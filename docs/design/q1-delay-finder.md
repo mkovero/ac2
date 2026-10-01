@@ -859,3 +859,12 @@ Notes:
 5. Not a decision, but owed: recorded captures (off-axis, near a boundary, other boxes) to
    rescore against tape-measured geometry in phase 2 HW. Nothing here was tuned on real
    loudspeaker responses.
+
+## Known issue (from the Rust implementation)
+
+The §7 excited-bandwidth check measures each bin relative to the band's own mean level, so a
+perfectly flat floor inside the band (e.g. a brick-wall low-passed synthetic reference with
+only f32 quantisation noise in band) passes as fully excited; the finder then returns
+Ambiguous instead of InsufficientExcitation. Real reference noise behaves correctly. Fix
+candidate: compare in-band level against an absolute floor derived from the capture's
+noise estimate as well as the relative check. Track before phase 5 HW acceptance.
