@@ -1,0 +1,350 @@
+//! Measurement jobs: one thread each, fed by the capture fan-out, publishing frames into the
+//! I/O thread's latest slots.
+//!
+//! A job's lifetime follows commands (`meas.start/stop`, session open/close), never
+//! subscriptions. Subscriptions only decide which optional derivations are computed (the
+//! live IR view). Every job publishes at most at the publish rate; between frames it only
+//! accumulates.
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use ac2_proto::frame::{
+    ClipFlags, Frame, FrameData, FrameStamp, LevelsFrame, LevelsMeta, ProtectionFlags,
+};
+use ac2_proto::grid::GridId;
+use ac2_proto::topic::Topic;
+use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
+use ac2_zmq::Context;
+
+use crate::fanout::Block;
+use crate::io::Interest;
+use crate::outbox::Outbox;
+
+pub(crate) mod finder;
+pub(crate) mod rta;
+pub(crate) mod spectrum;
+pub(crate) mod spl;
+pub(crate) mod timing;
+pub(crate) mod transfer;
+
+/// Per-topic sequence numbers; they survive job restarts so `seq` keeps increasing per
+/// topic for the whole incarnation.
+#[derive(Debug, Default)]
+pub(crate) struct Seqs(Mutex<HashMap<Topic, u64>>);
+
+impl Seqs {
+    pub(crate) fn next(&self, t: Topic) -> u64 {
+        let mut m = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let s = m.entry(t).or_insert(0);
+        *s += 1;
+        *s
+    }
+}
+
+/// What every job needs from the daemon.
+#[derive(Clone, Debug)]
+pub(crate) struct JobEnv {
+    pub(crate) ctx: Context,
+    pub(crate) endpoint: String,
+    pub(crate) incarnation: DaemonIncarnation,
+    pub(crate) epoch: SessionEpoch,
+    pub(crate) seqs: Arc<Seqs>,
+    pub(crate) interest: Arc<Interest>,
+    pub(crate) fps: u32,
+}
+
+/// Header fields a job decides.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StampArgs {
+    /// Newest sample index in the frame.
+    pub(crate) audio_sample: u64,
+    pub(crate) config_rev: Rev,
+    pub(crate) applied_at: u64,
+    pub(crate) wall_ns: u64,
+    pub(crate) grid_id: Option<GridId>,
+    pub(crate) protection: ProtectionFlags,
+}
+
+/// A job's way out.
+pub(crate) struct Emitter {
+    outbox: Outbox,
+    env: JobEnv,
+}
+
+impl Emitter {
+    pub(crate) fn wants(&self, t: Topic) -> bool {
+        self.env.interest.wants(&t.to_bytes())
+    }
+
+    pub(crate) fn send(&self, s: StampArgs, data: FrameData) {
+        let topic = data.topic();
+        let frame = Frame {
+            stamp: FrameStamp {
+                seq: self.env.seqs.next(topic),
+                audio_sample: SampleIndex(s.audio_sample),
+                session_epoch: self.env.epoch,
+                daemon_incarnation: self.env.incarnation,
+                config_rev: s.config_rev,
+                config_applied_at: SampleIndex(s.applied_at),
+                capture_wall_ns: WallNs(s.wall_ns),
+                grid_id: s.grid_id,
+                protection: s.protection,
+            },
+            data,
+        };
+        match ac2_proto::encode_frame(&frame) {
+            Ok(parts) => {
+                self.outbox.frame(&parts);
+            }
+            Err(e) => tracing::error!("{topic}: frame not encodable: {e}"),
+        }
+    }
+}
+
+/// Commands to a running job.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum JobCmd {
+    /// Run the delay finder now; the result goes to control under `token`.
+    Find { token: u64 },
+    /// Delay tracking on or off.
+    Track { enabled: bool },
+    /// New alignment delay (transfer); `rev` is the commit that set it.
+    SetDelay {
+        samples: i64,
+        seconds: f64,
+        rev: Rev,
+    },
+    /// Freeze or unfreeze.
+    Freeze(bool),
+    /// Clear averages.
+    Reset,
+}
+
+/// One analysis.
+pub(crate) trait Analysis: Send {
+    /// Accumulates one captured block.
+    fn push(&mut self, b: &Block);
+    /// Applies a command.
+    fn command(&mut self, c: JobCmd);
+    /// Publishes the current result.
+    fn emit(&mut self, e: &Emitter);
+}
+
+/// A running job thread.
+pub(crate) struct JobHandle {
+    cmd: Sender<JobCmd>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+    /// Id of this job at the fan-out.
+    pub(crate) fanout_id: u64,
+}
+
+impl JobHandle {
+    pub(crate) fn send(&self, c: JobCmd) {
+        let _ = self.cmd.send(c);
+    }
+
+    fn stop_inner(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        self.stop_inner();
+    }
+}
+
+/// Blocks a job may have queued: about 2 s at 48 kHz in 256-frame blocks. More means the
+/// job cannot keep up; it loses blocks and restarts rather than lagging further.
+const JOB_QUEUE: usize = 512;
+
+/// Starts `analysis` on its own thread. Returns the handle and the sender the fan-out feeds.
+pub(crate) fn spawn(
+    name: String,
+    env: JobEnv,
+    fanout_id: u64,
+    mut analysis: Box<dyn Analysis>,
+) -> std::io::Result<(JobHandle, SyncSender<Arc<Block>>)> {
+    let (btx, brx) = std::sync::mpsc::sync_channel::<Arc<Block>>(JOB_QUEUE);
+    let (ctx, crx) = std::sync::mpsc::channel::<JobCmd>();
+    let stop = Arc::new(AtomicBool::new(false));
+    let s = Arc::clone(&stop);
+    let thread = std::thread::Builder::new()
+        .name(name.clone())
+        .spawn(move || {
+            let outbox = match Outbox::connect(&env.ctx, &env.endpoint, 64) {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::error!("{name}: cannot reach the I/O thread: {e}");
+                    return;
+                }
+            };
+            let em = Emitter { outbox, env };
+            run(&mut *analysis, &brx, &crx, &s, &em);
+        })?;
+    Ok((
+        JobHandle {
+            cmd: ctx,
+            stop,
+            thread: Some(thread),
+            fanout_id,
+        },
+        btx,
+    ))
+}
+
+fn run(
+    a: &mut dyn Analysis,
+    blocks: &Receiver<Arc<Block>>,
+    cmds: &Receiver<JobCmd>,
+    stop: &AtomicBool,
+    em: &Emitter,
+) {
+    let period = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
+    let mut last_emit: Option<Instant> = None;
+    let mut dirty = false;
+    while !stop.load(Ordering::Acquire) {
+        match blocks.recv_timeout(period.min(Duration::from_millis(20))) {
+            Ok(b) => {
+                a.push(&b);
+                dirty = true;
+                for _ in 0..JOB_QUEUE {
+                    match blocks.try_recv() {
+                        Ok(b) => a.push(&b),
+                        Err(_) => break,
+                    }
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        while let Ok(c) = cmds.try_recv() {
+            a.command(c);
+            dirty = true;
+        }
+        if dirty && last_emit.is_none_or(|t| t.elapsed() >= period) {
+            a.emit(em);
+            last_emit = Some(Instant::now());
+            dirty = false;
+        }
+    }
+}
+
+/// Clip threshold for meters, matching the protection default (−0.1 dBFS sample peak).
+const CLIP_PEAK: f32 = 0.988_553_1;
+
+/// Input meters of a job's channels: peak, RMS and clip per frame interval.
+#[derive(Debug)]
+pub(crate) struct LevelsMeter {
+    /// Block channel index per meter.
+    idx: Vec<usize>,
+    /// Device input per meter.
+    channels: Vec<u16>,
+    peak: Vec<f32>,
+    sq: Vec<f64>,
+    frames: u64,
+    clipped: Vec<bool>,
+    hold_until: Vec<u64>,
+    hold: u64,
+    end: u64,
+}
+
+impl LevelsMeter {
+    pub(crate) fn new(idx: Vec<usize>, channels: Vec<u16>, sample_rate: u32) -> Self {
+        let n = idx.len();
+        Self {
+            idx,
+            channels,
+            peak: vec![0.0; n],
+            sq: vec![0.0; n],
+            frames: 0,
+            clipped: vec![false; n],
+            hold_until: vec![0; n],
+            // A clip indicator stays lit for a second so a single clipped block is seen.
+            hold: u64::from(sample_rate),
+            end: 0,
+        }
+    }
+
+    pub(crate) fn push(&mut self, b: &Block) {
+        let n = usize::from(b.channels).max(1);
+        for (m, &ch) in self.idx.iter().enumerate() {
+            let mut p = self.peak[m];
+            let mut s = 0.0f64;
+            for v in b.data.iter().skip(ch).step_by(n) {
+                p = p.max(v.abs());
+                s += f64::from(*v) * f64::from(*v);
+            }
+            self.peak[m] = p;
+            self.sq[m] += s;
+            if p >= CLIP_PEAK {
+                self.clipped[m] = true;
+                self.hold_until[m] = b.end_sample() + self.hold;
+            }
+        }
+        self.frames += u64::from(b.frames);
+        self.end = b.end_sample();
+    }
+
+    /// The interval's meters, then a new interval; `None` if nothing was captured.
+    pub(crate) fn take(&mut self, meas: MeasId) -> Option<LevelsFrame> {
+        if self.frames == 0 {
+            return None;
+        }
+        let n = self.idx.len();
+        let mut peak = Vec::with_capacity(n);
+        let mut rms = Vec::with_capacity(n);
+        let mut clip = Vec::with_capacity(n);
+        for m in 0..n {
+            peak.push((20.0 * f64::from(self.peak[m]).log10()) as f32);
+            let r = (self.sq[m] / self.frames as f64).sqrt();
+            rms.push(ac2_core::spectrum::rms_dbfs(r) as f32);
+            let mut c = ClipFlags::NONE;
+            if self.clipped[m] {
+                c = c.with(ClipFlags::CLIP);
+            }
+            if self.hold_until[m] > self.end {
+                c = c.with(ClipFlags::HELD);
+            }
+            clip.push(c);
+            self.peak[m] = 0.0;
+            self.sq[m] = 0.0;
+            self.clipped[m] = false;
+        }
+        self.frames = 0;
+        Some(LevelsFrame {
+            meas,
+            meta: LevelsMeta {
+                channels: self.channels.clone(),
+            },
+            peak,
+            rms,
+            clip,
+        })
+    }
+
+    pub(crate) fn any_clip_held(&self) -> bool {
+        self.hold_until.iter().any(|&h| h > self.end)
+    }
+}
+
+/// Block channel index of device input `input` in a session capturing `input_map`.
+pub(crate) fn block_index(input_map: &[u16], input: u16) -> Option<usize> {
+    input_map.iter().position(|&c| c == input)
+}
+
+/// Converts a block's channel to f64 into `out`.
+pub(crate) fn channel_f64(b: &Block, ch: usize, out: &mut Vec<f64>) {
+    out.clear();
+    let n = usize::from(b.channels).max(1);
+    out.extend(b.data.iter().skip(ch).step_by(n).map(|v| f64::from(*v)));
+}

@@ -102,6 +102,11 @@ bitmask!(
         WEAK_REFERENCE = 1 << 3;
         /// Averages restarted after a stream discontinuity.
         DISCONTINUITY = 1 << 4;
+        /// Reference and measurement look mis-patched: identical or near-perfectly
+        /// correlated at zero lag (the same signal on both inputs; a real acoustic path
+        /// always has propagation delay), or the reference silent while the measurement
+        /// carries signal (reference and measurement swapped).
+        CHECK_ROUTING = 1 << 5;
     }
 );
 

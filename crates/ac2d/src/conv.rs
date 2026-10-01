@@ -1,0 +1,228 @@
+//! Conversions between wire types (`ac2-proto`) and the DSP / audio crates' own types. The
+//! protocol mirrors them deliberately (so a change there cannot silently change the wire);
+//! this module is the one boundary where they meet.
+
+use ac2_audio as audio;
+use ac2_core as core;
+use ac2_proto::model as pm;
+use ac2_proto::units::{Samples, WallNs};
+
+pub(crate) fn band_fraction(f: pm::BandFraction) -> core::rta::BandFraction {
+    match f {
+        pm::BandFraction::Octave => core::rta::BandFraction::Octave,
+        pm::BandFraction::Third => core::rta::BandFraction::Third,
+        pm::BandFraction::Sixth => core::rta::BandFraction::Sixth,
+        pm::BandFraction::Twelfth => core::rta::BandFraction::Twelfth,
+        pm::BandFraction::TwentyFourth => core::rta::BandFraction::TwentyFourth,
+    }
+}
+
+pub(crate) fn smoothing(
+    s: pm::Smoothing,
+) -> (
+    core::smoothing::SmoothingFraction,
+    core::smoothing::SmoothingMode,
+) {
+    use core::smoothing::{SmoothingFraction as F, SmoothingMode as M};
+    let f = match s.fraction {
+        pm::SmoothingFraction::Third => F::Third,
+        pm::SmoothingFraction::Sixth => F::Sixth,
+        pm::SmoothingFraction::Twelfth => F::Twelfth,
+        pm::SmoothingFraction::TwentyFourth => F::TwentyFourth,
+        pm::SmoothingFraction::FortyEighth => F::FortyEighth,
+    };
+    let m = match s.mode {
+        pm::SmoothingMode::Power => M::Power,
+        pm::SmoothingMode::Complex => M::Complex,
+    };
+    (f, m)
+}
+
+pub(crate) fn weighting(w: pm::Weighting) -> core::weighting::Weighting {
+    match w {
+        pm::Weighting::A => core::weighting::Weighting::A,
+        pm::Weighting::C => core::weighting::Weighting::C,
+        pm::Weighting::Z => core::weighting::Weighting::Z,
+    }
+}
+
+pub(crate) fn time_weighting(t: pm::TimeWeighting) -> core::spl::TimeWeighting {
+    match t {
+        pm::TimeWeighting::Fast => core::spl::TimeWeighting::Fast,
+        pm::TimeWeighting::Slow => core::spl::TimeWeighting::Slow,
+        pm::TimeWeighting::Impulse => core::spl::TimeWeighting::Impulse,
+    }
+}
+
+pub(crate) fn peak_weighting(p: pm::PeakWeighting) -> core::spl::PeakWeighting {
+    match p {
+        pm::PeakWeighting::C => core::spl::PeakWeighting::C,
+        pm::PeakWeighting::Z => core::spl::PeakWeighting::Z,
+    }
+}
+
+pub(crate) fn window(w: pm::Window) -> core::window::Window {
+    match w {
+        pm::Window::Hann => core::window::Window::Hann,
+        pm::Window::BlackmanHarris4 => core::window::Window::BlackmanHarris4,
+        pm::Window::FlatTop => core::window::Window::FlatTop,
+        pm::Window::Rectangular => core::window::Window::Rectangular,
+    }
+}
+
+/// TF averaging; `None` when the values are out of range.
+pub(crate) fn tf_averaging(a: pm::TfAveraging) -> Option<core::mtw::Averaging> {
+    match a {
+        pm::TfAveraging::Fifo { blocks } if blocks >= 1 => {
+            Some(core::mtw::Averaging::Fifo { blocks })
+        }
+        pm::TfAveraging::Exponential { time_constant }
+            if time_constant.0.is_finite() && time_constant.0 > 0.0 =>
+        {
+            Some(core::mtw::Averaging::Exponential {
+                time_constant_s: time_constant.0,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Spectrum averaging; `None` when the values are out of range.
+pub(crate) fn spec_averaging(a: pm::SpecAveraging) -> Option<core::spectrum::Averaging> {
+    match a {
+        pm::SpecAveraging::Off => Some(core::spectrum::Averaging::Off),
+        pm::SpecAveraging::Fifo { frames } if frames >= 1 => {
+            Some(core::spectrum::Averaging::Fifo {
+                frames: frames as usize,
+            })
+        }
+        pm::SpecAveraging::Exponential { time_constant }
+            if time_constant.0.is_finite() && time_constant.0 > 0.0 =>
+        {
+            Some(core::spectrum::Averaging::Exponential {
+                time_constant_s: time_constant.0,
+            })
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn band_limit(b: Option<pm::BandLimit>) -> core::generator::BandLimit {
+    match b {
+        None => core::generator::BandLimit::NONE,
+        Some(b) => core::generator::BandLimit {
+            highpass_hz: b.highpass.map(|h| h.0),
+            lowpass_hz: b.lowpass.map(|h| h.0),
+            order: match b.order {
+                pm::FilterOrder::Second => core::generator::FilterOrder::Second,
+                pm::FilterOrder::Fourth => core::generator::FilterOrder::Fourth,
+            },
+        },
+    }
+}
+
+pub(crate) fn ess(s: pm::EssSpec) -> core::generator::EssConfig {
+    core::generator::EssConfig {
+        start_hz: s.start.0,
+        end_hz: s.end.0,
+        duration_s: s.duration.0,
+        fade_in_s: s.fade_in.0,
+        fade_out_s: s.fade_out.0,
+    }
+}
+
+/// Generator signal; `None` for a negative or oversized period.
+pub(crate) fn signal(s: pm::Signal) -> Option<core::generator::Signal> {
+    use core::generator::Signal as S;
+    Some(match s {
+        pm::Signal::White => S::White,
+        pm::Signal::Pink => S::Pink,
+        pm::Signal::PeriodicPink { period } => S::PeriodicPink {
+            period: usize::try_from(period.0).ok()?,
+        },
+        pm::Signal::Sine { freq } => S::Sine { freq_hz: freq.0 },
+        pm::Signal::Ess { sweep } => S::Ess(ess(sweep)),
+    })
+}
+
+pub(crate) fn device_selector(d: &pm::DeviceSelector) -> audio::DeviceSelector {
+    match d {
+        pm::DeviceSelector::Default => audio::DeviceSelector::Default,
+        pm::DeviceSelector::Id { id } => audio::DeviceSelector::Id(audio::DeviceId(id.0.clone())),
+    }
+}
+
+pub(crate) fn clock(c: audio::ClockRelation) -> pm::ClockRelation {
+    match c {
+        audio::ClockRelation::SingleCallback => pm::ClockRelation::SingleCallback,
+        audio::ClockRelation::SameDeviceSeparateCallbacks => {
+            pm::ClockRelation::SameDeviceSeparateCallbacks
+        }
+        audio::ClockRelation::Unknown => pm::ClockRelation::Unknown,
+    }
+}
+
+fn direction(d: &audio::DirectionCaps) -> pm::DirectionInfo {
+    pm::DirectionInfo {
+        max_channels: d.max_channels,
+        rates_hz: d
+            .rates
+            .iter()
+            .map(|r| pm::RangeU32 {
+                min: r.min,
+                max: r.max,
+            })
+            .collect(),
+        buffer_frames: d.buffer_frames.map(|b| pm::RangeU32 {
+            min: b.min,
+            max: b.max,
+        }),
+        default_rate_hz: d.default_rate,
+    }
+}
+
+pub(crate) fn device_info(c: &audio::DeviceCaps) -> pm::DeviceInfo {
+    pm::DeviceInfo {
+        backend: match c.backend {
+            audio::BackendKind::Jack => pm::BackendKind::Jack,
+            audio::BackendKind::Cpal => pm::BackendKind::Cpal,
+            audio::BackendKind::Fake => pm::BackendKind::Fake,
+        },
+        host: c.host.clone(),
+        id: pm::DeviceId(c.id.0.clone()),
+        name: c.name.clone(),
+        input: c.input.as_ref().map(direction),
+        output: c.output.as_ref().map(direction),
+        duplex_clock: clock(c.duplex_clock),
+        index: match c.index {
+            audio::IndexExactness::Exact => pm::IndexExactness::Exact,
+            audio::IndexExactness::Estimated => pm::IndexExactness::Estimated,
+        },
+        notes: c.notes.clone(),
+    }
+}
+
+pub(crate) fn timing_state(s: core::timing::TimingState) -> pm::TimingState {
+    use core::timing::TimingState as T;
+    match s {
+        T::NoStimulus => pm::TimingState::NoStimulus,
+        T::Acquiring => pm::TimingState::Acquiring,
+        T::Locked { offset } => pm::TimingState::Locked {
+            offset: Samples(offset),
+        },
+        T::Jumped { from, to } => pm::TimingState::Jumped {
+            from: Samples(from),
+            to: Samples(to),
+        },
+        T::Lost => pm::TimingState::Lost,
+    }
+}
+
+pub(crate) fn last_lock(l: core::timing::LastLock, at: WallNs) -> pm::LastLock {
+    pm::LastLock {
+        epoch: l.epoch,
+        offset: Samples(l.offset),
+        at_sample: ac2_proto::units::SampleIndex(l.at_capture_sample),
+        at,
+    }
+}

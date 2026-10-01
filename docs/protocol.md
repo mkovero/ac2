@@ -246,7 +246,9 @@ Undefined bits refuse the frame.
 `ABOVE_NYQUIST` 256.
 
 `protection`: `NO_REFERENCE` 1, `NO_SIGNAL` 2, `CLIP` 4, `WEAK_REFERENCE` 8,
-`DISCONTINUITY` 16 (averages restarted after a stream gap).
+`DISCONTINUITY` 16 (averages restarted after a stream gap), `CHECK_ROUTING` 32 (reference
+and measurement identical or near-perfectly correlated at zero lag, or reference silent while
+the measurement has signal: the inputs look mis-patched).
 
 `clip`: `CLIP` 1 (clipped in this interval), `HELD` 2 (indicator held).
 

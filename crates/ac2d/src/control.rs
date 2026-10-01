@@ -1,0 +1,1530 @@
+//! The control thread: decodes requests, executes commands one at a time against the state
+//! store (serial commits), runs the session and jobs, owns the stimulus lease and emits
+//! keepalives.
+//!
+//! It is a plain thread fed by one channel. Commands are short (job threads do the DSP),
+//! and a single consumer gives serial commits and a total event order for free; an async
+//! runtime would add scheduling without adding concurrency that the state model allows.
+
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
+
+use ac2_audio::{Backend, Gain, MaxLevel};
+use ac2_core::delay::{Arrival, FinderResult, Outcome};
+use ac2_core::generator::{
+    Generator as CoreGenerator, GeneratorConfig, GeneratorError, LevelControl, dbfs_to_rms,
+};
+use ac2_proto::event::{Change, Patch};
+use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
+use ac2_proto::grid::{GridDef, GridId};
+use ac2_proto::model::{
+    CalEntry, CalKey, DelayCandidate, DelayFinding, DelayPick, DelayState, GenAction, GenAudit,
+    Generator, GeneratorDesired, Lease as WireLease, MeasConfig, MeasKind, Measurement, Session,
+    SessionConfig, TimingStatus,
+};
+use ac2_proto::units::{
+    ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
+    SampleIndex, Samples, Seconds, SessionEpoch, WallNs,
+};
+use ac2_proto::{
+    Command, ErrorCode, ErrorDetail, PROTO_VERSION, ProtoError, Reply, ReplyBody, Welcome,
+    decode_request, encode_reply, peek_envelope,
+};
+use ac2_zmq::Context;
+
+use crate::config::{DedupLimits, ReplayLimits};
+use crate::conv;
+use crate::dedup::Dedup;
+use crate::io::Interest;
+use crate::jobs::{self, Analysis, JobCmd, JobEnv, JobHandle, Seqs, block_index};
+use crate::outbox::Outbox;
+use crate::session::{self, Runtime};
+use crate::state::Store;
+use crate::stimulus::{LeaseGate, LeasedSource};
+use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
+
+/// Everything that reaches the control thread.
+pub(crate) enum ControlMsg {
+    /// A ctrl request from the I/O thread.
+    Request {
+        routing_id: Vec<u8>,
+        user_id: Option<String>,
+        payload: Vec<u8>,
+    },
+    /// The stream of `epoch` reported a configuration change or ended.
+    DeviceChanged { epoch: SessionEpoch },
+    /// The timing monitor of `epoch` changed state.
+    Timing {
+        epoch: SessionEpoch,
+        status: TimingStatus,
+    },
+    /// A `delay.find` started under `token` finished.
+    DelayFound {
+        token: u64,
+        result: Box<Result<ac2_core::delay::FinderResult, String>>,
+    },
+    /// Delay tracking of `meas` agreed on a new delay.
+    DelayTracked {
+        meas: MeasId,
+        epoch: SessionEpoch,
+        samples: i64,
+    },
+    /// The network sockets are gone (ZAP handler exited); shut down.
+    Fatal(String),
+    /// Orderly shutdown.
+    Shutdown,
+}
+
+/// Construction parameters.
+pub(crate) struct Setup {
+    pub(crate) backend: Arc<dyn Backend>,
+    pub(crate) incarnation: DaemonIncarnation,
+    pub(crate) ceiling_dbfs: f64,
+    pub(crate) max_level: MaxLevel,
+    pub(crate) lease_expiry: Duration,
+    pub(crate) keepalive: Duration,
+    pub(crate) replay: ReplayLimits,
+    pub(crate) dedup: DedupLimits,
+    pub(crate) ctx: Context,
+    pub(crate) endpoint: String,
+    pub(crate) interest: Arc<Interest>,
+    pub(crate) fps: u32,
+    pub(crate) outbox: Outbox,
+    pub(crate) to_self: Sender<ControlMsg>,
+}
+
+/// A `delay.find` running on a job thread; answered when the result arrives.
+struct PendingFind {
+    routing_id: Vec<u8>,
+    client: ClientId,
+    id: RequestId,
+    meas: MeasId,
+}
+
+struct Lease {
+    token: LeaseToken,
+    owner: ClientId,
+    deadline: Instant,
+}
+
+/// What the current generator source was built from: a change rebuilds it, a level change
+/// alone ramps the running one.
+#[derive(Clone, Copy, PartialEq)]
+struct SourceKey {
+    signal: ac2_proto::model::Signal,
+    band: Option<ac2_proto::model::BandLimit>,
+}
+
+pub(crate) struct Control {
+    s: Setup,
+    store: Store,
+    dedup: Dedup,
+    session: Option<Runtime>,
+    jobs: BTreeMap<MeasId, JobHandle>,
+    timing_job: Option<JobHandle>,
+    next_fanout_id: u64,
+    next_meas: u32,
+    lease: Option<Lease>,
+    gate: Arc<LeaseGate>,
+    level: Option<LevelControl>,
+    source: Option<SourceKey>,
+    grids: HashMap<GridId, GridDef>,
+    seqs: Arc<Seqs>,
+    ka_seq: u64,
+    pending_finds: HashMap<u64, PendingFind>,
+    next_token: u64,
+    next_ka: Instant,
+}
+
+const MAX_DELAY_S: f64 = 10.0;
+
+/// Wire form of a finder result. Candidates are listed strongest first (at most 8); an
+/// ambiguous result lists the finder's ranked candidates in rule order instead, so the
+/// operator picks among exactly those. No estimate is a refusal naming the reasons.
+fn finding(r: &FinderResult, fs: f64) -> Result<DelayFinding, ProtoError> {
+    let cand = |a: &Arrival| DelayCandidate {
+        delay: Seconds(a.delay_frac / fs),
+        relative: Db(a.level_db),
+    };
+    let (first, strongest, ambiguous, candidates) = match &r.outcome {
+        Outcome::Accepted { first, strongest } => {
+            let mut c: Vec<&Arrival> = r.candidates.iter().collect();
+            c.sort_by(|a, b| b.level_db.total_cmp(&a.level_db));
+            (
+                *first,
+                *strongest,
+                false,
+                c.into_iter().take(8).map(cand).collect(),
+            )
+        }
+        Outcome::Ambiguous {
+            ranked, strongest, ..
+        } => {
+            let Some(first) = ranked.first() else {
+                return Err(perr(
+                    ErrorCode::Internal,
+                    "ambiguous result without candidates",
+                ));
+            };
+            (*first, *strongest, true, ranked.iter().map(cand).collect())
+        }
+        Outcome::NoEstimate { reasons } => {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!("no estimate: {reasons:?} (band {:?})", r.band),
+            ));
+        }
+    };
+    Ok(DelayFinding {
+        first_arrival: Seconds(first.delay_frac / fs),
+        strongest: Seconds(strongest.delay_frac / fs),
+        ambiguous,
+        candidates,
+        found_at: WallNs(wall_ns()),
+    })
+}
+
+fn mutation_conflict(rev: Rev) -> ProtoError {
+    perr_detail(
+        ErrorCode::Conflict,
+        format!("state has moved on to rev {}", rev.0),
+        ErrorDetail::Conflict { rev },
+    )
+}
+
+fn not_found(meas: MeasId) -> ProtoError {
+    perr(ErrorCode::NotFound, format!("no measurement {}", meas.0))
+}
+
+fn unsupported(what: &str) -> ProtoError {
+    perr(
+        ErrorCode::Unsupported,
+        format!("{what} is not supported by this daemon yet"),
+    )
+}
+
+fn lease_required() -> ProtoError {
+    perr(
+        ErrorCode::LeaseRequired,
+        "this command needs the stimulus lease; the token is missing, stale or expired",
+    )
+}
+
+fn gen_err(e: GeneratorError) -> ProtoError {
+    let code = match e {
+        GeneratorError::WouldClip { .. } | GeneratorError::AboveCeiling { .. } => {
+            ErrorCode::Refused
+        }
+        _ => ErrorCode::Invalid,
+    };
+    perr(code, e.to_string())
+}
+
+/// Checks a measurement configuration without a session.
+fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
+    let inv = |m: &str| Err(perr(ErrorCode::Invalid, m.to_owned()));
+    match &c.kind {
+        MeasKind::Transfer { config } => {
+            if config.reference_input == config.measurement_input {
+                return inv("reference and measurement must be different inputs");
+            }
+            let g = config.grid;
+            if g.ppo == 0 || g.ppo > 96 || g.k_min > g.k_max {
+                return inv("invalid grid");
+            }
+            if i64::from(g.k_max) - i64::from(g.k_min) + 1 > i64::from(ac2_proto::frame::MAX_N) {
+                return inv("grid too large");
+            }
+            if conv::tf_averaging(config.averaging).is_none() {
+                return inv("invalid averaging");
+            }
+        }
+        MeasKind::Spectrum { config } => {
+            if !config.fft_len.is_power_of_two() || !(64..=65536).contains(&config.fft_len) {
+                return inv("fft_len must be a power of two in 64..=65536");
+            }
+            if conv::spec_averaging(config.averaging).is_none() {
+                return inv("invalid averaging");
+            }
+        }
+        MeasKind::Rta { config } => {
+            if !(config.f_lo.0.is_finite()
+                && config.f_hi.0.is_finite()
+                && config.f_lo.0 > 0.0
+                && config.f_hi.0 > config.f_lo.0)
+            {
+                return inv("f_lo must be positive and below f_hi");
+            }
+            if conv::spec_averaging(config.averaging).is_none() {
+                return inv("invalid averaging");
+            }
+        }
+        MeasKind::Spl { .. } => {}
+    }
+    Ok(())
+}
+
+/// Grid of a transfer measurement; known without a session.
+fn static_grid(kind: &MeasKind) -> Option<GridDef> {
+    match kind {
+        MeasKind::Transfer { config } => Some(GridDef::Log {
+            ppo: config.grid.ppo,
+            k_min: config.grid.k_min,
+            k_max: config.grid.k_max,
+        }),
+        _ => None,
+    }
+}
+
+impl Control {
+    pub(crate) fn new(s: Setup) -> Self {
+        let store = Store::new(Dbfs(s.ceiling_dbfs), s.replay);
+        let dedup = Dedup::new(s.dedup);
+        Self {
+            store,
+            dedup,
+            session: None,
+            jobs: BTreeMap::new(),
+            timing_job: None,
+            next_fanout_id: 1,
+            next_meas: 1,
+            lease: None,
+            gate: Arc::new(LeaseGate::new()),
+            level: None,
+            source: None,
+            grids: HashMap::new(),
+            seqs: Arc::new(Seqs::default()),
+            ka_seq: 0,
+            pending_finds: HashMap::new(),
+            next_token: 1,
+            next_ka: Instant::now(),
+            s,
+        }
+    }
+
+    pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) {
+        loop {
+            let now = Instant::now();
+            self.check_lease(now);
+            if now >= self.next_ka {
+                self.send_ka();
+                self.next_ka = now + self.s.keepalive;
+            }
+            let mut wake = self.next_ka;
+            if let Some(l) = &self.lease {
+                wake = wake.min(l.deadline);
+            }
+            match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
+                Ok(ControlMsg::Request {
+                    routing_id,
+                    user_id,
+                    payload,
+                }) => self.on_request(&routing_id, user_id, &payload),
+                Ok(ControlMsg::DeviceChanged { epoch }) => {
+                    if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {
+                        tracing::warn!("device or configuration change: reopening the session");
+                        let routes = self
+                            .session
+                            .as_ref()
+                            .map(|r| r.routes.clone())
+                            .unwrap_or_default();
+                        if let Err(e) = self.reopen(&routes) {
+                            tracing::error!("reopen after device change failed: {}", e.msg);
+                        }
+                    }
+                }
+                Ok(ControlMsg::Timing { epoch, status }) => {
+                    if self.session.as_ref().is_some_and(|r| r.epoch == epoch)
+                        && self.store.state().timing != status
+                    {
+                        self.commit(Change::Timing(status));
+                    }
+                }
+                Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
+                Ok(ControlMsg::DelayTracked {
+                    meas,
+                    epoch,
+                    samples,
+                }) => self.tracked(meas, epoch, samples),
+                Ok(ControlMsg::Fatal(why)) => {
+                    tracing::error!("fatal: {why}");
+                    break;
+                }
+                Ok(ControlMsg::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
+        tracing::info!("shutting down");
+        self.stop_output();
+        self.stop_all_jobs();
+        if let Some(rt) = self.session.take() {
+            rt.close();
+        }
+        self.s.outbox.stop();
+    }
+
+    // -- plumbing --------------------------------------------------------------------------
+
+    fn commit(&mut self, change: Change) -> Rev {
+        let ev = self.store.commit(change, Instant::now());
+        match ac2_proto::encode_event(&ev) {
+            Ok(b) => self.s.outbox.event(&b),
+            Err(e) => tracing::error!("event not encodable: {e}"),
+        }
+        ev.rev
+    }
+
+    fn epoch(&self) -> SessionEpoch {
+        self.store.state().session.epoch
+    }
+
+    fn send_ka(&mut self) {
+        self.ka_seq += 1;
+        let st = self.store.state();
+        let now = wall_ns();
+        let latest = self
+            .session
+            .as_ref()
+            .map_or(0u64, |r| r.fanout.latest.load(Ordering::Acquire));
+        let frame = Frame {
+            stamp: FrameStamp {
+                seq: self.ka_seq,
+                audio_sample: SampleIndex(latest.saturating_sub(1)),
+                session_epoch: st.session.epoch,
+                daemon_incarnation: self.s.incarnation,
+                config_rev: self.store.rev(),
+                config_applied_at: SampleIndex(0),
+                capture_wall_ns: WallNs(now),
+                grid_id: None,
+                protection: ProtectionFlags::NONE,
+            },
+            data: FrameData::Ka(KaMeta {
+                rev: self.store.rev(),
+                daemon_wall_ns: WallNs(now),
+                timing: st.timing.state,
+                generator: GenSummary {
+                    owner: st.generator.owner.clone(),
+                    armed: st.generator.armed,
+                    firing: st.generator.firing,
+                },
+            }),
+        };
+        match ac2_proto::encode_frame(&frame) {
+            Ok(parts) => self.s.outbox.ka(&parts),
+            Err(e) => tracing::error!("keepalive not encodable: {e}"),
+        }
+    }
+
+    fn on_request(&mut self, routing_id: &[u8], user_id: Option<String>, payload: &[u8]) {
+        let now = Instant::now();
+        let env = match peek_envelope(payload) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("undecodable ctrl message dropped: {e}");
+                return;
+            }
+        };
+        let id = env.id.unwrap_or(RequestId(0));
+        if env.v != Some(PROTO_VERSION) {
+            tracing::warn!("refused a client at protocol version {:?}", env.v);
+            self.send_reply(routing_id, &Reply::version_refusal(id, env.v));
+            return;
+        }
+        let req = match decode_request(payload) {
+            Ok(r) => r,
+            Err(e) => {
+                self.send_reply(
+                    routing_id,
+                    &Reply::new(id, Err(perr(ErrorCode::Invalid, e.to_string()))),
+                );
+                return;
+            }
+        };
+        let client = ClientId(user_id.unwrap_or_else(|| format!("local-{}", hex(routing_id))));
+        if let Some(stored) = self.dedup.get(&client, req.id, now) {
+            let stored = stored.to_vec();
+            tracing::debug!("{} retried request {}; stored reply", client.0, req.id.0);
+            self.s.outbox.reply(routing_id, &stored);
+            return;
+        }
+        let result = match req.expect_rev {
+            Some(r) if req.cmd.is_mutation() && r != self.store.rev() => {
+                Err(mutation_conflict(self.store.rev()))
+            }
+            _ => match req.cmd {
+                // The finder runs for a while on the job thread; the reply follows its result
+                // and other clients are served meanwhile.
+                Command::DelayFind { meas } => match self.start_find(meas) {
+                    Ok(token) => {
+                        self.pending_finds.insert(
+                            token,
+                            PendingFind {
+                                routing_id: routing_id.to_vec(),
+                                client,
+                                id: req.id,
+                                meas,
+                            },
+                        );
+                        return;
+                    }
+                    Err(e) => Err(e),
+                },
+                cmd => self.execute(&client, cmd),
+            },
+        };
+        self.answer(routing_id, &client, req.id, result, now);
+    }
+
+    /// Sends a reply and remembers it for retries of `id`.
+    fn answer(
+        &mut self,
+        routing_id: &[u8],
+        client: &ClientId,
+        id: RequestId,
+        result: Result<ReplyBody, ProtoError>,
+        now: Instant,
+    ) {
+        let reply = Reply::new(id, result);
+        let bytes = match encode_reply(&reply) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("reply not encodable: {e}");
+                match encode_reply(&Reply::new(
+                    id,
+                    Err(perr(ErrorCode::Internal, e.to_string())),
+                )) {
+                    Ok(b) => b,
+                    Err(_) => return,
+                }
+            }
+        };
+        self.dedup.insert(client, id, bytes.clone(), now);
+        self.s.outbox.reply(routing_id, &bytes);
+    }
+
+    fn send_reply(&self, routing_id: &[u8], r: &Reply) {
+        match encode_reply(r) {
+            Ok(b) => self.s.outbox.reply(routing_id, &b),
+            Err(e) => tracing::error!("reply not encodable: {e}"),
+        }
+    }
+
+    fn execute(&mut self, client: &ClientId, cmd: Command) -> Result<ReplyBody, ProtoError> {
+        let ack = |rev: Rev| Ok(ReplyBody::Ack { rev });
+        match cmd {
+            Command::Hello { client: software } => {
+                tracing::info!("hello from {} ({software})", client.0);
+                Ok(ReplyBody::Welcome(Welcome {
+                    server: format!(
+                        "ac2d {} (build {})",
+                        env!("CARGO_PKG_VERSION"),
+                        env!("AC2_BUILD_ID")
+                    ),
+                    client_id: client.clone(),
+                    daemon_incarnation: self.s.incarnation,
+                    session_epoch: self.epoch(),
+                    rev: self.store.rev(),
+                }))
+            }
+            Command::SessionDevices => {
+                let devs = self
+                    .s
+                    .backend
+                    .enumerate()
+                    .map_err(|e| perr(ErrorCode::Unsupported, e.to_string()))?;
+                Ok(ReplyBody::Devices(
+                    devs.iter().map(conv::device_info).collect(),
+                ))
+            }
+            Command::SessionOpen { config } => self.session_open(client, config),
+            Command::SessionClose => {
+                self.session_close(client);
+                ack(self.store.rev())
+            }
+            Command::SessionStatus => Ok(ReplyBody::Session(self.store.state().session.clone())),
+
+            Command::GenAcquire { force } => self.gen_acquire(client, force),
+            Command::GenSet {
+                lease_token,
+                desired,
+            } => self.gen_set(client, lease_token, desired),
+            Command::GenRefresh { lease_token } => {
+                self.lease_check(client, lease_token)?;
+                let deadline = Instant::now() + self.s.lease_expiry;
+                if let Some(l) = &mut self.lease {
+                    l.deadline = deadline;
+                }
+                if self.store.state().generator.firing {
+                    self.gate.open_until(deadline);
+                }
+                Ok(ReplyBody::Lease(self.wire_lease(lease_token)))
+            }
+            Command::GenRelease { lease_token } => {
+                self.lease_check(client, lease_token)?;
+                self.stop_output();
+                self.lease = None;
+                let mut g = self.store.state().generator.clone();
+                g.owner = None;
+                g.armed = false;
+                g.firing = false;
+                self.audit(&mut g, GenAction::Release, Some(client));
+                ack(self.commit(Change::Generator(g)))
+            }
+            Command::GenStop => {
+                self.stop_output();
+                let mut g = self.store.state().generator.clone();
+                g.armed = false;
+                g.firing = false;
+                self.audit(&mut g, GenAction::Stop, Some(client));
+                ack(self.commit(Change::Generator(g)))
+            }
+
+            Command::MeasCreate { config } => {
+                validate_meas(&config)?;
+                let id = MeasId(self.next_meas);
+                self.next_meas += 1;
+                let grid_id = static_grid(&config.kind).map(|g| self.register_grid(g));
+                let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
+                    applied: Seconds(0.0),
+                    applied_samples: Samples(0),
+                    tracking: false,
+                    last_finding: None,
+                });
+                let m = Measurement {
+                    id,
+                    config,
+                    config_rev: Rev(self.store.rev().0 + 1),
+                    running: false,
+                    frozen: false,
+                    delay,
+                    grid_id,
+                };
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasUpdate { meas, config } => {
+                validate_meas(&config)?;
+                let mut m = self.meas(meas)?.clone();
+                let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
+                let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });
+                m.config = config;
+                m.config_rev = Rev(self.store.rev().0 + 1);
+                if !is_transfer {
+                    m.delay = None;
+                } else if !was_transfer {
+                    m.delay = Some(DelayState {
+                        applied: Seconds(0.0),
+                        applied_samples: Samples(0),
+                        tracking: false,
+                        last_finding: None,
+                    });
+                }
+                m.grid_id = static_grid(&m.config.kind).map(|g| self.register_grid(g));
+                if m.running && self.session.is_some() {
+                    self.stop_job(meas);
+                    if let Some(g) = self.start_job(&m)? {
+                        m.grid_id = Some(self.register_grid(g));
+                    }
+                }
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasDelete { meas } => {
+                self.meas(meas)?;
+                self.stop_job(meas);
+                self.s
+                    .outbox
+                    .clear(&ac2_proto::Subscription::Meas(meas).prefix());
+                ack(self.commit(Change::Measurement(Patch::Deleted(meas))))
+            }
+            Command::MeasStart { meas } => {
+                let mut m = self.meas(meas)?.clone();
+                if !m.running
+                    && self.session.is_some()
+                    && let Some(g) = self.start_job(&m)?
+                {
+                    m.grid_id = Some(self.register_grid(g));
+                }
+                m.running = true;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasStop { meas } => {
+                let mut m = self.meas(meas)?.clone();
+                self.stop_job(meas);
+                m.running = false;
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasFreeze { meas, frozen } => {
+                let mut m = self.meas(meas)?.clone();
+                m.frozen = frozen;
+                if let Some(j) = self.jobs.get(&meas) {
+                    j.send(JobCmd::Freeze(frozen));
+                }
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+            Command::MeasReset { meas } => {
+                self.meas(meas)?;
+                if let Some(j) = self.jobs.get(&meas) {
+                    j.send(JobCmd::Reset);
+                }
+                ack(self.store.rev())
+            }
+
+            Command::DelayFind { .. } => Err(perr(
+                ErrorCode::Internal,
+                "delay.find is answered asynchronously",
+            )),
+            Command::DelayInsert { meas, pick } => {
+                let d = self.transfer_delay(meas)?;
+                let Some(f) = &d.last_finding else {
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        "no delay finding to insert; run delay.find or use delay.set",
+                    ));
+                };
+                if f.ambiguous && pick == DelayPick::FirstArrival {
+                    return Err(perr(
+                        ErrorCode::Refused,
+                        "the finding is ambiguous; pick a candidate explicitly",
+                    ));
+                }
+                let delay = match pick {
+                    DelayPick::FirstArrival => f.first_arrival,
+                    DelayPick::Strongest => f.strongest,
+                    DelayPick::Candidate { index } => {
+                        f.candidates
+                            .get(usize::from(index))
+                            .ok_or_else(|| perr(ErrorCode::NotFound, "no such candidate"))?
+                            .delay
+                    }
+                };
+                self.set_delay(meas, delay)
+            }
+            Command::DelaySet { meas, delay } => self.set_delay(meas, delay),
+            Command::DelayTrack { meas, enabled } => {
+                self.transfer_delay(meas)?;
+                let mut m = self.meas(meas)?.clone();
+                if let Some(d) = &mut m.delay {
+                    d.tracking = enabled;
+                }
+                if let Some(j) = self.jobs.get(&meas) {
+                    j.send(JobCmd::Track { enabled });
+                }
+                self.commit(Change::Measurement(Patch::Set(m.clone())));
+                Ok(ReplyBody::Measurement(m))
+            }
+
+            Command::TraceList => Ok(ReplyBody::Traces(self.store.state().traces.clone())),
+            Command::TraceCapture { .. } => Err(unsupported("trace.capture")),
+            Command::TraceGet { .. } => Err(unsupported("trace.get")),
+            Command::TraceUpdate { .. } => Err(unsupported("trace.update")),
+            Command::TraceDelete { .. } => Err(unsupported("trace.delete")),
+            Command::TraceAverage { .. } => Err(unsupported("trace.average")),
+            Command::TraceMath { .. } => Err(unsupported("trace.math")),
+            Command::TraceImport { .. } => Err(unsupported("trace.import")),
+            Command::TraceExport { .. } => Err(unsupported("trace.export")),
+
+            Command::CalSpl {
+                input,
+                mic,
+                calibrator_level,
+                calibrator_freq,
+            } => self.cal_spl(input, mic, calibrator_level, calibrator_freq),
+            Command::CalMicCurve { .. } => Err(unsupported("cal.mic_curve")),
+            Command::CalList => Ok(ReplyBody::Calibrations(
+                self.store.state().calibrations.clone(),
+            )),
+
+            Command::SplLogStart { .. } => Err(unsupported("spl.log_start")),
+            Command::SplLogStop { .. } => Err(unsupported("spl.log_stop")),
+
+            Command::IrCapture { lease_token, .. } => {
+                self.lease_check(client, lease_token)?;
+                Err(unsupported("ir.capture"))
+            }
+
+            Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
+                self.store.snapshot(self.s.incarnation),
+            ))),
+            Command::StateSince { rev } => match self.store.since(rev, Instant::now()) {
+                Ok(evs) => Ok(ReplyBody::Events(evs)),
+                Err(oldest) => Err(perr_detail(
+                    ErrorCode::ResyncRequired,
+                    format!(
+                        "events after rev {} are no longer replayable; take a snapshot",
+                        rev.0
+                    ),
+                    ErrorDetail::Resync { oldest },
+                )),
+            },
+            Command::GridGet { grid_id } => self
+                .grids
+                .get(&grid_id)
+                .cloned()
+                .map(ReplyBody::Grid)
+                .ok_or_else(|| perr(ErrorCode::NotFound, format!("no grid {grid_id}"))),
+            Command::FileSave { .. } => Err(unsupported("file.save")),
+            Command::FileLoad { .. } => Err(unsupported("file.load")),
+        }
+    }
+
+    fn meas(&self, id: MeasId) -> Result<&Measurement, ProtoError> {
+        self.store
+            .state()
+            .measurements
+            .iter()
+            .find(|m| m.id == id)
+            .ok_or_else(|| not_found(id))
+    }
+
+    fn transfer_delay(&self, id: MeasId) -> Result<&DelayState, ProtoError> {
+        self.meas(id)?.delay.as_ref().ok_or_else(|| {
+            perr(
+                ErrorCode::Invalid,
+                format!("measurement {} is not a transfer function", id.0),
+            )
+        })
+    }
+
+    fn register_grid(&mut self, g: GridDef) -> GridId {
+        let id = g.id();
+        self.grids.entry(id).or_insert(g);
+        id
+    }
+
+    // -- session ---------------------------------------------------------------------------
+
+    fn session_open(
+        &mut self,
+        client: &ClientId,
+        config: SessionConfig,
+    ) -> Result<ReplyBody, ProtoError> {
+        session::validate(&config)?;
+        if self.session.is_some() {
+            self.session_close(client);
+        }
+        let epoch = SessionEpoch(self.epoch().0 + 1);
+        let rt = match Runtime::open(
+            &*self.s.backend,
+            &config,
+            &[],
+            self.s.max_level,
+            epoch,
+            self.s.to_self.clone(),
+        ) {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::warn!("session open failed: {}", e.msg);
+                return Err(e);
+            }
+        };
+        let s = Session {
+            epoch,
+            open: Some(rt.open.clone()),
+        };
+        self.session = Some(rt);
+        self.commit(Change::Session(s.clone()));
+        self.after_open();
+        Ok(ReplyBody::Session(s))
+    }
+
+    /// Starts jobs and re-derives sample-rate dependent state for a freshly opened stream.
+    fn after_open(&mut self) {
+        let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
+            return;
+        };
+        let ms: Vec<Measurement> = self.store.state().measurements.clone();
+        for mut m in ms {
+            let mut changed = false;
+            if let Some(d) = &mut m.delay {
+                let samples = (d.applied.0 * fs).round() as i64;
+                if samples != d.applied_samples.0 {
+                    d.applied_samples = Samples(samples);
+                    d.applied = Seconds(samples as f64 / fs);
+                    m.config_rev = Rev(self.store.rev().0 + 1);
+                    changed = true;
+                }
+            }
+            if m.running {
+                match self.start_job(&m) {
+                    Ok(Some(g)) => {
+                        let id = self.register_grid(g);
+                        if m.grid_id != Some(id) {
+                            m.grid_id = Some(id);
+                            changed = true;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => tracing::warn!("measurement {} not started: {}", m.id.0, e.msg),
+                }
+            }
+            if changed {
+                self.commit(Change::Measurement(Patch::Set(m)));
+            }
+        }
+        self.start_timing_job();
+    }
+
+    fn session_close(&mut self, client: &ClientId) {
+        self.stop_all_jobs();
+        let g = self.store.state().generator.clone();
+        if g.armed || g.firing {
+            self.stop_output();
+            let mut g = g;
+            g.armed = false;
+            g.firing = false;
+            self.audit(&mut g, GenAction::Stop, Some(client));
+            self.commit(Change::Generator(g));
+        } else {
+            self.stop_output();
+        }
+        if let Some(rt) = self.session.take() {
+            rt.close();
+            self.s.outbox.clear(b"d/");
+            self.s.outbox.clear(b"timing");
+            let epoch = SessionEpoch(self.epoch().0 + 1);
+            self.commit(Change::Session(Session { epoch, open: None }));
+        }
+    }
+
+    /// Reopens the stream with the same configuration and new generator routes: a routing
+    /// or device change is a configuration change, so it starts a new session epoch (5b).
+    fn reopen(&mut self, routes: &[u16]) -> Result<(), ProtoError> {
+        let Some(rt) = self.session.take() else {
+            return Err(perr(ErrorCode::Invalid, "no open session"));
+        };
+        let config = rt.open.config.clone();
+        self.stop_all_jobs();
+        self.level = None;
+        self.source = None;
+        rt.close();
+        self.s.outbox.clear(b"d/");
+        self.s.outbox.clear(b"timing");
+        let epoch = SessionEpoch(self.epoch().0 + 1);
+        match Runtime::open(
+            &*self.s.backend,
+            &config,
+            routes,
+            self.s.max_level,
+            epoch,
+            self.s.to_self.clone(),
+        ) {
+            Ok(rt) => {
+                let s = Session {
+                    epoch,
+                    open: Some(rt.open.clone()),
+                };
+                self.session = Some(rt);
+                self.commit(Change::Session(s));
+                self.after_open();
+                Ok(())
+            }
+            Err(e) => {
+                self.commit(Change::Session(Session { epoch, open: None }));
+                let g = self.store.state().generator.clone();
+                if g.armed || g.firing {
+                    let mut g = g;
+                    g.armed = false;
+                    g.firing = false;
+                    self.audit(&mut g, GenAction::Stop, None);
+                    self.commit(Change::Generator(g));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    // -- jobs ------------------------------------------------------------------------------
+
+    fn job_env(&self, rt: &Runtime) -> JobEnv {
+        JobEnv {
+            ctx: self.s.ctx.clone(),
+            endpoint: self.s.endpoint.clone(),
+            incarnation: self.s.incarnation,
+            epoch: rt.epoch,
+            seqs: Arc::clone(&self.seqs),
+            interest: Arc::clone(&self.s.interest),
+            fps: self.s.fps,
+        }
+    }
+
+    /// dB SPL of 0 dBFS for `input` on the open session's capture device, from the newest
+    /// calibration of that device and channel.
+    fn sensitivity(&self, rt: &Runtime, input: u16) -> Option<f64> {
+        self.store
+            .state()
+            .calibrations
+            .iter()
+            .filter(|c| c.key.device == rt.open.input_device && c.key.channel == input)
+            .max_by_key(|c| c.calibrated_at)
+            .map(|c| c.sensitivity.0)
+    }
+
+    /// Starts the job of `m` on the open session; returns its grid when it has one.
+    fn start_job(&mut self, m: &Measurement) -> Result<Option<GridDef>, ProtoError> {
+        let Some(rt) = self.session.as_ref() else {
+            return Ok(None);
+        };
+        let fs = rt.sample_rate;
+        let idx = |input: u16| {
+            block_index(&rt.input_map, input).ok_or_else(|| {
+                perr(
+                    ErrorCode::Invalid,
+                    format!("input {input} is not captured by the session"),
+                )
+            })
+        };
+        let inv = |e: String| perr(ErrorCode::Invalid, e);
+        let (analysis, grid): (Box<dyn Analysis>, Option<GridDef>) = match &m.config.kind {
+            MeasKind::Transfer { config } => {
+                let d = m.delay.clone().unwrap_or(DelayState {
+                    applied: Seconds(0.0),
+                    applied_samples: Samples(0),
+                    tracking: false,
+                    last_finding: None,
+                });
+                let a = jobs::transfer::Transfer::new(
+                    m.id,
+                    config.clone(),
+                    fs,
+                    idx(config.reference_input)?,
+                    idx(config.measurement_input)?,
+                    d.applied_samples.0,
+                    d.applied.0,
+                    m.frozen,
+                    m.config_rev,
+                    d.tracking,
+                    rt.epoch,
+                    self.s.to_self.clone(),
+                )
+                .map_err(inv)?;
+                (Box::new(a), static_grid(&m.config.kind))
+            }
+            MeasKind::Spectrum { config } => {
+                let a = jobs::spectrum::Spectrum::new(
+                    m.id,
+                    config.clone(),
+                    fs,
+                    idx(config.input)?,
+                    self.sensitivity(rt, config.input),
+                    m.frozen,
+                    m.config_rev,
+                )
+                .map_err(inv)?;
+                (Box::new(a), Some(jobs::spectrum::grid(config, fs)))
+            }
+            MeasKind::Rta { config } => {
+                let bank = jobs::rta::bank(config, fs).map_err(inv)?;
+                let g = jobs::rta::grid(config, &bank);
+                let a = jobs::rta::Rta::new(
+                    m.id,
+                    config.clone(),
+                    fs,
+                    idx(config.input)?,
+                    self.sensitivity(rt, config.input),
+                    m.frozen,
+                    m.config_rev,
+                )
+                .map_err(inv)?;
+                (Box::new(a), Some(g))
+            }
+            MeasKind::Spl { config } => {
+                let a = jobs::spl::Spl::new(
+                    m.id,
+                    *config,
+                    fs,
+                    idx(config.input)?,
+                    self.sensitivity(rt, config.input),
+                    m.frozen,
+                    m.config_rev,
+                )
+                .map_err(inv)?;
+                (Box::new(a), None)
+            }
+        };
+        let fid = self.next_fanout_id;
+        self.next_fanout_id += 1;
+        let (handle, tx) = jobs::spawn(
+            format!("ac2d-meas-{}", m.id.0),
+            self.job_env(rt),
+            fid,
+            analysis,
+        )
+        .map_err(|e| perr(ErrorCode::Internal, format!("cannot start job: {e}")))?;
+        rt.fanout.attach(fid, tx);
+        if let Some(old) = self.jobs.insert(m.id, handle)
+            && let Some(rt) = &self.session
+        {
+            rt.fanout.detach(old.fanout_id);
+        }
+        tracing::info!("measurement {} running", m.id.0);
+        Ok(grid)
+    }
+
+    fn stop_job(&mut self, id: MeasId) {
+        let orphaned: Vec<u64> = self
+            .pending_finds
+            .iter()
+            .filter(|(_, p)| p.meas == id)
+            .map(|(t, _)| *t)
+            .collect();
+        for t in orphaned {
+            if let Some(p) = self.pending_finds.remove(&t) {
+                let e = perr(
+                    ErrorCode::Invalid,
+                    "the measurement stopped during delay.find",
+                );
+                self.answer(&p.routing_id, &p.client, p.id, Err(e), Instant::now());
+            }
+        }
+        if let Some(h) = self.jobs.remove(&id) {
+            if let Some(rt) = &self.session {
+                rt.fanout.detach(h.fanout_id);
+            }
+            drop(h);
+        }
+    }
+
+    fn stop_all_jobs(&mut self) {
+        let ids: Vec<MeasId> = self.jobs.keys().copied().collect();
+        for id in ids {
+            self.stop_job(id);
+        }
+        if let Some(h) = self.timing_job.take() {
+            if let Some(rt) = &self.session {
+                rt.fanout.detach(h.fanout_id);
+            }
+            drop(h);
+        }
+    }
+
+    fn start_timing_job(&mut self) {
+        let Some(rt) = self.session.as_ref() else {
+            return;
+        };
+        let Some(lb) = rt.open.config.loopback else {
+            return;
+        };
+        let (Some(history), Some(idx)) = (rt.history.clone(), block_index(&rt.input_map, lb.input))
+        else {
+            return;
+        };
+        let a = jobs::timing::Timing::new(
+            rt.sample_rate,
+            idx,
+            history,
+            self.s.to_self.clone(),
+            rt.epoch,
+            self.store.state().timing,
+        );
+        let fid = self.next_fanout_id;
+        self.next_fanout_id += 1;
+        match jobs::spawn("ac2d-timing".into(), self.job_env(rt), fid, Box::new(a)) {
+            Ok((h, tx)) => {
+                rt.fanout.attach(fid, tx);
+                self.timing_job = Some(h);
+            }
+            Err(e) => tracing::error!("cannot start the timing monitor: {e}"),
+        }
+    }
+
+    fn set_delay(&mut self, meas: MeasId, delay: Seconds) -> Result<ReplyBody, ProtoError> {
+        self.transfer_delay(meas)?;
+        if !(delay.0.is_finite() && delay.0.abs() <= MAX_DELAY_S) {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("delay must be finite and within ±{MAX_DELAY_S} s"),
+            ));
+        }
+        let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
+            return Err(perr(
+                ErrorCode::Invalid,
+                "no open session: the delay in samples depends on its sample rate",
+            ));
+        };
+        let samples = (delay.0 * fs).round() as i64;
+        let mut m = self.meas(meas)?.clone();
+        let rev = Rev(self.store.rev().0 + 1);
+        if let Some(d) = &mut m.delay {
+            d.applied = Seconds(samples as f64 / fs);
+            d.applied_samples = Samples(samples);
+        }
+        m.config_rev = rev;
+        if let Some(j) = self.jobs.get(&meas) {
+            j.send(JobCmd::SetDelay {
+                samples,
+                seconds: samples as f64 / fs,
+                rev,
+            });
+        }
+        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        Ok(ReplyBody::Measurement(m))
+    }
+
+    fn start_find(&mut self, meas: MeasId) -> Result<u64, ProtoError> {
+        self.transfer_delay(meas)?;
+        let job = self.jobs.get(&meas).ok_or_else(|| {
+            perr(
+                ErrorCode::Invalid,
+                "the measurement is not running; the finder needs live audio",
+            )
+        })?;
+        let token = self.next_token;
+        self.next_token += 1;
+        job.send(JobCmd::Find { token });
+        Ok(token)
+    }
+
+    fn finish_find(&mut self, token: u64, result: Result<FinderResult, String>) {
+        let Some(p) = self.pending_finds.remove(&token) else {
+            return;
+        };
+        let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
+        let reply = match (result, fs) {
+            (Err(e), _) => Err(perr(ErrorCode::Refused, format!("no estimate: {e}"))),
+            (Ok(_), None) => Err(perr(ErrorCode::Invalid, "the session closed")),
+            (Ok(r), Some(fs)) => match finding(&r, fs) {
+                Err(e) => Err(e),
+                Ok(f) => match self.meas(p.meas).cloned() {
+                    Err(e) => Err(e),
+                    Ok(mut m) => {
+                        if let Some(d) = &mut m.delay {
+                            d.last_finding = Some(f.clone());
+                        }
+                        self.commit(Change::Measurement(Patch::Set(m)));
+                        Ok(ReplyBody::DelayFinding(f))
+                    }
+                },
+            },
+        };
+        self.answer(&p.routing_id, &p.client, p.id, reply, Instant::now());
+    }
+
+    fn tracked(&mut self, meas: MeasId, epoch: SessionEpoch, samples: i64) {
+        let Some(fs) = self
+            .session
+            .as_ref()
+            .filter(|r| r.epoch == epoch)
+            .map(|r| f64::from(r.sample_rate))
+        else {
+            return;
+        };
+        let Ok(m) = self.meas(meas) else {
+            return;
+        };
+        let Some(d) = &m.delay else {
+            return;
+        };
+        if d.tracking
+            && d.applied_samples.0 != samples
+            && let Err(e) = self.set_delay(meas, Seconds(samples as f64 / fs))
+        {
+            tracing::warn!("tracked delay not applied: {}", e.msg);
+        }
+    }
+
+    fn cal_spl(
+        &mut self,
+        input: u16,
+        mic: String,
+        calibrator_level: DbSpl,
+        calibrator_freq: Hz,
+    ) -> Result<ReplyBody, ProtoError> {
+        if mic.is_empty() {
+            return Err(perr(ErrorCode::Invalid, "mic name is required"));
+        }
+        if !(calibrator_level.0.is_finite()
+            && calibrator_freq.0.is_finite()
+            && calibrator_freq.0 > 0.0)
+        {
+            return Err(perr(
+                ErrorCode::Invalid,
+                "calibrator level and frequency must be finite",
+            ));
+        }
+        let Some(rt) = self.session.as_ref() else {
+            return Err(perr(ErrorCode::Invalid, "no open session"));
+        };
+        let idx = block_index(&rt.input_map, input)
+            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
+        let ms = rt.fanout.meters.mean_square(idx).unwrap_or(0.0);
+        let measured = ac2_core::spectrum::rms_dbfs(ms.sqrt());
+        if !(measured.is_finite() && measured > -80.0) {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!("no calibrator signal on input {input} ({measured:.1} dBFS)"),
+            ));
+        }
+        let entry = CalEntry {
+            key: CalKey {
+                device: rt.open.input_device.clone(),
+                channel: input,
+                mic,
+            },
+            sensitivity: Db(calibrator_level.0 - measured),
+            calibrator_level,
+            calibrator_freq,
+            measured: Dbfs(measured),
+            calibrated_at: WallNs(wall_ns()),
+        };
+        tracing::info!(
+            "input {input} calibrated: {:.2} dBFS at {:.1} dB SPL",
+            measured,
+            calibrator_level.0
+        );
+        self.commit(Change::Calibration(Patch::Set(entry.clone())));
+        // Jobs on this input pick the new sensitivity up on restart.
+        let affected: Vec<Measurement> = self
+            .store
+            .state()
+            .measurements
+            .iter()
+            .filter(|m| m.running && self.jobs.contains_key(&m.id))
+            .filter(|m| match &m.config.kind {
+                MeasKind::Spectrum { config } => config.input == input,
+                MeasKind::Rta { config } => config.input == input,
+                MeasKind::Spl { config } => config.input == input,
+                MeasKind::Transfer { .. } => false,
+            })
+            .cloned()
+            .collect();
+        for m in affected {
+            self.stop_job(m.id);
+            if let Err(e) = self.start_job(&m) {
+                tracing::warn!("measurement {} not restarted: {}", m.id.0, e.msg);
+            }
+        }
+        Ok(ReplyBody::Calibration(entry))
+    }
+
+    // -- generator (Q6) --------------------------------------------------------------------
+
+    fn audit(&self, g: &mut Generator, action: GenAction, client: Option<&ClientId>) {
+        tracing::info!(
+            target: "ac2d::audit",
+            "generator {action:?} by {}",
+            client.map_or("daemon (expiry)", |c| c.0.as_str())
+        );
+        g.last_action = Some(GenAudit {
+            action,
+            client: client.cloned(),
+            at: WallNs(wall_ns()),
+        });
+    }
+
+    fn wire_lease(&self, token: LeaseToken) -> WireLease {
+        WireLease {
+            lease_token: token,
+            expires_in_ms: u32::try_from(self.s.lease_expiry.as_millis()).unwrap_or(u32::MAX),
+        }
+    }
+
+    fn lease_check(&self, client: &ClientId, token: LeaseToken) -> Result<(), ProtoError> {
+        match &self.lease {
+            Some(l) if l.token == token && l.owner == *client && l.deadline > Instant::now() => {
+                Ok(())
+            }
+            _ => Err(lease_required()),
+        }
+    }
+
+    /// Fades the output out (the gate makes the source fade on its own as well).
+    fn stop_output(&mut self) {
+        self.gate.close();
+        if let Some(rt) = &self.session {
+            rt.gen_handle.stop();
+        }
+        self.level = None;
+        self.source = None;
+    }
+
+    fn check_lease(&mut self, now: Instant) {
+        if self.lease.as_ref().is_some_and(|l| l.deadline <= now) {
+            let owner = self.lease.take().map(|l| l.owner);
+            tracing::warn!(
+                "stimulus lease of {} expired",
+                owner.as_ref().map_or("?", |o| o.0.as_str())
+            );
+            self.stop_output();
+            let mut g = self.store.state().generator.clone();
+            g.owner = None;
+            g.armed = false;
+            g.firing = false;
+            self.audit(&mut g, GenAction::Expiry, None);
+            self.commit(Change::Generator(g));
+        }
+    }
+
+    fn gen_acquire(&mut self, client: &ClientId, force: bool) -> Result<ReplyBody, ProtoError> {
+        self.check_lease(Instant::now());
+        let mut g = self.store.state().generator.clone();
+        let action = match &self.lease {
+            Some(l) if l.owner != *client => {
+                if !force {
+                    return Err(perr_detail(
+                        ErrorCode::LeaseHeld,
+                        format!("{} holds the stimulus lease", l.owner.0),
+                        ErrorDetail::LeaseHeld {
+                            owner: l.owner.clone(),
+                        },
+                    ));
+                }
+                // Takeover stops and disarms first; the new owner arms and fires explicitly.
+                self.stop_output();
+                g.armed = false;
+                g.firing = false;
+                GenAction::Force
+            }
+            _ => GenAction::Acquire,
+        };
+        let token = LeaseToken(random_u128());
+        let deadline = Instant::now() + self.s.lease_expiry;
+        self.lease = Some(Lease {
+            token,
+            owner: client.clone(),
+            deadline,
+        });
+        if g.firing {
+            self.gate.open_until(deadline);
+        }
+        g.owner = Some(client.clone());
+        self.audit(&mut g, action, Some(client));
+        self.commit(Change::Generator(g));
+        Ok(ReplyBody::Lease(self.wire_lease(token)))
+    }
+
+    fn gen_set(
+        &mut self,
+        client: &ClientId,
+        token: LeaseToken,
+        desired: GeneratorDesired,
+    ) -> Result<ReplyBody, ProtoError> {
+        self.lease_check(client, token)?;
+        let st = &desired.settings;
+        if desired.firing && !desired.armed {
+            return Err(perr(ErrorCode::Refused, "firing requires armed"));
+        }
+        if !st.level.0.is_finite() {
+            return Err(perr(ErrorCode::Invalid, "level must be finite"));
+        }
+        if st.level.0 > self.s.ceiling_dbfs {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "{:.1} dBFS is above the global maximum {:.1} dBFS",
+                    st.level.0, self.s.ceiling_dbfs
+                ),
+            ));
+        }
+        for (i, o) in st.outputs.iter().enumerate() {
+            if st.outputs[..i].contains(o) {
+                return Err(perr(ErrorCode::Invalid, format!("output {o} listed twice")));
+            }
+        }
+        if desired.armed && st.outputs.is_empty() {
+            return Err(perr(ErrorCode::Invalid, "no output channels"));
+        }
+        let signal =
+            conv::signal(st.signal).ok_or_else(|| perr(ErrorCode::Invalid, "invalid signal"))?;
+        if let Some(rt) = &self.session
+            && let Some(o) = st.outputs.iter().find(|o| **o >= rt.output_channels)
+        {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("output {o} is not an output of the session"),
+            ));
+        }
+        if desired.firing && self.session.is_none() {
+            return Err(perr(ErrorCode::Refused, "no open session to emit on"));
+        }
+
+        let deadline = Instant::now() + self.s.lease_expiry;
+        if let Some(l) = &mut self.lease {
+            l.deadline = deadline;
+        }
+        let prev = self.store.state().generator.clone();
+
+        // Routes are fixed per stream: a different output set reopens it.
+        if (desired.armed || desired.firing)
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|r| r.routes != st.outputs)
+        {
+            let was_firing = prev.firing;
+            if was_firing {
+                self.stop_output();
+            }
+            self.reopen(&st.outputs)?;
+        }
+
+        if desired.firing {
+            let key = SourceKey {
+                signal: st.signal,
+                band: st.band,
+            };
+            let rt = self
+                .session
+                .as_mut()
+                .ok_or_else(|| perr(ErrorCode::Refused, "no session"))?;
+            if self.source != Some(key) || self.level.is_none() {
+                let g = CoreGenerator::new(&GeneratorConfig {
+                    signal,
+                    sample_rate: f64::from(rt.sample_rate),
+                    seed: random_u64(),
+                    band: conv::band_limit(st.band),
+                    level_dbfs: st.level.0,
+                    ceiling_dbfs: self.s.ceiling_dbfs,
+                })
+                .map_err(gen_err)?;
+                let peak = dbfs_to_rms(st.level.0) * g.crest_factor();
+                if peak > f64::from(self.s.max_level.linear()) * (1.0 + 1e-9) {
+                    return Err(perr(
+                        ErrorCode::Refused,
+                        "the signal's peak would exceed the output limit",
+                    ));
+                }
+                let lc = g.level_control();
+                // A fresh gate state for the new source; the old one fades on its own.
+                self.gate.open_until(deadline);
+                rt.gen_handle
+                    .set_source(Box::new(LeasedSource::new(g, Arc::clone(&self.gate))))
+                    .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
+                self.level = Some(lc);
+                self.source = Some(key);
+            } else if let Some(lc) = &self.level {
+                lc.set_level_dbfs(st.level.0).map_err(gen_err)?;
+                self.gate.open_until(deadline);
+            }
+            rt.gen_handle.set_gain(Gain::UNITY);
+            rt.gen_handle.start();
+        } else {
+            self.stop_output();
+        }
+
+        let mut g = self.store.state().generator.clone();
+        let action = if desired.firing && !prev.firing {
+            GenAction::Fire
+        } else if desired.armed && !prev.armed {
+            GenAction::Arm
+        } else {
+            GenAction::Set
+        };
+        g.armed = desired.armed;
+        g.firing = desired.firing;
+        g.settings = Some(desired.settings.clone());
+        self.audit(&mut g, action, Some(client));
+        self.commit(Change::Generator(g.clone()));
+        Ok(ReplyBody::Generator(g))
+    }
+}

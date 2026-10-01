@@ -20,7 +20,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
         any::<u64>(),
         any::<u32>(),
         any::<bool>(),
-        0u32..64,
+        0u32..128,
     )
         .prop_flat_map(|(n, seq, meas, eff, prot)| {
             (
