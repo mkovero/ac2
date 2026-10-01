@@ -1,0 +1,28 @@
+[package]
+name = "ac2-zmq"
+description = "The only crate that links libzmq: static libzmq 4.3.5 with CURVE (libsodium), a small typed binding, ZAP-enforced CURVE servers and the socket patterns ac2 uses."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+# No second libzmq may enter the graph (e.g. via `zmq-sys`, whose vendored build has CURVE off).
+links = "zmq"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Static libsodium (Unix: built from its bundled, signature-checked tarball; Windows: its
+# minisign-verified prebuilt archive). The build script reads its `DEP_SODIUM_*` metadata to
+# compile libzmq with CURVE.
+libsodium-sys-stable = "=1.24.0"
+libc = "0.2"
+
+[build-dependencies]
+# Pinned exactly: the bundled libzmq source (4.3.5) sits on the network trust boundary.
+zeromq-src = "=0.3.6"
+
+[dev-dependencies]
+tempfile = "3"

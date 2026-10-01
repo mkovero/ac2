@@ -1,7 +1,14 @@
 # Spike: ZeroMQ + CURVE (phase 0)
 
-Code: `spikes/zmq-curve` (throwaway). Feeds PLAN.md §6 (protocol), §4.3 (publishing),
-open questions Q2 (freshness), Q5 (frame identity), Q6 (lease binding to identity).
+Feeds PLAN.md §6 (protocol), §4.3 (publishing), open questions Q2 (freshness), Q5 (frame
+identity), Q6 (lease binding to identity).
+
+> **Code promoted.** The spike code (`spikes/zmq-curve`) has been removed; its build script,
+> binding and tests were reviewed and promoted to `crates/ac2-zmq` (build, typed API,
+> `SecureContext` + ZAP handler, authorized-keys store, `drain_latest`,
+> `SubscriptionTracker`). Commands and paths below that name `spike-zmq-curve` describe the
+> spike as it was measured; the throughput example was not carried over. The equivalent
+> tests now run with `cargo test -p ac2-zmq`.
 
 ## Answer
 
