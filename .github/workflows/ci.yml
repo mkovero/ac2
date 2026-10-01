@@ -56,14 +56,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev
 
-      - name: Windows dev drive for target/
-        if: runner.os == 'Windows'
-        uses: samypr100/setup-dev-drive@v4
-        with:
-          drive-size: 12GB
-          mount-path: target
-          trusted-dev-drive: true
-
       - name: Windows linker
         if: runner.os == 'Windows'
         shell: bash
@@ -72,10 +64,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/speed' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Disk headroom
+        if: always()
+        shell: bash
+        run: df -h . && du -sh target 2>/dev/null || true
 
   test:
     name: test (${{ matrix.os }})
@@ -111,16 +108,6 @@ jobs:
           # Runners expose a paravirtual Metal device; there is no software Metal adapter.
           { echo "WGPU_BACKEND=metal"; echo "AC2_REQUIRE_GPU=1"; } >> "$GITHUB_ENV"
 
-      # ReFS dev drive mounted over target/: the build is small-file heavy and NTFS on the
-      # hosted runners is the slowest part of the Windows job.
-      - name: Windows dev drive for target/
-        if: runner.os == 'Windows'
-        uses: samypr100/setup-dev-drive@v4
-        with:
-          drive-size: 24GB
-          mount-path: target
-          trusted-dev-drive: true
-
       - name: Windows GPU env + linker
         if: runner.os == 'Windows'
         shell: bash
@@ -140,7 +127,7 @@ jobs:
           cache-on-failure: true
           # Only main writes caches (branches and PRs restore main's). Keeps the 10 GB repo
           # budget for main's keys and skips the multi-minute save on Windows branch runs.
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/speed' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: clippy
         if: runner.os == 'macOS'
@@ -151,6 +138,11 @@ jobs:
 
       - name: test
         run: cargo test --workspace --locked
+
+      - name: Disk headroom
+        if: always()
+        shell: bash
+        run: df -h . && du -sh target 2>/dev/null || true
 
       - name: Upload golden-image diffs
         if: failure()
