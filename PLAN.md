@@ -8,7 +8,7 @@ then go beyond them on UX, networking and scriptability.
 - Language: Rust (stable), single Cargo workspace
 - Architecture: `core` (pure math) → `daemon` (owns audio + state) → frontends (`cli`, `ui`) over ZeroMQ, locally or across the network
 - UI: keyboard-first, GPU-accelerated, lightweight, smooth
-- License: open source (exact license TBD, see §12)
+- License: MIT (ASIO handling in §12)
 
 ---
 
@@ -572,11 +572,9 @@ Q7 calibration chain identity (phase 5), Q8 phase comparison time reference (pha
 | Scope creep before 1.0 | §9.1 slice; phase 7 is explicitly post-1.0 |
 
 Open decisions (settle before phase 1; technical design questions are in §9.2):
-1. OSS license and ASIO model. Steinberg offers the ASIO SDK under GPLv3 or proprietary
-   terms. Source licence and binary distribution are separate questions: the project's
-   source licence (GPL-3.0 vs MIT/Apache-2.0) is one choice; which SDK licence the ASIO
-   binaries are built under, and what obligations that puts on the combined artifact, is
-   another. Pin and audit the SDK version actually used. ASIO is post-1.0 (phase 7).
+1. ~~License~~ **Decided: MIT.** ASIO stays an opt-in cargo feature, off in default
+   builds; the SDK is not vendored. ASIO binaries need their own licensing decision when
+   phase 7 starts (Steinberg proprietary terms vs GPLv3 SDK, which would make that binary GPL).
 2. Distance readout for delay: `ac` removed it deliberately; revisit with the reasons from `ac`'s README.
 3. UI chrome: egui vs iced (short spike at phase 4 start; `ac2-plot` is independent of the outcome).
 4. Minimum headless target hardware (sets perf budgets).
