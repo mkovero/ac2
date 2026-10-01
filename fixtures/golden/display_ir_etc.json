@@ -1,0 +1,80 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "display_ir_etc",
+  "description": "Live IR view from a one-sided uniform-bin transfer function: circular IFFT, fftshift so time 0 (the inserted delay) sits at index n/2, ETC = 20 log10 of the Hilbert envelope.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_display_ir_etc"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n_fft": 4096,
+    "arrivals": "butter(2, [500, 4000] Hz) bandpass impulse at lags 40, 700, -30 samples, gains 1.0, 0.3, 0.1 (circular)",
+    "ir": "fftshift(irfft(h, n)); index i is time (i - n/2)/fs",
+    "etc": "20 log10 |scipy.signal.hilbert(ir)|, floored at floor_db"
+  },
+  "references": [
+    "PLAN.md 3.3 (live IR panel)",
+    "scipy.signal.hilbert"
+  ],
+  "scalars": {
+    "fs_hz": 48000.0,
+    "n_fft": 4096.0,
+    "floor_db": -200.0
+  },
+  "blob": {
+    "file": "display_ir_etc.bin",
+    "nbytes": 98320,
+    "sha256": "37f4a4a118151ff97c40a221d05b9e0c5f2ae8c45b1e0751ebfc581062eb76fb"
+  },
+  "arrays": [
+    {
+      "name": "h",
+      "dtype": "c128",
+      "shape": [
+        2049
+      ],
+      "offset": 0,
+      "nbytes": 32784,
+      "unit": "1",
+      "description": "one-sided transfer function, n/2 + 1 bins"
+    },
+    {
+      "name": "ir",
+      "dtype": "f64",
+      "shape": [
+        4096
+      ],
+      "offset": 32784,
+      "nbytes": 32768,
+      "unit": "1",
+      "description": "fftshifted impulse response",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-14,
+        "rel": 1e-09
+      }
+    },
+    {
+      "name": "etc_db",
+      "dtype": "f64",
+      "shape": [
+        4096
+      ],
+      "offset": 65552,
+      "nbytes": 32768,
+      "unit": "dB",
+      "description": "Hilbert envelope in dB",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -150.0
+      }
+    }
+  ]
+}

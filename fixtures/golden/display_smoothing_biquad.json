@@ -1,0 +1,118 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "display_smoothing_biquad",
+  "description": "Fractional-octave display smoothing on the 48 ppo base-2 grid of a peaking biquad with delay and a masked gap: power mode 1/3 oct, complex mode 1/6 oct.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_display_smoothing_biquad"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "biquad": "RBJ cookbook peaking EQ",
+    "f0_hz": 2000.0,
+    "gain_db": 12.0,
+    "q": 8.0,
+    "delay_s": 0.0004,
+    "grid": "f_i = 1000 * 2^((k_min + i)/ppo), k_min = floor(ppo log2(f_lo/1k))",
+    "kernel": "w(d) = 0.5 (1 + cos(pi d / H)), |d| < H, H = 0.75 ppo / b columns",
+    "edges": "truncated, renormalised by the sum of the weights present",
+    "gap": "columns 250 < f < 280 Hz invalid; smoothing confined to valid runs",
+    "power_mode": "|H_s| = sqrt(sum w |H|^2 / sum w), phase kept",
+    "complex_mode": "|H_s| as power; phase = sum w unwrap(arg H) / sum w per run"
+  },
+  "references": [
+    "PLAN.md 3.3, 5.1",
+    "numpy.convolve / numpy.unwrap",
+    "scipy.signal.freqz"
+  ],
+  "scalars": {
+    "ppo": 48.0,
+    "f_lo_hz": 20.0,
+    "f_hi_hz": 20000.0
+  },
+  "blob": {
+    "file": "display_smoothing_biquad.bin",
+    "nbytes": 26880,
+    "sha256": "2e6b7397e9d042529af895b8c6d3ee5456a2f7934b2be3d2a4749389d0f64d2b"
+  },
+  "arrays": [
+    {
+      "name": "freq_hz",
+      "dtype": "f64",
+      "shape": [
+        480
+      ],
+      "offset": 0,
+      "nbytes": 3840,
+      "unit": "Hz",
+      "description": "grid column centres",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "h",
+      "dtype": "c128",
+      "shape": [
+        480
+      ],
+      "offset": 3840,
+      "nbytes": 7680,
+      "unit": "1",
+      "description": "input H per column",
+      "axis": "freq_hz"
+    },
+    {
+      "name": "valid",
+      "dtype": "f64",
+      "shape": [
+        480
+      ],
+      "offset": 11520,
+      "nbytes": 3840,
+      "unit": "1",
+      "description": "1 = valid column"
+    },
+    {
+      "name": "power_third_mag",
+      "dtype": "f64",
+      "shape": [
+        480
+      ],
+      "offset": 15360,
+      "nbytes": 3840,
+      "unit": "1",
+      "description": "|H| after 1/3 octave power smoothing",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-12,
+        "rel": 1e-10
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "complex_sixth",
+      "dtype": "c128",
+      "shape": [
+        480
+      ],
+      "offset": 19200,
+      "nbytes": 7680,
+      "unit": "1",
+      "description": "H after 1/6 octave complex (power + unwrapped phase) smoothing",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-10,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    }
+  ]
+}
