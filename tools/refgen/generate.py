@@ -613,6 +613,33 @@ def json_without_hash(path: Path) -> dict:
     return meta
 
 
+def json_diff(a, b, path: str = "$") -> str | None:
+    """First path where two metadata trees differ; floats compared within the check tolerance."""
+    if isinstance(a, float) or isinstance(b, float):
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)) and np.isclose(
+            a, b, rtol=CHECK_RTOL, atol=CHECK_ATOL
+        ):
+            return None
+        return path
+    if isinstance(a, dict) and isinstance(b, dict):
+        if a.keys() != b.keys():
+            return path
+        for k in a:
+            d = json_diff(a[k], b[k], f"{path}.{k}")
+            if d:
+                return d
+        return None
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return path
+        for i, (x, y) in enumerate(zip(a, b)):
+            d = json_diff(x, y, f"{path}[{i}]")
+            if d:
+                return d
+        return None
+    return None if a == b else path
+
+
 def check(committed: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="ac2-refgen-") as tmp:
         tmp_dir = Path(tmp)
@@ -633,9 +660,11 @@ def check(committed: Path) -> int:
                 if lines:
                     failures.append(f"differs: {name}\n" + "\n".join(lines))
             elif name.endswith(".json"):
-                # The blob hash legitimately changes with last-ulp drift; the rest must match.
-                if json_without_hash(a) != json_without_hash(b):
-                    failures.append(f"differs: {name} (metadata)")
+                # The blob hash and float scalars legitimately move by a few ulps between
+                # machines; everything else must match exactly.
+                diff = json_diff(json_without_hash(a), json_without_hash(b))
+                if diff:
+                    failures.append(f"differs: {name} (metadata at {diff})")
             else:
                 failures.append(f"differs: {name}")
     if failures:

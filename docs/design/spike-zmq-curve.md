@@ -16,8 +16,8 @@ over 120 runs while 12 test processes ran in parallel.
 
 Caveat: on Windows, `libsodium-sys-stable` **downloads** a prebuilt, minisign-verified
 libsodium archive at build time, unless `SODIUM_LIB_DIR` (e.g. vcpkg) or `SODIUM_DIST_DIR`
-(a vendored copy of the zip) is set. CI must confirm the Windows and macOS builds; they are not
-verified yet (see Risks).
+(a vendored copy of the zip) is set. CI builds and passes all tests on Linux, macOS and
+Windows MSVC (windows-latest).
 
 ## Crate survey (2026-10-01)
 
@@ -49,7 +49,8 @@ verified yet (see Risks).
 
 What the build does (`spikes/zmq-curve/build.rs`):
 1. `libsodium-sys-stable` builds/fetches static libsodium and exports `DEP_SODIUM_INCLUDE`
-   / `DEP_SODIUM_LIB` to our build script.
+   / `DEP_SODIUM_LIB` to our build script (Unix). On MSVC it exports only an include dir that
+   does not exist; see the Windows row below.
 2. `zeromq_src::Build::new().with_libsodium(Some(LibLocation::new(lib, include))).build()`
    compiles static libzmq with `ZMQ_USE_LIBSODIUM` + `ZMQ_HAVE_CURVE`.
 3. A unit test asserts `zmq_version() == 4.3.5`, `zmq_has("curve")` and (Unix) `zmq_has("ipc")`.
@@ -59,8 +60,8 @@ Per OS:
 | OS | needs | notes |
 |---|---|---|
 | Linux | C/C++ compiler, `make`, `sh` (build-essential) | Verified (Arch, gcc). Binary depends dynamically on `libstdc++.so.6`, which every desktop has. |
-| macOS | Xcode Command Line Tools (clang, make) | libsodium via `configure`; libzmq uses kqueue. Not yet run; expected to work (zeromq-src and libsodium-sys-stable both support it). |
-| Windows MSVC | Visual Studio Build Tools (already needed by Rust) | libsodium: prebuilt zip **downloaded at build time** (minisign-verified), or `SODIUM_LIB_DIR` / `SODIUM_DIST_DIR` / vcpkg. Our build script (a) sets `CXXFLAGS=/DSODIUM_STATIC` so libzmq does not expect `dllimport` symbols, and (b) gives zeromq-src a header shim for the `builds/msvc/version.h` path it copies from a libsodium *source* tree. Both are untested. libzmq is C++: the binary needs `msvcp140.dll` (VC++ redistributable) unless built with `+crt-static`. IPC on Windows depends on `afunix.h` (Win10+ SDK); ac2 uses tcp://127.0.0.1 there anyway. |
+| macOS | Xcode Command Line Tools (clang, make) | libsodium via `configure`; libzmq uses kqueue. Verified on CI (macos-latest). |
+| Windows MSVC | Visual Studio Build Tools (already needed by Rust) | Verified on CI (windows-latest, x64, debug). libsodium: `configure` fails, so `libsodium-sys-stable` falls back to the prebuilt zip **downloaded at build time** (minisign-verified), or `SODIUM_LIB_DIR` / `SODIUM_DIST_DIR` / vcpkg. That fallback unpacks to `<its OUT_DIR>/installed/libsodium/{include, x64/{Debug,Release}/v143/{static,dynamic,ltcg}}`, emits `rustc-link-search` + `static=libsodium` for the `static` dir of the current profile, but exports **no `DEP_SODIUM_LIB`** and `DEP_SODIUM_INCLUDE = <OUT_DIR>/installed/include`, which does not exist. Our build script rebuilds both paths from that anchor (`installed/libsodium/include`, `installed/libsodium/<arch>/<Debug or Release>/v143/static`) and asserts `sodium.h` / `libsodium.lib` are there. It also (a) appends `/DSODIUM_STATIC` to `CXXFLAGS` so libzmq does not expect `dllimport` symbols, (b) gives zeromq-src a header shim for the `builds/msvc/version.h` path it copies from a libsodium *source* tree, and (c) links `ws2_32`, `iphlpapi`, `advapi32` explicitly (zeromq-src names only `iphlpapi`; libsodium's RNG uses `RtlGenRandom` from advapi32). libzmq and libsodium are both static. Debug builds link libsodium's Debug archive against Rust's release CRT without errors. libzmq is C++: the binary needs `msvcp140.dll` (VC++ redistributable) unless built with `+crt-static`. IPC on Windows depends on `afunix.h` (Win10+ SDK); ac2 uses tcp://127.0.0.1 there anyway, and the ipc tests are Unix-only. Cold Windows CI build of the workspace is ~15 min (whole job). |
 | Windows GNU | mingw toolchain | libsodium prebuilt archive (downloaded); no wepoll. Low priority. |
 
 Measurements (Threadripper PRO 3945WX, 12 cores, Linux):
@@ -194,11 +195,10 @@ The planned load is < 2 % of CURVE's headroom; encryption cost is not a factor.
 
 ## Risks / open items
 
-- **Windows build unverified**: the MSVC header shim and `SODIUM_STATIC` define are written
-  but untested; libsodium download at build time (decide: allow, vendor the zip via
+- **Windows build**: verified on CI. Open: libsodium download at build time (decide: allow, vendor the zip via
   `SODIUM_DIST_DIR`, or vcpkg in CI); `msvcp140.dll` runtime dependency (decide:
   `+crt-static` vs redistributable in the installer).
-- **macOS build unverified** (expected fine).
+- **macOS build**: verified on CI (macos-latest, arm64), no changes needed.
 - **pyzmq interop** of our CURVE build not tested yet (expected fine: same libzmq/libsodium);
   add to the cross-language fixture job.
 - **libsodium build time** (15 s, configure-bound) is paid on every clean CI build; cache

@@ -9,23 +9,20 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
 
-    let sodium_include =
-        PathBuf::from(env::var("DEP_SODIUM_INCLUDE").expect("libsodium-sys-stable include dir"));
-    let sodium_lib =
-        PathBuf::from(env::var("DEP_SODIUM_LIB").expect("libsodium-sys-stable lib dir"));
     let target = env::var("TARGET").expect("TARGET");
+    let (sodium_include, sodium_lib) = sodium_location(&target);
 
+    let flags = env::var("CXXFLAGS").unwrap_or_default();
     let include = if target.contains("msvc") {
         // libsodium's headers mark every symbol `dllimport` under MSVC unless SODIUM_STATIC is
         // defined; we link the static archive. cc reads CXXFLAGS from the environment when it
         // compiles libzmq.
         // SAFETY: build scripts are single-threaded at this point.
-        unsafe { env::set_var("CXXFLAGS", "/DSODIUM_STATIC") };
+        unsafe { env::set_var("CXXFLAGS", format!("{flags} /DSODIUM_STATIC")) };
         msvc_sodium_include_shim(&sodium_include)
     } else {
         // libzmq's sources are not -Wextra clean; cc would relay every warning as a cargo
         // warning on each build of this crate.
-        let flags = env::var("CXXFLAGS").unwrap_or_default();
         // SAFETY: build scripts are single-threaded at this point.
         unsafe { env::set_var("CXXFLAGS", format!("{flags} -w")) };
         sodium_include
@@ -34,6 +31,67 @@ fn main() {
     zeromq_src::Build::new()
         .with_libsodium(Some(zeromq_src::LibLocation::new(sodium_lib, include)))
         .build();
+
+    if target.contains("windows") {
+        // libzmq uses Winsock and the IP helper API; libsodium's randombytes uses
+        // RtlGenRandom from advapi32. zeromq-src only names iphlpapi, and Rust's std does not
+        // guarantee the others end up on the link line.
+        for lib in ["ws2_32", "iphlpapi", "advapi32"] {
+            println!("cargo:rustc-link-lib={lib}");
+        }
+    }
+}
+
+/// Include and static-library directories of the libsodium that `libsodium-sys-stable` built.
+///
+/// From source (Unix) it exports both as `DEP_SODIUM_INCLUDE` / `DEP_SODIUM_LIB`. On MSVC it
+/// unpacks the prebuilt zip into `<its OUT_DIR>/installed/libsodium/` but exports only
+/// `DEP_SODIUM_INCLUDE = <its OUT_DIR>/installed/include` (a directory that does not exist)
+/// and no `lib`; it still emits its own link-search path and `static=libsodium`. The real
+/// layout is reconstructed from that anchor, picking the `static` (not `dynamic`/`ltcg`)
+/// archive of the profile libsodium-sys-stable chose.
+fn sodium_location(target: &str) -> (PathBuf, PathBuf) {
+    let include = PathBuf::from(
+        env::var("DEP_SODIUM_INCLUDE").expect("libsodium-sys-stable exports no include dir"),
+    );
+    if let Ok(lib) = env::var("DEP_SODIUM_LIB") {
+        return (include, PathBuf::from(lib));
+    }
+    assert!(
+        target.contains("msvc"),
+        "libsodium-sys-stable exported no lib dir for {target}"
+    );
+    let installed = include
+        .parent()
+        .expect("DEP_SODIUM_INCLUDE has a parent")
+        .join("libsodium");
+    let arch = match env::var("CARGO_CFG_TARGET_ARCH")
+        .expect("target arch")
+        .as_str()
+    {
+        "x86_64" => "x64",
+        "x86" => "Win32",
+        "aarch64" => "ARM64",
+        other => panic!("no prebuilt libsodium for MSVC arch {other}"),
+    };
+    let config = if env::var("PROFILE").expect("PROFILE") == "release" {
+        "Release"
+    } else {
+        "Debug"
+    };
+    let include = installed.join("include");
+    let lib = installed
+        .join(arch)
+        .join(config)
+        .join("v143")
+        .join("static");
+    assert!(
+        include.join("sodium.h").is_file() && lib.join("libsodium.lib").is_file(),
+        "prebuilt libsodium not where expected: {} / {}",
+        include.display(),
+        lib.display()
+    );
+    (include, lib)
 }
 
 /// zeromq-src (MSVC only) copies `<include>/../../../builds/msvc/version.h`, a path that exists
