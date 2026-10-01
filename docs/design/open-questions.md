@@ -57,7 +57,7 @@ note at the start of the phase that implements them, within the decisions here.
 
 Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).
 
-Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the table below).
+Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the Decided table above).
 
 ---
 
