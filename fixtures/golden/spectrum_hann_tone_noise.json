@@ -1,0 +1,162 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "spectrum_hann_tone_noise",
+  "description": "Single-frame Hann-windowed one-sided amplitude spectrum (FS RMS) and PSD (FS^2/Hz) of a bin-centred sine plus white Gaussian noise.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_spectrum_hann_tone_noise"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 4096,
+    "window": "hann, periodic (w[i] = 0.5 - 0.5 cos(2 pi i / N))",
+    "tone_bin": 256,
+    "tone_freq_hz": 3000.0,
+    "tone_peak_fs": 0.5,
+    "tone_phase": "sin, zero phase at sample 0",
+    "noise_rms_fs": 0.001,
+    "noise": "numpy default_rng(seed).standard_normal(n) * noise_rms_fs",
+    "seed": 180486145,
+    "amplitude_formula": "amp_rms[k] = sqrt(c_k) * |X[k]| / sum(w)",
+    "psd_formula": "psd[k] = c_k * |X[k]|^2 / (fs * sum(w^2))",
+    "one_sided_c_k": "2 for 0 < k < N/2, 1 for k = 0 and k = N/2",
+    "dbfs_formula": "amp_dbfs = 20 log10(amp_rms * sqrt(2)) (0 dBFS = full-scale sine)",
+    "psd_db_formula": "psd_db = 10 log10(psd), dB re 1 FS^2/Hz",
+    "dft": "X[k] = sum_n w[n] x[n] exp(-2 pi i k n / N) (numpy.fft.rfft)"
+  },
+  "references": [
+    "PLAN.md 5.3 (units per display)",
+    "docs/design/open-questions.md Q4 / decision 4a",
+    "scipy.signal.periodogram cross-check (scaling='spectrum' and 'density')"
+  ],
+  "scalars": {
+    "window_sum": 2048.0,
+    "window_sum_sq": 1536.0,
+    "coherent_gain": 0.5,
+    "enbw_bins": 1.5,
+    "tone_rms_expected_fs": 0.35355339059327373
+  },
+  "blob": {
+    "file": "spectrum_hann_tone_noise.bin",
+    "nbytes": 147496,
+    "sha256": "12c48c569a4130bd0f649ec0ac972dc54796b8d2c145b39dd7619c944361791b"
+  },
+  "arrays": [
+    {
+      "name": "x",
+      "dtype": "f64",
+      "shape": [
+        4096
+      ],
+      "offset": 0,
+      "nbytes": 32768,
+      "unit": "FS",
+      "description": "input signal, n samples"
+    },
+    {
+      "name": "window",
+      "dtype": "f64",
+      "shape": [
+        4096
+      ],
+      "offset": 32768,
+      "nbytes": 32768,
+      "unit": "1",
+      "description": "periodic Hann window",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "freq_hz",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 65536,
+      "nbytes": 16392,
+      "unit": "Hz",
+      "description": "bin centre frequencies k*fs/N",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-15
+      }
+    },
+    {
+      "name": "amplitude_rms",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 81928,
+      "nbytes": 16392,
+      "unit": "FS RMS",
+      "description": "one-sided amplitude spectrum, sine RMS at bin centre",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-13,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "amplitude_dbfs",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 98320,
+      "nbytes": 16392,
+      "unit": "dBFS",
+      "description": "20 log10(amplitude_rms * sqrt 2)",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -300.0
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "psd",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 114712,
+      "nbytes": 16392,
+      "unit": "FS^2/Hz",
+      "description": "one-sided PSD",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "psd_db",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 131104,
+      "nbytes": 16392,
+      "unit": "dB re 1 FS^2/Hz",
+      "description": "10 log10(psd)",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -400.0
+      },
+      "axis": "freq_hz"
+    }
+  ]
+}

@@ -1,0 +1,135 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "weighting_iec61672",
+  "description": "IEC 61672-1 A and C frequency weighting (dB) from the analytic Annex E expressions at the exact base-10 one-third-octave frequencies 10 Hz - 20 kHz.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_weighting_iec61672"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "frequencies": "f_m = 1000 * 10^(n/10) Hz, n = -20..13 (exact, base-10)",
+    "C_formula": "C(f) = 20 log10[f4^2 f^2 / ((f^2 + f1^2)(f^2 + f4^2))] - C1000",
+    "A_formula": "A(f) = 20 log10[f4^2 f^4 / ((f^2 + f1^2)(f^2 + f2^2)^(1/2)(f^2 + f3^2)^(1/2)(f^2 + f4^2))] - A1000",
+    "poles": "IEC 61672-1:2013 Annex E: fr = 1000, fL = 10^1.5, fH = 10^3.9, D = sqrt(1/2), fA = 10^2.45; b = (fr^2 + fL^2 fH^2/fr^2 - D (fL^2 + fH^2))/(1 - D), c = fL^2 fH^2; f1^2, f4^2 = (-b -/+ sqrt(b^2 - 4c))/2; f2,3 = fA (3 -/+ sqrt5)/2",
+    "normalisation": "A1000, C1000 computed exactly so A(1 kHz) = C(1 kHz) = 0; standard's rounded constants are -2.000 / -0.062 dB"
+  },
+  "references": [
+    "IEC 61672-1:2013 Electroacoustics - Sound level meters - Part 1, Annex E (analytical expressions for frequency weightings C, A and Z), Table 3",
+    "PLAN.md 5.3 (A/C IIR verified per rate against IEC 61672-1 tables)"
+  ],
+  "scalars": {
+    "f1_hz": 20.598997057618316,
+    "f2_hz": 107.65264864304629,
+    "f3_hz": 737.8622307362901,
+    "f4_hz": 12194.21714799801,
+    "a1000_db": -1.999655535667262,
+    "c1000_db": -0.06190185672432287
+  },
+  "blob": {
+    "file": "weighting_iec61672.bin",
+    "nbytes": 1632,
+    "sha256": "4869d7a996bf7faec93241fa1ee12dd4c14857308f9e9a97aa4a3a2fa53ff750"
+  },
+  "arrays": [
+    {
+      "name": "nominal_hz",
+      "dtype": "f64",
+      "shape": [
+        34
+      ],
+      "offset": 0,
+      "nbytes": 272,
+      "unit": "Hz",
+      "description": "IEC 61672-1 Table 3 nominal frequencies (labels)"
+    },
+    {
+      "name": "exact_hz",
+      "dtype": "f64",
+      "shape": [
+        34
+      ],
+      "offset": 272,
+      "nbytes": 272,
+      "unit": "Hz",
+      "description": "exact frequencies the weights are at",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-14
+      }
+    },
+    {
+      "name": "a_weight_db",
+      "dtype": "f64",
+      "shape": [
+        34
+      ],
+      "offset": 544,
+      "nbytes": 272,
+      "unit": "dB",
+      "description": "A weighting at exact_hz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "exact_hz"
+    },
+    {
+      "name": "c_weight_db",
+      "dtype": "f64",
+      "shape": [
+        34
+      ],
+      "offset": 816,
+      "nbytes": 272,
+      "unit": "dB",
+      "description": "C weighting at exact_hz",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "exact_hz"
+    },
+    {
+      "name": "a_table_db",
+      "dtype": "f64",
+      "shape": [
+        34
+      ],
+      "offset": 1088,
+      "nbytes": 272,
+      "unit": "dB",
+      "description": "IEC 61672-1 Table 3 A weighting (rounded to 0.1 dB)",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.05,
+        "rel": 0.0
+      },
+      "axis": "exact_hz"
+    },
+    {
+      "name": "c_table_db",
+      "dtype": "f64",
+      "shape": [
+        34
+      ],
+      "offset": 1360,
+      "nbytes": 272,
+      "unit": "dB",
+      "description": "IEC 61672-1 Table 3 C weighting (rounded to 0.1 dB)",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.05,
+        "rel": 0.0
+      },
+      "axis": "exact_hz"
+    }
+  ]
+}

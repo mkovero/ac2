@@ -1,0 +1,73 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "delay_integer_pos_neg",
+  "description": "White-noise reference x and two measurement signals y = x delayed by a known integer number of samples (one positive, one negative) plus uncorrelated noise.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_delay_integer_pos_neg"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 8192,
+    "delay_sign": "positive lag = y (measurement) late: y[i] = x[i - lag] + noise",
+    "construction": "src = default_rng(seed).standard_normal(n + 2*margin); x = src[margin : margin+n]; y = src[margin-lag : margin-lag+n] + noise_rms * N(0,1) (no circular wrap, no zero fill)",
+    "margin": 1024,
+    "noise_rms": 0.1,
+    "seed": 180486148,
+    "lag_check": "argmax of scipy.signal.correlate(y, x, 'full') with scipy.signal.correlation_lags(n, n, 'full') equals the lag"
+  },
+  "references": [
+    "PLAN.md 5.2 (lag sign: positive = measurement late; negative delays first-class)"
+  ],
+  "scalars": {
+    "lag_pos_samples": 137,
+    "lag_neg_samples": -61,
+    "lag_pos_ms": 2.854166666666667,
+    "lag_neg_ms": -1.2708333333333333
+  },
+  "blob": {
+    "file": "delay_integer_pos_neg.bin",
+    "nbytes": 196608,
+    "sha256": "8e18db19d191ed0be32b94629e8a72449a9ef1a56ccb6772663eb6aadca4ba22"
+  },
+  "arrays": [
+    {
+      "name": "x",
+      "dtype": "f64",
+      "shape": [
+        8192
+      ],
+      "offset": 0,
+      "nbytes": 65536,
+      "unit": "FS",
+      "description": "reference signal"
+    },
+    {
+      "name": "y_pos",
+      "dtype": "f64",
+      "shape": [
+        8192
+      ],
+      "offset": 65536,
+      "nbytes": 65536,
+      "unit": "FS",
+      "description": "measurement, lag 137 samples (scalar lag_pos_samples)"
+    },
+    {
+      "name": "y_neg",
+      "dtype": "f64",
+      "shape": [
+        8192
+      ],
+      "offset": 131072,
+      "nbytes": 65536,
+      "unit": "FS",
+      "description": "measurement, lag -61 samples (scalar lag_neg_samples)"
+    }
+  ]
+}

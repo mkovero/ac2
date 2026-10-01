@@ -1,0 +1,193 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "transfer_h1_biquad_delay",
+  "description": "Welch-averaged H1 = Pxy/Pxx and magnitude-squared coherence for white noise through an RBJ peaking biquad, an integer delay and additive uncorrelated noise.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_transfer_h1_biquad_delay"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 16384,
+    "nperseg": 512,
+    "noverlap": 256,
+    "window": "hann, periodic (scipy get_window default)",
+    "detrend": false,
+    "average": "mean",
+    "delay_samples": 24,
+    "delay_sign": "positive = y (measurement) late relative to x (reference)",
+    "biquad": "RBJ peaking EQ f0=1000.0 Hz Q=2.0 gain=6.0 dB",
+    "biquad_b": [
+      1.0224727682198582,
+      -1.938116580557223,
+      0.9323677439107332
+    ],
+    "biquad_a": [
+      1.0,
+      -1.938116580557223,
+      0.9548405121305915
+    ],
+    "x": "default_rng(seed).standard_normal(n + lead)[lead:], lead=4096",
+    "y": "lfilter(b, a, x_full) delayed by delay_samples + noise_rms * N(0,1)",
+    "noise_rms": 0.3,
+    "seed": 180486146,
+    "csd_convention": "Pxy = mean(conj(X) * Y) (scipy.signal.csd)",
+    "h1_formula": "H1 = Pxy / Pxx",
+    "coherence_formula": "|Pxy|^2 / (Pxx * Pyy)"
+  },
+  "references": [
+    "PLAN.md 5.1 (H1 = Gxy/Gxx, gamma^2 = |Gxy|^2/(Gxx Gyy))",
+    "PLAN.md 5.6 (loopback with known filter, delay and uncorrelated noise)",
+    "R. Bristow-Johnson, Audio EQ Cookbook (peaking EQ)"
+  ],
+  "scalars": {
+    "n_segments": 63
+  },
+  "blob": {
+    "file": "transfer_h1_biquad_delay.bin",
+    "nbytes": 282704,
+    "sha256": "115d4c2311b2118323154db666e29502eb6442f04da44820a055ae95a21003e5"
+  },
+  "arrays": [
+    {
+      "name": "x",
+      "dtype": "f64",
+      "shape": [
+        16384
+      ],
+      "offset": 0,
+      "nbytes": 131072,
+      "unit": "FS",
+      "description": "reference (input) signal"
+    },
+    {
+      "name": "y",
+      "dtype": "f64",
+      "shape": [
+        16384
+      ],
+      "offset": 131072,
+      "nbytes": 131072,
+      "unit": "FS",
+      "description": "measurement (output) signal"
+    },
+    {
+      "name": "freq_hz",
+      "dtype": "f64",
+      "shape": [
+        257
+      ],
+      "offset": 262144,
+      "nbytes": 2056,
+      "unit": "Hz",
+      "description": "bin frequencies",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-15
+      }
+    },
+    {
+      "name": "pxx",
+      "dtype": "f64",
+      "shape": [
+        257
+      ],
+      "offset": 264200,
+      "nbytes": 2056,
+      "unit": "FS^2/Hz",
+      "description": "Welch PSD of x",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-18,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "pyy",
+      "dtype": "f64",
+      "shape": [
+        257
+      ],
+      "offset": 266256,
+      "nbytes": 2056,
+      "unit": "FS^2/Hz",
+      "description": "Welch PSD of y",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-18,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "pxy",
+      "dtype": "c128",
+      "shape": [
+        257
+      ],
+      "offset": 268312,
+      "nbytes": 4112,
+      "unit": "FS^2/Hz",
+      "description": "Welch CSD conj(X)*Y",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-18,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "h1",
+      "dtype": "c128",
+      "shape": [
+        257
+      ],
+      "offset": 272424,
+      "nbytes": 4112,
+      "unit": "1",
+      "description": "H1 estimate Pxy/Pxx",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-12,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "coherence",
+      "dtype": "f64",
+      "shape": [
+        257
+      ],
+      "offset": 276536,
+      "nbytes": 2056,
+      "unit": "1",
+      "description": "magnitude-squared coherence",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-12,
+        "rel": 1e-09
+      },
+      "axis": "freq_hz"
+    },
+    {
+      "name": "h_true",
+      "dtype": "c128",
+      "shape": [
+        257
+      ],
+      "offset": 278592,
+      "nbytes": 4112,
+      "unit": "1",
+      "description": "analytic biquad * exp(-j 2 pi f D / fs); not equal to h1 (finite averaging, noise, delay bias from segment length)",
+      "axis": "freq_hz"
+    }
+  ]
+}

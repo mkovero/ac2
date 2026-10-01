@@ -1,0 +1,3 @@
+# Golden vectors are compared byte for byte; never convert line endings.
+fixtures/golden/*.json -text
+fixtures/golden/*.bin binary
