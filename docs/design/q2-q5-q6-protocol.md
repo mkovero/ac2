@@ -68,8 +68,9 @@ Daemon:
 Client:
 - Before each render, drain the socket: read until EAGAIN, keep the max `seq` per topic,
   and count any malformed frames.
-- Clock offset: `offset = daemon_wall_ns − local_receive_ns`, taken from `ka` as the
-  minimum over the last 10 s. That is a lower-bound estimate unaffected by queueing.
+- Clock offset: each `ka` gives a sample `daemon_wall_ns − local_receive_ns` = true offset
+  minus that message's delivery delay. Take the **maximum** over the last 10 s (the
+  least-delayed sample); it under-estimates the offset by the minimum delivery delay only.
   Frame age = `now_local + offset − capture_wall_ns`.
 - **STALE** (2a): no new frame on a topic for 1 s, or frame age > 1 s. The trace dims and
   shows its age. STALE says nothing about measured delay.
