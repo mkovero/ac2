@@ -12,3 +12,4 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+ac2-proto = { path = "../ac2-proto" }

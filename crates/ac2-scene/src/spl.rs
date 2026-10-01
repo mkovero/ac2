@@ -1,0 +1,344 @@
+//! SPL readout block: big number, unit, metric name, interval statistics and the
+//! calibration state (decisions 7a/7b).
+//!
+//! Metric names follow IEC 61672 notation: `L` + frequency weighting + time weighting
+//! (`LAF` = A-weighted, Fast), `LAeq`, `LCpeak`, `LAFmax`, `LAFmin`.
+
+use ac2_proto::frame::SplFrame;
+use ac2_proto::model::{CalEntry, CalKey, LevelScale, PeakWeighting, TimeWeighting, Weighting};
+use ac2_proto::units::WallNs;
+
+use crate::canvas::{Canvas, anchor, label};
+use crate::format;
+use crate::primitives::{HAlign, Rect, Scene, VAlign, Viewport};
+use crate::theme::Theme;
+use crate::time::{self, ClockOffset, Freshness};
+
+fn w_letter(w: Weighting) -> &'static str {
+    match w {
+        Weighting::A => "A",
+        Weighting::C => "C",
+        Weighting::Z => "Z",
+    }
+}
+
+fn tw_letter(t: TimeWeighting) -> &'static str {
+    match t {
+        TimeWeighting::Fast => "F",
+        TimeWeighting::Slow => "S",
+        TimeWeighting::Impulse => "I",
+    }
+}
+
+fn pw_letter(p: PeakWeighting) -> &'static str {
+    match p {
+        PeakWeighting::C => "C",
+        PeakWeighting::Z => "Z",
+    }
+}
+
+/// One secondary statistic.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplStat {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplReadout {
+    /// `LAF`.
+    pub metric: String,
+    /// `94.0`.
+    pub value: String,
+    /// `dB SPL` or `dBFS`.
+    pub unit: String,
+    /// LAeq, LCpeak, LAFmax, LAFmin.
+    pub stats: Vec<SplStat>,
+    /// `over 1 min 23 s`.
+    pub interval: String,
+    /// `cal 3 h ago`, `cal from other mic / input`, `uncalibrated`.
+    pub cal: String,
+    /// `STALE 3.2 s` when the frame is stale.
+    pub stale: Option<String>,
+}
+
+/// Calibration text for a reading in `scale` from the input identified by `current`,
+/// given the calibration entry that applies to it (`entry`; the daemon picks it, the
+/// client looks it up by key).
+pub fn cal_text(
+    scale: LevelScale,
+    current: &CalKey,
+    entry: Option<&CalEntry>,
+    client_now: WallNs,
+    offset: ClockOffset,
+) -> String {
+    match (scale, entry) {
+        (LevelScale::Dbfs, _) => "uncalibrated".to_string(),
+        (LevelScale::DbSpl, None) => "cal not found".to_string(),
+        (LevelScale::DbSpl, Some(e)) if e.key != *current => {
+            "cal from other mic / input".to_string()
+        }
+        (LevelScale::DbSpl, Some(e)) => {
+            format!(
+                "cal {}",
+                format::ago(time::age_s(e.calibrated_at, client_now, offset))
+            )
+        }
+    }
+}
+
+pub fn spl_readout(frame: &SplFrame, cal: String, freshness: Option<Freshness>) -> SplReadout {
+    let m = &frame.meta;
+    let w = w_letter(m.weighting);
+    let tw = tw_letter(m.time_weighting);
+    let stat = |label: String, v: f64| SplStat {
+        label,
+        value: format::level(v),
+    };
+    SplReadout {
+        metric: format!("L{w}{tw}"),
+        value: format::level(m.level),
+        unit: match m.scale {
+            LevelScale::Dbfs => "dBFS",
+            LevelScale::DbSpl => "dB SPL",
+        }
+        .to_string(),
+        stats: vec![
+            stat(format!("L{w}eq"), m.leq),
+            stat(format!("L{}peak", pw_letter(m.peak_weighting)), m.lpeak),
+            stat(format!("L{w}{tw}max"), m.lmax),
+            stat(format!("L{w}{tw}min"), m.lmin),
+        ],
+        interval: format!("over {}", format::duration(m.duration.0)),
+        cal,
+        stale: freshness
+            .filter(Freshness::is_stale)
+            .map(|f| format!("STALE {}", format::age(f.age_s()))),
+    }
+}
+
+/// Lays the readout out in `size`: metric top-left, big number with its unit, a row of
+/// statistics, interval and calibration at the bottom.
+pub fn spl_scene(r: &SplReadout, theme: &Theme, size: Viewport) -> Scene {
+    let mut c = Canvas::new(size, theme);
+    let pad = 12.0;
+    let area = Rect::new(pad, pad, size.width - 2.0 * pad, size.height - 2.0 * pad);
+    let main = if r.stale.is_some() {
+        theme.text_dim
+    } else {
+        theme.text
+    };
+    c.overlay.labels.push(label(
+        r.metric.clone(),
+        [area.x, area.y],
+        anchor(HAlign::Left, VAlign::Top),
+        theme.font_size * 1.4,
+        theme.text_dim,
+    ));
+    if let Some(s) = &r.stale {
+        c.overlay.labels.push(label(
+            s.clone(),
+            [area.right(), area.y],
+            anchor(HAlign::Right, VAlign::Top),
+            theme.font_size,
+            theme.banner_warning.background,
+        ));
+    }
+    let base = area.y + area.h * 0.62;
+    let split = area.x + area.w * 0.66;
+    c.overlay.labels.push(label(
+        r.value.clone(),
+        [split, base],
+        anchor(HAlign::Right, VAlign::Baseline),
+        theme.big_font_size,
+        main,
+    ));
+    c.overlay.labels.push(label(
+        r.unit.clone(),
+        [split + 8.0, base],
+        anchor(HAlign::Left, VAlign::Baseline),
+        theme.font_size * 1.6,
+        main,
+    ));
+    let n = r.stats.len().max(1) as f32;
+    let row = area.y + area.h * 0.78;
+    for (i, s) in r.stats.iter().enumerate() {
+        c.overlay.labels.push(label(
+            format!("{} {}", s.label, s.value),
+            [area.x + area.w * (i as f32 + 0.5) / n, row],
+            anchor(HAlign::Center, VAlign::Center),
+            theme.font_size,
+            theme.text,
+        ));
+    }
+    c.overlay.labels.push(label(
+        r.interval.clone(),
+        [area.x, area.bottom()],
+        anchor(HAlign::Left, VAlign::Bottom),
+        theme.small_font_size,
+        theme.text_dim,
+    ));
+    c.overlay.labels.push(label(
+        r.cal.clone(),
+        [area.right(), area.bottom()],
+        anchor(HAlign::Right, VAlign::Bottom),
+        theme.small_font_size,
+        theme.text_dim,
+    ));
+    c.into_scene(size)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ac2_proto::frame::SplMeta;
+    use ac2_proto::model::DeviceId;
+    use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds};
+
+    const H: u64 = 3600 * 1_000_000_000;
+
+    fn frame(scale: LevelScale) -> SplFrame {
+        SplFrame {
+            meas: MeasId(4),
+            meta: SplMeta {
+                scale,
+                weighting: Weighting::A,
+                time_weighting: TimeWeighting::Fast,
+                peak_weighting: PeakWeighting::C,
+                level: 94.04,
+                lmax: 97.25,
+                lmin: f64::NEG_INFINITY,
+                leq: 92.06,
+                lpeak: 110.31,
+                duration: Seconds(83.9),
+            },
+        }
+    }
+
+    fn key(mic: &str, channel: u16) -> CalKey {
+        CalKey {
+            device: DeviceId("hw:1".into()),
+            channel,
+            mic: mic.into(),
+        }
+    }
+
+    fn entry(k: CalKey, at: u64) -> CalEntry {
+        CalEntry {
+            key: k,
+            sensitivity: Db(120.0),
+            calibrator_level: DbSpl(94.0),
+            calibrator_freq: Hz(1000.0),
+            measured: Dbfs(-26.0),
+            calibrated_at: WallNs(at),
+        }
+    }
+
+    #[test]
+    fn readout_strings() {
+        let r = spl_readout(
+            &frame(LevelScale::DbSpl),
+            "cal 3 h ago".into(),
+            Some(Freshness::from_age(0.2)),
+        );
+        assert_eq!(r.metric, "LAF");
+        assert_eq!(r.value, "94.0");
+        assert_eq!(r.unit, "dB SPL");
+        let stats: Vec<String> = r
+            .stats
+            .iter()
+            .map(|s| format!("{} {}", s.label, s.value))
+            .collect();
+        assert_eq!(
+            stats,
+            ["LAeq 92.1", "LCpeak 110.3", "LAFmax 97.2", "LAFmin —"]
+        );
+        assert_eq!(r.interval, "over 1 min 23 s");
+        assert_eq!(r.stale, None);
+        let r = spl_readout(
+            &frame(LevelScale::Dbfs),
+            "uncalibrated".into(),
+            Some(Freshness::from_age(3.24)),
+        );
+        assert_eq!(r.unit, "dBFS");
+        assert_eq!(r.stale.as_deref(), Some("STALE 3.2 s"));
+    }
+
+    #[test]
+    fn calibration_state() {
+        let k = key("M30 #1", 2);
+        let now = WallNs(100 * H);
+        let off = ClockOffset(0);
+        let e = entry(k.clone(), 97 * H - 1);
+        assert_eq!(
+            cal_text(LevelScale::DbSpl, &k, Some(&e), now, off),
+            "cal 3 h ago"
+        );
+        // Same device and channel, another mic: mismatch.
+        let other = entry(key("M30 #2", 2), 99 * H);
+        assert_eq!(
+            cal_text(LevelScale::DbSpl, &k, Some(&other), now, off),
+            "cal from other mic / input"
+        );
+        let other = entry(key("M30 #1", 3), 99 * H);
+        assert_eq!(
+            cal_text(LevelScale::DbSpl, &k, Some(&other), now, off),
+            "cal from other mic / input"
+        );
+        assert_eq!(
+            cal_text(LevelScale::Dbfs, &k, Some(&e), now, off),
+            "uncalibrated"
+        );
+        assert_eq!(
+            cal_text(LevelScale::DbSpl, &k, None, now, off),
+            "cal not found"
+        );
+        // The clock offset applies: client 2 h behind the daemon.
+        let off = ClockOffset(2 * H as i64);
+        assert_eq!(
+            cal_text(LevelScale::DbSpl, &k, Some(&e), WallNs(98 * H), off),
+            "cal 3 h ago"
+        );
+    }
+
+    #[test]
+    fn scene_carries_the_strings() {
+        let r = spl_readout(
+            &frame(LevelScale::DbSpl),
+            "cal 3 h ago".into(),
+            Some(Freshness::from_age(5.0)),
+        );
+        let s = spl_scene(
+            &r,
+            &Theme::dark(),
+            Viewport {
+                width: 400.0,
+                height: 200.0,
+            },
+        );
+        let texts: Vec<&str> = s
+            .layers
+            .iter()
+            .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+            .collect();
+        for want in [
+            "LAF",
+            "94.0",
+            "dB SPL",
+            "LAeq 92.1",
+            "LCpeak 110.3",
+            "over 1 min 23 s",
+            "cal 3 h ago",
+            "STALE 5.0 s",
+        ] {
+            assert!(texts.contains(&want), "{want} in {texts:?}");
+        }
+        let big = s.layers[2]
+            .labels
+            .iter()
+            .find(|l| l.text == "94.0")
+            .expect("value");
+        assert_eq!(big.size, Theme::dark().big_font_size);
+        assert_eq!(big.color, Theme::dark().text_dim);
+    }
+}

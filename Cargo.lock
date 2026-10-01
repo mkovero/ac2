@@ -34,6 +34,8 @@ dependencies = [
 name = "ac2-plot"
 version = "0.0.0"
 dependencies = [
+ "ac2-proto",
+ "ac2-scene",
  "ac2-testkit",
  "bytemuck",
  "glyphon",
@@ -55,6 +57,9 @@ dependencies = [
 [[package]]
 name = "ac2-scene"
 version = "0.0.0"
+dependencies = [
+ "ac2-proto",
+]
 
 [[package]]
 name = "ac2-testkit"
