@@ -1,6 +1,6 @@
 [package]
 name = "ac2-testkit"
-description = "Test support: golden-vector loading from tools/refgen and tolerance comparison."
+description = "Test support: golden vectors from tools/refgen, tolerance comparison, golden images."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,8 +11,14 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# PNG I/O and per-pixel comparison for renderer golden images. Off by default so numeric
+# tests do not build an image codec.
+image = ["dep:png"]
+
 [dependencies]
 num-complex = "0.4"
+png = { version = "0.18", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

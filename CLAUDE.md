@@ -25,7 +25,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
 | `ac2-ui` | desktop app |
-| `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare |
+| `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `spikes/*` | phase 0 throwaway spikes; findings in `docs/design/spike-*.md` |
 
 ## Rules

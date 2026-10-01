@@ -33,6 +33,13 @@ dependencies = [
 [[package]]
 name = "ac2-plot"
 version = "0.0.0"
+dependencies = [
+ "ac2-testkit",
+ "bytemuck",
+ "glyphon",
+ "pollster",
+ "wgpu",
+]
 
 [[package]]
 name = "ac2-proto"
@@ -54,6 +61,7 @@ name = "ac2-testkit"
 version = "0.0.0"
 dependencies = [
  "num-complex",
+ "png",
  "realfft",
  "serde",
  "serde_json",
