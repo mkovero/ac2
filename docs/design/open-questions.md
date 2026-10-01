@@ -11,137 +11,120 @@ each; these are the details that are too fine for the plan but too risky to deci
 
 ## Decision sheet
 
-Fill in `Answer:` lines. Empty answer = proposed default is accepted. Free text welcome —
-reasons help the design note. Full context for each Q is in the sections below the sheet.
+Round 1 answered 2026-10-01. **Decided** items are settled. Items marked **→ round 2**
+were unclear; each now has a plain-language explanation and a proposal. Fill `Answer:`
+(empty = proposal accepted).
 
-### Product decisions (PLAN.md §12)
+### Decided
 
-**A. Delay distance readout (ms → m/ft).** `ac` removed it deliberately (reason in `ac` README).
-- Default: leave out of 1.0; revisit after re-reading the `ac` reason.
+| # | Decision |
+|---|---|
+| A | Distance readout **in**: plain `delay × c(temperature)` shown next to ms, labelled as acoustic path distance. No correction layers (the uncertainty `ac` worried about is the operator's to judge). |
+| B | Toolkit is my call; requirement: cross-platform, sleek, beautiful. egui + custom theme, spike vs iced at phase 4 start. |
+| C | Primary performance target: x86-64 with a modern GPU. Use SIMD / CPU features where it measurably matters. ARM/SBC is best effort, not a gate. |
+| D | Raw capture: f32 WAV/W64 + JSON sidecar. |
+| 1a | First arrival within −12 dB of strongest; strongest shown too. |
+| 1b | One global threshold, operator-adjustable. |
+| 1d | ±1 s default search range (configurable up to several seconds for long digital/network chains). |
+| 1e | Sub band default **20–120 Hz** (subs go below 40 Hz). Auto mode picks from measured excitation. |
+| 1f | Provisional targets stand; tuned on the rig for "useful vs too strict". |
+| 3b | Reference is required. No loopback → no internal reference. |
+| 4a | Generator 0 dBFS = RMS of a full-scale sine. |
+| 5a | 1024 events or 60 s replay (my call). |
+| 5b | Device or sample-rate change starts a new session epoch. |
+| 6b | 20 ms fade-out on stop, never a hard cut. |
+| 6c | Any authorized client may force takeover; output stops and disarms first. |
+| 6d | Short network hiccup: output continues. |
+| 8a | Shared time reference within a session; imported traces marked independent; **each trace's delay can be nudged individually**. |
+
+### → round 2
+
+**1c. What happens when the finder sees several similar peaks?**
+Example: direct sound at 10.0 ms and a floor bounce at 11.2 ms only 2 dB weaker. The
+finder cannot know which one you want to align to.
+- Proposal: show both on the IR panel and as a short list (`1: 10.0 ms  2: 11.2 ms`);
+  the first-arrival rule pre-selects 10.0 ms, one key accepts it, another picks the other.
+  Delay tracking pauses until the ambiguity clears.
 - Answer:
 
-**B. UI chrome toolkit.**
-- Default: egui on wgpu, confirmed by a one-week spike at phase 4 start (vs iced).
+**2a. "STALE" — what it means (not about system latency).**
+This is not about how much delay your PA chain has — large console/network/processor
+delays are normal and are exactly what the reference loopback cancels (see 3a). STALE
+only means *the screen stopped receiving fresh data*: WiFi to a remote rig dropped,
+daemon hung, audio device vanished. Without it, a frozen trace looks like a perfectly
+stable measurement.
+- Proposal: if no new frame for a measurement arrives for ~1 s, its trace dims and shows
+  STALE with the age; it never decides anything about the measured delay.
 - Answer:
 
-**C. Minimum headless hardware.**
-- Default: Raspberry Pi 5 class (ARM64), 4 TF jobs @ 48 kHz.
+**2b. Publish rate.** You said: enough that smoothness is never the bottleneck.
+- Proposal: daemon publishes up to 60 fps per measurement locally (frames are small);
+  remote clients default to 30 and can raise it; UI interpolates to display refresh.
 - Answer:
 
-**D. Raw capture format.**
-- Default: f32 WAV/W64 + JSON sidecar (config timeline, discontinuities, algorithm version).
+**3a. Continuous probe/monitor of interface timing — yes, mostly for free.**
+With the reference wired as in `ac` (stimulus and reference out through the same
+converter, reference looped back into an input), every latency inside the interface,
+console, network and processors is common to both legs and cancels. So the loopback
+itself *is* the continuous monitor: while any signal plays, the daemon continuously
+correlates generator output against the loopback input and watches that offset. If it
+jumps (buffer change, device reset, clock slip) the daemon flags it immediately. No
+separate probe signal is needed while a stimulus runs; when nothing plays there is
+nothing to measure and the last value is shown with its age.
+- Proposal: continuous monitoring as above; no start-up probe.
 - Answer:
 
-### Q1 — Delay finder (before phase 2)
-
-**1a. Target.**
-- Default: first arrival within −12 dB of the strongest; strongest shown too.
+**4b. Which unit the spectrum view shows by default.**
+Two honest ways to read an FFT: *tone level* (a −20 dBFS sine reads −20 dBFS; noise
+reads lower the finer the FFT) or *band power* (noise reads the same regardless of FFT
+size; what an RTA shows). Mixing them up is the classic "why does my pink noise read
+15 dB low" confusion.
+- Proposal: narrowband spectrum = tone level; RTA = band power; the unit is printed on
+  the axis. No setting needed unless you want one.
 - Answer:
 
-**1b. Threshold per band or global?**
-- Default: one global threshold, operator-adjustable.
+**4c. Flat-top window.**
+A standard FFT window under-reads a pure tone by up to ~1.4 dB when the tone falls
+between bins. A flat-top window reads tones exactly, at the cost of blurrier frequency.
+Only useful for reading tone levels (e.g. checking a 1 kHz line-up tone).
+- Proposal: available as a window option in the spectrum view, not the default.
 - Answer:
 
-**1c. Ambiguous result.**
-- Default: list ≤ 3 candidates, operator picks; tracking pauses.
+**6a. Stimulus dead-man timer.**
+Safety for remote use: the client that started the noise must tell the daemon "I'm still
+here" twice a second. If that stops for 1.5 s (laptop lid closed, WiFi died, app
+crashed), the daemon fades the noise out on its own instead of leaving pink noise
+running through the PA with nobody in control. `ac` has the same mechanism.
+- Proposal: keep as is (heartbeat 0.5 s, timeout 1.5 s), timeout configurable.
 - Answer:
 
-**1d. Default search range.**
-- Default: ±1 s.
+**7a/7b. Calibration validity — simplified per your answer.**
+Agreed: ac2 can't know the preamp gain, phantom state, or even whether the gain knob is
+settable. So it won't pretend to.
+- Proposal: a calibration is tied to *device + input channel + mic name* (mic name typed
+  once at cal time). If any of those change, the SPL readout says "cal from other mic /
+  input". Otherwise it shows the cal's age (e.g. "cal 3 h ago"). No gain or phantom fields,
+  no confirmation prompts. Recalibrate when you touch the gain — that's on the operator.
 - Answer:
 
-**1e. Default sub band.**
-- Default: 40–120 Hz; auto mode chooses from measured excitation.
+**7c. How the mic correction file is applied (sorry — jargon).**
+Measurement mics come with a correction file (e.g. "+1.5 dB at 15 kHz"). Question was
+only *how* ac2 applies it internally.
+- Proposal: for transfer functions and spectra, subtract the file's dB values from the
+  displayed magnitude (simple, what everyone does). For SPL meters, apply it as a filter
+  before weighting so dB(A)/dB(C) include it. Phase is never touched. Nothing to choose
+  in the UI except on/off per input.
 - Answer:
 
-**1f. Acceptance targets.**
-- Default: error ≤ 1 sample full-range / ≤ 0.1 ms sub; wrong arrivals ≤ 1 %; refusals ≤ 10 % at ≥ 20 dB band SNR.
-- Answer:
-
-### Q2 — Delivery freshness (before phase 3)
-
-**2a. STALE deadlines.**
-- Default: TF 500 ms, SPL 300 ms, input meters 200 ms.
-- Answer:
-
-**2b. Publish rate.**
-- Default: 30 fps per topic; client may request lower.
-- Answer:
-
-### Q3 — Duplex timing (before phase 1)
-
-**3a. Loopback timing validation at session open?**
-- Default: only when internal reference is used; short probe at −40 dBFS; operator confirms the first time.
-- Answer:
-
-**3b. No loopback cable available.**
-- Default: internal reference refused; measured reference channel required.
-- Answer:
-
-### Q4 — Level normalisation (before phase 2)
-
-**4a. Generator 0 dBFS.**
-- Default: RMS of a full-scale sine.
-- Answer:
-
-**4b. Default spectrum unit.**
-- Default: amplitude spectrum for narrowband view; band power for RTA.
-- Answer:
-
-**4c. Flat-top window option for tone reading?**
-- Default: yes.
-- Answer:
-
-### Q5 — Replay & epochs (before phase 3)
-
-**5a. Replay buffer size.**
-- Default: 1024 events or 60 s, whichever is smaller.
-- Answer:
-
-**5b. Device or sample-rate change starts a new session epoch?**
-- Default: yes.
-- Answer:
-
-### Q6 — Stimulus lease (before phase 3)
-
-**6a. Refresh / expiry.**
-- Default: refresh every 0.5 s, expiry 1.5 s.
-- Answer:
-
-**6b. Stop behaviour.**
-- Default: 20 ms fade-out, never a hard cut.
-- Answer:
-
-**6c. Forced takeover.**
-- Default: any authorized client may force; output stops and disarms first.
-- Answer:
-
-**6d. Network hiccup shorter than expiry.**
-- Default: output continues; nothing special.
-- Answer:
-
-### Q7 — Calibration chain (before phase 5)
-
-**7a. Fields that must match for VERIFIED.**
-- Default: device, channel, mic id, preamp gain, phantom power state.
-- Answer:
-
-**7b. Re-confirming gain that cannot be read from hardware.**
-- Default: at session open; one confirmation covers all inputs.
-- Answer:
-
-**7c. Mic curve filter.**
-- Default: minimum-phase FIR for SPL/RTA; magnitude-only correction for TF.
-- Answer:
-
-### Q8 — Phase comparison time reference (before phase 4)
-
-**8a. Default overlay mode.**
-- Default: shared time reference within a session; imported traces marked independent.
-- Answer:
-
-**8b. Shared reference delay.**
-- Default: delay of the first selected trace; pick key to change.
+**8b. Shared delay reference for comparing traces — your point taken.**
+You said the delay should be continuously measured against the reference loopback and
+used in situ. Agreed: every live measurement's delay is measured against the reference
+(tracking optional), and every captured trace stores the delay it had. "Shared time
+reference" then just means: when overlaying mains and sub traces, phase is drawn relative
+to *one* chosen delay, so a 3 ms arrival difference between them stays visible instead
+of being aligned away.
+- Proposal: the reference delay for an overlay is the selected trace's measured delay
+  (pick key to change); every other trace is drawn relative to it; per-trace nudge on top.
 - Answer:
 
 ---

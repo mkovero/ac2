@@ -575,10 +575,9 @@ Open decisions (settle before phase 1; technical design questions are in §9.2):
 1. ~~License~~ **Decided: MIT.** ASIO stays an opt-in cargo feature, off in default
    builds; the SDK is not vendored. ASIO binaries need their own licensing decision when
    phase 7 starts (Steinberg proprietary terms vs GPLv3 SDK, which would make that binary GPL).
-2. Distance readout for delay: `ac` removed it deliberately; revisit with the reasons from `ac`'s README.
-3. UI chrome: egui vs iced (short spike at phase 4 start; `ac2-plot` is independent of the outcome).
-4. Minimum headless target hardware (sets perf budgets).
-5. Raw capture format: lossless for f32 samples (FLAC can't hold arbitrary float; options:
-   f32 WAV/W64 chunks, WavPack float, or 24-bit FLAC when the source is integer) plus a
-   config timeline, discontinuities and algorithm version. Exact sample preservation;
+2. ~~Distance readout~~ **Decided:** shown as plain delay × c(temperature), no correction layers.
+3. UI chrome: egui vs iced (spike at phase 4 start; requirement: cross-platform, sleek, beautiful).
+4. ~~Headless hardware~~ **Decided:** primary target x86-64 + modern GPU; SIMD where it matters; ARM best effort.
+5. ~~Raw capture format~~ **Decided:** f32 WAV/W64 + JSON sidecar (config timeline,
+   discontinuities, algorithm version). Exact sample preservation;
    DSP replay judged within tolerance, not bit-exact.
