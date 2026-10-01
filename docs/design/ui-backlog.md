@@ -16,11 +16,12 @@ pick sensible fixes and record them in the scene tests.
 - Narrow windows: legend and cursor readout shared rows and collided → when any readout row
   would run into its legend text (0.62 em/char estimate), all readout rows move below the
   legend and delay line; `narrow_panes_move_cursor_values_below_the_legend`.
-
 - Narrow panes (found in the first `ac2-ui` snapshots): a banner row too narrow for text and
   detail drops the detail (`narrow_rows_drop_the_detail`); the IR origin line moves under the
   title (`narrow_plot_puts_the_origin_under_the_title`); SPL statistics wrap to two rows
   (`narrow_meter_wraps_the_statistics`).
+- Narrowband spectrum in bar style lost single-bin tones (sub-pixel bars) → tone traces always
+  draw as the max-per-pixel line; bars are for RTA band power (`tone_traces_ignore_bar_style`).
 
 ## Open
 

@@ -1,0 +1,272 @@
+//! Headless UI snapshots against the fake daemon, rendered through egui-wgpu with the plots
+//! in paint callbacks, exactly as on screen.
+//!
+//! Needs a wgpu adapter: locally `AC2_GPU_FALLBACK=1 WGPU_BACKEND=vulkan` (lavapipe). Without
+//! one the tests print SKIP and pass, unless `AC2_REQUIRE_GPU=1`. References in
+//! `tests/snapshots/` are blessed on lavapipe: `UPDATE_SNAPSHOTS=1 cargo test -p ac2-ui`.
+
+mod common;
+
+use std::time::{Duration, Instant};
+
+use ac2_client::ClientConfig;
+use ac2_proto::topic::{Stream, Topic};
+use ac2_proto::units::MeasId;
+use ac2_scene::theme::ThemeName;
+use ac2_ui::conn::Target;
+use ac2_ui::keys::Keymap;
+use ac2_ui::state::{ConnState, Overlay};
+use ac2_ui::{App, AppOptions};
+use eframe::egui::{self, Event, Key, Modifiers};
+use egui_kittest::{Harness, SnapshotOptions};
+
+const SIZE: egui::Vec2 = egui::vec2(1280.0, 800.0);
+
+/// `true` when a wgpu adapter exists; otherwise prints why and skips (or fails under
+/// `AC2_REQUIRE_GPU=1`).
+fn have_gpu(test: &str) -> bool {
+    match ac2_plot::Gpu::new() {
+        Ok(g) => {
+            eprintln!("{test}: adapter {}", g.describe());
+            true
+        }
+        Err(e) if std::env::var("AC2_REQUIRE_GPU").is_ok_and(|v| v == "1") => {
+            panic!("{test}: {e} (AC2_REQUIRE_GPU=1)")
+        }
+        Err(e) => {
+            eprintln!("SKIP {test}: {e}");
+            false
+        }
+    }
+}
+
+fn options(rig: Option<&common::Rig>) -> AppOptions {
+    AppOptions {
+        target: rig.map(|r| Target {
+            config: ClientConfig::new(r.fake.endpoints(), "ac2-ui test"),
+            describe: "fake daemon".into(),
+        }),
+        theme: ThemeName::Dark,
+        keymap: Keymap::default(),
+        keymap_path: Some("~/.config/ac2/keys.toml".into()),
+        notices: vec![],
+        started: Instant::now(),
+        bench_startup: false,
+    }
+}
+
+fn harness(opts: AppOptions) -> Harness<'static, App> {
+    Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(move |cc| App::new(cc, opts))
+}
+
+/// Steps the UI (in real time, the link runs on its own thread) until `cond` holds.
+fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool) {
+    let t0 = Instant::now();
+    while !cond(h.state()) {
+        assert!(
+            t0.elapsed() < Duration::from_secs(15),
+            "timed out waiting for {what}"
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // A few more passes so layout settles and the plots are prepared.
+    for _ in 0..3 {
+        h.step();
+    }
+}
+
+fn live(app: &App) -> bool {
+    let st = &app.state;
+    let synced = st.mirror.as_ref().is_some_and(|m| m.synced());
+    let have = |m: u32, s: Stream| {
+        st.data.as_ref().is_some_and(|d| {
+            d.latest
+                .get(&Topic::Data {
+                    meas: MeasId(m),
+                    stream: s,
+                })
+                .is_some_and(|f| {
+                    f.frame
+                        .stamp
+                        .grid_id
+                        .is_none_or(|g| d.grids.contains_key(&g))
+                })
+        })
+    };
+    matches!(st.conn, ConnState::Connected { .. })
+        && synced
+        && st.measurements().len() == 4
+        && have(1, Stream::Tf)
+        && have(2, Stream::Tf)
+        && have(1, Stream::Ir)
+        && have(3, Stream::Spec)
+        && have(4, Stream::Spl)
+}
+
+fn snapshot_options() -> SnapshotOptions {
+    // lavapipe is bit-exact run to run; the threshold only absorbs other software
+    // rasterizers' edge pixels.
+    SnapshotOptions::new().threshold(1.0)
+}
+
+#[test]
+fn transfer_view_two_traces_and_banner() {
+    if !have_gpu("transfer_view_two_traces_and_banner") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    {
+        let st = &h.state().state;
+        assert_eq!(st.selected, Some(MeasId(1)));
+        let s = ac2_ui::scenes::transfer(
+            st,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let legend: Vec<&str> = s.legend.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(legend, ["Main L", "Delay tower"]);
+        let banners: Vec<&str> = s.banners.iter().map(|b| b.text.as_str()).collect();
+        assert_eq!(banners, ["NO DELAY ESTIMATE"]);
+    }
+    h.snapshot_options("transfer_two_traces_banner", &snapshot_options());
+}
+
+#[test]
+fn help_overlay() {
+    if !have_gpu("help_overlay") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::Slash);
+    step_until(&mut h, "help", |a| a.state.overlay == Overlay::Help);
+    h.snapshot_options("help_overlay", &snapshot_options());
+    // `/` closes it again.
+    h.key_press(Key::Slash);
+    step_until(&mut h, "help closed", |a| a.state.overlay == Overlay::None);
+}
+
+#[test]
+fn command_palette() {
+    if !have_gpu("command_palette") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    step_until(&mut h, "palette", |a| {
+        matches!(a.state.overlay, Overlay::Palette(_))
+    });
+    h.event(Event::Text("delay".into()));
+    step_until(
+        &mut h,
+        "query",
+        |a| matches!(&a.state.overlay, Overlay::Palette(p) if p.query == "delay"),
+    );
+    h.snapshot_options("command_palette", &snapshot_options());
+    // Enter runs the highlighted command against the fake daemon.
+    h.key_press(Key::Enter);
+    step_until(&mut h, "palette closed", |a| {
+        a.state.overlay == Overlay::None
+    });
+}
+
+#[test]
+fn themes() {
+    if !have_gpu("themes") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::T);
+    step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
+    h.snapshot_options("theme_light", &snapshot_options());
+    h.key_press(Key::T);
+    step_until(&mut h, "high contrast", |a| {
+        a.state.theme == ThemeName::HighContrast
+    });
+    h.snapshot_options("theme_high_contrast", &snapshot_options());
+}
+
+#[test]
+fn stimulus_flow_against_the_fake_daemon() {
+    if !have_gpu("stimulus_flow_against_the_fake_daemon") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    // Space without a level: the prompt opens; nothing reaches the daemon.
+    h.key_press(Key::Space);
+    step_until(&mut h, "level prompt", |a| {
+        matches!(a.state.overlay, Overlay::Prompt(_))
+    });
+    assert_eq!(rig.fake.executions("gen.acquire"), 0);
+    h.event(Event::Text("-24".into()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "level", |a| a.state.stimulus.level.is_some());
+    h.key_press(Key::Space);
+    step_until(&mut h, "armed", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.armed)
+    });
+    assert!(!h.state().state.daemon().is_some_and(|s| s.generator.firing));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "firing", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.firing)
+    });
+    h.key_press(Key::ArrowDown);
+    step_until(&mut h, "level −25", |a| {
+        a.state.daemon().is_some_and(|s| {
+            s.generator
+                .settings
+                .as_ref()
+                .is_some_and(|g| g.level.0 == -25.0)
+        })
+    });
+    h.key_press(Key::Escape);
+    step_until(&mut h, "stopped", |a| {
+        a.state.daemon().is_some_and(|s| {
+            !s.generator.firing && !s.generator.armed && s.generator.owner.is_none()
+        })
+    });
+    assert!(rig.fake.executions("gen.stop") >= 1);
+}
+
+#[test]
+fn startup_first_frame() {
+    if !have_gpu("startup_first_frame") {
+        return;
+    }
+    // Device creation is part of startup, as in the real app; the daemon link is not
+    // (the first frame never waits for it).
+    let t0 = Instant::now();
+    let mut h = harness(options(None));
+    h.step();
+    let img = h.render().expect("render");
+    let first = t0.elapsed();
+    assert_eq!(img.width(), SIZE.x as u32);
+    println!(
+        "startup: first frame rendered headless in {:.1} ms (target < 300 ms)",
+        first.as_secs_f64() * 1e3
+    );
+    // Software rasterizers in CI are slower than the target hardware; this bound catches a
+    // blocking call on the startup path, `--bench-startup` measures the real window.
+    assert!(first < Duration::from_secs(2), "{first:?}");
+}
