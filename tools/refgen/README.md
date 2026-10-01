@@ -14,11 +14,12 @@ python3 -m venv .venv            # gitignored
 .venv/bin/python generate.py --check
 ```
 
-`--check` regenerates everything into a temporary directory and compares byte for byte with
-the committed files, also flagging missing or stale files. It is bit-exact: run it with the
-pinned numpy/scipy (`requirements.txt`). On a mismatch in a `.bin` file it prints the
-largest absolute difference per array, which separates last-bit drift (different BLAS/FFT
-build) from a real change. Inputs are deterministic: fixed `numpy.random.default_rng`
+`--check` regenerates everything into a temporary directory and compares it with the
+committed files, also flagging missing or stale files. Array data must agree within
+rtol = atol = 1e-12: platform libm differences (e.g. `log10`) move derived values by a few
+ulps between machines even with the pinned numpy/scipy (`requirements.txt`). JSON metadata
+must match exactly except the blob hash. On a mismatch it prints the largest absolute
+difference per array. Inputs are deterministic: fixed `numpy.random.default_rng`
 seeds, fixed parameters, no timestamps.
 
 After changing a generator: run `generate.py`, then `--check`, then `cargo test -p

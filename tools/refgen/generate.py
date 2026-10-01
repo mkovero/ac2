@@ -557,11 +557,20 @@ def generate_all(out_dir: Path) -> list[str]:
     return names
 
 
-def describe_bin_diff(a: Path, b: Path) -> str:
-    """Report the largest per-array difference to tell float drift from real changes."""
+# Platform libm differences (e.g. log10) move derived values by a few ulps between
+# machines with identical numpy/scipy pins, so data is compared with a tight tolerance
+# rather than bit-exact. Anything beyond it is a real change.
+CHECK_RTOL = 1e-12
+CHECK_ATOL = 1e-12
+
+
+def compare_bins(a: Path, b: Path) -> list[str]:
+    """Per-array comparison; returns failure lines (empty if within tolerance)."""
     try:
         meta = json.loads(b.with_suffix(".json").read_text(encoding="utf-8"))
         da, db = a.read_bytes(), b.read_bytes()
+        if len(da) != len(db):
+            return [f"    blob size {len(da)} != {len(db)}"]
         lines = []
         for arr in meta["arrays"]:
             lo, hi = arr["offset"], arr["offset"] + arr["nbytes"]
@@ -569,11 +578,17 @@ def describe_bin_diff(a: Path, b: Path) -> str:
             vb = np.frombuffer(db[lo:hi], dtype="<f8")
             if va.shape != vb.shape:
                 lines.append(f"    {arr['name']}: size differs")
-            elif not np.array_equal(va, vb):
+            elif not np.allclose(va, vb, rtol=CHECK_RTOL, atol=CHECK_ATOL, equal_nan=True):
                 lines.append(f"    {arr['name']}: max |diff| = {np.max(np.abs(va - vb)):.3e}")
-        return "\n".join(lines)
+        return lines
     except (OSError, ValueError, KeyError) as e:
-        return f"    (could not compare arrays: {e})"
+        return [f"    (could not compare arrays: {e})"]
+
+
+def json_without_hash(path: Path) -> dict:
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    meta.get("blob", {}).pop("sha256", None)
+    return meta
 
 
 def check(committed: Path) -> int:
@@ -589,13 +604,20 @@ def check(committed: Path) -> int:
             failures.append(f"stale (not produced by generator): {name}")
         for name in sorted(fresh & existing):
             a, b = committed / name, tmp_dir / name
-            if a.read_bytes() != b.read_bytes():
-                msg = f"differs: {name}"
-                if name.endswith(".bin"):
-                    msg += "\n" + describe_bin_diff(a, b)
-                failures.append(msg)
+            if a.read_bytes() == b.read_bytes():
+                continue
+            if name.endswith(".bin"):
+                lines = compare_bins(a, b)
+                if lines:
+                    failures.append(f"differs: {name}\n" + "\n".join(lines))
+            elif name.endswith(".json"):
+                # The blob hash legitimately changes with last-ulp drift; the rest must match.
+                if json_without_hash(a) != json_without_hash(b):
+                    failures.append(f"differs: {name} (metadata)")
+            else:
+                failures.append(f"differs: {name}")
     if failures:
-        print("refgen --check FAILED (bit-exact comparison):", file=sys.stderr)
+        print(f"refgen --check FAILED (rtol={CHECK_RTOL}, atol={CHECK_ATOL}):", file=sys.stderr)
         for f in failures:
             print("  " + f, file=sys.stderr)
         print("Regenerate with tools/refgen/generate.py using the pinned numpy/scipy.",
