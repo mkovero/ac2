@@ -301,7 +301,14 @@ pub fn spectrum_scene(
         let color = t.color.with_alpha(dim);
         let n = t.freqs.len().min(t.level.len());
         let cols = visible_columns(&t.freqs[..n], xm.range.lo, xm.range.hi);
-        match view.spectrum.style {
+        // Bars are band power (RTA). A narrowband bin is a tone level, and thousands of bins
+        // share a pixel at the top of a log axis: drawn as bars, a single-bin tone becomes a
+        // sub-pixel sliver. Tone traces are always the max-per-pixel line.
+        let style = match t.quantity {
+            Quantity::Tone => SpectrumStyle::Line,
+            Quantity::Band => view.spectrum.style,
+        };
+        match style {
             SpectrumStyle::Bars => {
                 for i in cols.clone() {
                     let v = t.value(i);
@@ -346,7 +353,7 @@ pub fn spectrum_scene(
             && let Some(peak) = t.peak
         {
             let pc = color.with_alpha(theme.peak_alpha);
-            let points = match view.spectrum.style {
+            let points = match style {
                 // A cap across each band.
                 SpectrumStyle::Bars => {
                     let mut pts = Vec::new();
@@ -383,7 +390,7 @@ pub fn spectrum_scene(
                     stroke: Stroke {
                         color: pc,
                         width: (theme.trace_width * 0.75).max(1.0),
-                        dash: (view.spectrum.style == SpectrumStyle::Line).then_some(Dash {
+                        dash: (style == SpectrumStyle::Line).then_some(Dash {
                             on: 4.0,
                             off: 3.0,
                             offset: 0.0,
@@ -713,6 +720,26 @@ mod tests {
             let high = line.points.iter().filter(|p| p[1] < floor - 1e-3).count();
             assert_eq!(high, 2);
         }
+    }
+
+    #[test]
+    fn tone_traces_ignore_bar_style() {
+        // 4096-point FFT at 48 kHz: a 1 kHz tone in one bin, ~0.5 px wide on this axis.
+        let n = 2049;
+        let f: Vec<f64> = (0..n).map(|i| i as f64 * 48_000.0 / 4096.0).collect();
+        let e: Vec<(f64, f64)> = f.iter().map(|x| (x - 5.86, x + 5.86)).collect();
+        let k = 85; // 996 Hz
+        let mut level = vec![-80.0f32; n];
+        level[k] = -30.0;
+        let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+        t.quantity = Quantity::Tone;
+        let bars = ViewState::default();
+        assert_eq!(bars.spectrum.style, SpectrumStyle::Bars);
+        let s = spectrum_scene(&[t], &Status::default(), &bars, &Theme::dark(), SIZE);
+        assert!(s.scene.layers[1].rects.is_empty());
+        let line = &s.scene.layers[1].polylines[0];
+        let want = [s.x_axis.mapping.to_px(f[k]), s.y_axis.mapping.to_px(-30.0)];
+        assert!(line.points.contains(&want));
     }
 
     #[test]
