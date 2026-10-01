@@ -61,6 +61,22 @@ higher LF coherence floor) because LF felt unusably slow.
   deepest stage's settling at ~1 s and shows its higher coherence floor honestly.
 - Answer:
 
+**U1. Where banners go.** Today they stack at the top of the magnitude pane and cover the
+legend and cursor readout (see `crates/ac2-plot/tests/reference/transfer_view.png`).
+- Proposal: a banner strip above the plots, outside the data area; plots shrink while a banner is up.
+- Answer:
+
+**U2. Coherence placement.**
+- Proposal: own pane under phase (current, 3:2:1), with a toggle to overlay coherence on the
+  top of the magnitude pane (the classic analyzer look). Default: own pane.
+- Answer:
+
+**Decided by me (phase 4 scene work; say if you disagree):** banner priority DAEMON NOT
+RESPONDING > CLIP > NO REFERENCE > NO SIGNAL > STALE > OUTPUT TIMING JUMP > NO DELAY ESTIMATE,
+max 3 rows + "+N more"; units "dB SPL (tone)" / "dB SPL (band)"; coherence shown as γ² 0–1,
+fade on by default (0.15 at γ² 0 → full at 0.9), blanking off; IR log/ETC in dB re peak; spectrum
+line thinned to max-per-pixel; CHECK ROUTING gets a protocol flag and banner in phase 3.
+
 ---
 
 ## Q1 — Delay target and acceptance (before phase 2)
