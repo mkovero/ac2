@@ -97,6 +97,8 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q3 — Duplex timing (before phase 1)
 
+**Design:** [q3-loopback-timing.md](q3-loopback-timing.md) (proposed). Spike input: [spike-audio-duplex.md](spike-audio-duplex.md).
+
 **Question.** How is the generator→loopback offset monitored continuously (decided: 3a, 3b)?
 
 - Correlation method and update rate while a stimulus plays; cost on the daemon.
