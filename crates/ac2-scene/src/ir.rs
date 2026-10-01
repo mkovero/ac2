@@ -142,9 +142,21 @@ pub fn ir_scene(
         "t = 0 at inserted delay {}",
         readout::delay_readout(frame.meta.inserted_delay.0, view.temperature_c)
     );
+    // Beside the title when both fit, else on the row below it.
+    let side_by_side = 6.0
+        + canvas::text_width(&title, theme.small_font_size)
+        + 16.0
+        + canvas::text_width(&origin, theme.small_font_size)
+        + 6.0
+        <= plot.w;
+    let origin_y = if side_by_side {
+        plot.y + 4.0
+    } else {
+        plot.y + 4.0 + 1.4 * theme.small_font_size
+    };
     c.base.labels.push(label(
         origin.clone(),
-        [plot.right() - 6.0, plot.y + 4.0],
+        [plot.right() - 6.0, origin_y],
         anchor(HAlign::Right, VAlign::Top),
         theme.small_font_size,
         theme.text_dim,
@@ -382,5 +394,43 @@ mod tests {
         assert_eq!(s.plot.y, s.strip.bottom() + MARGINS.top);
         assert_eq!(s.plot.bottom(), calm.plot.bottom());
         crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot]);
+    }
+
+    #[test]
+    fn narrow_plot_puts_the_origin_under_the_title() {
+        use crate::canvas::tests::{intersects, label_box};
+        let f = frame();
+        let build = |w: f32| {
+            let size = Viewport {
+                width: w,
+                height: 300.0,
+            };
+            ir_scene(
+                &f,
+                Color::WHITE,
+                None,
+                &Status::default(),
+                &view(IrMode::Linear),
+                &Theme::dark(),
+                size,
+            )
+        };
+        let find = |s: &IrScene, t: &str| {
+            s.scene.layers[0]
+                .labels
+                .iter()
+                .find(|l| l.text == t)
+                .cloned()
+                .expect(t)
+        };
+        let wide = build(800.0);
+        assert_eq!(
+            find(&wide, &wide.origin).pos[1],
+            find(&wide, &wide.title).pos[1]
+        );
+        let narrow = build(330.0);
+        let (o, t) = (find(&narrow, &narrow.origin), find(&narrow, &narrow.title));
+        assert!(o.pos[1] > t.pos[1]);
+        assert!(!intersects(label_box(&o), label_box(&t)));
     }
 }

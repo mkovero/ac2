@@ -256,7 +256,8 @@ pub fn layout_banners(banners: &[Banner], area: Rect) -> Vec<BannerRow> {
     rows
 }
 
-/// Draws placed rows: a filled bar, the text on the left, the detail on the right.
+/// Draws placed rows: a filled bar, the text on the left, the detail on the right. In a row
+/// too narrow for both, the detail is left out: the fault itself must stay readable.
 pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
     for r in rows {
         let colors = match r.severity {
@@ -280,9 +281,16 @@ pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
             theme.font_size,
             colors.text,
         ));
-        if let Some(d) = &r.detail {
+        let fits = |d: &str| {
+            10.0 + crate::canvas::text_width(&r.text, theme.font_size)
+                + 16.0
+                + crate::canvas::text_width(d, theme.small_font_size)
+                + 10.0
+                <= r.rect.w
+        };
+        if let Some(d) = r.detail.as_deref().filter(|d| fits(d)) {
             layer.labels.push(crate::primitives::Label {
-                text: d.clone(),
+                text: d.to_string(),
                 pos: [r.rect.right() - 10.0, cy],
                 anchor: Anchor {
                     h: HAlign::Right,
@@ -466,5 +474,29 @@ pub(crate) mod tests {
         assert_eq!(layer.rects[0].color, theme.banner_fault.background);
         assert_eq!(layer.labels[0].text, "DAEMON NOT RESPONDING");
         assert_eq!(layer.labels[0].color, theme.banner_fault.text);
+    }
+
+    #[test]
+    fn narrow_rows_drop_the_detail() {
+        let theme = Theme::dark();
+        let s = Status {
+            no_delay_estimate: true,
+            ..Status::default()
+        };
+        let draw = |w: f32| {
+            let rows = layout_banners(&banners(&s), Rect::new(0.0, 0.0, w, 200.0));
+            let mut layer = Layer::default();
+            draw_banners(&mut layer, &rows, &theme);
+            (rows, layer)
+        };
+        let (rows, wide) = draw(800.0);
+        assert_eq!(wide.labels.len(), 2);
+        assert!(rows[0].detail.is_some());
+        // Too narrow for both: the banner text stays, the detail goes (it stays in the
+        // row data for other uses).
+        let (rows, narrow) = draw(300.0);
+        assert_eq!(narrow.labels.len(), 1);
+        assert_eq!(narrow.labels[0].text, "NO DELAY ESTIMATE");
+        assert!(rows[0].detail.is_some());
     }
 }

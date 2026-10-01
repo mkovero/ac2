@@ -168,12 +168,30 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         theme.font_size * 1.6,
         main,
     ));
-    let n = r.stats.len().max(1) as f32;
+    // One row of statistics when every cell fits its share of the width, else two rows.
+    let texts: Vec<String> = r
+        .stats
+        .iter()
+        .map(|s| format!("{} {}", s.label, s.value))
+        .collect();
+    let widest = texts
+        .iter()
+        .map(|t| canvas::text_width(t, theme.font_size))
+        .fold(0.0, f32::max);
+    let per_row = if (widest + 12.0) * texts.len() as f32 <= area.w {
+        texts.len().max(1)
+    } else {
+        texts.len().div_ceil(2).max(1)
+    };
     let row = area.y + area.h * 0.78;
-    for (i, s) in r.stats.iter().enumerate() {
+    for (i, t) in texts.into_iter().enumerate() {
+        let (r_i, c_i) = (i / per_row, i % per_row);
         c.overlay.labels.push(label(
-            format!("{} {}", s.label, s.value),
-            [area.x + area.w * (i as f32 + 0.5) / n, row],
+            t,
+            [
+                area.x + area.w * (c_i as f32 + 0.5) / per_row as f32,
+                row + r_i as f32 * 1.4 * theme.font_size,
+            ],
             anchor(HAlign::Center, VAlign::Center),
             theme.font_size,
             theme.text,
@@ -389,5 +407,44 @@ mod tests {
         assert_eq!(s.area.y, s.strip.bottom() + 12.0);
         assert_eq!(s.area.bottom(), 288.0);
         crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.area]);
+    }
+
+    #[test]
+    fn narrow_meter_wraps_the_statistics() {
+        use crate::canvas::tests::{intersects, label_box};
+        let r = spl_readout(&frame(LevelScale::DbSpl), "cal 3 h ago".into(), None);
+        let stats = |w: f32| {
+            let s = spl_scene(
+                &r,
+                &Status::default(),
+                &Theme::dark(),
+                Viewport {
+                    width: w,
+                    height: 260.0,
+                },
+            );
+            s.scene.layers[2]
+                .labels
+                .iter()
+                .filter(|l| r.stats.iter().any(|st| l.text.starts_with(&st.label)))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let wide = stats(900.0);
+        assert_eq!(wide.len(), 4);
+        assert!(wide.iter().all(|l| l.pos[1] == wide[0].pos[1]));
+        let narrow = stats(330.0);
+        assert_eq!(narrow.len(), 4);
+        assert!(narrow[2].pos[1] > narrow[0].pos[1]);
+        for (i, a) in narrow.iter().enumerate() {
+            for b in &narrow[i + 1..] {
+                assert!(
+                    !intersects(label_box(a), label_box(b)),
+                    "{:?} overlaps {:?}",
+                    a.text,
+                    b.text
+                );
+            }
+        }
     }
 }
