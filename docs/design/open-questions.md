@@ -9,6 +9,143 @@ each; these are the details that are too fine for the plan but too risky to deci
 
 ---
 
+## Decision sheet
+
+Fill in `Answer:` lines. Empty answer = proposed default is accepted. Free text welcome —
+reasons help the design note. Full context for each Q is in the sections below the sheet.
+
+### Product decisions (PLAN.md §12)
+
+**A. Delay distance readout (ms → m/ft).** `ac` removed it deliberately (reason in `ac` README).
+- Default: leave out of 1.0; revisit after re-reading the `ac` reason.
+- Answer:
+
+**B. UI chrome toolkit.**
+- Default: egui on wgpu, confirmed by a one-week spike at phase 4 start (vs iced).
+- Answer:
+
+**C. Minimum headless hardware.**
+- Default: Raspberry Pi 5 class (ARM64), 4 TF jobs @ 48 kHz.
+- Answer:
+
+**D. Raw capture format.**
+- Default: f32 WAV/W64 + JSON sidecar (config timeline, discontinuities, algorithm version).
+- Answer:
+
+### Q1 — Delay finder (before phase 2)
+
+**1a. Target.**
+- Default: first arrival within −12 dB of the strongest; strongest shown too.
+- Answer:
+
+**1b. Threshold per band or global?**
+- Default: one global threshold, operator-adjustable.
+- Answer:
+
+**1c. Ambiguous result.**
+- Default: list ≤ 3 candidates, operator picks; tracking pauses.
+- Answer:
+
+**1d. Default search range.**
+- Default: ±1 s.
+- Answer:
+
+**1e. Default sub band.**
+- Default: 40–120 Hz; auto mode chooses from measured excitation.
+- Answer:
+
+**1f. Acceptance targets.**
+- Default: error ≤ 1 sample full-range / ≤ 0.1 ms sub; wrong arrivals ≤ 1 %; refusals ≤ 10 % at ≥ 20 dB band SNR.
+- Answer:
+
+### Q2 — Delivery freshness (before phase 3)
+
+**2a. STALE deadlines.**
+- Default: TF 500 ms, SPL 300 ms, input meters 200 ms.
+- Answer:
+
+**2b. Publish rate.**
+- Default: 30 fps per topic; client may request lower.
+- Answer:
+
+### Q3 — Duplex timing (before phase 1)
+
+**3a. Loopback timing validation at session open?**
+- Default: only when internal reference is used; short probe at −40 dBFS; operator confirms the first time.
+- Answer:
+
+**3b. No loopback cable available.**
+- Default: internal reference refused; measured reference channel required.
+- Answer:
+
+### Q4 — Level normalisation (before phase 2)
+
+**4a. Generator 0 dBFS.**
+- Default: RMS of a full-scale sine.
+- Answer:
+
+**4b. Default spectrum unit.**
+- Default: amplitude spectrum for narrowband view; band power for RTA.
+- Answer:
+
+**4c. Flat-top window option for tone reading?**
+- Default: yes.
+- Answer:
+
+### Q5 — Replay & epochs (before phase 3)
+
+**5a. Replay buffer size.**
+- Default: 1024 events or 60 s, whichever is smaller.
+- Answer:
+
+**5b. Device or sample-rate change starts a new session epoch?**
+- Default: yes.
+- Answer:
+
+### Q6 — Stimulus lease (before phase 3)
+
+**6a. Refresh / expiry.**
+- Default: refresh every 0.5 s, expiry 1.5 s.
+- Answer:
+
+**6b. Stop behaviour.**
+- Default: 20 ms fade-out, never a hard cut.
+- Answer:
+
+**6c. Forced takeover.**
+- Default: any authorized client may force; output stops and disarms first.
+- Answer:
+
+**6d. Network hiccup shorter than expiry.**
+- Default: output continues; nothing special.
+- Answer:
+
+### Q7 — Calibration chain (before phase 5)
+
+**7a. Fields that must match for VERIFIED.**
+- Default: device, channel, mic id, preamp gain, phantom power state.
+- Answer:
+
+**7b. Re-confirming gain that cannot be read from hardware.**
+- Default: at session open; one confirmation covers all inputs.
+- Answer:
+
+**7c. Mic curve filter.**
+- Default: minimum-phase FIR for SPL/RTA; magnitude-only correction for TF.
+- Answer:
+
+### Q8 — Phase comparison time reference (before phase 4)
+
+**8a. Default overlay mode.**
+- Default: shared time reference within a session; imported traces marked independent.
+- Answer:
+
+**8b. Shared reference delay.**
+- Default: delay of the first selected trace; pick key to change.
+- Answer:
+
+---
+
 ## Q1 — Delay target and acceptance (before phase 2)
 
 **Question.** What exactly does the finder report, and when do we trust it?
