@@ -1,0 +1,118 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "spl_toneburst",
+  "description": "Maximum F and S time-weighted level of isolated 4 kHz tonebursts relative to the steady level, from a one-pole exponential average of the squared signal (Z weighting), plus IEC 61672-1 Formula 7.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_spl_toneburst"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "tone_hz": 4000.0,
+    "amplitude_fs": 0.5,
+    "burst": "x = amp sin(2 pi f0 k / fs), k = 0..round(Tb fs)-1, starting at a zero crossing after 10 ms of silence; zeros afterwards",
+    "detector": "ms[n] = ms[n-1] + alpha (x[n]^2 - ms[n-1]), alpha = 1 - exp(-1/(fs tau)), ms[-1] = 0 (scipy.signal.lfilter([alpha], [1, alpha - 1], x^2))",
+    "tau_s": {
+      "F": 0.125,
+      "S": 1.0
+    },
+    "response_db": "10 log10(max ms / (amp^2/2))",
+    "eq7": "10 log10(1 - exp(-Tb / tau))"
+  },
+  "references": [
+    "IEC 61672-1:2013 5.8, 5.9, Table 4 and Formula 7"
+  ],
+  "scalars": {},
+  "blob": {
+    "file": "spl_toneburst.bin",
+    "nbytes": 504,
+    "sha256": "ee2715ed51a2a38fd286e1a2a4b0665571fc12889dcc50d9442f3fce5c2bbe7b"
+  },
+  "arrays": [
+    {
+      "name": "tb_f_ms",
+      "dtype": "f64",
+      "shape": [
+        12
+      ],
+      "offset": 0,
+      "nbytes": 96,
+      "unit": "ms",
+      "description": "toneburst durations, F"
+    },
+    {
+      "name": "response_f_db",
+      "dtype": "f64",
+      "shape": [
+        12
+      ],
+      "offset": 96,
+      "nbytes": 96,
+      "unit": "dB",
+      "description": "LFmax - L, Z weighting",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "tb_f_ms"
+    },
+    {
+      "name": "eq7_f_db",
+      "dtype": "f64",
+      "shape": [
+        12
+      ],
+      "offset": 192,
+      "nbytes": 96,
+      "unit": "dB",
+      "description": "Formula 7, tau = 0.125 s",
+      "axis": "tb_f_ms"
+    },
+    {
+      "name": "tb_s_ms",
+      "dtype": "f64",
+      "shape": [
+        9
+      ],
+      "offset": 288,
+      "nbytes": 72,
+      "unit": "ms",
+      "description": "toneburst durations, S"
+    },
+    {
+      "name": "response_s_db",
+      "dtype": "f64",
+      "shape": [
+        9
+      ],
+      "offset": 360,
+      "nbytes": 72,
+      "unit": "dB",
+      "description": "LSmax - L, Z weighting",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "tb_s_ms"
+    },
+    {
+      "name": "eq7_s_db",
+      "dtype": "f64",
+      "shape": [
+        9
+      ],
+      "offset": 432,
+      "nbytes": 72,
+      "unit": "dB",
+      "description": "Formula 7, tau = 1 s",
+      "axis": "tb_s_ms"
+    }
+  ]
+}

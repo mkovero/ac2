@@ -1,0 +1,386 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "rta_butterworth_bands",
+  "description": "Magnitude responses of digital Butterworth band-pass filters on IEC 61260-1 base-10 band edges (scipy.signal.butter, bilinear with pre-warped edges).",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_rta_butterworth_bands"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "design": "scipy.signal.butter(order, [f_lower, f_upper], btype='bandpass', fs=fs, output='sos')",
+    "edges": "f_m * G^(-+1/(2b)), G = 10^0.3",
+    "frequencies": "f_m * G^(x/b), x = linspace(-3, 3, 121), kept below 0.499 fs",
+    "band_spec_columns": [
+      "fs_hz",
+      "b",
+      "f_lower_hz",
+      "f_upper_hz",
+      "order"
+    ]
+  },
+  "references": [
+    "IEC 61260-1:2014 (base-10 band edges, relative attenuation)",
+    "scipy.signal.butter / sosfreqz"
+  ],
+  "scalars": {},
+  "blob": {
+    "file": "rta_butterworth_bands.bin",
+    "nbytes": 21232,
+    "sha256": "43823a0b5288b8cbc9c0307166d5d54776ee0508d9fe334032961033cc418968"
+  },
+  "arrays": [
+    {
+      "name": "band_spec",
+      "dtype": "f64",
+      "shape": [
+        12,
+        5
+      ],
+      "offset": 0,
+      "nbytes": 480,
+      "unit": "mixed",
+      "description": "rows of (fs_hz, b, f_lower_hz, f_upper_hz, order)"
+    },
+    {
+      "name": "band0_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 480,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/1 fm=31.623 order 3"
+    },
+    {
+      "name": "band0_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 1448,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band0_freq_hz"
+    },
+    {
+      "name": "band1_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 2416,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/1 fm=1000.000 order 3"
+    },
+    {
+      "name": "band1_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 3384,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band1_freq_hz"
+    },
+    {
+      "name": "band2_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        92
+      ],
+      "offset": 4352,
+      "nbytes": 736,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/1 fm=7943.282 order 3"
+    },
+    {
+      "name": "band2_mag_db",
+      "dtype": "f64",
+      "shape": [
+        92
+      ],
+      "offset": 5088,
+      "nbytes": 736,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band2_freq_hz"
+    },
+    {
+      "name": "band3_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        72
+      ],
+      "offset": 5824,
+      "nbytes": 576,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/1 fm=15848.932 order 4"
+    },
+    {
+      "name": "band3_mag_db",
+      "dtype": "f64",
+      "shape": [
+        72
+      ],
+      "offset": 6400,
+      "nbytes": 576,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band3_freq_hz"
+    },
+    {
+      "name": "band4_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 6976,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/3 fm=19.953 order 3"
+    },
+    {
+      "name": "band4_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 7944,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band4_freq_hz"
+    },
+    {
+      "name": "band5_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 8912,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/3 fm=1000.000 order 3"
+    },
+    {
+      "name": "band5_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 9880,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band5_freq_hz"
+    },
+    {
+      "name": "band6_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        76
+      ],
+      "offset": 10848,
+      "nbytes": 608,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/3 fm=19952.623 order 4"
+    },
+    {
+      "name": "band6_mag_db",
+      "dtype": "f64",
+      "shape": [
+        76
+      ],
+      "offset": 11456,
+      "nbytes": 608,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band6_freq_hz"
+    },
+    {
+      "name": "band7_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 12064,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=44100.0 1/3 fm=1000.000 order 3"
+    },
+    {
+      "name": "band7_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 13032,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band7_freq_hz"
+    },
+    {
+      "name": "band8_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        89
+      ],
+      "offset": 14000,
+      "nbytes": 712,
+      "unit": "Hz",
+      "description": "frequencies, fs=44100.0 1/3 fm=15848.932 order 4"
+    },
+    {
+      "name": "band8_mag_db",
+      "dtype": "f64",
+      "shape": [
+        89
+      ],
+      "offset": 14712,
+      "nbytes": 712,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band8_freq_hz"
+    },
+    {
+      "name": "band9_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 15424,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=96000.0 1/3 fm=19952.623 order 3"
+    },
+    {
+      "name": "band9_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 16392,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band9_freq_hz"
+    },
+    {
+      "name": "band10_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 17360,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=48000.0 1/6 fm=1059.254 order 3"
+    },
+    {
+      "name": "band10_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 18328,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band10_freq_hz"
+    },
+    {
+      "name": "band11_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 19296,
+      "nbytes": 968,
+      "unit": "Hz",
+      "description": "frequencies, fs=96000.0 1/24 fm=19.668 order 3"
+    },
+    {
+      "name": "band11_mag_db",
+      "dtype": "f64",
+      "shape": [
+        121
+      ],
+      "offset": 20264,
+      "nbytes": 968,
+      "unit": "dB",
+      "description": "20 log10 |H|",
+      "tolerance": {
+        "kind": "db",
+        "db": 1e-06,
+        "floor_db": -250.0
+      },
+      "axis": "band11_freq_hz"
+    }
+  ]
+}

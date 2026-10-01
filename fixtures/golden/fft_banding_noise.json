@@ -1,0 +1,154 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "fft_banding_noise",
+  "description": "White noise plus an off-bin sine, one Hann frame; IEC base-10 1/1- and 1/3-octave band power by fractional-bin integration of the PSD, with band status for bands under two bins wide.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_fft_banding_noise"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 8192,
+    "x": "sigma * default_rng(seed).standard_normal(n) + 0.2 sin(2 pi 1234.5 t)",
+    "sigma": 0.1,
+    "seed": 180486161,
+    "window": "hann, periodic",
+    "bin_interval": "[(k - 1/2) df, (k + 1/2) df] clipped to [0, fs/2], df = fs/n",
+    "band_power": "integral of the piecewise-constant density: each bin's power c_k |X_k|^2 / (n sum w^2) spread uniformly over its interval",
+    "band_range": "exact mid-band frequencies in [15, 21000] Hz",
+    "edges": "f_m * G^(-+1/(2b)), G = 10^0.3",
+    "status": "0 valid, 1 width < 2 df (power stored as 0), 2 upper edge > fs/2"
+  },
+  "references": [
+    "docs/design/q4-level-normalisation.md (FFT banding, Parseval test)",
+    "IEC 61260-1:2014 5.2-5.4 (base-10 mid-band frequencies and band edges)"
+  ],
+  "scalars": {
+    "fs_hz": 48000.0,
+    "n": 8192,
+    "windowed_mean_square": 0.029652419560548652
+  },
+  "blob": {
+    "file": "fft_banding_noise.bin",
+    "nbytes": 66568,
+    "sha256": "1bc74d3cf5870b02d37af2a3830b99eaf957692bd1f7e32e7a5db8944c0c357a"
+  },
+  "arrays": [
+    {
+      "name": "x",
+      "dtype": "f64",
+      "shape": [
+        8192
+      ],
+      "offset": 0,
+      "nbytes": 65536,
+      "unit": "FS",
+      "description": "input frame"
+    },
+    {
+      "name": "oct_centre_hz",
+      "dtype": "f64",
+      "shape": [
+        11
+      ],
+      "offset": 65536,
+      "nbytes": 88,
+      "unit": "Hz",
+      "description": "1/1-octave mid-band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "oct_status",
+      "dtype": "f64",
+      "shape": [
+        11
+      ],
+      "offset": 65624,
+      "nbytes": 88,
+      "unit": "1",
+      "description": "band status code",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 0.0
+      },
+      "axis": "oct_centre_hz"
+    },
+    {
+      "name": "oct_band_power",
+      "dtype": "f64",
+      "shape": [
+        11
+      ],
+      "offset": 65712,
+      "nbytes": 88,
+      "unit": "FS^2",
+      "description": "band power (0 where status != 0)",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-18,
+        "rel": 1e-09
+      },
+      "axis": "oct_centre_hz"
+    },
+    {
+      "name": "third_centre_hz",
+      "dtype": "f64",
+      "shape": [
+        32
+      ],
+      "offset": 65800,
+      "nbytes": 256,
+      "unit": "Hz",
+      "description": "1/3-octave mid-band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "third_status",
+      "dtype": "f64",
+      "shape": [
+        32
+      ],
+      "offset": 66056,
+      "nbytes": 256,
+      "unit": "1",
+      "description": "band status code",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 0.0
+      },
+      "axis": "third_centre_hz"
+    },
+    {
+      "name": "third_band_power",
+      "dtype": "f64",
+      "shape": [
+        32
+      ],
+      "offset": 66312,
+      "nbytes": 256,
+      "unit": "FS^2",
+      "description": "band power (0 where status != 0)",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-18,
+        "rel": 1e-09
+      },
+      "axis": "third_centre_hz"
+    }
+  ]
+}

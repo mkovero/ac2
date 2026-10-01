@@ -1,0 +1,128 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "spectrum_offbin_windows",
+  "description": "Full-scale sine half a bin off-centre, one frame, amplitude spectrum in dBFS for Hann, 4-term Blackman-Harris, HFT95 flat-top and rectangular periodic windows; the peak bin's shortfall from 0 dBFS is the window's scalloping loss.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_spectrum_offbin_windows"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 4096,
+    "tone": "x = sin(2 pi f0 t), f0 = 1000.5 * fs / n (peak 1.0 = 0 dBFS)",
+    "windows": {
+      "hann": "periodic, 0.5 - 0.5 cos(2 pi i/N)",
+      "blackmanharris4": "scipy get_window('blackmanharris', fftbins=True)",
+      "flattop_hft95": "periodic cosine sum 1, 1.9383379, 1.3045202, 0.4028270, 0.0350665 (alternating signs)",
+      "rectangular": "ones"
+    },
+    "amplitude_dbfs": "20 log10(sqrt(c_k) |X_k| / sum(w) * sqrt 2)",
+    "scalloping_db": "-max_k amplitude_dbfs (includes the negligible image leakage)",
+    "kernel_loss_db": "-20 log10(|sum_j w_j exp(-i pi j / N)| / sum(w))"
+  },
+  "references": [
+    "docs/design/q4-level-normalisation.md (scalloping and windows, decision 4c)",
+    "G. Heinzel, A. Ruediger, R. Schilling, Spectrum and spectral density estimation by the DFT (2002), HFT95"
+  ],
+  "scalars": {
+    "fs_hz": 48000.0,
+    "n": 4096,
+    "tone_bin": 1000.5,
+    "tone_freq_hz": 11724.609375,
+    "hann_scalloping_db": 1.4236228083845204,
+    "hann_kernel_loss_db": 1.4236228084370148,
+    "blackmanharris4_scalloping_db": 0.8255722167037343,
+    "blackmanharris4_kernel_loss_db": 0.8255722309154755,
+    "flattop_hft95_scalloping_db": 0.00386579909221522,
+    "flattop_hft95_kernel_loss_db": 0.0038659185458867758,
+    "rectangular_scalloping_db": 3.922276558506189,
+    "rectangular_kernel_loss_db": 3.9223973276994966
+  },
+  "blob": {
+    "file": "spectrum_offbin_windows.bin",
+    "nbytes": 98336,
+    "sha256": "497a41a76d9bfc27823776da0871df9a592c626578a872e440ae43e73aac40fa"
+  },
+  "arrays": [
+    {
+      "name": "x",
+      "dtype": "f64",
+      "shape": [
+        4096
+      ],
+      "offset": 0,
+      "nbytes": 32768,
+      "unit": "FS",
+      "description": "input frame"
+    },
+    {
+      "name": "hann_amplitude_dbfs",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 32768,
+      "nbytes": 16392,
+      "unit": "dBFS",
+      "description": "amplitude spectrum, hann window",
+      "tolerance": {
+        "kind": "db",
+        "db": 0.0001,
+        "floor_db": -200.0
+      }
+    },
+    {
+      "name": "blackmanharris4_amplitude_dbfs",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 49160,
+      "nbytes": 16392,
+      "unit": "dBFS",
+      "description": "amplitude spectrum, blackmanharris4 window",
+      "tolerance": {
+        "kind": "db",
+        "db": 0.0001,
+        "floor_db": -200.0
+      }
+    },
+    {
+      "name": "flattop_hft95_amplitude_dbfs",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 65552,
+      "nbytes": 16392,
+      "unit": "dBFS",
+      "description": "amplitude spectrum, flattop_hft95 window",
+      "tolerance": {
+        "kind": "db",
+        "db": 0.0001,
+        "floor_db": -200.0
+      }
+    },
+    {
+      "name": "rectangular_amplitude_dbfs",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 81944,
+      "nbytes": 16392,
+      "unit": "dBFS",
+      "description": "amplitude spectrum, rectangular window",
+      "tolerance": {
+        "kind": "db",
+        "db": 0.0001,
+        "floor_db": -200.0
+      }
+    }
+  ]
+}
