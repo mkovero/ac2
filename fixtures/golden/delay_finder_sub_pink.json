@@ -1,0 +1,114 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "delay_finder_sub_pink",
+  "description": "Sub band (20-120 Hz), pink excitation, 2 s observation: direct below a louder reflection 35 ms later (resolved: > 3 pulse widths).",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "tools/refgen/sets/delay_finder.py: _golden(delay_finder_sub_pink)"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "band": "sub",
+    "band_edges_hz": [
+      20.0,
+      120.0
+    ],
+    "band_shape": "-6 dB edges; raised cosine in log2(f), 1 octave wide, centred on each edge; upper edge clipped to (fs/2) * 2^-0.5",
+    "excitation": "pink",
+    "excitation_period_samples": null,
+    "excitation_rms_fs": 0.1,
+    "seed": 180539398,
+    "ref_start": 990403.0,
+    "ref_coverage_samples": 9600,
+    "meas_length": 96000,
+    "threshold_db": -12.0,
+    "tolerance_samples": 4.8,
+    "delay_sign": "positive = measurement late: meas[i] = sum_k g_k * ref_clean(i - d_k) + noise",
+    "construction": "x = excitation over a buffer covering the ref block and every path (periodic extension when excitation_period_samples is set); each path is an exact band-limited fractional shift of x (FFT phase ramp); ref = x + white noise 70 dB below x; meas = sum of paths + pink noise scaled to snr_db in the band (band weighting squared)",
+    "expect_semantics": {
+      "accepted": "status Accepted and |first.delay - an acceptable delay| <= tol",
+      "ambiguous": "status Ambiguous and a listed candidate within tol of an acceptable delay",
+      "accepted_or_ambiguous": "Ambiguous, or Accepted with first.delay within tol of an acceptable delay (inside span instead, when span is given)",
+      "no_estimate": "status NoEstimate with at least one of reasons_any"
+    },
+    "cases": [
+      {
+        "name": "sub_refl_louder",
+        "class": "reflection_louder",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": -600.3,
+            "gain_db": -4.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 1079.7,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 40.0,
+        "search": [
+          -9600,
+          9600
+        ],
+        "first_delay": -600.3,
+        "strongest_delay": 1079.7,
+        "acceptable_first_delays": [
+          -600.3
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": ""
+      }
+    ]
+  },
+  "references": [
+    "docs/design/q1-delay-finder.md (acceptance table)",
+    "PLAN.md 5.2 (delay finder), 5.4 (periodic pink)",
+    "docs/design/open-questions.md decisions 1a, 1c, 1d, 1e, 1f"
+  ],
+  "scalars": {
+    "sub_refl_louder.first_delay": -600.3,
+    "sub_refl_louder.strongest_delay": 1079.7,
+    "sub_refl_louder.tol_samples": 4.8,
+    "sub_refl_louder.meas_start": 1000003.0,
+    "sub_refl_louder.search_min": -9600.0,
+    "sub_refl_louder.search_max": 9600.0
+  },
+  "blob": {
+    "file": "delay_finder_sub_pink.bin",
+    "nbytes": 1689600,
+    "sha256": "ef269556bb58afe88f2e611209b56ec262c2d1448e0bdb77c1086d2b2871765f"
+  },
+  "arrays": [
+    {
+      "name": "ref",
+      "dtype": "f64",
+      "shape": [
+        115200
+      ],
+      "offset": 0,
+      "nbytes": 921600,
+      "unit": "FS",
+      "description": "reference block starting at ref_start; covers meas_start - 9600 .. meas_start + meas_length + 9600"
+    },
+    {
+      "name": "meas.sub_refl_louder",
+      "dtype": "f64",
+      "shape": [
+        96000
+      ],
+      "offset": 921600,
+      "nbytes": 768000,
+      "unit": "FS",
+      "description": "measurement block of case sub_refl_louder, starting at sub_refl_louder.meas_start"
+    }
+  ]
+}

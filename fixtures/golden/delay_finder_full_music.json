@@ -1,0 +1,114 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "delay_finder_full_music",
+  "description": "Full-range band, programme-like excitation (tonal, non-stationary, steep HF roll-off): direct below a louder reflection.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "tools/refgen/sets/delay_finder.py: _golden(delay_finder_full_music)"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "band": "full",
+    "band_edges_hz": [
+      2000.0,
+      16000.0
+    ],
+    "band_shape": "-6 dB edges; raised cosine in log2(f), 1 octave wide, centred on each edge; upper edge clipped to (fs/2) * 2^-0.5",
+    "excitation": "music",
+    "excitation_period_samples": null,
+    "excitation_rms_fs": 0.1,
+    "seed": 180539394,
+    "ref_start": 997603.0,
+    "ref_coverage_samples": 2400,
+    "meas_length": 12000,
+    "threshold_db": -12.0,
+    "tolerance_samples": 1.0,
+    "delay_sign": "positive = measurement late: meas[i] = sum_k g_k * ref_clean(i - d_k) + noise",
+    "construction": "x = excitation over a buffer covering the ref block and every path (periodic extension when excitation_period_samples is set); each path is an exact band-limited fractional shift of x (FFT phase ramp); ref = x + white noise 70 dB below x; meas = sum of paths + pink noise scaled to snr_db in the band (band weighting squared)",
+    "expect_semantics": {
+      "accepted": "status Accepted and |first.delay - an acceptable delay| <= tol",
+      "ambiguous": "status Ambiguous and a listed candidate within tol of an acceptable delay",
+      "accepted_or_ambiguous": "Ambiguous, or Accepted with first.delay within tol of an acceptable delay (inside span instead, when span is given)",
+      "no_estimate": "status NoEstimate with at least one of reasons_any"
+    },
+    "cases": [
+      {
+        "name": "music_refl_louder",
+        "class": "reflection_louder",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": 55.5,
+            "gain_db": -6.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 355.5,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": 55.5,
+        "strongest_delay": 355.5,
+        "acceptable_first_delays": [
+          55.5
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": ""
+      }
+    ]
+  },
+  "references": [
+    "docs/design/q1-delay-finder.md (acceptance table)",
+    "PLAN.md 5.2 (delay finder), 5.4 (periodic pink)",
+    "docs/design/open-questions.md decisions 1a, 1c, 1d, 1e, 1f"
+  ],
+  "scalars": {
+    "music_refl_louder.first_delay": 55.5,
+    "music_refl_louder.strongest_delay": 355.5,
+    "music_refl_louder.tol_samples": 1.0,
+    "music_refl_louder.meas_start": 1000003.0,
+    "music_refl_louder.search_min": -2400.0,
+    "music_refl_louder.search_max": 2400.0
+  },
+  "blob": {
+    "file": "delay_finder_full_music.bin",
+    "nbytes": 230400,
+    "sha256": "d39f7df7b3906e71698c7fa38afa89a3f3ed550de247b57d5b29dfba3b48f7cb"
+  },
+  "arrays": [
+    {
+      "name": "ref",
+      "dtype": "f64",
+      "shape": [
+        16800
+      ],
+      "offset": 0,
+      "nbytes": 134400,
+      "unit": "FS",
+      "description": "reference block starting at ref_start; covers meas_start - 2400 .. meas_start + meas_length + 2400"
+    },
+    {
+      "name": "meas.music_refl_louder",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 134400,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case music_refl_louder, starting at music_refl_louder.meas_start"
+    }
+  ]
+}

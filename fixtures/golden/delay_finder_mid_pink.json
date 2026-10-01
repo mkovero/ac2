@@ -1,0 +1,156 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "delay_finder_mid_pink",
+  "description": "Mid band (300 Hz - 3 kHz), pink excitation.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "tools/refgen/sets/delay_finder.py: _golden(delay_finder_mid_pink)"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "band": "mid",
+    "band_edges_hz": [
+      300.0,
+      3000.0
+    ],
+    "band_shape": "-6 dB edges; raised cosine in log2(f), 1 octave wide, centred on each edge; upper edge clipped to (fs/2) * 2^-0.5",
+    "excitation": "pink",
+    "excitation_period_samples": null,
+    "excitation_rms_fs": 0.1,
+    "seed": 180539397,
+    "ref_start": 995203.0,
+    "ref_coverage_samples": 4800,
+    "meas_length": 24000,
+    "threshold_db": -12.0,
+    "tolerance_samples": 2.4,
+    "delay_sign": "positive = measurement late: meas[i] = sum_k g_k * ref_clean(i - d_k) + noise",
+    "construction": "x = excitation over a buffer covering the ref block and every path (periodic extension when excitation_period_samples is set); each path is an exact band-limited fractional shift of x (FFT phase ramp); ref = x + white noise 70 dB below x; meas = sum of paths + pink noise scaled to snr_db in the band (band weighting squared)",
+    "expect_semantics": {
+      "accepted": "status Accepted and |first.delay - an acceptable delay| <= tol",
+      "ambiguous": "status Ambiguous and a listed candidate within tol of an acceptable delay",
+      "accepted_or_ambiguous": "Ambiguous, or Accepted with first.delay within tol of an acceptable delay (inside span instead, when span is given)",
+      "no_estimate": "status NoEstimate with at least one of reasons_any"
+    },
+    "cases": [
+      {
+        "name": "mid_single_frac",
+        "class": "single",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": -1234.6,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -4800,
+          4800
+        ],
+        "first_delay": -1234.6,
+        "strongest_delay": -1234.6,
+        "acceptable_first_delays": [
+          -1234.6
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": ""
+      },
+      {
+        "name": "mid_refl_louder_inverted",
+        "class": "reflection_louder",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": 700.3,
+            "gain_db": -6.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 940.3,
+            "gain_db": 0.0,
+            "polarity": -1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -4800,
+          4800
+        ],
+        "first_delay": 700.3,
+        "strongest_delay": 940.3,
+        "acceptable_first_delays": [
+          700.3
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "5 ms (12 pulse widths) apart"
+      }
+    ]
+  },
+  "references": [
+    "docs/design/q1-delay-finder.md (acceptance table)",
+    "PLAN.md 5.2 (delay finder), 5.4 (periodic pink)",
+    "docs/design/open-questions.md decisions 1a, 1c, 1d, 1e, 1f"
+  ],
+  "scalars": {
+    "mid_single_frac.first_delay": -1234.6,
+    "mid_single_frac.strongest_delay": -1234.6,
+    "mid_single_frac.tol_samples": 2.4,
+    "mid_single_frac.meas_start": 1000003.0,
+    "mid_single_frac.search_min": -4800.0,
+    "mid_single_frac.search_max": 4800.0,
+    "mid_refl_louder_inverted.first_delay": 700.3,
+    "mid_refl_louder_inverted.strongest_delay": 940.3,
+    "mid_refl_louder_inverted.tol_samples": 2.4,
+    "mid_refl_louder_inverted.meas_start": 1000003.0,
+    "mid_refl_louder_inverted.search_min": -4800.0,
+    "mid_refl_louder_inverted.search_max": 4800.0
+  },
+  "blob": {
+    "file": "delay_finder_mid_pink.bin",
+    "nbytes": 652800,
+    "sha256": "77ed43fbea7d0d5fd3322f5b0e75b8c19fac86c2910be6dc63b7df8c0105adcc"
+  },
+  "arrays": [
+    {
+      "name": "ref",
+      "dtype": "f64",
+      "shape": [
+        33600
+      ],
+      "offset": 0,
+      "nbytes": 268800,
+      "unit": "FS",
+      "description": "reference block starting at ref_start; covers meas_start - 4800 .. meas_start + meas_length + 4800"
+    },
+    {
+      "name": "meas.mid_single_frac",
+      "dtype": "f64",
+      "shape": [
+        24000
+      ],
+      "offset": 268800,
+      "nbytes": 192000,
+      "unit": "FS",
+      "description": "measurement block of case mid_single_frac, starting at mid_single_frac.meas_start"
+    },
+    {
+      "name": "meas.mid_refl_louder_inverted",
+      "dtype": "f64",
+      "shape": [
+        24000
+      ],
+      "offset": 460800,
+      "nbytes": 192000,
+      "unit": "FS",
+      "description": "measurement block of case mid_refl_louder_inverted, starting at mid_refl_louder_inverted.meas_start"
+    }
+  ]
+}

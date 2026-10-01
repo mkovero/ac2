@@ -1,0 +1,549 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "delay_finder_full_pink",
+  "description": "Full-range band (2-16 kHz), pink excitation: single and multipath arrivals, fractional, negative and large delays, low SNR, no signal.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "tools/refgen/sets/delay_finder.py: _golden(delay_finder_full_pink)"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "band": "full",
+    "band_edges_hz": [
+      2000.0,
+      16000.0
+    ],
+    "band_shape": "-6 dB edges; raised cosine in log2(f), 1 octave wide, centred on each edge; upper edge clipped to (fs/2) * 2^-0.5",
+    "excitation": "pink",
+    "excitation_period_samples": null,
+    "excitation_rms_fs": 0.1,
+    "seed": 180539393,
+    "ref_start": 952003.0,
+    "ref_coverage_samples": 48000,
+    "meas_length": 12000,
+    "threshold_db": -12.0,
+    "tolerance_samples": 1.0,
+    "delay_sign": "positive = measurement late: meas[i] = sum_k g_k * ref_clean(i - d_k) + noise",
+    "construction": "x = excitation over a buffer covering the ref block and every path (periodic extension when excitation_period_samples is set); each path is an exact band-limited fractional shift of x (FFT phase ramp); ref = x + white noise 70 dB below x; meas = sum of paths + pink noise scaled to snr_db in the band (band weighting squared)",
+    "expect_semantics": {
+      "accepted": "status Accepted and |first.delay - an acceptable delay| <= tol",
+      "ambiguous": "status Ambiguous and a listed candidate within tol of an acceptable delay",
+      "accepted_or_ambiguous": "Ambiguous, or Accepted with first.delay within tol of an acceptable delay (inside span instead, when span is given)",
+      "no_estimate": "status NoEstimate with at least one of reasons_any"
+    },
+    "cases": [
+      {
+        "name": "single_frac",
+        "class": "single",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": 137.37,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": 137.37,
+        "strongest_delay": 137.37,
+        "acceptable_first_delays": [
+          137.37
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": ""
+      },
+      {
+        "name": "negative_frac",
+        "class": "single",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": -611.6,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": -611.6,
+        "strongest_delay": -611.6,
+        "acceptable_first_delays": [
+          -611.6
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": ""
+      },
+      {
+        "name": "refl_louder_inverted",
+        "class": "reflection_louder",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": 250.25,
+            "gain_db": -6.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 370.25,
+            "gain_db": 0.0,
+            "polarity": -1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": 250.25,
+        "strongest_delay": 370.25,
+        "acceptable_first_delays": [
+          250.25
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "direct 6 dB below an inverted reflection 2.5 ms later"
+      },
+      {
+        "name": "refl_louder_far",
+        "class": "reflection_louder",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": -80.5,
+            "gain_db": -10.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 879.5,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": -80.5,
+        "strongest_delay": 879.5,
+        "acceptable_first_delays": [
+          -80.5
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "direct 10 dB below a reflection 20 ms later"
+      },
+      {
+        "name": "direct_buried",
+        "class": "direct_below_threshold",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": 400.0,
+            "gain_db": -18.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 544.0,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": 544.0,
+        "strongest_delay": 544.0,
+        "acceptable_first_delays": [
+          544.0
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "direct 18 dB down is not significant: first significant = reflection"
+      },
+      {
+        "name": "borderline",
+        "class": "borderline",
+        "expect": "accepted_or_ambiguous",
+        "paths": [
+          {
+            "delay_samples": 300.0,
+            "gain_db": -12.3,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 500.0,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": 500.0,
+        "strongest_delay": 500.0,
+        "acceptable_first_delays": [
+          300.0,
+          500.0
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "direct within 2 dB of the -12 dB threshold: either pick, or ambiguous"
+      },
+      {
+        "name": "close_interfering",
+        "class": "unresolved",
+        "expect": "accepted_or_ambiguous",
+        "paths": [
+          {
+            "delay_samples": -200.4,
+            "gain_db": -2.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": -195.4,
+            "gain_db": 0.0,
+            "polarity": -1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": -200.4,
+        "strongest_delay": -195.4,
+        "acceptable_first_delays": [
+          -200.4
+        ],
+        "span": [
+          -201.4,
+          -194.4
+        ],
+        "reasons_any": [],
+        "note": "0.1 ms apart (1.3 pulse widths): unresolved; accepted only inside the cluster"
+      },
+      {
+        "name": "room",
+        "class": "room",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": 1020.6,
+            "gain_db": -3.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 1164.6,
+            "gain_db": -1.0,
+            "polarity": -1
+          },
+          {
+            "delay_samples": 1404.6,
+            "gain_db": -4.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 1692.6,
+            "gain_db": -6.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": 1980.6,
+            "gain_db": -9.0,
+            "polarity": -1
+          },
+          {
+            "delay_samples": 2700.0,
+            "gain_db": -12.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 25.0,
+        "search": [
+          -2400,
+          4800
+        ],
+        "first_delay": 1020.6,
+        "strongest_delay": 1164.6,
+        "acceptable_first_delays": [
+          1020.6
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "direct + 5 reflections 3-35 ms"
+      },
+      {
+        "name": "large_negative",
+        "class": "single",
+        "expect": "accepted",
+        "paths": [
+          {
+            "delay_samples": -35040.3,
+            "gain_db": 0.0,
+            "polarity": 1
+          },
+          {
+            "delay_samples": -34740.3,
+            "gain_db": -6.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": 30.0,
+        "search": [
+          -48000,
+          48000
+        ],
+        "first_delay": -35040.3,
+        "strongest_delay": -35040.3,
+        "acceptable_first_delays": [
+          -35040.3
+        ],
+        "span": null,
+        "reasons_any": [],
+        "note": "-0.73 s inside the default +-1 s search range"
+      },
+      {
+        "name": "low_snr",
+        "class": "noise",
+        "expect": "no_estimate",
+        "paths": [
+          {
+            "delay_samples": 90.0,
+            "gain_db": 0.0,
+            "polarity": 1
+          }
+        ],
+        "snr_db": -15.0,
+        "search": [
+          -2400,
+          2400
+        ],
+        "first_delay": 90.0,
+        "strongest_delay": 90.0,
+        "acceptable_first_delays": [
+          90.0
+        ],
+        "span": null,
+        "reasons_any": [
+          "low_psr",
+          "low_band_snr"
+        ],
+        "note": ""
+      }
+    ]
+  },
+  "references": [
+    "docs/design/q1-delay-finder.md (acceptance table)",
+    "PLAN.md 5.2 (delay finder), 5.4 (periodic pink)",
+    "docs/design/open-questions.md decisions 1a, 1c, 1d, 1e, 1f"
+  ],
+  "scalars": {
+    "single_frac.first_delay": 137.37,
+    "single_frac.strongest_delay": 137.37,
+    "single_frac.tol_samples": 1.0,
+    "single_frac.meas_start": 1000003.0,
+    "single_frac.search_min": -2400.0,
+    "single_frac.search_max": 2400.0,
+    "negative_frac.first_delay": -611.6,
+    "negative_frac.strongest_delay": -611.6,
+    "negative_frac.tol_samples": 1.0,
+    "negative_frac.meas_start": 1000003.0,
+    "negative_frac.search_min": -2400.0,
+    "negative_frac.search_max": 2400.0,
+    "refl_louder_inverted.first_delay": 250.25,
+    "refl_louder_inverted.strongest_delay": 370.25,
+    "refl_louder_inverted.tol_samples": 1.0,
+    "refl_louder_inverted.meas_start": 1000003.0,
+    "refl_louder_inverted.search_min": -2400.0,
+    "refl_louder_inverted.search_max": 2400.0,
+    "refl_louder_far.first_delay": -80.5,
+    "refl_louder_far.strongest_delay": 879.5,
+    "refl_louder_far.tol_samples": 1.0,
+    "refl_louder_far.meas_start": 1000003.0,
+    "refl_louder_far.search_min": -2400.0,
+    "refl_louder_far.search_max": 2400.0,
+    "direct_buried.first_delay": 544.0,
+    "direct_buried.strongest_delay": 544.0,
+    "direct_buried.tol_samples": 1.0,
+    "direct_buried.meas_start": 1000003.0,
+    "direct_buried.search_min": -2400.0,
+    "direct_buried.search_max": 2400.0,
+    "borderline.first_delay": 500.0,
+    "borderline.strongest_delay": 500.0,
+    "borderline.tol_samples": 1.0,
+    "borderline.meas_start": 1000003.0,
+    "borderline.search_min": -2400.0,
+    "borderline.search_max": 2400.0,
+    "close_interfering.first_delay": -200.4,
+    "close_interfering.strongest_delay": -195.4,
+    "close_interfering.tol_samples": 1.0,
+    "close_interfering.meas_start": 1000003.0,
+    "close_interfering.search_min": -2400.0,
+    "close_interfering.search_max": 2400.0,
+    "room.first_delay": 1020.6,
+    "room.strongest_delay": 1164.6,
+    "room.tol_samples": 1.0,
+    "room.meas_start": 1000003.0,
+    "room.search_min": -2400.0,
+    "room.search_max": 4800.0,
+    "large_negative.first_delay": -35040.3,
+    "large_negative.strongest_delay": -35040.3,
+    "large_negative.tol_samples": 1.0,
+    "large_negative.meas_start": 1000003.0,
+    "large_negative.search_min": -48000.0,
+    "large_negative.search_max": 48000.0,
+    "low_snr.first_delay": 90.0,
+    "low_snr.strongest_delay": 90.0,
+    "low_snr.tol_samples": 1.0,
+    "low_snr.meas_start": 1000003.0,
+    "low_snr.search_min": -2400.0,
+    "low_snr.search_max": 2400.0
+  },
+  "blob": {
+    "file": "delay_finder_full_pink.bin",
+    "nbytes": 1824000,
+    "sha256": "b700cfcf321e037f0e6abb1b19128a119d27ede660a1ab03af04c1125f5807c8"
+  },
+  "arrays": [
+    {
+      "name": "ref",
+      "dtype": "f64",
+      "shape": [
+        108000
+      ],
+      "offset": 0,
+      "nbytes": 864000,
+      "unit": "FS",
+      "description": "reference block starting at ref_start; covers meas_start - 48000 .. meas_start + meas_length + 48000"
+    },
+    {
+      "name": "meas.single_frac",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 864000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case single_frac, starting at single_frac.meas_start"
+    },
+    {
+      "name": "meas.negative_frac",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 960000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case negative_frac, starting at negative_frac.meas_start"
+    },
+    {
+      "name": "meas.refl_louder_inverted",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1056000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case refl_louder_inverted, starting at refl_louder_inverted.meas_start"
+    },
+    {
+      "name": "meas.refl_louder_far",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1152000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case refl_louder_far, starting at refl_louder_far.meas_start"
+    },
+    {
+      "name": "meas.direct_buried",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1248000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case direct_buried, starting at direct_buried.meas_start"
+    },
+    {
+      "name": "meas.borderline",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1344000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case borderline, starting at borderline.meas_start"
+    },
+    {
+      "name": "meas.close_interfering",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1440000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case close_interfering, starting at close_interfering.meas_start"
+    },
+    {
+      "name": "meas.room",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1536000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case room, starting at room.meas_start"
+    },
+    {
+      "name": "meas.large_negative",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1632000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case large_negative, starting at large_negative.meas_start"
+    },
+    {
+      "name": "meas.low_snr",
+      "dtype": "f64",
+      "shape": [
+        12000
+      ],
+      "offset": 1728000,
+      "nbytes": 96000,
+      "unit": "FS",
+      "description": "measurement block of case low_snr, starting at low_snr.meas_start"
+    }
+  ]
+}
