@@ -111,6 +111,8 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q4 — Level normalisation (before phase 2)
 
+**Design:** [q4-level-normalisation.md](q4-level-normalisation.md) (proposed).
+
 **Question.** Exact formulas and dB references for every displayed level.
 
 - Amplitude spectrum, PSD (dB re 1 FS²/Hz), band power: one-sided formulas, window
