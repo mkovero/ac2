@@ -12,3 +12,16 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# libzmq is built from source (zeromq-src) with CURVE backed by libsodium. rust-zmq's own
+# vendored build cannot be used: zmq-sys hard-codes `with_libsodium(None)`, which compiles
+# libzmq without CURVE. The binding here is a thin hand-written FFI layer (src/ffi.rs).
+libsodium-sys-stable = "1.24"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+rmp-serde = "1.3"
+
+[build-dependencies]
+zeromq-src = "=0.3.6"
+
+[dev-dependencies]
+tempfile = "3"
