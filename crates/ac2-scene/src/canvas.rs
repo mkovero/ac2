@@ -102,6 +102,12 @@ pub(crate) const fn anchor(h: HAlign, v: VAlign) -> Anchor {
     Anchor { h, v }
 }
 
+/// Generous width of a single-line label: no font metrics here, so 0.62 em per character
+/// (wider than the bundled font's average advance), used to keep text blocks apart.
+pub(crate) fn text_width(text: &str, size: f32) -> f32 {
+    text.chars().count() as f32 * 0.62 * size
+}
+
 /// Plot background, grid from both axes' ticks, y labels left of the plot, x labels below
 /// it when `x_labels`, and the y-axis title inside the top-left corner.
 pub(crate) fn pane_frame(
@@ -111,6 +117,22 @@ pub(crate) fn pane_frame(
     y: &Axis,
     x_labels: bool,
     title: &str,
+    theme: &Theme,
+) {
+    let at = [plot.x + 6.0, plot.y + 4.0];
+    pane_frame_at(c, plot, x, y, x_labels, title, at, theme);
+}
+
+/// [`pane_frame`] with the title's top-left at `title_at`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn pane_frame_at(
+    c: &mut Canvas,
+    plot: Rect,
+    x: &Axis,
+    y: &Axis,
+    x_labels: bool,
+    title: &str,
+    title_at: [f32; 2],
     theme: &Theme,
 ) {
     c.base.rects.push(FillRect {
@@ -166,7 +188,7 @@ pub(crate) fn pane_frame(
     }
     c.base.labels.push(label(
         title,
-        [plot.x + 6.0, plot.y + 4.0],
+        title_at,
         Anchor::TOP_LEFT,
         theme.small_font_size,
         theme.text_dim,
@@ -263,8 +285,10 @@ pub(crate) mod tests {
     /// 1.25 em per line.
     pub fn label_box(l: &Label) -> Rect {
         let lines: Vec<&str> = l.text.split('\n').collect();
-        let chars = lines.iter().map(|s| s.chars().count()).max().unwrap_or(0);
-        let w = chars as f32 * 0.62 * l.size;
+        let w = lines
+            .iter()
+            .map(|s| text_width(s, l.size))
+            .fold(0.0, f32::max);
         let h = lines.len() as f32 * 1.25 * l.size;
         let x = match l.anchor.h {
             HAlign::Left => l.pos[0],

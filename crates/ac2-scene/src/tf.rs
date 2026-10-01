@@ -3,9 +3,11 @@
 //! Coherence has its own pane by default or is overlaid on the magnitude pane
 //! ([`CoherencePlacement`], [`CoherenceOverlay`]).
 
-use crate::axis::{self, Axis, Range};
+use crate::axis::{self, Axis, Range, Steps};
 use crate::banner::{BannerRow, Status};
-use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, visible_columns};
+use crate::canvas::{
+    self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, text_width, visible_columns,
+};
 use crate::format;
 use crate::primitives::{Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::readout::{self, CursorReadout};
@@ -13,7 +15,7 @@ use crate::theme::Theme;
 use crate::trace::{
     DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
 };
-use crate::view::{CoherencePlacement, PhaseView, ViewState};
+use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
 
 /// Relative heights of the panes.
 const WEIGHT_MAGNITUDE: f32 = 3.0;
@@ -130,6 +132,9 @@ pub struct CoherenceOverlay {
 
 /// Share of the magnitude pane height given to the overlaid coherence.
 pub const OVERLAY_FRACTION: f32 = 0.3;
+/// Gap between the pane's top border and γ² = 1, so a fully coherent trace does not merge
+/// into the border line.
+pub const OVERLAY_INSET: f32 = 4.0;
 /// Right margin when the overlay axis needs room for `0.5`.
 const OVERLAY_MARGIN_RIGHT: f32 = 30.0;
 /// Opacity of the overlaid coherence trace, so it does not read as a magnitude trace of the
@@ -244,6 +249,20 @@ pub fn transfer_scene(
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, plot_x, plot_w, size, theme);
     let panes_at = layout(view, size, strip.rect.bottom(), right);
+    // Tick steps follow the pane heights of the default (coherence-pane) layout in both
+    // placements, so toggling the overlay changes no axis labels.
+    let pane_view = ViewState {
+        tf: TfView {
+            coherence_placement: CoherencePlacement::Pane,
+            ..view.tf
+        },
+        ..*view
+    };
+    let density_of: Vec<(TfPaneKind, f32)> =
+        layout(&pane_view, size, strip.rect.bottom(), MARGINS.right)
+            .into_iter()
+            .map(|(k, r)| (k, r.h))
+            .collect();
     let x_axis = axis::freq_axis(view.freq.range(), plot_x, plot_x + plot_w);
     let xm = x_axis.mapping;
     let last = panes_at.len().saturating_sub(1);
@@ -251,22 +270,29 @@ pub fn transfer_scene(
     let mut panes = Vec::new();
     let mut coherence_overlay = None;
     for (pi, (kind, plot)) in panes_at.iter().copied().enumerate() {
+        let density = density_of
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map_or(plot.h, |(_, h)| *h);
+        let y = |range: Range, title: &str, steps: Steps| {
+            axis::axis_with_density(range, plot.bottom(), plot.y, title, steps, density)
+        };
         let (y_axis, title) = match kind {
             TfPaneKind::Magnitude => (
-                axis::linear_axis(view.tf.magnitude_db, plot.bottom(), plot.y, "dB"),
+                y(view.tf.magnitude_db, "dB", Steps::Decimal),
                 "Magnitude dB".to_string(),
             ),
             TfPaneKind::Phase => match view.tf.phase {
                 PhaseView::Wrapped => (
-                    axis::phase_axis(Range::new(-180.0, 180.0), plot.bottom(), plot.y),
+                    y(Range::new(-180.0, 180.0), "°", Steps::Degrees),
                     "Phase °".to_string(),
                 ),
                 PhaseView::Unwrapped { range } => (
-                    axis::phase_axis(range, plot.bottom(), plot.y),
+                    y(range, "°", Steps::Degrees),
                     "Phase ° (unwrapped)".to_string(),
                 ),
                 PhaseView::GroupDelay { range_ms } => (
-                    axis::linear_axis(range_ms, plot.bottom(), plot.y, "ms"),
+                    y(range_ms, "ms", Steps::Decimal),
                     "Group delay ms".to_string(),
                 ),
             },
@@ -275,20 +301,41 @@ pub fn transfer_scene(
                 "Coherence γ²".to_string(),
             ),
         };
-        canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, pi == last, &title, theme);
+        let band = (overlay && kind == TfPaneKind::Magnitude).then(|| {
+            let band = Rect::new(
+                plot.x,
+                plot.y + OVERLAY_INSET,
+                plot.w,
+                (plot.h * OVERLAY_FRACTION - OVERLAY_INSET).max(1.0),
+            );
+            CoherenceOverlay {
+                band,
+                axis: axis::linear_axis(Range::new(0.0, 1.0), band.bottom(), band.y, "γ²"),
+            }
+        });
+        // The title (and, below, the legend) sits under the overlay band so the coherence
+        // curve never runs through text.
+        let title_at = [
+            plot.x + 6.0,
+            band.as_ref().map_or(plot.y, |o| o.band.bottom()) + 4.0,
+        ];
+        canvas::pane_frame_at(
+            &mut c,
+            plot,
+            &x_axis,
+            &y_axis,
+            pi == last,
+            &title,
+            title_at,
+            theme,
+        );
         let ym = y_axis.mapping;
         if kind != TfPaneKind::Coherence {
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
-        let band = (overlay && kind == TfPaneKind::Magnitude).then(|| {
-            let band = Rect::new(plot.x, plot.y, plot.w, plot.h * OVERLAY_FRACTION);
-            let o = CoherenceOverlay {
-                band,
-                axis: axis::linear_axis(Range::new(0.0, 1.0), band.bottom(), band.y, "γ²"),
-            };
-            overlay_frame(&mut c, plot, &o, theme);
-            o
-        });
+        if let Some(o) = &band {
+            overlay_frame(&mut c, plot, o, theme);
+        }
 
         for t in &shown {
             let cols = visible_columns(&t.freqs, xm.range.lo, xm.range.hi);
@@ -370,7 +417,12 @@ pub fn transfer_scene(
     });
     if let Some(&(_, top)) = panes_at.first() {
         let x0 = top.x + 8.0;
-        let y0 = top.y + 22.0;
+        // The text block starts under the pane title, which in overlay mode sits under the
+        // coherence band.
+        let block = coherence_overlay
+            .as_ref()
+            .map_or(top.y, |o: &CoherenceOverlay| o.band.bottom());
+        let y0 = block + 22.0;
         for (i, (e, t)) in legend.iter().zip(&shown).enumerate() {
             let y = y0 + i as f32 * ROW;
             c.overlay.rects.push(FillRect {
@@ -403,21 +455,37 @@ pub fn transfer_scene(
             let xr = top.right() - 8.0;
             let mut l = label(
                 cr.freq.clone(),
-                [xr, top.y + 6.0],
+                [xr, block + 6.0],
                 anchor(HAlign::Right, VAlign::Top),
                 theme.small_font_size,
                 theme.text,
             );
             l.clip = Some(top);
             c.overlay.labels.push(l);
+            let size = theme.small_font_size;
+            let row_text =
+                |r: &readout::CursorRow| format!("{}  {}  {}", r.magnitude, r.phase, r.coherence);
+            // Values sit on their trace's legend row; when any row would run into its legend
+            // text (a narrow pane, long names), all of them move below the legend block.
+            let collides = cr.rows.iter().any(|r| {
+                shown.iter().position(|t| t.key == r.key).is_some_and(|i| {
+                    let legend_end = x0 + 18.0 + text_width(&legend[i].text, size);
+                    legend_end + ROW > xr - text_width(&row_text(r), size)
+                })
+            });
+            let rows_y0 = if collides {
+                y0 + (legend.len() + usize::from(delay.is_some())) as f32 * ROW
+            } else {
+                y0
+            };
             for row in &cr.rows {
                 let Some(i) = shown.iter().position(|t| t.key == row.key) else {
                     continue;
                 };
-                let text = format!("{}  {}  {}", row.magnitude, row.phase, row.coherence);
+                let text = row_text(row);
                 let mut l = label(
                     text,
-                    [xr, y0 + i as f32 * ROW],
+                    [xr, rows_y0 + i as f32 * ROW],
                     anchor(HAlign::Right, VAlign::Center),
                     theme.small_font_size,
                     trace_stroke(&shown[i], theme).color,
@@ -804,22 +872,28 @@ mod tests {
         // Narrower plots: the right margin holds the overlay axis.
         assert_eq!(mag.right(), SIZE.width - OVERLAY_MARGIN_RIGHT);
         assert_eq!(s.x_axis.mapping.to_px(20_000.0), mag.right());
-        // γ² 0…1 fills the top 30 % of the magnitude pane.
+        // γ² 0…1 fills the top 30 % of the magnitude pane, inset from its top border so
+        // γ² = 1 does not sit on the border line.
         let o = s.coherence_overlay.as_ref().expect("overlay");
-        assert_eq!(o.band, Rect::new(mag.x, mag.y, mag.w, mag.h * 0.3));
-        assert_eq!(o.axis.mapping.to_px(1.0), mag.y);
-        assert_eq!(o.axis.mapping.to_px(0.0), mag.y + mag.h * 0.3);
+        let top = mag.y + OVERLAY_INSET;
+        let bottom = mag.y + mag.h * 0.3;
+        assert_eq!(o.band, Rect::new(mag.x, top, mag.w, bottom - top));
+        assert_eq!(o.axis.mapping.to_px(1.0), top);
+        assert!((o.axis.mapping.to_px(0.0) - bottom).abs() < 1e-3);
         assert_eq!(o.axis.title, "γ²");
         assert_eq!(o.axis.labels(), ["0.0", "0.5", "1.0"]);
-        // Axes as before; the overlay labels sit in the right margin, outside the plot.
-        // The taller magnitude pane may label more steps; the range is unchanged.
-        assert_eq!(
-            s.panes[0].y_axis.mapping.range,
-            pane.panes[0].y_axis.mapping.range
-        );
+        // Axes as before: same ranges and the same steps although both panes grew; the
+        // overlay labels sit in the right margin, outside the plot.
+        for i in 0..2 {
+            assert_eq!(
+                s.panes[i].y_axis.mapping.range,
+                pane.panes[i].y_axis.mapping.range
+            );
+            assert_eq!(s.panes[i].y_axis.labels(), pane.panes[i].y_axis.labels());
+        }
         assert_eq!(
             s.panes[1].y_axis.labels(),
-            ["−180", "−135", "−90", "−45", "0", "45", "90", "135", "180"]
+            ["−180", "−90", "0", "90", "180"]
         );
         assert_eq!(s.panes[0].title, "Magnitude dB");
         let right: Vec<&str> = s.scene.layers[0]
@@ -833,7 +907,7 @@ mod tests {
         let lines = &s.scene.layers[1].polylines;
         assert_eq!(lines.len(), 3);
         let coh = &lines[1];
-        assert!(coh.points.iter().all(|p| (p[1] - mag.y).abs() < 1e-3));
+        assert!(coh.points.iter().all(|p| (p[1] - top).abs() < 1e-3));
         assert_eq!(coh.clip, Some(mag));
         assert!(coh.alpha.is_empty());
         let a = Theme::dark().trace_color(0).a * OVERLAY_ALPHA;
@@ -909,5 +983,97 @@ mod tests {
         );
         assert!(s.coherence_overlay.is_none());
         assert_eq!(s.scene.layers[1].polylines.len(), 2);
+    }
+
+    #[test]
+    fn overlay_text_sits_below_the_band() {
+        use crate::canvas::tests::{intersects, label_box};
+        let s = busy(&overlay_view(), &Status::default());
+        let o = s.coherence_overlay.as_ref().expect("overlay");
+        // Title, legend, delay line and cursor values all start below the band.
+        let texts: Vec<&str> = s
+            .legend
+            .iter()
+            .map(|e| e.text.as_str())
+            .chain(s.delay.as_deref())
+            .chain(["Magnitude dB", "1.00 kHz"])
+            .collect();
+        let labels: Vec<&crate::primitives::Label> = s.scene.layers[..3]
+            .iter()
+            .flat_map(|l| &l.labels)
+            .filter(|l| texts.contains(&l.text.as_str()) || l.text.contains("dB  "))
+            .collect();
+        assert!(labels.len() >= texts.len() + 2, "{labels:?}");
+        for l in labels {
+            assert!(
+                !intersects(label_box(l), o.band),
+                "{:?} over the coherence band",
+                l.text
+            );
+        }
+        // Pane mode keeps the block at the top of the pane.
+        let p = busy(&ViewState::default(), &Status::default());
+        let title = |s: &TfScene| {
+            s.scene.layers[0]
+                .labels
+                .iter()
+                .find(|l| l.text == "Magnitude dB")
+                .map(|l| l.pos[1])
+        };
+        assert_eq!(title(&p), Some(p.panes[0].plot.y + 4.0));
+        assert_eq!(title(&s), Some(o.band.bottom() + 4.0));
+    }
+
+    #[test]
+    fn narrow_panes_move_cursor_values_below_the_legend() {
+        use crate::canvas::tests::{intersects, label_box};
+        let a = cols(97);
+        let mut ta = trace(&a, TraceKey::Live(MeasId(1)), 0.010);
+        ta.name = "Main left hang".into();
+        let mut tb = trace(&a, TraceKey::Live(MeasId(2)), 0.0115);
+        tb.name = "Delay tower stage right".into();
+        let view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        let build = |w: f32| {
+            let size = Viewport {
+                width: w,
+                height: 600.0,
+            };
+            transfer_scene(
+                &[ta.clone(), tb.clone()],
+                &Status::default(),
+                &view,
+                &Theme::dark(),
+                size,
+            )
+        };
+        let row_y = |s: &TfScene, needle: &str| {
+            s.scene.layers[2]
+                .labels
+                .iter()
+                .find(|l| l.text.starts_with(needle))
+                .map(|l| l.pos[1])
+                .expect(needle)
+        };
+        // Wide: values share the legend rows.
+        let wide = build(1400.0);
+        assert_eq!(row_y(&wide, "0.0 dB"), row_y(&wide, "Main left hang"));
+        // Narrow: values go below the legend and the delay line; nothing overlaps.
+        let narrow = build(460.0);
+        let legend_bottom = row_y(&narrow, "ref Main left hang");
+        assert!(row_y(&narrow, "0.0 dB") > legend_bottom);
+        let labels: Vec<&crate::primitives::Label> = narrow.scene.layers[2].labels.iter().collect();
+        for (i, a) in labels.iter().enumerate() {
+            for b in &labels[i + 1..] {
+                assert!(
+                    !intersects(label_box(a), label_box(b)),
+                    "{:?} overlaps {:?}",
+                    a.text,
+                    b.text
+                );
+            }
+        }
     }
 }

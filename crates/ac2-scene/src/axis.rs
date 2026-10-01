@@ -450,6 +450,41 @@ pub fn phase_axis(range: Range, px_lo: f32, px_hi: f32) -> Axis {
     }
 }
 
+/// Like [`linear_axis`] / [`phase_axis`] (`steps` picks which), but the tick step is chosen
+/// as if the axis were `density_px` long. Panes that change height between layouts keep
+/// the same steps, so switching a layout never relabels an axis whose range did not change.
+pub fn axis_with_density(
+    range: Range,
+    px_lo: f32,
+    px_hi: f32,
+    title: &str,
+    steps: Steps,
+    density_px: f32,
+) -> Axis {
+    let mapping = Mapping::new(range, Scale::Linear, px_lo, px_hi);
+    let px_per_unit = if range.is_valid() {
+        f64::from(density_px.abs()) / range.span()
+    } else {
+        0.0
+    };
+    let fmt = match steps {
+        Steps::Decimal => number_label,
+        Steps::Degrees => degree_label,
+    };
+    Axis {
+        ticks: linear_ticks_with(
+            &mapping,
+            px_per_unit,
+            steps,
+            linear_label_px(px_lo, px_hi),
+            MIN_MINOR_PX,
+            fmt,
+        ),
+        mapping,
+        title: title.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,5 +628,26 @@ mod tests {
         );
         let a = phase_axis(Range::new(-1440.0, 360.0), 200.0, 0.0);
         assert_eq!(a.labels(), ["−1440", "−1080", "−720", "−360", "0", "360"]);
+    }
+
+    #[test]
+    fn density_sets_the_step_not_the_mapping() {
+        let r = Range::new(-30.0, 30.0);
+        // Same density as the real length: identical to the plain axes.
+        assert_eq!(
+            axis_with_density(r, 300.0, 0.0, "dB", Steps::Decimal, 300.0),
+            linear_axis(r, 300.0, 0.0, "dB")
+        );
+        let p = Range::new(-180.0, 180.0);
+        assert_eq!(
+            axis_with_density(p, 200.0, 0.0, "°", Steps::Degrees, 200.0),
+            phase_axis(p, 200.0, 0.0)
+        );
+        // A taller axis keeps the steps of the shorter one it stands in for, mapped onto its
+        // own pixels.
+        let tall = axis_with_density(p, 400.0, 0.0, "°", Steps::Degrees, 120.0);
+        assert_eq!(tall.labels(), phase_axis(p, 120.0, 0.0).labels());
+        assert_eq!(tall.mapping.to_px(180.0), 0.0);
+        assert_eq!(tall.mapping.to_px(-180.0), 400.0);
     }
 }
