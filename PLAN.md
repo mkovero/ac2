@@ -206,6 +206,7 @@ crates/
   ac2-audio/   Backend trait (open duplex: N in / M out, callback → sample-indexed blocks)
                + explicit capability set. Backends: jack, cpal (CoreAudio/WASAPI/ASIO), fake.
   ac2-proto/   Typed commands (serde enum), events, normative frame schema, topics, version.
+  ac2-zmq/     The only crate linking libzmq (+libsodium): typed sockets, CURVE via SecureContext.
   ac2-client/  Async client: connect, call, subscribe, mirrored state.
   ac2d/        Daemon: audio session, jobs, state store, sessions, SPL log,
                ZMQ server, CURVE/ZAP, mDNS.
