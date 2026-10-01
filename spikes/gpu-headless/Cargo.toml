@@ -12,3 +12,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+wgpu = "30"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+png = "0.18"
+glyphon = "0.12"

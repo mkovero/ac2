@@ -48,11 +48,25 @@ jobs:
             pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev \
             mesa-vulkan-drivers libvulkan1
           # Hosted Linux runners have no GPU; lavapipe (Vulkan) is the only adapter wgpu can use.
-          echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
+          {
+            echo "WGPU_BACKEND=vulkan"
+            echo "AC2_GPU_FALLBACK=1"
+            echo "AC2_REQUIRE_GPU=1"
+          } >> "$GITHUB_ENV"
 
       - name: macOS system deps
         if: runner.os == 'macOS'
-        run: command -v cmake || brew install cmake
+        run: |
+          command -v cmake || brew install cmake
+          # Runners expose a paravirtual Metal device; there is no software Metal adapter.
+          { echo "WGPU_BACKEND=metal"; echo "AC2_REQUIRE_GPU=1"; } >> "$GITHUB_ENV"
+
+      - name: Windows GPU env
+        if: runner.os == 'Windows'
+        shell: bash
+        # WARP (software D3D12) ships with Windows.
+        run: |
+          { echo "WGPU_BACKEND=dx12"; echo "AC2_GPU_FALLBACK=1"; echo "AC2_REQUIRE_GPU=1"; } >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
 
