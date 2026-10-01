@@ -222,15 +222,15 @@ fixtures/      raw captures from real rigs + synthetic scenario captures
 | Need | Choice | Notes |
 |---|---|---|
 | FFT | `realfft` / `rustfft` | plans cached |
-| Audio | `jack`, `cpal` | ASIO feature opt-in |
+| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio/WASAPI/ALSA | ASIO feature opt-in; cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
 | Rings | `rtrb` | SPSC wait-free |
-| ZMQ | `zmq` (libzmq, vendored) | CURVE, Windows OK |
+| ZMQ | own thin binding over libzmq 4.3.5 + libsodium built from source (`zeromq-src`, `libsodium-sys-stable`) | `zmq` crate's vendored build has CURVE off; pure-Rust options lack CURVE or are too young — see `docs/design/spike-zmq-curve.md`. ZAP handler must be bound before CURVE sockets (fails open otherwise) |
 | Serialization | `rmp-serde` headers + raw `f32` LE arrays | decode via `bytemuck::try_cast_slice` with copy fallback on misalignment / big-endian |
 | Discovery | `mdns-sd` | `_ac2._tcp`; discovery never implies trust |
 | Async | `tokio` only in control plane | never on DSP threads |
 | CLI | `clap` with typed unit value-parsers (`20hz`, `-12dbfs`, `1.5ms`), no panics | keeps `ac`'s pleasant grammar |
-| GPU | `winit` + `wgpu` | Vulkan/Metal/DX12 |
-| UI chrome | `egui` on wgpu, custom theme | plots via `ac2-plot` callbacks |
+| GPU | `winit` + `wgpu` 30 | Vulkan/Metal/DX12; headless tests on lavapipe / WARP / Metal proven in CI — see `docs/design/spike-gpu-headless.md` |
+| UI chrome | `egui` on wgpu (egui-wgpu shares wgpu 30), custom theme | plots via `ac2-plot` prepare/paint callbacks; iced_wgpu lags 3 wgpu majors |
 | Text | `glyphon` / `cosmic-text` | |
 | Config | TOML | |
 
@@ -574,7 +574,7 @@ Open decisions (settle before phase 1; technical design questions are in §9.2):
    builds; the SDK is not vendored. ASIO binaries need their own licensing decision when
    phase 7 starts (Steinberg proprietary terms vs GPLv3 SDK, which would make that binary GPL).
 2. ~~Distance readout~~ **Decided:** shown as plain delay × c(temperature), no correction layers.
-3. UI chrome: egui vs iced (spike at phase 4 start; requirement: cross-platform, sleek, beautiful).
+3. ~~UI chrome~~ **Decided (phase 0 spike):** egui + custom theme; requirement stays cross-platform, sleek, beautiful.
 4. ~~Headless hardware~~ **Decided:** primary target x86-64 + modern GPU; SIMD where it matters; ARM best effort.
 5. ~~Raw capture format~~ **Decided:** f32 WAV/W64 + JSON sidecar (config timeline,
    discontinuities, algorithm version). Exact sample preservation;
