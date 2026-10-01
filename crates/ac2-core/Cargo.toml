@@ -12,3 +12,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+num-complex = "0.4"
+realfft = "3.5"
+
+[dev-dependencies]
+ac2-testkit = { path = "../ac2-testkit" }
