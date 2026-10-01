@@ -1,0 +1,5 @@
+30 trials in 9 s; params {}
+
+## per class
+class                            n    acc     ok  wrong  w/acc    amb  ambX    ref    e50    e95   emax   span
+sub/exc_music                   30  83.3%  83.3%   0.0%   0.0%   0.0%  0.0%  16.7%   0.57   3.78   4.16 100.0%

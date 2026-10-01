@@ -1,0 +1,8 @@
+band/kind              trials  moves  wrong    lock0   relock   amb%   ref%
+full/single                60    121      0     2.00     2.00    0.0    0.0
+full/refl_louder           60    122      0     2.00     2.00    0.0    0.0
+full/borderline            60      0      0      nan      nan  100.0    0.0
+sub/single                 15     48      0     2.00     2.00    0.0    0.0
+sub/refl_louder            15      0      0      nan      nan  100.0    0.0
+sub/borderline             15      0      4      nan      nan   93.3    0.0
+lock0/relock: mean windows until the first correct move (1 = first window; the rule needs two, so 2 is the minimum); nan = never in this trial set
