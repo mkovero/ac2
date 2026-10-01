@@ -1,6 +1,7 @@
 //! End to end: an `ac2-scene` view built from synthetic traces, rendered and compared with
 //! a golden image. The values are asserted headless in `ac2-scene`; this checks that the
-//! renderer draws what the scene says (panes, gaps, alpha, legend, banner on top).
+//! renderer draws what the scene says (panes, gaps, alpha, legend, banner strip above the
+//! panes, coherence in its own pane or overlaid on magnitude).
 
 mod common;
 
@@ -12,7 +13,7 @@ use ac2_scene::banner::Status;
 use ac2_scene::theme::Theme;
 use ac2_scene::time::Freshness;
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey, wrap_deg};
-use ac2_scene::view::ViewState;
+use ac2_scene::view::{CoherencePlacement, ViewState};
 use ac2_testkit::image::ImageTolerance;
 use common::{golden, gpu, render_on, renderer};
 
@@ -87,9 +88,9 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     }
 }
 
-#[test]
-fn transfer_view() {
-    let Some(gpu) = gpu("transfer_view") else {
+/// Two traces with a cursor and a STALE banner, rendered and compared with `name`.
+fn transfer_golden(name: &str, view: ViewState, status: Status) {
+    let Some(gpu) = gpu(name) else {
         return;
     };
     let a = cols(0.0, 0.0);
@@ -98,11 +99,7 @@ fn transfer_view() {
     let traces = [trace(&a, 1, 0, 0.010), trace(&b, 2, 1, 0.010_25)];
     let view = ViewState {
         cursor_hz: Some(1000.0),
-        ..ViewState::default()
-    };
-    let status = Status {
-        frame_age_s: Some(2.4),
-        ..Status::default()
+        ..view
     };
     let theme = Theme::dark();
     let size = Viewport {
@@ -111,7 +108,33 @@ fn transfer_view() {
     };
     let s = ac2_scene::tf::transfer_scene(&traces, &status, &view, &theme, size);
     assert_eq!(s.banners[0].text, "STALE · 2.4 s");
+    // The strip sits above every pane.
+    assert!(s.panes.iter().all(|p| p.plot.y > s.strip.bottom()));
     let mut r = renderer(gpu);
     let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
-    golden("transfer_view", &img, TEXT);
+    golden(name, &img, TEXT);
+}
+
+fn stale() -> Status {
+    Status {
+        frame_age_s: Some(2.4),
+        ..Status::default()
+    }
+}
+
+#[test]
+fn transfer_view() {
+    transfer_golden("transfer_view", ViewState::default(), stale());
+}
+
+#[test]
+fn transfer_view_coherence_overlay() {
+    let mut view = ViewState::default();
+    view.tf.coherence_placement = CoherencePlacement::OverlayOnMagnitude;
+    // Two banners: the strip grows by a row.
+    let status = Status {
+        no_delay_estimate: true,
+        ..stale()
+    };
+    transfer_golden("transfer_view_coherence_overlay", view, status);
 }

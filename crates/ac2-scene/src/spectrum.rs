@@ -8,7 +8,7 @@ use ac2_proto::frame::{RtaFrame, SpecFrame, ValidityMask};
 use ac2_proto::model::{BandFraction, LevelScale, Weighting, Window};
 
 use crate::axis::{self, Axis};
-use crate::banner::{self, BannerRow, Status};
+use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label, visible_columns};
 use crate::format;
 use crate::grid::nearest_column;
@@ -203,6 +203,42 @@ impl PeakHold {
     }
 }
 
+/// Thins a line to one point per pixel column (`xs` ascending, `ys` in pixels, NaN = gap):
+/// the highest point among the columns falling in that pixel, at its own x. A narrowband
+/// spectrum has far more bins than pixels; drawing every bin wastes vertices, and averaging
+/// or picking any bin would let a single-bin tone fall out of the picture. A pixel whose
+/// columns are all gaps stays a gap; a gap narrower than a pixel next to valid columns is
+/// not visible and is dropped.
+pub fn max_per_pixel(xs: &[f32], ys: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let n = xs.len().min(ys.len());
+    let mut ox = Vec::with_capacity(n.min(4096));
+    let mut oy = Vec::with_capacity(n.min(4096));
+    let mut i = 0;
+    while i < n {
+        let px = xs[i].floor();
+        let mut best: Option<usize> = None;
+        let mut j = i;
+        while j < n && (j == i || xs[j].floor() == px) {
+            if ys[j].is_finite() && best.is_none_or(|b| ys[j] < ys[b]) {
+                best = Some(j);
+            }
+            j += 1;
+        }
+        match best {
+            Some(b) => {
+                ox.push(xs[b]);
+                oy.push(ys[b]);
+            }
+            None => {
+                ox.push(xs[i]);
+                oy.push(f32::NAN);
+            }
+        }
+        i = j;
+    }
+    (ox, oy)
+}
+
 /// Cursor values on the spectrum.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpectrumCursor {
@@ -222,6 +258,8 @@ pub struct SpectrumScene {
     pub unit: String,
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
+    /// Banner strip above the plot; zero height when no banner is up.
+    pub strip: Rect,
     pub banners: Vec<BannerRow>,
 }
 
@@ -233,12 +271,9 @@ pub fn spectrum_scene(
     size: Viewport,
 ) -> SpectrumScene {
     let mut c = Canvas::new(size, theme);
-    let plot = Rect::new(
-        MARGINS.left,
-        MARGINS.top,
-        (size.width - MARGINS.left - MARGINS.right).max(1.0),
-        (size.height - MARGINS.top - MARGINS.bottom).max(1.0),
-    );
+    let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
+    let plot = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
     let units: Vec<&str> = traces
         .iter()
         .map(|t| level_unit(t.scale, t.quantity))
@@ -295,6 +330,7 @@ pub fn spectrum_scene(
             SpectrumStyle::Line => {
                 let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
                 let ys: Vec<f32> = cols.clone().map(|i| ym.to_px(t.value(i))).collect();
+                let (xs, ys) = max_per_pixel(&xs, &ys);
                 let (points, _) = gapped(&xs, &ys, None, |_, _| false);
                 if !points.is_empty() {
                     c.data.polylines.push(Polyline {
@@ -336,6 +372,7 @@ pub fn spectrum_scene(
                         .clone()
                         .map(|i| peak.get(i).map_or(f32::NAN, |p| ym.to_px(f64::from(*p))))
                         .collect();
+                    let (xs, ys) = max_per_pixel(&xs, &ys);
                     gapped(&xs, &ys, None, |_, _| false).0
                 }
             };
@@ -395,8 +432,6 @@ pub fn spectrum_scene(
         ));
     }
 
-    let rows = banner::layout_banners(&banner::banners(status), plot);
-    banner::draw_banners(&mut c.banners, &rows, theme);
     SpectrumScene {
         scene: c.into_scene(size),
         plot,
@@ -405,7 +440,8 @@ pub fn spectrum_scene(
         unit,
         caption,
         cursor,
-        banners: rows,
+        strip: strip.rect,
+        banners: strip.rows,
     }
 }
 
@@ -602,5 +638,94 @@ mod tests {
                 .filter(|p| p[1].is_finite())
                 .all(|p| (p[1] - y).abs() < 1e-3)
         );
+    }
+
+    #[test]
+    fn banners_sit_above_the_plot() {
+        let g = third_octaves();
+        let (f, e) = (column_frequencies(&g), column_edges(&g));
+        let level = vec![-40.0f32; f.len()];
+        let view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        let build = |status: &Status| {
+            spectrum_scene(
+                &[rta_trace(&f, &e, &level, LevelScale::Dbfs)],
+                status,
+                &view,
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let calm = build(&Status::default());
+        assert_eq!(calm.strip.h, 0.0);
+        assert_eq!(calm.plot.y, MARGINS.top);
+        let s = build(&crate::banner::tests::everything());
+        assert_eq!(s.banners.len(), crate::banner::MAX_BANNERS);
+        assert_eq!(s.plot.y, s.strip.bottom() + MARGINS.top);
+        assert_eq!(s.plot.bottom(), calm.plot.bottom());
+        assert!(s.cursor.is_some());
+        crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot]);
+    }
+
+    #[test]
+    fn line_thinning_keeps_peaks() {
+        // 32768 linear bins up to 24 kHz on a ~740 px log axis: thousands of bins per
+        // pixel at the top. Two single-bin tones and one sub-pixel invalid bin.
+        let n = 32_768;
+        let f: Vec<f64> = (0..n).map(|i| i as f64 * 24_000.0 / n as f64).collect();
+        let e: Vec<(f64, f64)> = f.iter().map(|x| (*x, *x)).collect();
+        let mut level = vec![-90.0f32; n];
+        let (k1, k2) = (13_653, 25_000); // 10.0 kHz, 18.3 kHz
+        level[k1] = -12.0;
+        level[k2] = -20.0;
+        let mut validity = vec![ValidityMask::NONE; n];
+        validity[k1 + 1] = ValidityMask::SETTLING;
+        let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+        t.quantity = Quantity::Tone;
+        t.validity = Some(&validity);
+        t.peak = Some(&level);
+        let view = ViewState {
+            spectrum: SpectrumView {
+                style: SpectrumStyle::Line,
+                level: Range::new(-100.0, 0.0),
+                peak_hold: true,
+            },
+            ..ViewState::default()
+        };
+        let s = spectrum_scene(&[t], &Status::default(), &view, &Theme::dark(), SIZE);
+        let (xm, ym) = (s.x_axis.mapping, s.y_axis.mapping);
+        for line in &s.scene.layers[1].polylines {
+            // At most one point per pixel column, plus the off-plot neighbours.
+            assert!(
+                line.points.len() <= s.plot.w as usize + 3,
+                "{}",
+                line.points.len()
+            );
+            assert_eq!(crate::canvas::tests::segments(&line.points).len(), 1);
+            for (k, v) in [(k1, -12.0), (k2, -20.0)] {
+                let want = [xm.to_px(f[k]), ym.to_px(v)];
+                assert!(line.points.contains(&want), "peak at {} Hz missing", f[k]);
+            }
+            // Everything else stays on the floor.
+            let floor = ym.to_px(-90.0);
+            let high = line.points.iter().filter(|p| p[1] < floor - 1e-3).count();
+            assert_eq!(high, 2);
+        }
+    }
+
+    #[test]
+    fn max_per_pixel_groups_by_pixel() {
+        let xs = [0.1, 0.5, 0.9, 1.2, 2.0, 2.5, 3.7];
+        let ys = [5.0, 3.0, 4.0, f32::NAN, f32::NAN, 7.0, 1.0];
+        let (x, y) = max_per_pixel(&xs, &ys);
+        assert_eq!(x, [0.5, 1.2, 2.5, 3.7]);
+        assert_eq!(y[0], 3.0);
+        assert!(y[1].is_nan());
+        assert_eq!(&y[2..], [7.0, 1.0]);
+        // Sparse input passes through unchanged.
+        let (x, y) = max_per_pixel(&[1.0, 5.0], &[2.0, 3.0]);
+        assert_eq!((x, y), (vec![1.0, 5.0], vec![2.0, 3.0]));
     }
 }

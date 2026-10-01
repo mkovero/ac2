@@ -98,6 +98,18 @@ impl Default for CoherenceStyle {
     }
 }
 
+/// Where the coherence trace is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CoherencePlacement {
+    /// Its own pane under phase; magnitude : phase : coherence heights 3 : 2 : 1.
+    #[default]
+    Pane,
+    /// Scaled into the top of the magnitude pane with its own 0–1 axis on the right;
+    /// magnitude : phase heights 3 : 2. Needs the magnitude pane: with magnitude hidden,
+    /// coherence keeps its own pane.
+    OverlayOnMagnitude,
+}
+
 /// Transfer-function panes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TfView {
@@ -107,6 +119,7 @@ pub struct TfView {
     pub magnitude_db: Range,
     pub phase: PhaseView,
     pub coherence: CoherenceStyle,
+    pub coherence_placement: CoherencePlacement,
     /// Trace whose measured delay is the phase reference (decision 8b). `None`: the first
     /// trace with a shared time base.
     pub phase_reference: Option<TraceKey>,
@@ -121,6 +134,7 @@ impl Default for TfView {
             magnitude_db: Range::new(-30.0, 30.0),
             phase: PhaseView::Wrapped,
             coherence: CoherenceStyle::default(),
+            coherence_placement: CoherencePlacement::Pane,
             phase_reference: None,
         }
     }

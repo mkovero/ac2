@@ -9,7 +9,7 @@
 use ac2_proto::frame::IrFrame;
 
 use crate::axis::{self, Axis, Range};
-use crate::banner::{self, BannerRow, Status};
+use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label};
 use crate::primitives::{Color, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::readout;
@@ -28,6 +28,8 @@ pub struct IrScene {
     pub origin: String,
     /// Why nothing is drawn, when that is the case.
     pub note: Option<String>,
+    /// Banner strip above the plot; zero height when no banner is up.
+    pub strip: Rect,
     pub banners: Vec<BannerRow>,
 }
 
@@ -97,12 +99,9 @@ pub fn ir_scene(
     size: Viewport,
 ) -> IrScene {
     let mut c = Canvas::new(size, theme);
-    let plot = Rect::new(
-        MARGINS.left,
-        MARGINS.top,
-        (size.width - MARGINS.left - MARGINS.right).max(1.0),
-        (size.height - MARGINS.top - MARGINS.bottom).max(1.0),
-    );
+    let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
+    let plot = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
     let t = times_ms(frame);
     let full = match (t.first(), t.last()) {
         (Some(a), Some(b)) if b > a => Range::new(*a, *b),
@@ -195,8 +194,6 @@ pub fn ir_scene(
             theme.text_dim,
         ));
     }
-    let rows = banner::layout_banners(&banner::banners(status), plot);
-    banner::draw_banners(&mut c.banners, &rows, theme);
     IrScene {
         scene: c.into_scene(size),
         plot,
@@ -205,7 +202,8 @@ pub fn ir_scene(
         title,
         origin,
         note,
-        banners: rows,
+        strip: strip.rect,
+        banners: strip.rows,
     }
 }
 
@@ -356,5 +354,33 @@ mod tests {
         );
         let stroke = s.scene.layers[1].polylines[0].stroke;
         assert!((stroke.color.a - Theme::dark().stale_alpha).abs() < 1e-6);
+    }
+
+    #[test]
+    fn banners_sit_above_the_plot() {
+        let f = frame();
+        let calm = ir_scene(
+            &f,
+            Color::WHITE,
+            None,
+            &Status::default(),
+            &view(IrMode::Log),
+            &Theme::dark(),
+            SIZE,
+        );
+        assert_eq!(calm.strip.h, 0.0);
+        assert_eq!(calm.plot.y, MARGINS.top);
+        let s = ir_scene(
+            &f,
+            Color::WHITE,
+            None,
+            &crate::banner::tests::everything(),
+            &view(IrMode::Log),
+            &Theme::dark(),
+            SIZE,
+        );
+        assert_eq!(s.plot.y, s.strip.bottom() + MARGINS.top);
+        assert_eq!(s.plot.bottom(), calm.plot.bottom());
+        crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot]);
     }
 }

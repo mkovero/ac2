@@ -1,17 +1,19 @@
 //! Transfer-function view: magnitude, phase and coherence panes sharing one log-frequency
-//! axis, with legend, comparison cursor, delay readout and banners.
+//! axis, with legend, comparison cursor, delay readout and the banner strip above them.
+//! Coherence has its own pane by default or is overlaid on the magnitude pane
+//! ([`CoherencePlacement`], [`CoherenceOverlay`]).
 
 use crate::axis::{self, Axis, Range};
-use crate::banner::{self, BannerRow, Status};
+use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, visible_columns};
 use crate::format;
-use crate::primitives::{FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
+use crate::primitives::{Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::readout::{self, CursorReadout};
 use crate::theme::Theme;
 use crate::trace::{
     DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
 };
-use crate::view::{PhaseView, ViewState};
+use crate::view::{CoherencePlacement, PhaseView, ViewState};
 
 /// Relative heights of the panes.
 const WEIGHT_MAGNITUDE: f32 = 3.0;
@@ -61,6 +63,10 @@ pub struct TfScene {
     pub cursor: Option<CursorReadout>,
     /// Reference trace's delay: `ref m1 12.34 ms · 4.24 m @ 20 °C`.
     pub delay: Option<String>,
+    /// Present when coherence is drawn over the magnitude pane.
+    pub coherence_overlay: Option<CoherenceOverlay>,
+    /// Banner strip above the panes; zero height when no banner is up.
+    pub strip: Rect,
     pub banners: Vec<BannerRow>,
 }
 
@@ -112,8 +118,32 @@ fn trace_stroke(t: &DisplayTrace, theme: &Theme) -> Stroke {
     Stroke::solid(t.color.with_alpha(a), theme.trace_width)
 }
 
-/// Pane rectangles for the enabled panes, top to bottom.
-fn layout(view: &ViewState, size: Viewport) -> Vec<(TfPaneKind, Rect)> {
+/// Coherence overlaid on the magnitude pane: γ² 0…1 maps linearly onto `band`, the top
+/// [`OVERLAY_FRACTION`] of the pane, so it stays clear of the 0 dB region where most
+/// magnitude traces sit. Its axis is drawn in the right margin, outside the plot, where the
+/// legend and cursor values cannot collide with it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoherenceOverlay {
+    pub band: Rect,
+    pub axis: Axis,
+}
+
+/// Share of the magnitude pane height given to the overlaid coherence.
+pub const OVERLAY_FRACTION: f32 = 0.3;
+/// Right margin when the overlay axis needs room for `0.5`.
+const OVERLAY_MARGIN_RIGHT: f32 = 30.0;
+/// Opacity of the overlaid coherence trace, so it does not read as a magnitude trace of the
+/// same colour.
+pub const OVERLAY_ALPHA: f32 = 0.6;
+
+fn overlaid(view: &ViewState) -> bool {
+    view.tf.show_coherence
+        && view.tf.show_magnitude
+        && view.tf.coherence_placement == CoherencePlacement::OverlayOnMagnitude
+}
+
+/// Pane rectangles for the enabled panes, top to bottom, below `top`.
+fn layout(view: &ViewState, size: Viewport, top: f32, right: f32) -> Vec<(TfPaneKind, Rect)> {
     let mut kinds = Vec::new();
     if view.tf.show_magnitude {
         kinds.push((TfPaneKind::Magnitude, WEIGHT_MAGNITUDE));
@@ -121,15 +151,15 @@ fn layout(view: &ViewState, size: Viewport) -> Vec<(TfPaneKind, Rect)> {
     if view.tf.show_phase {
         kinds.push((TfPaneKind::Phase, WEIGHT_PHASE));
     }
-    if view.tf.show_coherence {
+    if view.tf.show_coherence && !overlaid(view) {
         kinds.push((TfPaneKind::Coherence, WEIGHT_COHERENCE));
     }
     let x = MARGINS.left;
-    let w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let w = (size.width - MARGINS.left - right).max(1.0);
     let gaps = PANE_GAP * kinds.len().saturating_sub(1) as f32;
-    let h = (size.height - MARGINS.top - MARGINS.bottom - gaps).max(1.0);
+    let h = (size.height - top - MARGINS.top - MARGINS.bottom - gaps).max(1.0);
     let total: f32 = kinds.iter().map(|k| k.1).sum();
-    let mut y = MARGINS.top;
+    let mut y = top + MARGINS.top;
     kinds
         .into_iter()
         .map(|(k, wgt)| {
@@ -139,6 +169,59 @@ fn layout(view: &ViewState, size: Viewport) -> Vec<(TfPaneKind, Rect)> {
             (k, r)
         })
         .collect()
+}
+
+/// One trace's values on one mapping, as a gapped polyline; `None` when nothing is visible.
+fn trace_line(
+    xs: &[f32],
+    values: &[f64],
+    to_px: impl Fn(f64) -> f32,
+    alpha: Option<&[f32]>,
+    wrapped: bool,
+    stroke: Stroke,
+    clip: Rect,
+) -> Option<Polyline> {
+    let ys: Vec<f32> = values.iter().map(|v| to_px(*v)).collect();
+    let (points, alpha) = gapped(xs, &ys, alpha, |a, b| {
+        wrapped && (values[b] - values[a]).abs() > 180.0
+    });
+    (!points.is_empty()).then_some(Polyline {
+        points,
+        alpha,
+        stroke,
+        clip: Some(clip),
+    })
+}
+
+/// Right-margin axis of the overlaid coherence and a dashed line at γ² = 0.
+fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme) {
+    let floor = Stroke {
+        dash: Some(Dash {
+            on: 3.0,
+            off: 3.0,
+            offset: 0.0,
+        }),
+        ..theme.grid_major
+    };
+    canvas::hline(c, plot, o.band.bottom(), floor);
+    for t in &o.axis.ticks {
+        if let Some(text) = &t.label {
+            c.base.labels.push(label(
+                text.clone(),
+                [plot.right() + 4.0, t.pos],
+                anchor(HAlign::Left, VAlign::Center),
+                theme.small_font_size,
+                theme.axis_text,
+            ));
+        }
+    }
+    c.base.labels.push(label(
+        o.axis.title.clone(),
+        [plot.right() + 4.0, o.band.bottom() + 8.0],
+        anchor(HAlign::Left, VAlign::Top),
+        theme.small_font_size,
+        theme.text_dim,
+    ));
 }
 
 /// Builds the transfer view.
@@ -151,14 +234,22 @@ pub fn transfer_scene(
 ) -> TfScene {
     let mut c = Canvas::new(size, theme);
     let (reference, shown) = display_traces(traces, view.tf.phase_reference, &view.tf.coherence);
-    let panes_at = layout(view, size);
+    let overlay = overlaid(view);
+    let right = if overlay {
+        OVERLAY_MARGIN_RIGHT
+    } else {
+        MARGINS.right
+    };
     let plot_x = MARGINS.left;
-    let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let plot_w = (size.width - MARGINS.left - right).max(1.0);
+    let strip = canvas::banner_strip(&mut c, status, plot_x, plot_w, size, theme);
+    let panes_at = layout(view, size, strip.rect.bottom(), right);
     let x_axis = axis::freq_axis(view.freq.range(), plot_x, plot_x + plot_w);
     let xm = x_axis.mapping;
     let last = panes_at.len().saturating_sub(1);
 
     let mut panes = Vec::new();
+    let mut coherence_overlay = None;
     for (pi, (kind, plot)) in panes_at.iter().copied().enumerate() {
         let (y_axis, title) = match kind {
             TfPaneKind::Magnitude => (
@@ -189,6 +280,15 @@ pub fn transfer_scene(
         if kind != TfPaneKind::Coherence {
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
+        let band = (overlay && kind == TfPaneKind::Magnitude).then(|| {
+            let band = Rect::new(plot.x, plot.y, plot.w, plot.h * OVERLAY_FRACTION);
+            let o = CoherenceOverlay {
+                band,
+                axis: axis::linear_axis(Range::new(0.0, 1.0), band.bottom(), band.y, "γ²"),
+            };
+            overlay_frame(&mut c, plot, &o, theme);
+            o
+        });
 
         for t in &shown {
             let cols = visible_columns(&t.freqs, xm.range.lo, xm.range.hi);
@@ -202,27 +302,43 @@ pub fn transfer_scene(
                 },
                 TfPaneKind::Coherence => &t.coherence,
             };
-            let values = &values[cols.clone()];
             let scale = match (kind, view.tf.phase) {
                 (TfPaneKind::Phase, PhaseView::GroupDelay { .. }) => 1000.0,
                 _ => 1.0,
             };
-            let ys: Vec<f32> = values.iter().map(|v| ym.to_px(v * scale)).collect();
+            // The coherence trace itself is never faded by coherence.
             let alpha = (kind != TfPaneKind::Coherence && view.tf.coherence.alpha)
                 .then(|| &t.alpha[cols.clone()]);
             let wrapped = kind == TfPaneKind::Phase && view.tf.phase == PhaseView::Wrapped;
-            let (points, alpha) = gapped(&xs, &ys, alpha, |a, b| {
-                wrapped && (values[b] - values[a]).abs() > 180.0
-            });
-            if points.is_empty() {
-                continue;
-            }
-            c.data.polylines.push(Polyline {
-                points,
+            let stroke = trace_stroke(t, theme);
+            c.data.polylines.extend(trace_line(
+                &xs,
+                &values[cols.clone()],
+                |v| ym.to_px(v * scale),
                 alpha,
-                stroke: trace_stroke(t, theme),
-                clip: Some(plot),
-            });
+                wrapped,
+                stroke,
+                plot,
+            ));
+            if let Some(o) = &band {
+                let om = o.axis.mapping;
+                let stroke = Stroke {
+                    color: stroke.color.with_alpha(OVERLAY_ALPHA),
+                    ..stroke
+                };
+                c.data.polylines.extend(trace_line(
+                    &xs,
+                    &t.coherence[cols.clone()],
+                    |v| om.to_px(v),
+                    None,
+                    false,
+                    stroke,
+                    plot,
+                ));
+            }
+        }
+        if band.is_some() {
+            coherence_overlay = band;
         }
         panes.push(TfPane {
             kind,
@@ -315,12 +431,6 @@ pub fn transfer_scene(
         }
     }
 
-    let banner_area = panes_at
-        .first()
-        .map_or(Rect::new(0.0, 0.0, size.width, size.height), |(_, r)| *r);
-    let rows = banner::layout_banners(&banner::banners(status), banner_area);
-    banner::draw_banners(&mut c.banners, &rows, theme);
-
     TfScene {
         scene: c.into_scene(size),
         x_axis,
@@ -330,7 +440,9 @@ pub fn transfer_scene(
         legend,
         cursor,
         delay,
-        banners: rows,
+        coherence_overlay,
+        strip: strip.rect,
+        banners: strip.rows,
     }
 }
 
@@ -604,25 +716,198 @@ mod tests {
         assert!(line.points.iter().all(|p| (p[1] - y).abs() < 0.01));
     }
 
-    #[test]
-    fn banners_sit_on_top() {
-        let c = cols(10);
-        let status = Status {
-            protection: ac2_proto::frame::ProtectionFlags::NO_REFERENCE,
-            ..Status::default()
+    fn overlay_view() -> ViewState {
+        ViewState {
+            tf: crate::view::TfView {
+                coherence_placement: CoherencePlacement::OverlayOnMagnitude,
+                ..Default::default()
+            },
+            ..ViewState::default()
+        }
+    }
+
+    /// Two traces with a legend, delay line, cursor readout and every banner up.
+    fn busy(view: &ViewState, status: &Status) -> TfScene {
+        let a = cols(97);
+        let mut ta = trace(&a, TraceKey::Live(MeasId(1)), 0.010);
+        ta.name = "Main L".into();
+        let mut tb = trace(&a, TraceKey::Live(MeasId(2)), 0.0115);
+        tb.name = "Delay tower".into();
+        tb.offset_db = 3.0;
+        let view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..*view
         };
-        let s = transfer_scene(
-            &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
-            &status,
+        transfer_scene(&[ta, tb], status, &view, &Theme::dark(), SIZE)
+    }
+
+    #[test]
+    fn banners_live_in_a_strip_above_the_panes() {
+        use crate::banner::{BANNER_GAP, BANNER_HEIGHT, BANNER_PAD, MAX_BANNERS};
+        use crate::canvas::tests::assert_banners_clear;
+        for view in [ViewState::default(), overlay_view()] {
+            let calm = busy(&view, &Status::default());
+            assert!(calm.banners.is_empty());
+            assert_eq!(calm.strip.h, 0.0);
+            assert_eq!(calm.panes[0].plot.y, MARGINS.top);
+            assert!(calm.scene.layers[3].rects.is_empty());
+
+            let s = busy(&view, &crate::banner::tests::everything());
+            assert_eq!(s.banners.len(), MAX_BANNERS);
+            assert_eq!(s.banners[2].text, "+5 more");
+            let strip_h = 2.0 * BANNER_PAD + 3.0 * BANNER_HEIGHT + 2.0 * BANNER_GAP;
+            assert_eq!(s.strip, Rect::new(0.0, 0.0, SIZE.width, strip_h));
+            // Panes start below the strip and shrink by its height, keeping their ratios.
+            assert_eq!(s.panes[0].plot.y, strip_h + MARGINS.top);
+            let total = |s: &TfScene| s.panes.iter().map(|p| p.plot.h).sum::<f32>();
+            assert!((total(&calm) - total(&s) - strip_h).abs() < 1e-3);
+            for (a, b) in calm.panes.iter().zip(&s.panes) {
+                assert!((b.plot.h / a.plot.h - total(&s) / total(&calm)).abs() < 1e-4);
+            }
+            // Nothing drawn below the strip is covered: panes, the overlay band, legend,
+            // delay line, cursor readout, axis labels and titles.
+            assert!(!s.legend.is_empty() && s.cursor.is_some() && s.delay.is_some());
+            let mut areas: Vec<Rect> = s.panes.iter().map(|p| p.plot).collect();
+            areas.extend(s.coherence_overlay.as_ref().map(|o| o.band));
+            assert_banners_clear(&s.scene, &s.banners, &areas);
+            for r in &s.banners {
+                assert!(r.rect.bottom() <= s.strip.bottom());
+            }
+        }
+    }
+
+    #[test]
+    fn coherence_overlay_layout() {
+        let c = cols(100);
+        let t = [trace(&c, TraceKey::Live(MeasId(1)), 0.0)];
+        let pane = transfer_scene(
+            &t,
+            &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
             SIZE,
         );
-        let top = s.scene.layers.last().expect("layers");
-        assert_eq!(top.labels[0].text, "NO REFERENCE");
-        assert_eq!(
-            s.banners[0].rect.y,
-            s.panes[0].plot.y + crate::banner::BANNER_TOP
+        assert!(pane.coherence_overlay.is_none());
+        let s = transfer_scene(
+            &t,
+            &Status::default(),
+            &overlay_view(),
+            &Theme::dark(),
+            SIZE,
         );
+        let kinds: Vec<_> = s.panes.iter().map(|p| p.kind).collect();
+        assert_eq!(kinds, [TfPaneKind::Magnitude, TfPaneKind::Phase]);
+        let (mag, phase) = (s.panes[0].plot, s.panes[1].plot);
+        // Magnitude : phase = 3 : 2, filling the height the coherence pane had.
+        assert!((mag.h / phase.h - 1.5).abs() < 1e-4);
+        assert!((phase.bottom() - pane.panes[2].plot.bottom()).abs() < 1e-3);
+        // Narrower plots: the right margin holds the overlay axis.
+        assert_eq!(mag.right(), SIZE.width - OVERLAY_MARGIN_RIGHT);
+        assert_eq!(s.x_axis.mapping.to_px(20_000.0), mag.right());
+        // γ² 0…1 fills the top 30 % of the magnitude pane.
+        let o = s.coherence_overlay.as_ref().expect("overlay");
+        assert_eq!(o.band, Rect::new(mag.x, mag.y, mag.w, mag.h * 0.3));
+        assert_eq!(o.axis.mapping.to_px(1.0), mag.y);
+        assert_eq!(o.axis.mapping.to_px(0.0), mag.y + mag.h * 0.3);
+        assert_eq!(o.axis.title, "γ²");
+        assert_eq!(o.axis.labels(), ["0.0", "0.5", "1.0"]);
+        // Axes as before; the overlay labels sit in the right margin, outside the plot.
+        // The taller magnitude pane may label more steps; the range is unchanged.
+        assert_eq!(
+            s.panes[0].y_axis.mapping.range,
+            pane.panes[0].y_axis.mapping.range
+        );
+        assert_eq!(
+            s.panes[1].y_axis.labels(),
+            ["−180", "−135", "−90", "−45", "0", "45", "90", "135", "180"]
+        );
+        assert_eq!(s.panes[0].title, "Magnitude dB");
+        let right: Vec<&str> = s.scene.layers[0]
+            .labels
+            .iter()
+            .filter(|l| l.pos[0] > mag.right())
+            .map(|l| l.text.as_str())
+            .collect();
+        assert_eq!(right, ["0.0", "0.5", "1.0", "γ²"]);
+        // Polylines: magnitude, overlaid coherence, phase.
+        let lines = &s.scene.layers[1].polylines;
+        assert_eq!(lines.len(), 3);
+        let coh = &lines[1];
+        assert!(coh.points.iter().all(|p| (p[1] - mag.y).abs() < 1e-3));
+        assert_eq!(coh.clip, Some(mag));
+        assert!(coh.alpha.is_empty());
+        let a = Theme::dark().trace_color(0).a * OVERLAY_ALPHA;
+        assert!((coh.stroke.color.a - a).abs() < 1e-6);
+    }
+
+    #[test]
+    fn overlay_keeps_alpha_and_blanking() {
+        let mut c = cols(60);
+        for i in 10..14 {
+            c.coh[i] = 0.2;
+        }
+        c.coh[30] = 0.7;
+        let blank = |placement| ViewState {
+            tf: crate::view::TfView {
+                coherence: crate::view::CoherenceStyle {
+                    blank_below: Some(0.5),
+                    ..Default::default()
+                },
+                coherence_placement: placement,
+                ..Default::default()
+            },
+            ..ViewState::default()
+        };
+        let t = [trace(&c, TraceKey::Live(MeasId(1)), 0.0)];
+        let build = |v: &ViewState| {
+            transfer_scene(&t, &Status::default(), v, &Theme::dark(), SIZE)
+                .scene
+                .layers[1]
+                .polylines
+                .clone()
+        };
+        let pane = build(&blank(CoherencePlacement::Pane));
+        let over = build(&blank(CoherencePlacement::OverlayOnMagnitude));
+        // Magnitude: same gap and the same per-point opacity in both layouts.
+        assert_eq!(segments(&pane[0].points).len(), 2);
+        assert_eq!(pane[0].alpha, over[0].alpha);
+        assert!(pane[0].alpha.iter().any(|a| *a < 1.0));
+        // Coherence is never blanked or faded, in its pane or overlaid.
+        for coh in [&pane[2], &over[1]] {
+            assert_eq!(segments(&coh.points).len(), 1);
+            assert_eq!(coh.points.len(), 60);
+            assert!(coh.alpha.is_empty());
+        }
+        // Phase blanks like magnitude.
+        assert_eq!(segments(&over[2].points).len(), 2);
+    }
+
+    #[test]
+    fn overlay_without_magnitude_keeps_the_pane() {
+        let c = cols(20);
+        let mut view = overlay_view();
+        view.tf.show_magnitude = false;
+        let s = transfer_scene(
+            &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &Status::default(),
+            &view,
+            &Theme::dark(),
+            SIZE,
+        );
+        let kinds: Vec<_> = s.panes.iter().map(|p| p.kind).collect();
+        assert_eq!(kinds, [TfPaneKind::Phase, TfPaneKind::Coherence]);
+        assert!(s.coherence_overlay.is_none());
+        // Hidden coherence is hidden in both placements.
+        let mut view = overlay_view();
+        view.tf.show_coherence = false;
+        let s = transfer_scene(
+            &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &Status::default(),
+            &view,
+            &Theme::dark(),
+            SIZE,
+        );
+        assert!(s.coherence_overlay.is_none());
+        assert_eq!(s.scene.layers[1].polylines.len(), 2);
     }
 }

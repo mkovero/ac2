@@ -8,7 +8,8 @@ use ac2_proto::frame::SplFrame;
 use ac2_proto::model::{CalEntry, CalKey, LevelScale, PeakWeighting, TimeWeighting, Weighting};
 use ac2_proto::units::WallNs;
 
-use crate::canvas::{Canvas, anchor, label};
+use crate::banner::{BannerRow, Status};
+use crate::canvas::{self, Canvas, anchor, label};
 use crate::format;
 use crate::primitives::{HAlign, Rect, Scene, VAlign, Viewport};
 use crate::theme::Theme;
@@ -117,12 +118,19 @@ pub fn spl_readout(frame: &SplFrame, cal: String, freshness: Option<Freshness>) 
     }
 }
 
-/// Lays the readout out in `size`: metric top-left, big number with its unit, a row of
-/// statistics, interval and calibration at the bottom.
-pub fn spl_scene(r: &SplReadout, theme: &Theme, size: Viewport) -> Scene {
+/// Lays the readout out in `size` below the banner strip: metric top-left, big number with
+/// its unit, a row of statistics, interval and calibration at the bottom.
+pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport) -> SplScene {
     let mut c = Canvas::new(size, theme);
     let pad = 12.0;
-    let area = Rect::new(pad, pad, size.width - 2.0 * pad, size.height - 2.0 * pad);
+    let strip = canvas::banner_strip(&mut c, status, pad, size.width - 2.0 * pad, size, theme);
+    let top = strip.rect.bottom();
+    let area = Rect::new(
+        pad,
+        top + pad,
+        size.width - 2.0 * pad,
+        (size.height - top - 2.0 * pad).max(1.0),
+    );
     let main = if r.stale.is_some() {
         theme.text_dim
     } else {
@@ -185,7 +193,23 @@ pub fn spl_scene(r: &SplReadout, theme: &Theme, size: Viewport) -> Scene {
         theme.small_font_size,
         theme.text_dim,
     ));
-    c.into_scene(size)
+    SplScene {
+        scene: c.into_scene(size),
+        area,
+        strip: strip.rect,
+        banners: strip.rows,
+    }
+}
+
+/// The SPL meter as drawn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplScene {
+    pub scene: Scene,
+    /// Where the readout is laid out, below the banner strip.
+    pub area: Rect,
+    /// Banner strip above the readout; zero height when no banner is up.
+    pub strip: Rect,
+    pub banners: Vec<BannerRow>,
 }
 
 #[cfg(test)]
@@ -310,12 +334,17 @@ mod tests {
         );
         let s = spl_scene(
             &r,
+            &Status::default(),
             &Theme::dark(),
             Viewport {
                 width: 400.0,
                 height: 200.0,
             },
         );
+        assert!(s.banners.is_empty());
+        assert_eq!(s.strip.h, 0.0);
+        assert_eq!(s.area, Rect::new(12.0, 12.0, 376.0, 176.0));
+        let s = s.scene;
         let texts: Vec<&str> = s
             .layers
             .iter()
@@ -340,5 +369,25 @@ mod tests {
             .expect("value");
         assert_eq!(big.size, Theme::dark().big_font_size);
         assert_eq!(big.color, Theme::dark().text_dim);
+    }
+
+    #[test]
+    fn banners_push_the_readout_down() {
+        let r = spl_readout(&frame(LevelScale::DbSpl), "cal 3 h ago".into(), None);
+        let size = Viewport {
+            width: 400.0,
+            height: 300.0,
+        };
+        let s = spl_scene(
+            &r,
+            &crate::banner::tests::everything(),
+            &Theme::dark(),
+            size,
+        );
+        assert_eq!(s.banners.len(), crate::banner::MAX_BANNERS);
+        assert!(s.strip.h > 0.0);
+        assert_eq!(s.area.y, s.strip.bottom() + 12.0);
+        assert_eq!(s.area.bottom(), 288.0);
+        crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.area]);
     }
 }

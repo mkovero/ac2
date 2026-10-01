@@ -1,6 +1,7 @@
 //! Shared drawing helpers for the builders: layer stack, pane frames, gap-aware polylines.
 
 use crate::axis::{Axis, TickKind};
+use crate::banner::{self, BannerStrip, Status};
 use crate::primitives::{
     Anchor, Color, FillRect, Grid, GridAxis, GridKind, GridLine, HAlign, Label, Layer, Polyline,
     Rect, Scene, Stroke, VAlign, Viewport,
@@ -8,7 +9,7 @@ use crate::primitives::{
 use crate::theme::Theme;
 
 /// Layer order: base (backgrounds, grids, axis labels) → data (traces) → overlay (cursor,
-/// legend, readouts) → banners (cover everything).
+/// legend, readouts) → banners (in their own strip above the plots, drawn last).
 #[derive(Debug, Default)]
 pub(crate) struct Canvas {
     pub base: Layer,
@@ -54,6 +55,31 @@ pub(crate) const MARGINS: Margins = Margins {
 
 /// Gap between stacked panes.
 pub(crate) const PANE_GAP: f32 = 10.0;
+
+/// Lays out and draws the banner strip for `status`, rows centred over `x .. x + w`.
+pub(crate) fn banner_strip(
+    c: &mut Canvas,
+    status: &Status,
+    x: f32,
+    w: f32,
+    size: Viewport,
+    theme: &Theme,
+) -> BannerStrip {
+    let strip = banner::banner_strip(&banner::banners(status), x, w, size);
+    banner::draw_banners(&mut c.banners, &strip.rows, theme);
+    strip
+}
+
+/// The plot rectangle of a single-pane view: inside the margins, below the banner strip
+/// (`top` is the strip's bottom edge).
+pub(crate) fn plot_area(size: Viewport, top: f32, right: f32) -> Rect {
+    Rect::new(
+        MARGINS.left,
+        top + MARGINS.top,
+        (size.width - MARGINS.left - right).max(1.0),
+        (size.height - top - MARGINS.top - MARGINS.bottom).max(1.0),
+    )
+}
 
 pub(crate) fn label(
     text: impl Into<String>,
@@ -232,6 +258,56 @@ pub(crate) fn visible_columns(freqs: &[f64], lo: f64, hi: f64) -> std::ops::Rang
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// Generous box around a label's text (no font metrics here): 0.62 em per character,
+    /// 1.25 em per line.
+    pub fn label_box(l: &Label) -> Rect {
+        let lines: Vec<&str> = l.text.split('\n').collect();
+        let chars = lines.iter().map(|s| s.chars().count()).max().unwrap_or(0);
+        let w = chars as f32 * 0.62 * l.size;
+        let h = lines.len() as f32 * 1.25 * l.size;
+        let x = match l.anchor.h {
+            HAlign::Left => l.pos[0],
+            HAlign::Center => l.pos[0] - w / 2.0,
+            HAlign::Right => l.pos[0] - w,
+        };
+        let y = match l.anchor.v {
+            VAlign::Top => l.pos[1],
+            VAlign::Center => l.pos[1] - h / 2.0,
+            VAlign::Baseline => l.pos[1] - 0.95 * l.size,
+            VAlign::Bottom => l.pos[1] - h,
+        };
+        Rect::new(x, y, w, h)
+    }
+
+    pub fn intersects(a: Rect, b: Rect) -> bool {
+        a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+    }
+
+    /// No banner row overlaps any `areas` rect or any label outside the banner layer (axis
+    /// labels, titles, legend, cursor readout).
+    pub fn assert_banners_clear(scene: &Scene, rows: &[banner::BannerRow], areas: &[Rect]) {
+        assert!(!rows.is_empty(), "test needs banners up");
+        let (banners, rest) = scene.layers.split_last().expect("layers");
+        assert_eq!(banners.rects.len(), rows.len());
+        for r in rows {
+            for a in areas {
+                assert!(
+                    !intersects(r.rect, *a),
+                    "banner {:?} over area {a:?}",
+                    r.text
+                );
+            }
+            for l in rest.iter().flat_map(|layer| &layer.labels) {
+                assert!(
+                    !intersects(r.rect, label_box(l)),
+                    "banner {:?} over label {:?}",
+                    r.text,
+                    l.text
+                );
+            }
+        }
+    }
 
     /// Runs of finite points in a gapped polyline.
     pub fn segments(points: &[[f32; 2]]) -> Vec<Vec<[f32; 2]>> {

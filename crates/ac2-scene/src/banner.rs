@@ -13,15 +13,17 @@
 //! | 6 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
 //! | 7 | NO DELAY ESTIMATE | info | TF measurement without an accepted delay |
 //!
-//! Layout: centred at the top of the area, stacked downwards in that order, at most
-//! [`MAX_BANNERS`] rows and never more than fit; when some do not fit, the last row says
-//! how many more there are.
+//! Layout: a strip above the plots, outside every data area, so a banner never hides the
+//! trace, legend or cursor values it is warning about. Rows are centred over the plots and
+//! stacked downwards in that order, at most [`MAX_BANNERS`] and never more than fit; when
+//! some do not fit, the last row says how many more there are. The strip only exists while
+//! a banner is up; the plots below shrink by its height ([`banner_strip`]).
 
 use ac2_proto::frame::ProtectionFlags;
 use ac2_proto::model::{MeasKind, Measurement, TimingState};
 
 use crate::format;
-use crate::primitives::{Anchor, FillRect, HAlign, Layer, Rect, VAlign};
+use crate::primitives::{Anchor, FillRect, HAlign, Layer, Rect, VAlign, Viewport};
 use crate::theme::Theme;
 use crate::time::{DAEMON_SILENT_AFTER_S, STALE_AFTER_S};
 
@@ -29,8 +31,11 @@ pub const MAX_BANNERS: usize = 3;
 pub const BANNER_HEIGHT: f32 = 24.0;
 pub const BANNER_GAP: f32 = 4.0;
 pub const BANNER_MAX_WIDTH: f32 = 460.0;
-/// Inset of the banner stack from the top of the area.
-pub const BANNER_TOP: f32 = 8.0;
+/// Space above and below the stack inside the strip.
+pub const BANNER_PAD: f32 = 4.0;
+/// Largest share of the view height the strip may take: the plots must stay readable while
+/// faults are up, and the overflow row names whatever did not fit.
+pub const STRIP_MAX_FRACTION: f32 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -181,9 +186,31 @@ pub struct BannerRow {
     pub detail: Option<String>,
 }
 
-/// Places `banners` (already in priority order) in `area`.
+/// Strip of banner rows above the plots.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BannerStrip {
+    /// Full view width from the top; zero height when no banner is up.
+    pub rect: Rect,
+    pub rows: Vec<BannerRow>,
+}
+
+/// Lays out the strip for a view of `size`, rows centred over `x .. x + w` (the plots).
+pub fn banner_strip(banners: &[Banner], x: f32, w: f32, size: Viewport) -> BannerStrip {
+    let area = Rect::new(x, 0.0, w, size.height * STRIP_MAX_FRACTION);
+    let rows = layout_banners(banners, area);
+    let h = rows
+        .last()
+        .map_or(0.0, |r| r.rect.bottom() + BANNER_PAD - area.y);
+    BannerStrip {
+        rect: Rect::new(0.0, 0.0, size.width, h),
+        rows,
+    }
+}
+
+/// Places `banners` (already in priority order) in `area`, padded by [`BANNER_PAD`] above
+/// and below.
 pub fn layout_banners(banners: &[Banner], area: Rect) -> Vec<BannerRow> {
-    let fit = ((area.h - BANNER_TOP + BANNER_GAP) / (BANNER_HEIGHT + BANNER_GAP)).floor();
+    let fit = ((area.h - 2.0 * BANNER_PAD + BANNER_GAP) / (BANNER_HEIGHT + BANNER_GAP)).floor();
     let capacity = (fit.max(0.0) as usize).min(MAX_BANNERS);
     if capacity == 0 || banners.is_empty() {
         return Vec::new();
@@ -193,7 +220,7 @@ pub fn layout_banners(banners: &[Banner], area: Rect) -> Vec<BannerRow> {
     let rect = |i: usize| {
         Rect::new(
             x,
-            area.y + BANNER_TOP + i as f32 * (BANNER_HEIGHT + BANNER_GAP),
+            area.y + BANNER_PAD + i as f32 * (BANNER_HEIGHT + BANNER_GAP),
             w,
             BANNER_HEIGHT,
         )
@@ -270,7 +297,7 @@ pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ac2_proto::units::Samples;
 
@@ -278,7 +305,7 @@ mod tests {
         b.iter().map(|b| b.text.as_str()).collect()
     }
 
-    fn everything() -> Status {
+    pub(crate) fn everything() -> Status {
         Status {
             daemon_silence_s: 3.2,
             protection: ProtectionFlags::CLIP
@@ -370,7 +397,7 @@ mod tests {
         }
         assert_eq!(rows[0].rect.w, BANNER_MAX_WIDTH);
         assert!((rows[0].rect.x + rows[0].rect.w / 2.0 - 400.0).abs() < 1e-3);
-        assert_eq!(rows[0].rect.y, BANNER_TOP);
+        assert_eq!(rows[0].rect.y, BANNER_PAD);
 
         // Exactly MAX_BANNERS fit without an overflow row.
         let rows = layout_banners(&b[..3], area);
@@ -382,13 +409,51 @@ mod tests {
             0.0,
             0.0,
             300.0,
-            BANNER_TOP + 2.0 * BANNER_HEIGHT + BANNER_GAP,
+            2.0 * BANNER_PAD + 2.0 * BANNER_HEIGHT + BANNER_GAP,
         );
         let rows = layout_banners(&b, short);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].text, "+6 more");
         assert_eq!(rows[0].rect.w, 284.0);
         assert!(layout_banners(&b, Rect::new(0.0, 0.0, 300.0, 20.0)).is_empty());
+    }
+
+    #[test]
+    fn strip_height_follows_the_rows() {
+        let size = Viewport {
+            width: 800.0,
+            height: 600.0,
+        };
+        let none = banner_strip(&[], 48.0, 740.0, size);
+        assert!(none.rows.is_empty());
+        assert_eq!(none.rect.h, 0.0);
+        let b = banners(&everything());
+        let one = banner_strip(&b[..1], 48.0, 740.0, size);
+        assert_eq!(one.rect.h, 2.0 * BANNER_PAD + BANNER_HEIGHT);
+        let all = banner_strip(&b, 48.0, 740.0, size);
+        assert_eq!(all.rows.len(), MAX_BANNERS);
+        assert_eq!(
+            all.rect.h,
+            2.0 * BANNER_PAD + 3.0 * BANNER_HEIGHT + 2.0 * BANNER_GAP
+        );
+        // Rows are centred over the given span and inside the strip.
+        for r in &all.rows {
+            assert!((r.rect.x + r.rect.w / 2.0 - (48.0 + 370.0)).abs() < 1e-3);
+            assert!(r.rect.y >= all.rect.y && r.rect.bottom() <= all.rect.bottom());
+        }
+        // A short view gives the strip at most half its height.
+        let short = banner_strip(
+            &b,
+            0.0,
+            300.0,
+            Viewport {
+                width: 300.0,
+                height: 100.0,
+            },
+        );
+        assert!(short.rect.h <= 50.0);
+        assert_eq!(short.rows.len(), 1);
+        assert_eq!(short.rows[0].text, "+7 more");
     }
 
     #[test]
