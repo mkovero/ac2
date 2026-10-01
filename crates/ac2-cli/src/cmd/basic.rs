@@ -1,0 +1,607 @@
+//! Request/response commands and the live views built on them.
+
+use ac2_client::{Client, expect_body};
+use ac2_proto::model::*;
+use ac2_proto::units::Seconds;
+use ac2_proto::{Command, ReplyBody};
+use serde_json::json;
+
+use super::{connect, find_meas, find_trace, rate, state};
+use crate::CliError;
+use crate::args::*;
+use crate::output::{self, Out};
+use crate::watch;
+
+pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let r = c.call(Command::SessionDevices).await?;
+    let d = expect_body!("session.devices", r, ReplyBody::Devices(d) => d)?;
+    out.emit(&d, || output::devices(&d))?;
+    Ok(())
+}
+
+fn backend(b: BackendArg) -> BackendKind {
+    match b {
+        BackendArg::Jack => BackendKind::Jack,
+        BackendArg::Cpal => BackendKind::Cpal,
+        BackendArg::Fake => BackendKind::Fake,
+    }
+}
+
+pub(crate) async fn session(
+    cli: &Cli,
+    cmd: &SessionCmd,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    match cmd {
+        SessionCmd::Open(o) => {
+            let r = c.call(Command::SessionDevices).await?;
+            let devs = expect_body!("session.devices", r, ReplyBody::Devices(d) => d)?;
+            let want = backend(o.backend);
+            let of_backend: Vec<&DeviceInfo> = devs.iter().filter(|d| d.backend == want).collect();
+            let dev = match &o.device {
+                Some(sel) => of_backend
+                    .iter()
+                    .find(|d| &d.id.0 == sel || &d.name == sel)
+                    .copied()
+                    .ok_or_else(|| {
+                        CliError::Usage(format!("no {want:?} device {sel:?} (see `ac2 devices`)"))
+                    })?,
+                None => match of_backend.as_slice() {
+                    [d] => *d,
+                    [] => {
+                        return Err(CliError::Usage(format!(
+                            "the daemon lists no {want:?} device"
+                        )));
+                    }
+                    _ => {
+                        return Err(CliError::Usage(format!(
+                            "{} {want:?} devices; choose one with --device (see `ac2 devices`)",
+                            of_backend.len()
+                        )));
+                    }
+                },
+            };
+            let rate = match o.rate {
+                None => None,
+                Some(f) if f.0.0.fract() == 0.0 && f.0.0 <= f64::from(u32::MAX) => {
+                    Some(f.0.0 as u32)
+                }
+                Some(f) => {
+                    return Err(CliError::Usage(format!(
+                        "sample rate {} Hz is not a whole number",
+                        f.0.0
+                    )));
+                }
+            };
+            let buffer = match o.buffer {
+                None => None,
+                Some(n) => Some(
+                    u32::try_from(n.0)
+                        .map_err(|_| CliError::Usage(format!("buffer of {} samples", n.0)))?,
+                ),
+            };
+            let loopback = match (o.loopback_out, o.loopback_in) {
+                (Some(out_ch), Some(in_ch)) => Some(LoopbackRoute {
+                    output: out_ch.0,
+                    input: in_ch.0,
+                }),
+                _ => None,
+            };
+            let sel = DeviceSelector::Id { id: dev.id.clone() };
+            let config = SessionConfig {
+                input_device: sel.clone(),
+                output_device: sel,
+                input_channels: o.inputs.0.clone(),
+                output_channels: o.outputs,
+                sample_rate_hz: rate,
+                buffer_frames: buffer,
+                loopback,
+            };
+            let r = c.call(Command::SessionOpen { config }).await?;
+            let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
+            out.emit(&s, || output::session(&s))?;
+        }
+        SessionCmd::Close => {
+            let r = c.call(Command::SessionClose).await?;
+            let rev = expect_body!("session.close", r, ReplyBody::Ack { rev } => rev)?;
+            out.emit(&json!({ "rev": rev }), || "session closed".to_owned())?;
+        }
+        SessionCmd::Status => {
+            let r = c.call(Command::SessionStatus).await?;
+            let s = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
+            out.emit(&s, || output::session(&s))?;
+        }
+    }
+    Ok(())
+}
+
+fn weighting(w: WeightArg) -> Weighting {
+    match w {
+        WeightArg::A => Weighting::A,
+        WeightArg::C => Weighting::C,
+        WeightArg::Z => Weighting::Z,
+    }
+}
+
+fn time_weighting(t: TimeWeightArg) -> TimeWeighting {
+    match t {
+        TimeWeightArg::Fast => TimeWeighting::Fast,
+        TimeWeightArg::Slow => TimeWeighting::Slow,
+        TimeWeightArg::Impulse => TimeWeighting::Impulse,
+    }
+}
+
+fn smoothing(f: FractionArg) -> Result<SmoothingFraction, CliError> {
+    Ok(match f {
+        FractionArg::F3 => SmoothingFraction::Third,
+        FractionArg::F6 => SmoothingFraction::Sixth,
+        FractionArg::F12 => SmoothingFraction::Twelfth,
+        FractionArg::F24 => SmoothingFraction::TwentyFourth,
+        FractionArg::F48 => SmoothingFraction::FortyEighth,
+        FractionArg::F1 => return Err(CliError::Usage("smoothing is 1/3 … 1/48 octave".into())),
+    })
+}
+
+fn band_fraction(f: FractionArg) -> Result<BandFraction, CliError> {
+    Ok(match f {
+        FractionArg::F1 => BandFraction::Octave,
+        FractionArg::F3 => BandFraction::Third,
+        FractionArg::F6 => BandFraction::Sixth,
+        FractionArg::F12 => BandFraction::Twelfth,
+        FractionArg::F24 => BandFraction::TwentyFourth,
+        FractionArg::F48 => return Err(CliError::Usage("RTA bands are 1/1 … 1/24 octave".into())),
+    })
+}
+
+fn window(w: WindowArg) -> Window {
+    match w {
+        WindowArg::Hann => Window::Hann,
+        WindowArg::Bh4 => Window::BlackmanHarris4,
+        WindowArg::Flattop => Window::FlatTop,
+        WindowArg::Rect => Window::Rectangular,
+    }
+}
+
+/// Builds the measurement configuration of `meas new`, checking the kind's required inputs.
+pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
+    let need = |c: Option<crate::units::Channel>, flag: &str| {
+        c.map(|c| c.0)
+            .ok_or_else(|| CliError::Usage(format!("{:?} needs --{flag}", n.kind)))
+    };
+    let refuse = |c: Option<crate::units::Channel>, flag: &str| match c {
+        Some(_) => Err(CliError::Usage(format!(
+            "--{flag} does not apply to {:?}",
+            n.kind
+        ))),
+        None => Ok(()),
+    };
+    let kind = match n.kind {
+        MeasKindArg::Tf => {
+            refuse(n.input, "input")?;
+            if n.ppo == 0 || n.ppo > 96 {
+                return Err(CliError::Usage("--ppo must be 1 … 96".into()));
+            }
+            if n.blocks == 0 {
+                return Err(CliError::Usage("--blocks must be at least 1".into()));
+            }
+            let ppo = n.ppo as i32;
+            // 10 octaves around 1 kHz: ≈ 31 Hz … 32 kHz.
+            MeasKind::Transfer {
+                config: TransferConfig {
+                    reference_input: need(n.reference, "ref")?,
+                    measurement_input: need(n.measurement, "meas")?,
+                    averaging: TfAveraging::Fifo { blocks: n.blocks },
+                    grid: LogGridSpec {
+                        ppo: n.ppo,
+                        k_min: -5 * ppo,
+                        k_max: 5 * ppo - 1,
+                    },
+                    smoothing: n
+                        .smooth
+                        .map(|f| {
+                            smoothing(f).map(|fraction| Smoothing {
+                                fraction,
+                                mode: SmoothingMode::Power,
+                            })
+                        })
+                        .transpose()?,
+                },
+            }
+        }
+        k => {
+            refuse(n.reference, "ref")?;
+            refuse(n.measurement, "meas")?;
+            let input = need(n.input, "input")?;
+            match k {
+                MeasKindArg::Spectrum => {
+                    let len = n.fft.0;
+                    if !(64..=1 << 20).contains(&len) || (len & (len - 1)) != 0 {
+                        return Err(CliError::Usage(
+                            "--fft must be a power of two, 64 … 1048576 samples".into(),
+                        ));
+                    }
+                    MeasKind::Spectrum {
+                        config: SpectrumConfig {
+                            input,
+                            fft_len: len as u32,
+                            window: window(n.window),
+                            averaging: SpecAveraging::Off,
+                        },
+                    }
+                }
+                MeasKindArg::Rta => {
+                    if n.from.0.0 >= n.to.0.0 {
+                        return Err(CliError::Usage("--from must be below --to".into()));
+                    }
+                    MeasKind::Rta {
+                        config: RtaConfig {
+                            input,
+                            fraction: band_fraction(n.fraction)?,
+                            f_lo: n.from.0,
+                            f_hi: n.to.0,
+                            weighting: weighting(n.weight),
+                            averaging: SpecAveraging::Off,
+                        },
+                    }
+                }
+                _ => MeasKind::Spl {
+                    config: SplConfig {
+                        input,
+                        weighting: weighting(n.weight),
+                        time_weighting: time_weighting(n.time),
+                        peak_weighting: PeakWeighting::C,
+                    },
+                },
+            }
+        }
+    };
+    if n.name.trim().is_empty() {
+        return Err(CliError::Usage("--name must not be empty".into()));
+    }
+    Ok(MeasConfig {
+        name: n.name.clone(),
+        kind,
+    })
+}
+
+async fn meas_call(c: &Client, cmd: Command) -> Result<Measurement, CliError> {
+    let op = cmd.name();
+    let r = c.call(cmd).await?;
+    Ok(expect_body!(op, r, ReplyBody::Measurement(m) => m)?)
+}
+
+pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    if let MeasCmd::List { watch: true } = cmd {
+        let c = connect(cli, true).await?;
+        return watch::meas_list(&c, out).await;
+    }
+    let c = connect(cli, false).await?;
+    match cmd {
+        MeasCmd::New(n) => {
+            let config = meas_config(n)?;
+            let mut m = meas_call(&c, Command::MeasCreate { config }).await?;
+            if n.start {
+                m = meas_call(&c, Command::MeasStart { meas: m.id }).await?;
+            }
+            out.emit(&m, || output::measurement(&m))?;
+        }
+        MeasCmd::List { .. } => {
+            let s = state(&c).await?;
+            out.emit(&s.measurements, || output::measurements(&s.measurements))?;
+        }
+        MeasCmd::Start { meas } | MeasCmd::Stop { meas } => {
+            let s = state(&c).await?;
+            let id = find_meas(&s, meas)?.id;
+            let cmd = if matches!(cmd, MeasCmd::Start { .. }) {
+                Command::MeasStart { meas: id }
+            } else {
+                Command::MeasStop { meas: id }
+            };
+            let m = meas_call(&c, cmd).await?;
+            out.emit(&m, || output::measurement(&m))?;
+        }
+        MeasCmd::Rm { meas } => {
+            let snap = c.snapshot().await?;
+            let m = find_meas(&snap.state, meas)?;
+            // Guarded by the rev the name was resolved at: if the measurements changed in
+            // between, the daemon refuses instead of deleting the wrong one.
+            let r = c
+                .call_expect(Command::MeasDelete { meas: m.id }, snap.rev)
+                .await?;
+            let rev = expect_body!("meas.delete", r, ReplyBody::Ack { rev } => rev)?;
+            let name = m.config.name.clone();
+            out.emit(&json!({ "deleted": m.id, "rev": rev }), || {
+                format!("deleted measurement {} {name}", m.id)
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn transfer<'s>(s: &'s State, r: &MeasRef) -> Result<&'s Measurement, CliError> {
+    let m = find_meas(s, r)?;
+    match m.config.kind {
+        MeasKind::Transfer { .. } => Ok(m),
+        _ => Err(CliError::Usage(format!(
+            "{} is not a transfer measurement",
+            m.config.name
+        ))),
+    }
+}
+
+fn pick(p: PickArg) -> DelayPick {
+    match p {
+        PickArg::First => DelayPick::FirstArrival,
+        PickArg::Strongest => DelayPick::Strongest,
+        PickArg::Candidate(index) => DelayPick::Candidate { index },
+    }
+}
+
+fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
+    let smp = |s: Seconds| match rate {
+        Some(r) => format!(" ({} samples)", (s.0 * f64::from(r)).round() as i64),
+        None => String::new(),
+    };
+    let mut out = format!(
+        "first arrival  {}{}\nstrongest      {}{}",
+        output::ms(f.first_arrival.0),
+        smp(f.first_arrival),
+        output::ms(f.strongest.0),
+        smp(f.strongest)
+    );
+    if f.ambiguous {
+        out.push_str("\nAMBIGUOUS: near-equal peaks; tracking pauses until one is inserted");
+    }
+    let mut t = output::table(&["#", "delay", "relative"]);
+    for (i, cand) in f.candidates.iter().enumerate() {
+        t.add_row(vec![
+            i.to_string(),
+            output::ms(cand.delay.0),
+            ac2_scene::format::db_readout(cand.relative.0),
+        ]);
+    }
+    out.push('\n');
+    out.push_str(&t.to_string());
+    out
+}
+
+pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let s = state(&c).await?;
+    match cmd {
+        DelayCmd::Find { meas, insert } => {
+            let id = transfer(&s, meas)?.id;
+            let r = c.call(Command::DelayFind { meas: id }).await?;
+            let f = expect_body!("delay.find", r, ReplyBody::DelayFinding(f) => f)?;
+            let inserted = match insert {
+                Some(p) => Some(
+                    meas_call(
+                        &c,
+                        Command::DelayInsert {
+                            meas: id,
+                            pick: pick(*p),
+                        },
+                    )
+                    .await?,
+                ),
+                None => None,
+            };
+            let rate = rate(&s);
+            out.emit(&json!({ "finding": f, "inserted": inserted }), || {
+                let mut t = finding_text(&f, rate);
+                if let Some(m) = &inserted {
+                    t.push_str(&format!("\ninserted: {}", output::measurement(m)));
+                }
+                t
+            })?;
+        }
+        DelayCmd::Insert { meas, pick: p } => {
+            let id = transfer(&s, meas)?.id;
+            let m = meas_call(
+                &c,
+                Command::DelayInsert {
+                    meas: id,
+                    pick: pick(*p),
+                },
+            )
+            .await?;
+            out.emit(&m, || output::measurement(&m))?;
+        }
+        DelayCmd::Set { meas, delay, temp } => {
+            let id = transfer(&s, meas)?.id;
+            let d = delay
+                .seconds(rate(&s), *temp)
+                .map_err(|e| CliError::Usage(e.0))?;
+            let m = meas_call(&c, Command::DelaySet { meas: id, delay: d }).await?;
+            out.emit(&m, || output::measurement(&m))?;
+        }
+        DelayCmd::Track { meas, state: on } => {
+            let id = transfer(&s, meas)?.id;
+            let m = meas_call(
+                &c,
+                Command::DelayTrack {
+                    meas: id,
+                    enabled: *on == Switch::On,
+                },
+            )
+            .await?;
+            out.emit(&m, || output::measurement(&m))?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    match cmd {
+        SplCmd::Cal(a) => cal_spl(cli, a, out).await,
+        SplCmd::Watch(w) => {
+            let c = connect(cli, true).await?;
+            let s = state(&c).await?;
+            let (id, created) = match (&w.meas, w.input) {
+                (Some(r), _) => {
+                    let m = find_meas(&s, r)?;
+                    if !matches!(m.config.kind, MeasKind::Spl { .. }) {
+                        return Err(CliError::Usage(format!(
+                            "{} is not an SPL measurement",
+                            m.config.name
+                        )));
+                    }
+                    (m.id, false)
+                }
+                (None, Some(input)) => {
+                    let want = SplConfig {
+                        input: input.0,
+                        weighting: weighting(w.weight),
+                        time_weighting: time_weighting(w.time),
+                        peak_weighting: PeakWeighting::C,
+                    };
+                    let existing = s.measurements.iter().find(
+                        |m| matches!(&m.config.kind, MeasKind::Spl { config } if *config == want),
+                    );
+                    match existing {
+                        Some(m) => (m.id, false),
+                        None => {
+                            let m = meas_call(
+                                &c,
+                                Command::MeasCreate {
+                                    config: MeasConfig {
+                                        name: format!("spl-in{input}"),
+                                        kind: MeasKind::Spl { config: want },
+                                    },
+                                },
+                            )
+                            .await?;
+                            (m.id, true)
+                        }
+                    }
+                }
+                (None, None) => return Err(CliError::Usage("give --meas or --input".into())),
+            };
+            let running = s
+                .measurements
+                .iter()
+                .find(|m| m.id == id)
+                .is_some_and(|m| m.running);
+            if !running {
+                meas_call(&c, Command::MeasStart { meas: id }).await?;
+            }
+            let result = watch::spl(&c, id, out).await;
+            if created {
+                let _ = c.call(Command::MeasDelete { meas: id }).await;
+            } else if !running {
+                let _ = c.call(Command::MeasStop { meas: id }).await;
+            }
+            result
+        }
+    }
+}
+
+async fn cal_spl(cli: &Cli, a: &CalSpl, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let r = c
+        .call(Command::CalSpl {
+            input: a.input.0,
+            mic: a.mic.clone(),
+            calibrator_level: a.reference.0,
+            calibrator_freq: a.freq.0,
+        })
+        .await?;
+    let e = expect_body!("cal.spl", r, ReplyBody::Calibration(e) => e)?;
+    out.emit(&e, || output::calibrations(std::slice::from_ref(&e)))?;
+    Ok(())
+}
+
+pub(crate) async fn cal(cli: &Cli, cmd: &CalCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    match cmd {
+        CalCmd::Spl(a) => cal_spl(cli, a, out).await,
+        CalCmd::List => {
+            let c = connect(cli, false).await?;
+            let r = c.call(Command::CalList).await?;
+            let l = expect_body!("cal.list", r, ReplyBody::Calibrations(l) => l)?;
+            out.emit(&l, || output::calibrations(&l))?;
+            Ok(())
+        }
+    }
+}
+
+pub(crate) async fn timing(cli: &Cli, live: bool, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, live).await?;
+    if live {
+        return watch::timing(&c, out).await;
+    }
+    let s = state(&c).await?;
+    out.emit(&s.timing, || output::timing(&s.timing, rate(&s)))?;
+    Ok(())
+}
+
+pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    match cmd {
+        TraceCmd::Capture { meas, name } => {
+            let s = state(&c).await?;
+            let id = find_meas(&s, meas)?.id;
+            let r = c
+                .call(Command::TraceCapture {
+                    meas: id,
+                    name: name.clone(),
+                })
+                .await?;
+            let t = expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
+        }
+        TraceCmd::List => {
+            let r = c.call(Command::TraceList).await?;
+            let l = expect_body!("trace.list", r, ReplyBody::Traces(l) => l)?;
+            out.emit(&l, || output::traces(&l))?;
+        }
+        TraceCmd::Export { trace, csv } => {
+            let s = state(&c).await?;
+            let t = find_trace(&s, trace)?;
+            let r = c
+                .call(Command::TraceExport {
+                    trace: t.id,
+                    format: ExportFormat::Ac2Csv,
+                })
+                .await?;
+            let (file_name, content) = expect_body!(
+                "trace.export", r, ReplyBody::Export { file_name, content } => (file_name, content)
+            )?;
+            if csv.as_os_str() == "-" {
+                // The CSV itself is the output; nothing else may be mixed in.
+                out.w.write_all(&content.0)?;
+                out.w.flush()?;
+                return Ok(());
+            }
+            std::fs::write(csv, &content.0)?;
+            let n = content.0.len();
+            out.emit(
+                &json!({ "trace": t.id, "file": csv, "bytes": n, "suggested_name": file_name }),
+                || format!("wrote {} ({n} bytes)", csv.display()),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+async fn dump(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
+    let snap = c.snapshot().await?;
+    // A dump is JSON in both modes.
+    let s = serde_json::to_string_pretty(&snap).map_err(std::io::Error::other)?;
+    writeln!(out.w, "{s}")?;
+    Ok(())
+}
+
+pub(crate) async fn state_dump(
+    cli: &Cli,
+    cmd: &StateCmd,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
+    match cmd {
+        StateCmd::Dump => {
+            let c = connect(cli, false).await?;
+            dump(&c, out).await
+        }
+    }
+}

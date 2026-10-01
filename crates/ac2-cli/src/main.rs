@@ -1,5 +1,5 @@
-//! ac2 command-line client.
+//! `ac2`: command-line client of the ac2 daemon.
 
-fn main() {
-    eprintln!("ac2: not implemented yet");
+fn main() -> std::process::ExitCode {
+    ac2_cli::main_entry()
 }

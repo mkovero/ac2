@@ -301,6 +301,21 @@ async fn lease_is_refreshed_while_held_and_stopped_on_drop() -> R {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn release_queued_on_drop_leaves_even_when_the_client_closes_at_once() -> R {
+    let f = fake()?;
+    let c = connect(&f).await?;
+    let lease = c.acquire_lease(false, OnDrop::StopAndRelease).await?;
+    lease.set(desired(true, true)).await?;
+    // A foreground CLI ending: lease and client go together, nothing is awaited.
+    drop(lease);
+    drop(c);
+    until("release", || async { f.executions("gen.release") == 1 }).await?;
+    assert!(!f.lock().state.generator.firing);
+    assert_eq!(f.lock().expiries, 0);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn lease_expires_daemon_side_when_refreshes_stop() -> R {
     let f = fake()?;
     let c = connect(&f).await?;

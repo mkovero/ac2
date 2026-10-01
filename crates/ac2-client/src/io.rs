@@ -105,8 +105,10 @@ impl Io {
     /// Queues an encoded request for the DEALER.
     pub(crate) fn send(&self, bytes: &[u8]) -> Result<(), ClientError> {
         let push = self.push.lock().map_err(|_| ClientError::Closed)?;
-        push.send(&[TAG_REQUEST, bytes]).map_err(|e| match e {
-            ac2_zmq::Error::ContextTerminated => ClientError::Closed,
+        // Never block: with the I/O thread gone the PUSH has no peer and a blocking send
+        // would hang the caller (with the lock held).
+        push.try_send(&[TAG_REQUEST, bytes]).map_err(|e| match e {
+            ac2_zmq::Error::ContextTerminated | ac2_zmq::Error::WouldBlock => ClientError::Closed,
             e => ClientError::Zmq(e),
         })
     }
@@ -114,7 +116,8 @@ impl Io {
     /// Tells the thread to send what is queued and stop.
     pub(crate) fn quit(&self) {
         if let Ok(push) = self.push.lock() {
-            let _ = push.send(&[TAG_QUIT]);
+            // Non-blocking: a second quit after the thread has gone must not hang.
+            let _ = push.try_send(&[TAG_QUIT]);
         }
     }
 }
