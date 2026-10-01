@@ -137,6 +137,20 @@ impl StageSpec {
     pub fn filter_len(&self) -> usize {
         self.decimator.as_ref().map_or(1, FirDesign::len)
     }
+
+    /// Aligned full-rate pairs needed before this stage has completed `blocks` blocks
+    /// (≥ 1). Decimated sample `j` depends on pairs `[j·M, j·M + L)`, and block `k` ends at
+    /// stage sample `k·hop + nfft − 1`.
+    pub fn pairs_for_blocks(&self, blocks: usize) -> u64 {
+        let last = (self.nfft + blocks.saturating_sub(1) * self.hop - 1) as u64;
+        last * self.factor as u64 + self.filter_len() as u64
+    }
+
+    /// Time from the start of the aligned stream to this stage's first complete block:
+    /// the window plus the decimator's span. No averaging setting shortens it.
+    pub fn first_block_s(&self) -> f64 {
+        self.pairs_for_blocks(1) as f64 / (self.rate_hz * self.factor as f64)
+    }
 }
 
 /// Hand-over between a shallower and the next deeper stage.

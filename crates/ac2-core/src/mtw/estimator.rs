@@ -31,6 +31,51 @@ pub enum Averaging {
     },
 }
 
+/// How deep the decimated stages average relative to the full-rate stage.
+///
+/// The full-rate stage always averages exactly as [`Averaging`] says; the policy only
+/// governs the decimated stages.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum DepthPolicy {
+    /// Every stage reaches the full-rate stage's model effective-average count, so the
+    /// coherence floor is the same at every frequency. Deeper stages settle more slowly in
+    /// wall-clock time because their blocks overlap more.
+    #[default]
+    EqualConfidence,
+    /// Like `EqualConfidence`, but no decimated stage averages over a longer span than
+    /// `max_settle_s` (FIFO: `(blocks − 1)·hop`; exponential: three time constants), down to
+    /// [`MIN_FAST_LF_BLOCKS`] blocks or its exponential equivalent. The span counts from the
+    /// stage's first complete block: the window length itself is fixed by the stage's
+    /// resolution and is not shortened by any averaging choice. Capped stages hold fewer
+    /// effective averages, so their coherence floor is higher; the reported effective
+    /// averages show it.
+    FastLf {
+        /// Longest averaging span of a decimated stage, seconds (> 0, finite).
+        max_settle_s: f64,
+    },
+}
+
+impl DepthPolicy {
+    /// Default span cap of [`DepthPolicy::FastLf`], seconds.
+    pub const DEFAULT_MAX_SETTLE_S: f64 = 1.0;
+
+    /// `FastLf` with the default span cap.
+    pub const fn fast_lf() -> Self {
+        DepthPolicy::FastLf {
+            max_settle_s: Self::DEFAULT_MAX_SETTLE_S,
+        }
+    }
+}
+
+/// Fewest blocks a `FastLf`-capped FIFO stage holds (exponential stages: the α with the same
+/// steady-state model effective count). One block always reads γ² = 1 whatever the
+/// signals, so coherence needs several blocks to mean anything. Four blocks give about 1.5
+/// model effective averages at 87.5 % overlap
+/// (floor γ² ≈ 0.7) and 2.4 at 75 %: the least that still separates coherent from
+/// incoherent content. The floor applies only when the span cap would go below it, and never
+/// deepens a stage beyond equal confidence.
+pub const MIN_FAST_LF_BLOCKS: usize = 4;
+
 /// Concrete per-stage averaging after depth matching.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StageAveraging {
@@ -44,6 +89,17 @@ pub enum StageAveraging {
         /// Weight of the newest block, 0 < α ≤ 1.
         alpha: f64,
     },
+}
+
+impl StageAveraging {
+    /// Averaging span in blocks after the first block: FIFO `blocks − 1`; exponential three
+    /// time constants, `3 / −ln(1 − α)` (the oldest contributions then weigh e⁻³ ≈ 5 %).
+    pub fn settle_blocks(&self) -> f64 {
+        match *self {
+            StageAveraging::Fifo { blocks } => blocks.saturating_sub(1) as f64,
+            StageAveraging::Exponential { alpha } => 3.0 / -(1.0 - alpha).ln(),
+        }
+    }
 }
 
 /// Stationary white-noise model of the correlation between Hann-windowed DFT coefficients.

@@ -12,7 +12,9 @@
 //!    `[k·hop, k·hop + nfft)` counted from the start of the aligned stream, however the input
 //!    was chunked.
 //! 4. **Averaging** of Gxx, Gyy, Gxy only ([`Averaging`]). Depth is matched across stages in
-//!    model effective averages ([`estimator::OverlapModel`]).
+//!    model effective averages ([`estimator::OverlapModel`]) by default; [`DepthPolicy::FastLf`]
+//!    instead caps how long the decimated stages average, trading a higher (reported)
+//!    low-frequency coherence floor for faster settling.
 //! 5. **Columns** on the shared [`LogGrid`]: each column sums the cross- and auto-spectra of
 //!    the bins whose centres fall inside it and divides once. Columns that contain no bin are
 //!    thinned (NaN with a reason), never interpolated. Across each crossover H1 is blended
@@ -30,7 +32,7 @@ pub mod layout;
 use num_complex::Complex64;
 
 use crate::grid::LogGrid;
-pub use estimator::{Averaging, OverlapModel, StageAveraging};
+pub use estimator::{Averaging, DepthPolicy, MIN_FAST_LF_BLOCKS, OverlapModel, StageAveraging};
 use estimator::{BlockFate, StageEstimator, matched_alpha, matched_fifo_blocks};
 pub use fir::{FirDesign, PairDecimator};
 pub use layout::{Crossover, Ladder, Layout, LayoutError, StageSpec};
@@ -44,6 +46,8 @@ pub struct MtwConfig {
     pub ladder: Ladder,
     /// Spectral averaging.
     pub averaging: Averaging,
+    /// Averaging depth of the decimated stages relative to the full-rate stage.
+    pub depth: DepthPolicy,
     /// Output grid (48 ppo base-2 for the display).
     pub grid: LogGrid,
     /// Alignment delay in full-rate samples; positive = measurement late.
@@ -57,6 +61,8 @@ pub enum ConfigError {
     Layout(LayoutError),
     /// FIFO depth of zero, or a time constant that is not positive and finite.
     InvalidAveraging(Averaging),
+    /// A `FastLf` span cap that is not positive and finite.
+    InvalidDepthPolicy(DepthPolicy),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -64,6 +70,7 @@ impl std::fmt::Display for ConfigError {
         match self {
             ConfigError::Layout(e) => write!(f, "{e}"),
             ConfigError::InvalidAveraging(a) => write!(f, "invalid averaging {a:?}"),
+            ConfigError::InvalidDepthPolicy(p) => write!(f, "invalid depth policy {p:?}"),
         }
     }
 }
@@ -235,10 +242,34 @@ pub struct StageSpectra {
     pub blocks: u64,
 }
 
+/// Averaging depth and timing of one stage, as configured.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StageDepth {
+    /// Averaging the stage uses.
+    pub averaging: StageAveraging,
+    /// Time from the start of the aligned stream to the stage's first block (window plus
+    /// decimator span); fixed by the layout.
+    pub first_block_s: f64,
+    /// Averaging span after the first block: FIFO `(blocks − 1)·hop`, exponential three
+    /// time constants. This is what [`DepthPolicy::FastLf`] caps.
+    pub settle_s: f64,
+    /// `first_block_s + settle_s`: from the start of the aligned stream until the stage's
+    /// average is full (FIFO) or within e⁻³ of steady state (exponential). After
+    /// [`Mtw::reset_averages`] framing continues, so a refill takes about `settle_s` plus one
+    /// hop instead.
+    pub fill_s: f64,
+    /// Model effective averages per bin once settled; its inverse is the coherence floor
+    /// on uncorrelated input.
+    pub steady_eff_avg: f64,
+    /// Whether the depth policy made this stage shallower than equal confidence would.
+    pub capped: bool,
+}
+
 #[derive(Debug)]
 struct StageRuntime {
     spec: StageSpec,
     averaging: StageAveraging,
+    capped: bool,
     decimator: Option<PairDecimator>,
     est: StageEstimator,
 }
@@ -269,19 +300,20 @@ impl Mtw {
             .iter()
             .map(|s| OverlapModel::new(&crate::window::Window::Hann.coefficients(s.nfft), s.hop))
             .collect();
-        let per_stage = stage_averaging(&layout, &models, config.averaging)?;
+        let per_stage = stage_averaging(&layout, &models, config.averaging, config.depth)?;
         let stages = layout
             .stages
             .iter()
             .zip(per_stage)
             .zip(models)
-            .map(|((spec, averaging), model)| StageRuntime {
+            .map(|((spec, (averaging, capped)), model)| StageRuntime {
                 decimator: spec
                     .decimator
                     .as_ref()
                     .map(|d| PairDecimator::new(d.taps.clone(), spec.factor)),
                 est: StageEstimator::new(spec.nfft, spec.hop, averaging, model),
                 averaging,
+                capped,
                 spec: spec.clone(),
             })
             .collect();
@@ -317,6 +349,26 @@ impl Mtw {
         self.stages.iter().map(|s| s.averaging).collect()
     }
 
+    /// Per-stage averaging depth, settling times and steady-state effective averages.
+    pub fn stage_depths(&self) -> Vec<StageDepth> {
+        self.stages
+            .iter()
+            .enumerate()
+            .map(|(b, s)| {
+                let first_block_s = s.spec.first_block_s();
+                let settle_s = s.averaging.settle_blocks() * s.spec.hop_s();
+                StageDepth {
+                    averaging: s.averaging,
+                    first_block_s,
+                    settle_s,
+                    fill_s: first_block_s + settle_s,
+                    steady_eff_avg: self.steady_eff_avg(b),
+                    capped: s.capped,
+                }
+            })
+            .collect()
+    }
+
     /// Model effective averages of stage `stage` once its average is full (FIFO) or in
     /// steady state (exponential), for a single bin.
     pub fn steady_eff_avg(&self, stage: usize) -> f64 {
@@ -341,11 +393,28 @@ impl Mtw {
 
     /// Change averaging. Clears the averages; framing continues.
     pub fn set_averaging(&mut self, averaging: Averaging) -> Result<(), ConfigError> {
+        self.reconfigure_depth(averaging, self.config.depth)
+    }
+
+    /// Change the depth policy. Like [`Mtw::set_averaging`] it clears the averages (every
+    /// stage, even one whose depth does not change, so all stages restart together);
+    /// framing continues. An invalid policy leaves the engine untouched.
+    pub fn set_depth_policy(&mut self, depth: DepthPolicy) -> Result<(), ConfigError> {
+        self.reconfigure_depth(self.config.averaging, depth)
+    }
+
+    fn reconfigure_depth(
+        &mut self,
+        averaging: Averaging,
+        depth: DepthPolicy,
+    ) -> Result<(), ConfigError> {
         let models: Vec<OverlapModel> = self.stages.iter().map(|s| s.est.model.clone()).collect();
-        let per_stage = stage_averaging(&self.layout, &models, averaging)?;
+        let per_stage = stage_averaging(&self.layout, &models, averaging, depth)?;
         self.config.averaging = averaging;
-        for (s, a) in self.stages.iter_mut().zip(per_stage) {
+        self.config.depth = depth;
+        for (s, (a, capped)) in self.stages.iter_mut().zip(per_stage) {
             s.averaging = a;
+            s.capped = capped;
             s.est.reset_averages(a);
         }
         Ok(())
@@ -625,12 +694,23 @@ struct ColumnEstimate {
     eff_avg: f64,
 }
 
-/// Per-stage averaging matched to the full-rate stage's model effective count.
+/// Per-stage averaging matched to the full-rate stage's model effective count, then capped
+/// by the depth policy. The flag tells whether the cap made the stage shallower.
 fn stage_averaging(
     layout: &Layout,
     models: &[OverlapModel],
     averaging: Averaging,
-) -> Result<Vec<StageAveraging>, ConfigError> {
+    depth: DepthPolicy,
+) -> Result<Vec<(StageAveraging, bool)>, ConfigError> {
+    let max_settle_s = match depth {
+        DepthPolicy::EqualConfidence => None,
+        DepthPolicy::FastLf { max_settle_s } => {
+            if !(max_settle_s.is_finite() && max_settle_s > 0.0) {
+                return Err(ConfigError::InvalidDepthPolicy(depth));
+            }
+            Some(max_settle_s)
+        }
+    };
     match averaging {
         Averaging::Fifo { blocks } => {
             if blocks == 0 {
@@ -639,13 +719,27 @@ fn stage_averaging(
             let target = models[0].neff_fifo(blocks as usize, 1);
             Ok(models
                 .iter()
-                .enumerate()
-                .map(|(b, m)| StageAveraging::Fifo {
-                    blocks: if b == 0 {
-                        blocks as usize
-                    } else {
-                        matched_fifo_blocks(m, target)
-                    },
+                .zip(&layout.stages)
+                .map(|(m, spec)| {
+                    if spec.index == 0 {
+                        return (
+                            StageAveraging::Fifo {
+                                blocks: blocks as usize,
+                            },
+                            false,
+                        );
+                    }
+                    let matched = matched_fifo_blocks(m, target);
+                    let held = match max_settle_s {
+                        None => matched,
+                        Some(t) => {
+                            // Largest count whose span (blocks − 1)·hop fits in t; the
+                            // tolerance keeps an exact fit from rounding down.
+                            let cap = (t / spec.hop_s() + 1e-9).floor() as usize + 1;
+                            matched.min(cap.max(MIN_FAST_LF_BLOCKS))
+                        }
+                    };
+                    (StageAveraging::Fifo { blocks: held }, held < matched)
                 })
                 .collect())
         }
@@ -657,13 +751,23 @@ fn stage_averaging(
             let target = models[0].neff_exponential(alpha0, None, 1);
             Ok(models
                 .iter()
-                .enumerate()
-                .map(|(b, m)| StageAveraging::Exponential {
-                    alpha: if b == 0 {
-                        alpha0
-                    } else {
-                        matched_alpha(m, target)
-                    },
+                .zip(&layout.stages)
+                .map(|(m, spec)| {
+                    if spec.index == 0 {
+                        return (StageAveraging::Exponential { alpha: alpha0 }, false);
+                    }
+                    let matched = matched_alpha(m, target);
+                    // A larger α is a shallower average.
+                    let alpha = match max_settle_s {
+                        None => matched,
+                        Some(t) => {
+                            // Three time constants, 3·hop / −ln(1 − α), equal to t.
+                            let cap = 1.0 - (-3.0 * spec.hop_s() / t).exp();
+                            let floor = matched_alpha(m, m.neff_fifo(MIN_FAST_LF_BLOCKS, 1));
+                            matched.max(cap.min(floor.max(matched)))
+                        }
+                    };
+                    (StageAveraging::Exponential { alpha }, alpha > matched)
                 })
                 .collect())
         }
