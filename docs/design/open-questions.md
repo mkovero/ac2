@@ -77,9 +77,21 @@ max 3 rows + "+N more"; units "dB SPL (tone)" / "dB SPL (band)"; coherence shown
 fade on by default (0.15 at γ² 0 → full at 0.9), blanking off; IR log/ETC in dB re peak; spectrum
 line thinned to max-per-pixel; CHECK ROUTING gets a protocol flag and banner in phase 3.
 
+**D1–D4. Delay finder results (Q1 study, `q1-delay-finder.md` §16).** Accepted provisionally
+by me so the Rust finder can be built; overrule any of them here.
+- D1: revised acceptance — full range unchanged (≤1 sample); mid ≤0.05 ms; sub ≤0.1 ms only
+  for arrivals ≥2 pulse widths apart (~22 ms), ≤2 ms for unresolved sub clusters; resolved sub
+  pairs and sub programme ≤2 % wrong / ≤20 % refused at 8 s.
+- D2: sub observation 4 s default (lock ≈ 8 s), operator choice 2/4/8 s.
+- D3: sub tracking agreement ±0.1 ms (±1 sample would stall).
+- D4: GCC-PHAT is a diagnostic option, not the fallback (it picked wrong arrivals 10–20 %).
+- Answer:
+
 ---
 
 ## Q1 — Delay target and acceptance (before phase 2)
+
+**Design:** [q1-delay-finder.md](q1-delay-finder.md). Decisions D1–D4 accepted provisionally (sheet).
 
 **Question.** What exactly does the finder report, and when do we trust it?
 

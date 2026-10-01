@@ -301,8 +301,9 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   band is sufficiently excited: regularisation shrinks weakly excited bins
   (Ĥ ≈ H·Gxx/(Gxx + ε·mean Gxx)), which reshapes the response and can reorder candidates.
   It is far less excitation-dependent than plain cross-correlation, not independent of it.
-  GCC-PHAT is the fallback for poor reference spectra; neither recovers frequencies the
-  excitation never contained. Inadequate excited bandwidth in the selected band →
+  GCC-PHAT is a diagnostic option only: in multipath scenes it accepted wrong arrivals
+  10–20 % of the time vs 0 % for regularised H1 (Q1 evidence). Neither recovers frequencies
+  the excitation never contained. Inadequate excited bandwidth in the selected band →
   "no estimate". Tests check that arrival picks stay stable across excitation spectra
   (white, pink, band-limited, programme material).
   Zero-padded to ≥ 2× the search span to avoid circular wrap; lag sign: positive = measurement late.
@@ -321,7 +322,9 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   error ≤ 1 sample (full-range) / ≤ 0.1 ms (sub bands) when accepted; wrong-arrival
   acceptance ≤ 1 %; refusal ≤ 10 % at ≥ 20 dB band SNR on unambiguous scenarios.
   These are provisional targets for identifiable delays, not guarantees for acoustic
-  onsets in general; exact numbers fixed in Q1 before phase 2.
+  onsets in general. Q1 revised them per band (mid 0.05 ms; sub 0.1 ms only for arrivals
+  ≥ 2 pulse widths apart, ≤ 2 ms for unresolved sub clusters; sub tracking agreement
+  ±0.1 ms): see `docs/design/q1-delay-finder.md`.
 
 ### 5.3 Spectrum, RTA, SPL
 - Units defined per display: **amplitude spectrum** (bin-centred sine reads its RMS;
