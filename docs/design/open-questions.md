@@ -59,6 +59,48 @@ Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the 
 
 Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the Decided table above).
 
+### → round 4 (raised by the desktop app, phase 4)
+
+Fill `Answer:` (empty = proposal accepted).
+
+**K1. Esc and other people's stimulus.** Esc sends a universal stop even when another
+client (e.g. a laptop at the delay tower) owns the generator.
+- Proposal: keep it. Esc is the panic key; any operator can always silence the PA.
+- Answer:
+
+**K2. Enter while a prompt or the palette is open** applies the prompt/selection instead of
+firing the stimulus.
+- Proposal: keep (fails safe; firing needs no overlay open).
+- Answer:
+
+**K3. Holding ↑/↓ on level.** Key repeat is off, so holding ↑ doesn't ramp the level.
+- Proposal: keep off (no accidental ramps into the PA); Shift+↑/↓ steps 3 dB, `L` types a value.
+- Answer:
+
+**K4. Stimulus output default.** Outputs default to channel 1; changed via the palette.
+- Proposal: remember the last outputs per device; first run defaults to output 1 and
+  shows it in the top bar (as now).
+- Answer:
+
+**K5. Spectrum "bars" style for narrowband FFT.** A single-bin tone vanishes as a sub-pixel
+bar, so narrowband spectra always draw as a thinned line; bars only for RTA bands.
+- Proposal: keep.
+- Answer:
+
+**K6. Quitting with the daemon gone** can wait up to ~5 s on lease stop/release timeouts
+(the daemon's own 1.5 s expiry is the real safety net).
+- Proposal: cap the quit wait at 1 s.
+- Answer:
+
+**K7. Slots.** Ctrl+1…9 slots are UI-only and lost on restart until sessions exist (phase 5).
+- Proposal: fine for now; slots become part of sessions in phase 5.
+- Answer:
+
+**K8. Mic name in SPL calibration.** The meter config has no mic name, so the UI matches a
+calibration by device + channel only (decision 7a wants mic name too).
+- Proposal: add a mic name per input in the session's input setup (phase 5) and match on it.
+- Answer:
+
 ---
 
 ## Q1 — Delay target and acceptance (before phase 2)
