@@ -242,7 +242,12 @@ fn run(
 /// Clip threshold for meters, matching the protection default (−0.1 dBFS sample peak).
 const CLIP_PEAK: f32 = 0.988_553_1;
 
-/// Input meters of a job's channels: peak, RMS and clip per frame interval.
+/// RMS integration time of the input meters. A frame interval (~16 ms) is far too short for
+/// noise stimuli: pink noise over 16 ms swings by several dB, so the RMS is an exponential
+/// mean square with a 300 ms time constant (VU-like ballistics) while peak stays per interval.
+const METER_RMS_TAU_S: f64 = 0.3;
+
+/// Input meters of a job's channels: per-interval peak and clip, 300 ms integrated RMS.
 #[derive(Debug)]
 pub(crate) struct LevelsMeter {
     /// Block channel index per meter.
@@ -250,8 +255,10 @@ pub(crate) struct LevelsMeter {
     /// Device input per meter.
     channels: Vec<u16>,
     peak: Vec<f32>,
-    sq: Vec<f64>,
+    /// Exponentially integrated mean square per meter; `None` until the first block.
+    ms: Vec<Option<f64>>,
     frames: u64,
+    sample_rate: f64,
     clipped: Vec<bool>,
     hold_until: Vec<u64>,
     hold: u64,
@@ -265,8 +272,9 @@ impl LevelsMeter {
             idx,
             channels,
             peak: vec![0.0; n],
-            sq: vec![0.0; n],
+            ms: vec![None; n],
             frames: 0,
+            sample_rate: f64::from(sample_rate),
             clipped: vec![false; n],
             hold_until: vec![0; n],
             // A clip indicator stays lit for a second so a single clipped block is seen.
@@ -277,6 +285,8 @@ impl LevelsMeter {
 
     pub(crate) fn push(&mut self, b: &Block) {
         let n = usize::from(b.channels).max(1);
+        let frames = f64::from(b.frames.max(1));
+        let alpha = 1.0 - (-frames / (METER_RMS_TAU_S * self.sample_rate)).exp();
         for (m, &ch) in self.idx.iter().enumerate() {
             let mut p = self.peak[m];
             let mut s = 0.0f64;
@@ -285,7 +295,11 @@ impl LevelsMeter {
                 s += f64::from(*v) * f64::from(*v);
             }
             self.peak[m] = p;
-            self.sq[m] += s;
+            let block_ms = s / frames;
+            self.ms[m] = Some(match self.ms[m] {
+                Some(prev) => prev + alpha * (block_ms - prev),
+                None => block_ms,
+            });
             if p >= CLIP_PEAK {
                 self.clipped[m] = true;
                 self.hold_until[m] = b.end_sample() + self.hold;
@@ -306,7 +320,7 @@ impl LevelsMeter {
         let mut clip = Vec::with_capacity(n);
         for m in 0..n {
             peak.push((20.0 * f64::from(self.peak[m]).log10()) as f32);
-            let r = (self.sq[m] / self.frames as f64).sqrt();
+            let r = self.ms[m].unwrap_or(0.0).sqrt();
             rms.push(ac2_core::spectrum::rms_dbfs(r) as f32);
             let mut c = ClipFlags::NONE;
             if self.clipped[m] {
@@ -317,7 +331,6 @@ impl LevelsMeter {
             }
             clip.push(c);
             self.peak[m] = 0.0;
-            self.sq[m] = 0.0;
             self.clipped[m] = false;
         }
         self.frames = 0;
@@ -347,4 +360,48 @@ pub(crate) fn channel_f64(b: &Block, ch: usize, out: &mut Vec<f64>) {
     out.clear();
     let n = usize::from(b.channels).max(1);
     out.extend(b.data.iter().skip(ch).step_by(n).map(|v| f64::from(*v)));
+}
+
+#[cfg(test)]
+mod levels_tests {
+    use super::*;
+    use crate::fanout::Block;
+    use ac2_audio::BlockFlags;
+    use ac2_proto::units::MeasId;
+
+    fn sine_block(start: u64, frames: u32, amp: f32, fs: f64) -> Block {
+        let data: Vec<f32> = (0..frames)
+            .map(|i| {
+                let t = (start + u64::from(i)) as f64 / fs;
+                amp * (2.0 * std::f64::consts::PI * 997.0 * t).sin() as f32
+            })
+            .collect();
+        Block {
+            start_sample: start,
+            frames,
+            channels: 1,
+            flags: BlockFlags::NONE,
+            wall_ns: 0,
+            data: data.into_boxed_slice(),
+        }
+    }
+
+    /// A steady −20 dBFS sine reads −20 dBFS RMS, and short frame intervals don't change the
+    /// reading: the RMS integrates over 300 ms, not over one interval.
+    #[test]
+    fn rms_integrates_across_intervals() {
+        let fs = 48_000.0;
+        let amp = 0.1_f32; // −20 dBFS (0 dBFS = full-scale sine)
+        let mut m = LevelsMeter::new(vec![0], vec![0], 48_000);
+        let mut start = 0;
+        let mut last = f32::NAN;
+        for _ in 0..200 {
+            m.push(&sine_block(start, 256, amp, fs));
+            start += 256;
+            if let Some(f) = m.take(MeasId(1)) {
+                last = f.rms[0];
+            }
+        }
+        assert!((last + 20.0).abs() < 0.05, "rms {last}");
+    }
 }

@@ -193,11 +193,9 @@ fn lease_acquire_force_expiry_and_universal_stop() {
     assert!(!g.armed && !g.firing);
     // Fade (20 ms) plus cable delay fit in the first 50 ms; then nothing at all.
     let _ = m.level(&mut d, 0.05);
+    // Sample peak proves silence; the meter's RMS integrates over 300 ms and only decays.
     let (peak, rms) = m.level(&mut d, 0.2);
-    assert!(
-        peak == f32::NEG_INFINITY && rms == f32::NEG_INFINITY,
-        "silent: {peak} {rms}"
-    );
+    assert!(peak == f32::NEG_INFINITY, "silent: peak {peak}, rms {rms}");
     let e = a
         .call(Command::GenRefresh { lease_token: tok_a })
         .unwrap_err();
