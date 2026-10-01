@@ -93,6 +93,8 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q2 — Delivery freshness (before phase 3)
 
+**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (proposed).
+
 **Question.** What freshness can the data path actually guarantee, end to end?
 
 - Daemon side: per-topic latest slot, PUB HWM value, send policy when HWM is hit.
@@ -141,6 +143,8 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q5 — Replay, epochs and frame identity (before phase 3)
 
+**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (proposed).
+
 **Question.** How does a client always know which state and which audio a frame belongs to?
 
 - Replay buffer size (events and/or time), `resync_required` semantics.
@@ -154,6 +158,8 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 ---
 
 ## Q6 — Stimulus lease protocol (before phase 3)
+
+**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (proposed).
 
 **Question.** Exact lease mechanics so that output is never orphaned or contested.
 
