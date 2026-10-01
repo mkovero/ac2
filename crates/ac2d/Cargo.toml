@@ -1,0 +1,18 @@
+[package]
+name = "ac2d"
+description = "ac2 daemon: owns the audio session, measurement jobs and state; serves clients over ZeroMQ."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "ac2d"
+path = "src/main.rs"
+
+[dependencies]
