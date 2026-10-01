@@ -11,9 +11,9 @@ each; these are the details that are too fine for the plan but too risky to deci
 
 ## Decision sheet
 
-Round 1 answered 2026-10-01. **Decided** items are settled. Items marked **→ round 2**
-were unclear; each now has a plain-language explanation and a proposal. Fill `Answer:`
-(empty = proposal accepted).
+All sheet items decided 2026-10-01 (two rounds). The Q sections below keep the
+remaining *technical* details (formulas, thresholds, tests); those are settled in a design
+note at the start of the phase that implements them, within the decisions here.
 
 ### Decided
 
@@ -36,96 +36,18 @@ were unclear; each now has a plain-language explanation and a proposal. Fill `An
 | 6c | Any authorized client may force takeover; output stops and disarms first. |
 | 6d | Short network hiccup: output continues. |
 | 8a | Shared time reference within a session; imported traces marked independent; **each trace's delay can be nudged individually**. |
+| 1c | Near-equal peaks: both shown on IR panel + short list; first-arrival rule pre-selects; one key accepts, another picks; tracking pauses until resolved. |
+| 2a | STALE = no fresh frame for ~1 s: trace dims and shows age. Says nothing about measured delay. |
+| 2b | Up to 60 fps per measurement locally, 30 default remote (raisable); UI interpolates to display refresh. |
+| 3a | No start-up probe. Daemon continuously correlates generator output with the reference loopback while a stimulus plays; offset jumps are flagged; when silent, last value shown with age. |
+| 4b | Narrowband spectrum = tone level; RTA = band power; unit printed on axis. |
+| 4c | Flat-top window available as an option in spectrum view, not default. |
+| 6a | Dead-man heartbeat 0.5 s, timeout 1.5 s (configurable); daemon fades stimulus out on timeout. |
+| 7a/7b | Calibration tied to device + input channel + mic name. Mismatch → "cal from other mic / input"; otherwise shows cal age. No gain/phantom fields, no prompts. Recalibrating after gain changes is the operator's job. |
+| 7c | Mic curve: TF / spectrum / RTA subtract file dB from displayed magnitude; SPL applies it as a filter before weighting; phase never touched; on/off per input. |
+| 8b | Overlay reference = selected trace's measured delay (pick key to change); others drawn relative to it; per-trace nudge on top. |
 
-### → round 2
-
-**1c. What happens when the finder sees several similar peaks?**
-Example: direct sound at 10.0 ms and a floor bounce at 11.2 ms only 2 dB weaker. The
-finder cannot know which one you want to align to.
-- Proposal: show both on the IR panel and as a short list (`1: 10.0 ms  2: 11.2 ms`);
-  the first-arrival rule pre-selects 10.0 ms, one key accepts it, another picks the other.
-  Delay tracking pauses until the ambiguity clears.
-- Answer:
-
-**2a. "STALE" — what it means (not about system latency).**
-This is not about how much delay your PA chain has — large console/network/processor
-delays are normal and are exactly what the reference loopback cancels (see 3a). STALE
-only means *the screen stopped receiving fresh data*: WiFi to a remote rig dropped,
-daemon hung, audio device vanished. Without it, a frozen trace looks like a perfectly
-stable measurement.
-- Proposal: if no new frame for a measurement arrives for ~1 s, its trace dims and shows
-  STALE with the age; it never decides anything about the measured delay.
-- Answer:
-
-**2b. Publish rate.** You said: enough that smoothness is never the bottleneck.
-- Proposal: daemon publishes up to 60 fps per measurement locally (frames are small);
-  remote clients default to 30 and can raise it; UI interpolates to display refresh.
-- Answer:
-
-**3a. Continuous probe/monitor of interface timing — yes, mostly for free.**
-With the reference wired as in `ac` (stimulus and reference out through the same
-converter, reference looped back into an input), every latency inside the interface,
-console, network and processors is common to both legs and cancels. So the loopback
-itself *is* the continuous monitor: while any signal plays, the daemon continuously
-correlates generator output against the loopback input and watches that offset. If it
-jumps (buffer change, device reset, clock slip) the daemon flags it immediately. No
-separate probe signal is needed while a stimulus runs; when nothing plays there is
-nothing to measure and the last value is shown with its age.
-- Proposal: continuous monitoring as above; no start-up probe.
-- Answer:
-
-**4b. Which unit the spectrum view shows by default.**
-Two honest ways to read an FFT: *tone level* (a −20 dBFS sine reads −20 dBFS; noise
-reads lower the finer the FFT) or *band power* (noise reads the same regardless of FFT
-size; what an RTA shows). Mixing them up is the classic "why does my pink noise read
-15 dB low" confusion.
-- Proposal: narrowband spectrum = tone level; RTA = band power; the unit is printed on
-  the axis. No setting needed unless you want one.
-- Answer:
-
-**4c. Flat-top window.**
-A standard FFT window under-reads a pure tone by up to ~1.4 dB when the tone falls
-between bins. A flat-top window reads tones exactly, at the cost of blurrier frequency.
-Only useful for reading tone levels (e.g. checking a 1 kHz line-up tone).
-- Proposal: available as a window option in the spectrum view, not the default.
-- Answer:
-
-**6a. Stimulus dead-man timer.**
-Safety for remote use: the client that started the noise must tell the daemon "I'm still
-here" twice a second. If that stops for 1.5 s (laptop lid closed, WiFi died, app
-crashed), the daemon fades the noise out on its own instead of leaving pink noise
-running through the PA with nobody in control. `ac` has the same mechanism.
-- Proposal: keep as is (heartbeat 0.5 s, timeout 1.5 s), timeout configurable.
-- Answer:
-
-**7a/7b. Calibration validity — simplified per your answer.**
-Agreed: ac2 can't know the preamp gain, phantom state, or even whether the gain knob is
-settable. So it won't pretend to.
-- Proposal: a calibration is tied to *device + input channel + mic name* (mic name typed
-  once at cal time). If any of those change, the SPL readout says "cal from other mic /
-  input". Otherwise it shows the cal's age (e.g. "cal 3 h ago"). No gain or phantom fields,
-  no confirmation prompts. Recalibrate when you touch the gain — that's on the operator.
-- Answer:
-
-**7c. How the mic correction file is applied (sorry — jargon).**
-Measurement mics come with a correction file (e.g. "+1.5 dB at 15 kHz"). Question was
-only *how* ac2 applies it internally.
-- Proposal: for transfer functions and spectra, subtract the file's dB values from the
-  displayed magnitude (simple, what everyone does). For SPL meters, apply it as a filter
-  before weighting so dB(A)/dB(C) include it. Phase is never touched. Nothing to choose
-  in the UI except on/off per input.
-- Answer:
-
-**8b. Shared delay reference for comparing traces — your point taken.**
-You said the delay should be continuously measured against the reference loopback and
-used in situ. Agreed: every live measurement's delay is measured against the reference
-(tracking optional), and every captured trace stores the delay it had. "Shared time
-reference" then just means: when overlaying mains and sub traces, phase is drawn relative
-to *one* chosen delay, so a 3 ms arrival difference between them stays visible instead
-of being aligned away.
-- Proposal: the reference delay for an overlay is the selected trace's measured delay
-  (pick key to change); every other trace is drawn relative to it; per-trace nudge on top.
-- Answer:
+Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).
 
 ---
 

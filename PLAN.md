@@ -142,7 +142,8 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Capture live → named, colored trace; slots; mandatory metadata: delay, polarity, offset, smoothing, cal state, mic, time | P0 | ac | 4 |
 | Show/hide/lock/reorder, offset, invert | P0 | ac | 4 |
 | Synchronized comparison cursor across traces and panes | P0 | new | 4 |
-| Phase comparison time reference: overlays either share one explicit time reference (phase rebuilt from each trace's stored delay so relative arrival is visible) or are marked as independently referenced; default shared for traces from one session | P0 | new | 4 |
+| Phase comparison: overlays drawn relative to the selected trace's measured delay (pick key to change), so relative arrival stays visible; imported traces marked independent; per-trace delay nudge | P0 | new | 4 |
+| Delay distance readout: delay × c(temperature) next to ms, no correction layers | P1 | new | 4 |
 | Trace averaging: power, complex, coherence-weighted; common delay/phase reference stated per average | P0 | ac | 5 |
 | Trace math A−B: dB subtraction for magnitude, complex division where phase is wanted | P1 | new | 5 |
 | Target curves (file or drawn) | P1 | ac (file) | 5 |
@@ -155,7 +156,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 |---|---|---|---|
 | Mic sensitivity cal against 94/114 dB calibrator; SPL from raw dBFS | P0 | ac | 5 |
 | Mic curve assignment / bypass per input, with provenance | P0 | ac | 5 |
-| Calibration bound to chain identity (device, channel, mic id, gain read or operator-confirmed); unverifiable → UNVERIFIED | P0 | ac (simplified) | 5 |
+| Calibration tied to device + input channel + mic name; mismatch → "cal from other mic / input", otherwise cal age shown | P0 | ac (simplified) | 5 |
 | Fast / Slow / Impulse; Leq, LAeq, LCeq, LCpeak, Lmax/Lmin | P0 | ac (partly) | 5 |
 | Big-number SPL display + history | P0 | new | 5 |
 | Rolling Leq windows, limits and alarms | P1 | new | 7 |
@@ -248,7 +249,7 @@ control (tokio) ◄─► ROUTER; serialized state commits; jobs controlled via 
 generator ◄── atomics / lock-free param swap ◄── control (owner lease enforced, §6.5)
 ```
 - **Sync contract.** Every block carries its absolute sample index and flags (xrun, overflow, device change). All channels of a block travel together, so channels can never shift relative to each other. A gap is a discontinuity marker: affected jobs reset their averages and report it; nothing silently splices.
-- **Duplex timing contract.** A shared clock is necessary but not sufficient for internal-reference measurements: the output→input sample offset must be validated (loopback measurement at session open, re-validated after any stream recovery), and the reference is taken post-routing, post-level. Without a valid mapping internal reference is refused. Detail: `docs/design/open-questions.md` Q3.
+- **Reference & timing contract.** A measured reference is required: stimulus and reference leave through the same converter and the reference is looped back into an input, so every latency in interface, console, network and processors cancels. While a stimulus plays, the daemon continuously correlates generator output against the loopback input and flags any offset jump (buffer change, device reset, clock slip); when silent, the last value is shown with its age. No start-up probe. Without a loopback there is no internal reference. Detail: `docs/design/open-questions.md` Q3.
 - **Job lifetime** follows explicit commands (`meas.start/stop`, `spl.log.start/stop`). Closing every UI never stops measuring, averaging, logging or alarms. Subscriptions only decide what is *published* and which optional display derivations are computed.
 - Block grid fixed to the sample stream (push pipeline); never re-segment a sliding buffer.
 - **Bounded freshness, not guaranteed latest.** Each topic has one latest-result slot in the daemon; the publisher sends only the newest frame per topic with a small PUB HWM. Frames already queued in ZMQ cannot be replaced, so clients also drain their socket and keep only the newest frame per topic before rendering. Frames carry a capture wall-clock time so age is measurable remotely; past a deadline they are shown STALE. Recoverable state events use a separate path with replay (§6.2). Detail: Q2.
@@ -330,11 +331,9 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   cases (off-bin tones, DC/Nyquist, integrated noise power) in Q4.
 - RTA: IEC 61260-1 bank (base-10 G) for banded levels; FFT banding labelled as such.
   Base-2 octaves only for MTW grid and smoothing. Never mix the two constants.
-- SPL from raw dBFS + mic sensitivity. Voltage scale never in that path. Mic curve, if
-  enabled, is applied as a minimum-phase/linear-phase FIR **before** weighting and time
-  integration, normalised to 0 dB at the calibrator frequency so the sensitivity cal is
-  not counted twice; LCpeak uses the uncorrected path unless the FIR's latency and
-  pre-ringing are characterised.
+- SPL from raw dBFS + mic sensitivity. Voltage scale never in that path. Mic curve per
+  §5.7 (filter before weighting/integration); LCpeak uses the uncorrected path unless the
+  filter's latency and pre-ringing are characterised.
 - A/C IIR verified per rate (44.1/48/96 kHz); Fast/Slow/Impulse; Leq in f64.
 - Claims are "digital response tests per IEC 61672-1 tables, with stated tolerances",
   never implied instrument class compliance.
@@ -376,15 +375,14 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 ### 5.7 Calibration store
 - Per input: mic sensitivity, mic curve (magnitude-only file), optional voltage scale.
 - Each entry records provenance (when, how, which calibrator, calibrator frequency) and
-  the **measurement chain**: device uid, channel, mic id (operator-entered serial or name),
-  preamp gain (read from the backend where possible, otherwise operator-confirmed at cal
-  time and re-confirmed when a session opens). Any element unknown or changed → readouts
-  marked UNVERIFIED; never silently applied, never silently dropped. Digital identity
-  alone never counts as verified.
-- Mic curve placement: SPL and RTA per §5.3 (FIR before integration, normalised at the
-  calibrator frequency). Sensitivity calibration records the calibrator frequency and
-  uses the same convention, so the two corrections never double-count. Transfer functions: magnitude correction of the measurement
-  channel only, shown as on/off; no phase is invented from magnitude-only files.
+  is tied to **device + input channel + mic name** (typed once at cal time). Any of those
+  changed → SPL readout says "cal from other mic / input"; otherwise it shows the cal's
+  age. ac2 cannot know preamp gain or phantom state and does not pretend to: recalibrating
+  after a gain change is the operator's job.
+- Mic curve placement: TF, spectrum and RTA subtract the file's dB values from the
+  displayed magnitude; SPL applies it as a filter before weighting and integration,
+  normalised at the calibrator frequency (sensitivity cal uses the same convention, so
+  nothing double-counts). Phase is never touched. On/off per input.
 - Atomic writes; an unparseable file is never overwritten.
 
 ---
@@ -432,7 +430,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows), `inproc://` (em
   protected vs below floor).
 - Bounds: max frame size and array length validated before decode; malformed frame →
   dropped and counted, never panics.
-- TF frame (mag + phase + coh, ~480 cols) ≈ 6 KB; 30 fps ≈ 180 KB/s.
+- TF frame (mag + phase + coh, ~480 cols) ≈ 6 KB. Up to 60 fps per measurement locally, 30 default remote (raisable) ≈ 180 KB/s; UI interpolates to display refresh.
 - Large blobs (raw captures) via chunked binary ctrl transfer, never base64.
 - Cross-language fixtures: Rust encodes, Python decodes (and back) in CI.
 
