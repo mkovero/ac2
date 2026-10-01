@@ -48,6 +48,7 @@ fn transfer() -> MeasKind {
                 k_max: 216,
             },
             smoothing: None,
+            depth: ac2_proto::model::DepthPolicy::EqualConfidence,
         },
     }
 }
@@ -87,9 +88,14 @@ fn daemon_state() -> State {
 }
 
 fn mirror(state: State) -> ConnEvent {
+    mirror_of(state, 1, Some("c1"))
+}
+
+fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
     ConnEvent::Mirror(Arc::new(MirrorView {
+        client_id: me.map(|m| ClientId(m.into())),
         phase: Phase::Live,
-        incarnation: Some(DaemonIncarnation(1)),
+        incarnation: Some(DaemonIncarnation(incarnation)),
         session_epoch: Some(SessionEpoch(2)),
         rev: Rev(10),
         state: Some(Arc::new(state)),
@@ -381,23 +387,17 @@ fn transfer_commands() {
     let r = t.key("X");
     assert!(matches!(
         r.as_slice(),
-        [Request::Call {
-            cmd: Command::DelayInsert {
-                meas: MeasId(1),
-                pick: DelayPick::FirstArrival
-            },
-            ..
+        [Request::FindDelay {
+            meas: MeasId(1),
+            pick: DelayPick::FirstArrival
         }]
     ));
     let r = t.key("Shift+X");
     assert!(matches!(
         r.as_slice(),
-        [Request::Call {
-            cmd: Command::DelayInsert {
-                pick: DelayPick::Strongest,
-                ..
-            },
-            ..
+        [Request::FindDelay {
+            meas: MeasId(1),
+            pick: DelayPick::Strongest
         }]
     ));
     let r = t.key("Y");
@@ -662,4 +662,170 @@ fn level_change_during_arming_is_sent_once_armed() {
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     t.key("Space");
     assert!(t.conn(ConnEvent::Stimulus(StimEvent::Armed)).is_empty());
+}
+
+fn arrival(ms: f64, level: f64) -> DelayArrival {
+    DelayArrival {
+        delay: Seconds(ms / 1000.0),
+        delay_samples: ms * 48.0,
+        level: Db(level),
+        phase: Degrees(0.0),
+        uncertainty_samples: 0.2,
+        misfit: 0.0,
+        refined: true,
+    }
+}
+
+fn finding(outcome: DelayOutcome) -> Box<DelayFinding> {
+    Box::new(DelayFinding {
+        outcome,
+        confidence: DelayConfidence {
+            psr_db: Some(Db(20.0)),
+            psr_acq_db: None,
+            band_snr_db: Some(Db(25.0)),
+            excited_fraction: Some(1.0),
+            uncertainty_samples: Some(0.2),
+            pulse_width_samples: None,
+            period: None,
+        },
+        band: DelayBand::Full,
+        observation: Seconds(0.25),
+        candidates: vec![],
+        found_at: WallNs(0),
+    })
+}
+
+fn ambiguous() -> Box<DelayFinding> {
+    finding(DelayOutcome::Ambiguous {
+        reasons: vec![AmbiguityReason::BorderlineLevel],
+        ranked: vec![
+            arrival(12.5, -11.5),
+            arrival(12.7, 0.0),
+            arrival(13.4, -6.0),
+        ],
+        strongest: arrival(12.7, 0.0),
+    })
+}
+
+fn found(t: &mut T, pick: DelayPick, f: Box<DelayFinding>) -> Vec<Request> {
+    t.conn(ConnEvent::DelayFound {
+        meas: MeasId(1),
+        pick,
+        finding: f,
+    })
+}
+
+fn inserted(r: &[Request]) -> Option<DelayPick> {
+    match r {
+        [
+            Request::Call {
+                cmd:
+                    Command::DelayInsert {
+                        meas: MeasId(1),
+                        pick,
+                    },
+                ..
+            },
+        ] => Some(*pick),
+        _ => None,
+    }
+}
+
+#[test]
+fn accepted_finding_inserts_what_was_asked() {
+    let mut t = T::new();
+    let f = || {
+        finding(DelayOutcome::Accepted {
+            first: arrival(12.5, -3.0),
+            strongest: arrival(12.7, 0.0),
+        })
+    };
+    let r = found(&mut t, DelayPick::FirstArrival, f());
+    assert_eq!(inserted(&r), Some(DelayPick::FirstArrival));
+    let r = found(&mut t, DelayPick::Strongest, f());
+    assert_eq!(inserted(&r), Some(DelayPick::Strongest));
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn ambiguous_first_arrival_opens_the_candidate_list() {
+    let mut t = T::new();
+    t.key("X");
+    let r = found(&mut t, DelayPick::FirstArrival, ambiguous());
+    assert!(r.is_empty(), "{r:?}");
+    let Overlay::DelayPick(c) = &t.st.overlay else {
+        panic!("no candidate list: {:?}", t.st.overlay);
+    };
+    let rows = c.rows();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].text, "12.50 ms  −11.5 dB · rule pick");
+    // Keys 1–3 pick (and do not focus panes while the list is up).
+    let r = t.key("2");
+    assert_eq!(inserted(&r), Some(DelayPick::Ranked { index: 1 }));
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+    // 1 is the rule's pre-selection.
+    found(&mut t, DelayPick::FirstArrival, ambiguous());
+    let r = t.key("1");
+    assert_eq!(inserted(&r), Some(DelayPick::Ranked { index: 0 }));
+    // Other keys keep working with the list up; Esc closes it.
+    found(&mut t, DelayPick::FirstArrival, ambiguous());
+    t.key("4");
+    assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    assert!(matches!(t.st.overlay, Overlay::DelayPick(_)));
+    t.key("Esc");
+    assert_eq!(t.st.overlay, Overlay::None);
+    // Shift+X on an ambiguous finding: the strongest is well defined, insert it.
+    let r = found(&mut t, DelayPick::Strongest, ambiguous());
+    assert_eq!(inserted(&r), Some(DelayPick::Strongest));
+}
+
+#[test]
+fn refusal_inserts_nothing_and_says_why() {
+    let mut t = T::new();
+    let r = found(
+        &mut t,
+        DelayPick::FirstArrival,
+        finding(DelayOutcome::NoEstimate {
+            reasons: vec![NoEstimateReason::LowPsr],
+        }),
+    );
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    assert_eq!(t.last_toast(), "Main L: no delay estimate (no clear peak)");
+    // The banner over the transfer pane carries the reason too.
+    let mut s = daemon_state();
+    if let Some(d) = s.measurements[1].delay.as_mut() {
+        d.last_finding = Some(*finding(DelayOutcome::NoEstimate {
+            reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr],
+        }));
+    }
+    t.conn(mirror(s));
+    let m = t.st.meas(MeasId(1)).cloned().expect("meas");
+    let why = ac2_scene::banner::no_delay_estimate(&m);
+    let b = ac2_scene::banner::banners(&ac2_scene::banner::Status {
+        no_delay_estimate: why,
+        ..Default::default()
+    });
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some("finder: no clear peak, too noisy in band")
+    );
+}
+
+#[test]
+fn own_client_id_follows_the_daemon_incarnation() {
+    let mut t = T::new();
+    assert_eq!(t.st.my_client_id(), Some(&ClientId("c1".into())));
+    let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("c1".into()));
+    s.generator.armed = true;
+    // The daemon restarted: the mirror shows the new incarnation, and until its welcome
+    // arrives this client has no identity there; the old id is never "me".
+    t.conn(mirror_of(s.clone(), 2, None));
+    assert_eq!(t.st.my_client_id(), None);
+    // The new welcome binds another id; an owner "c1" (another client now) is not us.
+    t.conn(mirror_of(s, 2, Some("c9")));
+    assert_eq!(t.st.my_client_id(), Some(&ClientId("c9".into())));
 }

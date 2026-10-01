@@ -84,8 +84,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.stop` | `meas` | `measurement` | |
 | `meas.freeze` | `meas`, `frozen` | `measurement` | |
 | `meas.reset` | `meas` | `ack` | |
-| `delay.find` | `meas` | `delay_finding` | |
-| `delay.insert` | `meas`, `pick: first_arrival \| strongest \| candidate{index}` | `measurement` | |
+| `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | |
+| `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `measurement` | |
 | `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
 | `delay.track` | `meas`, `enabled` | `measurement` | |
 | `trace.capture` | `meas`, `name` | `trace` | |
@@ -113,7 +113,53 @@ Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries t
 desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 s after
 the last refresh fades out (20 ms), disarms and clears the owner. `gen.acquire{force}`
 stops and disarms before handing over. Every acquire, force, arm, fire, set, stop, release
-and expiry is a `generator` event naming the client.
+and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
+owner whose lease expired).
+
+#### Delay finder (`delay.find`, `delay.insert`)
+
+`FinderBand` (tagged by `type`): `full` (2–16 kHz), `mid` (300 Hz–3 kHz), `sub`
+(20–120 Hz), `custom` {`lo_hz`, `hi_hz`}, `auto` (full → mid → sub, the first band not
+refused). `observation` is the measurement block length; nil uses the audio captured so far,
+up to the band's default (full 0.25 s, mid 0.5 s, sub and auto 4 s). In the sub band (and a
+custom band below 150 Hz) it must be 2, 4 or 8 s; anywhere it is at most 8 s. A finder run
+needs live audio: the measurement must be running.
+
+The reply `DelayFinding`:
+
+- `outcome: DelayOutcome`, `confidence: DelayConfidence`, `band: DelayBand`,
+  `observation: Seconds` (block analysed), `candidates: [DelayArrival]` (every candidate,
+  by delay, ≤ 16), `found_at: WallNs`.
+- `DelayOutcome` (tagged by `type`): `accepted` {`first`, `strongest`} | `ambiguous`
+  {`reasons: [AmbiguityReason]`, `ranked: [DelayArrival]` (≤ 3, the rule pick first),
+  `strongest`} | `no_estimate` {`reasons: [NoEstimateReason]`}.
+- `DelayArrival`: `delay: Seconds`, `delay_samples` (f64, fractional), `level: Db` (re the
+  strongest), `phase: Degrees`, `uncertainty_samples` (f64, 1 σ), `misfit` (f64),
+  `refined` (bool).
+- `DelayConfidence` (nil where the finder refused before reaching it): `psr_db`,
+  `psr_acq_db`, `band_snr_db` (Db), `excited_fraction` (0…1), `uncertainty_samples` (of
+  the rule pick), `pulse_width_samples`, `period` (Samples).
+
+`DelayBand` is `FinderBand` without `auto` (the band actually analysed). `AmbiguityReason`:
+`borderline_level`, `close_arrivals`, `merged_lobe`, `outside_refinement`.
+`NoEstimateReason` (tagged by `type`): `no_reference`, `no_signal`,
+`observation_too_short` (also: not enough audio captured yet), `insufficient_overlap`,
+`insufficient_excitation`, `periodic_excitation` {`period`: Samples}, `low_psr`,
+`low_precision`, `peak_at_search_edge`, `low_band_snr`. A refusal is a successful reply
+with a `no_estimate` outcome, never an error; errors are kept for requests that cannot run
+(not a running transfer measurement, invalid band or observation).
+
+Every finding is stored as the measurement's `delay.last_finding`. `delay.insert` applies
+it: `first_arrival` takes the accepted first arrival or, when ambiguous, the pre-selected
+`ranked[0]`; `strongest` the strongest arrival; `ranked{index}` an entry of the ambiguous
+list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an explicit operator
+value) clears `last_finding`; a delay tracking moves keeps it.
+
+#### Averaging depth
+
+`TransferConfig.depth: DepthPolicy` (tagged by `type`): `equal_confidence` (every MTW stage
+reaches the same effective-average count) or `fast_lf` {`max_settle_s`: Seconds > 0} (no
+decimated stage averages over a longer span; those stages show a higher coherence floor).
 
 ### 3.3 Reply bodies
 

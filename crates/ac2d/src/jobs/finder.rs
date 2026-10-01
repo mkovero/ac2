@@ -5,14 +5,20 @@
 use std::collections::VecDeque;
 
 use ac2_core::delay::{
-    Agreement, Band, Block as DBlock, DelayStream, FinderConfig, FinderResult, Tracker, find_auto,
+    Agreement, Band, Block as DBlock, Confidence, DelayStream, FinderConfig, FinderResult,
+    FinderScratch, NoEstimateReason, Outcome, Tracker, find_auto_with, find_with,
 };
 
-/// Seconds of raw audio kept for `delay.find`: the longest default observation (sub, 4 s)
-/// plus the ±1 s search span on both sides, with margin.
-const HISTORY_S: f64 = 7.0;
-/// Longest observation `delay.find` uses (the sub band's default).
-const MAX_OBSERVATION_S: f64 = 4.0;
+use crate::conv::FindBand;
+
+/// Longest observation `delay.find` accepts (decision D2: the sub band's 8 s choice).
+pub(crate) const MAX_OBSERVATION_S: f64 = 8.0;
+/// Seconds of raw audio kept for `delay.find`: the longest observation plus the ±1 s search
+/// span on both sides, with margin.
+const HISTORY_S: f64 = MAX_OBSERVATION_S + 3.0;
+/// Default observation of an auto-band run: the longest band default (sub), so that the sub
+/// band, tried last, has its full observation when the higher bands refuse.
+const AUTO_OBSERVATION_S: f64 = 4.0;
 
 pub(crate) struct Finder {
     fs: f64,
@@ -20,6 +26,9 @@ pub(crate) struct Finder {
     reference: VecDeque<f32>,
     measurement: VecDeque<f32>,
     start: u64,
+    scratch: FinderScratch,
+    /// Band tracking runs in: the band of the last finding that was not refused.
+    track_band: Band,
     tracking: Option<(DelayStream, Tracker)>,
 }
 
@@ -31,6 +40,8 @@ impl Finder {
             reference: VecDeque::new(),
             measurement: VecDeque::new(),
             start: 0,
+            scratch: FinderScratch::new(),
+            track_band: Band::FullRange,
             tracking: None,
         }
     }
@@ -81,12 +92,12 @@ impl Finder {
         moved
     }
 
-    /// Turns tracking on in `band` (from the held delay) or off.
-    pub(crate) fn track(&mut self, enabled: bool, band: Band, held: i64) {
+    /// Turns tracking on (from the held delay) or off.
+    pub(crate) fn track(&mut self, enabled: bool, held: i64) {
         self.tracking = if enabled {
-            match DelayStream::new(FinderConfig::new(self.fs, band)) {
+            match DelayStream::new(FinderConfig::new(self.fs, self.track_band)) {
                 Ok(s) => {
-                    let mut t = Tracker::new(Agreement::for_band(band, self.fs));
+                    let mut t = Tracker::new(Agreement::for_band(self.track_band, self.fs));
                     t.set_held(Some(held));
                     Some((s, t))
                 }
@@ -107,37 +118,153 @@ impl Finder {
         }
     }
 
-    /// Runs the finder (auto band) on the newest observation that has reference coverage for
-    /// every lag of the default ±1 s search.
-    pub(crate) fn find(&self) -> Result<FinderResult, String> {
-        let cfg = FinderConfig::new(self.fs, Band::FullRange);
+    /// Runs the finder on the newest observation that has reference coverage for every lag
+    /// of the ±1 s search. `observation` (seconds) asks for exactly that block; `None` takes
+    /// what has been captured, up to the band's default. Too little audio is a refusal
+    /// (`ObservationTooShort`), not an error; `Err` is a configuration the finder rejects.
+    /// A finding that is not refused moves tracking to its band.
+    pub(crate) fn find(
+        &mut self,
+        band: FindBand,
+        observation: Option<f64>,
+        held: i64,
+    ) -> Result<FinderResult, String> {
+        let (core_band, default_s) = match band {
+            FindBand::Auto => (Band::FullRange, AUTO_OBSERVATION_S),
+            FindBand::Band(b) => (b, b.class().default_observation_s()),
+        };
+        let mut cfg = FinderConfig::new(self.fs, core_band);
+        cfg.observation_s = observation;
+        cfg.validate().map_err(|e| e.to_string())?;
         let lead = cfg.search.max.max(0) as usize;
         let tail = cfg.search.min.min(0).unsigned_abs() as usize;
         let total = self.measurement.len();
         let room = total.saturating_sub(lead + tail);
-        if room < cfg.min_observation_len() {
-            return Err(format!(
-                "not enough audio yet: {:.2} s captured, {:.2} s needed",
-                total as f64 / self.fs,
-                (lead + tail + cfg.min_observation_len()) as f64 / self.fs
-            ));
+        let (want, need) = match observation {
+            Some(s) => {
+                let n = (s * self.fs).round() as usize;
+                (n, n.max(cfg.min_observation_len()))
+            }
+            None => (
+                (default_s * self.fs).round() as usize,
+                cfg.min_observation_len(),
+            ),
+        };
+        if room < need {
+            let end = self.start + total as u64;
+            return Ok(FinderResult {
+                outcome: Outcome::NoEstimate {
+                    reasons: vec![NoEstimateReason::ObservationTooShort],
+                },
+                candidates: Vec::new(),
+                confidence: Confidence {
+                    psr_db: f64::NAN,
+                    psr_acq_db: f64::NAN,
+                    band_snr_db: f64::NAN,
+                    excited_fraction: f64::NAN,
+                    pulse_width: f64::NAN,
+                    nominal_width: f64::NAN,
+                    period: None,
+                    refinement_window: None,
+                },
+                band: core_band,
+                meas_window: end - room as u64..end,
+            });
         }
-        let lm = room.min((MAX_OBSERVATION_S * self.fs) as usize);
+        let lm = room.min(want);
         let m0 = total - tail - lm;
         let r0 = m0 - lead;
         let r: Vec<f32> = self.reference.range(r0..).copied().collect();
         let m: Vec<f32> = self.measurement.range(m0..m0 + lm).copied().collect();
-        find_auto(
-            DBlock {
-                start: self.start + r0 as u64,
-                samples: &r,
-            },
-            DBlock {
-                start: self.start + m0 as u64,
-                samples: &m,
-            },
-            &cfg,
-        )
-        .map_err(|e| e.to_string())
+        let rb = DBlock {
+            start: self.start + r0 as u64,
+            samples: &r,
+        };
+        let mb = DBlock {
+            start: self.start + m0 as u64,
+            samples: &m,
+        };
+        let res = match band {
+            FindBand::Auto => find_auto_with(&mut self.scratch, rb, mb, &cfg),
+            FindBand::Band(_) => find_with(&mut self.scratch, rb, mb, &cfg),
+        }
+        .map_err(|e| e.to_string())?;
+        if !matches!(res.outcome, Outcome::NoEstimate { .. }) && res.band != self.track_band {
+            self.track_band = res.band;
+            if self.tracking.is_some() {
+                self.track(true, held);
+            }
+        }
+        Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn noise(n: usize, seed: u64) -> Vec<f32> {
+        let mut x = seed;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x as f64 / u64::MAX as f64 * 2.0 - 1.0) as f32 * 0.5
+            })
+            .collect()
+    }
+
+    #[test]
+    fn too_little_audio_is_a_typed_refusal() {
+        let mut f = Finder::new(48_000.0);
+        let r = noise(48_000, 1);
+        f.push(0, &r, &r);
+        let res = f.find(FindBand::Auto, None, 0).expect("valid config");
+        assert_eq!(
+            res.outcome,
+            Outcome::NoEstimate {
+                reasons: vec![NoEstimateReason::ObservationTooShort]
+            }
+        );
+        // An explicit sub observation needs that much audio beyond the search span.
+        let r = noise(48_000 * 5, 2);
+        f.push(48_000, &r, &r);
+        let res = f
+            .find(FindBand::Band(Band::Sub), Some(8.0), 0)
+            .expect("valid config");
+        assert!(matches!(res.outcome, Outcome::NoEstimate { .. }));
+    }
+
+    #[test]
+    fn finds_a_delay_in_the_requested_band_and_tracks_there() {
+        let fs = 48_000.0;
+        let mut f = Finder::new(fs);
+        let d = 120;
+        let r = noise(48_000 * 4, 3);
+        let m: Vec<f32> = std::iter::repeat_n(0.0, d)
+            .chain(r.iter().copied())
+            .take(r.len())
+            .collect();
+        f.push(0, &r, &m);
+        let res = f
+            .find(FindBand::Band(Band::Mid), None, 0)
+            .expect("valid config");
+        let pick = res.pick().expect("an estimate");
+        assert!((pick.delay_frac - d as f64).abs() < 1.0, "{res:?}");
+        assert_eq!(res.band, Band::Mid);
+        assert_eq!(f.track_band, Band::Mid);
+        // Observation: the mid band's default.
+        assert_eq!(res.meas_window.end - res.meas_window.start, 24_000);
+    }
+
+    #[test]
+    fn invalid_band_is_an_error() {
+        let mut f = Finder::new(48_000.0);
+        let bad = Band::Custom {
+            lo_hz: 500.0,
+            hi_hz: 100.0,
+        };
+        assert!(f.find(FindBand::Band(bad), None, 0).is_err());
     }
 }

@@ -53,6 +53,26 @@ fn meas_config(name: &str) -> MeasConfig {
     }
 }
 
+fn tf_config() -> MeasConfig {
+    MeasConfig {
+        name: "tf".into(),
+        kind: MeasKind::Transfer {
+            config: TransferConfig {
+                reference_input: 0,
+                measurement_input: 1,
+                averaging: TfAveraging::Fifo { blocks: 8 },
+                grid: LogGridSpec {
+                    ppo: 24,
+                    k_min: -120,
+                    k_max: 119,
+                },
+                smoothing: None,
+                depth: DepthPolicy::EqualConfidence,
+            },
+        },
+    }
+}
+
 fn spl_meas(id: u32, name: &str) -> Measurement {
     Measurement {
         id: MeasId(id),
@@ -167,6 +187,8 @@ async fn incarnation_change_resets_and_rehellos() -> R {
     let c = connect(&f).await?;
     c.wait_synced(DEADLINE).await?;
     let first = c.view().incarnation;
+    let first_id = c.client_id();
+    assert_eq!(c.view().client_id.as_ref(), Some(&first_id));
     {
         let mut s = f.lock();
         s.restart(0xbeef);
@@ -182,6 +204,83 @@ async fn incarnation_change_resets_and_rehellos() -> R {
     assert_eq!(c.view().incarnation_changes, 1);
     until("welcome refreshed", || async {
         c.welcome().daemon_incarnation == DaemonIncarnation(0xbeef)
+    })
+    .await?;
+    // The restarted daemon bound a new identity; a synced view of the new incarnation
+    // carries it, so "owned by me" never compares against the old one.
+    let v = c.view();
+    assert_ne!(c.client_id(), first_id);
+    assert_eq!(v.client_id.as_ref(), Some(&c.client_id()));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delay_find_outcomes_and_insert() -> R {
+    use ac2_client::fake::FakeFinding;
+    let f = fake()?;
+    let c = connect(&f).await?;
+    let m = match c
+        .call(Command::MeasCreate {
+            config: tf_config(),
+        })
+        .await?
+    {
+        ReplyBody::Measurement(m) => m.id,
+        other => panic!("{other:?}"),
+    };
+    let find = || Command::DelayFind {
+        meas: m,
+        band: FinderBand::Sub,
+        observation: Some(Seconds(8.0)),
+    };
+    let insert = |pick| Command::DelayInsert { meas: m, pick };
+
+    f.lock().finding = FakeFinding::NoEstimate;
+    match c.call(find()).await? {
+        ReplyBody::DelayFinding(d) => assert_eq!(
+            d.outcome,
+            DelayOutcome::NoEstimate {
+                reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr]
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    let e = c
+        .call(insert(DelayPick::FirstArrival))
+        .await
+        .expect_err("refused");
+    assert_eq!(e.code(), Some(ErrorCode::Refused));
+
+    f.lock().finding = FakeFinding::Ambiguous;
+    c.call(find()).await?;
+    let applied = |b: ReplyBody| match b {
+        ReplyBody::Measurement(m) => m.delay.map(|d| d.applied.0),
+        other => panic!("{other:?}"),
+    };
+    // Ranked pick 2 (13.4 ms), and the pre-selected rule pick (12.5 ms).
+    assert_eq!(
+        applied(c.call(insert(DelayPick::Ranked { index: 2 })).await?),
+        Some(0.0134)
+    );
+    assert_eq!(
+        applied(c.call(insert(DelayPick::FirstArrival)).await?),
+        Some(0.0125)
+    );
+    let e = c
+        .call(insert(DelayPick::Ranked { index: 3 }))
+        .await
+        .expect_err("no such arrival");
+    assert_eq!(e.code(), Some(ErrorCode::NotFound));
+    // The finding is mirrored with the measurement.
+    until("finding mirrored", || async {
+        c.view().state.as_ref().is_some_and(|s| {
+            s.measurements.iter().any(|x| {
+                x.delay
+                    .as_ref()
+                    .and_then(|d| d.last_finding.as_ref())
+                    .is_some_and(|f| matches!(f.outcome, DelayOutcome::Ambiguous { .. }))
+            })
+        })
     })
     .await?;
     Ok(())
@@ -326,6 +425,9 @@ async fn lease_expires_daemon_side_when_refreshes_stop() -> R {
     until("expiry", || async { f.lock().expiries == 1 }).await?;
     let g = f.lock().state.generator.clone();
     assert!(!g.firing && !g.armed && g.owner.is_none());
+    let audit = g.last_action.expect("expiry audited");
+    assert_eq!(audit.action, GenAction::Expiry);
+    assert_eq!(audit.client, Some(c.client_id()));
     f.lock().mute = false;
     // The next refresh is refused: the lease reports itself lost.
     until("lost", || async { lease.lost().is_some() }).await?;

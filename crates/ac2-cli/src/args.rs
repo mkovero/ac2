@@ -386,6 +386,10 @@ pub struct MeasNew {
     /// tf averaging: FIFO blocks of the full-rate stage.
     #[arg(long, default_value_t = 8)]
     pub blocks: u32,
+    /// tf: cap the low-frequency stages' averaging span (default 1s) for faster settling,
+    /// at a higher coherence floor there. Default: equal confidence at every frequency.
+    #[arg(long, num_args = 0..=1, default_missing_value = "1s", value_name = "TIME")]
+    pub fast_lf: Option<Time>,
     /// Spectrum FFT length, samples.
     #[arg(long, default_value = "65536samples")]
     pub fft: SampleCount,
@@ -415,12 +419,12 @@ pub struct MeasNew {
 /// Which finder result to insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickArg {
-    /// First arrival (the default).
+    /// First arrival (the default); of an ambiguous finding, the rule's pre-selection.
     First,
     /// Strongest peak.
     Strongest,
-    /// Candidate index (0 = strongest).
-    Candidate(u8),
+    /// Entry N (1, 2, 3) of an ambiguous finding's candidate list, as printed.
+    Ranked(u8),
 }
 
 impl FromStr for PickArg {
@@ -429,10 +433,50 @@ impl FromStr for PickArg {
         match s.trim().to_lowercase().as_str() {
             "first" | "first-arrival" => Ok(Self::First),
             "strongest" => Ok(Self::Strongest),
-            n => n
-                .parse::<u8>()
-                .map(Self::Candidate)
-                .map_err(|_| format!("{s:?}: expected first, strongest or a candidate index")),
+            n => match n.parse::<u8>() {
+                Ok(i @ 1..=3) => Ok(Self::Ranked(i)),
+                _ => Err(format!(
+                    "{s:?}: expected first, strongest or a candidate number 1 … 3"
+                )),
+            },
+        }
+    }
+}
+
+/// Delay-finder band: `full`, `mid`, `sub`, `auto` or custom edges `80hz-800hz`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BandArg {
+    /// 2 – 16 kHz.
+    Full,
+    /// 300 Hz – 3 kHz.
+    Mid,
+    /// 20 – 120 Hz.
+    Sub,
+    /// Full → mid → sub, the first that is not refused.
+    Auto,
+    /// Operator edges.
+    Custom(Freq, Freq),
+}
+
+impl FromStr for BandArg {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.trim().to_lowercase().as_str() {
+            "full" => Ok(Self::Full),
+            "mid" => Ok(Self::Mid),
+            "sub" => Ok(Self::Sub),
+            "auto" => Ok(Self::Auto),
+            edges => {
+                let bad =
+                    || format!("{s:?}: expected full, mid, sub, auto or edges like 80hz-800hz");
+                let (lo, hi) = edges.split_once('-').ok_or_else(bad)?;
+                let lo: Freq = lo.parse().map_err(|e: crate::units::UnitError| e.0)?;
+                let hi: Freq = hi.parse().map_err(|e: crate::units::UnitError| e.0)?;
+                if hi.0.0 <= lo.0.0 {
+                    return Err(format!("{s:?}: the upper edge must be above the lower"));
+                }
+                Ok(Self::Custom(lo, hi))
+            }
         }
     }
 }
@@ -453,7 +497,14 @@ pub enum DelayCmd {
     Find {
         /// Transfer measurement.
         meas: MeasRef,
-        /// Insert a result right away (default: first arrival).
+        /// Band: full, mid, sub, auto, or edges like 80hz-800hz.
+        #[arg(long, default_value = "auto")]
+        band: BandArg,
+        /// Measurement block length (sub band: 2s, 4s or 8s; default: the band's).
+        #[arg(long, value_name = "TIME")]
+        observation: Option<Time>,
+        /// Insert a result right away: first (default), strongest, or a candidate 1 … 3 of
+        /// an ambiguous finding.
         #[arg(long, num_args = 0..=1, default_missing_value = "first", value_name = "PICK")]
         insert: Option<PickArg>,
     },
@@ -461,7 +512,7 @@ pub enum DelayCmd {
     Insert {
         /// Transfer measurement.
         meas: MeasRef,
-        /// first, strongest or a candidate index.
+        /// first, strongest, or a candidate 1 … 3 of an ambiguous finding.
         #[arg(long, default_value = "first")]
         pick: PickArg,
     },

@@ -15,6 +15,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         Overlay::Help => help(app, ctx, ch),
         Overlay::Palette(_) => palette(app, ctx, ch),
         Overlay::Prompt(_) => prompt(app, ctx, ch),
+        Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
     }
     toasts(app, ctx, ch);
 }
@@ -330,6 +331,53 @@ fn prompt(app: &App, ctx: &egui::Context, ch: &Chrome) {
                     RichText::new("Enter applies · Esc cancels (and stops stimulus)")
                         .small()
                         .color(ch.dim),
+                );
+            });
+        });
+}
+
+/// The candidate list of an ambiguous delay finding, over the top of the transfer pane. No
+/// backdrop: the IR and transfer plots it is chosen from stay visible.
+fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
+    let Overlay::DelayPick(c) = &app.state.overlay else {
+        return;
+    };
+    egui::Area::new(egui::Id::new("ac2-delay-pick"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 72.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(420.0);
+                ui.label(RichText::new(format!("{}: pick the delay", c.name)).strong());
+                ui.label(
+                    RichText::new(ac2_scene::finding::outcome_text(&c.finding.outcome))
+                        .small()
+                        .color(ch.armed),
+                );
+                ui.add_space(6.0);
+                for r in c.rows() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(&r.key).monospace().strong().color(ch.focus));
+                        ui.label(RichText::new(&r.text).monospace().color(ch.text));
+                    });
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "{} · {}",
+                        ac2_scene::finding::band_text(c.finding.band),
+                        ac2_scene::finding::confidence_text(&c.finding.confidence)
+                    ))
+                    .small()
+                    .color(ch.dim),
+                );
+                ui.label(
+                    RichText::new(
+                        "1–3 inserts · Shift+X strongest · Esc closes (and stops stimulus)",
+                    )
+                    .small()
+                    .color(ch.dim),
                 );
             });
         });

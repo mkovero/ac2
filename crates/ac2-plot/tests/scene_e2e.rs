@@ -133,7 +133,7 @@ fn transfer_view_coherence_overlay() {
     view.tf.coherence_placement = CoherencePlacement::OverlayOnMagnitude;
     // Two banners: the strip grows by a row.
     let status = Status {
-        no_delay_estimate: true,
+        no_delay_estimate: Some(ac2_scene::banner::NoDelayEstimate::NotFound),
         ..stale()
     };
     transfer_golden("transfer_view_coherence_overlay", view, status);

@@ -1,6 +1,126 @@
 [
  {
   "kind": "measurement",
+  "rev": 43,
+  "payload": {
+   "type": "set",
+   "value": {
+    "id": 1,
+    "config": {
+     "name": "Main L",
+     "kind": {
+      "type": "transfer",
+      "config": {
+       "reference_input": 0,
+       "measurement_input": 1,
+       "averaging": {
+        "type": "fifo",
+        "blocks": 8
+       },
+       "grid": {
+        "ppo": 48,
+        "k_min": -240,
+        "k_max": 239
+       },
+       "smoothing": {
+        "fraction": "sixth",
+        "mode": "power"
+       },
+       "depth": {
+        "type": "fast_lf",
+        "max_settle_s": 1.0
+       }
+      }
+     }
+    },
+    "config_rev": 40,
+    "running": true,
+    "frozen": false,
+    "delay": {
+     "applied": 0.0125,
+     "applied_samples": 600,
+     "tracking": true,
+     "last_finding": {
+      "outcome": {
+       "type": "ambiguous",
+       "reasons": [
+        "borderline_level",
+        "merged_lobe"
+       ],
+       "ranked": [
+        {
+         "delay": 0.0125,
+         "delay_samples": 600.0,
+         "level": -1.25,
+         "phase": -12.5,
+         "uncertainty_samples": 0.25,
+         "misfit": 0.125,
+         "refined": true
+        },
+        {
+         "delay": 0.01309375,
+         "delay_samples": 628.5,
+         "level": 0.0,
+         "phase": -12.5,
+         "uncertainty_samples": 0.25,
+         "misfit": 0.125,
+         "refined": true
+        }
+       ],
+       "strongest": {
+        "delay": 0.01309375,
+        "delay_samples": 628.5,
+        "level": 0.0,
+        "phase": -12.5,
+        "uncertainty_samples": 0.25,
+        "misfit": 0.125,
+        "refined": true
+       }
+      },
+      "confidence": {
+       "psr_db": 18.5,
+       "psr_acq_db": 14.0,
+       "band_snr_db": 21.25,
+       "excited_fraction": 0.875,
+       "uncertainty_samples": 0.25,
+       "pulse_width_samples": 9.5,
+       "period": null
+      },
+      "band": {
+       "type": "custom",
+       "lo_hz": 80.0,
+       "hi_hz": 800.0
+      },
+      "observation": 0.5,
+      "candidates": [
+       {
+        "delay": 0.0125,
+        "delay_samples": 600.0,
+        "level": -1.25,
+        "phase": -12.5,
+        "uncertainty_samples": 0.25,
+        "misfit": 0.125,
+        "refined": true
+       },
+       {
+        "delay": 0.01309375,
+        "delay_samples": 628.5,
+        "level": 0.0,
+        "phase": -12.5,
+        "uncertainty_samples": 0.25,
+        "misfit": 0.125,
+        "refined": true
+       }
+      ],
+      "found_at": 1790000000000000000
+     }
+    },
+    "grid_id": 8785464140711761104
+   }
+  }
+ },
+ {
+  "kind": "measurement",
   "rev": 44,
   "payload": {
    "type": "deleted",

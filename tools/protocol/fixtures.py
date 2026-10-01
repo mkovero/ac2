@@ -228,6 +228,76 @@ def req(idx, op, args=None, mutation=True):
     return {"v": 1, "id": idx, "cmd": cmd, "expect_rev": 41 if mutation else None}
 
 
+MEAS_CONFIG = {
+    "name": "Main L",
+    "kind": {
+        "type": "transfer",
+        "config": {
+            "reference_input": 0,
+            "measurement_input": 1,
+            "averaging": {"type": "fifo", "blocks": 8},
+            "grid": {"ppo": 48, "k_min": -240, "k_max": 239},
+            "smoothing": {"fraction": "sixth", "mode": "power"},
+            "depth": {"type": "fast_lf", "max_settle_s": 1.0},
+        },
+    },
+}
+
+
+def arrival(delay_samples, level):
+    return {
+        "delay": delay_samples / 48000.0,
+        "delay_samples": delay_samples,
+        "level": level,
+        "phase": -12.5,
+        "uncertainty_samples": 0.25,
+        "misfit": 0.125,
+        "refined": True,
+    }
+
+
+def finding():
+    """samples::finding(): ambiguous, two near-equal arrivals."""
+    return {
+        "outcome": {
+            "type": "ambiguous",
+            "reasons": ["borderline_level", "merged_lobe"],
+            "ranked": [arrival(600.0, -1.25), arrival(628.5, 0.0)],
+            "strongest": arrival(628.5, 0.0),
+        },
+        "confidence": {
+            "psr_db": 18.5,
+            "psr_acq_db": 14.0,
+            "band_snr_db": 21.25,
+            "excited_fraction": 0.875,
+            "uncertainty_samples": 0.25,
+            "pulse_width_samples": 9.5,
+            "period": None,
+        },
+        "band": {"type": "custom", "lo_hz": 80.0, "hi_hz": 800.0},
+        "observation": 0.5,
+        "candidates": [arrival(600.0, -1.25), arrival(628.5, 0.0)],
+        "found_at": 1790000000000000000,
+    }
+
+
+def measurement():
+    return {
+        "id": 1,
+        "config": MEAS_CONFIG,
+        "config_rev": 40,
+        "running": True,
+        "frozen": False,
+        "delay": {
+            "applied": 0.0125,
+            "applied_samples": 600,
+            "tracking": True,
+            "last_finding": finding(),
+        },
+        "grid_id": p.grid_id(LOG_GRID),
+    }
+
+
 def requests():
     """A subset of samples::commands(); `id` is the index in that list."""
     return [
@@ -250,26 +320,14 @@ def requests():
             },
         ),
         req(9, "gen.stop"),
+        req(10, "meas.create", {"config": MEAS_CONFIG}),
         req(
-            10,
-            "meas.create",
-            {
-                "config": {
-                    "name": "Main L",
-                    "kind": {
-                        "type": "transfer",
-                        "config": {
-                            "reference_input": 0,
-                            "measurement_input": 1,
-                            "averaging": {"type": "fifo", "blocks": 8},
-                            "grid": {"ppo": 48, "k_min": -240, "k_max": 239},
-                            "smoothing": {"fraction": "sixth", "mode": "power"},
-                        },
-                    },
-                }
-            },
+            17,
+            "delay.find",
+            {"meas": 1, "band": {"type": "sub"}, "observation": 8.0},
+            mutation=False,
         ),
-        req(18, "delay.insert", {"meas": 1, "pick": {"type": "candidate", "index": 1}}),
+        req(18, "delay.insert", {"meas": 1, "pick": {"type": "ranked", "index": 1}}),
         req(
             28,
             "trace.import",
@@ -281,6 +339,7 @@ def requests():
 def events():
     """A subset of samples::events()."""
     return [
+        {"kind": "measurement", "rev": 43, "payload": {"type": "set", "value": measurement()}},
         {"kind": "measurement", "rev": 44, "payload": {"type": "deleted", "value": 3}},
         {"kind": "trace", "rev": 46, "payload": {"type": "deleted", "value": 8}},
         {

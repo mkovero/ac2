@@ -87,6 +87,89 @@ async fn devices_json() -> R {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn delay_find_bands_ambiguity_and_refusal() -> R {
+    use ac2_client::fake::FakeFinding;
+    let f = fake()?;
+    ok_json(
+        &f,
+        &[
+            "meas",
+            "new",
+            "tf",
+            "--ref",
+            "1",
+            "--meas",
+            "2",
+            "--name",
+            "sub",
+            "--fast-lf",
+            "--json",
+        ],
+    )
+    .await
+    .map(|m| assert_eq!(m["config"]["kind"]["config"]["depth"]["type"], "fast_lf"))?;
+
+    // Ambiguous: candidates listed, the third one inserted (1-based on the command line).
+    f.lock().finding = FakeFinding::Ambiguous;
+    let d = ok_json(
+        &f,
+        &[
+            "delay",
+            "find",
+            "sub",
+            "--band",
+            "sub",
+            "--observation",
+            "8s",
+            "--insert",
+            "3",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(d["finding"]["outcome"]["type"], "ambiguous");
+    assert_eq!(d["finding"]["band"]["type"], "sub");
+    assert_eq!(
+        d["finding"]["outcome"]["ranked"].as_array().map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(d["inserted"]["delay"]["applied"], 0.0134);
+    let r = ac2(&f, &["delay", "find", "sub", "--band", "80hz-800hz"]).await?;
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(
+        r.stdout.starts_with("AMBIGUOUS · near the threshold"),
+        "{}",
+        r.stdout
+    );
+    assert!(r.stdout.contains("12.50 ms  −11.5 dB") || r.stdout.contains("12.50 ms"));
+    assert!(r.stdout.contains("--pick 1|2|3"), "{}", r.stdout);
+    assert!(
+        r.stdout.contains("band           custom 80–800 Hz"),
+        "{}",
+        r.stdout
+    );
+
+    // Refused: the reasons are typed in JSON and spelled out for people; nothing inserted.
+    f.lock().finding = FakeFinding::NoEstimate;
+    let d = ok_json(&f, &["delay", "find", "sub", "--insert", "--json"]).await?;
+    assert_eq!(d["finding"]["outcome"]["type"], "no_estimate");
+    assert_eq!(
+        d["finding"]["outcome"]["reasons"],
+        json!([{ "type": "low_psr" }, { "type": "low_band_snr" }])
+    );
+    assert_eq!(d["inserted"], Value::Null);
+    let r = ac2(&f, &["delay", "find", "sub"]).await?;
+    assert_eq!(r.code, 0);
+    assert!(
+        r.stdout
+            .starts_with("NO ESTIMATE · no clear peak, too noisy in band"),
+        "{}",
+        r.stdout
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn session_meas_delay_trace_flow() -> R {
     let f = fake()?;
     let s = ok_json(
@@ -168,7 +251,8 @@ async fn session_meas_delay_trace_flow() -> R {
             "measurement_input": 1,
             "averaging": { "type": "fifo", "blocks": 8 },
             "grid": { "ppo": 48, "k_min": -240, "k_max": 239 },
-            "smoothing": { "fraction": "sixth", "mode": "power" }
+            "smoothing": { "fraction": "sixth", "mode": "power" },
+            "depth": { "type": "equal_confidence" }
         }})
     );
 
@@ -182,9 +266,11 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(names, ["foh", "main-l"]);
 
     let d = ok_json(&f, &["delay", "find", "main-l", "--insert", "--json"]).await?;
-    assert_eq!(d["finding"]["first_arrival"], 0.0125);
-    assert_eq!(d["finding"]["strongest"], 0.0127);
-    assert_eq!(d["finding"]["ambiguous"], false);
+    assert_eq!(d["finding"]["outcome"]["type"], "accepted");
+    assert_eq!(d["finding"]["outcome"]["first"]["delay"], 0.0125);
+    assert_eq!(d["finding"]["outcome"]["strongest"]["delay"], 0.0127);
+    assert_eq!(d["finding"]["band"]["type"], "full");
+    assert_eq!(d["finding"]["confidence"]["psr_db"], 24.0);
     assert_eq!(d["finding"]["candidates"].as_array().map(Vec::len), Some(2));
     assert_eq!(d["inserted"]["delay"]["applied"], 0.0125);
     assert_eq!(d["inserted"]["delay"]["applied_samples"], 600);

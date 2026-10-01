@@ -13,7 +13,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use ac2_audio::{Backend, Gain, MaxLevel};
-use ac2_core::delay::{Arrival, FinderResult, Outcome};
+use ac2_core::delay::FinderResult;
 use ac2_core::generator::{
     Generator as CoreGenerator, GeneratorConfig, GeneratorError, LevelControl, dbfs_to_rms,
 };
@@ -21,9 +21,8 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    CalEntry, CalKey, DelayCandidate, DelayFinding, DelayPick, DelayState, GenAction, GenAudit,
-    Generator, GeneratorDesired, Lease as WireLease, MeasConfig, MeasKind, Measurement, Session,
-    SessionConfig, TimingStatus,
+    CalEntry, CalKey, DelayState, FinderBand, GenAction, GenAudit, Generator, GeneratorDesired,
+    Lease as WireLease, MeasConfig, MeasKind, Measurement, Session, SessionConfig, TimingStatus,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -141,50 +140,38 @@ pub(crate) struct Control {
 
 const MAX_DELAY_S: f64 = 10.0;
 
-/// Wire form of a finder result. Candidates are listed strongest first (at most 8); an
-/// ambiguous result lists the finder's ranked candidates in rule order instead, so the
-/// operator picks among exactly those. No estimate is a refusal naming the reasons.
-fn finding(r: &FinderResult, fs: f64) -> Result<DelayFinding, ProtoError> {
-    let cand = |a: &Arrival| DelayCandidate {
-        delay: Seconds(a.delay_frac / fs),
-        relative: Db(a.level_db),
+/// Refuses a `delay.find` the finder could not run as asked: band edges or observation out
+/// of range for `fs`. Sub-band observations are the operator's 2 / 4 / 8 s choice (D2).
+fn check_find(band: conv::FindBand, observation: Option<f64>, fs: f64) -> Result<(), ProtoError> {
+    use ac2_core::delay::{Band, BandClass, FinderConfig};
+    let inv = |m: String| Err(perr(ErrorCode::Invalid, m));
+    let core_band = match band {
+        conv::FindBand::Auto => Band::FullRange,
+        conv::FindBand::Band(b) => b,
     };
-    let (first, strongest, ambiguous, candidates) = match &r.outcome {
-        Outcome::Accepted { first, strongest } => {
-            let mut c: Vec<&Arrival> = r.candidates.iter().collect();
-            c.sort_by(|a, b| b.level_db.total_cmp(&a.level_db));
-            (
-                *first,
-                *strongest,
-                false,
-                c.into_iter().take(8).map(cand).collect(),
-            )
-        }
-        Outcome::Ambiguous {
-            ranked, strongest, ..
-        } => {
-            let Some(first) = ranked.first() else {
-                return Err(perr(
-                    ErrorCode::Internal,
-                    "ambiguous result without candidates",
-                ));
-            };
-            (*first, *strongest, true, ranked.iter().map(cand).collect())
-        }
-        Outcome::NoEstimate { reasons } => {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("no estimate: {reasons:?} (band {:?})", r.band),
+    let mut cfg = FinderConfig::new(fs, core_band);
+    cfg.observation_s = observation;
+    if let Err(e) = cfg.validate() {
+        return inv(format!("delay finder: {e}"));
+    }
+    if let Some(s) = observation {
+        if s > jobs::finder::MAX_OBSERVATION_S {
+            return inv(format!(
+                "observation {s} s is longer than {} s",
+                jobs::finder::MAX_OBSERVATION_S
             ));
         }
-    };
-    Ok(DelayFinding {
-        first_arrival: Seconds(first.delay_frac / fs),
-        strongest: Seconds(strongest.delay_frac / fs),
-        ambiguous,
-        candidates,
-        found_at: WallNs(wall_ns()),
-    })
+        let sub = match band {
+            conv::FindBand::Auto => false,
+            conv::FindBand::Band(b) => b.class() == BandClass::Sub,
+        };
+        if sub && ![2.0, 4.0, 8.0].contains(&s) {
+            return inv(format!(
+                "sub-band observation must be 2, 4 or 8 s, not {s} s"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn mutation_conflict(rev: Rev) -> ProtoError {
@@ -240,6 +227,9 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             }
             if conv::tf_averaging(config.averaging).is_none() {
                 return inv("invalid averaging");
+            }
+            if conv::depth(config.depth).is_none() {
+                return inv("fast_lf max_settle_s must be a positive time");
             }
         }
         MeasKind::Spectrum { config } => {
@@ -461,7 +451,11 @@ impl Control {
             _ => match req.cmd {
                 // The finder runs for a while on the job thread; the reply follows its result
                 // and other clients are served meanwhile.
-                Command::DelayFind { meas } => match self.start_find(meas) {
+                Command::DelayFind {
+                    meas,
+                    band,
+                    observation,
+                } => match self.start_find(meas, band, observation) {
                     Ok(token) => {
                         self.pending_finds.insert(
                             token,
@@ -692,25 +686,26 @@ impl Control {
                         "no delay finding to insert; run delay.find or use delay.set",
                     ));
                 };
-                if f.ambiguous && pick == DelayPick::FirstArrival {
+                if let Some(reasons) = f.no_estimate() {
                     return Err(perr(
                         ErrorCode::Refused,
-                        "the finding is ambiguous; pick a candidate explicitly",
+                        format!(
+                            "the last finding has no estimate ({reasons:?}); find again or use delay.set"
+                        ),
                     ));
                 }
-                let delay = match pick {
-                    DelayPick::FirstArrival => f.first_arrival,
-                    DelayPick::Strongest => f.strongest,
-                    DelayPick::Candidate { index } => {
-                        f.candidates
-                            .get(usize::from(index))
-                            .ok_or_else(|| perr(ErrorCode::NotFound, "no such candidate"))?
-                            .delay
-                    }
-                };
-                self.set_delay(meas, delay)
+                let delay = f
+                    .arrival(pick)
+                    .ok_or_else(|| {
+                        perr(
+                            ErrorCode::NotFound,
+                            "the last finding has no such arrival (ranked picks need an ambiguous finding)",
+                        )
+                    })?
+                    .delay;
+                self.set_delay(meas, delay, false)
             }
-            Command::DelaySet { meas, delay } => self.set_delay(meas, delay),
+            Command::DelaySet { meas, delay } => self.set_delay(meas, delay, true),
             Command::DelayTrack { meas, enabled } => {
                 self.transfer_delay(meas)?;
                 let mut m = self.meas(meas)?.clone();
@@ -1138,7 +1133,15 @@ impl Control {
         }
     }
 
-    fn set_delay(&mut self, meas: MeasId, delay: Seconds) -> Result<ReplyBody, ProtoError> {
+    /// Applies `delay`. An explicit operator value (`clear_finding`) drops the last finding:
+    /// it no longer describes the applied delay, and a refusal must not keep showing as the
+    /// reason there is no delay.
+    fn set_delay(
+        &mut self,
+        meas: MeasId,
+        delay: Seconds,
+        clear_finding: bool,
+    ) -> Result<ReplyBody, ProtoError> {
         self.transfer_delay(meas)?;
         if !(delay.0.is_finite() && delay.0.abs() <= MAX_DELAY_S) {
             return Err(perr(
@@ -1158,6 +1161,9 @@ impl Control {
         if let Some(d) = &mut m.delay {
             d.applied = Seconds(samples as f64 / fs);
             d.applied_samples = Samples(samples);
+            if clear_finding {
+                d.last_finding = None;
+            }
         }
         m.config_rev = rev;
         if let Some(j) = self.jobs.get(&meas) {
@@ -1171,7 +1177,12 @@ impl Control {
         Ok(ReplyBody::Measurement(m))
     }
 
-    fn start_find(&mut self, meas: MeasId) -> Result<u64, ProtoError> {
+    fn start_find(
+        &mut self,
+        meas: MeasId,
+        band: FinderBand,
+        observation: Option<Seconds>,
+    ) -> Result<u64, ProtoError> {
         self.transfer_delay(meas)?;
         let job = self.jobs.get(&meas).ok_or_else(|| {
             perr(
@@ -1179,9 +1190,20 @@ impl Control {
                 "the measurement is not running; the finder needs live audio",
             )
         })?;
+        let fs = self
+            .session
+            .as_ref()
+            .map(|r| f64::from(r.sample_rate))
+            .ok_or_else(|| perr(ErrorCode::Invalid, "no open session"))?;
+        let band = conv::finder_band(band);
+        check_find(band, observation.map(|o| o.0), fs)?;
         let token = self.next_token;
         self.next_token += 1;
-        job.send(JobCmd::Find { token });
+        job.send(JobCmd::Find {
+            token,
+            band,
+            observation: observation.map(|o| o.0),
+        });
         Ok(token)
     }
 
@@ -1191,11 +1213,11 @@ impl Control {
         };
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
         let reply = match (result, fs) {
-            (Err(e), _) => Err(perr(ErrorCode::Refused, format!("no estimate: {e}"))),
+            (Err(e), _) => Err(perr(ErrorCode::Invalid, format!("delay finder: {e}"))),
             (Ok(_), None) => Err(perr(ErrorCode::Invalid, "the session closed")),
-            (Ok(r), Some(fs)) => match finding(&r, fs) {
-                Err(e) => Err(e),
-                Ok(f) => match self.meas(p.meas).cloned() {
+            (Ok(r), Some(fs)) => {
+                let f = conv::delay_finding(&r, fs, WallNs(wall_ns()));
+                match self.meas(p.meas).cloned() {
                     Err(e) => Err(e),
                     Ok(mut m) => {
                         if let Some(d) = &mut m.delay {
@@ -1204,8 +1226,8 @@ impl Control {
                         self.commit(Change::Measurement(Patch::Set(m)));
                         Ok(ReplyBody::DelayFinding(f))
                     }
-                },
-            },
+                }
+            }
         };
         self.answer(&p.routing_id, &p.client, p.id, reply, Instant::now());
     }
@@ -1227,7 +1249,7 @@ impl Control {
         };
         if d.tracking
             && d.applied_samples.0 != samples
-            && let Err(e) = self.set_delay(meas, Seconds(samples as f64 / fs))
+            && let Err(e) = self.set_delay(meas, Seconds(samples as f64 / fs), false)
         {
             tracing::warn!("tracked delay not applied: {}", e.msg);
         }
@@ -1313,7 +1335,7 @@ impl Control {
         tracing::info!(
             target: "ac2d::audit",
             "generator {action:?} by {}",
-            client.map_or("daemon (expiry)", |c| c.0.as_str())
+            client.map_or("daemon", |c| c.0.as_str())
         );
         g.last_action = Some(GenAudit {
             action,
@@ -1360,7 +1382,7 @@ impl Control {
             g.owner = None;
             g.armed = false;
             g.firing = false;
-            self.audit(&mut g, GenAction::Expiry, None);
+            self.audit(&mut g, GenAction::Expiry, owner.as_ref());
             self.commit(Change::Generator(g));
         }
     }

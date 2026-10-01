@@ -13,7 +13,7 @@ use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, CalEntry, DelayFinding, DelayPick, DelayReference, DeviceInfo, EssSpec,
-    ExportFormat, Generator, GeneratorDesired, ImportFormat, Lease, MathOp, MeasConfig,
+    ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, Lease, MathOp, MeasConfig,
     Measurement, MicCurve, MicCurveAction, Session, SessionConfig, SplLog, TraceData, TraceEdit,
     TraceMeta,
 };
@@ -165,6 +165,11 @@ pub enum Command {
     DelayFind {
         /// Measurement.
         meas: MeasId,
+        /// Analysis band.
+        band: FinderBand,
+        /// Measurement block length; nil = as much audio as there is, up to the band's
+        /// default (decision D2: sub 2, 4 or 8 s, default 4 s).
+        observation: Option<Seconds>,
     },
     /// Apply a finder result.
     #[serde(rename = "delay.insert")]

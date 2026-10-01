@@ -19,9 +19,11 @@ fn doc() -> String {
 }
 
 fn expected_names(err: &str) -> BTreeSet<String> {
+    // "expected one of `a`, `b`, …", or "expected `a` or `b`" for two names.
     let tail = err
         .split("expected one of")
         .nth(1)
+        .or_else(|| err.split(", expected").nth(1))
         .unwrap_or_else(|| panic!("no name list in {err:?}"));
     tail.split('`')
         .enumerate()
@@ -121,6 +123,58 @@ fn protocol_doc_names_everything() {
         &mut missing,
     );
     check("unit", &names_of::<Unit, _>(&"no_such"), &doc, &mut missing);
+    check(
+        "finder band",
+        &names_of::<model::FinderBand, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "delay outcome",
+        &names_of::<model::DelayOutcome, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "no-estimate reason",
+        &names_of::<model::NoEstimateReason, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "ambiguity reason",
+        &names_of::<model::AmbiguityReason, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "delay pick",
+        &names_of::<model::DelayPick, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "depth policy",
+        &names_of::<model::DepthPolicy, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    for (group, fields) in [
+        (
+            "delay finding field",
+            names_of::<model::DelayFinding, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "delay arrival field",
+            names_of::<model::DelayArrival, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "delay confidence field",
+            names_of::<model::DelayConfidence, _>(&Bogus { bogus_field: 0 }),
+        ),
+    ] {
+        check(group, &fields, &doc, &mut missing);
+    }
 
     for (group, flags) in [
         ("validity bit", ValidityMask::NAMED),

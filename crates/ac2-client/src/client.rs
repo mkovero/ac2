@@ -263,7 +263,7 @@ impl Client {
         });
         let welcome = hello(&core, &cfg.name).await?;
         let mirror = Mirror::new(cfg.mirror);
-        let (view_tx, view_rx) = watch::channel(Arc::new(mirror.view()));
+        let (view_tx, view_rx) = watch::channel(Arc::new(view_of(&mirror, &welcome)));
         let welcome = Arc::new(Mutex::new(welcome));
         let sync_task = tokio::spawn(run_sync(
             core.clone(),
@@ -452,6 +452,15 @@ impl Client {
     }
 }
 
+/// The mirror view with the identity of the `welcome` that belongs to its incarnation.
+fn view_of(mirror: &Mirror, w: &Welcome) -> MirrorView {
+    let mut v = mirror.view();
+    if v.incarnation.is_none_or(|i| i == w.daemon_incarnation) {
+        v.client_id = Some(w.client_id.clone());
+    }
+    v
+}
+
 async fn hello(core: &CallCore, name: &str) -> Result<Welcome, ClientError> {
     let op = "hello";
     let r = core
@@ -481,7 +490,7 @@ async fn run_sync(
         let (mut need, received) = tokio::select! {
             msg = rx.recv() => match msg {
                 None => return,
-                Some(SyncIn::Event(e)) => (mirror.on_event(e, now), true),
+                Some(SyncIn::Event(e)) => (mirror.on_event(*e, now), true),
                 Some(SyncIn::Ka { stamp, meta, at, local_wall_ns }) => {
                     (mirror.on_ka(&stamp, meta, at, local_wall_ns), true)
                 }
@@ -533,6 +542,10 @@ async fn run_sync(
         // each keeps watchers simple. Keepalives come at 4 Hz, events at commit rate.
         // Liveness itself is derived by watchers from `last_ka`, so idle ticks publish
         // nothing.
-        view_tx.send_replace(Arc::new(mirror.view()));
+        let v = match welcome.lock() {
+            Ok(w) => view_of(&mirror, &w),
+            Err(_) => mirror.view(),
+        };
+        view_tx.send_replace(Arc::new(v));
     }
 }

@@ -214,7 +214,7 @@ crates/
   ac2-scene/   Pure display layer: traces → geometry, axes, ticks, readout strings,
                banners. No GPU, no windowing, no sockets.
   ac2-plot/    wgpu renderer for scenes: lines, fills, heatmaps, grids, text.
-  ac2-ui/      Desktop app; can host an embedded daemon (inproc).
+  ac2-ui/      Desktop app; can host an embedded daemon (`--embedded`, local transports).
 tools/refgen/  numpy/scipy scripts producing golden vectors
 fixtures/      raw captures from real rigs + synthetic scenario captures
 ```
@@ -399,7 +399,7 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 | ctrl | ROUTER | async request/response with ids; slow handlers never block other clients |
 | data | XPUB | frames + state events, subscription-aware |
 
-Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows), `inproc://` (embedded),
+Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded daemon uses the same (private ipc dir / ephemeral loopback ports), since the client owns its own ZeroMQ context;
 `tcp://<iface>` only in network mode, which requires CURVE on **both** sockets.
 
 ### 6.2 Messages & state sync

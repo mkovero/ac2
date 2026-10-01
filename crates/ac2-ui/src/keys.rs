@@ -157,7 +157,23 @@ impl Chord {
     /// Parses `Ctrl+K`, `Cmd+K`, `Shift+P`, `Alt+Left`, `Space`, `/`, `Up`, `F1`.
     pub fn parse(s: &str) -> Result<Self, String> {
         let mut c = Chord::key(Key::Space);
-        let parts: Vec<&str> = s.split('+').map(str::trim).collect();
+        // macOS labels (`⌘⇧P`) parse too, so every label reads back as its chord.
+        let mut rest = s.trim();
+        loop {
+            if let Some(r) = rest.strip_prefix('⌘') {
+                c.command = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix('⌥') {
+                c.alt = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix('⇧') {
+                c.shift = true;
+                rest = r;
+            } else {
+                break;
+            }
+        }
+        let parts: Vec<&str> = rest.split('+').map(str::trim).collect();
         let Some((key, mods)) = parts.split_last() else {
             return Err(format!("empty key {s:?}"));
         };
@@ -752,6 +768,8 @@ mod tests {
             }
             assert_eq!(Chord::parse(&c.label()).ok(), Some(c), "{s}");
         }
+        assert_eq!(Chord::parse("⌘⇧K"), Chord::parse("Ctrl+Shift+K"));
+        assert_eq!(Chord::parse("⌥←"), Chord::parse("Alt+Left"));
         assert!(Chord::parse("Hyper+K").is_err());
         assert!(Chord::parse("Ctrl+Nope").is_err());
     }

@@ -34,6 +34,18 @@ use crate::endpoint::Endpoints;
 use crate::io::wall_ns;
 use crate::mirror::apply_change;
 
+/// What the fake's `delay.find` answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FakeFinding {
+    /// First arrival 12.5 ms, strongest 12.7 ms.
+    #[default]
+    Accepted,
+    /// Three ranked arrivals (12.5, 12.7, 13.4 ms); the strongest is 12.7 ms.
+    Ambiguous,
+    /// Refused: low PSR and low band SNR.
+    NoEstimate,
+}
+
 /// Fake daemon settings.
 #[derive(Debug, Clone)]
 pub struct FakeOptions {
@@ -98,6 +110,8 @@ pub struct Shared {
     pub refreshes: u32,
     /// Lease expiries.
     pub expiries: u32,
+    /// What `delay.find` answers.
+    pub finding: FakeFinding,
     lease: Option<LeaseSlot>,
     dedup: HashMap<(Vec<u8>, u64), Vec<u8>>,
     outbox: Vec<Vec<Vec<u8>>>,
@@ -186,6 +200,7 @@ impl Shared {
             devices: fake_devices(),
             refreshes: 0,
             expiries: 0,
+            finding: FakeFinding::default(),
             lease: None,
             dedup: HashMap::new(),
             outbox: vec![],
@@ -280,12 +295,12 @@ impl Shared {
             .as_ref()
             .is_some_and(|l| l.deadline <= Instant::now())
         {
-            self.lease = None;
+            let owner = self.lease.take().map(|l| l.owner);
             self.expiries += 1;
             self.state.generator.owner = None;
             self.state.generator.armed = false;
             self.state.generator.firing = false;
-            self.generator_changed(GenAction::Expiry, None);
+            self.generator_changed(GenAction::Expiry, owner);
         }
     }
 
@@ -496,31 +511,41 @@ impl Shared {
                 self.meas(meas)?;
                 ReplyBody::Ack { rev: self.rev }
             }
-            C::DelayFind { meas } => {
-                let m = self.meas(meas)?;
-                if m.delay.is_none() {
-                    return Err(err(ErrorCode::Invalid, "not a transfer measurement"));
-                }
-                ReplyBody::DelayFinding(finding(self.now_ns()))
+            C::DelayFind { meas, band, .. } => {
+                let mut m = self.meas(meas)?;
+                let f = finding(self.finding, band, self.now_ns());
+                let st = m
+                    .delay
+                    .as_mut()
+                    .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?;
+                st.last_finding = Some(f.clone());
+                self.commit(Change::Measurement(Patch::Set(m)));
+                ReplyBody::DelayFinding(f)
             }
             C::DelayInsert { meas, pick } => {
                 let mut m = self.meas(meas)?;
-                let f = finding(self.now_ns());
-                let d = match pick {
-                    DelayPick::FirstArrival => f.first_arrival,
-                    DelayPick::Strongest => f.strongest,
-                    DelayPick::Candidate { index } => f
-                        .candidates
-                        .get(usize::from(index))
-                        .map(|c| c.delay)
-                        .ok_or_else(|| err(ErrorCode::Invalid, "no such candidate"))?,
-                };
-                set_delay(&mut m, d, Some(f))?;
+                let f = m
+                    .delay
+                    .as_ref()
+                    .and_then(|d| d.last_finding.clone())
+                    .ok_or_else(|| err(ErrorCode::Invalid, "no delay finding to insert"))?;
+                if let Some(r) = f.no_estimate() {
+                    return Err(err(ErrorCode::Refused, format!("no estimate: {r:?}")));
+                }
+                let d = f
+                    .arrival(pick)
+                    .ok_or_else(|| err(ErrorCode::NotFound, "no such arrival"))?
+                    .delay;
+                set_delay(&mut m, d)?;
                 self.put_meas(m)
             }
             C::DelaySet { meas, delay } => {
                 let mut m = self.meas(meas)?;
-                set_delay(&mut m, delay, None)?;
+                set_delay(&mut m, delay)?;
+                // An explicit value supersedes the last finding (as the daemon does).
+                if let Some(d) = &mut m.delay {
+                    d.last_finding = None;
+                }
                 self.put_meas(m)
             }
             C::DelayTrack { meas, enabled } => {
@@ -658,35 +683,90 @@ impl Shared {
     }
 }
 
-fn finding(now: u64) -> DelayFinding {
+fn arrival(ms: f64, level: f64) -> DelayArrival {
+    DelayArrival {
+        delay: Seconds(ms / 1000.0),
+        delay_samples: ms * 48.0,
+        level: Db(level),
+        phase: Degrees(0.0),
+        uncertainty_samples: 0.2,
+        misfit: 0.01,
+        refined: true,
+    }
+}
+
+fn finding(kind: FakeFinding, band: FinderBand, now: u64) -> DelayFinding {
+    let band = match band {
+        FinderBand::Full | FinderBand::Auto => DelayBand::Full,
+        FinderBand::Mid => DelayBand::Mid,
+        FinderBand::Sub => DelayBand::Sub,
+        FinderBand::Custom { lo_hz, hi_hz } => DelayBand::Custom { lo_hz, hi_hz },
+    };
+    let confidence = DelayConfidence {
+        psr_db: Some(Db(24.0)),
+        psr_acq_db: Some(Db(20.0)),
+        band_snr_db: Some(Db(30.0)),
+        excited_fraction: Some(1.0),
+        uncertainty_samples: Some(0.2),
+        pulse_width_samples: Some(4.0),
+        period: None,
+    };
+    let (outcome, candidates, confidence) = match kind {
+        FakeFinding::Accepted => (
+            DelayOutcome::Accepted {
+                first: arrival(12.5, -2.5),
+                strongest: arrival(12.7, 0.0),
+            },
+            vec![arrival(12.5, -2.5), arrival(12.7, 0.0)],
+            confidence,
+        ),
+        FakeFinding::Ambiguous => (
+            DelayOutcome::Ambiguous {
+                reasons: vec![AmbiguityReason::BorderlineLevel],
+                ranked: vec![
+                    arrival(12.5, -11.5),
+                    arrival(12.7, 0.0),
+                    arrival(13.4, -6.0),
+                ],
+                strongest: arrival(12.7, 0.0),
+            },
+            vec![
+                arrival(12.5, -11.5),
+                arrival(12.7, 0.0),
+                arrival(13.4, -6.0),
+            ],
+            confidence,
+        ),
+        FakeFinding::NoEstimate => (
+            DelayOutcome::NoEstimate {
+                reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr],
+            },
+            vec![],
+            DelayConfidence {
+                psr_db: Some(Db(4.0)),
+                band_snr_db: Some(Db(2.0)),
+                uncertainty_samples: None,
+                ..confidence
+            },
+        ),
+    };
     DelayFinding {
-        first_arrival: Seconds(0.0125),
-        strongest: Seconds(0.0127),
-        ambiguous: false,
-        candidates: vec![
-            DelayCandidate {
-                delay: Seconds(0.0127),
-                relative: Db(0.0),
-            },
-            DelayCandidate {
-                delay: Seconds(0.0125),
-                relative: Db(-2.5),
-            },
-        ],
+        outcome,
+        confidence,
+        band,
+        observation: Seconds(0.25),
+        candidates,
         found_at: WallNs(now),
     }
 }
 
-fn set_delay(m: &mut Measurement, d: Seconds, f: Option<DelayFinding>) -> Result<(), ProtoError> {
+fn set_delay(m: &mut Measurement, d: Seconds) -> Result<(), ProtoError> {
     let st = m
         .delay
         .as_mut()
         .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?;
     st.applied = d;
     st.applied_samples = Samples((d.0 * 48_000.0).round() as i64);
-    if f.is_some() {
-        st.last_finding = f;
-    }
     Ok(())
 }
 
@@ -841,8 +921,11 @@ fn handle(shared: &Mutex<Shared>, rid: &[u8], body: &[u8]) -> Option<Vec<u8>> {
     if let Some(stored) = s.dedup.get(&key) {
         return Some(stored.clone());
     }
+    // Like a real restart (a new ROUTER assigns new routing ids), a new incarnation binds a
+    // new identity to the same connection.
     let client = ClientId(format!(
-        "local-{}",
+        "local-{:04x}-{}",
+        s.incarnation.0 & 0xffff,
         rid.iter().map(|b| format!("{b:02x}")).collect::<String>()
     ));
     let result = match req.expect_rev {

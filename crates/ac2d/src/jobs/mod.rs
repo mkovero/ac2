@@ -110,7 +110,11 @@ impl Emitter {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum JobCmd {
     /// Run the delay finder now; the result goes to control under `token`.
-    Find { token: u64 },
+    Find {
+        token: u64,
+        band: crate::conv::FindBand,
+        observation: Option<f64>,
+    },
     /// Delay tracking on or off.
     Track { enabled: bool },
     /// New alignment delay (transfer); `rev` is the commit that set it.

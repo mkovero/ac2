@@ -138,6 +138,7 @@ pub fn transfer(name: &str) -> MeasConfig {
                     k_max: 239,
                 },
                 smoothing: None,
+                depth: ac2_proto::model::DepthPolicy::EqualConfidence,
             },
         },
     }

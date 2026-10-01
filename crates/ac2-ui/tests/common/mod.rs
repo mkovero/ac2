@@ -184,6 +184,7 @@ fn transfer(meas_in: u16) -> MeasKind {
                 k_max: 103,
             },
             smoothing: None,
+            depth: ac2_proto::model::DepthPolicy::EqualConfidence,
         },
     }
 }

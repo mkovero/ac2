@@ -106,6 +106,7 @@ dependencies = [
  "ac2-plot",
  "ac2-proto",
  "ac2-scene",
+ "ac2d",
  "clap",
  "directories",
  "eframe",

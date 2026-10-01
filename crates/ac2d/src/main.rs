@@ -2,18 +2,17 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 
-use ac2_audio::{Backend, CpalBackend, FakeBackend, FakeConfig};
-use ac2d::{Daemon, DaemonConfig, Listen, NetworkSecurity};
+use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
 
 const USAGE: &str = "\
 usage: ac2d [options]
 
 With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), cpal backend.
 
-  --backend <name>       audio backend: cpal (default), jack, or fake (a simulated device;
-                         only when named here, never as a fallback)
+  --backend <name>       audio backend: cpal (default), jack, or fake (a simulated rig:
+                         out 1 → in 1 loopback, out 1 → in 2 acoustic path; only when
+                         named here, never as a fallback)
   --listen <tcp://iface[:port]>
                          network mode: ctrl on port (default 47820), data on port+1,
                          CURVE on both
@@ -28,7 +27,7 @@ Logging: RUST_LOG (default info).";
 
 #[derive(Debug)]
 struct Args {
-    backend: String,
+    backend: BackendChoice,
     listen: Option<String>,
     ctrl: Option<String>,
     data: Option<String>,
@@ -41,7 +40,7 @@ fn parse() -> Result<Option<Args>, String> {
     let mut it = std::env::args().skip(1);
     let mut backend = None;
     let mut a = Args {
-        backend: String::new(),
+        backend: BackendChoice::Cpal,
         listen: None,
         ctrl: None,
         data: None,
@@ -69,7 +68,9 @@ fn parse() -> Result<Option<Args>, String> {
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    a.backend = backend.unwrap_or_else(|| "cpal".into());
+    if let Some(b) = backend {
+        a.backend = b.parse()?;
+    }
     Ok(Some(a))
 }
 
@@ -80,26 +81,6 @@ fn config_dir() -> PathBuf {
         .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ac2")
-}
-
-fn backend(name: &str) -> Result<Arc<dyn Backend>, String> {
-    match name {
-        "cpal" => Ok(Arc::new(CpalBackend::new())),
-        "fake" => {
-            let cfg = FakeConfig {
-                drive: ac2_audio::fake::FakeDrive::Thread(ac2_audio::fake::Pace::Realtime),
-                ..FakeConfig::default()
-            };
-            Ok(Arc::new(FakeBackend::new(cfg).map_err(|e| e.to_string())?))
-        }
-        #[cfg(all(feature = "jack", target_os = "linux"))]
-        "jack" => Ok(Arc::new(ac2_audio::JackBackend::new(
-            ac2_audio::JackConfig::default(),
-        ))),
-        #[cfg(not(all(feature = "jack", target_os = "linux")))]
-        "jack" => Err("this build has no JACK backend (feature `jack`, Linux)".into()),
-        other => Err(format!("unknown backend {other} (jack, cpal or fake)")),
-    }
 }
 
 fn main() -> ExitCode {
@@ -120,7 +101,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let backend = match backend(&args.backend) {
+    let backend = match ac2d::backend(args.backend) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("ac2d: {e}");

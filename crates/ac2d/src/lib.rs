@@ -26,6 +26,7 @@
 //! path itself ([`stimulus`]).
 #![deny(unsafe_code)]
 
+mod backend;
 pub mod config;
 mod control;
 mod conv;
@@ -53,6 +54,7 @@ pub use config::{
     pid_file, runtime_dir,
 };
 
+pub use backend::{BackendChoice, FAKE_RIG, backend};
 use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};
 use outbox::Outbox;

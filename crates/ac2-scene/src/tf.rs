@@ -822,7 +822,7 @@ mod tests {
 
             let s = busy(&view, &crate::banner::tests::everything());
             assert_eq!(s.banners.len(), MAX_BANNERS);
-            assert_eq!(s.banners[2].text, "+5 more");
+            assert_eq!(s.banners[2].text, "+6 more");
             let strip_h = 2.0 * BANNER_PAD + 3.0 * BANNER_HEIGHT + 2.0 * BANNER_GAP;
             assert_eq!(s.strip, Rect::new(0.0, 0.0, SIZE.width, strip_h));
             // Panes start below the strip and shrink by its height, keeping their ratios.

@@ -8,10 +8,15 @@
 //! | 1 | DAEMON NOT RESPONDING | fault | no keepalive for > 1.5 s |
 //! | 2 | CLIP | fault | protection `CLIP` |
 //! | 3 | NO REFERENCE | fault | protection `NO_REFERENCE` |
-//! | 4 | NO SIGNAL | fault | protection `NO_SIGNAL` |
-//! | 5 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
-//! | 6 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
-//! | 7 | NO DELAY ESTIMATE | info | TF measurement without an accepted delay |
+//! | 4 | CHECK ROUTING | fault | protection `CHECK_ROUTING` (inputs identical or swapped) |
+//! | 5 | NO SIGNAL | fault | protection `NO_SIGNAL` |
+//! | 6 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
+//! | 7 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
+//! | 8 | NO DELAY ESTIMATE | info | TF measurement without a delay, or the finder refused (the detail says why) |
+//!
+//! CHECK ROUTING sits right under NO REFERENCE: a mis-patched reference invalidates every
+//! transfer value just as a missing one does, and fixing the patch comes before any other
+//! signal check.
 //!
 //! Layout: a strip above the plots, outside every data area, so a banner never hides the
 //! trace, legend or cursor values it is warning about. Rows are centred over the plots and
@@ -20,7 +25,7 @@
 //! a banner is up; the plots below shrink by its height ([`banner_strip`]).
 
 use ac2_proto::frame::ProtectionFlags;
-use ac2_proto::model::{MeasKind, Measurement, TimingState};
+use ac2_proto::model::{MeasKind, Measurement, NoEstimateReason, TimingState};
 
 use crate::format;
 use crate::primitives::{Anchor, FillRect, HAlign, Layer, Rect, VAlign, Viewport};
@@ -50,6 +55,7 @@ pub enum BannerKind {
     DaemonNotResponding,
     Clip,
     NoReference,
+    CheckRouting,
     NoSignal,
     Stale,
     OutputTimingJump,
@@ -59,9 +65,11 @@ pub enum BannerKind {
 impl BannerKind {
     pub fn severity(self) -> Severity {
         match self {
-            Self::DaemonNotResponding | Self::Clip | Self::NoReference | Self::NoSignal => {
-                Severity::Fault
-            }
+            Self::DaemonNotResponding
+            | Self::Clip
+            | Self::NoReference
+            | Self::CheckRouting
+            | Self::NoSignal => Severity::Fault,
             Self::Stale | Self::OutputTimingJump => Severity::Warning,
             Self::NoDelayEstimate => Severity::Info,
         }
@@ -87,18 +95,33 @@ pub struct Status {
     /// Age of the newest live frame shown; `None` when nothing live is shown.
     pub frame_age_s: Option<f64>,
     pub timing: Option<TimingState>,
-    pub no_delay_estimate: bool,
+    pub no_delay_estimate: Option<NoDelayEstimate>,
 }
 
-/// True when a TF measurement has no delay the operator can rely on: none inserted yet, or
-/// tracking without a current finding.
-pub fn no_delay_estimate(m: &Measurement) -> bool {
+/// Why a TF measurement has no delay the operator can rely on.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NoDelayEstimate {
+    /// None found yet: no delay state, or tracking without a finding.
+    NotFound,
+    /// The last finder run refused, for these reasons.
+    Refused(Vec<NoEstimateReason>),
+}
+
+/// Whether (and why) a TF measurement has no delay the operator can rely on: none inserted
+/// yet, tracking without a current finding, or a last finding that refused.
+pub fn no_delay_estimate(m: &Measurement) -> Option<NoDelayEstimate> {
     if !matches!(m.config.kind, MeasKind::Transfer { .. }) {
-        return false;
+        return None;
     }
-    match &m.delay {
-        None => true,
-        Some(d) => d.tracking && d.last_finding.is_none(),
+    let Some(d) = &m.delay else {
+        return Some(NoDelayEstimate::NotFound);
+    };
+    match &d.last_finding {
+        Some(f) => f
+            .no_estimate()
+            .map(|r| NoDelayEstimate::Refused(r.to_vec())),
+        None if d.tracking => Some(NoDelayEstimate::NotFound),
+        None => None,
     }
 }
 
@@ -139,6 +162,15 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             Some("reference input below its floor; check the loopback patch".into()),
         ));
     }
+    if p.contains(ProtectionFlags::CHECK_ROUTING) {
+        out.push(banner(
+            BannerKind::CheckRouting,
+            "CHECK ROUTING".into(),
+            Some(
+                "reference and measurement look identical or swapped; check the input patch".into(),
+            ),
+        ));
+    }
     if p.contains(ProtectionFlags::NO_SIGNAL) {
         out.push(banner(
             BannerKind::NoSignal,
@@ -166,11 +198,17 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             )),
         ));
     }
-    if s.no_delay_estimate {
+    if let Some(why) = &s.no_delay_estimate {
+        let detail = match why {
+            NoDelayEstimate::NotFound => "phase is not aligned; find or set the delay".into(),
+            NoDelayEstimate::Refused(r) => {
+                format!("finder: {}", crate::finding::no_estimate_reasons(r))
+            }
+        };
         out.push(banner(
             BannerKind::NoDelayEstimate,
             "NO DELAY ESTIMATE".into(),
-            Some("phase is not aligned; find or set the delay".into()),
+            Some(detail),
         ));
     }
     out.sort_by_key(|b| b.kind);
@@ -318,13 +356,14 @@ pub(crate) mod tests {
             daemon_silence_s: 3.2,
             protection: ProtectionFlags::CLIP
                 .with(ProtectionFlags::NO_REFERENCE)
+                .with(ProtectionFlags::CHECK_ROUTING)
                 .with(ProtectionFlags::NO_SIGNAL),
             frame_age_s: Some(4.25),
             timing: Some(TimingState::Jumped {
                 from: Samples(480),
                 to: Samples(-512),
             }),
-            no_delay_estimate: true,
+            no_delay_estimate: Some(NoDelayEstimate::NotFound),
         }
     }
 
@@ -349,6 +388,7 @@ pub(crate) mod tests {
                 "DAEMON NOT RESPONDING",
                 "CLIP",
                 "NO REFERENCE",
+                "CHECK ROUTING",
                 "NO SIGNAL",
                 "STALE · 4.2 s",
                 "OUTPUT TIMING JUMP",
@@ -357,14 +397,134 @@ pub(crate) mod tests {
         );
         assert_eq!(b[0].detail.as_deref(), Some("no keepalive for 3.2 s"));
         assert_eq!(
-            b[5].detail.as_deref(),
+            b[6].detail.as_deref(),
             Some("loopback offset 480 → −512 samples")
         );
         assert_eq!(b[0].severity, Severity::Fault);
-        assert_eq!(b[4].severity, Severity::Warning);
-        assert_eq!(b[6].severity, Severity::Info);
+        assert_eq!(b[3].severity, Severity::Fault);
+        assert_eq!(b[5].severity, Severity::Warning);
+        assert_eq!(b[7].severity, Severity::Info);
         // Severity never increases down the list.
         assert!(b.windows(2).all(|w| w[0].severity <= w[1].severity));
+    }
+
+    #[test]
+    fn check_routing_ranks_right_after_no_reference() {
+        let only = |p: ProtectionFlags| {
+            texts(&banners(&Status {
+                protection: p,
+                ..Status::default()
+            }))
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(only(ProtectionFlags::CHECK_ROUTING), ["CHECK ROUTING"]);
+        assert_eq!(
+            only(
+                ProtectionFlags::NO_SIGNAL
+                    .with(ProtectionFlags::CHECK_ROUTING)
+                    .with(ProtectionFlags::NO_REFERENCE)
+            ),
+            ["NO REFERENCE", "CHECK ROUTING", "NO SIGNAL"]
+        );
+        let b = banners(&Status {
+            protection: ProtectionFlags::CHECK_ROUTING,
+            ..Status::default()
+        });
+        assert_eq!(b[0].severity, Severity::Fault);
+        assert!(
+            b[0].detail
+                .as_deref()
+                .is_some_and(|d| d.contains("input patch"))
+        );
+        // Other flags raise nothing.
+        assert!(
+            only(ProtectionFlags::WEAK_REFERENCE.with(ProtectionFlags::DISCONTINUITY)).is_empty()
+        );
+    }
+
+    #[test]
+    fn no_delay_estimate_says_why() {
+        use ac2_proto::model::{
+            DelayBand, DelayConfidence, DelayFinding, DelayOutcome, DelayState, LogGridSpec,
+            MeasConfig, TfAveraging, TransferConfig,
+        };
+        use ac2_proto::units::{MeasId, Rev, Seconds, WallNs};
+        let refused = DelayFinding {
+            outcome: DelayOutcome::NoEstimate {
+                reasons: vec![NoEstimateReason::LowPsr, NoEstimateReason::LowBandSnr],
+            },
+            confidence: DelayConfidence {
+                psr_db: None,
+                psr_acq_db: None,
+                band_snr_db: None,
+                excited_fraction: None,
+                uncertainty_samples: None,
+                pulse_width_samples: None,
+                period: None,
+            },
+            band: DelayBand::Sub,
+            observation: Seconds(4.0),
+            candidates: vec![],
+            found_at: WallNs(0),
+        };
+        let mut m = Measurement {
+            id: MeasId(1),
+            config: MeasConfig {
+                name: "tf".into(),
+                kind: MeasKind::Transfer {
+                    config: TransferConfig {
+                        reference_input: 0,
+                        measurement_input: 1,
+                        averaging: TfAveraging::Fifo { blocks: 4 },
+                        grid: LogGridSpec {
+                            ppo: 12,
+                            k_min: -12,
+                            k_max: 12,
+                        },
+                        smoothing: None,
+                        depth: ac2_proto::model::DepthPolicy::EqualConfidence,
+                    },
+                },
+            },
+            config_rev: Rev(1),
+            running: true,
+            frozen: false,
+            delay: Some(DelayState {
+                applied: Seconds(0.0),
+                applied_samples: Samples(0),
+                tracking: false,
+                last_finding: Some(refused),
+            }),
+            grid_id: None,
+        };
+        let why = no_delay_estimate(&m);
+        assert_eq!(
+            why,
+            Some(NoDelayEstimate::Refused(vec![
+                NoEstimateReason::LowPsr,
+                NoEstimateReason::LowBandSnr
+            ]))
+        );
+        let b = banners(&Status {
+            no_delay_estimate: why,
+            ..Status::default()
+        });
+        assert_eq!(b[0].text, "NO DELAY ESTIMATE");
+        assert_eq!(
+            b[0].detail.as_deref(),
+            Some("finder: no clear peak, too noisy in band")
+        );
+        // No finding and not tracking: the operator's delay stands.
+        if let Some(d) = &mut m.delay {
+            d.last_finding = None;
+        }
+        assert_eq!(no_delay_estimate(&m), None);
+        if let Some(d) = &mut m.delay {
+            d.tracking = true;
+        }
+        assert_eq!(no_delay_estimate(&m), Some(NoDelayEstimate::NotFound));
     }
 
     #[test]
@@ -391,12 +551,12 @@ pub(crate) mod tests {
         assert_eq!(rows.len(), MAX_BANNERS);
         assert_eq!(rows[0].text, "DAEMON NOT RESPONDING");
         assert_eq!(rows[1].text, "CLIP");
-        assert_eq!(rows[2].text, "+5 more");
+        assert_eq!(rows[2].text, "+6 more");
         assert_eq!(rows[2].severity, Severity::Fault);
         assert_eq!(
             rows[2].detail.as_deref(),
             Some(
-                "NO REFERENCE · NO SIGNAL · STALE · 4.2 s · OUTPUT TIMING JUMP · NO DELAY ESTIMATE"
+                "NO REFERENCE · CHECK ROUTING · NO SIGNAL · STALE · 4.2 s · OUTPUT TIMING JUMP · NO DELAY ESTIMATE"
             )
         );
         // Stacked downwards without overlap, centred, capped width.
@@ -421,7 +581,7 @@ pub(crate) mod tests {
         );
         let rows = layout_banners(&b, short);
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[1].text, "+6 more");
+        assert_eq!(rows[1].text, "+7 more");
         assert_eq!(rows[0].rect.w, 284.0);
         assert!(layout_banners(&b, Rect::new(0.0, 0.0, 300.0, 20.0)).is_empty());
     }
@@ -461,7 +621,7 @@ pub(crate) mod tests {
         );
         assert!(short.rect.h <= 50.0);
         assert_eq!(short.rows.len(), 1);
-        assert_eq!(short.rows[0].text, "+7 more");
+        assert_eq!(short.rows[0].text, "+8 more");
     }
 
     #[test]
@@ -480,7 +640,7 @@ pub(crate) mod tests {
     fn narrow_rows_drop_the_detail() {
         let theme = Theme::dark();
         let s = Status {
-            no_delay_estimate: true,
+            no_delay_estimate: Some(NoDelayEstimate::NotFound),
             ..Status::default()
         };
         let draw = |w: f32| {

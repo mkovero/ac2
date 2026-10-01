@@ -158,7 +158,8 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         desired: fire(-20.0),
     });
     let mut d = driver(&backend);
-    let _fade_in = m.level(&mut d, 0.1);
+    // Fade-in plus a full 300 ms RMS window of signal before the meter is read.
+    let _fade_in = m.level(&mut d, 0.35);
     let (peak, rms) = m.level(&mut d, 0.3);
     assert!(
         (rms + 20.0).abs() < 1.5,
@@ -191,6 +192,11 @@ fn lease_acquire_force_expiry_and_universal_stop() {
     };
     assert_eq!(g.owner, None);
     assert!(!g.armed && !g.firing);
+    // The audit names whose lease expired.
+    assert_eq!(
+        g.last_action.as_ref().and_then(|x| x.client.as_ref()),
+        Some(&id_a)
+    );
     // Fade (20 ms) plus cable delay fit in the first 50 ms; then nothing at all.
     let _ = m.level(&mut d, 0.05);
     // Sample peak proves silence; the meter's RMS integrates over 300 ms and only decays.
@@ -211,7 +217,8 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         lease_token: tok_b,
         desired: fire(-26.0),
     });
-    let _fade_in = m.level(&mut d, 0.1);
+    // Fade-in plus a full 300 ms RMS window of signal before the meter is read.
+    let _fade_in = m.level(&mut d, 0.35);
     let (_, rms) = m.level(&mut d, 0.2);
     assert!((rms + 26.0).abs() < 1.5, "{rms}");
     match a.ok(Command::GenStop) {
@@ -249,7 +256,8 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         lease_token: tok_b,
         desired: fire(-26.0),
     });
-    let _fade_in = m.level(&mut d, 0.1);
+    // Fade-in plus a full 300 ms RMS window of signal before the meter is read.
+    let _fade_in = m.level(&mut d, 0.35);
     let (_, rms) = m.level(&mut d, 0.2);
     assert!((rms + 26.0).abs() < 1.5, "{rms}");
     let e = acquire(&mut a, false).unwrap_err();

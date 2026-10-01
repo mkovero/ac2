@@ -71,7 +71,7 @@ pub fn status(
         protection,
         frame_age_s,
         timing: st.mirror.as_ref().and_then(|m| m.timing),
-        no_delay_estimate: tf_meas.is_some_and(no_delay_estimate),
+        no_delay_estimate: tf_meas.and_then(no_delay_estimate),
     }
 }
 

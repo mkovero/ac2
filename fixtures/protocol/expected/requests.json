@@ -76,6 +76,10 @@
        "smoothing": {
         "fraction": "sixth",
         "mode": "power"
+       },
+       "depth": {
+        "type": "fast_lf",
+        "max_settle_s": 1.0
        }
       }
      }
@@ -86,13 +90,28 @@
  },
  {
   "v": 1,
+  "id": 17,
+  "cmd": {
+   "op": "delay.find",
+   "args": {
+    "meas": 1,
+    "band": {
+     "type": "sub"
+    },
+    "observation": 8.0
+   }
+  },
+  "expect_rev": null
+ },
+ {
+  "v": 1,
   "id": 18,
   "cmd": {
    "op": "delay.insert",
    "args": {
     "meas": 1,
     "pick": {
-     "type": "candidate",
+     "type": "ranked",
      "index": 1
     }
    }

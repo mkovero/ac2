@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 use ac2_client::{
     Client, ClientConfig, ClientError, Latest, MirrorView, OnDrop, StimulusLease, expect_body,
 };
-use ac2_proto::model::{GeneratorDesired, GeneratorSettings, TraceData, TraceMeta};
+use ac2_proto::model::{
+    DelayFinding, DelayPick, FinderBand, GeneratorDesired, GeneratorSettings, TraceData, TraceMeta,
+};
 use ac2_proto::units::{ClientId, MeasId, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
 use tokio::sync::mpsc;
@@ -62,6 +64,12 @@ pub enum ConnEvent {
         what: String,
         result: Result<(), String>,
     },
+    /// A `delay.find` answered; `pick` is what the operator asked to insert.
+    DelayFound {
+        meas: MeasId,
+        pick: DelayPick,
+        finding: Box<DelayFinding>,
+    },
     /// A capture into a slot finished.
     Captured {
         slot: u8,
@@ -99,6 +107,9 @@ pub enum Request {
     StimSet(GeneratorDesired),
     /// Stop and release; without a lease, `gen.stop` (any client may stop the output).
     StimStop,
+    /// `delay.find` (auto band) on `meas`, to insert `pick` from; the reducer decides what to
+    /// insert once the finding is back.
+    FindDelay { meas: MeasId, pick: DelayPick },
     /// `trace.capture` of `meas` into `slot`, deleting `replace` first.
     Capture {
         meas: MeasId,
@@ -296,6 +307,7 @@ fn request_name(r: &Request) -> String {
         Request::StimSet(_) => "stimulus".into(),
         Request::StimStop => "stop".into(),
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
+        Request::FindDelay { .. } => "delay find".into(),
         Request::Reconnect => "reconnect".into(),
     }
 }
@@ -389,6 +401,30 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
             tokio::spawn(async move {
                 let result = c.call(cmd).await.map(drop).map_err(|e| e.to_string());
                 o.send(ConnEvent::Reply { what, result });
+            });
+        }
+        Request::FindDelay { meas, pick } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let r = c
+                    .call(Command::DelayFind {
+                        meas,
+                        band: FinderBand::Auto,
+                        observation: None,
+                    })
+                    .await
+                    .and_then(|r| expect_body!("delay.find", r, ReplyBody::DelayFinding(f) => f));
+                match r {
+                    Ok(finding) => o.send(ConnEvent::DelayFound {
+                        meas,
+                        pick,
+                        finding: Box::new(finding),
+                    }),
+                    Err(e) => o.send(ConnEvent::Reply {
+                        what: "delay find".into(),
+                        result: Err(e.to_string()),
+                    }),
+                }
             });
         }
         Request::Capture {

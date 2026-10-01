@@ -18,6 +18,7 @@
 pub mod axis;
 pub mod banner;
 mod canvas;
+pub mod finding;
 pub mod format;
 pub mod grid;
 pub mod ir;

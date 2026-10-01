@@ -9,8 +9,11 @@ use std::time::Duration;
 
 use ac2_audio::FakeDriver;
 use ac2_proto::frame::{Frame, FrameData, ProtectionFlags, TfFrame, ValidityMask};
-use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal, TimingState};
-use ac2_proto::units::{Dbfs, MeasId, Samples};
+use ac2_proto::model::{
+    DelayOutcome, DelayPick, DepthPolicy, FinderBand, GeneratorDesired, GeneratorSettings,
+    MeasKind, NoEstimateReason, Signal, TimingState,
+};
+use ac2_proto::units::{Dbfs, Hz, MeasId, Samples, Seconds};
 use ac2_proto::{Command, ErrorCode, ReplyBody};
 use ac2d::Daemon;
 use common::*;
@@ -49,6 +52,52 @@ fn band(t: &TfFrame, hi: f64) -> Vec<usize> {
         .collect()
 }
 
+fn find(band: FinderBand, observation: Option<f64>) -> Command {
+    Command::DelayFind {
+        meas: MeasId(1),
+        band,
+        observation: observation.map(Seconds),
+    }
+}
+
+#[test]
+fn depth_policy_is_validated_and_kept() {
+    init_log();
+    let h = Daemon::start(config(manual_rig(), inproc("depth"))).unwrap();
+    let (mut c, _sub) = connect(&h, &[]);
+    let with = |depth| {
+        let mut m = transfer("lf");
+        if let MeasKind::Transfer { config } = &mut m.kind {
+            config.depth = depth;
+        }
+        m
+    };
+    let e = c
+        .call(Command::MeasCreate {
+            config: with(DepthPolicy::FastLf {
+                max_settle_s: Seconds(0.0),
+            }),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid);
+    let fast = DepthPolicy::FastLf {
+        max_settle_s: Seconds(1.0),
+    };
+    match c.ok(Command::MeasCreate { config: with(fast) }) {
+        ReplyBody::Measurement(m) => match m.config.kind {
+            MeasKind::Transfer { config } => assert_eq!(config.depth, fast),
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    }
+    // The job starts with it.
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    h.shutdown();
+}
+
 #[test]
 fn transfer_magnitude_delay_timing_and_ir() {
     init_log();
@@ -66,13 +115,40 @@ fn transfer_magnitude_delay_timing_and_ir() {
         config: transfer("main"),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    // Nothing captured yet: the finder refuses rather than guessing.
-    assert_eq!(
-        c.call(Command::DelayFind { meas: MeasId(1) })
-            .unwrap_err()
-            .code,
-        ErrorCode::Refused
-    );
+    // Nothing captured yet: the finder refuses rather than guessing, with a typed reason,
+    // and the refusal is what the measurement shows.
+    match c.ok(find(FinderBand::Auto, None)) {
+        ReplyBody::DelayFinding(f) => assert_eq!(
+            f.outcome,
+            DelayOutcome::NoEstimate {
+                reasons: vec![NoEstimateReason::ObservationTooShort]
+            }
+        ),
+        other => panic!("{other:?}"),
+    }
+    let e = c
+        .call(Command::DelayInsert {
+            meas: MeasId(1),
+            pick: DelayPick::FirstArrival,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    // Requests the finder cannot run as asked are errors, not refusals.
+    for (band, obs) in [
+        (FinderBand::Sub, Some(3.0)),
+        (FinderBand::Full, Some(9.0)),
+        (FinderBand::Mid, Some(-1.0)),
+        (
+            FinderBand::Custom {
+                lo_hz: Hz(800.0),
+                hi_hz: Hz(80.0),
+            },
+            None,
+        ),
+    ] {
+        let e = c.call(find(band, obs)).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{band:?} {obs:?}: {e:?}");
+    }
     let tok = match c.ok(Command::GenAcquire { force: false }) {
         ReplyBody::Lease(l) => l.lease_token,
         other => panic!("{other:?}"),
@@ -143,19 +219,28 @@ fn transfer_magnitude_delay_timing_and_ir() {
     // Insert the delay: phase flat, magnitude unchanged, frames show the new config.
     // The finder (on the raw, unaligned pair) sees the acoustic delay.
     let delay_s = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
-    match c.ok(Command::DelayFind { meas: MeasId(1) }) {
-        ReplyBody::DelayFinding(f) => {
-            assert!(!f.ambiguous, "{f:?}");
-            assert!(
-                (f.first_arrival.0 - delay_s).abs() < 0.5 / f64::from(FS),
-                "{f:?}"
-            );
-            assert!(
-                (f.strongest.0 - delay_s).abs() < 0.5 / f64::from(FS),
-                "{f:?}"
-            );
+    for band in [FinderBand::Auto, FinderBand::Mid, FinderBand::Full] {
+        match c.ok(find(band, None)) {
+            ReplyBody::DelayFinding(f) => {
+                let DelayOutcome::Accepted { first, strongest } = f.outcome else {
+                    panic!("{band:?}: {f:?}");
+                };
+                assert!(
+                    (first.delay.0 - delay_s).abs() < 0.5 / f64::from(FS),
+                    "{f:?}"
+                );
+                assert!(
+                    (strongest.delay.0 - delay_s).abs() < 0.5 / f64::from(FS),
+                    "{f:?}"
+                );
+                assert!(f.confidence.psr_db.is_some_and(|p| p.0 > 10.0), "{f:?}");
+                assert!(f.observation.0 > 0.0);
+                if band == FinderBand::Mid {
+                    assert_eq!(f.band, ac2_proto::model::DelayBand::Mid);
+                }
+            }
+            other => panic!("{other:?}"),
         }
-        other => panic!("{other:?}"),
     }
     let rev = match c.ok(Command::DelayInsert {
         meas: MeasId(1),

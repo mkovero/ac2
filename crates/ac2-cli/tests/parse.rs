@@ -20,7 +20,7 @@ fn ok(args: &[&str]) -> Cli {
 
 #[test]
 fn plan_examples_parse() {
-    // PLAN §7, as written (minus `delay find --band`, which the protocol does not carry).
+    // PLAN §7, as written.
     let c = ok(&["gen", "pink", "--out", "1,2", "--level", "-20dbfs"]);
     let Cmd::Gen {
         cmd: GenCmd::Pink(o),
@@ -53,7 +53,7 @@ fn plan_examples_parse() {
     let c = ok(&["delay", "find", "main-l", "--insert"]);
     assert!(matches!(
         c.cmd,
-        Cmd::Delay { cmd: DelayCmd::Find { meas: MeasRef::Name(ref n), insert: Some(PickArg::First) } } if n == "main-l"
+        Cmd::Delay { cmd: DelayCmd::Find { meas: MeasRef::Name(ref n), band: BandArg::Auto, observation: None, insert: Some(PickArg::First) } } if n == "main-l"
     ));
     let c = ok(&["delay", "find", "3", "--insert", "strongest"]);
     assert!(matches!(
@@ -61,9 +61,32 @@ fn plan_examples_parse() {
         Cmd::Delay {
             cmd: DelayCmd::Find {
                 meas: MeasRef::Id(3),
-                insert: Some(PickArg::Strongest)
+                insert: Some(PickArg::Strongest),
+                ..
             }
         }
+    ));
+    let c = ok(&[
+        "delay",
+        "find",
+        "sub-l",
+        "--band",
+        "sub",
+        "--observation",
+        "8s",
+        "--insert",
+        "2",
+    ]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Delay {
+            cmd: DelayCmd::Find {
+                band: BandArg::Sub,
+                observation: Some(Time(Seconds(t))),
+                insert: Some(PickArg::Ranked(2)),
+                ..
+            }
+        } if t == 8.0
     ));
 
     let c = ok(&["spl", "watch", "--input", "3", "--weight", "a", "--json"]);
@@ -166,6 +189,32 @@ fn other_commands_parse() {
     ok(&["delay", "set", "main-l", "4.3m", "--temp", "-5c"]);
     ok(&["delay", "set", "main-l", "600samples"]);
     ok(&["delay", "insert", "main-l", "--pick", "2"]);
+    let c = ok(&["delay", "find", "main-l", "--band", "80hz-1.2khz"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Delay {
+            cmd: DelayCmd::Find {
+                band: BandArg::Custom(Freq(Hz(lo)), Freq(Hz(hi))),
+                ..
+            }
+        } if lo == 80.0 && hi == 1200.0
+    ));
+    let c = ok(&[
+        "meas",
+        "new",
+        "tf",
+        "--ref",
+        "1",
+        "--meas",
+        "2",
+        "--name",
+        "s",
+        "--fast-lf",
+    ]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Meas { cmd: MeasCmd::New(ref n) } if n.fast_lf == Some(Time(Seconds(1.0)))
+    ));
     ok(&["delay", "track", "main-l", "on"]);
     ok(&["spl", "watch", "--meas", "foh"]);
     ok(&[
@@ -213,6 +262,12 @@ fn refusals() {
         &["delay", "set", "main-l", "12"],
         &["delay", "track", "main-l", "maybe"],
         &["delay", "find", "x", "--insert", "best"],
+        &["delay", "find", "x", "--insert", "0"],
+        &["delay", "find", "x", "--insert", "4"],
+        &["delay", "find", "x", "--band", "treble"],
+        &["delay", "find", "x", "--band", "800hz-80hz"],
+        &["delay", "find", "x", "--band", "80-800"],
+        &["delay", "find", "x", "--observation", "8"],
         &["cal", "spl", "--input", "3", "--ref", "94"],
         &["spl", "watch"],
         &["spl", "watch", "--meas", "a", "--input", "1"],

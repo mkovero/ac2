@@ -101,6 +101,9 @@ fn meas_config() -> MeasConfig {
                     fraction: SmoothingFraction::Sixth,
                     mode: SmoothingMode::Power,
                 }),
+                depth: DepthPolicy::FastLf {
+                    max_settle_s: Seconds(1.0),
+                },
             },
         },
     }
@@ -188,10 +191,14 @@ pub fn commands() -> Vec<Command> {
             frozen: true,
         },
         Command::MeasReset { meas: MeasId(1) },
-        Command::DelayFind { meas: MeasId(1) },
+        Command::DelayFind {
+            meas: MeasId(1),
+            band: FinderBand::Sub,
+            observation: Some(Seconds(8.0)),
+        },
         Command::DelayInsert {
             meas: MeasId(1),
-            pick: DelayPick::Candidate { index: 1 },
+            pick: DelayPick::Ranked { index: 1 },
         },
         Command::DelaySet {
             meas: MeasId(1),
@@ -299,21 +306,88 @@ fn measurement() -> Measurement {
     }
 }
 
+fn arrival(delay_samples: f64, level: f64) -> DelayArrival {
+    DelayArrival {
+        delay: Seconds(delay_samples / 48_000.0),
+        delay_samples,
+        level: Db(level),
+        phase: Degrees(-12.5),
+        uncertainty_samples: 0.25,
+        misfit: 0.125,
+        refined: true,
+    }
+}
+
+fn confidence() -> DelayConfidence {
+    DelayConfidence {
+        psr_db: Some(Db(18.5)),
+        psr_acq_db: Some(Db(14.0)),
+        band_snr_db: Some(Db(21.25)),
+        excited_fraction: Some(0.875),
+        uncertainty_samples: Some(0.25),
+        pulse_width_samples: Some(9.5),
+        period: None,
+    }
+}
+
+/// An ambiguous finding (two near-equal arrivals).
 fn finding() -> DelayFinding {
     DelayFinding {
-        first_arrival: Seconds(0.0125),
-        strongest: Seconds(0.0131),
-        ambiguous: true,
-        candidates: vec![
-            DelayCandidate {
-                delay: Seconds(0.0131),
-                relative: Db(0.0),
-            },
-            DelayCandidate {
-                delay: Seconds(0.0125),
-                relative: Db(-1.2),
-            },
-        ],
+        outcome: DelayOutcome::Ambiguous {
+            reasons: vec![
+                AmbiguityReason::BorderlineLevel,
+                AmbiguityReason::MergedLobe,
+            ],
+            ranked: vec![arrival(600.0, -1.25), arrival(628.5, 0.0)],
+            strongest: arrival(628.5, 0.0),
+        },
+        confidence: confidence(),
+        band: DelayBand::Custom {
+            lo_hz: Hz(80.0),
+            hi_hz: Hz(800.0),
+        },
+        observation: Seconds(0.5),
+        candidates: vec![arrival(600.0, -1.25), arrival(628.5, 0.0)],
+        found_at: WallNs(1_790_000_000_000_000_000),
+    }
+}
+
+fn accepted_finding() -> DelayFinding {
+    DelayFinding {
+        outcome: DelayOutcome::Accepted {
+            first: arrival(600.0, -6.0),
+            strongest: arrival(628.5, 0.0),
+        },
+        confidence: confidence(),
+        band: DelayBand::Full,
+        observation: Seconds(0.25),
+        candidates: vec![arrival(600.0, -6.0), arrival(628.5, 0.0)],
+        found_at: WallNs(1_790_000_000_000_000_000),
+    }
+}
+
+fn refused_finding() -> DelayFinding {
+    DelayFinding {
+        outcome: DelayOutcome::NoEstimate {
+            reasons: vec![
+                NoEstimateReason::LowPsr,
+                NoEstimateReason::PeriodicExcitation {
+                    period: Samples(131_072),
+                },
+            ],
+        },
+        confidence: DelayConfidence {
+            psr_db: Some(Db(3.0)),
+            psr_acq_db: None,
+            band_snr_db: None,
+            excited_fraction: Some(0.5),
+            uncertainty_samples: None,
+            pulse_width_samples: None,
+            period: Some(Samples(131_072)),
+        },
+        band: DelayBand::Sub,
+        observation: Seconds(4.0),
+        candidates: vec![],
         found_at: WallNs(1_790_000_000_000_000_000),
     }
 }
@@ -499,6 +573,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Generator(generator())),
         Ok(ReplyBody::Measurement(measurement())),
         Ok(ReplyBody::DelayFinding(finding())),
+        Ok(ReplyBody::DelayFinding(accepted_finding())),
+        Ok(ReplyBody::DelayFinding(refused_finding())),
         Ok(ReplyBody::Trace(trace_meta())),
         Ok(ReplyBody::Traces(vec![trace_meta()])),
         Ok(ReplyBody::TraceData(TraceData {

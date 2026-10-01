@@ -220,7 +220,7 @@ proptest! {
         let m = MeasId(meas);
         let cmds = vec![
             Command::DelaySet { meas: m, delay: Seconds(delay) },
-            Command::DelayInsert { meas: m, pick: DelayPick::Candidate { index: idx } },
+            Command::DelayInsert { meas: m, pick: DelayPick::Ranked { index: idx } },
             Command::MeasFreeze { meas: m, frozen: flag },
             Command::TraceCapture { meas: m, name: name.clone() },
             Command::GenRefresh { lease_token: LeaseToken(token) },

@@ -26,7 +26,7 @@ use crate::error::ClientError;
 #[derive(Debug)]
 pub(crate) enum SyncIn {
     /// A state event.
-    Event(Event),
+    Event(Box<Event>),
     /// A keepalive and when it was received.
     Ka {
         stamp: FrameStamp,
@@ -225,7 +225,7 @@ impl Worker {
             let local_wall_ns = wall_ns();
             let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
             let msg = match decode_data_message(&parts) {
-                Ok(DataMessage::Event(e)) => SyncIn::Event(e),
+                Ok(DataMessage::Event(e)) => SyncIn::Event(Box::new(e)),
                 Ok(DataMessage::Frame(f)) => match f.data {
                     FrameData::Ka(meta) => SyncIn::Ka {
                         stamp: f.stamp,

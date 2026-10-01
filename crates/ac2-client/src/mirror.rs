@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{GenSummary, KaMeta};
 use ac2_proto::model::{State, TimingState};
-use ac2_proto::units::{DaemonIncarnation, Rev, SessionEpoch};
+use ac2_proto::units::{ClientId, DaemonIncarnation, Rev, SessionEpoch};
 use ac2_proto::{Change, Event, FrameStamp, Patch, StateSnapshot};
 
 /// No `ka` for this long: the daemon is not responding.
@@ -114,6 +114,11 @@ pub struct MirrorView {
     pub since_requests: u64,
     /// Daemon restarts seen.
     pub incarnation_changes: u64,
+    /// The identity the daemon bound to this connection, from the `welcome` of the
+    /// incarnation shown; `None` while a restarted daemon has not answered `hello` yet. A
+    /// restarted daemon binds a new identity, so "owned by me" must be judged with this,
+    /// never with an id kept from an earlier connect.
+    pub client_id: Option<ClientId>,
 }
 
 impl MirrorView {
@@ -189,6 +194,7 @@ impl Mirror {
             snapshots: self.snapshots,
             since_requests: self.since_requests,
             incarnation_changes: self.incarnation_changes,
+            client_id: None,
         }
     }
 

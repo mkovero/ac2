@@ -15,7 +15,8 @@ use ac2_client::MirrorView;
 use ac2_proto::Command;
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    DelayPick, GeneratorDesired, GeneratorSettings, MeasKind, Measurement, Signal, State, TraceData,
+    DelayFinding, DelayOutcome, DelayPick, GeneratorDesired, GeneratorSettings, MeasKind,
+    Measurement, Signal, State, TraceData,
 };
 use ac2_proto::units::{ClientId, Dbfs, MeasId, Seconds, TraceId};
 use ac2_scene::spectrum::PeakHold;
@@ -234,6 +235,22 @@ pub struct Prompt {
     pub error: Option<String>,
 }
 
+/// An ambiguous delay finding waiting for the operator (decision 1c): keys 1–3 insert a
+/// candidate (1 is the first-arrival rule's pick).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DelayChoice {
+    pub meas: MeasId,
+    pub name: String,
+    pub finding: DelayFinding,
+}
+
+impl DelayChoice {
+    /// Candidates the keys pick from.
+    pub fn rows(&self) -> Vec<ac2_scene::finding::PickRow> {
+        ac2_scene::finding::pick_rows(&self.finding)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Overlay {
     #[default]
@@ -241,6 +258,9 @@ pub enum Overlay {
     Help,
     Palette(Palette),
     Prompt(Prompt),
+    /// Candidate list of an ambiguous finding over the transfer pane. Keys other than 1–3
+    /// keep working; Esc closes it (and stops the stimulus, as always).
+    DelayPick(Box<DelayChoice>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -396,10 +416,17 @@ impl AppState {
         self.edits.get(&id).copied().unwrap_or_default()
     }
 
+    /// This connection's identity. The mirror's is authoritative: it belongs to the daemon
+    /// incarnation the shown state comes from, and a restarted daemon binds a new one (the
+    /// id from the connect would make another client's lease look like ours, or ours like
+    /// another's).
     pub fn my_client_id(&self) -> Option<&ClientId> {
-        match &self.conn {
-            ConnState::Connected { client_id, .. } => Some(client_id),
-            _ => None,
+        let ConnState::Connected { client_id, .. } = &self.conn else {
+            return None;
+        };
+        match &self.mirror {
+            Some(m) if m.incarnation.is_some() => m.client_id.as_ref(),
+            _ => Some(client_id),
         }
     }
 
@@ -525,6 +552,29 @@ impl AppState {
                     self.swallow_text = swallow;
                 }
                 return;
+            }
+            Overlay::DelayPick(choice) => {
+                let index = match chord {
+                    c if c == Chord::key(Key::Num1) => Some(0u8),
+                    c if c == Chord::key(Key::Num2) => Some(1),
+                    c if c == Chord::key(Key::Num3) => Some(2),
+                    _ => None,
+                };
+                if let Some(index) = index
+                    && usize::from(index) < choice.rows().len()
+                {
+                    let (meas, name) = (choice.meas, choice.name.clone());
+                    self.overlay = Overlay::None;
+                    self.call(
+                        out,
+                        Command::DelayInsert {
+                            meas,
+                            pick: DelayPick::Ranked { index },
+                        },
+                        format!("{name}: candidate {} inserted", index + 1),
+                    );
+                    return;
+                }
             }
             Overlay::Help | Overlay::None => {}
         }
@@ -918,11 +968,10 @@ impl AppState {
                     } else {
                         DelayPick::Strongest
                     };
-                    self.call(
-                        out,
-                        Command::DelayInsert { meas: m.id, pick },
-                        format!("{}: delay inserted", m.config.name),
-                    );
+                    if matches!(self.overlay, Overlay::DelayPick(_)) {
+                        self.overlay = Overlay::None;
+                    }
+                    out.push(Request::FindDelay { meas: m.id, pick });
                 }
             }
             C::TypeDelay => {
@@ -1106,6 +1155,11 @@ impl AppState {
                 Ok(()) => self.toast(what),
                 Err(e) => self.error(format!("{what}: {e}")),
             },
+            ConnEvent::DelayFound {
+                meas,
+                pick,
+                finding,
+            } => self.delay_found(meas, pick, *finding, out),
             ConnEvent::Captured { slot, trace } => {
                 if let Some(s) = self.slots.get_mut(usize::from(slot.saturating_sub(1))) {
                     *s = Some(trace.id);
@@ -1113,6 +1167,46 @@ impl AppState {
                 self.toast(format!("captured to slot {slot}"));
             }
             ConnEvent::Stimulus(s) => self.stim_event(s, out),
+        }
+    }
+
+    /// X inserts the first arrival, Shift+X the strongest — when the finder accepted. An
+    /// ambiguous first arrival is the operator's to pick (decision 1c): the candidate list
+    /// opens. A refusal inserts nothing and says why (the banner keeps saying it).
+    fn delay_found(
+        &mut self,
+        meas: MeasId,
+        pick: DelayPick,
+        finding: DelayFinding,
+        out: &mut Vec<Request>,
+    ) {
+        let name = self.meas(meas).map_or_else(
+            || format!("measurement {}", meas.0),
+            |m| m.config.name.clone(),
+        );
+        match (&finding.outcome, pick) {
+            (DelayOutcome::NoEstimate { reasons }, _) => self.error(format!(
+                "{name}: no delay estimate ({})",
+                ac2_scene::finding::no_estimate_reasons(reasons)
+            )),
+            (DelayOutcome::Ambiguous { .. }, DelayPick::FirstArrival) => {
+                self.overlay = Overlay::DelayPick(Box::new(DelayChoice {
+                    meas,
+                    name,
+                    finding,
+                }));
+            }
+            _ => {
+                let what = match pick {
+                    DelayPick::Strongest => "strongest arrival inserted",
+                    _ => "first arrival inserted",
+                };
+                self.call(
+                    out,
+                    Command::DelayInsert { meas, pick },
+                    format!("{name}: {what}"),
+                );
+            }
         }
     }
 

@@ -17,7 +17,6 @@ use num_complex::Complex64;
 
 use std::sync::mpsc::Sender;
 
-use ac2_core::delay::Band;
 use ac2_proto::units::SessionEpoch;
 
 use super::finder::Finder;
@@ -134,7 +133,7 @@ impl Transfer {
         let mut mtw = Mtw::new(MtwConfig {
             sample_rate_hz: fs,
             ladder: Ladder::Standard,
-            depth: ac2_core::mtw::DepthPolicy::EqualConfidence,
+            depth: conv::depth(cfg.depth).ok_or("invalid depth policy")?,
             averaging,
             grid,
             delay_samples,
@@ -152,7 +151,7 @@ impl Transfer {
         }
         .id();
         let mut finder = Finder::new(fs);
-        finder.track(tracking, Band::FullRange, delay_samples);
+        finder.track(tracking, delay_samples);
         Ok(Self {
             finder,
             epoch,
@@ -288,16 +287,19 @@ impl Analysis for Transfer {
                 self.mtw.set_delay(samples);
                 self.finder.set_held(samples);
             }
-            JobCmd::Find { token } => {
-                let result = self.finder.find();
+            JobCmd::Find {
+                token,
+                band,
+                observation,
+            } => {
+                let result = self.finder.find(band, observation, self.delay_samples);
                 let _ = self.to_control.send(ControlMsg::DelayFound {
                     token,
                     result: Box::new(result),
                 });
             }
             JobCmd::Track { enabled } => {
-                self.finder
-                    .track(enabled, Band::FullRange, self.delay_samples);
+                self.finder.track(enabled, self.delay_samples);
             }
             JobCmd::Freeze(f) => {
                 self.frozen = f;
