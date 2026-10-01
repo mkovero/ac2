@@ -1,0 +1,49 @@
+{
+ "topic": "timing",
+ "header": {
+  "v": 1,
+  "kind": "timing",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 8,
+  "n": 0,
+  "arrays": [],
+  "meta": {
+   "timing": {
+    "status": {
+     "epoch": 3,
+     "state": {
+      "type": "locked",
+      "offset": 312
+     },
+     "last_lock": {
+      "epoch": 3,
+      "offset": 312,
+      "at_sample": 96000,
+      "at": 1790000000000000000
+     },
+     "drift": {
+      "ppm": 0.4,
+      "span": 30.0,
+      "warning": false
+     },
+     "internal_reference": true
+    },
+    "window": {
+     "capture_start": 96000,
+     "offset": 312,
+     "psr": 24.0,
+     "loopback": -20.5,
+     "stimulus": -20.0
+    }
+   }
+  }
+ },
+ "arrays": {}
+}

@@ -1,0 +1,151 @@
+//! `docs/protocol.md` names every command, reply body, error code, event kind, frame header
+//! field, frame kind, array name, unit and bitmask flag the code defines.
+//!
+//! The name sets come from serde itself (the "expected one of …" list of an unknown
+//! variant / field error), so a new variant or field cannot be missed by this test.
+
+use std::collections::BTreeSet;
+
+use ac2_proto::event::WireEvent;
+use ac2_proto::frame::{
+    ArrayName, ClipFlags, FrameHeader, FrameKind, ProtectionFlags, Unit, ValidityMask,
+};
+use ac2_proto::*;
+use serde::de::DeserializeOwned;
+
+fn doc() -> String {
+    let p = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/protocol.md");
+    std::fs::read_to_string(p).expect("docs/protocol.md and probes")
+}
+
+fn expected_names(err: &str) -> BTreeSet<String> {
+    let tail = err
+        .split("expected one of")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no name list in {err:?}"));
+    tail.split('`')
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 1)
+        .map(|(_, s)| s.to_string())
+        .collect()
+}
+
+fn names_of<T: DeserializeOwned + std::fmt::Debug, P: serde::Serialize>(
+    probe: &P,
+) -> BTreeSet<String> {
+    let b = rmp_serde::to_vec_named(probe).expect("docs/protocol.md and probes");
+    let err = rmp_serde::from_slice::<T>(&b)
+        .expect_err("probe must be refused")
+        .to_string();
+    expected_names(&err)
+}
+
+#[derive(serde::Serialize)]
+struct Tagged<'a> {
+    #[serde(rename = "type")]
+    t: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct KindTagged<'a> {
+    kind: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct OpTagged<'a> {
+    op: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct Bogus {
+    bogus_field: u8,
+}
+
+fn check(group: &str, names: &BTreeSet<String>, doc: &str, missing: &mut Vec<String>) {
+    assert!(!names.is_empty(), "{group}: no names extracted");
+    for n in names {
+        if !doc.contains(&format!("`{n}`")) && !doc.contains(&format!("`{n}:")) {
+            missing.push(format!("{group}: {n}"));
+        }
+    }
+}
+
+#[test]
+fn protocol_doc_names_everything() {
+    let doc = doc();
+    let mut missing = Vec::new();
+
+    let commands = names_of::<Command, _>(&OpTagged { op: "no.such" });
+    assert_eq!(commands.len(), samples::commands().len());
+    check("command", &commands, &doc, &mut missing);
+    check(
+        "reply body",
+        &names_of::<ReplyBody, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "error code",
+        &names_of::<ErrorCode, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "error detail",
+        &names_of::<ErrorDetail, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "event kind",
+        &names_of::<WireEvent, _>(&KindTagged { kind: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "frame header field",
+        &names_of::<FrameHeader, _>(&Bogus { bogus_field: 0 }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "frame kind",
+        &names_of::<FrameKind, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "array name",
+        &names_of::<ArrayName, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check("unit", &names_of::<Unit, _>(&"no_such"), &doc, &mut missing);
+
+    for (group, flags) in [
+        ("validity bit", ValidityMask::NAMED),
+        ("protection bit", ProtectionFlags::NAMED),
+        ("clip bit", ClipFlags::NAMED),
+    ] {
+        for (name, bit) in flags {
+            if !doc.contains(&format!("`{name}` {bit}")) {
+                missing.push(format!("{group}: `{name}` {bit}"));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "docs/protocol.md lacks:\n{}",
+        missing.join("\n")
+    );
+}
+
+#[test]
+fn protocol_doc_states_the_version_and_bounds() {
+    let doc = doc();
+    assert!(doc.contains(&format!("`PROTO_VERSION = {}`", PROTO_VERSION)));
+    assert!(doc.contains(&format!("≤ {} bytes", frame::MAX_HEADER_BYTES)));
+    assert!(doc.contains(&format!("≤ {}", frame::MAX_N)));
+    assert!(doc.contains(&format!("`0x{}`", samples::log_grid().id())));
+}

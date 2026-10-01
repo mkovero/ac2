@@ -1,0 +1,34 @@
+{
+ "topic": "ka",
+ "header": {
+  "v": 1,
+  "kind": "ka",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 0,
+  "n": 0,
+  "arrays": [],
+  "meta": {
+   "ka": {
+    "rev": 40,
+    "daemon_wall_ns": 1790000000123456789,
+    "timing": {
+     "type": "locked",
+     "offset": 312
+    },
+    "generator": {
+     "owner": "alice",
+     "armed": true,
+     "firing": true
+    }
+   }
+  }
+ },
+ "arrays": {}
+}

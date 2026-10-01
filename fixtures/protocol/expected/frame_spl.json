@@ -1,0 +1,33 @@
+{
+ "topic": "d/4/spl",
+ "header": {
+  "v": 1,
+  "kind": "spl",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 8,
+  "n": 0,
+  "arrays": [],
+  "meta": {
+   "spl": {
+    "scale": "db_spl",
+    "weighting": "a",
+    "time_weighting": "fast",
+    "peak_weighting": "c",
+    "level": 94.1,
+    "lmax": 101.3,
+    "lmin": 40.2,
+    "leq": 92.0,
+    "lpeak": 112.7,
+    "duration": 60.0
+   }
+  }
+ },
+ "arrays": {}
+}

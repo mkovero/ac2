@@ -1,0 +1,56 @@
+{
+ "topic": "d/1/levels",
+ "header": {
+  "v": 1,
+  "kind": "levels",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 8,
+  "n": 2,
+  "arrays": [
+   {
+    "name": "peak",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "rms",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "clip",
+    "unit": "bitmask",
+    "elem": "u32"
+   }
+  ],
+  "meta": {
+   "levels": {
+    "channels": [
+     0,
+     1
+    ]
+   }
+  }
+ },
+ "arrays": {
+  "peak": [
+   -0.10000000149011612,
+   -18.0
+  ],
+  "rms": [
+   -12.0,
+   -30.5
+  ],
+  "clip": [
+   3,
+   0
+  ]
+ }
+}

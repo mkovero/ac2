@@ -1,0 +1,61 @@
+[
+ {
+  "kind": "measurement",
+  "rev": 44,
+  "payload": {
+   "type": "deleted",
+   "value": 3
+  }
+ },
+ {
+  "kind": "trace",
+  "rev": 46,
+  "payload": {
+   "type": "deleted",
+   "value": 8
+  }
+ },
+ {
+  "kind": "calibration",
+  "rev": 49,
+  "payload": {
+   "type": "deleted",
+   "value": {
+    "device": "hw:UMC1820",
+    "channel": 1,
+    "mic": "M30 #1234"
+   }
+  }
+ },
+ {
+  "kind": "mic_curve",
+  "rev": 51,
+  "payload": {
+   "type": "deleted",
+   "value": 1
+  }
+ },
+ {
+  "kind": "timing",
+  "rev": 54,
+  "payload": {
+   "epoch": 3,
+   "state": {
+    "type": "locked",
+    "offset": 312
+   },
+   "last_lock": {
+    "epoch": 3,
+    "offset": 312,
+    "at_sample": 96000,
+    "at": 1790000000000000000
+   },
+   "drift": {
+    "ppm": 0.4,
+    "span": 30.0,
+    "warning": false
+   },
+   "internal_reference": true
+  }
+ }
+]

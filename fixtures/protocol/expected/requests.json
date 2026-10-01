@@ -1,0 +1,117 @@
+[
+ {
+  "v": 1,
+  "id": 0,
+  "cmd": {
+   "op": "hello",
+   "args": {
+    "client": "ac2-cli 0.0.0"
+   }
+  },
+  "expect_rev": null
+ },
+ {
+  "v": 1,
+  "id": 6,
+  "cmd": {
+   "op": "gen.set",
+   "args": {
+    "lease_token": {
+     "$bin": "0123456789abcdeffedcba9876543210"
+    },
+    "desired": {
+     "settings": {
+      "signal": {
+       "type": "periodic_pink",
+       "period": 131072
+      },
+      "level": -20.0,
+      "band": {
+       "highpass": 30.0,
+       "lowpass": null,
+       "order": "fourth"
+      },
+      "outputs": [
+       0,
+       1
+      ]
+     },
+     "armed": true,
+     "firing": false
+    }
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 9,
+  "cmd": {
+   "op": "gen.stop"
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 10,
+  "cmd": {
+   "op": "meas.create",
+   "args": {
+    "config": {
+     "name": "Main L",
+     "kind": {
+      "type": "transfer",
+      "config": {
+       "reference_input": 0,
+       "measurement_input": 1,
+       "averaging": {
+        "type": "fifo",
+        "blocks": 8
+       },
+       "grid": {
+        "ppo": 48,
+        "k_min": -240,
+        "k_max": 239
+       },
+       "smoothing": {
+        "fraction": "sixth",
+        "mode": "power"
+       }
+      }
+     }
+    }
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 18,
+  "cmd": {
+   "op": "delay.insert",
+   "args": {
+    "meas": 1,
+    "pick": {
+     "type": "candidate",
+     "index": 1
+    }
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 28,
+  "cmd": {
+   "op": "trace.import",
+   "args": {
+    "file_name": "sub.txt",
+    "format": "freq_mag_phase_text",
+    "content": {
+     "$bin": "3230202d332e302031300a"
+    }
+   }
+  },
+  "expect_rev": 41
+ }
+]

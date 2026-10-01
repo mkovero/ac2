@@ -1,0 +1,48 @@
+{
+ "topic": "d/3/rta",
+ "header": {
+  "v": 1,
+  "kind": "rta",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": 12543407874762319330,
+  "protection": 8,
+  "n": 3,
+  "arrays": [
+   {
+    "name": "level",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "validity",
+    "unit": "bitmask",
+    "elem": "u32"
+   }
+  ],
+  "meta": {
+   "rta": {
+    "fraction": "third",
+    "weighting": "z",
+    "scale": "db_spl"
+   }
+  }
+ },
+ "arrays": {
+  "level": [
+   NaN,
+   74.5,
+   61.25
+  ],
+  "validity": [
+   128,
+   0,
+   0
+  ]
+ }
+}

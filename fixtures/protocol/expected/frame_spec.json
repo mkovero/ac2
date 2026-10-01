@@ -1,0 +1,49 @@
+{
+ "topic": "d/5/spec",
+ "header": {
+  "v": 1,
+  "kind": "spec",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": 33497051499903108,
+  "protection": 8,
+  "n": 4,
+  "arrays": [
+   {
+    "name": "level",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "validity",
+    "unit": "bitmask",
+    "elem": "u32"
+   }
+  ],
+  "meta": {
+   "spec": {
+    "window": "hann",
+    "scale": "dbfs"
+   }
+  }
+ },
+ "arrays": {
+  "level": [
+   -120.0,
+   -20.0,
+   Infinity,
+   -Infinity
+  ],
+  "validity": [
+   0,
+   0,
+   0,
+   0
+  ]
+ }
+}
