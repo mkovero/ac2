@@ -97,14 +97,13 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q3 — Duplex timing (before phase 1)
 
-**Question.** When can the generator output stand in for a measured reference?
+**Question.** How is the generator→loopback offset monitored continuously (decided: 3a, 3b)?
 
-- How each backend exposes input/output latency (JACK port latency ranges, CoreAudio
-  device + stream latency, WASAPI) and how far each can be trusted.
-- Validation at session open: loopback measurement of the output→input offset; tolerance.
-- Re-validation triggers: xrun, device reset, buffer-size change, stream restart.
-- Where the reference is tapped: after routing and level, before the DAC.
-- What is refused, and what the operator sees, when timing is not validated.
+- Correlation method and update rate while a stimulus plays; cost on the daemon.
+- Jump detection threshold and what the UI shows (banner, event log).
+- Behaviour across xrun, device reset, buffer-size change, stream restart.
+- What backends report about latency (JACK port latency, CoreAudio, WASAPI) — used only
+  as a plausibility check, never instead of the loopback.
 
 ---
 
@@ -154,17 +153,16 @@ disarms, stop is universal, CLI holds a lease only while a foreground command ru
 
 ---
 
-## Q7 — Calibration chain identity (before phase 5)
+## Q7 — Calibration store (before phase 5)
 
-**Question.** What must match for a calibration to count as verified?
+**Question.** Calibration store details (decided: 7a/7b, 7c — device + channel + mic name,
+cal age, no gain/phantom fields).
 
-- Chain record fields: device uid, channel, mic id, preamp gain (read or confirmed),
-  phantom power state, calibrator id and frequency, timestamp.
-- Which backends can read preamp gain (vendor-specific; likely few). Confirmation UX
-  when they cannot: at cal time, and again at session open.
-- UNVERIFIED display: which readouts carry it (SPL, calibrated RTA, absolute levels).
-- Mic curve: FIR design (minimum- vs linear-phase), length, latency, normalisation at the
-  calibrator frequency, interaction with LCpeak and Impulse weighting.
+- Record fields: device uid, channel, mic name, sensitivity, calibrator level and
+  frequency, timestamp, optional mic-curve file reference.
+- Mismatch display wording and which readouts carry it (SPL, calibrated RTA).
+- SPL mic-curve filter: design, length, latency, normalisation at the calibrator
+  frequency, interaction with LCpeak and Impulse.
 - Storage format, atomic writes, behaviour on unparseable files.
 
 ---

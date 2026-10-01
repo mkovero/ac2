@@ -45,7 +45,7 @@ expected results independently. Nothing is copied file-for-file.
 |---|---|
 | Lab bench: THD/THD+N, AES17 noise, BS.468, DMM/SCPI, GPIO, `test_dut`/`test_hardware`, dBu cal prompts, stepped sweeps | out of PA-tuning scope |
 | HTML/PDF report renderers, report schema v1–v13, `ir_stats` arrival forensics, citation audit | archival machinery, not live tuning |
-| Calibration session/refusal machinery, τ history, loop-gain baselines | overbuilt for PA; replaced by a small cal store with provenance + measurement-chain identity (§5.7) |
+| Calibration session/refusal machinery, τ history, loop-gain baselines | overbuilt for PA; replaced by a small cal store with provenance, tied to device + channel + mic name (§5.7) |
 | CWT / CQT / reassigned spectrograms | replaced by one spectrograph (later) |
 | CWT-based RTA | RTA must be IEC filterbank or plain FFT, honestly labelled |
 | Full-rate Welch H1 with phase-rotation-only delay compensation (`transfer.rs:94,174`: both channels windowed at the same offset) | biased for large delays — MTW + time-domain alignment only |
@@ -521,7 +521,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 2 | Core DSP | MTW ladder + alignment, averaging (freeze/reset), smoothing, protection, delay finder (target, bands, confidence, candidates) + tracking, spectrum, RTA, weighting, generator | CI: §5.6 loopback suites pass against refgen; finder meets §5.2 acceptance numbers on scenario fixtures |
 | 3 | Daemon + protocol + CLI | session + jobs, ROUTER/XPUB, typed proto, state sync with replay/resync, bounded-freshness publishing, stimulus lease, CURVE + pairing, client, CLI `--watch` | CI: two clients stay in sync through dropped events, expired replay, session reopen and daemon restart; stalled subscriber recovers to fresh frames; unauthorized connect refused on both sockets; lease expiry stops output. HW: CLI drives a live TF remotely over CURVE |
 | 4 | Scene + UI | scene layer, wgpu plot, panes, keys, palette, banners, meters, live TF/RTA/IR, traces + metadata + slots + compare cursor, embedded daemon | HW: tune a real speaker end-to-end keyboard-only on Linux, macOS and Windows |
-| 5 | Calibration, SPL, sessions | cal store (sensitivity, mic curve, chain identity), SPL meter, trace averaging/math/targets, import/export, sessions | HW: **replaces `ac` for PA work** — mains + sub + delay alignment, cal'd SPL, saved/compared traces, session reload disarmed, on all 3 OS |
+| 5 | Calibration, SPL, sessions | cal store (sensitivity, mic curve, device/channel/mic binding), SPL meter, trace averaging/math/targets, import/export, sessions | HW: **replaces `ac` for PA work** — mains + sub + delay alignment, cal'd SPL, saved/compared traces, session reload disarmed, on all 3 OS |
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
 | 7 | Post-1.0 extras | ASIO, SPL logging/alarms, ESS IR + ISO 3382, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | per-feature criteria (room metrics vs published values; 24 h log clean; …) |
 
@@ -536,7 +536,7 @@ until phase 5 exit.
 before the phase that implements them starts: Q1 delay target & acceptance (phase 2),
 Q2 delivery freshness (phase 3), Q3 duplex timing (phase 1), Q4 level normalisation
 (phase 2), Q5 replay & epochs (phase 3), Q6 stimulus lease protocol (phase 3),
-Q7 calibration chain identity (phase 5), Q8 phase comparison time reference (phase 4).
+Q7 calibration store (phase 5), Q8 phase comparison time reference (phase 4).
 
 ---
 
