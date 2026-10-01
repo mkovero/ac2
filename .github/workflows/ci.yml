@@ -7,7 +7,9 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A newer push supersedes a branch/PR run. Every main commit runs to the end, so main keeps
+  # saving the caches every other ref restores from.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -15,6 +17,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Line tables keep file:line in panics and backtraces. Full debuginfo (the dev default) roughly
+  # doubles the target dir and its link time (PDBs on Windows) and the cache that carries it.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_NET_RETRY: "10"
 
 jobs:
   fmt:
@@ -27,8 +33,52 @@ jobs:
         run: rustup toolchain install
       - run: cargo fmt --all --check
 
-  build:
-    name: clippy + test (${{ matrix.os }})
+  # clippy is a check build and shares no artifacts with the test build, so on the slow runners
+  # it runs in its own job beside the tests instead of before them. macOS runs it inline (see
+  # `test`): it is not the critical path there and macOS minutes are the expensive ones.
+  clippy:
+    name: clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev
+
+      - name: Windows dev drive for target/
+        if: runner.os == 'Windows'
+        uses: samypr100/setup-dev-drive@v4
+        with:
+          drive-size: 12GB
+          mount-path: target
+          trusted-dev-drive: true
+
+      - name: Windows linker
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/speed' }}
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -61,17 +111,43 @@ jobs:
           # Runners expose a paravirtual Metal device; there is no software Metal adapter.
           { echo "WGPU_BACKEND=metal"; echo "AC2_REQUIRE_GPU=1"; } >> "$GITHUB_ENV"
 
-      - name: Windows GPU env
+      # ReFS dev drive mounted over target/: the build is small-file heavy and NTFS on the
+      # hosted runners is the slowest part of the Windows job.
+      - name: Windows dev drive for target/
+        if: runner.os == 'Windows'
+        uses: samypr100/setup-dev-drive@v4
+        with:
+          drive-size: 24GB
+          mount-path: target
+          trusted-dev-drive: true
+
+      - name: Windows GPU env + linker
         if: runner.os == 'Windows'
         shell: bash
-        # WARP (software D3D12) ships with Windows.
+        # WARP (software D3D12) ships with Windows. rust-lld (lld-link) links the many test
+        # binaries far faster than MSVC link.exe.
         run: |
-          { echo "WGPU_BACKEND=dx12"; echo "AC2_GPU_FALLBACK=1"; echo "AC2_REQUIRE_GPU=1"; } >> "$GITHUB_ENV"
+          {
+            echo "WGPU_BACKEND=dx12"
+            echo "AC2_GPU_FALLBACK=1"
+            echo "AC2_REQUIRE_GPU=1"
+            echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld"
+          } >> "$GITHUB_ENV"
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # A failing test should not throw away the dependency build.
+          cache-on-failure: true
+          # Only main writes caches (branches and PRs restore main's). Keeps the 10 GB repo
+          # budget for main's keys and skips the multi-minute save on Windows branch runs.
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci/speed' }}
 
       - name: clippy
+        if: runner.os == 'macOS'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: build tests
+        run: cargo test --workspace --locked --no-run
 
       - name: test
         run: cargo test --workspace --locked
