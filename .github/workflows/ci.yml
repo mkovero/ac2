@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # With no arguments rustup installs the toolchain + components pinned in rust-toolchain.toml.
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+      - run: cargo fmt --all --check
+
+  build:
+    name: clippy + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev \
+            mesa-vulkan-drivers libvulkan1
+          # Hosted Linux runners have no GPU; lavapipe (Vulkan) is the only adapter wgpu can use.
+          echo "WGPU_BACKEND=vulkan" >> "$GITHUB_ENV"
+
+      - name: macOS system deps
+        if: runner.os == 'macOS'
+        run: command -v cmake || brew install cmake
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --locked
+
+  refgen:
+    name: refgen check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install refgen requirements
+        if: hashFiles('tools/refgen/requirements.txt') != ''
+        run: pip install -r tools/refgen/requirements.txt
+      - name: Check golden vectors are up to date
+        if: hashFiles('tools/refgen/generate.py') != ''
+        run: python tools/refgen/generate.py --check
