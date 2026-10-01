@@ -29,6 +29,9 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
   polarity, amplitude; close interfering arrivals; fractional delays; sub-only) and
   recorded (off-axis, near reflecting surface, different boxes/crossovers).
 - How ambiguity is shown in the UI and CLI, and what tracking does with it.
+- Minimum excited bandwidth per band before an estimate is allowed; stability of picks
+  across excitation spectra (regularisation reshapes weakly excited bins).
+- Periodic excitation: default tail allowance T and how a wrapped late reflection is detected.
 
 **Must not:** score "agreement between two selectors" or "repeatability" as correctness.
 
@@ -121,3 +124,18 @@ disarms, stop is universal, CLI holds a lease only while a foreground command ru
 - Mic curve: FIR design (minimum- vs linear-phase), length, latency, normalisation at the
   calibrator frequency, interaction with LCpeak and Impulse weighting.
 - Storage format, atomic writes, behaviour on unparseable files.
+
+---
+
+## Q8 — Phase comparison time reference (before phase 4)
+
+**Question.** How do overlaid traces show true relative arrival, not just per-trace alignment?
+
+- Shared reference mode: phase of each trace rebuilt from its stored delay against one
+  chosen reference delay; how that reference is chosen and shown.
+- Independent mode: per-trace alignment, clearly marked so a convincing overlay cannot
+  hide relative delay.
+- Defaults (shared within a session), behaviour for imported traces without delay metadata.
+- Interaction with trace averaging's common delay reference and with A−B math.
+- Test: two otherwise identical paths with different physical delays must show their
+  relative phase in shared mode.

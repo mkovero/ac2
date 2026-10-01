@@ -142,6 +142,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Capture live → named, colored trace; slots; mandatory metadata: delay, polarity, offset, smoothing, cal state, mic, time | P0 | ac | 4 |
 | Show/hide/lock/reorder, offset, invert | P0 | ac | 4 |
 | Synchronized comparison cursor across traces and panes | P0 | new | 4 |
+| Phase comparison time reference: overlays either share one explicit time reference (phase rebuilt from each trace's stored delay so relative arrival is visible) or are marked as independently referenced; default shared for traces from one session | P0 | new | 4 |
 | Trace averaging: power, complex, coherence-weighted; common delay/phase reference stated per average | P0 | ac | 5 |
 | Trace math A−B: dB subtraction for magnitude, complex division where phase is wanted | P1 | new | 5 |
 | Target curves (file or drawn) | P1 | ac (file) | 5 |
@@ -293,9 +294,15 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   candidates are ambiguous (several within threshold, close spacing), the finder returns
   all of them ranked and the operator chooses; tracking never acts on an ambiguous result.
 - **Estimator**, separate from the ladder, on the **raw, unaligned** pair with uniform
-  bins: regularised H1 = Gxy / (Gxx + ε·mean(Gxx)) → band-limit → IFFT gives a
-  band-limited impulse response, whose shape does not depend on the excitation spectrum
-  (a plain cross-correlation would). GCC-PHAT is the fallback for poor reference spectra.
+  bins: regularised H1 = Gxy / (Gxx + ε·mean(Gxx)) → band-limit → IFFT gives an
+  approximate band-limited impulse response. The recovery is only approximate where the
+  band is sufficiently excited: regularisation shrinks weakly excited bins
+  (Ĥ ≈ H·Gxx/(Gxx + ε·mean Gxx)), which reshapes the response and can reorder candidates.
+  It is far less excitation-dependent than plain cross-correlation, not independent of it.
+  GCC-PHAT is the fallback for poor reference spectra; neither recovers frequencies the
+  excitation never contained. Inadequate excited bandwidth in the selected band →
+  "no estimate". Tests check that arrival picks stay stable across excitation spectra
+  (white, pink, band-limited, programme material).
   Zero-padded to ≥ 2× the search span to avoid circular wrap; lag sign: positive = measurement late.
   Search range bounded and signed (default ±1 s, configurable). Result is the **absolute**
   delay; the held delay is never added to it.
@@ -311,7 +318,8 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   interfering arrivals, fractional and negative delays, recorded noise at varying SNR):
   error ≤ 1 sample (full-range) / ≤ 0.1 ms (sub bands) when accepted; wrong-arrival
   acceptance ≤ 1 %; refusal ≤ 10 % at ≥ 20 dB band SNR on unambiguous scenarios.
-  Exact numbers fixed in Q1 before phase 2.
+  These are provisional targets for identifiable delays, not guarantees for acoustic
+  onsets in general; exact numbers fixed in Q1 before phase 2.
 
 ### 5.3 Spectrum, RTA, SPL
 - Units defined per display: **amplitude spectrum** (bin-centred sine reads its RMS;
@@ -335,11 +343,17 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 - Pink (free-running, filtered), white, periodic pink, sine, ESS. Seeded RNG.
   Band-limit filters. Level always typed by the operator (dBFS RMS); global max
   enforced in daemon.
-- Periodic pink: period defined at full rate and a power of two ≥ the largest stage's
-  full-rate window span **and** > 2× the delay search range (e.g. 2¹⁷ at 48 kHz ≈ 2.7 s),
-  so neither MTW stages nor the finder see period ambiguity. Shorter periods are allowed
-  only with a correspondingly limited search range, shown in the UI. Free-running noise
-  remains the default for unrestricted finding.
+- Periodic pink: period P defined at full rate, a power of two, with
+  P ≥ largest stage's full-rate window span **and** P > W + T, where W is the full width
+  of the delay search interval (2 s for ±1 s) and T the significant response-tail
+  duration (late reflections / decay down to the finder's threshold; configurable,
+  default 1 s). Example: ±1 s search, 1 s tail at 48 kHz → 2¹⁸ ≈ 5.5 s. This prevents
+  repeated direct-arrival candidates and keeps late energy from wrapping into the search
+  interval only as long as the room's tail is actually shorter than T; it is not an
+  absolute guarantee. Shorter periods require a correspondingly limited search range,
+  shown in the UI. Free-running noise remains the default for unrestricted finding.
+  Test: a late reflection placed to wrap into the search interval at a too-short period
+  must be flagged or refused, never accepted as an arrival.
 - ESS for IR capture and generator noise share one output path. An IR capture needs the
   stimulus lease like any emission (§6.5); it never takes it implicitly.
 
@@ -368,7 +382,8 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   marked UNVERIFIED; never silently applied, never silently dropped. Digital identity
   alone never counts as verified.
 - Mic curve placement: SPL and RTA per §5.3 (FIR before integration, normalised at the
-  calibrator frequency). Transfer functions: magnitude correction of the measurement
+  calibrator frequency). Sensitivity calibration records the calibrator frequency and
+  uses the same convention, so the two corrections never double-count. Transfer functions: magnitude correction of the measurement
   channel only, shown as on/off; no phase is invented from magnitude-only files.
 - Atomic writes; an unparseable file is never overwritten.
 
@@ -523,7 +538,7 @@ until phase 5 exit.
 before the phase that implements them starts: Q1 delay target & acceptance (phase 2),
 Q2 delivery freshness (phase 3), Q3 duplex timing (phase 1), Q4 level normalisation
 (phase 2), Q5 replay & epochs (phase 3), Q6 stimulus lease protocol (phase 3),
-Q7 calibration chain identity (phase 5).
+Q7 calibration chain identity (phase 5), Q8 phase comparison time reference (phase 4).
 
 ---
 
