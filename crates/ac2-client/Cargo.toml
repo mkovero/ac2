@@ -11,4 +11,20 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# An in-process fake daemon (ROUTER + XPUB built from ac2-proto + ac2-zmq) for tests of this
+# crate and of ac2-cli. Never used by a shipping binary.
+test-support = []
+
 [dependencies]
+ac2-proto = { path = "../ac2-proto" }
+ac2-zmq = { path = "../ac2-zmq" }
+tokio = { version = "1.53", features = ["rt", "sync", "time", "macros"] }
+thiserror = "2"
+getrandom = "0.3"
+sha2 = "0.10"
+
+[dev-dependencies]
+ac2-client = { path = ".", features = ["test-support"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tempfile = "3"
