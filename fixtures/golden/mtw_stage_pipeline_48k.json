@@ -1,0 +1,247 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "mtw_stage_pipeline_48k",
+  "description": "MTW stage pipeline at 48 kHz: integer alignment, Kaiser decimation with warm-up discarded, and Hann Welch auto/cross spectra per stage, built from scipy primitives.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "tools/refgen/sets/mtw.py:gen_mtw_stage_pipeline_48k"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "n": 30000,
+    "delay_samples": 7,
+    "delay_sign": "positive = measurement late; pair n = (x[n - D], y[n])",
+    "nfft": 4096,
+    "factors": [
+      1,
+      4,
+      12
+    ],
+    "hops": [
+      2048,
+      1024,
+      512
+    ],
+    "design_ppo": 48,
+    "attenuation_db": 92.0,
+    "decimator": "firwin(kaiserord(92 dB, width)), odd length; output j = lfilter(h, 1, aligned)[L - 1 + j M]",
+    "welch": "hann periodic, detrend False, density, mean; csd conj(X) Y",
+    "biquad": "RBJ peaking f0=400.0 Q=1.5 gain=6.0 dB",
+    "noise_rms": 0.2,
+    "seed": 180486913
+  },
+  "references": [
+    "PLAN.md 5.1 (stages, alignment before decimation, shared phase)",
+    "scipy.signal.kaiserord / firwin / welch / csd"
+  ],
+  "scalars": {
+    "stage0_blocks": 13,
+    "stage1_passband_hz": 1029.8461583517885,
+    "stage1_stopband_hz": 10712.692302060264,
+    "stage1_beta": 9.17966,
+    "stage1_blocks": 4,
+    "stage2_passband_hz": 257.46153958794713,
+    "stage2_stopband_hz": 3678.173075515066,
+    "stage2_beta": 9.17966
+  },
+  "blob": {
+    "file": "mtw_stage_pipeline_48k.bin",
+    "nbytes": 644848,
+    "sha256": "d2b943a9b968293d85aea67e1ab2bbefaeb88896100791fd2e6bc5ac573c33d6"
+  },
+  "arrays": [
+    {
+      "name": "x",
+      "dtype": "f64",
+      "shape": [
+        30000
+      ],
+      "offset": 0,
+      "nbytes": 240000,
+      "unit": "FS",
+      "description": "reference input, index 0 = sample 0"
+    },
+    {
+      "name": "y",
+      "dtype": "f64",
+      "shape": [
+        30000
+      ],
+      "offset": 240000,
+      "nbytes": 240000,
+      "unit": "FS",
+      "description": "measurement input"
+    },
+    {
+      "name": "stage0_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 480000,
+      "nbytes": 16392,
+      "unit": "Hz",
+      "description": "stage 0 bin frequencies",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "stage0_gxx",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 496392,
+      "nbytes": 16392,
+      "unit": "FS^2/Hz",
+      "description": "stage 0 Welch Gxx",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-08
+      },
+      "axis": "stage0_freq_hz"
+    },
+    {
+      "name": "stage0_gyy",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 512784,
+      "nbytes": 16392,
+      "unit": "FS^2/Hz",
+      "description": "stage 0 Welch Gyy",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-08
+      },
+      "axis": "stage0_freq_hz"
+    },
+    {
+      "name": "stage0_gxy",
+      "dtype": "c128",
+      "shape": [
+        2049
+      ],
+      "offset": 529176,
+      "nbytes": 32784,
+      "unit": "FS^2/Hz",
+      "description": "stage 0 Welch Gxy",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-08
+      },
+      "axis": "stage0_freq_hz"
+    },
+    {
+      "name": "stage1_taps",
+      "dtype": "f64",
+      "shape": [
+        31
+      ],
+      "offset": 561960,
+      "nbytes": 248,
+      "unit": "1",
+      "description": "stage 1 decimator taps",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-13,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "stage1_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 562208,
+      "nbytes": 16392,
+      "unit": "Hz",
+      "description": "stage 1 bin frequencies",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-12
+      }
+    },
+    {
+      "name": "stage1_gxx",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 578600,
+      "nbytes": 16392,
+      "unit": "FS^2/Hz",
+      "description": "stage 1 Welch Gxx",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-08
+      },
+      "axis": "stage1_freq_hz"
+    },
+    {
+      "name": "stage1_gyy",
+      "dtype": "f64",
+      "shape": [
+        2049
+      ],
+      "offset": 594992,
+      "nbytes": 16392,
+      "unit": "FS^2/Hz",
+      "description": "stage 1 Welch Gyy",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-08
+      },
+      "axis": "stage1_freq_hz"
+    },
+    {
+      "name": "stage1_gxy",
+      "dtype": "c128",
+      "shape": [
+        2049
+      ],
+      "offset": 611384,
+      "nbytes": 32784,
+      "unit": "FS^2/Hz",
+      "description": "stage 1 Welch Gxy",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-15,
+        "rel": 1e-08
+      },
+      "axis": "stage1_freq_hz"
+    },
+    {
+      "name": "stage2_taps",
+      "dtype": "f64",
+      "shape": [
+        85
+      ],
+      "offset": 644168,
+      "nbytes": 680,
+      "unit": "1",
+      "description": "stage 2 decimator taps",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-13,
+        "rel": 0.0
+      }
+    }
+  ]
+}
