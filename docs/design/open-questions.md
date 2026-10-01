@@ -46,46 +46,18 @@ note at the start of the phase that implements them, within the decisions here.
 | 7a/7b | Calibration tied to device + input channel + mic name. Mismatch → "cal from other mic / input"; otherwise shows cal age. No gain/phantom fields, no prompts. Recalibrating after gain changes is the operator's job. |
 | 7c | Mic curve: TF / spectrum / RTA subtract file dB from displayed magnitude; SPL applies it as a filter before weighting; phase never touched; on/off per input. |
 | 8b | Overlay reference = selected trace's measured delay (pick key to change); others drawn relative to it; per-trace nudge on top. |
+| M1 | MTW averaging: equal statistical confidence across stages is the default; a "fast LF" option caps the deepest stage's settling at ~1 s and shows its higher coherence floor. |
+| U1 | Banners live in a strip above the plots, outside the data area; plots shrink while a banner is up. |
+| U2 | Coherence in its own pane under phase (3:2:1) by default; toggle to overlay it on top of the magnitude pane. |
+| D1 | Delay finder acceptance: full ≤1 sample; mid ≤0.05 ms; sub ≤0.1 ms for arrivals ≥2 pulse widths apart, ≤2 ms for unresolved sub clusters; resolved sub pairs / sub programme ≤2 % wrong, ≤20 % refused at 8 s. |
+| D2 | Sub observation 4 s default, operator choice 2/4/8 s. |
+| D3 | Sub tracking agreement ±0.1 ms. |
+| D4 | GCC-PHAT is a diagnostic option, not a fallback. |
+| — | Scene defaults recorded with U1/U2 (banner priority, units, coherence fade, IR dB re peak, spectrum thinning, CHECK ROUTING flag) stand. |
 
 Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).
 
-### → round 3 (raised by phase 2 work)
-
-**M1. What "averages = 8" means across the MTW ladder.**
-Today the setting fixes the top (full-rate) stage; deeper stages hold more blocks so every
-frequency has the same statistical confidence (equal coherence floor). Consequence at
-48 kHz, FIFO 8: above ~1 kHz settles in ~0.4 s, 250 Hz–1 kHz in ~1.3 s, below ~250 Hz in
-~3.7 s. `ac` chose the opposite trade-off later (deeper stages update faster, accepting a
-higher LF coherence floor) because LF felt unusably slow.
-- Proposal: keep equal confidence as the default, add a "fast LF" option that caps the
-  deepest stage's settling at ~1 s and shows its higher coherence floor honestly.
-- Answer:
-
-**U1. Where banners go.** Today they stack at the top of the magnitude pane and cover the
-legend and cursor readout (see `crates/ac2-plot/tests/reference/transfer_view.png`).
-- Proposal: a banner strip above the plots, outside the data area; plots shrink while a banner is up.
-- Answer:
-
-**U2. Coherence placement.**
-- Proposal: own pane under phase (current, 3:2:1), with a toggle to overlay coherence on the
-  top of the magnitude pane (the classic analyzer look). Default: own pane.
-- Answer:
-
-**Decided by me (phase 4 scene work; say if you disagree):** banner priority DAEMON NOT
-RESPONDING > CLIP > NO REFERENCE > NO SIGNAL > STALE > OUTPUT TIMING JUMP > NO DELAY ESTIMATE,
-max 3 rows + "+N more"; units "dB SPL (tone)" / "dB SPL (band)"; coherence shown as γ² 0–1,
-fade on by default (0.15 at γ² 0 → full at 0.9), blanking off; IR log/ETC in dB re peak; spectrum
-line thinned to max-per-pixel; CHECK ROUTING gets a protocol flag and banner in phase 3.
-
-**D1–D4. Delay finder results (Q1 study, `q1-delay-finder.md` §16).** Accepted provisionally
-by me so the Rust finder can be built; overrule any of them here.
-- D1: revised acceptance — full range unchanged (≤1 sample); mid ≤0.05 ms; sub ≤0.1 ms only
-  for arrivals ≥2 pulse widths apart (~22 ms), ≤2 ms for unresolved sub clusters; resolved sub
-  pairs and sub programme ≤2 % wrong / ≤20 % refused at 8 s.
-- D2: sub observation 4 s default (lock ≈ 8 s), operator choice 2/4/8 s.
-- D3: sub tracking agreement ±0.1 ms (±1 sample would stall).
-- D4: GCC-PHAT is a diagnostic option, not the fallback (it picked wrong arrivals 10–20 %).
-- Answer:
+Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the table below).
 
 ---
 
