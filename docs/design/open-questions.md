@@ -49,6 +49,18 @@ note at the start of the phase that implements them, within the decisions here.
 
 Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).
 
+### → round 3 (raised by phase 2 work)
+
+**M1. What "averages = 8" means across the MTW ladder.**
+Today the setting fixes the top (full-rate) stage; deeper stages hold more blocks so every
+frequency has the same statistical confidence (equal coherence floor). Consequence at
+48 kHz, FIFO 8: above ~1 kHz settles in ~0.4 s, 250 Hz–1 kHz in ~1.3 s, below ~250 Hz in
+~3.7 s. `ac` chose the opposite trade-off later (deeper stages update faster, accepting a
+higher LF coherence floor) because LF felt unusably slow.
+- Proposal: keep equal confidence as the default, add a "fast LF" option that caps the
+  deepest stage's settling at ~1 s and shows its higher coherence floor honestly.
+- Answer:
+
 ---
 
 ## Q1 — Delay target and acceptance (before phase 2)
