@@ -134,7 +134,7 @@ pub(crate) fn unique_inproc(purpose: &str) -> String {
     )
 }
 
-fn endpoint(s: &str) -> Result<CString> {
+fn c_endpoint(s: &str) -> Result<CString> {
     CString::new(s).map_err(|_| Error::InvalidArgument("endpoint contains NUL"))
 }
 
@@ -297,20 +297,20 @@ impl Socket {
     // --- connections -----------------------------------------------------------------------
 
     /// Binds to `endpoint` (`tcp://host:port`, `ipc://path`, `inproc://name`).
-    pub fn bind(&self, endpoint_: &str) -> Result<()> {
-        zmq(self.raw.bind(&endpoint(endpoint_)?))
+    pub fn bind(&self, endpoint: &str) -> Result<()> {
+        zmq(self.raw.bind(&c_endpoint(endpoint)?))
     }
 
     /// Connects to `endpoint`; libzmq connects (and reconnects) in the background.
-    pub fn connect(&self, endpoint_: &str) -> Result<()> {
-        zmq(self.raw.connect(&endpoint(endpoint_)?))
+    pub fn connect(&self, endpoint: &str) -> Result<()> {
+        zmq(self.raw.connect(&c_endpoint(endpoint)?))
     }
 
     /// Starts reporting this socket's connection events. Attach before `bind`/`connect` to
     /// see every event. A socket has at most one monitor; a new one replaces the previous.
     pub fn monitor(&self) -> Result<Monitor> {
         let ep = unique_inproc("monitor");
-        zmq(self.raw.monitor(&endpoint(&ep)?, raw::ZMQ_EVENT_ALL))?;
+        zmq(self.raw.monitor(&c_endpoint(&ep)?, raw::ZMQ_EVENT_ALL))?;
         let pair = self.ctx.pair_socket()?;
         pair.connect(&ep)?;
         Ok(Monitor::new(pair))
