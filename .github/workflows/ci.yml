@@ -76,6 +76,14 @@ jobs:
       - name: test
         run: cargo test --workspace --locked
 
+      - name: Upload golden-image diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-images-${{ matrix.os }}
+          path: target/golden-images/
+          if-no-files-found: ignore
+
   refgen:
     name: refgen check
     runs-on: ubuntu-latest
@@ -90,3 +98,15 @@ jobs:
       - name: Check golden vectors are up to date
         if: hashFiles('tools/refgen/generate.py') != ''
         run: python tools/refgen/generate.py --check
+
+  protocol:
+    name: protocol fixtures (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r tools/protocol/requirements.txt
+      - name: Python decodes Rust fixtures and matches expectations
+        run: python tools/protocol/fixtures.py check
