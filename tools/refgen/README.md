@@ -93,3 +93,8 @@ that an estimator is not expected to match exactly).
   `γ² = |Pxy|²/(Pxx·Pyy)`.
 - **Delay sign**: positive lag = measurement `y` late relative to reference `x`.
 - **Units**: FS = digital full scale (sample value 1.0).
+
+## Adding vector sets
+
+Put a module in `sets/` (see `sets/README.md`); `generate.py` discovers it. No edits to
+`generate.py` needed.

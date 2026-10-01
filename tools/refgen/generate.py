@@ -548,9 +548,31 @@ GENERATORS = [
 ]
 
 
+SETS_DIR = Path(__file__).resolve().parent / "sets"
+
+
+def discovered_generators() -> list:
+    """Generators from tools/refgen/sets/*.py (each module exports GENERATORS).
+
+    Set modules use the helpers here via `import generate as g`, so independent areas of
+    work add vector sets without editing this file.
+    """
+    import importlib.util
+
+    gens = []
+    for path in sorted(SETS_DIR.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        spec = importlib.util.spec_from_file_location(f"refgen_sets_{path.stem}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        gens.extend(mod.GENERATORS)
+    return gens
+
+
 def generate_all(out_dir: Path) -> list[str]:
     names = []
-    for gen in GENERATORS:
+    for gen in GENERATORS + discovered_generators():
         vs = gen()
         vs.write(out_dir)
         names.append(vs.name)
