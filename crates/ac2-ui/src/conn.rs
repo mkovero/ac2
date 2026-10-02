@@ -16,8 +16,8 @@ use ac2_client::{
     Client, ClientConfig, ClientError, Latest, MirrorView, OnDrop, StimulusLease, expect_body,
 };
 use ac2_proto::model::{
-    DelayFinding, DelayPick, FinderBand, GeneratorDesired, GeneratorSettings, ImportFormat,
-    ImportRole, TraceData, TraceMeta,
+    DelayFinding, DelayPick, DeviceInfo, FinderBand, GeneratorDesired, GeneratorSettings,
+    ImportFormat, ImportRole, MeasConfig, Measurement, TraceData, TraceMeta,
 };
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
@@ -77,6 +77,10 @@ pub enum ConnEvent {
         trace: Box<TraceMeta>,
     },
     Stimulus(StimEvent),
+    /// `session.devices` answered (or could not be asked).
+    Devices(Result<Vec<DeviceInfo>, String>),
+    /// A measurement was created (and, unless a reply says otherwise, started).
+    MeasCreated(Box<Measurement>),
 }
 
 /// Stimulus lease outcomes.
@@ -128,6 +132,10 @@ pub enum Request {
         path: std::path::PathBuf,
         role: ImportRole,
     },
+    /// `session.devices`, for the session dialog.
+    Devices,
+    /// `meas.create` then `meas.start` (as `ac2 meas new --start`).
+    CreateMeas { config: MeasConfig },
     /// Drop the connection and connect again now.
     Reconnect,
 }
@@ -332,6 +340,9 @@ async fn wait_retry(
                     // Nothing to stop through: no connection, so no lease of ours either.
                     out.send(ConnEvent::Stimulus(StimEvent::Stopped));
                 }
+                Some(Ctl::Req(Request::Devices)) => {
+                    out.send(ConnEvent::Devices(Err("not connected".into())));
+                }
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
                     result: Err("not connected".into()),
@@ -350,6 +361,8 @@ fn request_name(r: &Request) -> String {
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
         Request::Import { path, .. } => format!("import {}", path.display()),
         Request::FindDelay { .. } => "delay find".into(),
+        Request::Devices => "list devices".into(),
+        Request::CreateMeas { config } => format!("new measurement {}", config.name),
         Request::Reconnect => "reconnect".into(),
     }
 }
@@ -511,6 +524,44 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                         result: Err(e),
                     });
                 }
+            });
+        }
+        Request::Devices => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let r = c
+                    .call(Command::SessionDevices)
+                    .await
+                    .and_then(|r| expect_body!("session.devices", r, ReplyBody::Devices(d) => d))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::Devices(r));
+            });
+        }
+        Request::CreateMeas { config } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let name = config.name.clone();
+                let created = c
+                    .call(Command::MeasCreate { config })
+                    .await
+                    .and_then(|r| expect_body!("meas.create", r, ReplyBody::Measurement(m) => m));
+                let m = match created {
+                    Ok(m) => m,
+                    Err(e) => {
+                        o.send(ConnEvent::Reply {
+                            what: format!("new measurement {name}"),
+                            result: Err(e.to_string()),
+                        });
+                        return;
+                    }
+                };
+                let id = m.id;
+                o.send(ConnEvent::MeasCreated(Box::new(m)));
+                let (what, result) = match c.call(Command::MeasStart { meas: id }).await {
+                    Ok(_) => (format!("{name} created and started"), Ok(())),
+                    Err(e) => (name, Err(format!("created but not started: {e}"))),
+                };
+                o.send(ConnEvent::Reply { what, result });
             });
         }
         Request::StimArm { settings, force } => {

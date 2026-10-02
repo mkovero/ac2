@@ -90,8 +90,10 @@ WASAPI needs a buffer of 256 frames or more for reliable duplex; set it per sess
 There are three ways; pick one.
 
 - **The app hosts it.** Start **ac2**. If no daemon is running, the connect dialog opens:
-  choose *This computer's audio* (or *Simulated rig* to try ac2 without hardware). That
-  daemon lives inside the app and stops with it. The command-line client cannot reach it.
+  choose *This computer's audio* (the session dialog opens next, to pick the interface and
+  channels) or *Simulated rig* to try ac2 without hardware (it starts with its session open
+  and a transfer measurement "demo" running). That daemon lives inside the app and stops
+  with it. The command-line client cannot reach it; everything it would do is in the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
   (Linux), or `ac2 daemon start` on any OS (`ac2 daemon stop` stops it). The app connects to
   it automatically.
@@ -108,7 +110,22 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
                   └──► loopback cable ──────────────────────────────────────► in 1
 ```
 
-With a per-user daemon running (see above), in a terminal:
+**In the app** (any daemon: hosted by the app, per-user, or remote; no terminal needed):
+
+1. Until there is an audio session the transfer pane says *No audio session — press
+   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens the session dialog:
+   it lists the daemon's interfaces. **↑/↓** move between fields, **←/→** pick the backend
+   and device, type the input channels (`1-2`), the number of output channels, optionally a
+   rate and buffer (empty: the device's defaults) and the loopback (`1>1`: output 1 returns
+   on input 1; leave it empty if your interface does not loop the output back). **Enter**
+   opens it.
+2. The pane now says *No measurements*. **Ctrl+K**, type `new transfer`, **Enter**: the
+   dialog proposes the loopback input as reference and the next input as measurement
+   (**Enter** creates and starts it; it is selected). *New spectrum…*, *New RTA…* and *New
+   SPL meter…* work the same way; *Delete selected measurement* and *Close audio session*
+   are in the palette too.
+
+**Or from a terminal**, with a per-user daemon running (see above):
 
 ```sh
 ac2 devices                                       # find your interface
@@ -118,8 +135,9 @@ ac2 meas start main
 ac2-ui                                            # or start ac2 from the menu
 ```
 
-Then in the app (or with `ac2 gen pink --out 1 --level -30dbfs`, which runs in the
-foreground: **Enter** fires, **Esc** stops):
+The app's dialogs use the same defaults as these commands. Then in the app (or with
+`ac2 gen pink --out 1 --level -30dbfs`, which runs in the foreground: **Enter** fires,
+**Esc** stops):
 
 1. Press **L**, type a level such as `-30` (dBFS) and Enter. ac2 never plays anything at a
    default level.
@@ -128,9 +146,11 @@ foreground: **Enter** fires, **Esc** stops):
    transparency of the trace) shows where the data is trustworthy.
 4. **Esc** stops the noise at any time.
 
-No hardware at hand? Run the same steps against the built-in simulated rig (output 1 → input
-1 loopback, output 1 → input 2 through a speaker-and-room model; it never touches real
-audio):
+No hardware at hand? Use the built-in simulated rig (output 1 → input 1 loopback, output 1
+→ input 2 through a speaker-and-room model; it never touches real audio). In the app, choose
+*Simulated rig* in the connect dialog: its session is already open (inputs 1–2, output 1,
+loopback 1 → 1) and the transfer measurement "demo" (reference 1, measurement 2) is running,
+so steps 1–4 above work at once. From a terminal:
 
 ```sh
 ac2d --backend fake &

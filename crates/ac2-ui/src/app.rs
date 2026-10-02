@@ -12,7 +12,7 @@ use eframe::egui::{self, Event, Key};
 
 use crate::conn::{Conn, Target};
 use crate::connect::{Choice, ConnectDialog};
-use crate::embedded::{Embedded, start_embedded};
+use crate::embedded::{Embedded, EmbeddedBackend, start_embedded};
 use crate::keys::{Chord, Keymap};
 use crate::state::{AppState, Msg, Overlay, PaneKind};
 use crate::{theme, view};
@@ -35,6 +35,9 @@ pub struct AppOptions {
     pub started: Instant,
     /// Print the first-frame time and quit.
     pub bench_startup: bool,
+    /// Open the session dialog once connected if the daemon has no audio session (an
+    /// embedded daemon on real audio starts without one).
+    pub open_session_dialog: bool,
 }
 
 impl std::fmt::Debug for AppOptions {
@@ -115,6 +118,7 @@ impl App {
         });
         let mut state = AppState::new(opts.theme, describe);
         state.prefs = opts.prefs;
+        state.open_session_when_empty = opts.open_session_dialog;
         for n in opts.notices {
             state.update(
                 Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
@@ -168,6 +172,17 @@ impl App {
                     };
                     self.conn = None;
                     self.embedded = Some(e);
+                    // Real audio: the operator picks the interface and channels. The
+                    // simulated rig is already measuring.
+                    self.state.open_session_when_empty = b != EmbeddedBackend::Fake;
+                    if b == EmbeddedBackend::Fake {
+                        self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
+                            what: "simulated rig: session open, \"demo\" measuring · L types a \
+                                   level, Space arms, Enter fires"
+                                .into(),
+                            result: Ok(()),
+                        })));
+                    }
                     t
                 }
                 Err(e) => {
@@ -226,7 +241,10 @@ impl App {
     /// Keyboard and text events → reducer. Handled events are removed so egui widgets never
     /// also act on them (Space must not click a focused button, Tab must not move focus).
     fn input(&mut self, ctx: &egui::Context) {
-        let text_overlay = matches!(self.state.overlay, Overlay::Palette(_) | Overlay::Prompt(_));
+        let text_overlay = matches!(
+            self.state.overlay,
+            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_)
+        );
         let events = ctx.input_mut(|i| {
             let (mine, rest): (Vec<Event>, Vec<Event>) =
                 std::mem::take(&mut i.events).into_iter().partition(|e| {

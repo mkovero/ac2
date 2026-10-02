@@ -3,8 +3,9 @@
 use eframe::egui::{self, Color32, Key, RichText, text::LayoutJob};
 
 use crate::app::App;
+use crate::forms::Value;
 use crate::keys::{CommandId, Keymap, Scope};
-use crate::state::{Msg, Overlay};
+use crate::state::{FormMsg, Msg, Overlay};
 use crate::theme::Chrome;
 
 const PALETTE_ROWS: usize = 12;
@@ -16,6 +17,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         Overlay::Palette(_) => palette(app, ctx, ch),
         Overlay::Prompt(_) => prompt(app, ctx, ch),
         Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
+        Overlay::Form(_) => form(app, ctx, ch),
     }
     toasts(app, ctx, ch);
 }
@@ -366,6 +368,116 @@ fn prompt(app: &App, ctx: &egui::Context, ch: &Chrome) {
                 );
             });
         });
+}
+
+/// The session dialog and the new-measurement dialogs: one row per field, the focused row
+/// highlighted; keys drive it, the mouse can too.
+fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    let Overlay::Form(f) = &app.state.overlay else {
+        return;
+    };
+    let f = f.clone();
+    backdrop(ctx);
+    let mut msg = None;
+    egui::Area::new(egui::Id::new("ac2-form"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(600.0);
+                ui.label(RichText::new(f.kind.title()).strong().size(16.0));
+                ui.add_space(8.0);
+                egui::Grid::new("ac2-form-grid")
+                    .num_columns(3)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .min_col_width(0.0)
+                    .show(ui, |ui| {
+                        for (i, field) in f.fields.iter().enumerate() {
+                            let focused = i == f.focus;
+                            let label = RichText::new(field.label).color(if focused {
+                                ch.text
+                            } else {
+                                ch.dim
+                            });
+                            if ui
+                                .add(egui::Label::new(label).sense(egui::Sense::click()))
+                                .clicked()
+                            {
+                                msg = Some(FormMsg::Focus(i));
+                            }
+                            ui.horizontal(|ui| {
+                                ui.set_min_width(250.0);
+                                match &field.value {
+                                    Value::Text(t) => {
+                                        let shown = if focused {
+                                            format!("{t}▏")
+                                        } else if t.is_empty() {
+                                            "—".to_owned()
+                                        } else {
+                                            t.clone()
+                                        };
+                                        let text = RichText::new(shown).monospace().color(ch.text);
+                                        if ui.add(egui::Button::selectable(focused, text)).clicked()
+                                        {
+                                            msg = Some(FormMsg::Focus(i));
+                                        }
+                                    }
+                                    Value::Choice { options, .. } => {
+                                        let shown = field.display();
+                                        let shown = if options.is_empty() {
+                                            "—".to_owned()
+                                        } else {
+                                            shown
+                                        };
+                                        if ui.small_button("‹").clicked() {
+                                            msg = Some(FormMsg::Cycle(i, -1));
+                                        }
+                                        let text = RichText::new(shown).color(ch.text);
+                                        if ui.add(egui::Button::selectable(focused, text)).clicked()
+                                        {
+                                            msg = Some(FormMsg::Cycle(i, 1));
+                                        }
+                                        if ui.small_button("›").clicked() {
+                                            msg = Some(FormMsg::Cycle(i, 1));
+                                        }
+                                    }
+                                }
+                            });
+                            ui.label(RichText::new(&field.hint).small().color(ch.dim));
+                            ui.end_row();
+                        }
+                    });
+                if let Some(e) = &f.error {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(e).color(ch.fault));
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let verb = match f.kind {
+                        crate::forms::FormKind::Session => "Open",
+                        _ => "Create and start",
+                    };
+                    if ui.button(verb).clicked() {
+                        msg = Some(FormMsg::Submit);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        msg = Some(FormMsg::Cancel);
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "{} · ↑↓ field · ←→ choose · Esc closes (and stops stimulus)",
+                        f.kind.submit()
+                    ))
+                    .small()
+                    .color(ch.dim),
+                );
+            });
+        });
+    if let Some(m) = msg {
+        app.dispatch(Msg::Form(m));
+    }
 }
 
 /// The candidate list of an ambiguous delay finding, over the top of the transfer pane. No

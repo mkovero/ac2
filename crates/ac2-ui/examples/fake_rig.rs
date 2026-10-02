@@ -49,6 +49,7 @@ fn main() -> Result<(), eframe::Error> {
         notices: err.into_iter().collect(),
         started,
         bench_startup: has("--bench-startup"),
+        open_session_dialog: false,
     };
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

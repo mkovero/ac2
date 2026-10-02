@@ -28,6 +28,7 @@ use ac2_scene::{axis::Range, format};
 
 use crate::anim::FreqNav;
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
+use crate::forms::{Form, FormKind};
 use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
@@ -347,6 +348,8 @@ pub enum Overlay {
     /// Candidate list of an ambiguous finding over the transfer pane. Keys other than 1–3
     /// keep working; Esc closes it (and stops the stimulus, as always).
     DelayPick(Box<DelayChoice>),
+    /// The audio session dialog or a new-measurement dialog.
+    Form(Box<Form>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -396,6 +399,19 @@ pub enum Msg {
         octaves: f64,
     },
     CursorAt(Option<f64>),
+    /// Mouse on an open dialog.
+    Form(FormMsg),
+}
+
+/// What the mouse does on a dialog (the keyboard goes through [`Msg::Key`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormMsg {
+    Focus(usize),
+    /// ←/→ on field `.0`.
+    Cycle(usize, i32),
+    Submit,
+    /// Closes the dialog without touching the stimulus.
+    Cancel,
 }
 
 /// Everything the UI holds.
@@ -434,6 +450,11 @@ pub struct AppState {
     /// Settings sent with the arm in flight; a change made before the arm is confirmed is
     /// sent once it is.
     armed_with: Option<GeneratorSettings>,
+    /// A measurement this client just created: selected once the mirror lists it.
+    pending_select: Option<MeasId>,
+    /// Open the session dialog once the daemon's state shows no audio session (an embedded
+    /// daemon on real audio starts without one).
+    pub open_session_when_empty: bool,
 }
 
 impl Default for AppState {
@@ -481,6 +502,8 @@ impl AppState {
             quit: false,
             swallow_text: None,
             armed_with: None,
+            pending_select: None,
+            open_session_when_empty: false,
         }
     }
 
@@ -562,6 +585,33 @@ impl AppState {
         }
     }
 
+    /// The daemon's open audio session.
+    pub fn open_session(&self) -> Option<&ac2_proto::model::OpenSession> {
+        self.daemon().and_then(|s| s.session.open.as_ref())
+    }
+
+    /// What the transfer pane says when there is nothing to measure yet: no audio session,
+    /// or a session without measurements. `None` once there is something (or no daemon).
+    pub fn empty_hint(&self, keymap: &Keymap) -> Option<String> {
+        if !self.connected() {
+            return None;
+        }
+        let st = self.daemon()?;
+        if st.session.open.is_none() {
+            return Some(format!("No audio session — {}", open_session_hint(keymap)));
+        }
+        if st.measurements.is_empty() {
+            let palette = keymap
+                .chords(CommandId::Palette, Scope::Global)
+                .first()
+                .map_or_else(|| "Command palette".to_owned(), |c| c.label());
+            return Some(format!(
+                "No measurements — {palette} → New transfer measurement… (or New spectrum, RTA, SPL meter)"
+            ));
+        }
+        None
+    }
+
     pub fn connected(&self) -> bool {
         matches!(self.conn, ConnState::Connected { .. })
     }
@@ -598,14 +648,16 @@ impl AppState {
             Msg::Text(t) => self.text(&t),
             Msg::Backspace => match &mut self.overlay {
                 Overlay::Palette(p) => p.backspace(),
+                Overlay::Form(f) => f.backspace(),
                 Overlay::Prompt(p) => {
                     p.text.pop();
                     p.error = None;
                 }
                 _ => {}
             },
-            Msg::Command(c) => self.command(c, &mut out),
-            Msg::Conn(e) => self.conn_event(*e, &mut out),
+            Msg::Command(c) => self.command(c, keymap, &mut out),
+            Msg::Conn(e) => self.conn_event(*e, keymap, &mut out),
+            Msg::Form(m) => self.form_msg(m, &mut out),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
@@ -652,7 +704,7 @@ impl AppState {
         // Esc always stops, whatever is open; it also closes the overlay.
         if chord == Chord::key(Key::Escape) {
             self.overlay = Overlay::None;
-            self.command(CommandId::StimulusStop, out);
+            self.command(CommandId::StimulusStop, keymap, out);
             return;
         }
         match &mut self.overlay {
@@ -667,7 +719,7 @@ impl AppState {
                         let c = p.chosen(keymap, scope);
                         self.overlay = Overlay::None;
                         if let Some(c) = c {
-                            self.command(c, out);
+                            self.command(c, keymap, out);
                         }
                     }
                     _ if keymap.lookup(Scope::Global, chord) == Some(CommandId::Palette) => {
@@ -682,6 +734,18 @@ impl AppState {
                     self.apply_prompt(out);
                 } else {
                     self.swallow_text = swallow;
+                }
+                return;
+            }
+            Overlay::Form(f) => {
+                match chord.key {
+                    Key::Enter => self.submit_form(out),
+                    Key::ArrowUp => f.move_focus(-1),
+                    Key::Tab if chord.shift => f.move_focus(-1),
+                    Key::ArrowDown | Key::Tab => f.move_focus(1),
+                    Key::ArrowLeft => f.cycle(-1),
+                    Key::ArrowRight => f.cycle(1),
+                    _ => self.swallow_text = swallow,
                 }
                 return;
             }
@@ -712,8 +776,11 @@ impl AppState {
         }
         if let Some(c) = keymap.lookup(self.scope(), chord) {
             let before = std::mem::discriminant(&self.overlay);
-            self.command(c, out);
-            let opened_text = matches!(self.overlay, Overlay::Palette(_) | Overlay::Prompt(_));
+            self.command(c, keymap, out);
+            let opened_text = matches!(
+                self.overlay,
+                Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_)
+            );
             if opened_text && std::mem::discriminant(&self.overlay) != before {
                 self.swallow_text = typed_char(&chord);
             }
@@ -733,6 +800,7 @@ impl AppState {
         }
         match &mut self.overlay {
             Overlay::Palette(p) => p.type_text(&t),
+            Overlay::Form(f) => f.type_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;
@@ -903,7 +971,7 @@ impl AppState {
         self.resend_stimulus(out);
     }
 
-    fn arm(&mut self, force: bool, out: &mut Vec<Request>) {
+    fn arm(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
         if !self.connected() {
             self.error("not connected");
             return;
@@ -914,7 +982,10 @@ impl AppState {
             return;
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
-            self.error("no open audio session");
+            self.error(format!(
+                "no audio session to play into: {}",
+                open_session_hint(keymap)
+            ));
             return;
         }
         if !matches!(self.stimulus.phase, StimPhase::Idle) && !force {
@@ -1102,7 +1173,7 @@ impl AppState {
         out.push(Request::Call { cmd, what });
     }
 
-    fn command(&mut self, c: CommandId, out: &mut Vec<Request>) {
+    fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
         match c {
             C::Help => {
@@ -1121,8 +1192,8 @@ impl AppState {
             }
             C::Quit => self.quit = true,
 
-            C::StimulusArm => self.arm(false, out),
-            C::StimulusTakeOver => self.arm(true, out),
+            C::StimulusArm => self.arm(false, keymap, out),
+            C::StimulusTakeOver => self.arm(true, keymap, out),
             C::StimulusFire => match self.stimulus.phase {
                 StimPhase::Armed => {
                     if let Some(settings) = self.stimulus.settings() {
@@ -1273,6 +1344,48 @@ impl AppState {
             C::SessionSave => self.prompt(PromptKind::SessionSave, String::new()),
             C::SessionLoad => self.prompt(PromptKind::SessionLoad, String::new()),
             C::Reconnect => out.push(Request::Reconnect),
+            C::OpenSession => {
+                if !self.connected() {
+                    self.error("not connected");
+                } else {
+                    let open = self.open_session().cloned();
+                    self.overlay = Overlay::Form(Box::new(Form::session(open.as_ref())));
+                    out.push(Request::Devices);
+                }
+            }
+            C::CloseSession => {
+                if self.open_session().is_none() {
+                    self.error("no audio session is open");
+                } else {
+                    self.call(out, Command::SessionClose, "audio session closed".into());
+                }
+            }
+            C::NewTransfer | C::NewSpectrum | C::NewRta | C::NewSpl => {
+                let kind = match c {
+                    C::NewSpectrum => FormKind::Spectrum,
+                    C::NewRta => FormKind::Rta,
+                    C::NewSpl => FormKind::Spl,
+                    _ => FormKind::Transfer,
+                };
+                match self.open_session().cloned() {
+                    None => self.error(format!(
+                        "no audio session to measure: {}",
+                        open_session_hint(keymap)
+                    )),
+                    Some(o) => {
+                        let f = Form::measurement(kind, Some(&o), &self.measurements());
+                        self.overlay = Overlay::Form(Box::new(f));
+                    }
+                }
+            }
+            C::DeleteMeasurement => match self.selected_meas().cloned() {
+                Some(m) => self.call(
+                    out,
+                    Command::MeasDelete { meas: m.id },
+                    format!("{} deleted", m.config.name),
+                ),
+                None => self.error("select a measurement first (N)"),
+            },
             C::InputMics => {
                 let rows: Vec<InputSetup> = self
                     .daemon()
@@ -1536,7 +1649,7 @@ impl AppState {
         }
     }
 
-    fn conn_event(&mut self, e: ConnEvent, out: &mut Vec<Request>) {
+    fn conn_event(&mut self, e: ConnEvent, keymap: &Keymap, out: &mut Vec<Request>) {
         match e {
             ConnEvent::Connecting { target } => {
                 if !matches!(self.conn, ConnState::Failed { .. }) {
@@ -1558,6 +1671,7 @@ impl AppState {
             }
             ConnEvent::Failed { target, error, .. } => {
                 self.conn = ConnState::Failed { target, error };
+                self.pending_select = None;
                 self.mirror = None;
                 self.data = None;
                 self.stimulus.phase = StimPhase::Idle;
@@ -1565,7 +1679,14 @@ impl AppState {
             ConnEvent::Mirror(v) => {
                 self.mirror = Some(v);
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
-                if self.selected.is_none_or(|s| !ids.contains(&s)) {
+                if let Some(p) = self.pending_select
+                    && ids.contains(&p)
+                {
+                    self.selected = Some(p);
+                    self.pending_select = None;
+                }
+                let waiting = self.pending_select.is_some() && self.pending_select == self.selected;
+                if !waiting && self.selected.is_none_or(|s| !ids.contains(&s)) {
                     self.selected = self
                         .measurements()
                         .iter()
@@ -1594,6 +1715,24 @@ impl AppState {
                     self.view.tf.phase_reference = None;
                 }
                 self.follow_output_device();
+                if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
+                    self.open_session_when_empty = false;
+                    if self.open_session().is_none() && self.overlay == Overlay::None {
+                        self.command(CommandId::OpenSession, keymap, out);
+                    }
+                }
+            }
+            ConnEvent::Devices(r) => match (&mut self.overlay, r) {
+                (Overlay::Form(f), Ok(d)) if f.kind == FormKind::Session => f.set_devices(d),
+                (Overlay::Form(f), Err(e)) if f.kind == FormKind::Session => {
+                    f.error = Some(format!("cannot list devices: {e}"));
+                }
+                // The dialog was closed meanwhile.
+                _ => {}
+            },
+            ConnEvent::MeasCreated(m) => {
+                self.selected = Some(m.id);
+                self.pending_select = Some(m.id);
             }
             ConnEvent::Data(d) => {
                 if self.view.spectrum.peak_hold {
@@ -1624,6 +1763,53 @@ impl AppState {
                 self.toast(format!("slot {slot}: {} captured", trace.edit.name));
             }
             ConnEvent::Stimulus(s) => self.stim_event(s, out),
+        }
+    }
+
+    fn form_msg(&mut self, m: FormMsg, out: &mut Vec<Request>) {
+        match m {
+            FormMsg::Submit => self.submit_form(out),
+            FormMsg::Cancel => {
+                if matches!(self.overlay, Overlay::Form(_)) {
+                    self.overlay = Overlay::None;
+                }
+            }
+            FormMsg::Focus(i) => {
+                if let Overlay::Form(f) = &mut self.overlay {
+                    f.focus_field(i);
+                }
+            }
+            FormMsg::Cycle(i, d) => {
+                if let Overlay::Form(f) = &mut self.overlay {
+                    f.focus_field(i);
+                    f.cycle(d);
+                }
+            }
+        }
+    }
+
+    /// Enter on a dialog: the command goes out and the dialog closes, or the dialog says
+    /// what is wrong and stays.
+    fn submit_form(&mut self, out: &mut Vec<Request>) {
+        let open = self.open_session().cloned();
+        let Overlay::Form(f) = &mut self.overlay else {
+            return;
+        };
+        let r = match f.kind {
+            FormKind::Session => f.session_config().map(|(config, dev)| Request::Call {
+                cmd: Command::SessionOpen { config },
+                what: format!("audio session open on {dev}"),
+            }),
+            _ => f
+                .meas_config(open.as_ref())
+                .map(|config| Request::CreateMeas { config }),
+        };
+        match r {
+            Ok(req) => {
+                out.push(req);
+                self.overlay = Overlay::None;
+            }
+            Err(e) => f.error = Some(e),
         }
     }
 
@@ -1798,6 +1984,22 @@ impl AppState {
                 e.1 = at;
             }
         }
+    }
+}
+
+/// `press Shift+O (or Ctrl+K → Open audio session)`, from the keys actually bound.
+pub fn open_session_hint(keymap: &Keymap) -> String {
+    let first = |c| {
+        keymap
+            .chords(c, Scope::Global)
+            .first()
+            .map(|k: &Chord| k.label())
+    };
+    match (first(CommandId::OpenSession), first(CommandId::Palette)) {
+        (Some(o), Some(p)) => format!("press {o} (or {p} → Open audio session)"),
+        (Some(o), None) => format!("press {o}"),
+        (None, Some(p)) => format!("{p} → Open audio session"),
+        (None, None) => "command palette → Open audio session".into(),
     }
 }
 

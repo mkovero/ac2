@@ -8,10 +8,54 @@
 //! the local daemon, nothing on the network. On Windows it listens on `tcp://127.0.0.1`
 //! with OS-assigned ports, like the local daemon there. The audio backend is always named
 //! by the caller; the fake rig runs only when chosen.
+//!
+//! The simulated rig starts ready to use: its session is opened (in 1–2, out 1, the loopback
+//! out 1 → in 1 as the rig is wired) and a transfer measurement "demo" (ref 1 → meas 2) is
+//! created and started. A daemon on real audio starts with no session: which interface and
+//! channels to open is the operator's choice, made in the session dialog.
 
 use std::fmt;
 
 use ac2_client::Endpoints;
+use ac2_proto::model::{
+    DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, SessionConfig, TransferConfig,
+};
+
+/// What an embedded daemon has when it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setup {
+    /// No session: the operator opens one.
+    Empty,
+    /// The simulated rig's session open and the "demo" measurement running. Fake rig only.
+    Demo,
+}
+
+/// The session the simulated rig opens: inputs 1–2, output 1, loopback out 1 → in 1.
+pub fn demo_session() -> SessionConfig {
+    SessionConfig {
+        input_device: DeviceSelector::Default,
+        output_device: DeviceSelector::Default,
+        input_channels: vec![0, 1],
+        output_channels: 1,
+        sample_rate_hz: None,
+        buffer_frames: None,
+        loopback: Some(LoopbackRoute {
+            output: 0,
+            input: 0,
+        }),
+    }
+}
+
+/// The measurement the simulated rig starts: transfer ref 1 → meas 2 named "demo", with the
+/// defaults of `ac2 meas new tf`.
+pub fn demo_measurement() -> MeasConfig {
+    MeasConfig {
+        name: "demo".into(),
+        kind: MeasKind::Transfer {
+            config: TransferConfig::with_inputs(0, 1),
+        },
+    }
+}
 
 /// Audio backend of the embedded daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +76,8 @@ pub enum EmbeddedError {
     Backend(String),
     /// The daemon did not start.
     Start(String),
+    /// The simulated rig's session or measurement could not be set up.
+    Setup(String),
 }
 
 impl fmt::Display for EmbeddedError {
@@ -42,6 +88,7 @@ impl fmt::Display for EmbeddedError {
             ),
             EmbeddedError::Backend(e) => write!(f, "audio backend: {e}"),
             EmbeddedError::Start(e) => write!(f, "daemon: {e}"),
+            EmbeddedError::Setup(e) => write!(f, "simulated rig setup: {e}"),
         }
     }
 }
@@ -96,10 +143,29 @@ impl Drop for Embedded {
     }
 }
 
-/// Starts the embedded daemon on `backend`.
-#[cfg(feature = "embedded")]
+/// Starts the embedded daemon on `backend`: the simulated rig ready to measure
+/// ([`Setup::Demo`]), real audio with no session ([`Setup::Empty`]).
 pub fn start_embedded(backend: EmbeddedBackend) -> Result<Embedded, EmbeddedError> {
+    let setup = match backend {
+        EmbeddedBackend::Fake => Setup::Demo,
+        EmbeddedBackend::Cpal | EmbeddedBackend::Jack => Setup::Empty,
+    };
+    start_embedded_with(backend, setup)
+}
+
+/// Starts the embedded daemon on `backend` with `setup`. A demo is refused on real audio:
+/// nothing opens a real interface the operator did not choose.
+#[cfg(feature = "embedded")]
+pub fn start_embedded_with(
+    backend: EmbeddedBackend,
+    setup: Setup,
+) -> Result<Embedded, EmbeddedError> {
     use ac2d::{BackendChoice, Daemon, DaemonConfig};
+    if setup == Setup::Demo && backend != EmbeddedBackend::Fake {
+        return Err(EmbeddedError::Setup(
+            "the demo runs on the simulated rig only".into(),
+        ));
+    }
     let choice = match backend {
         EmbeddedBackend::Cpal => BackendChoice::Cpal,
         EmbeddedBackend::Jack => BackendChoice::Jack,
@@ -122,12 +188,61 @@ pub fn start_embedded(backend: EmbeddedBackend) -> Result<Embedded, EmbeddedErro
         ctrl: handle.ctrl_endpoint().to_owned(),
         data: handle.data_endpoint().to_owned(),
     };
-    Ok(Embedded {
+    let e = Embedded {
         endpoints,
         backend,
         handle: Some(handle),
         dir,
-    })
+    };
+    if setup == Setup::Demo {
+        // Dropping `e` on failure shuts the daemon down again.
+        set_up_demo(e.endpoints())?;
+    }
+    Ok(e)
+}
+
+/// Opens the simulated rig's session and starts "demo", as a client of the daemon. Runs on
+/// its own thread and runtime, so it works whether or not the caller is inside one.
+#[cfg(feature = "embedded")]
+fn set_up_demo(endpoints: Endpoints) -> Result<(), EmbeddedError> {
+    use ac2_client::{Client, ClientConfig, expect_body};
+    use ac2_proto::{Command, ReplyBody};
+    const DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+    let run = move || -> Result<(), String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        rt.block_on(async move {
+            let work = async {
+                let c =
+                    Client::connect(ClientConfig::new(endpoints, "ac2-ui embedded setup")).await?;
+                c.call(Command::SessionOpen {
+                    config: demo_session(),
+                })
+                .await?;
+                let r = c
+                    .call(Command::MeasCreate {
+                        config: demo_measurement(),
+                    })
+                    .await?;
+                let m = expect_body!("meas.create", r, ReplyBody::Measurement(m) => m)?;
+                c.call(Command::MeasStart { meas: m.id }).await?;
+                Ok::<(), ac2_client::ClientError>(())
+            };
+            match tokio::time::timeout(DEADLINE, work).await {
+                Ok(r) => r.map_err(|e| e.to_string()),
+                Err(_) => Err("the daemon did not answer".into()),
+            }
+        })
+    };
+    std::thread::Builder::new()
+        .name("ac2-ui embedded setup".into())
+        .spawn(run)
+        .map_err(|e| EmbeddedError::Setup(e.to_string()))?
+        .join()
+        .map_err(|_| EmbeddedError::Setup("setup thread panicked".into()))?
+        .map_err(EmbeddedError::Setup)
 }
 
 #[cfg(all(feature = "embedded", unix))]
@@ -155,9 +270,12 @@ fn listen() -> (ac2d::Listen, Option<std::path::PathBuf>) {
     (listen, None)
 }
 
-/// Starts the embedded daemon on `backend`.
+/// Starts the embedded daemon on `backend` with `setup`.
 #[cfg(not(feature = "embedded"))]
-pub fn start_embedded(backend: EmbeddedBackend) -> Result<Embedded, EmbeddedError> {
-    let _ = backend;
+pub fn start_embedded_with(
+    backend: EmbeddedBackend,
+    setup: Setup,
+) -> Result<Embedded, EmbeddedError> {
+    let _ = (backend, setup);
     Err(EmbeddedError::Unavailable)
 }

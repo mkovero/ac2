@@ -201,18 +201,12 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             if n.blocks == 0 {
                 return Err(CliError::Usage("--blocks must be at least 1".into()));
             }
-            let ppo = n.ppo as i32;
-            // 10 octaves around 1 kHz: ≈ 31 Hz … 32 kHz.
             MeasKind::Transfer {
                 config: TransferConfig {
                     reference_input: need(n.reference, "ref")?,
                     measurement_input: need(n.measurement, "meas")?,
                     averaging: TfAveraging::Fifo { blocks: n.blocks },
-                    grid: LogGridSpec {
-                        ppo: n.ppo,
-                        k_min: -5 * ppo,
-                        k_max: 5 * ppo - 1,
-                    },
+                    grid: LogGridSpec::ten_octaves(n.ppo),
                     smoothing: n
                         .smooth
                         .map(|f| {
@@ -246,10 +240,9 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     }
                     MeasKind::Spectrum {
                         config: SpectrumConfig {
-                            input,
                             fft_len: len as u32,
                             window: window(n.window),
-                            averaging: SpecAveraging::Off,
+                            ..SpectrumConfig::on_input(input)
                         },
                     }
                 }
@@ -259,22 +252,15 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     }
                     MeasKind::Rta {
                         config: RtaConfig {
-                            input,
-                            fraction: band_fraction(n.fraction)?,
                             f_lo: n.from.0,
                             f_hi: n.to.0,
                             weighting: weighting(n.weight),
-                            averaging: SpecAveraging::Off,
+                            ..RtaConfig::on_input(input, band_fraction(n.fraction)?)
                         },
                     }
                 }
                 _ => MeasKind::Spl {
-                    config: SplConfig {
-                        input,
-                        weighting: weighting(n.weight),
-                        time_weighting: time_weighting(n.time),
-                        peak_weighting: PeakWeighting::C,
-                    },
+                    config: SplConfig::on_input(input, weighting(n.weight), time_weighting(n.time)),
                 },
             }
         }

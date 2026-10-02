@@ -387,6 +387,13 @@ commands! {
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
+    OpenSession => "session_open", "Open audio session…", [Global];
+    CloseSession => "session_close", "Close audio session", [Global];
+    NewTransfer => "meas_new_transfer", "New transfer measurement…", [Global];
+    NewSpectrum => "meas_new_spectrum", "New spectrum…", [Global];
+    NewRta => "meas_new_rta", "New RTA…", [Global];
+    NewSpl => "meas_new_spl", "New SPL meter…", [Global];
+    DeleteMeasurement => "meas_delete", "Delete selected measurement", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
     MicCurve => "mic_curve", "Mic curve on / off for the selected measurement's input", [Global];
     CalDelete => "cal_delete", "Calibration: delete sensitivity and mic curve (input=mic)…", [Global];
@@ -477,6 +484,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::CycleTheme, S::Global, k(K::T)),
         (C::ZoomIn, S::Global, k(K::I)),
         (C::ZoomOut, S::Global, k(K::O)),
+        // Plain O zooms out; the session dialog takes Shift+O.
+        (C::OpenSession, S::Global, sh(K::O)),
         (C::PanLeft, S::Global, k(K::ArrowLeft)),
         (C::PanRight, S::Global, k(K::ArrowRight)),
         (C::ResetView, S::Global, k(K::Home)),
@@ -784,6 +793,12 @@ mod tests {
             CommandId::StimulusOutputs,
             CommandId::StimulusTakeOver,
             CommandId::Reconnect,
+            CommandId::CloseSession,
+            CommandId::NewTransfer,
+            CommandId::NewSpectrum,
+            CommandId::NewRta,
+            CommandId::NewSpl,
+            CommandId::DeleteMeasurement,
             CommandId::AverageComplex,
             CommandId::AverageCoherence,
             CommandId::MathDifference,
@@ -837,6 +852,8 @@ mod tests {
             ("Down", CommandId::LevelDown),
             ("/", CommandId::Help),
             ("Ctrl+K", CommandId::Palette),
+            ("Shift+O", CommandId::OpenSession),
+            ("O", CommandId::ZoomOut),
         ] {
             assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
         }

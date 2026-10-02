@@ -205,6 +205,12 @@ mod tests {
             ("stim stop", CommandId::StimulusStop),
             ("type level", CommandId::StimulusLevel),
             ("slot 3", CommandId::Slot3),
+            ("open session", CommandId::OpenSession),
+            ("close session", CommandId::CloseSession),
+            ("new transfer", CommandId::NewTransfer),
+            ("new rta", CommandId::NewRta),
+            ("new spl", CommandId::NewSpl),
+            ("delete meas", CommandId::DeleteMeasurement),
         ] {
             let r = search(q, &k, Scope::Transfer);
             assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");

@@ -459,13 +459,13 @@ pub struct MeasNew {
     #[arg(long)]
     pub input: Option<Channel>,
     /// Points per octave of the tf grid.
-    #[arg(long, default_value_t = 48)]
+    #[arg(long, default_value_t = ac2_proto::model::TransferConfig::DEFAULT_PPO)]
     pub ppo: u32,
     /// tf live smoothing, 1/N octave.
     #[arg(long, value_enum)]
     pub smooth: Option<FractionArg>,
     /// tf averaging: FIFO blocks of the full-rate stage.
-    #[arg(long, default_value_t = 8)]
+    #[arg(long, default_value_t = ac2_proto::model::TransferConfig::DEFAULT_BLOCKS)]
     pub blocks: u32,
     /// tf: cap the low-frequency stages' averaging span (default 1s) for faster settling,
     /// at a higher coherence floor there. Default: equal confidence at every frequency.

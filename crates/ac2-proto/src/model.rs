@@ -494,6 +494,95 @@ pub struct MeasConfig {
     pub kind: MeasKind,
 }
 
+// Defaults every front end shares (`ac2 meas new`, the app's dialogs), so a measurement
+// made from either is the same measurement.
+
+impl LogGridSpec {
+    /// Ten octaves around 1 kHz (≈ 31 Hz … 32 kHz) at `ppo` points per octave.
+    pub fn ten_octaves(ppo: u32) -> Self {
+        let p = i64::from(ppo);
+        let k = |v: i64| i32::try_from(v).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX });
+        Self {
+            ppo,
+            k_min: k(-5 * p),
+            k_max: k(5 * p - 1),
+        }
+    }
+}
+
+impl TransferConfig {
+    /// Default points per octave of the grid.
+    pub const DEFAULT_PPO: u32 = 48;
+    /// Default FIFO blocks of the full-rate stage.
+    pub const DEFAULT_BLOCKS: u32 = 8;
+
+    /// `reference_input` → `measurement_input` with the default grid and averaging, no
+    /// smoothing and equal confidence at every frequency.
+    pub fn with_inputs(reference_input: u16, measurement_input: u16) -> Self {
+        Self {
+            reference_input,
+            measurement_input,
+            averaging: TfAveraging::Fifo {
+                blocks: Self::DEFAULT_BLOCKS,
+            },
+            grid: LogGridSpec::ten_octaves(Self::DEFAULT_PPO),
+            smoothing: None,
+            depth: DepthPolicy::EqualConfidence,
+        }
+    }
+}
+
+impl DepthPolicy {
+    /// Settle cap of [`DepthPolicy::FastLf`] when none is given, seconds.
+    pub const DEFAULT_FAST_LF_S: f64 = 1.0;
+}
+
+impl SpectrumConfig {
+    /// Default FFT length, samples.
+    pub const DEFAULT_FFT_LEN: u32 = 65_536;
+
+    /// `input` with the default FFT length, a Hann window and no averaging.
+    pub fn on_input(input: u16) -> Self {
+        Self {
+            input,
+            fft_len: Self::DEFAULT_FFT_LEN,
+            window: Window::Hann,
+            averaging: SpecAveraging::Off,
+        }
+    }
+}
+
+impl RtaConfig {
+    /// Default lowest band, Hz.
+    pub const DEFAULT_F_LO_HZ: f64 = 20.0;
+    /// Default highest band, Hz.
+    pub const DEFAULT_F_HI_HZ: f64 = 20_000.0;
+
+    /// `input` in `fraction` bands over 20 Hz … 20 kHz, Z-weighted, no averaging.
+    pub fn on_input(input: u16, fraction: BandFraction) -> Self {
+        Self {
+            input,
+            fraction,
+            f_lo: Hz(Self::DEFAULT_F_LO_HZ),
+            f_hi: Hz(Self::DEFAULT_F_HI_HZ),
+            weighting: Weighting::Z,
+            averaging: SpecAveraging::Off,
+        }
+    }
+}
+
+impl SplConfig {
+    /// `input` with the given weightings and a C-weighted peak.
+    pub fn on_input(input: u16, weighting: Weighting, time_weighting: TimeWeighting) -> Self {
+        Self {
+            input,
+            weighting,
+            time_weighting,
+            peak_weighting: PeakWeighting::C,
+        }
+    }
+}
+
 /// Which delay-finder result to insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]

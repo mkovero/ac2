@@ -169,9 +169,37 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 );
             }
         }
+        // Hidden under a dialog, which is already the next step.
+        if pane == PaneKind::Transfer
+            && app.state.overlay == crate::state::Overlay::None
+            && let Some(hint) = app.state.empty_hint(&app.keymap)
+        {
+            empty_hint(ui, plot_rect, &hint, ch);
+        }
         navigate(app, ui, &resp, pane, plot_rect, built.and_then(|b| b.1));
     }
     ui.allocate_rect(area, egui::Sense::hover());
+}
+
+/// First-run guidance over the (empty) transfer plot: what to do to get a measurement.
+fn empty_hint(ui: &egui::Ui, plot_rect: egui::Rect, hint: &str, ch: &Chrome) {
+    let painter = ui.painter_at(plot_rect);
+    let galley = painter.layout(
+        hint.to_owned(),
+        egui::FontId::proportional(15.0),
+        ch.text,
+        (plot_rect.width() - 40.0).max(100.0),
+    );
+    let pad = egui::vec2(16.0, 10.0);
+    let rect = egui::Rect::from_center_size(plot_rect.center(), galley.size() + 2.0 * pad);
+    painter.rect_filled(rect, 6.0, ch.panel);
+    painter.rect_stroke(
+        rect,
+        6.0,
+        egui::Stroke::new(1.0, ch.focus),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.min + pad, galley, ch.text);
 }
 
 /// Click focuses (and on a frequency axis places the cursor); wheel zooms about the

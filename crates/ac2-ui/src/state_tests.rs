@@ -1405,3 +1405,347 @@ fn finder_band_and_observation_are_the_operators_choice() {
     t.st.update(Msg::Command(CommandId::FinderAuto), &t.keys);
     assert_eq!(t.st.finder, FinderChoice::default());
 }
+
+// ----- audio session and measurement dialogs ----------------------------------------------
+
+fn no_session_state() -> State {
+    let mut s = empty_state();
+    s.session.open = None;
+    s
+}
+
+fn device(backend: BackendKind, id: &str) -> DeviceInfo {
+    let dir = |ch| DirectionInfo {
+        max_channels: ch,
+        rates_hz: vec![RangeU32 {
+            min: 48_000,
+            max: 48_000,
+        }],
+        buffer_frames: Some(RangeU32 { min: 256, max: 256 }),
+        default_rate_hz: Some(48_000),
+    };
+    DeviceInfo {
+        backend,
+        host: "test".into(),
+        id: DeviceId(id.into()),
+        name: id.into(),
+        input: Some(dir(4)),
+        output: Some(dir(2)),
+        duplex_clock: ClockRelation::SingleCallback,
+        index: IndexExactness::Exact,
+        notes: vec![],
+    }
+}
+
+fn form(t: &T) -> &crate::forms::Form {
+    match &t.st.overlay {
+        Overlay::Form(f) => f,
+        other => panic!("no dialog open: {other:?}"),
+    }
+}
+
+fn created(r: &[Request]) -> Option<&MeasConfig> {
+    r.iter().find_map(|r| match r {
+        Request::CreateMeas { config } => Some(config),
+        _ => None,
+    })
+}
+
+fn connected_to(t: &mut T, target: &str) {
+    t.conn(ConnEvent::Connected {
+        target: target.into(),
+        server: "ac2d test".into(),
+        client_id: ClientId("c1".into()),
+    });
+}
+
+#[test]
+fn empty_hints_guide_to_a_session_then_a_measurement() {
+    let mut t = T::disconnected();
+    assert_eq!(t.st.empty_hint(&t.keys), None);
+    connected_to(&mut t, "local daemon");
+    // Connected but not synced: nothing to say yet.
+    assert_eq!(t.st.empty_hint(&t.keys), None);
+    t.conn(mirror(no_session_state()));
+    assert_eq!(
+        t.st.empty_hint(&t.keys).as_deref(),
+        Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
+    );
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    let hint = t.st.empty_hint(&t.keys).unwrap_or_default();
+    assert!(
+        hint.starts_with("No measurements — Ctrl+K → New transfer measurement…"),
+        "{hint}"
+    );
+    t.conn(mirror(daemon_state()));
+    assert_eq!(t.st.empty_hint(&t.keys), None);
+    // The hint follows the keymap: palette only when Shift+O is unbound.
+    let keys = Keymap::from_toml("[global]\nsession_open = []").expect("keys");
+    t.conn(mirror(no_session_state()));
+    assert_eq!(
+        t.st.empty_hint(&keys).as_deref(),
+        Some("No audio session — Ctrl+K → Open audio session")
+    );
+}
+
+#[test]
+fn arming_without_a_session_names_the_key() {
+    let mut t = T::new();
+    t.conn(mirror(no_session_state()));
+    t.st.stimulus.level = Some(Dbfs(-20.0));
+    let r = t.key("Space");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert!(
+        t.last_toast()
+            .contains("press Shift+O (or Ctrl+K → Open audio session)"),
+        "{}",
+        t.last_toast()
+    );
+}
+
+#[test]
+fn session_dialog_opens_a_session() {
+    let mut t = T::new();
+    t.conn(mirror(no_session_state()));
+    // Shift+O opens the dialog and asks for the devices; the O it types is swallowed.
+    let r = t.type_key("Shift+O", "O");
+    assert!(matches!(r.as_slice(), [Request::Devices]), "{r:?}");
+    let f = form(&t);
+    assert_eq!(f.kind, FormKind::Session);
+    assert!(f.devices.is_none());
+    // Enter before the list arrives says so and sends nothing.
+    assert!(t.key("Enter").is_empty());
+    assert!(form(&t).error.is_some());
+    t.conn(ConnEvent::Devices(Ok(vec![device(
+        BackendKind::Fake,
+        "fake:loop",
+    )])));
+    // A daemon offering only the simulated rig (started on it explicitly) preselects it,
+    // with its wiring.
+    assert_eq!(form(&t).backend(), Some(BackendKind::Fake));
+    assert_eq!(form(&t).text(crate::forms::FieldId::Loopback), "1>1");
+    // ↓↓ to the input channels, retype them.
+    t.key("Down");
+    t.key("Down");
+    for _ in 0..3 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("1-3");
+    // A bad output count keeps the dialog open with the reason.
+    t.key("Tab");
+    t.st.update(Msg::Backspace, &t.keys);
+    t.text("5");
+    assert!(t.key("Enter").is_empty());
+    let err = form(&t).error.clone().unwrap_or_default();
+    assert!(err.contains("output channels"), "{err}");
+    t.st.update(Msg::Backspace, &t.keys);
+    t.text("2");
+    let r = t.key("Enter");
+    match r.as_slice() {
+        [
+            Request::Call {
+                cmd: Command::SessionOpen { config },
+                what,
+            },
+        ] => {
+            assert_eq!(config.input_channels, vec![0, 1, 2]);
+            assert_eq!(config.output_channels, 2);
+            assert_eq!(
+                config.loopback,
+                Some(LoopbackRoute {
+                    output: 0,
+                    input: 0
+                })
+            );
+            assert_eq!(
+                config.input_device,
+                DeviceSelector::Id {
+                    id: DeviceId("fake:loop".into())
+                }
+            );
+            assert!(what.contains("fake:loop"), "{what}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn session_dialog_errors_and_mouse() {
+    let mut t = T::new();
+    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    // The open session prefills the dialog.
+    assert_eq!(form(&t).text(crate::forms::FieldId::Inputs), "1-2");
+    t.conn(ConnEvent::Devices(Err("not connected".into())));
+    assert!(
+        form(&t)
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("not connected"))
+    );
+    t.conn(ConnEvent::Devices(Ok(vec![
+        device(BackendKind::Fake, "fake:loop"),
+        device(BackendKind::Cpal, "card"),
+    ])));
+    // The open session's device is preselected, and its backend with it.
+    assert_eq!(form(&t).backend(), Some(BackendKind::Fake));
+    // The mouse: › on the backend switches to the real interface.
+    t.st.update(Msg::Form(FormMsg::Cycle(0, 1)), &t.keys);
+    assert_eq!(form(&t).backend(), Some(BackendKind::Cpal));
+    assert_eq!(form(&t).device().map(|d| d.id.0.as_str()), Some("card"));
+    let r = t.st.update(Msg::Form(FormMsg::Submit), &t.keys);
+    assert!(
+        matches!(r.as_slice(), [Request::Call { cmd: Command::SessionOpen { config }, .. }]
+            if config.input_device == DeviceSelector::Id { id: DeviceId("card".into()) }),
+        "{r:?}"
+    );
+    // Cancel closes without touching the stimulus (Esc would stop it).
+    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.stimulus.phase = StimPhase::Armed;
+    let r = t.st.update(Msg::Form(FormMsg::Cancel), &t.keys);
+    assert!(r.is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    // Not connected: no dialog.
+    let mut t = T::disconnected();
+    assert!(
+        t.st.update(Msg::Command(CommandId::OpenSession), &t.keys)
+            .is_empty()
+    );
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(t.last_toast().contains("not connected"));
+}
+
+#[test]
+fn close_session_and_delete_measurement() {
+    let mut t = T::new();
+    let r = t.st.update(Msg::Command(CommandId::CloseSession), &t.keys);
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Call {
+                cmd: Command::SessionClose,
+                ..
+            }]
+        ),
+        "{r:?}"
+    );
+    let r =
+        t.st.update(Msg::Command(CommandId::DeleteMeasurement), &t.keys);
+    assert!(
+        matches!(r.as_slice(), [Request::Call { cmd: Command::MeasDelete { meas: MeasId(1) }, what }]
+            if what == "Main L deleted"),
+        "{r:?}"
+    );
+    t.conn(mirror(no_session_state()));
+    assert!(
+        t.st.update(Msg::Command(CommandId::CloseSession), &t.keys)
+            .is_empty()
+    );
+    assert!(t.last_toast().contains("no audio session"));
+    assert!(
+        t.st.update(Msg::Command(CommandId::DeleteMeasurement), &t.keys)
+            .is_empty()
+    );
+    assert!(t.last_toast().contains("select a measurement"));
+}
+
+#[test]
+fn new_measurements_start_and_become_selected() {
+    let mut t = T::new();
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    t.st.update(Msg::Command(CommandId::NewTransfer), &t.keys);
+    assert_eq!(form(&t).kind, FormKind::Transfer);
+    let r = t.key("Enter");
+    let c = created(&r).expect("meas.create");
+    // One transfer exists, so this is the second; inputs from the session (1 → 2).
+    assert_eq!(c.name, "TF 2");
+    assert!(matches!(
+        &c.kind,
+        MeasKind::Transfer { config } if config.reference_input == 0
+            && config.measurement_input == 1
+            && config.depth == DepthPolicy::EqualConfidence
+    ));
+    assert_eq!(t.st.overlay, Overlay::None);
+    // Created: selected at once, kept while the mirror has not caught up, then confirmed.
+    let m = meas(7, "TF 2", transfer());
+    t.conn(ConnEvent::MeasCreated(Box::new(m.clone())));
+    assert_eq!(t.st.selected, Some(MeasId(7)));
+    t.conn(mirror(daemon_state()));
+    assert_eq!(t.st.selected, Some(MeasId(7)));
+    let mut s = daemon_state();
+    s.measurements.push(m);
+    t.conn(mirror(s.clone()));
+    assert_eq!(t.st.selected, Some(MeasId(7)));
+    // The selection is the operator's again: N moves on and a later mirror keeps it.
+    t.key("N");
+    assert_ne!(t.st.selected, Some(MeasId(7)));
+    let sel = t.st.selected;
+    t.conn(mirror(s));
+    assert_eq!(t.st.selected, sel);
+
+    // Spectrum, RTA and SPL meter dialogs make their kinds on the first non-reference input.
+    for (cmd, want) in [
+        (CommandId::NewSpectrum, "spectrum"),
+        (CommandId::NewRta, "rta"),
+        (CommandId::NewSpl, "spl"),
+    ] {
+        t.st.update(Msg::Command(cmd), &t.keys);
+        let r = t.key("Enter");
+        let c = created(&r).unwrap_or_else(|| panic!("{want}: {r:?}"));
+        let kind = match &c.kind {
+            MeasKind::Spectrum { config } => ("spectrum", config.input),
+            MeasKind::Rta { config } => ("rta", config.input),
+            MeasKind::Spl { config } => ("spl", config.input),
+            MeasKind::Transfer { .. } => ("tf", 99),
+        };
+        assert_eq!(kind, (want, 1));
+    }
+    // An input the session does not capture is refused in the dialog.
+    t.st.update(Msg::Command(CommandId::NewSpl), &t.keys);
+    t.st.update(Msg::Backspace, &t.keys);
+    t.text("4");
+    assert!(created(&t.key("Enter")).is_none());
+    assert!(
+        form(&t)
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("not captured"))
+    );
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+
+    // No session: nothing to measure, and the toast says how to open one.
+    t.conn(mirror(no_session_state()));
+    assert!(
+        t.st.update(Msg::Command(CommandId::NewRta), &t.keys)
+            .is_empty()
+    );
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(t.last_toast().contains("Shift+O"), "{}", t.last_toast());
+}
+
+#[test]
+fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
+    let mut t = T::disconnected();
+    t.st.open_session_when_empty = true;
+    connected_to(&mut t, "embedded daemon (cpal)");
+    let r = t.conn(mirror(no_session_state()));
+    assert!(matches!(r.as_slice(), [Request::Devices]), "{r:?}");
+    assert_eq!(form(&t).kind, FormKind::Session);
+    t.key("Escape");
+    // Only once: the operator closed it.
+    assert!(t.conn(mirror(no_session_state())).is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+
+    // A daemon that already has a session: no dialog.
+    let mut t = T::disconnected();
+    t.st.open_session_when_empty = true;
+    connected_to(&mut t, "embedded daemon (cpal)");
+    assert!(t.conn(mirror(daemon_state())).is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(!t.st.open_session_when_empty);
+}

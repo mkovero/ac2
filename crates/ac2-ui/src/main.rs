@@ -194,6 +194,9 @@ fn main() -> ExitCode {
         notices,
         started,
         bench_startup: args.bench_startup,
+        // An embedded daemon on real audio starts without a session; the simulated rig
+        // starts measuring.
+        open_session_dialog: embedded.is_some() && !matches!(args.backend, BackendArg::Fake),
     };
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

@@ -21,7 +21,13 @@ across the network it requires pairing ([install.md](install.md#remote-use-foh--
 
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on the session: transfer functions (`tf`), spectrum,
-RTA and SPL meters. The CLI sets them up:
+RTA and SPL meters. In the app, **Shift+O** opens the session dialog (it lists the daemon's
+interfaces; **Enter** opens), and the command palette (**Ctrl+K**) has *New transfer
+measurement…*, *New spectrum…*, *New RTA…* and *New SPL meter…* (created, started and
+selected on **Enter**), *Delete selected measurement* and *Close audio session*. Until there
+is a session, or a measurement, the transfer pane says which of these comes next. This
+works the same against a daemon the app hosts, a per-user daemon and a remote one. The CLI
+does the same from a script, with the same defaults:
 
 ```sh
 ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz
@@ -32,7 +38,11 @@ ac2 meas start main-l
 ```
 
 The backend is always named: `cpal` (the OS audio host: ALSA, CoreAudio, WASAPI), `jack`, or
-`fake`. The fake backend is a simulated rig for trying things out and is never chosen for you.
+`fake`. The fake backend is a simulated rig for trying things out and is never chosen for you:
+the session dialog preselects a real interface whenever the daemon lists one. Choosing
+*Simulated rig* in the app's connect dialog starts it ready to measure (session open, a
+transfer measurement "demo" running); *This computer's audio* starts with no session and
+opens the session dialog.
 
 ## Reference wiring and loopback
 
@@ -223,6 +233,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `7` | Show / hide slot 7 | `show_slot_7` |
 | `8` | Show / hide slot 8 | `show_slot_8` |
 | `9` | Show / hide slot 9 | `show_slot_9` |
+| `Shift+O` | Open audio session… | `session_open` |
 
 #### Transfer function
 
@@ -282,6 +293,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Session: save (name or path)… | `session_save` |
 | Session: load, disarmed (name or path)… | `session_load` |
 | Reconnect to the daemon now | `reconnect` |
+| Close audio session | `session_close` |
+| New transfer measurement… | `meas_new_transfer` |
+| New spectrum… | `meas_new_spectrum` |
+| New RTA… | `meas_new_rta` |
+| New SPL meter… | `meas_new_spl` |
+| Delete selected measurement | `meas_delete` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
 | Mic curve on / off for the selected measurement's input | `mic_curve` |
 | Calibration: delete sensitivity and mic curve (input=mic)… | `cal_delete` |

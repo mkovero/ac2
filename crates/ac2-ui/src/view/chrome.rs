@@ -56,7 +56,10 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 format::fixed(f64::from(o.sample_rate_hz) / 1000.0, 1),
                 o.buffer_frames
             ),
-            None if st.daemon().is_some() => "no audio session".into(),
+            None if st.daemon().is_some() => format!(
+                "no audio session · {} opens one",
+                key_hint(app, CommandId::OpenSession)
+            ),
             None => "—".into(),
         };
         ui.label(RichText::new(session).color(ch.dim));

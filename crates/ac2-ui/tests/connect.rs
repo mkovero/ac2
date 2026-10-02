@@ -66,6 +66,7 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
         notices: vec![],
         started: Instant::now(),
         bench_startup: false,
+        open_session_dialog: false,
     };
     let mut dialog = Some(dialog);
     Harness::builder()

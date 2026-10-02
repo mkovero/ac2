@@ -41,9 +41,13 @@ fn have_gpu(test: &str) -> bool {
 }
 
 fn options(rig: Option<&common::Rig>) -> AppOptions {
+    options_at(rig.map(|r| r.fake.endpoints()))
+}
+
+fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
     AppOptions {
-        target: rig.map(|r| Target {
-            config: ClientConfig::new(r.fake.endpoints(), "ac2-ui test"),
+        target: endpoints.map(|ep| Target {
+            config: ClientConfig::new(ep, "ac2-ui test"),
             describe: "fake daemon".into(),
         }),
         theme: ThemeName::Dark,
@@ -54,6 +58,7 @@ fn options(rig: Option<&common::Rig>) -> AppOptions {
         notices: vec![],
         started: Instant::now(),
         bench_startup: false,
+        open_session_dialog: false,
     }
 }
 
@@ -383,4 +388,62 @@ fn stored_traces_and_target() {
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("transfer_stored_traces", &snapshot_options());
+}
+
+/// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):
+/// the transfer pane says how to open one.
+#[test]
+fn empty_session_hint() {
+    if !have_gpu("empty_session_hint") {
+        return;
+    }
+    let fake = ac2_client::fake::FakeDaemon::start(ac2_client::fake::FakeOptions::default())
+        .expect("fake daemon");
+    let mut h = harness(options_at(Some(fake.endpoints())));
+    step_until(&mut h, "synced, no session", |a| {
+        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+            && a.state.empty_hint(&a.keymap).is_some()
+    });
+    assert_eq!(
+        h.state().state.empty_hint(&h.state().keymap).as_deref(),
+        Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
+    );
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("empty_session_hint", &snapshot_options());
+}
+
+/// Shift+O: the session dialog with the daemon's device and the simulated rig's defaults;
+/// Enter opens the session.
+#[test]
+fn session_dialog() {
+    if !have_gpu("session_dialog") {
+        return;
+    }
+    let fake = ac2_client::fake::FakeDaemon::start(ac2_client::fake::FakeOptions::default())
+        .expect("fake daemon");
+    let mut h = harness(options_at(Some(fake.endpoints())));
+    step_until(&mut h, "synced", |a| {
+        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+    });
+    h.key_press_modifiers(Modifiers::SHIFT, Key::O);
+    step_until(
+        &mut h,
+        "dialog with devices",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.device().is_some()),
+    );
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("session_dialog", &snapshot_options());
+    h.key_press(Key::Enter);
+    step_until(&mut h, "session open", |a| {
+        a.state.overlay == Overlay::None && a.state.open_session().is_some()
+    });
+    assert_eq!(fake.executions("session.open"), 1);
+    assert!(
+        h.state()
+            .state
+            .empty_hint(&h.state().keymap)
+            .is_some_and(|t| t.starts_with("No measurements"))
+    );
 }

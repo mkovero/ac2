@@ -17,6 +17,7 @@ pub mod app;
 pub mod conn;
 pub mod connect;
 pub mod embedded;
+pub mod forms;
 pub mod keys;
 pub mod palette;
 pub mod plot;
