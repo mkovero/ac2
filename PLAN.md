@@ -529,6 +529,19 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
 | 7 | Post-1.0 extras | ASIO, SPL logging/alarms, ESS IR + ISO 3382, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | per-feature criteria (room metrics vs published values; 24 h log clean; …) |
 
+### 9.0 Status (2026-10-02)
+
+| # | CI criteria | HW criteria |
+|---|---|---|
+| 0 | done | duplex spike on real mac/win interface — **open** |
+| 1 | done (overflow → discontinuity, never a channel shift) | 8 in / 2 out, 1 h, per OS — **open** |
+| 2 | done (refgen + Q1 scenario acceptance) | — |
+| 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **open** |
+| 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** |
+| 5 | done (traces, sessions, calibration, SPL) | mains + sub + delay workflow per OS — **open** |
+| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open**; signing needs Apple Developer ID + Windows code-signing cert |
+| 7 | not started (post-1.0) | — |
+
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and
 comparison, calibration, SPL meter, sessions, recovery, authenticated remote use, signed
