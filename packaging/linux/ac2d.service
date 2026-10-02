@@ -1,0 +1,24 @@
+# systemd user unit for the ac2 daemon, local mode (ipc sockets in $XDG_RUNTIME_DIR/ac2).
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now ac2d
+# Network mode (FOH <-> stage): `systemctl --user edit ac2d` and add
+#   [Service]
+#   ExecStart=
+#   ExecStart=@BINDIR@/ac2d --listen tcp://0.0.0.0
+# then pair clients as described in docs/install.md.
+[Unit]
+Description=ac2 analyzer daemon
+Documentation=https://github.com/mkovero/ac2/blob/main/docs/install.md
+After=pipewire.service sound.target
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/ac2d
+Restart=on-failure
+RestartSec=2
+# The audio callback thread asks for real-time priority; rtkit or limits.conf grant it.
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=default.target

@@ -6,6 +6,7 @@ use std::time::Instant;
 use ac2_client::{ClientConfig, Endpoints, KeyDir, RemoteAddr};
 use ac2_scene::theme::ThemeName;
 use ac2_ui::conn::Target;
+use ac2_ui::connect::ConnectDialog;
 use ac2_ui::embedded::{Embedded, EmbeddedBackend, start_embedded};
 use ac2_ui::keys::{Keymap, config_path};
 use ac2_ui::{App, AppOptions};
@@ -56,6 +57,13 @@ struct Args {
     keys: Option<std::path::PathBuf>,
     #[arg(long, value_enum, default_value = "dark")]
     theme: ThemeArg,
+    /// Open the connect dialog (local daemon, embedded, or a rig found on the network). Also
+    /// opens on its own when no target is given and no local daemon is running.
+    #[arg(long, conflicts_with_all = ["remote", "ctrl", "embedded"])]
+    connect: bool,
+    /// Do not browse the network for rigs in the connect dialog.
+    #[arg(long)]
+    no_discovery: bool,
     /// Print the time to the first presented frame and exit.
     #[arg(long)]
     bench_startup: bool,
@@ -117,17 +125,50 @@ fn target(
     })
 }
 
+fn embedded_backends() -> Vec<EmbeddedBackend> {
+    if !cfg!(feature = "embedded") {
+        return Vec::new();
+    }
+    let mut v = vec![EmbeddedBackend::Cpal];
+    if cfg!(feature = "jack") {
+        v.push(EmbeddedBackend::Jack);
+    }
+    v.push(EmbeddedBackend::Fake);
+    v
+}
+
 fn main() -> ExitCode {
     let started = Instant::now();
     let args = Args::parse();
     let mut notices = Vec::new();
     // Lives until the window closes; dropping it shuts the daemon down.
     let mut embedded = None;
-    let target = match target(&args, &mut embedded, &mut notices) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("ac2-ui: {e}");
-            return ExitCode::from(2);
+    let explicit = args.remote.is_some() || args.ctrl.is_some() || args.embedded;
+    let local_running = ac2_ui::connect::local_daemon_running();
+    let dialog = (args.connect || (!explicit && !local_running)).then(|| {
+        let kd = KeyDir::new(
+            args.key_dir
+                .clone()
+                .unwrap_or_else(ac2_client::keys::default_key_dir),
+        );
+        let mdns = ac2_discovery::Options::default();
+        ConnectDialog::new(
+            kd,
+            NAME,
+            embedded_backends(),
+            local_running,
+            (!args.no_discovery).then_some(&mdns),
+        )
+    });
+    let target = if dialog.is_some() {
+        None
+    } else {
+        match target(&args, &mut embedded, &mut notices) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                eprintln!("ac2-ui: {e}");
+                return ExitCode::from(2);
+            }
         }
     };
     let keymap_path = args.keys.clone().or_else(config_path);
@@ -139,7 +180,7 @@ fn main() -> ExitCode {
         ThemeArg::HighContrast => ThemeName::HighContrast,
     };
     let opts = AppOptions {
-        target: Some(target),
+        target,
         theme,
         keymap,
         keymap_path,
@@ -159,7 +200,13 @@ fn main() -> ExitCode {
     let r = eframe::run_native(
         "ac2",
         native,
-        Box::new(move |cc| Ok(Box::new(App::new(cc, opts)))),
+        Box::new(move |cc| {
+            let mut app = App::new(cc, opts);
+            if let Some(d) = dialog {
+                app.open_connect(d);
+            }
+            Ok(Box::new(app))
+        }),
     );
     // The app (and its link, which stops our stimulus) is gone; now the daemon.
     drop(embedded);

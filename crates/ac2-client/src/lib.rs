@@ -31,6 +31,6 @@ pub use client::{Client, ClientConfig, Retry, body_name};
 pub use data::{Latest, TopicFrame, frame_age};
 pub use endpoint::{Endpoints, RemoteAddr};
 pub use error::{ClientError, code_name};
-pub use keys::{KeyDir, fingerprint};
+pub use keys::{KeyDir, PinStatus, fingerprint};
 pub use lease::{LeaseLost, OnDrop, StimulusLease};
 pub use mirror::{MirrorView, Phase};

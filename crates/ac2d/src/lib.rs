@@ -51,8 +51,8 @@ use ac2_proto::units::DaemonIncarnation;
 use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType};
 
 pub use config::{
-    DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError, NetworkSecurity, ReplayLimits,
-    config_dir, default_cal_store, pid_file, runtime_dir,
+    Advertise, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError, NetworkSecurity,
+    ReplayLimits, config_dir, default_cal_store, pid_file, runtime_dir,
 };
 
 pub use backend::{BackendChoice, FAKE_RIG, backend};
@@ -120,6 +120,7 @@ pub struct Handle {
     tx: Sender<ControlMsg>,
     control: Option<JoinHandle<()>>,
     io: Option<JoinHandle<()>>,
+    advert: Option<ac2_discovery::Advertiser>,
 }
 
 impl fmt::Debug for Handle {
@@ -176,6 +177,14 @@ impl Handle {
         self.server_key
     }
 
+    /// The mDNS full name this daemon advertises under (network mode with
+    /// [`DaemonConfig::advertise`]), once registered.
+    pub fn advertised_as(&self) -> Option<&str> {
+        self.advert
+            .as_ref()
+            .map(ac2_discovery::Advertiser::fullname)
+    }
+
     /// A handle that can request shutdown from elsewhere.
     pub fn stopper(&self) -> Stopper {
         Stopper(self.tx.clone())
@@ -193,6 +202,8 @@ impl Handle {
     }
 
     fn join(&mut self) {
+        // Goodbye first, so browsers drop the rig before its sockets close.
+        self.advert = None;
         if let Some(t) = self.control.take() {
             let _ = t.join();
         }
@@ -276,9 +287,10 @@ impl Daemon {
                 let authorized = keys::load_or_create_authorized(&security.authorized_clients_file)
                     .map_err(StartError::Keys)?;
                 tracing::info!(
-                    "network mode: {} authorized client(s); server key {}",
+                    "network mode: {} authorized client(s); server key {} (fingerprint {})",
                     authorized.len(),
-                    kp.public.to_z85()
+                    kp.public.to_z85(),
+                    kp.public.fingerprint()
                 );
                 let sc = SecureContext::new(ZAP_DOMAIN, authorized, |d| {
                     if d.allowed() {
@@ -371,6 +383,10 @@ impl Daemon {
             .name("ac2d-control".into())
             .spawn(move || control.run(&rx))
             .map_err(StartError::Io)?;
+        let advert = match (&config.advertise, server_key) {
+            (Some(a), Some(key)) => advertise(a, &key, &ctrl),
+            _ => None,
+        };
         tracing::info!(
             "ac2d {} up: ctrl {ctrl}, data {data}, backend {:?}, incarnation {:016x}",
             env!("CARGO_PKG_VERSION"),
@@ -386,6 +402,42 @@ impl Daemon {
             tx,
             control: Some(control),
             io: Some(io),
+            advert,
         })
+    }
+}
+
+/// Registers the mDNS advert of a network-mode daemon bound at `ctrl`. A failure is logged
+/// and otherwise ignored: discovery is a convenience, the daemon serves paired clients
+/// without it.
+fn advertise(a: &Advertise, key: &PublicKey, ctrl: &str) -> Option<ac2_discovery::Advertiser> {
+    let (host, port) = ctrl
+        .strip_prefix("tcp://")
+        .and_then(|r| r.rsplit_once(':'))
+        .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))?;
+    let advert = ac2_discovery::Advert {
+        name: ac2_discovery::instance_name(&a.name),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        proto: ac2_proto::PROTO_VERSION,
+        fingerprint: key.fingerprint(),
+    };
+    match ac2_discovery::Advertiser::start(
+        &advert,
+        port,
+        &ac2_discovery::Bind::from_listen_host(host),
+        &a.mdns,
+    ) {
+        Ok(adv) => {
+            tracing::info!(
+                "mDNS: advertising {:?} ({}) on port {port}",
+                advert.name,
+                advert.fingerprint
+            );
+            Some(adv)
+        }
+        Err(e) => {
+            tracing::warn!("{e}; not advertised (clients can still connect by address)");
+            None
+        }
     }
 }

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>ac2</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232833"/>
+      <stop offset="1" stop-color="#12151b"/>
+    </linearGradient>
+    <linearGradient id="mag" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3fd6b0"/>
+      <stop offset="1" stop-color="#00b386"/>
+    </linearGradient>
+    <clipPath id="plot">
+      <rect x="168" y="168" width="688" height="688" rx="24"/>
+    </clipPath>
+  </defs>
+  <!-- macOS-style squircle-ish tile with margin, so the icon sits well beside others -->
+  <rect x="80" y="80" width="864" height="864" rx="196" fill="url(#bg)"/>
+  <rect x="80.5" y="80.5" width="863" height="863" rx="195.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <!-- log-frequency grid -->
+  <g clip-path="url(#plot)" stroke="#ffffff" stroke-opacity="0.07" stroke-width="6">
+    <line x1="168" y1="340" x2="856" y2="340"/>
+    <line x1="168" y1="512" x2="856" y2="512"/>
+    <line x1="168" y1="684" x2="856" y2="684"/>
+    <line x1="300" y1="168" x2="300" y2="856"/>
+    <line x1="530" y1="168" x2="530" y2="856"/>
+    <line x1="760" y1="168" x2="760" y2="856"/>
+  </g>
+  <g clip-path="url(#plot)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- phase: smooth descent of a delayed path, amber -->
+    <path d="M200 520 C 380 530, 520 590, 620 660 S 760 760, 824 790"
+          stroke="#e69f00" stroke-width="30"/>
+    <!-- magnitude: low shelf, a presence bump, gentle roll-off; teal -->
+    <path d="M200 420 C 270 420, 300 470, 370 470 S 480 380, 550 380 S 650 460, 710 460 S 790 500, 824 560"
+          stroke="url(#mag)" stroke-width="46"/>
+  </g>
+</svg>

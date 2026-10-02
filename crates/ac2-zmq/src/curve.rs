@@ -57,6 +57,21 @@ impl PublicKey {
     pub fn to_z85(&self) -> String {
         raw::z85_encode(&self.0).unwrap_or_default()
     }
+
+    /// Short, human-comparable fingerprint: the first 10 bytes of SHA-256 over the 32 raw
+    /// key bytes, as five dash-separated groups of four lowercase hex digits
+    /// (`1a2b-3c4d-5e6f-7a8b-9c0d`). 80 bits are enough for a person comparing two strings
+    /// (a second-preimage search is out of reach); it never replaces the key itself, which
+    /// CURVE pins.
+    pub fn fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let d = Sha256::digest(self.0);
+        d[..10]
+            .chunks(2)
+            .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
+            .collect::<Vec<_>>()
+            .join("-")
+    }
 }
 
 impl fmt::Display for PublicKey {

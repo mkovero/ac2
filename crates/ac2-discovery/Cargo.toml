@@ -1,0 +1,19 @@
+[package]
+name = "ac2-discovery"
+description = "mDNS (DNS-SD) advertisement and discovery of network-mode ac2 daemons. Discovery only names rigs; trust comes from pairing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+gethostname = "1"
+# No async runtime, no `log` facade: discovery runs on mdns-sd's own thread and is polled.
+mdns-sd = { version = "0.21", default-features = false }
+
+[dev-dependencies]

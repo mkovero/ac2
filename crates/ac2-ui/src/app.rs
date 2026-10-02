@@ -11,6 +11,8 @@ use ac2_scene::theme::{Theme, ThemeName};
 use eframe::egui::{self, Event, Key};
 
 use crate::conn::{Conn, Target};
+use crate::connect::{Choice, ConnectDialog};
+use crate::embedded::{Embedded, start_embedded};
 use crate::keys::{Chord, Keymap};
 use crate::state::{AppState, Msg, Overlay, PaneKind};
 use crate::{theme, view};
@@ -72,6 +74,11 @@ pub struct App {
     pub(crate) scenes: HashMap<PaneKind, CachedScene>,
     pub(crate) plots: bool,
     passes: u64,
+    /// The connect dialog, while open: the app has no link until the operator picks one.
+    connect: Option<ConnectDialog>,
+    /// A daemon hosted in this process, chosen in the connect dialog. Declared after `conn`
+    /// so the link (and the stimulus it may hold) goes first.
+    embedded: Option<Embedded>,
 }
 
 impl std::fmt::Debug for App {
@@ -125,6 +132,53 @@ impl App {
             scenes: HashMap::new(),
             plots,
             passes: 0,
+            connect: None,
+            embedded: None,
+        }
+    }
+
+    /// Shows the connect dialog; the choice replaces the current link.
+    pub fn open_connect(&mut self, dialog: ConnectDialog) {
+        self.connect = Some(dialog);
+    }
+
+    /// Whether the connect dialog is open.
+    pub fn connect_open(&self) -> bool {
+        self.connect.is_some()
+    }
+
+    fn connect_to(&mut self, ctx: &egui::Context, choice: Choice) {
+        let Some(dialog) = self.connect.as_mut() else {
+            return;
+        };
+        let target = match choice {
+            Choice::Target(t) => *t,
+            Choice::Embedded(b) => match start_embedded(b) {
+                Ok(e) => {
+                    let t = Target {
+                        config: ac2_client::ClientConfig::new(e.endpoints(), dialog.client_name()),
+                        describe: e.describe(),
+                    };
+                    self.conn = None;
+                    self.embedded = Some(e);
+                    t
+                }
+                Err(e) => {
+                    // Never a silent switch to another daemon: the operator chooses again.
+                    dialog.error = Some(format!("embedded daemon: {e}"));
+                    return;
+                }
+            },
+        };
+        let wake_ctx = ctx.clone();
+        let wake = Arc::new(move || wake_ctx.request_repaint());
+        self.conn = None;
+        match Conn::start(target, wake) {
+            Ok(c) => {
+                self.conn = Some(c);
+                self.connect = None;
+            }
+            Err(e) => dialog_error(&mut self.connect, format!("link thread: {e}")),
         }
     }
 
@@ -196,6 +250,12 @@ impl App {
     }
 }
 
+fn dialog_error(d: &mut Option<ConnectDialog>, msg: String) {
+    if let Some(d) = d {
+        d.error = Some(msg);
+    }
+}
+
 /// Chrome text in the plots' bundled font (Inter), so panels and plots share one typeface and
 /// arrows, minus signs and γ² render the same everywhere; egui's fonts stay as fallback.
 fn install_fonts(ctx: &egui::Context) {
@@ -242,7 +302,10 @@ impl eframe::App for App {
             dt_s: dt,
         });
         self.pump_link();
-        self.input(&ctx);
+        // The dialog owns the keyboard while open (text entry); there is no link to drive.
+        if self.connect.is_none() {
+            self.input(&ctx);
+        }
         if self.state.quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -253,6 +316,11 @@ impl eframe::App for App {
             self.applied_theme = Some(self.state.theme);
         }
         view::draw(self, ui, &t);
+        if let Some(d) = self.connect.as_mut()
+            && let Some(choice) = d.show(&ctx, &theme::chrome(&t))
+        {
+            self.connect_to(&ctx, choice);
+        }
 
         if self.state.animating() || self.startup.first_frame.is_none() {
             ctx.request_repaint();

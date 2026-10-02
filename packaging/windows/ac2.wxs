@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ac2 MSI (WiX Toolset v5):
+    wix build packaging/windows/ac2.wxs -arch x64 -d Version=1.2.3 -d BinDir=<dir with exes>
+      -d RootDir=<repo root> -o ac2-1.2.3-windows-x64.msi
+  Per-machine install into Program Files\ac2, a Start-menu shortcut to the app, and the
+  install folder on the system PATH so `ac2` and `ac2d` work in a new terminal.
+  The UpgradeCode never changes: a newer MSI replaces an older one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="ac2"
+           Manufacturer="ac2 contributors"
+           Version="$(var.Version)"
+           UpgradeCode="8FB15B25-A492-4317-AAE2-7BC608A1E6E0"
+           Scope="perMachine"
+           Compressed="yes">
+    <SummaryInformation Description="ac2 live dual-channel analyzer" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of ac2 is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="ac2.ico" SourceFile="$(var.RootDir)\packaging\icon\generated\ac2.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ac2.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/mkovero/ac2" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ac2">
+        <Component Id="AppExe">
+          <File Id="ac2ui.exe" Source="$(var.BinDir)\ac2-ui.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="CliExe">
+          <File Id="ac2.exe" Source="$(var.BinDir)\ac2.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="DaemonExe">
+          <File Id="ac2d.exe" Source="$(var.BinDir)\ac2d.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="Docs">
+          <File Id="README.md" Source="$(var.RootDir)\README.md" KeyPath="yes" />
+          <File Id="LICENSE" Source="$(var.RootDir)\LICENSE" Name="LICENSE.txt" />
+          <File Id="install.md" Source="$(var.RootDir)\docs\install.md" />
+          <File Id="userguide.md" Source="$(var.RootDir)\docs\user-guide.md" />
+          <File Id="protocol.md" Source="$(var.RootDir)\docs\protocol.md" />
+        </Component>
+        <Component Id="PathEntry">
+          <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
+                       Action="set" System="yes" Permanent="no" />
+          <RegistryValue Root="HKLM" Key="Software\ac2" Name="path" Type="integer" Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="ac2Shortcut" Name="ac2" Description="Live dual-channel analyzer"
+                  Target="[INSTALLFOLDER]ac2-ui.exe" WorkingDirectory="INSTALLFOLDER"
+                  Icon="ac2.ico" />
+        <RegistryValue Root="HKLM" Key="Software\ac2" Name="shortcut" Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="ac2" Level="1">
+      <ComponentRef Id="AppExe" />
+      <ComponentRef Id="CliExe" />
+      <ComponentRef Id="DaemonExe" />
+      <ComponentRef Id="Docs" />
+      <ComponentRef Id="PathEntry" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

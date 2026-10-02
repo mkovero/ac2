@@ -1,0 +1,10 @@
+# Windows MSVC: link the C runtime statically. libzmq is C++ and would otherwise need
+# msvcp140.dll / vcruntime140.dll (the VC++ redistributable) on the user's machine, and the
+# prebuilt static libsodium is compiled for the static CRT (/MT) anyway. Applied to every
+# build, not only releases, so tests run with the same runtime the installer ships.
+# `tools/release/check-windows-deps.ps1` verifies the result in CI.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

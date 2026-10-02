@@ -104,6 +104,11 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: StateCmd,
     },
+    /// List ac2 daemons on the local network (mDNS).
+    ///
+    /// Listing a rig does not make it trusted: connect with `--remote` only after
+    /// `ac2 auth pair`, which pins the daemon key you verified on the daemon host.
+    Discover(DiscoverArgs),
     /// Remote-mode keys (client side).
     Auth {
         /// Action.
@@ -798,6 +803,20 @@ pub enum ImportFormatArg {
 pub enum StateCmd {
     /// Print the full state snapshot as JSON.
     Dump,
+}
+
+/// `discover`.
+#[derive(Debug, Args)]
+pub struct DiscoverArgs {
+    /// How long to listen for adverts.
+    #[arg(long, value_name = "TIME", default_value = "2s")]
+    pub wait: Time,
+    /// mDNS port (tests).
+    #[arg(long, hide = true)]
+    pub mdns_port: Option<u16>,
+    /// Browse on 127.0.0.1 only (tests).
+    #[arg(long, hide = true)]
+    pub loopback: bool,
 }
 
 /// `auth …`.

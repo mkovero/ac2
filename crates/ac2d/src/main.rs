@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
+use ac2d::{Advertise, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
 
 const USAGE: &str = "\
 usage: ac2d [options]
@@ -20,9 +20,14 @@ With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), c
   --data <endpoint>      local data endpoint
   --key-file <path>      server key pair (network mode; generated if missing)
   --authorized <path>    authorized clients (network mode; created empty if missing)
+  --name <text>          rig name advertised over mDNS in network mode
+                         (default: ac2 on <hostname>)
+  --no-mdns              network mode without the mDNS advert (clients then need the
+                         address; pairing is required either way)
   --max-level <dBFS>     global generator maximum, dBFS RMS (default -10)
   --cal-store <path>     calibration store (default <config dir>/ac2/calibrations.json);
                          an unreadable file is never overwritten
+  -V, --version          print the version and build id
   -h, --help             this text
 
 Logging: RUST_LOG (default info).";
@@ -37,6 +42,8 @@ struct Args {
     authorized: Option<PathBuf>,
     max_level: f64,
     cal_store: Option<PathBuf>,
+    name: Option<String>,
+    mdns: bool,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -51,11 +58,21 @@ fn parse() -> Result<Option<Args>, String> {
         authorized: None,
         max_level: -10.0,
         cal_store: None,
+        name: None,
+        mdns: true,
     };
     while let Some(flag) = it.next() {
         let mut val = || it.next().ok_or_else(|| format!("{flag} needs a value"));
         match flag.as_str() {
             "-h" | "--help" => return Ok(None),
+            "-V" | "--version" => {
+                println!(
+                    "ac2d {} (build {})",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("AC2_BUILD_ID")
+                );
+                std::process::exit(0);
+            }
             "--backend" => backend = Some(val()?),
             "--listen" => a.listen = Some(val()?),
             "--ctrl" => a.ctrl = Some(val()?),
@@ -63,6 +80,8 @@ fn parse() -> Result<Option<Args>, String> {
             "--key-file" => a.key_file = Some(PathBuf::from(val()?)),
             "--authorized" => a.authorized = Some(PathBuf::from(val()?)),
             "--cal-store" => a.cal_store = Some(PathBuf::from(val()?)),
+            "--name" => a.name = Some(val()?),
+            "--no-mdns" => a.mdns = false,
             "--max-level" => {
                 let v = val()?;
                 let v = v.strip_suffix("dbfs").unwrap_or(&v);
@@ -135,7 +154,19 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if !listen.is_network() && (args.name.is_some() || !args.mdns) {
+        eprintln!("ac2d: --name and --no-mdns apply to network mode (--listen) only");
+        return ExitCode::from(2);
+    }
+    let advertise = (listen.is_network() && args.mdns).then(|| Advertise {
+        name: args
+            .name
+            .clone()
+            .unwrap_or_else(ac2_discovery::default_rig_name),
+        mdns: ac2_discovery::Options::default(),
+    });
     let mut config = DaemonConfig::new(backend, listen, args.max_level);
+    config.advertise = advertise;
     config.cal_store = Some(
         args.cal_store
             .clone()

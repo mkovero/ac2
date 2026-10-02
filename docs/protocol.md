@@ -481,3 +481,31 @@ refused (no migration). A directory that holds other files is never written into
 
 `fixtures/protocol/` holds Rust-encoded (`rust_*.bin`) and Python-encoded (`py_*.bin`)
 messages plus expected values (`expected/*.json`). See `tools/protocol/README.md`.
+
+## 9. Discovery (mDNS)
+
+A daemon in network mode (`ac2d --listen tcp://…`) advertises one DNS-SD service over mDNS
+(RFC 6762 / 6763) unless started with `--no-mdns`. Local modes never advertise.
+
+| field | value |
+|---|---|
+| service type | `_ac2._tcp.local.` |
+| instance name | the rig name (`ac2d --name`, default `ac2 on <hostname>`); dots and control characters replaced by `-`, at most 63 bytes |
+| port (SRV) | the ctrl (ROUTER) port; the data (XPUB) port is ctrl + 1 |
+| addresses | A / AAAA records of the listening interface (all interfaces for `0.0.0.0`) |
+
+TXT record (all values UTF-8 strings):
+
+| key | meaning |
+|---|---|
+| `txtvers` | layout of this record, `1`. A reader that does not know the value ignores the advert. |
+| `name` | the rig name, as above |
+| `v` | daemon version (`ac2d --version`) |
+| `proto` | `PROTO_VERSION` the daemon speaks (§2) |
+| `fp` | fingerprint of the daemon's CURVE server key: the first 10 bytes of SHA-256 over the 32 raw key bytes as five dash-separated groups of four lowercase hex digits (`1a2b-3c4d-5e6f-7a8b-9c0d`) |
+
+The advert carries no key and grants nothing. A client connects only with a server key it
+pinned beforehand (`ac2 auth pair`, after comparing the fingerprint with the one the daemon
+host shows), and CURVE fails the handshake when the daemon does not hold that key. Clients
+may use `fp` to pick which pinned key belongs to an advert and to warn when a known host
+advertises a different fingerprint; they must not pin a key based on an advert alone.

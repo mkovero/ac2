@@ -17,7 +17,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ac2_zmq::{CurveClient, KeyPair, PublicKey, SecretKey};
-use sha2::{Digest, Sha256};
 
 use crate::error::ClientError;
 
@@ -41,12 +40,29 @@ pub fn default_key_dir() -> PathBuf {
 /// SHA-256 over the 32 raw key bytes, as five dash-separated groups of four lowercase hex
 /// digits (`1a2b-3c4d-5e6f-7a8b-9c0d`). The daemon shows the same for its own key.
 pub fn fingerprint(key: &PublicKey) -> String {
-    let d = Sha256::digest(key.as_bytes());
-    d[..10]
-        .chunks(2)
-        .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
-        .collect::<Vec<_>>()
-        .join("-")
+    key.fingerprint()
+}
+
+/// How an advertised daemon relates to this client's pinned keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PinStatus {
+    /// A key with the advertised fingerprint is pinned (under `host`).
+    Paired {
+        /// The host it was pinned under.
+        host: String,
+        /// The pinned key.
+        key: PublicKey,
+    },
+    /// The daemon's host is pinned to a key with another fingerprint: a re-keyed daemon, or
+    /// something impersonating it. Never connected to without a new, verified pairing.
+    Mismatch {
+        /// The pinned host.
+        host: String,
+        /// Fingerprint of the key pinned for it.
+        pinned: String,
+    },
+    /// No pin matches.
+    Unpaired,
 }
 
 /// A key directory.
@@ -175,6 +191,35 @@ impl KeyDir {
         Ok(old)
     }
 
+    /// How a daemon that advertises `fingerprint` (from mDNS, so untrusted) relates to the
+    /// pins: `Paired` when a pinned key has that fingerprint, `Mismatch` when one of `hosts`
+    /// (the names the daemon goes by) is pinned to a different key. Only a pinned key is
+    /// ever used to connect; CURVE then proves the daemon holds it.
+    pub fn pin_status(&self, fingerprint: &str, hosts: &[&str]) -> Result<PinStatus, ClientError> {
+        let pins = self.known_servers()?;
+        if let Some((host, key)) = pins.iter().find(|(_, k)| k.fingerprint() == fingerprint) {
+            return Ok(PinStatus::Paired {
+                host: host.clone(),
+                key: *key,
+            });
+        }
+        Ok(pins
+            .iter()
+            .find(|(h, _)| hosts.contains(&h.as_str()))
+            .map_or(PinStatus::Unpaired, |(h, k)| PinStatus::Mismatch {
+                host: h.clone(),
+                pinned: k.fingerprint(),
+            }))
+    }
+
+    /// CURVE client configuration for a daemon whose key was pinned (under any host name).
+    pub fn curve_client_for_key(&self, server_key: PublicKey) -> Result<CurveClient, ClientError> {
+        Ok(CurveClient {
+            keys: self.client_keypair()?,
+            server_key,
+        })
+    }
+
     /// CURVE client configuration for `host`: this client's keypair and the pinned key.
     pub fn curve_client(&self, host: &str) -> Result<CurveClient, ClientError> {
         Ok(CurveClient {
@@ -233,6 +278,38 @@ mod tests {
         let cc = kd.curve_client("rig")?;
         assert_eq!(cc.server_key, other);
         assert_eq!(kd.known_servers()?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pin_status_by_fingerprint_and_host() -> Result<(), ClientError> {
+        let tmp = tempfile::tempdir().map_err(|e| ClientError::Keys(e.to_string()))?;
+        let kd = KeyDir::new(tmp.path());
+        let a = KeyPair::generate()?.public;
+        let b = KeyPair::generate()?.public;
+        assert_eq!(
+            kd.pin_status(&a.fingerprint(), &["rig"])?,
+            PinStatus::Unpaired
+        );
+        kd.pin_server("10.0.0.5", a)?;
+        assert_eq!(
+            kd.pin_status(&a.fingerprint(), &["rig.local", "10.0.0.9"])?,
+            PinStatus::Paired {
+                host: "10.0.0.5".into(),
+                key: a
+            }
+        );
+        assert_eq!(
+            kd.pin_status(&b.fingerprint(), &["rig.local", "10.0.0.5"])?,
+            PinStatus::Mismatch {
+                host: "10.0.0.5".into(),
+                pinned: a.fingerprint()
+            }
+        );
+        assert_eq!(
+            kd.pin_status(&b.fingerprint(), &["other"])?,
+            PinStatus::Unpaired
+        );
         Ok(())
     }
 

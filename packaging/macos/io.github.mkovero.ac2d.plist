@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Optional launchd agent: runs the ac2 daemon (local mode) while you are logged in.
+    cp io.github.mkovero.ac2d.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.github.mkovero.ac2d.plist
+  Remove with `launchctl bootout gui/$(id -u)/io.github.mkovero.ac2d`.
+  The path below is where the install guide puts the command-line tools; edit it if yours
+  differ. For network mode, add two more strings to ProgramArguments: the listen flag
+  (as in ac2d -h) and tcp://0.0.0.0.
+  macOS asks for microphone access per app, and a daemon started by launchd cannot show
+  that prompt. If its inputs stay silent, start ac2d from Terminal instead (macOS then asks
+  on Terminal's behalf), or let the app host its own daemon.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>io.github.mkovero.ac2d</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/ac2d</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/ac2d.log</string>
+</dict>
+</plist>

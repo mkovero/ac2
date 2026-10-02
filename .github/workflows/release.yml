@@ -1,0 +1,303 @@
+name: Release
+
+# Tags `v*` build, test and package every artifact on all three OS and attach them with
+# SHA256SUMS to a *draft* GitHub release (publishing stays a manual step).
+# `workflow_dispatch` is the dry run: the same builds, tests, packages and smoke tests, with
+# the artifacts (and SHA256SUMS) kept as workflow artifacts and no release touched.
+#
+# Signing is wired but optional; each step runs only when its secrets exist:
+#   macOS   MACOS_CERTIFICATE (base64 .p12, Developer ID Application),
+#           MACOS_CERTIFICATE_PASSWORD, MACOS_SIGN_IDENTITY;
+#           notarization: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (app-specific)
+#   Windows WINDOWS_CERTIFICATE (base64 .pfx, code signing), WINDOWS_CERTIFICATE_PASSWORD
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  BINS: -p ac2d -p ac2-cli -p ac2-ui
+
+jobs:
+  meta:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      msi_version: ${{ steps.v.outputs.msi_version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        shell: bash
+        run: |
+          cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version=${GITHUB_REF_NAME#v}
+            if [ "$version" != "$cargo_version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $cargo_version"
+              exit 1
+            fi
+          else
+            version="$cargo_version-dev.$GITHUB_RUN_NUMBER"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # MSI ProductVersion is numeric major.minor.build.
+          echo "msi_version=${cargo_version%%-*}" >> "$GITHUB_OUTPUT"
+          echo "release version $version (cargo $cargo_version)"
+
+  ci:
+    name: tests
+    uses: ./.github/workflows/ci.yml
+
+  linux:
+    name: package (linux)
+    needs: meta
+    # The oldest supported runner: binaries need glibc ≥ 2.35 (Ubuntu 22.04, Debian 12, Fedora 36).
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+      - name: System deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev
+      - name: Build
+        # JACK is loaded at run time, so the JACK backend costs nothing where JACK is absent.
+        run: cargo build --release --locked $BINS --features ac2d/jack,ac2-ui/jack
+      - name: Package
+        run: packaging/linux/package.sh "$VERSION" target/release dist
+      - name: Smoke test (tarball + AppImage)
+        shell: bash
+        run: |
+          set -euo pipefail
+          t=$(mktemp -d)
+          tar -C "$t" -xzf "dist/ac2-$VERSION-linux-x86_64.tar.gz"
+          d="$t/ac2-$VERSION-linux-x86_64"
+          "$d/install.sh" --prefix "$t/prefix"
+          export AC2_RUNTIME_DIR="$t/run" XDG_CONFIG_HOME="$t/config"
+          bin="$t/prefix/bin"
+          "$bin/ac2d" --version
+          "$bin/ac2d" --backend fake > "$t/ac2d.log" 2>&1 &
+          for _ in $(seq 100); do [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] && break; sleep 0.1; done
+          "$bin/ac2" status
+          "$bin/ac2" session open --backend fake --in 1-2
+          "$bin/ac2" meas new tf --ref 1 --meas 2 --name smoke
+          "$bin/ac2" meas list
+          "$bin/ac2" daemon stop
+          APPIMAGE_EXTRACT_AND_RUN=1 "dist/ac2-ui-$VERSION-x86_64.AppImage" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: package (macos universal)
+    needs: meta
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      HAVE_CERT: ${{ secrets.MACOS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned toolchain + targets
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Build arm64
+        run: cargo build --release --locked --target aarch64-apple-darwin $BINS
+      - name: Build x86_64
+        run: cargo build --release --locked --target x86_64-apple-darwin $BINS
+      - name: Import signing certificate
+        if: env.HAVE_CERT == 'true'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          pw=$(uuidgen)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          security set-key-partition-list -S apple-tool:,apple: -k "$pw" "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "MACOS_SIGN_IDENTITY=$MACOS_SIGN_IDENTITY" >> "$GITHUB_ENV"
+      - name: Package (sign + notarize when configured)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          packaging/macos/package.sh "$VERSION" \
+            target/aarch64-apple-darwin/release target/x86_64-apple-darwin/release dist
+      - name: Smoke test (zip)
+        run: |
+          set -euo pipefail
+          t=$(mktemp -d)
+          ditto -x -k "dist/ac2-$VERSION-macos-universal.zip" "$t"
+          d="$t/ac2-$VERSION-macos-universal"
+          lipo -archs "$d/ac2.app/Contents/MacOS/ac2-ui"
+          "$d/ac2.app/Contents/MacOS/ac2-ui" --version
+          export AC2_RUNTIME_DIR="$t/run" XDG_CONFIG_HOME="$t/config"
+          "$d/bin/ac2d" --version
+          "$d/bin/ac2d" --backend fake > "$t/ac2d.log" 2>&1 &
+          for _ in $(seq 100); do [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] && break; sleep 0.1; done
+          "$d/bin/ac2" status
+          "$d/bin/ac2" session open --backend fake --in 1-2
+          "$d/bin/ac2" meas new tf --ref 1 --meas 2 --name smoke
+          "$d/bin/ac2" meas list
+          "$d/bin/ac2" daemon stop
+          hdiutil verify "dist/ac2-$VERSION-macos-universal.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    name: package (windows)
+    needs: meta
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      MSI_VERSION: ${{ needs.meta.outputs.msi_version }}
+      HAVE_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+      - name: Vendored libsodium
+        shell: bash
+        run: echo "SODIUM_DIST_DIR=$(tools/release/fetch-libsodium.sh "$RUNNER_TEMP/libsodium-dist")" >> "$GITHUB_ENV"
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked $BINS
+      - name: No VC++ runtime imports
+        shell: pwsh
+        run: tools/release/check-windows-deps.ps1 target/release/ac2.exe target/release/ac2d.exe target/release/ac2-ui.exe
+      - name: Decode signing certificate
+        if: env.HAVE_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          "SIGNTOOL=$($signtool.FullName)" | Out-File -Append $env:GITHUB_ENV
+          "PFX=$pfx" | Out-File -Append $env:GITHUB_ENV
+      - name: Sign executables
+        if: env.HAVE_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          & $env:SIGNTOOL sign /f $env:PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /td sha256 /tr http://timestamp.digicert.com target\release\ac2.exe target\release\ac2d.exe target\release\ac2-ui.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          New-Item -ItemType Directory -Force dist | Out-Null
+          wix build packaging/windows/ac2.wxs -arch x64 -d "Version=$env:MSI_VERSION" -d "BinDir=$PWD\target\release" -d "RootDir=$PWD" -o "dist\ac2-$env:VERSION-windows-x64.msi"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Sign MSI
+        if: env.HAVE_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          & $env:SIGNTOOL sign /f $env:PFX /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /td sha256 /tr http://timestamp.digicert.com "dist\ac2-$env:VERSION-windows-x64.msi"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item $env:PFX
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $z = Join-Path $env:RUNNER_TEMP "ac2-$env:VERSION-windows-x64"
+          New-Item -ItemType Directory -Force $z | Out-Null
+          Copy-Item target\release\ac2.exe, target\release\ac2d.exe, target\release\ac2-ui.exe, README.md $z
+          Copy-Item LICENSE (Join-Path $z 'LICENSE.txt')
+          Compress-Archive -Path $z -DestinationPath "dist\ac2-$env:VERSION-windows-x64.zip"
+      - name: Smoke test (MSI install, fake rig, uninstall)
+        shell: pwsh
+        run: |
+          $msi = Resolve-Path "dist\ac2-$env:VERSION-windows-x64.msi"
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /l*v msi-install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content msi-install.log -Tail 50; exit 1 }
+          $dir = Join-Path $env:ProgramFiles 'ac2'
+          Get-ChildItem $dir
+          if (-not (Test-Path (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'ac2.lnk'))) { throw 'no Start-menu shortcut' }
+          & "$dir\ac2d.exe" --version
+          & "$dir\ac2-ui.exe" --version
+          $env:AC2_RUNTIME_DIR = Join-Path $env:RUNNER_TEMP 'ac2-run'
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'ac2-appdata'
+          $d = Start-Process "$dir\ac2d.exe" -ArgumentList '--backend','fake' -PassThru -RedirectStandardError ac2d.log
+          Start-Sleep -Seconds 2
+          & "$dir\ac2.exe" status; if ($LASTEXITCODE -ne 0) { Get-Content ac2d.log; exit 1 }
+          & "$dir\ac2.exe" session open --backend fake --in 1-2; if ($LASTEXITCODE -ne 0) { exit 1 }
+          & "$dir\ac2.exe" meas new tf --ref 1 --meas 2 --name smoke; if ($LASTEXITCODE -ne 0) { exit 1 }
+          & "$dir\ac2.exe" meas list; if ($LASTEXITCODE -ne 0) { exit 1 }
+          & "$dir\ac2.exe" daemon stop
+          $d.WaitForExit(10000) | Out-Null
+          $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit 1 }
+          if (Test-Path "$dir\ac2.exe") { throw 'uninstall left ac2.exe behind' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: checksums + draft release
+    needs: [meta, ci, linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ env.VERSION }}
+          path: dist/*
+          if-no-files-found: error
+      - name: Draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "ac2 $VERSION" \
+            --notes "Draft: review the artifacts and notes, then publish. Install: docs/install.md. Checksums: SHA256SUMS."

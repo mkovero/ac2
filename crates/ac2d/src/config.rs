@@ -33,6 +33,20 @@ pub struct DaemonConfig {
     /// Calibration store file (`docs/design/q7-calibration.md` §7); `None` keeps
     /// calibrations in memory only.
     pub cal_store: Option<PathBuf>,
+    /// mDNS advert of a network-mode daemon (`_ac2._tcp`); ignored in local modes, which
+    /// are not reachable from the network. `None` advertises nothing.
+    pub advertise: Option<Advertise>,
+}
+
+/// What a network-mode daemon advertises over mDNS. The advert names the rig and its key
+/// fingerprint; it never grants anything (clients still need a pinned key and an entry in
+/// the authorized-clients file).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Advertise {
+    /// Rig name shown by `ac2 discover` and the UI.
+    pub name: String,
+    /// mDNS port and interfaces (tests confine it to loopback).
+    pub mdns: ac2_discovery::Options,
 }
 
 impl fmt::Debug for DaemonConfig {
@@ -48,6 +62,7 @@ impl fmt::Debug for DaemonConfig {
             .field("keepalive", &self.keepalive)
             .field("session_dir", &self.session_dir)
             .field("cal_store", &self.cal_store)
+            .field("advertise", &self.advertise)
             .finish()
     }
 }
@@ -67,6 +82,7 @@ impl DaemonConfig {
             keepalive: Duration::from_millis(250),
             session_dir: ac2_traces::default_session_dir(),
             cal_store: None,
+            advertise: None,
         }
     }
 }

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ac2
+GenericName=Audio Analyzer
+Comment=Live dual-channel FFT analyzer for PA system tuning
+Exec=ac2-ui
+Icon=ac2
+Terminal=false
+Categories=AudioVideo;Audio;Engineering;
+Keywords=transfer function;RTA;FFT;SPL;loudspeaker;measurement;
+StartupWMClass=ac2

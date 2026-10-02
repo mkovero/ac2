@@ -22,6 +22,7 @@ path = "src/main.rs"
 
 [dependencies]
 ac2-client = { path = "../ac2-client" }
+ac2-discovery = { path = "../ac2-discovery" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
 ac2-zmq = { path = "../ac2-zmq" }
