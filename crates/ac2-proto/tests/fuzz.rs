@@ -222,7 +222,7 @@ proptest! {
             Command::DelaySet { meas: m, delay: Seconds(delay) },
             Command::DelayInsert { meas: m, pick: DelayPick::Ranked { index: idx } },
             Command::MeasFreeze { meas: m, frozen: flag },
-            Command::TraceCapture { meas: m, name: name.clone() },
+            Command::TraceCapture { meas: m, name: name.clone(), slot: None },
             Command::GenRefresh { lease_token: LeaseToken(token) },
             Command::GenAcquire { force: flag },
             Command::Hello { client: name.clone() },

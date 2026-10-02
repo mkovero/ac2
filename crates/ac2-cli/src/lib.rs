@@ -82,7 +82,15 @@ impl CliError {
             Self::Refused(_) => "refused",
             Self::Io(_) => "io",
         };
-        serde_json::json!({ "error": { "code": code, "msg": self.to_string() } })
+        let mut v = serde_json::json!({ "error": { "code": code, "msg": self.to_string() } });
+        // Typed detail (import line and problem, session version, …) for scripts.
+        if let Self::Client(ClientError::Daemon(e)) = self
+            && let Some(d) = &e.detail
+            && let Ok(d) = serde_json::to_value(d)
+        {
+            v["error"]["detail"] = d;
+        }
+        v
     }
 }
 

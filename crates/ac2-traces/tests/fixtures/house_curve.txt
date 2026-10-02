@@ -1,0 +1,7 @@
+# House curve: +6 dB at 20 Hz, flat 1 kHz, -6 dB at 20 kHz
+# freq dB
+20 6
+100 3
+1000 0
+10000 -3
+20000 -6

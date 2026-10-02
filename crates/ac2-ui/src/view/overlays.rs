@@ -64,16 +64,47 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
             .filter(|s| *s != Scope::Global && *s != active),
     );
     scopes.dedup();
-    let slots = [
-        CommandId::Slot1,
-        CommandId::Slot2,
-        CommandId::Slot3,
-        CommandId::Slot4,
-        CommandId::Slot5,
-        CommandId::Slot6,
-        CommandId::Slot7,
-        CommandId::Slot8,
-        CommandId::Slot9,
+    use CommandId as C;
+    let groups: [([CommandId; 9], &str); 2] = [
+        (
+            [
+                C::Slot1,
+                C::Slot2,
+                C::Slot3,
+                C::Slot4,
+                C::Slot5,
+                C::Slot6,
+                C::Slot7,
+                C::Slot8,
+                C::Slot9,
+            ],
+            "Capture selected measurement to slot 1…9",
+        ),
+        (
+            [
+                C::ShowSlot1,
+                C::ShowSlot2,
+                C::ShowSlot3,
+                C::ShowSlot4,
+                C::ShowSlot5,
+                C::ShowSlot6,
+                C::ShowSlot7,
+                C::ShowSlot8,
+                C::ShowSlot9,
+            ],
+            "Show / hide slot 1…9",
+        ),
+    ];
+    let digits = [
+        Key::Num1,
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+        Key::Num7,
+        Key::Num8,
+        Key::Num9,
     ];
     let mut rows = Vec::new();
     for scope in scopes {
@@ -82,36 +113,37 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
             title: scope.title(),
             live,
         });
-        let slot_chords: Vec<Vec<crate::keys::Chord>> =
-            slots.iter().map(|c| keymap.chords(*c, scope)).collect();
-        let digits = [
-            Key::Num1,
-            Key::Num2,
-            Key::Num3,
-            Key::Num4,
-            Key::Num5,
-            Key::Num6,
-            Key::Num7,
-            Key::Num8,
-            Key::Num9,
-        ];
-        let collapsed = slot_chords.iter().zip(digits).all(|(v, d)| {
-            v.len() == 1 && v[0].key == d && {
-                let first = &slot_chords[0][0];
-                (v[0].command, v[0].alt, v[0].shift) == (first.command, first.alt, first.shift)
-            }
-        });
+        // A group bound to one modifier + digit 1…9 collapses into one row.
+        let collapsed: Vec<bool> = groups
+            .iter()
+            .map(|(cmds, _)| {
+                let chords: Vec<Vec<crate::keys::Chord>> =
+                    cmds.iter().map(|c| keymap.chords(*c, scope)).collect();
+                chords.iter().zip(digits).all(|(v, d)| {
+                    v.len() == 1 && v[0].key == d && {
+                        let first = &chords[0][0];
+                        (v[0].command, v[0].alt, v[0].shift)
+                            == (first.command, first.alt, first.shift)
+                    }
+                })
+            })
+            .collect();
         for c in CommandId::ALL {
             let chords = keymap.chords(*c, scope);
             if chords.is_empty() {
                 continue;
             }
-            if collapsed && slots.contains(c) {
-                if *c == CommandId::Slot1 {
+            if let Some(g) = groups
+                .iter()
+                .zip(&collapsed)
+                .position(|((cmds, _), col)| *col && cmds.contains(c))
+            {
+                let (cmds, title) = &groups[g];
+                if *c == cmds[0] {
                     let one = chords[0].label();
                     rows.push(HelpRow::Bind {
                         keys: format!("{one}…9"),
-                        title: "Capture selected measurement to slot 1…9".into(),
+                        title: (*title).into(),
                         live,
                     });
                 }
@@ -433,16 +465,21 @@ mod tests {
             .iter()
             .filter(|r| matches!(r, HelpRow::Bind { .. }))
             .count();
-        // One row per bound (command, scope), the nine slot keys folded into one.
+        // One row per bound (command, scope), each group of nine slot keys folded into one.
         let mut pairs: Vec<(CommandId, Scope)> =
             k.bindings().iter().map(|b| (b.command, b.scope)).collect();
         pairs.sort();
         pairs.dedup();
-        assert_eq!(binds, pairs.len() - 8);
+        assert_eq!(binds, pairs.len() - 16);
         let one = crate::keys::Chord::command(Key::Num1).label();
         assert!(rows.contains(&HelpRow::Bind {
             keys: format!("{one}…9"),
             title: "Capture selected measurement to slot 1…9".into(),
+            live: true,
+        }));
+        assert!(rows.contains(&HelpRow::Bind {
+            keys: "1…9".into(),
+            title: "Show / hide slot 1…9".into(),
             live: true,
         }));
         // Focused scope right after the global one.

@@ -274,3 +274,72 @@ fn startup_first_frame() {
     // blocking call on the startup path, `--bench-startup` measures the real window.
     assert!(first < Duration::from_secs(2), "{first:?}");
 }
+
+/// Two captures in slots 1 and 2 and an imported target curve, drawn with the live traces:
+/// captures share the epoch's time base (Δt to the reference), the target is independent.
+#[test]
+fn stored_traces_and_target() {
+    if !have_gpu("stored_traces_and_target") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    // Ctrl+1 captures Main L (selected) into slot 1; N, Ctrl+2 Delay tower into slot 2.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    h.key_press(Key::N);
+    step_until(&mut h, "delay tower", |a| {
+        a.state.selected == Some(MeasId(2))
+    });
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
+    // Z: a target curve from a file.
+    h.key_press(Key::Z);
+    step_until(&mut h, "target prompt", |a| {
+        matches!(a.state.overlay, Overlay::Prompt(_))
+    });
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ac2-traces/tests/fixtures/house_curve.txt");
+    h.event(Event::Text(path.to_string_lossy().into_owned()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "three stored traces with data", |a| {
+        a.state.traces.len() == 3
+    });
+    // 2 hides slot 2, 2 again shows it.
+    h.key_press(Key::Num2);
+    step_until(&mut h, "slot 2 hidden", |a| {
+        a.state.slots()[1].is_some_and(|t| !t.edit.visible)
+    });
+    h.key_press(Key::Num2);
+    step_until(&mut h, "slot 2 shown", |a| {
+        a.state.slots()[1].is_some_and(|t| t.edit.visible)
+            && a.state.traces.values().all(|(d, _)| d.meta.edit.visible)
+    });
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::transfer(
+            st,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let legend: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(legend.len(), 5, "{legend:?}");
+        assert!(legend.contains(&"house_curve · indep."), "{legend:?}");
+        assert!(
+            legend.iter().any(|l| l.starts_with("Main L S1 · Δt")),
+            "{legend:?}"
+        );
+    }
+    // Toasts expire on the wall clock; the snapshot shows the plots only.
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("transfer_stored_traces", &snapshot_options());
+}

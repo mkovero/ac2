@@ -331,7 +331,12 @@ def requests():
         req(
             28,
             "trace.import",
-            {"file_name": "sub.txt", "format": "freq_mag_phase_text", "content": b"20 -3.0 10\n"},
+            {
+                "file_name": "sub.txt",
+                "format": "analyzer_text",
+                "role": "target",
+                "content": b"20 -3.0 10\n",
+            },
         ),
     ]
 

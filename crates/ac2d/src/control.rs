@@ -45,6 +45,9 @@ use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource};
 use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
 
+mod files;
+mod traces;
+
 /// Everything that reaches the control thread.
 pub(crate) enum ControlMsg {
     /// A ctrl request from the I/O thread.
@@ -93,6 +96,10 @@ pub(crate) struct Setup {
     pub(crate) fps: u32,
     pub(crate) outbox: Outbox,
     pub(crate) to_self: Sender<ControlMsg>,
+    /// Session directory for `file.*` by name.
+    pub(crate) session_dir: std::path::PathBuf,
+    /// Network mode: `file.*` accept names only, never paths.
+    pub(crate) network: bool,
 }
 
 /// A `delay.find` running on a job thread; answered when the result arrives.
@@ -136,6 +143,7 @@ pub(crate) struct Control {
     pending_finds: HashMap<u64, PendingFind>,
     next_token: u64,
     next_ka: Instant,
+    traces: traces::TraceStore,
 }
 
 const MAX_DELAY_S: f64 = 10.0;
@@ -291,6 +299,7 @@ impl Control {
             pending_finds: HashMap::new(),
             next_token: 1,
             next_ka: Instant::now(),
+            traces: traces::TraceStore::default(),
             s,
         }
     }
@@ -720,14 +729,24 @@ impl Control {
             }
 
             Command::TraceList => Ok(ReplyBody::Traces(self.store.state().traces.clone())),
-            Command::TraceCapture { .. } => Err(unsupported("trace.capture")),
-            Command::TraceGet { .. } => Err(unsupported("trace.get")),
-            Command::TraceUpdate { .. } => Err(unsupported("trace.update")),
-            Command::TraceDelete { .. } => Err(unsupported("trace.delete")),
-            Command::TraceAverage { .. } => Err(unsupported("trace.average")),
-            Command::TraceMath { .. } => Err(unsupported("trace.math")),
-            Command::TraceImport { .. } => Err(unsupported("trace.import")),
-            Command::TraceExport { .. } => Err(unsupported("trace.export")),
+            Command::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot),
+            Command::TraceGet { trace } => self.trace_get(trace),
+            Command::TraceUpdate { trace, edit } => self.trace_update(trace, edit),
+            Command::TraceDelete { trace } => self.trace_delete(trace),
+            Command::TraceAverage {
+                traces,
+                method,
+                reference,
+                name,
+            } => self.trace_average(&traces, method, reference, name),
+            Command::TraceMath { a, b, op, name } => self.trace_math(a, b, op, name),
+            Command::TraceImport {
+                file_name,
+                format,
+                role,
+                content,
+            } => self.trace_import(file_name, format, role, &content.0),
+            Command::TraceExport { trace, format } => self.trace_export(trace, format),
 
             Command::CalSpl {
                 input,
@@ -768,8 +787,9 @@ impl Control {
                 .cloned()
                 .map(ReplyBody::Grid)
                 .ok_or_else(|| perr(ErrorCode::NotFound, format!("no grid {grid_id}"))),
-            Command::FileSave { .. } => Err(unsupported("file.save")),
-            Command::FileLoad { .. } => Err(unsupported("file.load")),
+            Command::FileSave { session } => self.file_save(&session),
+            Command::FileLoad { session } => self.file_load(client, &session),
+            Command::FileList => self.file_list(),
         }
     }
 
@@ -895,6 +915,12 @@ impl Control {
     /// Reopens the stream with the same configuration and new generator routes: a routing
     /// or device change is a configuration change, so it starts a new session epoch (5b).
     fn reopen(&mut self, routes: &[u16]) -> Result<(), ProtoError> {
+        let epoch = SessionEpoch(self.epoch().0 + 1);
+        self.reopen_at(routes, epoch)
+    }
+
+    /// [`Self::reopen`] into a given (newer) epoch.
+    fn reopen_at(&mut self, routes: &[u16], epoch: SessionEpoch) -> Result<(), ProtoError> {
         let Some(rt) = self.session.take() else {
             return Err(perr(ErrorCode::Invalid, "no open session"));
         };
@@ -905,7 +931,6 @@ impl Control {
         rt.close();
         self.s.outbox.clear(b"d/");
         self.s.outbox.clear(b"timing");
-        let epoch = SessionEpoch(self.epoch().0 + 1);
         match Runtime::open(
             &*self.s.backend,
             &config,

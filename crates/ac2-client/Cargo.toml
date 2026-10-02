@@ -14,10 +14,11 @@ workspace = true
 [features]
 # An in-process fake daemon (ROUTER + XPUB built from ac2-proto + ac2-zmq) for tests of this
 # crate and of ac2-cli. Never used by a shipping binary.
-test-support = []
+test-support = ["dep:ac2-traces"]
 
 [dependencies]
 ac2-proto = { path = "../ac2-proto" }
+ac2-traces = { path = "../ac2-traces", optional = true }
 ac2-zmq = { path = "../ac2-zmq" }
 tokio = { version = "1.53", features = ["rt", "sync", "time", "macros"] }
 thiserror = "2"

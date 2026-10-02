@@ -924,10 +924,43 @@ pub enum MathOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportFormat {
-    /// ac2 CSV.
+    /// ac2 CSV (what `trace.export` writes; its header is checked).
     Ac2Csv,
-    /// Generic `freq mag [phase]` text export.
-    FreqMagPhaseText,
+    /// Analyzer text export: columns `freq mag [phase] [coherence]`, separated by commas,
+    /// semicolons, tabs or spaces, with optional comment and header lines.
+    AnalyzerText,
+    /// ac2 CSV when the file starts with the ac2 header, analyzer text otherwise.
+    Auto,
+}
+
+/// What an imported file becomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportRole {
+    /// A measured trace (independent time base, decision 8a).
+    Trace,
+    /// A target curve: magnitude only, drawn on the transfer pane.
+    Target,
+}
+
+/// What a trace holds, and so where it is drawn and which operations apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TraceKind {
+    /// Transfer function: magnitude dB, phase, coherence.
+    Transfer,
+    /// Target curve: magnitude dB only.
+    Target,
+    /// Narrowband spectrum (tone level).
+    Spectrum {
+        /// Level unit.
+        scale: LevelScale,
+    },
+    /// Fractional-octave RTA (band power).
+    Rta {
+        /// Level unit.
+        scale: LevelScale,
+    },
 }
 
 /// Export format.
@@ -946,6 +979,8 @@ pub enum TraceSource {
     Captured {
         /// Source measurement.
         meas: MeasId,
+        /// Its name at capture.
+        meas_name: String,
         /// Epoch it was captured in (shared time reference within it).
         epoch: SessionEpoch,
         /// Capture sample index.
@@ -955,7 +990,7 @@ pub enum TraceSource {
     Imported {
         /// Original file name.
         file_name: String,
-        /// Format.
+        /// Format actually parsed (never `auto`).
         format: ImportFormat,
     },
     /// Average of other traces.
@@ -1044,6 +1079,8 @@ pub struct TraceEdit {
     pub polarity: Polarity,
     /// Per-trace delay nudge on top of the measured delay (decision 8a).
     pub delay_nudge: Seconds,
+    /// Slot 1…9 the trace occupies (Ctrl+1…9 in the UI); a slot holds at most one trace.
+    pub slot: Option<u8>,
 }
 
 /// Trace metadata entity (mandatory metadata of PLAN §3.5).
@@ -1054,20 +1091,57 @@ pub struct TraceMeta {
     pub id: TraceId,
     /// Editable properties.
     pub edit: TraceEdit,
+    /// Content.
+    pub kind: TraceKind,
     /// Origin.
     pub source: TraceSource,
     /// Grid of the stored data.
     pub grid_id: GridId,
-    /// Measured delay at capture.
+    /// Delay the phase is referred to: the measured delay at capture; for an average the
+    /// common reference delay; 0 for imported traces.
     pub delay: Seconds,
     /// Smoothing at capture.
     pub smoothing: Option<Smoothing>,
+    /// Averaging depth policy at capture (transfer captures).
+    pub depth: Option<DepthPolicy>,
     /// Calibration at capture.
     pub cal: CalState,
     /// Mic at capture.
     pub mic: Option<MicState>,
     /// When captured / created.
     pub created_at: WallNs,
+}
+
+/// A session saved by `file.save` (reply to `file.save` / `file.load`, rows of `file.list`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionFile {
+    /// Name (the directory name).
+    pub name: String,
+    /// Directory on the daemon host.
+    pub path: String,
+    /// When it was saved.
+    pub saved_at: WallNs,
+    /// Measurements in it.
+    pub measurements: u32,
+    /// Traces in it.
+    pub traces: u32,
+}
+
+/// Which session directory `file.save` / `file.load` use.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SessionRef {
+    /// A name in the daemon's session directory (letters, digits, ` `, `-`, `_`, `.`).
+    Name {
+        /// Name.
+        name: String,
+    },
+    /// A directory path on the daemon host (local transports only).
+    Path {
+        /// Path.
+        path: String,
+    },
 }
 
 /// Stored trace data (reply to `trace.get`). Column order = grid order.

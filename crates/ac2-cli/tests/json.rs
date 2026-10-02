@@ -297,10 +297,17 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(traces.as_array().map(Vec::len), Some(1));
     let csv = ac2(&f, &["trace", "export", "l-pre-eq", "--csv", "-"]).await?;
     assert_eq!(csv.code, 0);
-    assert_eq!(
-        csv.stdout,
-        "freq_hz,mag_db,phase_deg,coherence\n1000,-3,45,0.98\n"
+    assert!(
+        csv.stdout
+            .starts_with("# ac2 trace export v1\n# name: l-pre-eq\n# kind: transfer\n"),
+        "{}",
+        csv.stdout
     );
+    assert!(
+        csv.stdout
+            .contains("\nfreq_hz,mag_db,phase_deg,coherence\n")
+    );
+    assert_eq!(csv.stdout.lines().count(), 17 + 480);
 
     let rm = ok_json(&f, &["meas", "rm", "foh", "--json"]).await?;
     assert_eq!(rm["deleted"], 1);
@@ -405,5 +412,207 @@ async fn cal_and_unreachable_daemon() -> R {
     let r = ac2(&f, &["--timeout", "100ms", "devices", "--json"]).await?;
     assert_eq!(r.code, 3);
     assert_eq!(r.json()?["error"]["code"], "not_running");
+    Ok(())
+}
+
+fn fixture(name: &str) -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ac2-traces/tests/fixtures")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trace_commands_json() -> R {
+    let dir = tempfile::tempdir()?;
+    let f = FakeDaemon::start(FakeOptions {
+        session_dir: Some(dir.path().join("sessions")),
+        ..FakeOptions::default()
+    })?;
+    ok_json(
+        &f,
+        &[
+            "meas", "new", "tf", "--ref", "1", "--meas", "2", "--name", "main", "--start", "--json",
+        ],
+    )
+    .await?;
+    ok_json(&f, &["delay", "set", "main", "10ms", "--json"]).await?;
+    let a = ok_json(
+        &f,
+        &[
+            "trace", "capture", "main", "--name", "a", "--slot", "1", "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(
+        a,
+        json!({
+            "id": 2,
+            "edit": {
+                "name": "a",
+                "color": { "r": 86, "g": 180, "b": 233 },
+                "visible": true,
+                "locked": false,
+                "order": 2,
+                "offset": 0.0,
+                "polarity": "normal",
+                "delay_nudge": 0.0,
+                "slot": 1
+            },
+            "kind": { "type": "transfer" },
+            "source": {
+                "type": "captured",
+                "meas": 1,
+                "meas_name": "main",
+                "epoch": 1,
+                "at_sample": 48000
+            },
+            "grid_id": 0x79ec_3d16_ae0e_94d0u64,
+            "delay": 0.01,
+            "smoothing": null,
+            "depth": { "type": "equal_confidence" },
+            "cal": { "type": "uncalibrated" },
+            "mic": null,
+            "created_at": 1790000000000000000u64
+        })
+    );
+    // The slot range is checked by the parser.
+    assert!(
+        Cli::try_parse_from([
+            "ac2", "trace", "capture", "main", "--name", "x", "--slot", "10"
+        ])
+        .is_err()
+    );
+    ok_json(
+        &f,
+        &[
+            "trace", "capture", "main", "--name", "b", "--slot", "2", "--json",
+        ],
+    )
+    .await?;
+
+    let l = ok_json(&f, &["trace", "list", "--json"]).await?;
+    assert_eq!(l.as_array().map(Vec::len), Some(2));
+    let s = ok_json(&f, &["trace", "show", "a", "--json"]).await?;
+    assert_eq!(s, a);
+    let d = ok_json(&f, &["trace", "show", "2", "--data", "--json"]).await?;
+    assert_eq!(d["meta"], a);
+    assert_eq!(d["mag_db"].as_array().map(Vec::len), Some(480));
+    assert!(d["coherence"].is_array());
+
+    let avg = ok_json(
+        &f,
+        &[
+            "trace", "average", "a", "b", "--name", "avg", "--method", "complex", "--ref", "b",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(
+        avg["source"],
+        json!({
+            "type": "average",
+            "traces": [2, 3],
+            "method": "complex",
+            "reference": { "type": "trace", "trace": 3 }
+        })
+    );
+    assert_eq!(avg["delay"], 0.01);
+    let fixed = ok_json(
+        &f,
+        &[
+            "trace",
+            "average",
+            "a",
+            "b",
+            "--name",
+            "avg2",
+            "--ref-delay",
+            "12.5ms",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(
+        fixed["source"]["reference"],
+        json!({ "type": "fixed", "delay": 0.0125 })
+    );
+    let m = ok_json(&f, &["trace", "math", "a", "b", "--name", "a-b", "--json"]).await?;
+    assert_eq!(
+        m["source"],
+        json!({ "type": "math", "a": 2, "b": 3, "op": "magnitude_difference" })
+    );
+    let m = ok_json(
+        &f,
+        &[
+            "trace",
+            "math",
+            "a",
+            "b",
+            "--name",
+            "a/b",
+            "--complex",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(m["source"]["op"], "complex_division");
+
+    let rew = fixture("rew_export.txt");
+    let i = ok_json(&f, &["trace", "import", &rew, "--json"]).await?;
+    assert_eq!(i["edit"]["name"], "rew_export");
+    assert_eq!(
+        i["source"],
+        json!({ "type": "imported", "file_name": "rew_export.txt", "format": "analyzer_text" })
+    );
+    let house = fixture("house_curve.txt");
+    let t = ok_json(
+        &f,
+        &[
+            "trace", "import", &house, "--target", "--name", "house", "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(t["kind"], json!({ "type": "target" }));
+    assert_eq!(t["edit"]["name"], "house");
+    let bad = dir.path().join("bad.txt");
+    std::fs::write(&bad, "20 1\n30 x\n")?;
+    let r = ac2(&f, &["trace", "import", &bad.to_string_lossy(), "--json"]).await?;
+    assert_eq!(r.code, 1);
+    assert_eq!(
+        r.json()?["error"]["detail"],
+        json!({ "type": "import", "line": 2, "problem": "bad_number" })
+    );
+    assert_eq!(r.json()?["error"]["code"], "invalid");
+
+    let rm = ok_json(&f, &["trace", "rm", "a-b", "a/b", "--json"]).await?;
+    assert_eq!(rm, json!({ "deleted": [6, 7] }));
+
+    // Sessions.
+    let saved = ok_json(&f, &["session", "save", "show", "--json"]).await?;
+    assert_eq!(saved["name"], "show");
+    assert_eq!(saved["measurements"], 1);
+    assert_eq!(saved["traces"], 6);
+    let list = ok_json(&f, &["session", "list", "--json"]).await?;
+    assert_eq!(list.as_array().map(Vec::len), Some(1));
+    assert_eq!(list[0]["name"], "show");
+    ok_json(&f, &["trace", "rm", "house", "--json"]).await?;
+    let loaded = ok_json(&f, &["session", "load", "show", "--json"]).await?;
+    assert_eq!(loaded["traces"], 6);
+    let dump = ok_json(&f, &["state", "dump"]).await?;
+    assert_eq!(dump["state"]["traces"].as_array().map(Vec::len), Some(6));
+    assert_eq!(dump["state"]["generator"]["owner"], json!(null));
+    assert_eq!(dump["state"]["generator"]["armed"], false);
+    let by_path = dir.path().join("elsewhere");
+    let p = ok_json(
+        &f,
+        &["session", "save", &by_path.to_string_lossy(), "--json"],
+    )
+    .await?;
+    assert_eq!(p["name"], "elsewhere");
+    assert!(by_path.join("session.json").exists());
+    let r = ac2(&f, &["session", "load", "nope", "--json"]).await?;
+    assert_eq!(r.json()?["error"]["code"], "not_found");
     Ok(())
 }

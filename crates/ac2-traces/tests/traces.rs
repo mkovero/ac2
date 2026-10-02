@@ -1,0 +1,543 @@
+//! Import of realistic analyzer exports, ac2 CSV round trips, averaging and A−B math with
+//! analytic expectations, and session directory round trips.
+#![allow(clippy::unwrap_used)]
+
+use std::path::Path;
+
+use ac2_proto::model::*;
+use ac2_proto::units::*;
+use ac2_proto::{GridDef, ImportProblem};
+use ac2_traces::columns::{Columns, StoredTrace, frequencies};
+use ac2_traces::ops::{OpError, average, math};
+use ac2_traces::session::{self, SavedDelay, SavedMeasurement, Session, SessionError};
+use ac2_traces::text::{export_csv, import};
+
+fn fixture(name: &str) -> Vec<u8> {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+    std::fs::read(p).unwrap()
+}
+
+fn grid() -> GridDef {
+    GridDef::Log {
+        ppo: 48,
+        k_min: -240,
+        k_max: 239,
+    }
+}
+
+fn edit(name: &str) -> TraceEdit {
+    TraceEdit {
+        name: name.into(),
+        color: Rgb { r: 1, g: 2, b: 3 },
+        visible: true,
+        locked: false,
+        order: 0,
+        offset: Db(0.0),
+        polarity: Polarity::Normal,
+        delay_nudge: Seconds(0.0),
+        slot: None,
+    }
+}
+
+fn meta(id: u32, source: TraceSource, delay: f64, kind: TraceKind, g: &GridDef) -> TraceMeta {
+    TraceMeta {
+        id: TraceId(id),
+        edit: edit(&format!("t{id}")),
+        kind,
+        source,
+        grid_id: g.id(),
+        delay: Seconds(delay),
+        smoothing: None,
+        depth: Some(DepthPolicy::EqualConfidence),
+        cal: CalState::Uncalibrated,
+        mic: None,
+        created_at: WallNs(1_790_000_000_000_000_000),
+    }
+}
+
+fn captured(epoch: u32) -> TraceSource {
+    TraceSource::Captured {
+        meas: MeasId(1),
+        meas_name: "main".into(),
+        epoch: SessionEpoch(epoch),
+        at_sample: SampleIndex(48_000),
+    }
+}
+
+/// A flat 0 dB path arriving `arrival` s late, captured with `inserted` s of reference
+/// delay: stored phase = −360·f·(arrival − inserted).
+fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> StoredTrace {
+    let g = grid();
+    let f = frequencies(&g);
+    StoredTrace {
+        meta: meta(id, captured(epoch), inserted, TraceKind::Transfer, &g),
+        columns: Columns {
+            mag_db: vec![0.0; f.len()],
+            phase_deg: Some(
+                f.iter()
+                    .map(|f| {
+                        ac2_traces::columns::wrap_deg(-360.0 * f * (arrival - inserted)) as f32
+                    })
+                    .collect(),
+            ),
+            coherence: Some(vec![coh; f.len()]),
+        },
+        grid: g,
+    }
+}
+
+fn col(g: &GridDef, hz: f64) -> usize {
+    frequencies(g)
+        .iter()
+        .position(|f| (f - hz).abs() < 1e-6 * hz)
+        .unwrap()
+}
+
+// ---- import ------------------------------------------------------------------------
+
+#[test]
+fn rew_export_with_star_comments_and_crlf() {
+    let t = import(
+        &fixture("rew_export.txt"),
+        ImportFormat::Auto,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    assert_eq!(t.format, ImportFormat::AnalyzerText);
+    assert_eq!(t.kind, TraceKind::Transfer);
+    assert_eq!(t.rows, 120);
+    let GridDef::Log { ppo, .. } = t.grid else {
+        panic!("{:?}", t.grid)
+    };
+    assert_eq!(ppo, 48);
+    // 1 kHz is a row of the file and a column of the grid: exact.
+    let i = col(&t.grid, 1000.0);
+    assert!((t.columns.mag_db[i] - 80.0).abs() < 1e-3);
+    assert!(t.columns.phase_deg.is_some());
+    assert!(t.columns.coherence.is_none());
+}
+
+#[test]
+fn smaart_tab_export_maps_columns_by_header() {
+    let t = import(
+        &fixture("smaart_tf.txt"),
+        ImportFormat::AnalyzerText,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    let coh = t.columns.coherence.as_ref().unwrap();
+    let finite: Vec<f32> = coh.iter().copied().filter(|v| v.is_finite()).collect();
+    assert!(!finite.is_empty());
+    assert!(finite.iter().all(|v| (0.6..=1.0).contains(v)), "{finite:?}");
+    // Outside the file's 31.25 Hz … 16 kHz span the grid has no values.
+    assert!(t.columns.mag_db[col(&t.grid, 1000.0 * 2f64.powf(-5.0))].is_finite());
+    let first = frequencies(&t.grid)[0];
+    assert!(first >= 31.25 - 1e-9, "{first}");
+}
+
+#[test]
+fn semicolon_decimal_comma_latin1() {
+    let t = import(
+        &fixture("semicolon_decimal_comma.csv"),
+        ImportFormat::Auto,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    assert_eq!(t.rows, 17);
+    let i = col(&t.grid, 1000.0);
+    assert!(
+        (t.columns.mag_db[i] + 2.5).abs() < 1e-4,
+        "{}",
+        t.columns.mag_db[i]
+    );
+    assert!((t.columns.phase_deg.as_ref().unwrap()[i] - 12.0).abs() < 1e-4);
+}
+
+#[test]
+fn coherence_in_percent_is_scaled() {
+    let t = import(
+        &fixture("coh_percent.csv"),
+        ImportFormat::Auto,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    let c = t.columns.coherence.unwrap();
+    assert!(
+        c.iter()
+            .filter(|v| v.is_finite())
+            .all(|v| (0.0..=1.0).contains(v))
+    );
+}
+
+#[test]
+fn target_curve_is_magnitude_only_and_interpolates_in_log_f() {
+    let t = import(
+        &fixture("house_curve.txt"),
+        ImportFormat::Auto,
+        ImportRole::Target,
+    )
+    .unwrap();
+    assert_eq!(t.kind, TraceKind::Target);
+    assert!(t.columns.phase_deg.is_none() && t.columns.coherence.is_none());
+    let f = frequencies(&t.grid);
+    let at = |hz: f64| {
+        let i = f
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 / hz).ln().abs().total_cmp(&(b.1 / hz).ln().abs()))
+            .unwrap()
+            .0;
+        (f[i], t.columns.mag_db[i])
+    };
+    let (f1k, v1k) = at(1000.0);
+    assert!((f1k - 1000.0).abs() < 1e-9 && v1k.abs() < 1e-6);
+    // Halfway between 1 k and 10 k in log frequency is half of −3 dB.
+    let (fm, vm) = at(1000.0 * 10f64.sqrt());
+    let expect = -3.0 * (fm / 1000.0).log10();
+    assert!((f64::from(vm) - expect).abs() < 1e-4, "{vm} vs {expect}");
+}
+
+#[test]
+fn typed_refusals() {
+    let bad = |s: &str| import(s.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap_err();
+    let e = bad("20 1\n30 2\n25 3\n");
+    assert_eq!((e.line, e.problem), (Some(3), ImportProblem::NotAscending));
+    let e = bad("# x\n20 1\n30 2 5\n");
+    assert_eq!((e.line, e.problem), (Some(3), ImportProblem::ColumnCount));
+    let e = bad("20 1\n30 abc\n");
+    assert_eq!((e.line, e.problem), (Some(2), ImportProblem::BadNumber));
+    let e = bad("-20 1\n30 2\n");
+    assert_eq!((e.line, e.problem), (Some(1), ImportProblem::OutOfRange));
+    let e = bad("# nothing here\n\n");
+    assert_eq!(e.problem, ImportProblem::NoData);
+    let e = bad("20 1 0 1.5\n30 2 0 0.5\n");
+    assert_eq!(e.problem, ImportProblem::BadCoherence);
+    let e = bad("# ac2 trace export v2\nfreq_hz,mag_db\n20,1\n30,2\n");
+    assert_eq!((e.line, e.problem), (Some(1), ImportProblem::BadHeader));
+    let e = import(b"20 1\n30 2\n", ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
+    assert_eq!(e.problem, ImportProblem::BadHeader);
+    let e = import(b"\x00\x01\x02", ImportFormat::Auto, ImportRole::Trace).unwrap_err();
+    assert_eq!(e.problem, ImportProblem::NotText);
+    let e = bad("20\n30\n");
+    assert_eq!(e.problem, ImportProblem::NoData);
+}
+
+#[test]
+fn ac2_csv_round_trips_bit_for_bit() {
+    let mut t = delayed(7, 3, 0.0125, 0.0120, 0.97);
+    t.columns.mag_db[10] = f32::NAN;
+    t.columns.mag_db[11] = -2.718_281_7e-3;
+    t.meta.edit.name = "Main L, pre EQ".into();
+    let csv = export_csv(&t);
+    assert!(csv.starts_with("# ac2 trace export v1\n# name: Main L, pre EQ\n"));
+    assert!(csv.contains("# delay_ms: 12\n"));
+    assert!(csv.contains("freq_hz,mag_db,phase_deg,coherence\n"));
+    let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();
+    assert_eq!(back.format, ImportFormat::Ac2Csv);
+    assert_eq!(back.name.as_deref(), Some("Main L, pre EQ"));
+    assert_eq!(back.grid, t.grid);
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&back.columns.mag_db), bits(&t.columns.mag_db));
+    assert_eq!(
+        bits(back.columns.phase_deg.as_ref().unwrap()),
+        bits(t.columns.phase_deg.as_ref().unwrap())
+    );
+    assert_eq!(
+        bits(back.columns.coherence.as_ref().unwrap()),
+        bits(t.columns.coherence.as_ref().unwrap())
+    );
+}
+
+#[test]
+fn linear_grid_spectrum_round_trips_with_dc_bin() {
+    let g = GridDef::Linear {
+        fs: Hz(48_000.0),
+        n: 64,
+    };
+    let n = frequencies(&g).len();
+    let t = StoredTrace {
+        meta: meta(
+            3,
+            captured(1),
+            0.0,
+            TraceKind::Spectrum {
+                scale: LevelScale::Dbfs,
+            },
+            &g,
+        ),
+        grid: g.clone(),
+        columns: Columns {
+            mag_db: (0..n).map(|i| -(i as f32)).collect(),
+            phase_deg: None,
+            coherence: None,
+        },
+    };
+    let back = import(
+        export_csv(&t).as_bytes(),
+        ImportFormat::Ac2Csv,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    assert_eq!(back.grid, g);
+    assert_eq!(back.kind, t.meta.kind);
+    assert_eq!(back.columns.mag_db, t.columns.mag_db);
+}
+
+// ---- averaging and math ------------------------------------------------------------
+
+#[test]
+fn complex_average_rereferes_to_the_reference_delay() {
+    // Same 10 ms arrival captured with two different inserted delays: re-referred to one
+    // delay they agree, so the complex average is the same flat 0 dB response.
+    let a = delayed(1, 2, 0.010, 0.010, 0.9);
+    let b = delayed(2, 2, 0.010, 0.0095, 0.9);
+    let r = average(
+        &[&a, &b],
+        AverageMethod::Complex,
+        DelayReference::Trace { trace: TraceId(1) },
+    )
+    .unwrap();
+    assert_eq!(r.delay, Seconds(0.010));
+    let i = col(&r.grid, 2000.0);
+    assert!(r.columns.mag_db[i].abs() < 1e-3, "{}", r.columns.mag_db[i]);
+    assert!(r.columns.phase_deg.as_ref().unwrap()[i].abs() < 1e-2);
+    // Referred to 9.5 ms instead, the average shows the 0.5 ms arrival: −360°·f·0.5 ms.
+    let r = average(
+        &[&a, &b],
+        AverageMethod::Complex,
+        DelayReference::Fixed {
+            delay: Seconds(0.0095),
+        },
+    )
+    .unwrap();
+    let i = col(&r.grid, 500.0);
+    let expect = ac2_traces::columns::wrap_deg(-360.0 * 500.0 * 0.0005);
+    let got = f64::from(r.columns.phase_deg.as_ref().unwrap()[i]);
+    assert!((got - expect).abs() < 0.01, "{got} vs {expect}");
+}
+
+#[test]
+fn power_average_of_levels() {
+    let mut a = delayed(1, 2, 0.0, 0.0, 0.9);
+    let mut b = delayed(2, 2, 0.0, 0.0, 0.9);
+    a.columns.mag_db.iter_mut().for_each(|v| *v = 0.0);
+    b.columns.mag_db.iter_mut().for_each(|v| *v = -100.0);
+    let r = average(
+        &[&a, &b],
+        AverageMethod::Power,
+        DelayReference::Trace { trace: TraceId(1) },
+    )
+    .unwrap();
+    // (1 + 1e-10) / 2 in power ≈ −3.01 dB.
+    assert!((r.columns.mag_db[100] + 3.0103).abs() < 1e-3);
+}
+
+#[test]
+fn phase_methods_need_a_shared_time_base() {
+    let a = delayed(1, 2, 0.0, 0.0, 0.9);
+    let b = delayed(2, 3, 0.0, 0.0, 0.9);
+    let refd = DelayReference::Trace { trace: TraceId(1) };
+    assert_eq!(
+        average(&[&a, &b], AverageMethod::Complex, refd),
+        Err(OpError::NoSharedTimeBase)
+    );
+    assert_eq!(
+        average(&[&a, &b], AverageMethod::CoherenceWeighted, refd),
+        Err(OpError::NoSharedTimeBase)
+    );
+    // Power still works, magnitude only.
+    let r = average(&[&a, &b], AverageMethod::Power, refd).unwrap();
+    assert!(r.columns.phase_deg.is_none());
+    assert_eq!(
+        average(&[&a], AverageMethod::Power, refd),
+        Err(OpError::TooFewTraces)
+    );
+    assert_eq!(
+        average(&[&a, &a], AverageMethod::Power, refd),
+        Err(OpError::Duplicate(TraceId(1)))
+    );
+    let c = delayed(3, 2, 0.0, 0.0, 0.9);
+    assert_eq!(
+        average(
+            &[&a, &c],
+            AverageMethod::Complex,
+            DelayReference::Trace { trace: TraceId(9) }
+        ),
+        Err(OpError::ReferenceNotInput(TraceId(9)))
+    );
+}
+
+#[test]
+fn coherence_weighting_favours_the_coherent_trace() {
+    let mut a = delayed(1, 2, 0.0, 0.0, 0.99);
+    let mut b = delayed(2, 2, 0.0, 0.0, 0.5);
+    a.columns.mag_db.iter_mut().for_each(|v| *v = 0.0);
+    b.columns.mag_db.iter_mut().for_each(|v| *v = -20.0);
+    let r = average(
+        &[&a, &b],
+        AverageMethod::CoherenceWeighted,
+        DelayReference::Trace { trace: TraceId(1) },
+    )
+    .unwrap();
+    // Weights 99 and 1: (99·1 + 1·0.1) / 100 = 0.991 → −0.078 dB.
+    assert!(
+        (r.columns.mag_db[200] + 0.0785).abs() < 1e-3,
+        "{}",
+        r.columns.mag_db[200]
+    );
+}
+
+#[test]
+fn a_minus_b() {
+    let mut a = delayed(1, 2, 0.0110, 0.0110, 0.9);
+    let b = delayed(2, 2, 0.0100, 0.0100, 0.9);
+    a.columns.mag_db.iter_mut().for_each(|v| *v = -6.0);
+    let d = math(&a, &b, MathOp::MagnitudeDifference).unwrap();
+    assert!(d.columns.phase_deg.is_none());
+    assert_eq!(d.columns.mag_db[50], -6.0);
+    // Complex division on the shared time base shows A's 1 ms later arrival.
+    let q = math(&a, &b, MathOp::ComplexDivision).unwrap();
+    let i = col(&q.grid, 250.0);
+    let expect = ac2_traces::columns::wrap_deg(-360.0 * 250.0 * 0.001);
+    let got = f64::from(q.columns.phase_deg.as_ref().unwrap()[i]);
+    assert!((got - expect).abs() < 0.01, "{got} vs {expect}");
+
+    // Against a target on another grid: resampled, magnitude only.
+    let target = import(
+        &fixture("house_curve.txt"),
+        ImportFormat::Auto,
+        ImportRole::Target,
+    )
+    .unwrap();
+    let tt = StoredTrace {
+        meta: meta(
+            3,
+            TraceSource::Imported {
+                file_name: "house_curve.txt".into(),
+                format: ImportFormat::AnalyzerText,
+            },
+            0.0,
+            TraceKind::Target,
+            &target.grid,
+        ),
+        grid: target.grid,
+        columns: target.columns,
+    };
+    let d = math(&a, &tt, MathOp::MagnitudeDifference).unwrap();
+    let i = col(&d.grid, 1000.0);
+    assert!((d.columns.mag_db[i] + 6.0).abs() < 1e-4);
+    assert_eq!(
+        math(&a, &tt, MathOp::ComplexDivision),
+        Err(OpError::NoPhase(TraceId(3)))
+    );
+}
+
+// ---- sessions ----------------------------------------------------------------------
+
+fn session_sample() -> Session {
+    let mut a = delayed(4, 2, 0.0125, 0.0125, 0.95);
+    a.meta.edit.slot = Some(1);
+    a.meta.edit.visible = false;
+    let b = delayed(9, 2, 0.0100, 0.0100, 0.9);
+    Session {
+        saved_at: WallNs(1_790_000_000_123_456_789),
+        measurements: vec![SavedMeasurement {
+            id: MeasId(1),
+            config: MeasConfig {
+                name: "main".into(),
+                kind: MeasKind::Transfer {
+                    config: TransferConfig {
+                        reference_input: 0,
+                        measurement_input: 1,
+                        averaging: TfAveraging::Fifo { blocks: 8 },
+                        grid: LogGridSpec {
+                            ppo: 48,
+                            k_min: -240,
+                            k_max: 239,
+                        },
+                        smoothing: None,
+                        depth: DepthPolicy::EqualConfidence,
+                    },
+                },
+            },
+            running: true,
+            frozen: false,
+            delay: Some(SavedDelay {
+                applied: Seconds(0.0125),
+                tracking: false,
+            }),
+        }],
+        traces: vec![a, b],
+    }
+}
+
+#[test]
+fn session_round_trip_and_generations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("show");
+    let s = session_sample();
+    session::save(&dir, &s).unwrap();
+    let back = session::load(&dir).unwrap();
+    assert_eq!(back.saved_at, s.saved_at);
+    assert_eq!(back.measurements, s.measurements);
+    assert_eq!(back.traces.len(), 2);
+    for (x, y) in back.traces.iter().zip(&s.traces) {
+        assert_eq!(x.meta, y.meta);
+        assert_eq!(x.grid, y.grid);
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&x.columns.mag_db), bits(&y.columns.mag_db));
+        assert_eq!(
+            bits(x.columns.phase_deg.as_ref().unwrap()),
+            bits(y.columns.phase_deg.as_ref().unwrap())
+        );
+    }
+    // A second save with one trace leaves only that generation's file behind.
+    let mut s2 = s.clone();
+    s2.saved_at = WallNs(s.saved_at.0 + 1);
+    s2.traces.truncate(1);
+    session::save(&dir, &s2).unwrap();
+    let files: Vec<_> = std::fs::read_dir(dir.join("traces"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files, vec![format!("{}-4.csv", s2.saved_at.0)]);
+    assert_eq!(session::load(&dir).unwrap().traces.len(), 1);
+    let listed = session::list(tmp.path()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].0, "show");
+}
+
+#[test]
+fn session_refusals() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("s");
+    session::save(&dir, &session_sample()).unwrap();
+    let m = dir.join(session::MANIFEST);
+    let text = std::fs::read_to_string(&m).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 1", "\"version\": 2")).unwrap();
+    assert_eq!(
+        session::load(&dir),
+        Err(SessionError::Version {
+            path: dir.clone(),
+            found: 2
+        })
+    );
+    assert_eq!(
+        session::load(&tmp.path().join("missing")),
+        Err(SessionError::NotFound(tmp.path().join("missing")))
+    );
+    // A directory with other files is not overwritten.
+    let other = tmp.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("notes.txt"), "x").unwrap();
+    assert_eq!(
+        session::save(&other, &session_sample()),
+        Err(SessionError::NotASession(other.clone()))
+    );
+    assert!(session::validate_name("friday show-2").is_ok());
+    for bad in ["", "../x", "a/b", ".hidden", "a\\b", " x"] {
+        assert!(session::validate_name(bad).is_err(), "{bad:?}");
+    }
+}

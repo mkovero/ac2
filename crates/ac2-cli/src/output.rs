@@ -2,9 +2,11 @@
 
 use std::io::{self, Write};
 
+use ac2_proto::GridDef;
 use ac2_proto::model::{
-    CalEntry, DeviceInfo, LevelScale, MeasKind, Measurement, PeakWeighting, Session, TimeWeighting,
-    TimingState, TimingStatus, TraceMeta, TraceSource, Weighting,
+    CalEntry, CalState, DelayReference, DepthPolicy, DeviceInfo, LevelScale, MeasKind, Measurement,
+    PeakWeighting, Polarity, Session, SessionFile, SmoothingFraction, SmoothingMode, TimeWeighting,
+    TimingState, TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource, Weighting,
 };
 use ac2_scene::format;
 use comfy_table::{Table, presets};
@@ -239,26 +241,237 @@ pub fn session(s: &Session) -> String {
     }
 }
 
+fn source_text(s: &TraceSource) -> String {
+    match s {
+        TraceSource::Captured {
+            meas, meas_name, ..
+        } => format!("captured from {meas_name} ({meas})"),
+        TraceSource::Imported { file_name, .. } => format!("imported {file_name}"),
+        TraceSource::Average { traces, method, .. } => {
+            let m = match method {
+                ac2_proto::model::AverageMethod::Power => "power",
+                ac2_proto::model::AverageMethod::Complex => "complex",
+                ac2_proto::model::AverageMethod::CoherenceWeighted => "coherence-weighted",
+            };
+            format!(
+                "{m} average of {}",
+                traces
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+        TraceSource::Math { a, b, op } => match op {
+            ac2_proto::model::MathOp::MagnitudeDifference => format!("{a} − {b} (dB)"),
+            ac2_proto::model::MathOp::ComplexDivision => format!("{a} / {b} (complex)"),
+        },
+        TraceSource::IrCapture { .. } => "ir capture".to_owned(),
+    }
+}
+
+fn kind_text(k: TraceKind) -> &'static str {
+    match k {
+        TraceKind::Transfer => "transfer",
+        TraceKind::Target => "target",
+        TraceKind::Spectrum { .. } => "spectrum",
+        TraceKind::Rta { .. } => "rta",
+    }
+}
+
 /// Traces table.
 pub fn traces(t_: &[TraceMeta]) -> String {
-    let mut t = table(&["id", "name", "source", "delay", "visible"]);
+    let mut t = table(&[
+        "id",
+        "slot",
+        "name",
+        "kind",
+        "source",
+        "delay",
+        "time base",
+        "shown",
+    ]);
     for tr in t_ {
-        let src = match &tr.source {
-            TraceSource::Captured { meas, .. } => format!("captured from {meas}"),
-            TraceSource::Imported { file_name, .. } => format!("imported {file_name}"),
-            TraceSource::Average { traces, .. } => format!("average of {}", traces.len()),
-            TraceSource::Math { a, b, .. } => format!("{a} − {b}"),
-            TraceSource::IrCapture { .. } => "ir capture".to_owned(),
-        };
         t.add_row(vec![
             tr.id.to_string(),
+            tr.edit.slot.map(|s| s.to_string()).unwrap_or_default(),
             tr.edit.name.clone(),
-            src,
+            kind_text(tr.kind).to_owned(),
+            source_text(&tr.source),
             ms(tr.delay.0),
+            time_base(&tr.source).to_owned(),
             yes(tr.edit.visible),
         ]);
     }
     t.to_string()
+}
+
+fn time_base(s: &TraceSource) -> &'static str {
+    match s {
+        TraceSource::Captured { .. } => "shared",
+        _ => "indep.",
+    }
+}
+
+/// Every metadata field of one trace.
+pub fn trace_meta(t: &TraceMeta) -> String {
+    let smoothing = match t.smoothing {
+        None => "none".to_owned(),
+        Some(s) => {
+            let f = match s.fraction {
+                SmoothingFraction::Third => 3,
+                SmoothingFraction::Sixth => 6,
+                SmoothingFraction::Twelfth => 12,
+                SmoothingFraction::TwentyFourth => 24,
+                SmoothingFraction::FortyEighth => 48,
+            };
+            let m = match s.mode {
+                SmoothingMode::Power => "power",
+                SmoothingMode::Complex => "complex",
+            };
+            format!("1/{f} octave, {m}")
+        }
+    };
+    let depth = match t.depth {
+        None => "—".to_owned(),
+        Some(DepthPolicy::EqualConfidence) => "equal confidence".to_owned(),
+        Some(DepthPolicy::FastLf { max_settle_s }) => {
+            format!("fast LF (≤ {} s)", format::fixed(max_settle_s.0, 1))
+        }
+    };
+    let cal = match &t.cal {
+        CalState::Uncalibrated => "uncalibrated".to_owned(),
+        CalState::Calibrated {
+            key, sensitivity, ..
+        } => format!(
+            "{} in {} mic {}, sensitivity {}",
+            key.device.0,
+            u32::from(key.channel) + 1,
+            key.mic,
+            format::db_readout(sensitivity.0)
+        ),
+    };
+    let mic = t.mic.as_ref().map_or_else(
+        || "—".to_owned(),
+        |m| {
+            format!(
+                "{} (curve {})",
+                m.name,
+                m.curve.as_deref().unwrap_or("none")
+            )
+        },
+    );
+    let reference = match &t.source {
+        TraceSource::Average {
+            reference: DelayReference::Trace { trace },
+            ..
+        } => format!("\n  phase ref   delay of trace {trace}"),
+        TraceSource::Average {
+            reference: DelayReference::Fixed { delay },
+            ..
+        } => format!("\n  phase ref   {}", ms(delay.0)),
+        _ => String::new(),
+    };
+    let epoch = match &t.source {
+        TraceSource::Captured {
+            epoch, at_sample, ..
+        } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
+        _ => String::new(),
+    };
+    format!(
+        "trace {} {:?}{}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  nudge       {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns",
+        t.id,
+        t.edit.name,
+        t.edit
+            .slot
+            .map_or_else(String::new, |s| format!(" (slot {s})")),
+        kind_text(t.kind),
+        source_text(&t.source),
+        time_base(&t.source),
+        ms(t.delay.0),
+        ms(t.edit.delay_nudge.0),
+        match t.edit.polarity {
+            Polarity::Normal => "normal",
+            Polarity::Inverted => "inverted",
+        },
+        format::db_readout(t.edit.offset.0),
+        yes(t.edit.visible),
+        if t.edit.locked { ", locked" } else { "" },
+        t.created_at.0
+    )
+}
+
+/// A trace's columns.
+pub fn trace_columns(d: &TraceData, g: &GridDef) -> String {
+    let f = ac2_scene::grid::column_frequencies(g);
+    let mut head = vec!["freq", "mag"];
+    if d.phase_deg.is_some() {
+        head.push("phase");
+    }
+    if d.coherence.is_some() {
+        head.push("γ²");
+    }
+    let mut t = table(&head);
+    let num = |v: f32, dec: usize| {
+        if v.is_finite() {
+            format::fixed(f64::from(v), dec)
+        } else {
+            "—".to_owned()
+        }
+    };
+    for (i, hz) in f.iter().enumerate() {
+        let mut row = vec![
+            format::freq_readout(*hz),
+            num(d.mag_db.get(i).copied().unwrap_or(f32::NAN), 2),
+        ];
+        if let Some(p) = &d.phase_deg {
+            row.push(num(p.get(i).copied().unwrap_or(f32::NAN), 1));
+        }
+        if let Some(c) = &d.coherence {
+            row.push(num(c.get(i).copied().unwrap_or(f32::NAN), 3));
+        }
+        t.add_row(row);
+    }
+    t.to_string()
+}
+
+/// Saved sessions table.
+pub fn sessions(l: &[SessionFile]) -> String {
+    if l.is_empty() {
+        return "no saved sessions".to_owned();
+    }
+    let mut t = table(&["name", "saved (UTC)", "meas", "traces", "path"]);
+    for s in l {
+        t.add_row(vec![
+            s.name.clone(),
+            utc(s.saved_at.0),
+            s.measurements.to_string(),
+            s.traces.to_string(),
+            s.path.clone(),
+        ]);
+    }
+    t.to_string()
+}
+
+/// `YYYY-MM-DD hh:mm` UTC of Unix nanoseconds (civil-from-days, proleptic Gregorian).
+pub fn utc(ns: u64) -> String {
+    let secs = ns / 1_000_000_000;
+    let days = i64::try_from(secs / 86_400).unwrap_or(0);
+    let rem = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        rem / 3600,
+        (rem % 3600) / 60
+    )
 }
 
 /// Calibrations table.

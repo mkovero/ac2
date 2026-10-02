@@ -143,6 +143,18 @@ pub enum SessionCmd {
     Close,
     /// Current session.
     Status,
+    /// Save measurements and traces (with slots and display edits) to a session.
+    Save {
+        /// Session name (in the daemon's session directory) or a directory path.
+        session: String,
+    },
+    /// Load a session: replaces measurements and traces; always comes up disarmed.
+    Load {
+        /// Session name or directory path.
+        session: String,
+    },
+    /// Saved sessions in the daemon's session directory.
+    List,
 }
 
 /// `session open`.
@@ -593,16 +605,78 @@ pub struct CalSpl {
 /// `trace …`.
 #[derive(Debug, Subcommand)]
 pub enum TraceCmd {
-    /// Capture a measurement's live result.
+    /// Capture a measurement's live result (transfer, spectrum or RTA) with its metadata.
     Capture {
         /// Source measurement.
         meas: MeasRef,
         /// Trace name.
         #[arg(long)]
         name: String,
+        /// Put it in slot 1 … 9 (taken from the trace holding it).
+        #[arg(long, value_parser = clap::value_parser!(u8).range(1..=9))]
+        slot: Option<u8>,
     },
     /// List traces.
     List,
+    /// One trace's metadata (with `--data`, its columns too).
+    Show {
+        /// Trace id or name.
+        trace: MeasRef,
+        /// Include frequency, magnitude, phase and coherence columns.
+        #[arg(long)]
+        data: bool,
+    },
+    /// Delete traces.
+    Rm {
+        /// Trace ids or names.
+        #[arg(required = true)]
+        traces: Vec<MeasRef>,
+    },
+    /// Average traces into a new trace.
+    Average {
+        /// Trace ids or names (at least two).
+        #[arg(required = true, num_args = 2..)]
+        traces: Vec<MeasRef>,
+        /// Name of the result.
+        #[arg(long)]
+        name: String,
+        /// power (RMS magnitude), complex, or coherence (inverse-variance weighted).
+        #[arg(long, value_enum, default_value = "power")]
+        method: AverageArg,
+        /// Phase reference: this trace's measured delay (default: the first listed).
+        #[arg(long = "ref", value_name = "TRACE", conflicts_with = "ref_delay")]
+        reference: Option<MeasRef>,
+        /// Phase reference: an explicit delay, e.g. `12.5ms`.
+        #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
+        ref_delay: Option<Time>,
+    },
+    /// A − B into a new trace: dB difference, or with `--complex` complex division A / B.
+    Math {
+        /// A.
+        a: MeasRef,
+        /// B.
+        b: MeasRef,
+        /// Name of the result.
+        #[arg(long)]
+        name: String,
+        /// Complex division (keeps phase) instead of magnitude difference.
+        #[arg(long)]
+        complex: bool,
+    },
+    /// Import a CSV / analyzer text export (freq, mag[, phase][, coherence]).
+    Import {
+        /// File.
+        file: PathBuf,
+        /// Import as a target curve (magnitude only).
+        #[arg(long)]
+        target: bool,
+        /// File format.
+        #[arg(long, value_enum, default_value = "auto")]
+        format: ImportFormatArg,
+        /// Name (default: from the file).
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Export a trace.
     Export {
         /// Trace id or name.
@@ -611,6 +685,28 @@ pub enum TraceCmd {
         #[arg(long, value_name = "FILE")]
         csv: PathBuf,
     },
+}
+
+/// Trace averaging method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AverageArg {
+    /// RMS magnitude; phase of the complex mean.
+    Power,
+    /// Complex mean.
+    Complex,
+    /// Coherence-weighted complex mean.
+    Coherence,
+}
+
+/// Import file format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ImportFormatArg {
+    /// ac2 CSV when the file starts with its header, analyzer text otherwise.
+    Auto,
+    /// ac2 CSV only.
+    Ac2,
+    /// Analyzer text (REW, Smaart, … exports).
+    Text,
 }
 
 /// `state …`.

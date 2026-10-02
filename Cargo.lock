@@ -27,6 +27,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -36,6 +37,7 @@ version = "0.0.0"
 dependencies = [
  "ac2-client",
  "ac2-proto",
+ "ac2-traces",
  "ac2-zmq",
  "getrandom 0.3.4",
  "sha2",
@@ -99,6 +101,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac2-traces"
+version = "0.0.0"
+dependencies = [
+ "ac2-core",
+ "ac2-proto",
+ "directories",
+ "num-complex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ac2-ui"
 version = "0.0.0"
 dependencies = [
@@ -135,6 +151,7 @@ dependencies = [
  "ac2-client",
  "ac2-core",
  "ac2-proto",
+ "ac2-traces",
  "ac2-zmq",
  "ctrlc",
  "getrandom 0.3.4",

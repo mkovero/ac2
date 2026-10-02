@@ -70,10 +70,15 @@ pub(crate) struct StampArgs {
     pub(crate) protection: ProtectionFlags,
 }
 
+/// The newest `tf` / `spec` / `rta` frame a job published, for `trace.capture`: a capture
+/// stores exactly what clients were shown, never a separately computed result.
+pub(crate) type LatestFrame = Arc<Mutex<Option<Frame>>>;
+
 /// A job's way out.
 pub(crate) struct Emitter {
     outbox: Outbox,
     env: JobEnv,
+    latest: LatestFrame,
 }
 
 impl Emitter {
@@ -101,7 +106,16 @@ impl Emitter {
             Ok(parts) => {
                 self.outbox.frame(&parts);
             }
-            Err(e) => tracing::error!("{topic}: frame not encodable: {e}"),
+            Err(e) => {
+                tracing::error!("{topic}: frame not encodable: {e}");
+                return;
+            }
+        }
+        if matches!(
+            frame.data,
+            FrameData::Tf(_) | FrameData::Spec(_) | FrameData::Rta(_)
+        ) {
+            *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = Some(frame);
         }
     }
 }
@@ -144,6 +158,7 @@ pub(crate) struct JobHandle {
     cmd: Sender<JobCmd>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    latest: LatestFrame,
     /// Id of this job at the fan-out.
     pub(crate) fanout_id: u64,
 }
@@ -151,6 +166,14 @@ pub(crate) struct JobHandle {
 impl JobHandle {
     pub(crate) fn send(&self, c: JobCmd) {
         let _ = self.cmd.send(c);
+    }
+
+    /// The newest curve frame this job published.
+    pub(crate) fn latest(&self) -> Option<Frame> {
+        self.latest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn stop_inner(&mut self) {
@@ -182,6 +205,8 @@ pub(crate) fn spawn(
     let (ctx, crx) = std::sync::mpsc::channel::<JobCmd>();
     let stop = Arc::new(AtomicBool::new(false));
     let s = Arc::clone(&stop);
+    let latest: LatestFrame = Arc::new(Mutex::new(None));
+    let slot = Arc::clone(&latest);
     let thread = std::thread::Builder::new()
         .name(name.clone())
         .spawn(move || {
@@ -192,7 +217,11 @@ pub(crate) fn spawn(
                     return;
                 }
             };
-            let em = Emitter { outbox, env };
+            let em = Emitter {
+                outbox,
+                env,
+                latest: slot,
+            };
             run(&mut *analysis, &brx, &crx, &s, &em);
         })?;
     Ok((
@@ -200,6 +229,7 @@ pub(crate) fn spawn(
             cmd: ctx,
             stop,
             thread: Some(thread),
+            latest,
             fanout_id,
         },
         btx,

@@ -88,15 +88,15 @@ Lease column: **L** = `lease_token` required (Q6).
 | `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `measurement` | |
 | `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
 | `delay.track` | `meas`, `enabled` | `measurement` | |
-| `trace.capture` | `meas`, `name` | `trace` | |
+| `trace.capture` | `meas`, `name`, `slot` (1…9 \| nil) | `trace` | |
 | `trace.list` | — | `traces` | |
 | `trace.get` | `trace` | `trace_data` | |
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
 | `trace.math` | `a`, `b`, `op: magnitude_difference \| complex_division`, `name` | `trace` | |
-| `trace.import` | `file_name`, `format`, `content: bin` | `trace` | |
-| `trace.export` | `trace`, `format` | `export` (`file_name`, `content: bin`) | |
+| `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| auto`, `role: trace \| target`, `content: bin` | `trace` | |
+| `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
 | `cal.mic_curve` | `input`, `action: assign{name, provenance, points} \| bypass{bypassed} \| clear` | `mic_curve` | |
 | `cal.list` | — | `calibrations` | |
@@ -106,8 +106,9 @@ Lease column: **L** = `lease_token` required (Q6).
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
-| `file.save` | `path` (daemon host) | `ack` | |
-| `file.load` | `path` (daemon host) | `ack`; loads disarmed, no owner | |
+| `file.save` | `session: SessionRef` | `session_file` | |
+| `file.load` | `session: SessionRef` | `session_file`; loads disarmed, no owner, new epoch | |
+| `file.list` | — | `sessions` | |
 
 Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries the full
 desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 s after
@@ -155,6 +156,74 @@ it: `first_arrival` takes the accepted first arrival or, when ambiguous, the pre
 list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an explicit operator
 value) clears `last_finding`; a delay tracking moves keeps it.
 
+#### Traces (`trace.*`)
+
+A trace's metadata (`TraceMeta`, §4.1) is mirrored state; its columns leave the daemon only
+through `trace.get` (`TraceData`: `meta`, `mag_db`, `phase_deg` (nil = magnitude only),
+`coherence` (nil = unknown), column order = the trace's grid, NaN = no value), `trace.export`
+and `file.save`. Columns are stored as measured: offset, polarity and nudge are display
+edits and are never applied to the data.
+
+- `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
+  exactly what clients were shown — with columns whose validity mask is set stored as NaN.
+  It needs a result in the current session epoch (`invalid` otherwise: not running, no
+  frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
+  `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
+  `epoch`, `at_sample`}, `delay` (the delay the DSP used), `smoothing`, `depth` (transfer),
+  `cal` (spectrum / RTA: the newest calibration of the input on the open device; transfer
+  functions are ratios and always `uncalibrated`), `mic` (from that calibration and the
+  input's mic curve), `created_at`.
+- **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
+  updating into a slot clears it on the trace that held it (a `trace` event for that one
+  too).
+- **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
+  `locked`; `trace.delete` of a locked trace is `refused`.
+- **Time base (decisions 8a / 8b).** Captured traces share the time base of their session
+  epoch; every other source (`imported`, `average`, `math`) is independent.
+- `trace.average`: ≥ 2 distinct traces of one kind (no targets). Transfer: `power` (RMS
+  magnitude, phase of the complex mean), `complex`, `coherence_weighted` (weight
+  γ²/(1 − γ²), γ² capped at 0.999); every input's phase is re-referred to `reference`
+  (`DelayReference`: `trace` {`trace`} = that input's measured delay, or `fixed` {`delay`})
+  before combining, and the result's `delay` is that reference. Phase methods need every
+  input captured in the same epoch (`invalid` otherwise); a power average without a shared
+  time base, or with an input without phase, keeps the magnitude only. Spectrum / RTA:
+  `power` only, all on one grid. A column is valid only where every input is. The result is
+  on the first trace's grid (others resampled).
+- `trace.math`: `magnitude_difference` = A − B in dB (no phase); `complex_division` = A / B
+  with B's phase re-referred to A's delay when both are captured in one epoch (otherwise
+  each keeps its own alignment). Transfer and target traces combine with each other (B is
+  resampled onto A's grid); spectra / RTA only with their own kind on one grid, magnitude
+  only. Result kind `transfer`, source `math`, independent.
+- `trace.import`: the file text is parsed by `format` (§7.1) and, unless it is an ac2 CSV
+  on a known grid, resampled onto a log grid (48 points per octave, 96 when the file is
+  denser) — magnitude and coherence linear over log frequency, phase unwrapped first.
+  `role: target` keeps the magnitude only and makes `kind: target`. The name is the ac2
+  header's `name`, else the file name without extension. A refused file is `invalid` with
+  `detail: {type: import, line (1-based) | nil, problem: ImportProblem}`.
+  `ImportProblem`: `not_text`, `no_data`, `bad_number`, `column_count`, `too_few_columns`,
+  `not_ascending`, `out_of_range`, `too_many_rows` (> 65536), `bad_header`,
+  `bad_coherence`.
+
+#### Sessions (`file.*`)
+
+`SessionRef` (tagged by `type`): `name` {`name`} — a directory in the daemon's session
+directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or `path`
+{`path`} — an absolute directory on the daemon host, accepted from local transports only
+(`refused` in network mode). `SessionFile`: `name`, `path`, `saved_at`, `measurements`,
+`traces`.
+
+- `file.save` writes measurement configurations (applied delay, tracking, running,
+  frozen) and every trace with metadata, edits, slots and columns (format §7.2). Never
+  generator state; calibrations belong to the calibration store.
+- `file.load` checks the whole session first (a refusal changes nothing), then stops and
+  disarms the generator and drops its owner (the old lease is gone), deletes every
+  measurement and trace, starts a new session epoch newer than every epoch recorded in the
+  loaded traces (an open stream reopens without generator routes), and recreates the
+  measurements (same ids, restarted when they were running) and traces (same ids). Errors:
+  `not_found`; `invalid` (not a session, bad name, damaged files); `unsupported` with
+  `detail: {type: session_version, found, supported}` for another format version.
+- `file.list`: the sessions in the session directory, by name.
+
 #### Averaging depth
 
 `TransferConfig.depth: DepthPolicy` (tagged by `type`): `equal_confidence` (every MTW stage
@@ -166,7 +235,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `devices`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `export`, `calibration`, `calibrations`, `mic_curve` (value or nil after `clear`),
-`spl_log`, `snapshot`, `events`, `grid`.
+`spl_log`, `snapshot`, `events`, `grid`, `session_file`, `sessions`.
 
 ### 3.4 Errors
 
@@ -175,7 +244,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `internal`, `version_mismatch`.
 
 `detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
-`version` {daemon, client}, `resync` {oldest}.
+`version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),
+`session_version` {found, supported} (§3.2 sessions).
 
 ## 4. State and events
 
@@ -184,8 +254,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
-polarity, delay_nudge}, `source` {captured | imported | average | math | ir_capture},
-`grid_id`, `delay`, `smoothing`, `cal`, `mic`, `created_at`), `generator` (`owner`,
+polarity, delay_nudge, slot}, `kind`, `source` {captured | imported | average | math |
+ir_capture}, `grid_id`, `delay`, `smoothing`, `depth`, `cal`, `mic`, `created_at`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `sensitivity`, `calibrator_level`, `calibrator_freq`,
 `measured`, `calibrated_at`), `mic_curves`, `spl_logs`, `timing` (`TimingStatus`: `epoch`,
@@ -325,7 +395,45 @@ u32, `k_min` i32, `k_max` i32; iec_bands: band designator b u32 (1, 3, 6, 12, 24
 count u32, each centre f64; linear: `fs` f64, `n` u32. Example: log 48/−240/239 (480
 columns) = `0x79ec3d16ae0e94d0`.
 
-## 7. Cross-language fixtures
+## 7. Files
+
+### 7.1 Trace text (`trace.import` / `trace.export`)
+
+**ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
+`# ac2 trace export v1` (another version is `bad_header`); then `# key: value` lines with
+every metadata field (`name`, `kind`, `source`, `time_base`, `delay_ms`,
+`delay_nudge_ms`, `polarity`, `offset_db`, `smoothing`, `depth`, `cal`, `mic`,
+`created_ns`, `note`, `grid` as the JSON `GridDef`); then the header
+`freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column. Values are written in
+their shortest exact form and gaps as `nan`, so an export re-imports bit for bit onto the
+grid named in its header. Import reads `name`, `kind` and `grid`.
+
+**Analyzer text** (`analyzer_text`): columns separated by `,`, `;` (decimal commas
+allowed), tabs or spaces; UTF-8 or Latin-1; comment lines starting with `#`, `*`, `;`,
+`%`, `!` or `//`; non-numeric lines before the first data row are headers, and a header
+naming the columns maps them (freq; mag / SPL / dB / level; phase / deg; coh), otherwise
+columns are `freq mag [phase] [coherence]`. Coherence where most values exceed 1 is read as
+percent. Frequencies must be positive (0 Hz allowed as the first row) and strictly
+ascending, every data row must have the first row's column count, and at least two rows
+need a magnitude. `auto` picks ac2 CSV when the first line starts with
+`# ac2 trace export`.
+
+### 7.2 Session directory (`file.save` / `file.load`)
+
+```
+<dir>/session.json                  manifest
+<dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace
+```
+
+`session.json`: `{format: "ac2-session", version: 1, saved_at, measurements:
+[{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
+[{meta: TraceMeta, grid: GridDef, file}]}` (JSON, field names as in this document). A save
+writes the trace files of a new generation first, then replaces `session.json` atomically
+(temporary file + rename), then removes older generations: a reader sees the old session
+or the new one, never a mix. `format` and `version` are read first; any other version is
+refused (no migration). A directory that holds other files is never written into.
+
+## 8. Cross-language fixtures
 
 `fixtures/protocol/` holds Rust-encoded (`rust_*.bin`) and Python-encoded (`py_*.bin`)
 messages plus expected values (`expected/*.json`). See `tools/protocol/README.md`.

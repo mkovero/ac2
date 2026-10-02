@@ -144,6 +144,13 @@ impl Chord {
         }
     }
 
+    pub const fn alt(key: Key) -> Self {
+        Self {
+            alt: true,
+            ..Self::key(key)
+        }
+    }
+
     /// The chord of a key event.
     pub fn from_event(key: Key, m: Modifiers) -> Self {
         Self {
@@ -367,6 +374,18 @@ commands! {
     Slot7 => "slot_7", "Capture selected measurement to slot 7", [Global];
     Slot8 => "slot_8", "Capture selected measurement to slot 8", [Global];
     Slot9 => "slot_9", "Capture selected measurement to slot 9", [Global];
+    ShowSlot1 => "show_slot_1", "Show / hide slot 1", [Global];
+    ShowSlot2 => "show_slot_2", "Show / hide slot 2", [Global];
+    ShowSlot3 => "show_slot_3", "Show / hide slot 3", [Global];
+    ShowSlot4 => "show_slot_4", "Show / hide slot 4", [Global];
+    ShowSlot5 => "show_slot_5", "Show / hide slot 5", [Global];
+    ShowSlot6 => "show_slot_6", "Show / hide slot 6", [Global];
+    ShowSlot7 => "show_slot_7", "Show / hide slot 7", [Global];
+    ShowSlot8 => "show_slot_8", "Show / hide slot 8", [Global];
+    ShowSlot9 => "show_slot_9", "Show / hide slot 9", [Global];
+    ImportTrace => "import_trace", "Import a trace file (CSV / analyzer text)…", [Global];
+    SessionSave => "session_save", "Session: save (name or path)…", [Global];
+    SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
@@ -382,11 +401,15 @@ commands! {
     NudgeEarlier => "nudge_earlier", "Nudge selected trace 0.1 ms earlier", [Transfer];
     NudgeLater => "nudge_later", "Nudge selected trace 0.1 ms later", [Transfer];
     PhaseReference => "phase_reference", "Make selected trace the phase reference", [Transfer];
-    Target => "target", "Target curve (not yet available)", [Transfer];
+    Target => "target", "Load a target curve file…", [Transfer];
     ToggleIr => "toggle_ir", "Show / hide IR pane", [Transfer, Ir];
     CoherenceMask => "coherence_mask", "Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9", [Transfer];
     CoherencePlacement => "coherence_placement", "Coherence: own pane / over magnitude", [Transfer];
-    Average => "average", "Average traces (not yet available)", [Transfer];
+    Average => "average", "Average shown stored traces (power)", [Transfer];
+    AverageComplex => "average_complex", "Average shown stored traces (complex)", [Transfer];
+    AverageCoherence => "average_coherence", "Average shown stored traces (coherence-weighted)", [Transfer];
+    MathDifference => "math_difference", "A − B: dB difference of the two lowest shown slots", [Transfer];
+    MathDivide => "math_divide", "A / B: complex division of the two lowest shown slots", [Transfer];
     PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
     GroupDelay => "group_delay", "Phase / group delay", [Transfer];
 
@@ -423,16 +446,18 @@ pub fn defaults() -> Vec<Binding> {
     let k = Chord::key;
     let sh = Chord::shift;
     let cmd = Chord::command;
+    let alt = Chord::alt;
     let mut v: Vec<(C, S, Chord)> = vec![
         (C::Help, S::Global, k(K::Slash)),
         (C::Help, S::Global, k(K::F1)),
         (C::Palette, S::Global, cmd(K::K)),
         (C::Quit, S::Global, cmd(K::Q)),
         (C::StimulusLevel, S::Global, k(K::L)),
-        (C::FocusTransfer, S::Global, k(K::Num1)),
-        (C::FocusSpectrum, S::Global, k(K::Num2)),
-        (C::FocusIr, S::Global, k(K::Num3)),
-        (C::FocusSpl, S::Global, k(K::Num4)),
+        // Plain digits are the slots' (as in `ac`); panes take Alt+digit.
+        (C::FocusTransfer, S::Global, alt(K::Num1)),
+        (C::FocusSpectrum, S::Global, alt(K::Num2)),
+        (C::FocusIr, S::Global, alt(K::Num3)),
+        (C::FocusSpl, S::Global, alt(K::Num4)),
         (C::NextPane, S::Global, k(K::Tab)),
         (C::PrevPane, S::Global, sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
@@ -456,6 +481,15 @@ pub fn defaults() -> Vec<Binding> {
         (C::Slot7, S::Global, cmd(K::Num7)),
         (C::Slot8, S::Global, cmd(K::Num8)),
         (C::Slot9, S::Global, cmd(K::Num9)),
+        (C::ShowSlot1, S::Global, k(K::Num1)),
+        (C::ShowSlot2, S::Global, k(K::Num2)),
+        (C::ShowSlot3, S::Global, k(K::Num3)),
+        (C::ShowSlot4, S::Global, k(K::Num4)),
+        (C::ShowSlot5, S::Global, k(K::Num5)),
+        (C::ShowSlot6, S::Global, k(K::Num6)),
+        (C::ShowSlot7, S::Global, k(K::Num7)),
+        (C::ShowSlot8, S::Global, k(K::Num8)),
+        (C::ShowSlot9, S::Global, k(K::Num9)),
         (C::InsertDelay, S::Transfer, k(K::X)),
         (C::InsertStrongest, S::Transfer, sh(K::X)),
         (C::TypeDelay, S::Transfer, k(K::D)),
@@ -738,6 +772,13 @@ mod tests {
             CommandId::StimulusOutputs,
             CommandId::StimulusTakeOver,
             CommandId::Reconnect,
+            CommandId::AverageComplex,
+            CommandId::AverageCoherence,
+            CommandId::MathDifference,
+            CommandId::MathDivide,
+            CommandId::ImportTrace,
+            CommandId::SessionSave,
+            CommandId::SessionLoad,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {
@@ -763,6 +804,9 @@ mod tests {
             ("Shift+P", CommandId::GroupDelay),
             ("Ctrl+1", CommandId::Slot1),
             ("Ctrl+9", CommandId::Slot9),
+            ("1", CommandId::ShowSlot1),
+            ("9", CommandId::ShowSlot9),
+            ("Alt+2", CommandId::FocusSpectrum),
             ("Space", CommandId::StimulusArm),
             ("Enter", CommandId::StimulusFire),
             ("Esc", CommandId::StimulusStop),

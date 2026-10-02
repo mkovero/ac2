@@ -7,19 +7,19 @@ use std::time::Instant;
 use ac2_client::TopicFrame;
 use ac2_proto::FrameData;
 use ac2_proto::frame::ProtectionFlags;
-use ac2_proto::model::{LevelScale, MeasKind, Measurement, Polarity, TraceSource};
+use ac2_proto::model::{LevelScale, MeasKind, Measurement, Polarity, TraceKind, TraceSource};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::grid::{column_edges, column_frequencies};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::primitives::Viewport;
-use ac2_scene::spectrum::{SpectrumScene, SpectrumTrace, spectrum_scene};
+use ac2_scene::spectrum::{Quantity, SpectrumScene, SpectrumTrace, spectrum_scene};
 use ac2_scene::spl::{SplScene, cal_text, spl_readout, spl_scene};
 use ac2_scene::tf::{TfScene, transfer_scene};
 use ac2_scene::theme::Theme;
 use ac2_scene::time::{ClockOffset, Freshness};
-use ac2_scene::trace::{TfTrace, TimeBase};
+use ac2_scene::trace::{TfTrace, TimeBase, TraceKey};
 
 use crate::state::AppState;
 
@@ -120,12 +120,15 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             color: i,
         });
     }
-    let stored: Vec<(&ac2_proto::model::TraceData, Vec<f64>)> = st
+    let mut stored: Vec<(&ac2_proto::model::TraceData, Vec<f64>)> = st
         .traces
         .values()
-        .filter(|(t, _)| t.meta.edit.visible)
+        .filter(|(t, _)| {
+            t.meta.edit.visible && matches!(t.meta.kind, TraceKind::Transfer | TraceKind::Target)
+        })
         .map(|(t, g)| (t.as_ref(), column_frequencies(g)))
         .collect();
+    stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
 
     let mut traces: Vec<TfTrace<'_>> = Vec::new();
     for l in &live {
@@ -220,6 +223,57 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
         traces.push(t);
+    }
+    // Stored spectra / RTA bands, drawn under the live ones' axis rules.
+    struct Stored<'a> {
+        data: &'a ac2_proto::model::TraceData,
+        scale: LevelScale,
+        quantity: Quantity,
+        freqs: Vec<f64>,
+        edges: Vec<(f64, f64)>,
+    }
+    let stored: Vec<Stored<'_>> = st
+        .traces
+        .values()
+        .filter(|(t, _)| t.meta.edit.visible)
+        .filter_map(|(t, g)| {
+            let (scale, q) = match t.meta.kind {
+                TraceKind::Spectrum { scale } => (scale, Quantity::Tone),
+                TraceKind::Rta { scale } => (scale, Quantity::Band),
+                _ => return None,
+            };
+            Some(Stored {
+                data: t.as_ref(),
+                scale,
+                quantity: q,
+                freqs: column_frequencies(g),
+                edges: column_edges(g),
+            })
+        })
+        .collect();
+    for Stored {
+        data,
+        scale,
+        quantity,
+        freqs,
+        edges,
+    } in &stored
+    {
+        let c = data.meta.edit.color;
+        traces.push(SpectrumTrace {
+            key: TraceKey::Stored(data.meta.id),
+            name: data.meta.edit.name.clone(),
+            color: ac2_scene::primitives::Color::from_rgba8([c.r, c.g, c.b, 255]),
+            freqs,
+            edges,
+            level: &data.mag_db,
+            validity: None,
+            peak: None,
+            scale: *scale,
+            quantity: *quantity,
+            caption: "stored".into(),
+            freshness: None,
+        });
     }
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
     let status = status(st, &shown, None, now);

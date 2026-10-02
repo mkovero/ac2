@@ -3,7 +3,7 @@
 //! Used by round-trip tests, the documentation parity test and the cross-language
 //! fixtures (`tools/protocol/fixtures.py` builds the same frames in Python).
 
-use crate::ctrl::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
+use crate::ctrl::{Command, ErrorCode, ErrorDetail, ImportProblem, ProtoError, ReplyBody, Welcome};
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
     ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LevelsFrame,
@@ -131,6 +131,7 @@ fn edit() -> TraceEdit {
         offset: Db(-3.0),
         polarity: Polarity::Inverted,
         delay_nudge: Seconds(0.000_25),
+        slot: Some(3),
     }
 }
 
@@ -211,6 +212,7 @@ pub fn commands() -> Vec<Command> {
         Command::TraceCapture {
             meas: MeasId(1),
             name: "Main L".into(),
+            slot: Some(3),
         },
         Command::TraceList,
         Command::TraceGet { trace: TraceId(7) },
@@ -233,7 +235,8 @@ pub fn commands() -> Vec<Command> {
         },
         Command::TraceImport {
             file_name: "sub.txt".into(),
-            format: ImportFormat::FreqMagPhaseText,
+            format: ImportFormat::AnalyzerText,
+            role: ImportRole::Target,
             content: Blob(b"20 -3.0 10\n".to_vec()),
         },
         Command::TraceExport {
@@ -281,11 +284,16 @@ pub fn commands() -> Vec<Command> {
             grid_id: log_grid().id(),
         },
         Command::FileSave {
-            path: "/tmp/show.ac2".into(),
+            session: SessionRef::Name {
+                name: "friday show".into(),
+            },
         },
         Command::FileLoad {
-            path: "/tmp/show.ac2".into(),
+            session: SessionRef::Path {
+                path: "/tmp/show".into(),
+            },
         },
+        Command::FileList,
     ]
 }
 
@@ -396,14 +404,17 @@ fn trace_meta() -> TraceMeta {
     TraceMeta {
         id: TraceId(7),
         edit: edit(),
+        kind: TraceKind::Transfer,
         source: TraceSource::Captured {
             meas: MeasId(1),
+            meas_name: "Main L".into(),
             epoch: SessionEpoch(2),
             at_sample: SampleIndex(4_800_000),
         },
         grid_id: log_grid().id(),
         delay: Seconds(0.0125),
         smoothing: None,
+        depth: Some(DepthPolicy::EqualConfidence),
         cal: CalState::Calibrated {
             key: cal_key(),
             sensitivity: Db(120.5),
@@ -414,6 +425,16 @@ fn trace_meta() -> TraceMeta {
             curve: Some("M30-1234".into()),
         }),
         created_at: WallNs(1_790_000_000_000_000_000),
+    }
+}
+
+fn session_file() -> SessionFile {
+    SessionFile {
+        name: "friday show".into(),
+        path: "/home/fohtech/.local/share/ac2/sessions/friday show".into(),
+        saved_at: WallNs(1_790_000_000_000_000_000),
+        measurements: 2,
+        traces: 5,
     }
 }
 
@@ -599,6 +620,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         }))),
         Ok(ReplyBody::Events(events())),
         Ok(ReplyBody::Grid(grids().remove(1))),
+        Ok(ReplyBody::SessionFile(session_file())),
+        Ok(ReplyBody::Sessions(vec![session_file()])),
         Err(ProtoError {
             code: ErrorCode::Conflict,
             msg: "state moved".into(),
@@ -615,6 +638,22 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             code: ErrorCode::ResyncRequired,
             msg: "gap expired".into(),
             detail: Some(ErrorDetail::Resync { oldest: Rev(100) }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Invalid,
+            msg: "line 12: not a number".into(),
+            detail: Some(ErrorDetail::Import {
+                line: Some(12),
+                problem: ImportProblem::BadNumber,
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Unsupported,
+            msg: "session format 2".into(),
+            detail: Some(ErrorDetail::SessionVersion {
+                found: 2,
+                supported: 1,
+            }),
         }),
         Err(ProtoError {
             code: ErrorCode::NotFound,

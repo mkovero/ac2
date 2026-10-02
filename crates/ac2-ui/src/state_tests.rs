@@ -365,7 +365,7 @@ fn keys_follow_the_focused_pane() {
     assert!(!t.st.layout.is_shown(PaneKind::Ir));
     t.key("H");
     // Spectrum pane: H is peak hold.
-    t.key("2");
+    t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
     t.key("H");
     assert!(t.st.view.spectrum.peak_hold);
@@ -458,10 +458,14 @@ fn transfer_commands() {
         t.st.view.tf.phase_reference,
         Some(TraceKey::Live(MeasId(1)))
     );
-    // Stubs say so and do nothing else.
+    // Z asks for a target file; M with no stored traces says what it needs.
     assert!(t.key("Z").is_empty());
-    assert!(t.last_toast().contains("not available"));
+    assert!(
+        matches!(&t.st.overlay, Overlay::Prompt(p) if p.kind == PromptKind::ImportFile(ImportRole::Target))
+    );
+    t.key("Esc");
     assert!(t.key("M").is_empty());
+    assert!(t.last_toast().contains("at least two"));
 }
 
 #[test]
@@ -475,6 +479,43 @@ fn transfer_commands_need_a_transfer_measurement() {
     assert_eq!(t.st.selected, Some(MeasId(1)));
 }
 
+fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
+    TraceMeta {
+        id: TraceId(id),
+        edit: TraceEdit {
+            name: format!("t{id}"),
+            color: Rgb { r: 1, g: 2, b: 3 },
+            visible: true,
+            locked: false,
+            order: id,
+            offset: Db(0.0),
+            polarity: Polarity::Normal,
+            delay_nudge: Seconds(0.0),
+            slot,
+        },
+        kind: TraceKind::Transfer,
+        source: TraceSource::Captured {
+            meas: MeasId(1),
+            meas_name: "Main L".into(),
+            epoch: SessionEpoch(epoch),
+            at_sample: SampleIndex(0),
+        },
+        grid_id: ac2_proto::GridId(1),
+        delay: Seconds(0.0),
+        smoothing: None,
+        depth: Some(DepthPolicy::EqualConfidence),
+        cal: CalState::Uncalibrated,
+        mic: None,
+        created_at: WallNs(0),
+    }
+}
+
+fn with_traces(traces: Vec<TraceMeta>) -> ConnEvent {
+    let mut s = daemon_state();
+    s.traces = traces;
+    mirror(s)
+}
+
 #[test]
 fn slots_capture_and_replace() {
     let mut t = T::new();
@@ -484,38 +525,13 @@ fn slots_capture_and_replace() {
         [Request::Capture {
             meas: MeasId(1),
             slot: 3,
-            replace: None
-        }]
+            replace: None,
+            name,
+        }] if name == "Main L S3"
     ));
-    let trace = TraceMeta {
-        id: TraceId(9),
-        edit: TraceEdit {
-            name: "slot 3".into(),
-            color: Rgb { r: 1, g: 2, b: 3 },
-            visible: true,
-            locked: false,
-            order: 9,
-            offset: Db(0.0),
-            polarity: Polarity::Normal,
-            delay_nudge: Seconds(0.0),
-        },
-        source: TraceSource::Captured {
-            meas: MeasId(1),
-            epoch: SessionEpoch(2),
-            at_sample: SampleIndex(0),
-        },
-        grid_id: ac2_proto::GridId(1),
-        delay: Seconds(0.0),
-        smoothing: None,
-        cal: CalState::Uncalibrated,
-        mic: None,
-        created_at: WallNs(0),
-    };
-    t.conn(ConnEvent::Captured {
-        slot: 3,
-        trace: trace.clone(),
-    });
-    assert_eq!(t.st.slots[2], Some(TraceId(9)));
+    // Slots are the daemon's: a mirrored trace in slot 3 is what Ctrl+3 replaces.
+    t.conn(with_traces(vec![stored(9, Some(3), 2)]));
+    assert_eq!(t.st.slots()[2].map(|t| t.id), Some(TraceId(9)));
     let r = t.key("Ctrl+3");
     assert!(matches!(
         r.as_slice(),
@@ -525,9 +541,253 @@ fn slots_capture_and_replace() {
             ..
         }]
     ));
+    // A locked trace is not deleted; it only gives up the slot.
+    let mut locked = stored(9, Some(3), 2);
+    locked.edit.locked = true;
+    t.conn(with_traces(vec![locked]));
+    let r = t.key("Ctrl+3");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Capture {
+            slot: 3,
+            replace: None,
+            ..
+        }]
+    ));
+    // Spectrum measurements capture too.
+    t.st.selected = Some(MeasId(2));
+    let r = t.key("Ctrl+1");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Capture {
+            meas: MeasId(2),
+            slot: 1,
+            ..
+        }]
+    ));
     // A trace deleted daemon-side frees its slot.
     t.conn(mirror(daemon_state()));
-    assert_eq!(t.st.slots[2], None);
+    assert!(t.st.slots()[2].is_none());
+}
+
+#[test]
+fn digits_show_and_hide_slots_alt_digits_focus_panes() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![stored(9, Some(3), 2)]));
+    let r = t.key("3");
+    let [
+        Request::Call {
+            cmd: Command::TraceUpdate { trace, edit },
+            what,
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}")
+    };
+    assert_eq!(*trace, TraceId(9));
+    assert!(!edit.visible);
+    assert_eq!(edit.slot, Some(3));
+    assert_eq!(what, "slot 3 hidden");
+    // The pane did not change focus.
+    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+    // An empty slot says how to fill it.
+    assert!(t.key("5").is_empty());
+    assert!(t.last_toast().contains("slot 5 is empty"));
+    t.key("Alt+2");
+    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    t.key("Alt+1");
+    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+}
+
+#[test]
+fn m_averages_the_shown_stored_traces() {
+    let mut t = T::new();
+    // One shown trace is not enough.
+    t.conn(with_traces(vec![stored(4, Some(1), 2)]));
+    assert!(t.key("M").is_empty());
+    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    let mut hidden = stored(6, Some(3), 2);
+    hidden.edit.visible = false;
+    let mut target = stored(7, None, 2);
+    target.kind = TraceKind::Target;
+    t.conn(with_traces(vec![
+        stored(4, Some(2), 2),
+        stored(5, Some(1), 2),
+        hidden,
+        target,
+    ]));
+    let r = t.key("M");
+    let [
+        Request::Call {
+            cmd:
+                Command::TraceAverage {
+                    traces,
+                    method,
+                    reference,
+                    name,
+                },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}")
+    };
+    // Slot order, hidden and target traces left out, reference = the first.
+    assert_eq!(traces, &[TraceId(5), TraceId(4)]);
+    assert_eq!(*method, AverageMethod::Power);
+    assert_eq!(*reference, DelayReference::Trace { trace: TraceId(5) });
+    assert_eq!(name, "avg S1+S2");
+    // The phase reference (decision 8b) wins when it is one of them.
+    t.st.view.tf.phase_reference = Some(TraceKey::Stored(TraceId(4)));
+    let r = t.key("M");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Call {
+            cmd: Command::TraceAverage {
+                reference: DelayReference::Trace { trace: TraceId(4) },
+                ..
+            },
+            ..
+        }]
+    ));
+    // Complex averaging from the palette.
+    t.key("Ctrl+K");
+    t.text("average complex");
+    let r = t.key("Enter");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Call {
+            cmd: Command::TraceAverage {
+                method: AverageMethod::Complex,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn a_minus_b_from_the_palette() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![
+        stored(4, Some(2), 2),
+        stored(5, Some(7), 2),
+    ]));
+    t.key("Ctrl+K");
+    t.text("A − B dB difference");
+    let r = t.key("Enter");
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Call {
+                cmd: Command::TraceMath {
+                    a: TraceId(4),
+                    b: TraceId(5),
+                    op: MathOp::MagnitudeDifference,
+                    ..
+                },
+                ..
+            }]
+        ),
+        "{r:?}"
+    );
+    t.key("Ctrl+K");
+    t.text("complex division");
+    let r = t.key("Enter");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Call {
+            cmd: Command::TraceMath {
+                op: MathOp::ComplexDivision,
+                ..
+            },
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn z_loads_a_target_curve_file() {
+    let mut t = T::new();
+    t.type_key("Z", "z");
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::ImportFile(ImportRole::Target) && p.text.is_empty()
+    ));
+    t.text("/home/foh/house.txt");
+    let r = t.key("Enter");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Import { path, role: ImportRole::Target }] if path == std::path::Path::new("/home/foh/house.txt")
+    ));
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn sessions_from_the_palette() {
+    let mut t = T::new();
+    t.key("Ctrl+K");
+    t.text("session save");
+    t.key("Enter");
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.kind == PromptKind::SessionSave));
+    t.text("friday show");
+    let r = t.key("Enter");
+    assert!(matches!(
+        r.as_slice(),
+        [Request::Call {
+            cmd: Command::FileSave {
+                session: SessionRef::Name { name }
+            },
+            ..
+        }] if name == "friday show"
+    ));
+    t.key("Ctrl+K");
+    t.text("session load");
+    t.key("Enter");
+    t.text("./shows/fri");
+    let r = t.key("Enter");
+    let [
+        Request::Call {
+            cmd:
+                Command::FileLoad {
+                    session: SessionRef::Path { path },
+                },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}")
+    };
+    assert!(std::path::Path::new(path).is_absolute());
+    assert!(path.ends_with("fri"));
+}
+
+#[test]
+fn stored_trace_metadata_follows_the_mirror() {
+    let mut t = T::new();
+    let meta = stored(9, Some(1), 2);
+    t.conn(with_traces(vec![meta.clone()]));
+    let data = TraceData {
+        meta: meta.clone(),
+        mag_db: vec![0.0; 3],
+        phase_deg: None,
+        coherence: None,
+    };
+    t.conn(ConnEvent::Trace(
+        Arc::new(data),
+        Arc::new(ac2_proto::GridDef::Log {
+            ppo: 1,
+            k_min: 0,
+            k_max: 2,
+        }),
+    ));
+    let mut hidden = meta.clone();
+    hidden.edit.visible = false;
+    hidden.edit.slot = None;
+    t.conn(with_traces(vec![hidden.clone()]));
+    assert_eq!(t.st.traces[&TraceId(9)].0.meta, hidden);
+    t.conn(with_traces(vec![]));
+    assert!(t.st.traces.is_empty());
 }
 
 #[test]
@@ -608,7 +868,7 @@ fn cursor_keys() {
 #[test]
 fn toasts_expire() {
     let mut t = T::new();
-    t.key("Z");
+    t.key("M");
     assert!(!t.st.toasts.is_empty());
     t.st.update(
         Msg::Tick {
@@ -770,7 +1030,7 @@ fn ambiguous_first_arrival_opens_the_candidate_list() {
     assert_eq!(inserted(&r), Some(DelayPick::Ranked { index: 0 }));
     // Other keys keep working with the list up; Esc closes it.
     found(&mut t, DelayPick::FirstArrival, ambiguous());
-    t.key("4");
+    t.key("Alt+4");
     assert_eq!(t.st.layout.focus, PaneKind::Spl);
     assert!(matches!(t.st.overlay, Overlay::DelayPick(_)));
     t.key("Esc");

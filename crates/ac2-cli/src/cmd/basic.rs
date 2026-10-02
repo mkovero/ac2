@@ -5,7 +5,7 @@ use ac2_proto::model::*;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
-use super::{connect, find_meas, find_trace, rate, state};
+use super::{connect, find_meas, rate, state};
 use crate::CliError;
 use crate::args::*;
 use crate::output::{self, Out};
@@ -112,6 +112,13 @@ pub(crate) async fn session(
             let s = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
             out.emit(&s, || output::session(&s))?;
         }
+        SessionCmd::Save { session } => {
+            super::traces::save_or_load(cli, &c, session, false, out).await?;
+        }
+        SessionCmd::Load { session } => {
+            super::traces::save_or_load(cli, &c, session, true, out).await?;
+        }
+        SessionCmd::List => super::traces::list(&c, out).await?,
     }
     Ok(())
 }
@@ -606,55 +613,6 @@ pub(crate) async fn timing(cli: &Cli, live: bool, out: &mut Out<'_>) -> Result<(
     }
     let s = state(&c).await?;
     out.emit(&s.timing, || output::timing(&s.timing, rate(&s)))?;
-    Ok(())
-}
-
-pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Result<(), CliError> {
-    let c = connect(cli, false).await?;
-    match cmd {
-        TraceCmd::Capture { meas, name } => {
-            let s = state(&c).await?;
-            let id = find_meas(&s, meas)?.id;
-            let r = c
-                .call(Command::TraceCapture {
-                    meas: id,
-                    name: name.clone(),
-                })
-                .await?;
-            let t = expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)?;
-            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
-        }
-        TraceCmd::List => {
-            let r = c.call(Command::TraceList).await?;
-            let l = expect_body!("trace.list", r, ReplyBody::Traces(l) => l)?;
-            out.emit(&l, || output::traces(&l))?;
-        }
-        TraceCmd::Export { trace, csv } => {
-            let s = state(&c).await?;
-            let t = find_trace(&s, trace)?;
-            let r = c
-                .call(Command::TraceExport {
-                    trace: t.id,
-                    format: ExportFormat::Ac2Csv,
-                })
-                .await?;
-            let (file_name, content) = expect_body!(
-                "trace.export", r, ReplyBody::Export { file_name, content } => (file_name, content)
-            )?;
-            if csv.as_os_str() == "-" {
-                // The CSV itself is the output; nothing else may be mixed in.
-                out.w.write_all(&content.0)?;
-                out.w.flush()?;
-                return Ok(());
-            }
-            std::fs::write(csv, &content.0)?;
-            let n = content.0.len();
-            out.emit(
-                &json!({ "trace": t.id, "file": csv, "bytes": n, "suggested_name": file_name }),
-                || format!("wrote {} ({n} bytes)", csv.display()),
-            )?;
-        }
-    }
     Ok(())
 }
 

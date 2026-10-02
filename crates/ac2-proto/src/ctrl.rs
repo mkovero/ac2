@@ -13,9 +13,9 @@ use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, CalEntry, DelayFinding, DelayPick, DelayReference, DeviceInfo, EssSpec,
-    ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, Lease, MathOp, MeasConfig,
-    Measurement, MicCurve, MicCurveAction, Session, SessionConfig, SplLog, TraceData, TraceEdit,
-    TraceMeta,
+    ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, ImportRole, Lease, MathOp,
+    MeasConfig, Measurement, MicCurve, MicCurveAction, Session, SessionConfig, SessionFile,
+    SessionRef, SplLog, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, DbSpl, Hz, LeaseToken, MeasId, RequestId, Rev, Seconds,
@@ -204,6 +204,8 @@ pub enum Command {
         meas: MeasId,
         /// Name.
         name: String,
+        /// Slot 1…9 to put the trace in (taken from any trace holding it).
+        slot: Option<u8>,
     },
     /// List trace metadata.
     #[serde(rename = "trace.list")]
@@ -259,6 +261,8 @@ pub enum Command {
         file_name: String,
         /// Format.
         format: ImportFormat,
+        /// Measured trace or target curve.
+        role: ImportRole,
         /// File content.
         content: Blob,
     },
@@ -342,18 +346,22 @@ pub enum Command {
         /// Grid.
         grid_id: GridId,
     },
-    /// Save the whole state to a daemon-side file.
+    /// Save measurements and traces to a session directory on the daemon host.
     #[serde(rename = "file.save")]
     FileSave {
-        /// Path on the daemon host.
-        path: String,
+        /// Where.
+        session: SessionRef,
     },
-    /// Load state from a daemon-side file; always comes up disarmed with no owner.
+    /// Replace measurements and traces with a saved session; always comes up disarmed with
+    /// no generator owner, in a new session epoch.
     #[serde(rename = "file.load")]
     FileLoad {
-        /// Path on the daemon host.
-        path: String,
+        /// Which.
+        session: SessionRef,
     },
+    /// Sessions in the daemon's session directory.
+    #[serde(rename = "file.list")]
+    FileList,
 }
 
 impl Command {
@@ -401,6 +409,7 @@ impl Command {
             Self::GridGet { .. } => "grid.get",
             Self::FileSave { .. } => "file.save",
             Self::FileLoad { .. } => "file.load",
+            Self::FileList => "file.list",
         }
     }
 
@@ -420,6 +429,7 @@ impl Command {
                 | Self::GridGet { .. }
                 | Self::DelayFind { .. }
                 | Self::FileSave { .. }
+                | Self::FileList
         )
     }
 
@@ -506,6 +516,10 @@ pub enum ReplyBody {
     Events(Vec<Event>),
     /// `grid.get`.
     Grid(GridDef),
+    /// `file.save` / `file.load`.
+    SessionFile(SessionFile),
+    /// `file.list`.
+    Sessions(Vec<SessionFile>),
 }
 
 /// Error codes.
@@ -560,6 +574,46 @@ pub enum ErrorDetail {
         /// Oldest replayable rev.
         oldest: Rev,
     },
+    /// `invalid` from `trace.import`: what is wrong and where.
+    Import {
+        /// 1-based line of the file, when the problem has one.
+        line: Option<u32>,
+        /// Problem.
+        problem: ImportProblem,
+    },
+    /// `unsupported` from `file.load`: the session format version is not this build's.
+    SessionVersion {
+        /// Version in the file.
+        found: u32,
+        /// The one version this build reads.
+        supported: u32,
+    },
+}
+
+/// Why `trace.import` refused a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportProblem {
+    /// Not UTF-8 / Latin-1 text.
+    NotText,
+    /// No data rows.
+    NoData,
+    /// A data row with a field that is not a number.
+    BadNumber,
+    /// A data row with fewer or more columns than the first one.
+    ColumnCount,
+    /// Fewer than two columns (frequency and magnitude are required).
+    TooFewColumns,
+    /// Frequencies not strictly ascending.
+    NotAscending,
+    /// A frequency that is not positive and finite, or a non-finite magnitude.
+    OutOfRange,
+    /// More rows than an import accepts.
+    TooManyRows,
+    /// An ac2 CSV header of another format version (or none where `ac2_csv` was asked).
+    BadHeader,
+    /// Coherence outside 0…1.
+    BadCoherence,
 }
 
 /// Error reply.

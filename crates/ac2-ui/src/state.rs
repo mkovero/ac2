@@ -15,8 +15,9 @@ use ac2_client::MirrorView;
 use ac2_proto::Command;
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    DelayFinding, DelayOutcome, DelayPick, GeneratorDesired, GeneratorSettings, MeasKind,
-    Measurement, Signal, State, TraceData,
+    AverageMethod, DelayFinding, DelayOutcome, DelayPick, DelayReference, GeneratorDesired,
+    GeneratorSettings, ImportRole, MathOp, MeasKind, Measurement, SessionRef, Signal, State,
+    TraceData, TraceKind, TraceMeta,
 };
 use ac2_proto::units::{ClientId, Dbfs, MeasId, Seconds, TraceId};
 use ac2_scene::spectrum::PeakHold;
@@ -215,6 +216,10 @@ pub enum PromptKind {
     StimulusOutputs,
     Offset(MeasId),
     Delay(MeasId),
+    /// A file to import as a trace or target curve.
+    ImportFile(ImportRole),
+    SessionSave,
+    SessionLoad,
 }
 
 impl PromptKind {
@@ -224,6 +229,10 @@ impl PromptKind {
             PromptKind::StimulusOutputs => "Stimulus outputs (1-based, e.g. 1, 2)",
             PromptKind::Offset(_) => "Display offset (dB)",
             PromptKind::Delay(_) => "Delay (ms)",
+            PromptKind::ImportFile(ImportRole::Target) => "Target curve file (path)",
+            PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
+            PromptKind::SessionSave => "Save session as (name or path)",
+            PromptKind::SessionLoad => "Load session, disarmed (name or path)",
         }
     }
 }
@@ -333,7 +342,6 @@ pub struct AppState {
     pub stimulus: Stimulus,
     pub overlay: Overlay,
     pub toasts: Vec<Toast>,
-    pub slots: [Option<TraceId>; 9],
     pub now_s: f64,
     pub quit: bool,
     /// The key that just opened a text overlay also arrives as text; drop that one char.
@@ -380,7 +388,6 @@ impl AppState {
             stimulus: Stimulus::default(),
             overlay: Overlay::None,
             toasts: Vec::new(),
-            slots: [None; 9],
             now_s: 0.0,
             quit: false,
             swallow_text: None,
@@ -414,6 +421,42 @@ impl AppState {
 
     pub fn edit(&self, id: MeasId) -> LiveEdit {
         self.edits.get(&id).copied().unwrap_or_default()
+    }
+
+    /// Stored trace metadata as mirrored (edits, slots and visibility are the daemon's).
+    pub fn stored_traces(&self) -> Vec<&TraceMeta> {
+        let mut v: Vec<&TraceMeta> = self
+            .daemon()
+            .map(|s| s.traces.iter().collect())
+            .unwrap_or_default();
+        v.sort_by_key(|t| (t.edit.order, t.id));
+        v
+    }
+
+    /// The trace in each slot 1…9 (index 0 = slot 1).
+    pub fn slots(&self) -> [Option<&TraceMeta>; 9] {
+        let mut out = [None; 9];
+        for t in self
+            .daemon()
+            .map(|s| s.traces.as_slice())
+            .unwrap_or_default()
+        {
+            if let Some(n) = t.edit.slot.filter(|n| (1..=9).contains(n)) {
+                out[usize::from(n - 1)] = Some(t);
+            }
+        }
+        out
+    }
+
+    /// Shown stored traces on the transfer pane, slotted first (by slot), then by order.
+    fn shown_transfer_traces(&self) -> Vec<&TraceMeta> {
+        let mut v: Vec<&TraceMeta> = self
+            .stored_traces()
+            .into_iter()
+            .filter(|t| t.edit.visible && matches!(t.kind, TraceKind::Transfer | TraceKind::Target))
+            .collect();
+        v.sort_by_key(|t| (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id));
+        v
     }
 
     /// This connection's identity. The mirror's is authoritative: it belongs to the daemon
@@ -632,6 +675,39 @@ impl AppState {
             PromptKind::Offset(id) => parse_number(&text, &["db"]).map(|v| {
                 self.edits.entry(id).or_default().offset_db = v;
             }),
+            PromptKind::ImportFile(role) => {
+                let path = text.trim();
+                if path.is_empty() {
+                    Err("type a file path".to_string())
+                } else {
+                    out.push(Request::Import {
+                        path: std::path::PathBuf::from(path),
+                        role,
+                    });
+                    Ok(())
+                }
+            }
+            PromptKind::SessionSave | PromptKind::SessionLoad => {
+                parse_session_ref(&text).map(|session| {
+                    let load = kind == PromptKind::SessionLoad;
+                    let what = match &session {
+                        SessionRef::Name { name } => name.clone(),
+                        SessionRef::Path { path } => path.clone(),
+                    };
+                    let (cmd, what) = if load {
+                        (
+                            Command::FileLoad { session },
+                            format!("session {what:?} loaded (disarmed)"),
+                        )
+                    } else {
+                        (
+                            Command::FileSave { session },
+                            format!("session {what:?} saved"),
+                        )
+                    };
+                    out.push(Request::Call { cmd, what });
+                })
+            }
             PromptKind::Delay(id) => parse_number(&text, &["ms"]).and_then(|v| {
                 if !(0.0..=10_000.0).contains(&v) {
                     return Err("delay must be 0 … 10000 ms".to_string());
@@ -910,14 +986,54 @@ impl AppState {
             | C::Slot8
             | C::Slot9 => {
                 let slot = slot_of(c);
-                if let Some(m) = self.need_tf() {
+                if let Some(m) = self.need_meas(
+                    &[
+                        |k| matches!(k, MeasKind::Transfer { .. }),
+                        |k| matches!(k, MeasKind::Spectrum { .. } | MeasKind::Rta { .. }),
+                    ],
+                    "transfer, spectrum or RTA",
+                ) {
+                    // The slot's previous trace is replaced unless it is locked; a locked
+                    // one only gives up the slot.
+                    let replace = self.slots()[usize::from(slot - 1)]
+                        .filter(|t| !t.edit.locked)
+                        .map(|t| t.id);
                     out.push(Request::Capture {
                         meas: m.id,
                         slot,
-                        replace: self.slots[usize::from(slot - 1)],
+                        name: format!("{} S{slot}", m.config.name),
+                        replace,
                     });
                 }
             }
+            C::ShowSlot1
+            | C::ShowSlot2
+            | C::ShowSlot3
+            | C::ShowSlot4
+            | C::ShowSlot5
+            | C::ShowSlot6
+            | C::ShowSlot7
+            | C::ShowSlot8
+            | C::ShowSlot9 => {
+                let slot = slot_of(c);
+                match self.slots()[usize::from(slot - 1)].cloned() {
+                    None => self.error(format!(
+                        "slot {slot} is empty (Ctrl+{slot} captures into it)"
+                    )),
+                    Some(t) => {
+                        let mut edit = t.edit.clone();
+                        edit.visible = !edit.visible;
+                        let what = format!(
+                            "slot {slot} {}",
+                            if edit.visible { "shown" } else { "hidden" }
+                        );
+                        self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
+                    }
+                }
+            }
+            C::ImportTrace => self.prompt(PromptKind::ImportFile(ImportRole::Trace), String::new()),
+            C::SessionSave => self.prompt(PromptKind::SessionSave, String::new()),
+            C::SessionLoad => self.prompt(PromptKind::SessionLoad, String::new()),
             C::Reconnect => out.push(Request::Reconnect),
 
             C::Freeze => {
@@ -1033,8 +1149,12 @@ impl AppState {
                     self.toast(format!("phase reference: {}", m.config.name));
                 }
             }
-            C::Target => self.toast("target curves are not available yet"),
-            C::Average => self.toast("trace averaging is not available yet"),
+            C::Target => self.prompt(PromptKind::ImportFile(ImportRole::Target), String::new()),
+            C::Average => self.average(AverageMethod::Power, out),
+            C::AverageComplex => self.average(AverageMethod::Complex, out),
+            C::AverageCoherence => self.average(AverageMethod::CoherenceWeighted, out),
+            C::MathDifference => self.math(MathOp::MagnitudeDifference, out),
+            C::MathDivide => self.math(MathOp::ComplexDivision, out),
             C::ToggleIr => {
                 let i = PaneKind::Ir.index();
                 self.layout.shown[i] = !self.layout.shown[i];
@@ -1132,14 +1252,24 @@ impl AppState {
                         .map(|m| m.id);
                 }
                 self.edits.retain(|k, _| ids.contains(k));
-                if let Some(st) = self.daemon() {
-                    let live: Vec<TraceId> = st.traces.iter().map(|t| t.id).collect();
-                    self.traces.retain(|k, _| live.contains(k));
-                    for s in &mut self.slots {
-                        if s.is_some_and(|t| !live.contains(&t)) {
-                            *s = None;
-                        }
+                let metas: BTreeMap<TraceId, TraceMeta> = self
+                    .daemon()
+                    .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
+                    .unwrap_or_default();
+                // Fetched data keeps its columns; its metadata follows the mirror (edits,
+                // visibility and slots change by event, the columns never do).
+                self.traces.retain(|k, _| metas.contains_key(k));
+                for (id, (data, _)) in &mut self.traces {
+                    if let Some(m) = metas.get(id)
+                        && data.meta != *m
+                    {
+                        Arc::make_mut(data).meta = m.clone();
                     }
+                }
+                if let Some(TraceKey::Stored(r)) = self.view.tf.phase_reference
+                    && !metas.contains_key(&r)
+                {
+                    self.view.tf.phase_reference = None;
                 }
             }
             ConnEvent::Data(d) => {
@@ -1148,7 +1278,14 @@ impl AppState {
                 }
                 self.data = Some(d);
             }
-            ConnEvent::Trace(t, g) => {
+            ConnEvent::Trace(mut t, g) => {
+                if let Some(m) = self
+                    .daemon()
+                    .and_then(|s| s.traces.iter().find(|x| x.id == t.meta.id))
+                    && t.meta != *m
+                {
+                    Arc::make_mut(&mut t).meta = m.clone();
+                }
                 self.traces.insert(t.meta.id, (t, g));
             }
             ConnEvent::Reply { what, result } => match result {
@@ -1161,10 +1298,7 @@ impl AppState {
                 finding,
             } => self.delay_found(meas, pick, *finding, out),
             ConnEvent::Captured { slot, trace } => {
-                if let Some(s) = self.slots.get_mut(usize::from(slot.saturating_sub(1))) {
-                    *s = Some(trace.id);
-                }
-                self.toast(format!("captured to slot {slot}"));
+                self.toast(format!("slot {slot}: {} captured", trace.edit.name));
             }
             ConnEvent::Stimulus(s) => self.stim_event(s, out),
         }
@@ -1251,6 +1385,75 @@ impl AppState {
         }
     }
 
+    /// M: averages the shown stored transfer traces, phase referred to the phase reference
+    /// when it is one of them, else to the first (decision 8b).
+    fn average(&mut self, method: AverageMethod, out: &mut Vec<Request>) {
+        let shown: Vec<&TraceMeta> = self
+            .shown_transfer_traces()
+            .into_iter()
+            .filter(|t| t.kind == TraceKind::Transfer)
+            .collect();
+        if shown.len() < 2 {
+            self.error("average: show at least two stored transfer traces (1…9)");
+            return;
+        }
+        let ids: Vec<TraceId> = shown.iter().map(|t| t.id).collect();
+        let reference = match self.view.tf.phase_reference {
+            Some(TraceKey::Stored(r)) if ids.contains(&r) => r,
+            _ => ids[0],
+        };
+        let label = |t: &TraceMeta| {
+            t.edit
+                .slot
+                .map_or_else(|| t.edit.name.clone(), |s| format!("S{s}"))
+        };
+        let name = format!(
+            "avg {}",
+            shown.iter().map(|t| label(t)).collect::<Vec<_>>().join("+")
+        );
+        let m = match method {
+            AverageMethod::Power => "power",
+            AverageMethod::Complex => "complex",
+            AverageMethod::CoherenceWeighted => "coherence-weighted",
+        };
+        let what = format!("{name} ({m}) created");
+        self.call(
+            out,
+            Command::TraceAverage {
+                traces: ids,
+                method,
+                reference: DelayReference::Trace { trace: reference },
+                name,
+            },
+            what,
+        );
+    }
+
+    /// A − B (or A / B) of the two lowest shown slots.
+    fn math(&mut self, op: MathOp, out: &mut Vec<Request>) {
+        let slotted: Vec<&TraceMeta> = self
+            .shown_transfer_traces()
+            .into_iter()
+            .filter(|t| t.edit.slot.is_some())
+            .collect();
+        let [a, b, ..] = slotted.as_slice() else {
+            self.error("A − B: show two slotted traces (1…9); the lower slot is A");
+            return;
+        };
+        let (sa, sb) = (a.edit.slot.unwrap_or(0), b.edit.slot.unwrap_or(0));
+        let name = match op {
+            MathOp::MagnitudeDifference => format!("S{sa} − S{sb}"),
+            MathOp::ComplexDivision => format!("S{sa} / S{sb}"),
+        };
+        let cmd = Command::TraceMath {
+            a: a.id,
+            b: b.id,
+            op,
+            name: name.clone(),
+        };
+        self.call(out, cmd, format!("{name} created"));
+    }
+
     fn fold_peaks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         for tf in d.latest.frames.values() {
@@ -1278,16 +1481,45 @@ impl AppState {
 fn slot_of(c: CommandId) -> u8 {
     use CommandId as C;
     match c {
-        C::Slot1 => 1,
-        C::Slot2 => 2,
-        C::Slot3 => 3,
-        C::Slot4 => 4,
-        C::Slot5 => 5,
-        C::Slot6 => 6,
-        C::Slot7 => 7,
-        C::Slot8 => 8,
+        C::Slot1 | C::ShowSlot1 => 1,
+        C::Slot2 | C::ShowSlot2 => 2,
+        C::Slot3 | C::ShowSlot3 => 3,
+        C::Slot4 | C::ShowSlot4 => 4,
+        C::Slot5 | C::ShowSlot5 => 5,
+        C::Slot6 | C::ShowSlot6 => 6,
+        C::Slot7 | C::ShowSlot7 => 7,
+        C::Slot8 | C::ShowSlot8 => 8,
         _ => 9,
     }
+}
+
+/// A session given by name, or by path (anything with a separator, or starting with `.` or
+/// `~`); a path is made absolute, since the daemon does not share this process's working
+/// directory.
+pub fn parse_session_ref(text: &str) -> Result<SessionRef, String> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Err("type a session name or a directory path".into());
+    }
+    let is_path = t.contains('/')
+        || t.contains('\\')
+        || t.starts_with('.')
+        || t.starts_with('~')
+        || std::path::Path::new(t).is_absolute();
+    if !is_path {
+        return Ok(SessionRef::Name { name: t.to_owned() });
+    }
+    let p = match t.strip_prefix('~') {
+        Some(rest) => std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(|h| std::path::PathBuf::from(h).join(rest.trim_start_matches(['/', '\\'])))
+            .ok_or_else(|| "no home directory to expand ~".to_string())?,
+        None => std::path::PathBuf::from(t),
+    };
+    let p = std::path::absolute(&p).map_err(|e| e.to_string())?;
+    Ok(SessionRef::Path {
+        path: p.to_string_lossy().into_owned(),
+    })
 }
 
 /// A number with an optional unit suffix (case-insensitive); accepts `−` and `,` decimal.

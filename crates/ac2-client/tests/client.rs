@@ -610,3 +610,149 @@ async fn grids_are_fetched_once_for_unknown_ids() -> R {
     assert_eq!(missing, Some(ErrorCode::NotFound));
     Ok(())
 }
+
+/// Trace and session commands against the fake: capture, data, average, math, import,
+/// export, save and load (disarmed, newer epoch), mirrored through events.
+#[tokio::test(flavor = "multi_thread")]
+async fn traces_and_sessions_against_the_fake() -> R {
+    let dir = tempfile::tempdir()?;
+    let f = FakeDaemon::start(FakeOptions {
+        session_dir: Some(dir.path().to_owned()),
+        ..FakeOptions::default()
+    })?;
+    let c = connect(&f).await?;
+    c.wait_synced(DEADLINE).await?;
+    let m = match c
+        .call(Command::MeasCreate {
+            config: tf_config(),
+        })
+        .await?
+    {
+        ReplyBody::Measurement(m) => m,
+        other => return Err(format!("{other:?}").into()),
+    };
+    let cap = |name: &str, slot| Command::TraceCapture {
+        meas: m.id,
+        name: name.into(),
+        slot,
+    };
+    let a = match c.call(cap("a", Some(1))).await? {
+        ReplyBody::Trace(t) => t,
+        other => return Err(format!("{other:?}").into()),
+    };
+    let b = match c.call(cap("b", Some(1))).await? {
+        ReplyBody::Trace(t) => t,
+        other => return Err(format!("{other:?}").into()),
+    };
+    // The slot moved to b, and the mirror shows it.
+    until("slot moved", || {
+        let v = c.view();
+        async move {
+            v.state.as_ref().is_some_and(|s| {
+                s.traces
+                    .iter()
+                    .any(|t| t.id == a.id && t.edit.slot.is_none())
+                    && s.traces
+                        .iter()
+                        .any(|t| t.id == b.id && t.edit.slot == Some(1))
+            })
+        }
+    })
+    .await?;
+    let d = match c.call(Command::TraceGet { trace: a.id }).await? {
+        ReplyBody::TraceData(d) => d,
+        other => return Err(format!("{other:?}").into()),
+    };
+    assert_eq!(d.mag_db.len(), 240);
+    assert!(d.phase_deg.is_some() && d.coherence.is_some());
+    let avg = c
+        .call(Command::TraceAverage {
+            traces: vec![a.id, b.id],
+            method: AverageMethod::Power,
+            reference: DelayReference::Trace { trace: a.id },
+            name: "avg".into(),
+        })
+        .await?;
+    assert!(matches!(
+        avg,
+        ReplyBody::Trace(TraceMeta {
+            source: TraceSource::Average { .. },
+            ..
+        })
+    ));
+    let csv = match c
+        .call(Command::TraceExport {
+            trace: a.id,
+            format: ExportFormat::Ac2Csv,
+        })
+        .await?
+    {
+        ReplyBody::Export { content, .. } => content,
+        other => return Err(format!("{other:?}").into()),
+    };
+    let imp = match c
+        .call(Command::TraceImport {
+            file_name: "a.csv".into(),
+            format: ImportFormat::Auto,
+            role: ImportRole::Trace,
+            content: csv,
+        })
+        .await?
+    {
+        ReplyBody::Trace(t) => t,
+        other => return Err(format!("{other:?}").into()),
+    };
+    let ReplyBody::Trace(diff) = c
+        .call(Command::TraceMath {
+            a: a.id,
+            b: imp.id,
+            op: MathOp::MagnitudeDifference,
+            name: "a-a".into(),
+        })
+        .await?
+    else {
+        return Err("math".into());
+    };
+    match c.call(Command::TraceGet { trace: diff.id }).await? {
+        ReplyBody::TraceData(d) => assert!(d.mag_db.iter().all(|v| *v == 0.0)),
+        other => return Err(format!("{other:?}").into()),
+    }
+    let bad = c
+        .call(Command::TraceImport {
+            file_name: "x.txt".into(),
+            format: ImportFormat::AnalyzerText,
+            role: ImportRole::Trace,
+            content: Blob(b"1 2\n".to_vec()),
+        })
+        .await;
+    assert_eq!(bad.err().and_then(|e| e.code()), Some(ErrorCode::Invalid));
+
+    let saved = c.view().state.clone().ok_or("no state")?;
+    c.call(Command::FileSave {
+        session: SessionRef::Name { name: "s1".into() },
+    })
+    .await?;
+    c.call(Command::TraceDelete { trace: a.id }).await?;
+    match c.call(Command::FileList).await? {
+        ReplyBody::Sessions(l) => assert_eq!(l[0].traces, 5),
+        other => return Err(format!("{other:?}").into()),
+    }
+    c.call(Command::FileLoad {
+        session: SessionRef::Name { name: "s1".into() },
+    })
+    .await?;
+    until("loaded state mirrored", || {
+        let v = c.view();
+        let saved = saved.clone();
+        async move {
+            v.state.as_ref().is_some_and(|s| {
+                s.traces == saved.traces
+                    && s.session.epoch > saved.session.epoch
+                    && s.generator.owner.is_none()
+                    && !s.generator.armed
+            })
+        }
+    })
+    .await?;
+    Ok(())
+}

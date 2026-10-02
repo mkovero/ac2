@@ -4,6 +4,7 @@ mod auth;
 mod basic;
 mod daemon;
 mod gen_;
+mod traces;
 
 use std::time::Duration;
 
@@ -26,7 +27,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Spl { cmd } => basic::spl(cli, cmd, out).await,
         Cmd::Cal { cmd } => basic::cal(cli, cmd, out).await,
         Cmd::Timing { watch } => basic::timing(cli, *watch, out).await,
-        Cmd::Trace { cmd } => basic::trace(cli, cmd, out).await,
+        Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::State { cmd } => basic::state_dump(cli, cmd, out).await,
         Cmd::Auth { cmd } => auth::run(cli, cmd, out),
     }
@@ -67,7 +68,7 @@ pub(crate) fn target(cli: &Cli) -> Result<(ClientConfig, String), CliError> {
     Ok((cfg, what))
 }
 
-fn is_local(cli: &Cli) -> bool {
+pub(crate) fn is_local(cli: &Cli) -> bool {
     cli.remote.is_none() && cli.ctrl_endpoint.is_none()
 }
 

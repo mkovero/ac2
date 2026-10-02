@@ -16,7 +16,8 @@ use ac2_client::{
     Client, ClientConfig, ClientError, Latest, MirrorView, OnDrop, StimulusLease, expect_body,
 };
 use ac2_proto::model::{
-    DelayFinding, DelayPick, FinderBand, GeneratorDesired, GeneratorSettings, TraceData, TraceMeta,
+    DelayFinding, DelayPick, FinderBand, GeneratorDesired, GeneratorSettings, ImportFormat,
+    ImportRole, TraceData, TraceMeta,
 };
 use ac2_proto::units::{ClientId, MeasId, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
@@ -73,7 +74,7 @@ pub enum ConnEvent {
     /// A capture into a slot finished.
     Captured {
         slot: u8,
-        trace: TraceMeta,
+        trace: Box<TraceMeta>,
     },
     Stimulus(StimEvent),
 }
@@ -110,11 +111,17 @@ pub enum Request {
     /// `delay.find` (auto band) on `meas`, to insert `pick` from; the reducer decides what to
     /// insert once the finding is back.
     FindDelay { meas: MeasId, pick: DelayPick },
-    /// `trace.capture` of `meas` into `slot`, deleting `replace` first.
+    /// `trace.capture` of `meas` into `slot` as `name`, deleting `replace` first.
     Capture {
         meas: MeasId,
         slot: u8,
+        name: String,
         replace: Option<TraceId>,
+    },
+    /// Read a local file and `trace.import` it.
+    Import {
+        path: std::path::PathBuf,
+        role: ImportRole,
     },
     /// Drop the connection and connect again now.
     Reconnect,
@@ -307,6 +314,7 @@ fn request_name(r: &Request) -> String {
         Request::StimSet(_) => "stimulus".into(),
         Request::StimStop => "stop".into(),
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
+        Request::Import { path, .. } => format!("import {}", path.display()),
         Request::FindDelay { .. } => "delay find".into(),
         Request::Reconnect => "reconnect".into(),
     }
@@ -430,17 +438,39 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
         Request::Capture {
             meas,
             slot,
+            name,
             replace,
         } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                let r = capture(&c, meas, slot, replace).await;
+                let r = capture(&c, meas, slot, name, replace).await;
                 match r {
-                    Ok(trace) => o.send(ConnEvent::Captured { slot, trace }),
+                    Ok(trace) => o.send(ConnEvent::Captured {
+                        slot,
+                        trace: Box::new(trace),
+                    }),
                     Err(e) => o.send(ConnEvent::Reply {
                         what: format!("capture slot {slot}"),
                         result: Err(e.to_string()),
                     }),
+                }
+            });
+        }
+        Request::Import { path, role } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let what = format!("import {}", path.display());
+                let result = import(&c, &path, role).await.map(|t| {
+                    o.send(ConnEvent::Reply {
+                        what: format!("{} imported", t.edit.name),
+                        result: Ok(()),
+                    });
+                });
+                if let Err(e) = result {
+                    o.send(ConnEvent::Reply {
+                        what,
+                        result: Err(e),
+                    });
                 }
             });
         }
@@ -461,6 +491,7 @@ async fn capture(
     c: &Client,
     meas: MeasId,
     slot: u8,
+    name: String,
     replace: Option<TraceId>,
 ) -> Result<TraceMeta, ClientError> {
     if let Some(old) = replace {
@@ -470,10 +501,35 @@ async fn capture(
     let r = c
         .call(Command::TraceCapture {
             meas,
-            name: format!("slot {slot}"),
+            name,
+            slot: Some(slot),
         })
         .await?;
     expect_body!("trace.capture", r, ReplyBody::Trace(t) => t)
+}
+
+async fn import(c: &Client, path: &std::path::Path, role: ImportRole) -> Result<TraceMeta, String> {
+    let content = tokio::task::spawn_blocking({
+        let p = path.to_owned();
+        move || std::fs::read(&p)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("cannot read: {e}"))?;
+    let file_name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let r = c
+        .call(Command::TraceImport {
+            file_name,
+            format: ImportFormat::Auto,
+            role,
+            content: ac2_proto::units::Blob(content),
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    expect_body!("trace.import", r, ReplyBody::Trace(t) => t).map_err(|e| e.to_string())
 }
 
 async fn fetch_trace(c: Client, id: TraceId, grid: GridId, out: Out) {

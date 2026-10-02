@@ -162,6 +162,8 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Snapshot(_) => "snapshot",
         ReplyBody::Events(_) => "events",
         ReplyBody::Grid(_) => "grid",
+        ReplyBody::SessionFile(_) => "session_file",
+        ReplyBody::Sessions(_) => "sessions",
     }
 }
 

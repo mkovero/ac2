@@ -28,6 +28,8 @@ pub struct DaemonConfig {
     pub publish_fps: Option<u32>,
     /// Keepalive period (Q2: 250 ms).
     pub keepalive: Duration,
+    /// Where `file.save` / `file.load` put sessions given by name.
+    pub session_dir: PathBuf,
 }
 
 impl fmt::Debug for DaemonConfig {
@@ -41,6 +43,7 @@ impl fmt::Debug for DaemonConfig {
             .field("dedup", &self.dedup)
             .field("publish_fps", &self.publish_fps)
             .field("keepalive", &self.keepalive)
+            .field("session_dir", &self.session_dir)
             .finish()
     }
 }
@@ -58,6 +61,7 @@ impl DaemonConfig {
             dedup: DedupLimits::default(),
             publish_fps: None,
             keepalive: Duration::from_millis(250),
+            session_dir: ac2_traces::default_session_dir(),
         }
     }
 }

@@ -31,6 +31,9 @@ use ac2_proto::{
 use ac2_zmq::{Context, PollItem, Socket, SocketType, poll};
 
 use crate::endpoint::Endpoints;
+
+#[path = "fake_traces.rs"]
+mod traces;
 use crate::io::wall_ns;
 use crate::mirror::apply_change;
 
@@ -57,6 +60,8 @@ pub struct FakeOptions {
     pub server: String,
     /// Added to the daemon's wall clock (tests the client's offset estimate).
     pub clock_skew_ns: i64,
+    /// Session directory for `file.*`; `None` answers them `unsupported`.
+    pub session_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for FakeOptions {
@@ -66,6 +71,7 @@ impl Default for FakeOptions {
             lease_expiry: Duration::from_millis(1500),
             server: "ac2d 0.0.0 (build fake)".into(),
             clock_skew_ns: 0,
+            session_dir: None,
         }
     }
 }
@@ -112,6 +118,7 @@ pub struct Shared {
     pub expiries: u32,
     /// What `delay.find` answers.
     pub finding: FakeFinding,
+    traces: traces::FakeTraces,
     lease: Option<LeaseSlot>,
     dedup: HashMap<(Vec<u8>, u64), Vec<u8>>,
     outbox: Vec<Vec<Vec<u8>>>,
@@ -201,6 +208,7 @@ impl Shared {
             refreshes: 0,
             expiries: 0,
             finding: FakeFinding::default(),
+            traces: traces::FakeTraces::default(),
             lease: None,
             dedup: HashMap::new(),
             outbox: vec![],
@@ -557,60 +565,28 @@ impl Shared {
                 d.tracking = enabled;
                 self.put_meas(m)
             }
-            C::TraceCapture { meas, name } => {
-                let m = self.meas(meas)?;
-                let id = TraceId(self.next_id);
-                self.next_id += 1;
-                let t = TraceMeta {
-                    id,
-                    edit: TraceEdit {
-                        name,
-                        color: Rgb {
-                            r: 200,
-                            g: 120,
-                            b: 20,
-                        },
-                        visible: true,
-                        locked: false,
-                        order: id.0,
-                        offset: Db(0.0),
-                        polarity: Polarity::Normal,
-                        delay_nudge: Seconds(0.0),
-                    },
-                    source: TraceSource::Captured {
-                        meas,
-                        epoch: self.state.session.epoch,
-                        at_sample: SampleIndex(48_000),
-                    },
-                    grid_id: m.grid_id.unwrap_or(GridId(0)),
-                    delay: m.delay.map_or(Seconds(0.0), |d| d.applied),
-                    smoothing: None,
-                    cal: CalState::Uncalibrated,
-                    mic: None,
-                    created_at: WallNs(1_790_000_000_000_000_000),
-                };
-                self.commit(Change::Trace(Patch::Set(t.clone())));
-                ReplyBody::Trace(t)
-            }
+            C::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot)?,
             C::TraceList => ReplyBody::Traces(self.state.traces.clone()),
-            C::TraceExport { trace, .. } => {
-                let t = self
-                    .state
-                    .traces
-                    .iter()
-                    .find(|t| t.id == trace)
-                    .ok_or_else(|| err(ErrorCode::NotFound, format!("no trace {trace}")))?;
-                ReplyBody::Export {
-                    file_name: format!("{}.csv", t.edit.name),
-                    content: Blob(
-                        b"freq_hz,mag_db,phase_deg,coherence\n1000,-3,45,0.98\n".to_vec(),
-                    ),
-                }
-            }
-            C::TraceDelete { trace } => {
-                let rev = self.commit(Change::Trace(Patch::Deleted(trace)));
-                ReplyBody::Ack { rev }
-            }
+            C::TraceGet { trace } => self.trace_get(trace)?,
+            C::TraceUpdate { trace, edit } => self.trace_update(trace, edit)?,
+            C::TraceDelete { trace } => self.trace_delete(trace)?,
+            C::TraceAverage {
+                traces,
+                method,
+                reference,
+                name,
+            } => self.trace_average(traces, method, reference, name)?,
+            C::TraceMath { a, b, op, name } => self.trace_math(a, b, op, name)?,
+            C::TraceImport {
+                file_name,
+                format,
+                role,
+                content,
+            } => self.trace_import(file_name, format, role, &content.0)?,
+            C::TraceExport { trace, .. } => self.trace_export(trace)?,
+            C::FileSave { session } => self.file_save(&session)?,
+            C::FileLoad { session } => self.file_load(client, &session)?,
+            C::FileList => self.file_list()?,
             C::CalSpl {
                 input,
                 mic,

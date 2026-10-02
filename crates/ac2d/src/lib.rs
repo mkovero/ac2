@@ -362,6 +362,8 @@ impl Daemon {
             fps,
             outbox,
             to_self: tx.clone(),
+            session_dir: config.session_dir.clone(),
+            network,
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

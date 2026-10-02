@@ -177,19 +177,23 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         ui.label(RichText::new("Slots").strong());
         ui.add_space(4.0);
         let mut any = false;
-        for (i, s) in st.slots.iter().enumerate() {
-            let Some(id) = s else { continue };
+        for (i, s) in st.slots().iter().enumerate() {
+            let Some(t) = s else { continue };
             any = true;
-            let name = st
-                .daemon()
-                .and_then(|d| d.traces.iter().find(|t| t.id == *id))
-                .map_or_else(|| format!("trace {}", id.0), |t| t.edit.name.clone());
-            let data = if st.traces.contains_key(id) {
+            let data = if st.traces.contains_key(&t.id) {
                 ""
             } else {
                 " (no data)"
             };
-            ui.label(format!("{}  {name}{data}", i + 1));
+            let lock = if t.edit.locked { " 🔒" } else { "" };
+            let text = format!("{}  {}{data}{lock}", i + 1, t.edit.name);
+            let c = t.edit.color;
+            let color = if t.edit.visible {
+                egui::Color32::from_rgb(c.r, c.g, c.b)
+            } else {
+                ch.dim
+            };
+            ui.label(RichText::new(text).color(color));
         }
         if !any {
             ui.label(
