@@ -21,6 +21,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | `ac2-proto` | typed protocol: commands, events, frame headers, version |
 | `ac2-zmq` | the only crate linking libzmq: safe typed sockets, CURVE behind `SecureContext` (ZAP handler first) |
 | `ac2-client` | async client |
+| `ac2-discovery` | mDNS advert (`_ac2._tcp`, network mode only) and browse; names rigs, never trusts them |
 | `ac2d` | daemon (`ac2d` binary) |
 | `ac2-cli` | CLI (`ac2` binary) |
 | `ac2-traces` | stored traces: capture columns, average / A−B, text import/export, session files |
@@ -28,6 +29,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
 | `ac2-ui` | desktop app |
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
+| `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `spikes/*` | phase 0 throwaway spikes; findings in `docs/design/spike-*.md` |
 
 ## Rules

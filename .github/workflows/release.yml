@@ -13,6 +13,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    # TEMPORARY dry-run trigger: workflow_dispatch only works once this file is on the
+    # default branch. Remove before merging.
+    branches: ["phase6/release"]
   workflow_dispatch:
 
 concurrency:
