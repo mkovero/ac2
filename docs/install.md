@@ -64,9 +64,9 @@ chmod +x ac2-ui-<version>-x86_64.AppImage
 ```
 
 The AppImage bundles no system libraries; it needs glibc and libstdc++, which every desktop
-has, and `libjack.so.0` (pipewire-jack or JACK2, above), which it must take from the system
-to reach the system's JACK or PipeWire. Without FUSE, run it with
-`--appimage-extract-and-run`.
+has. It starts without JACK (the simulated rig works anywhere); to measure real audio it loads
+the system's `libjack.so.0` (pipewire-jack or JACK2, above) at run time. Without FUSE, run it
+with `--appimage-extract-and-run`.
 
 Real-time scheduling: the audio thread asks for real-time priority. With PipeWire this is
 granted through rtkit; with JACK2 add yourself to the `audio` (or `realtime`) group your

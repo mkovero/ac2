@@ -27,8 +27,21 @@ name="ac2-$version-linux-$arch"
 d="$work/$name"
 mkdir -p "$d/bin" "$d/share/applications" "$d/share/systemd/user" \
     "$d/share/icons/hicolor/scalable/apps" "$d/docs"
+# jack-sys's build script always links `-ljack`, but ac2 loads libjack at run time
+# (dynamic_loading). The linker keeps a stray DT_NEEDED on some binaries (ac2-ui), which would
+# stop them from starting on systems without libjack; remove it, then refuse to ship one.
+unjack() { # binary
+    if readelf -d "$1" | grep -q 'NEEDED.*libjack'; then
+        patchelf --remove-needed libjack.so.0 "$1"
+    fi
+    if readelf -d "$1" | grep -q 'NEEDED.*libjack'; then
+        echo "package.sh: $1 still needs libjack" >&2
+        exit 1
+    fi
+}
 for b in ac2 ac2d ac2-ui; do
     install -m 0755 "$bins/$b" "$d/bin/$b"
+    unjack "$d/bin/$b"
 done
 install -m 0644 "$root/packaging/linux/ac2.desktop" "$d/share/applications/"
 install -m 0644 "$root/packaging/linux/ac2d.service" "$d/share/systemd/user/"
@@ -62,7 +75,7 @@ chmod +x "$tools/appimagetool"
 
 app="$work/ac2.AppDir"
 mkdir -p "$app/usr/bin" "$app/usr/share/applications" "$app/usr/share/icons/hicolor/256x256/apps"
-install -m 0755 "$bins/ac2-ui" "$app/usr/bin/ac2-ui"
+install -m 0755 "$d/bin/ac2-ui" "$app/usr/bin/ac2-ui"
 install -m 0644 "$root/packaging/linux/ac2.desktop" "$app/usr/share/applications/ac2.desktop"
 install -m 0644 "$root/packaging/linux/ac2.desktop" "$app/ac2.desktop"
 install -m 0644 "$root/packaging/icon/generated/ac2-256.png" "$app/usr/share/icons/hicolor/256x256/apps/ac2.png"
