@@ -12,10 +12,10 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = []
-# JACK backend through the `jack` crate (Linux only). Off by default so that builds never
-# need libjack. libjack is loaded at run time, so a missing library or server is reported as
-# `AudioError::Unavailable`, not as a link error.
+default = ["jack"]
+# JACK backend through the `jack` crate (Linux only; a no-op elsewhere). On by default: the
+# crate loads libjack at run time, so builds never need libjack and a missing library or server
+# is reported as `AudioError::Unavailable`, not as a link error.
 jack = ["dep:jack"]
 
 [dependencies]

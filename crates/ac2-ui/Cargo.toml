@@ -19,7 +19,7 @@ name = "ac2-ui"
 path = "src/main.rs"
 
 [features]
-default = ["embedded"]
+default = ["embedded", "jack"]
 # Host the daemon in-process (`ac2-ui --embedded`). Links `ac2d` and through it the DSP and
 # audio crates; the UI code itself never uses them (`tests/no_dsp.rs`).
 embedded = ["dep:ac2d"]

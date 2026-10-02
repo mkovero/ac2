@@ -79,7 +79,7 @@ jobs:
             pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev
       - name: Build
         # JACK is loaded at run time, so the JACK backend costs nothing where JACK is absent.
-        run: cargo build --release --locked $BINS --features ac2d/jack,ac2-ui/jack
+        run: cargo build --release --locked $BINS
       - name: Package
         run: packaging/linux/package.sh "$VERSION" target/release dist
       - name: Smoke test (clean install to first measurement, AppImage)
