@@ -38,6 +38,21 @@ pub(crate) fn grid(cfg: &WireConfig, fs: u32) -> GridDef {
     }
 }
 
+/// Updates per second the spectrum aims for. The FFT length sets frequency resolution; the
+/// hop sets how often a new spectrum appears. Tying the hop to the length (n/2) made a
+/// 65 536-point spectrum update only every ~0.7 s, so the hop is chosen for a fluid display
+/// instead: heavily overlapped windows, about this many per second.
+const SPECTRUM_UPDATES_PER_S: u32 = 30;
+
+/// Hop for an `n`-point spectrum at `fs`: the largest power of two at or below
+/// `fs / SPECTRUM_UPDATES_PER_S`, never more than half a window (overlap ≥ 50 %) and at least
+/// 64 samples.
+fn display_hop(n: usize, fs: u32) -> usize {
+    let target = (fs / SPECTRUM_UPDATES_PER_S).max(64) as usize;
+    let pow2 = 1usize << (usize::BITS - 1 - target.leading_zeros());
+    pow2.min((n / 2).max(1)).max(1)
+}
+
 impl Spectrum {
     pub(crate) fn new(
         meas: MeasId,
@@ -52,7 +67,7 @@ impl Spectrum {
         let analyzer = SpectrumAnalyzer::new(SpectrumConfig {
             fs: f64::from(sample_rate),
             n,
-            hop: (n / 2).max(1),
+            hop: display_hop(n, sample_rate),
             window: conv::window(cfg.window),
             averaging: conv::spec_averaging(cfg.averaging).ok_or("invalid averaging")?,
             peak_hold: None,
@@ -179,5 +194,23 @@ impl Analysis for Spectrum {
                 FrameData::Levels(l),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod hop_tests {
+    use super::display_hop;
+
+    #[test]
+    fn hop_gives_a_fluid_update_rate_independent_of_fft_length() {
+        // 48 kHz: 1024-sample hop ≈ 47 updates/s for every FFT length that allows it.
+        assert_eq!(display_hop(65_536, 48_000), 1024);
+        assert_eq!(display_hop(16_384, 48_000), 1024);
+        // Short windows keep at least 50 % overlap.
+        assert_eq!(display_hop(1024, 48_000), 512);
+        assert_eq!(display_hop(256, 48_000), 128);
+        // Other rates scale.
+        assert_eq!(display_hop(65_536, 96_000), 2048);
+        assert_eq!(display_hop(65_536, 44_100), 1024);
     }
 }
