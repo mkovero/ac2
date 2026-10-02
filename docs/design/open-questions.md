@@ -61,6 +61,12 @@ note at the start of the phase that implements them, within the decisions here.
 | K6 | Quit waits at most 1 s for lease stop/release; daemon expiry is the safety net. |
 | K7 | Slots are UI-only until sessions; they persist in sessions from phase 5. |
 | K8 | Mic name per input in the session's input setup; calibration matches device + channel + mic name. |
+| T1 | Digits 1–9 show/hide trace slots (Ctrl+1–9 captures); pane focus on Alt+1–4, Tab cycles. (provisional) |
+| T2 | Calibrations stay in the per-machine store, not in sessions; traces record which calibration they used. (provisional) |
+| T3 | Spectrum/RTA trace math needs identical grids; refused with a clear error otherwise. (provisional) |
+| C1 | Data-socket send queue fixed at 128 frames per client (resizing live crashes libzmq 4.3.5). (provisional) |
+| C2 | Platform-native dirs via ac2-paths: config dir for calibrations/keys/prefs, data dir for sessions. (provisional) |
+| C3 | `cal.delete` / `ac2 cal rm`; calibration age in spectrum/RTA captions. (provisional) |
 | — | Scene defaults recorded with U1/U2 (banner priority, units, coherence fade, IR dB re peak, spectrum thinning, CHECK ROUTING flag) stand. |
 
 Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).
@@ -69,45 +75,7 @@ Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the Decided
 
 Round 4 answered 2026-10-02: all proposals accepted (rows K1–K8 in the Decided table above).
 
-### → round 5 (raised by phase 5 traces & sessions)
-
-Fill `Answer:` (empty = proposal accepted).
-
-**T1. Pane focus keys.** Digits 1–9 now show/hide trace slots (Ctrl+1–9 captures), so pane
-focus moved from 1–4 to Alt+1–4 (Tab / Shift+Tab still cycle panes).
-- Proposal: keep (slots are used far more often than pane focus while tuning).
-- Answer:
-
-**T2. Calibrations in sessions.** Sessions save measurements, traces and slots; calibrations
-stay in the per-machine calibration store (they belong to the hardware, not the show).
-- Proposal: keep; a session records which calibration each trace used (already in trace
-  metadata), so a loaded session shows "cal from other mic / input" if the rig differs.
-- Answer:
-
-**T3. Spectrum/RTA trace math across grids.** Averaging/A−B of spectrum or RTA traces needs
-identical grids (band powers aren't interpolated); transfer/target traces are resampled.
-- Proposal: keep; refuse with a clear message when grids differ.
-- Answer:
-
-**C1. Data-socket send queue fixed at 128 frames per client.** Resizing SNDHWM on live
-connections triggers a use-after-free inside libzmq 4.3.5 when a client with many
-subscriptions disconnects (daemon crash, reproduced 3–5/10 under load). The queue is now set
-once (128) before binding. A stalled client can hold up to 128 stale frames; the client-side
-drain discards them on recovery, and frame age/STALE makes any delay visible.
-- Proposal: keep (safety over a smaller backlog).
-- Answer:
-
-**C2. Where files live.** Calibrations are in `~/.config/ac2` on every OS; sessions use the
-OS data dir (e.g. Application Support on macOS).
-- Proposal: both platform-native via the `directories` crate — calibrations (machine config)
-  in the config dir, sessions (user documents) in the data dir; Linux stays ~/.config/ac2 and
-  ~/.local/share/ac2.
-- Answer:
-
-**C3. Calibration housekeeping.** No command deletes a sensitivity calibration (only mic curves
-can be cleared); calibration age shows only in the SPL pane.
-- Proposal: add `cal.delete` (CLI + palette); show cal age in spectrum/RTA captions too.
-- Answer:
+Round 5 (T1–T3, C1–C3): proposals adopted provisionally and implemented; rows in the Decided table above. Overrule any here.
 
 ---
 
