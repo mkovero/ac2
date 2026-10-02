@@ -141,12 +141,15 @@ ac2-ui
 
 ### Timing
 
-Measured on the release artifacts (Linux tarball, fresh user, fake rig, keystrokes typed by
-hand): unpacking and `install.sh` take under 5 s, starting the daemon and the four CLI
-commands above under 20 s, and the app shows a live transfer function about 30 s later after
-**L**, a level, **Space**, **Enter**, **X**. The time that remains in the two-minute budget is
-for downloading and for wiring the loopback cable. macOS and Windows follow the same steps;
-there the installer replaces `install.sh`.
+`tools/release/first-measurement.sh <tarball>` replays the Linux path in a throw-away home
+directory against the simulated rig and prints a timestamp per step. On the release
+tarball: unpacked and installed after 0.3 s, daemon up after 0.3 s, session and running
+transfer measurement after 0.4 s, delay found and inserted and a first trace captured after
+6.4 s (4 s of that is the noise averaging before the finder runs). The rest of the
+two-minute budget is the person: downloading, typing five commands (or, in the app, **L**, a
+level, **Space**, **Enter**, **X**) and wiring the loopback cable. On macOS and Windows the
+installer replaces `install.sh`; the CI release job runs the same commands on each OS after
+installing the artifact.
 
 ## Remote use (FOH ↔ stage)
 

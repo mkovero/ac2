@@ -83,24 +83,9 @@ jobs:
         run: cargo build --release --locked $BINS --features ac2d/jack,ac2-ui/jack
       - name: Package
         run: packaging/linux/package.sh "$VERSION" target/release dist
-      - name: Smoke test (tarball + AppImage)
-        shell: bash
+      - name: Smoke test (clean install to first measurement, AppImage)
         run: |
-          set -euo pipefail
-          t=$(mktemp -d)
-          tar -C "$t" -xzf "dist/ac2-$VERSION-linux-x86_64.tar.gz"
-          d="$t/ac2-$VERSION-linux-x86_64"
-          "$d/install.sh" --prefix "$t/prefix"
-          export AC2_RUNTIME_DIR="$t/run" XDG_CONFIG_HOME="$t/config"
-          bin="$t/prefix/bin"
-          "$bin/ac2d" --version
-          "$bin/ac2d" --backend fake > "$t/ac2d.log" 2>&1 &
-          for _ in $(seq 100); do [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] && break; sleep 0.1; done
-          "$bin/ac2" status
-          "$bin/ac2" session open --backend fake --in 1-2
-          "$bin/ac2" meas new tf --ref 1 --meas 2 --name smoke
-          "$bin/ac2" meas list
-          "$bin/ac2" daemon stop
+          tools/release/first-measurement.sh "dist/ac2-$VERSION-linux-x86_64.tar.gz"
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/ac2-ui-$VERSION-x86_64.AppImage" --version
       - uses: actions/upload-artifact@v4
         with:
