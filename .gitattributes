@@ -1,3 +1,5 @@
 # Golden vectors are compared byte for byte; never convert line endings.
 fixtures/golden/*.json -text
 fixtures/golden/*.bin binary
+# The wire lock is compared as text written on Linux; never convert line endings.
+fixtures/protocol/WIRE_LOCK -text
