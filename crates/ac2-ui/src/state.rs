@@ -15,11 +15,11 @@ use ac2_client::MirrorView;
 use ac2_proto::Command;
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    AverageMethod, DelayFinding, DelayOutcome, DelayPick, DelayReference, GeneratorDesired,
-    GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind, Measurement, SessionRef, Signal,
-    State, TraceData, TraceKind, TraceMeta,
+    AverageMethod, CalKey, CalPart, DelayFinding, DelayOutcome, DelayPick, DelayReference,
+    FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind,
+    Measurement, SessionRef, Signal, State, TraceData, TraceKind, TraceMeta,
 };
-use ac2_proto::units::{ClientId, Dbfs, MeasId, Seconds, TraceId};
+use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, TraceId};
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
@@ -30,6 +30,7 @@ use crate::anim::FreqNav;
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
 use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::palette::Palette;
+use crate::prefs::UiPrefs;
 
 /// The four panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -197,6 +198,61 @@ impl Stimulus {
     }
 }
 
+/// What X / Shift+X ask the delay finder for: the band and the observation (block length).
+/// Auto band and automatic observation by default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FinderChoice {
+    pub band: FinderBand,
+    /// `None`: the band's default (decision D2: sub 4 s).
+    pub observation: Option<Seconds>,
+}
+
+impl Default for FinderChoice {
+    fn default() -> Self {
+        Self {
+            band: FinderBand::Auto,
+            observation: None,
+        }
+    }
+}
+
+/// Sub-band observations the finder accepts (decision D2).
+pub const SUB_OBSERVATIONS_S: [f64; 3] = [2.0, 4.0, 8.0];
+/// Longest observation the finder accepts.
+pub const MAX_OBSERVATION_S: f64 = 8.0;
+
+impl FinderChoice {
+    /// The band analysed needs a sub-band observation (2, 4 or 8 s): the sub preset, or a
+    /// custom band starting below 150 Hz.
+    fn sub_like(&self) -> bool {
+        match self.band {
+            FinderBand::Sub => true,
+            FinderBand::Custom { lo_hz, .. } => lo_hz.0 < 150.0,
+            _ => false,
+        }
+    }
+
+    /// `auto band · auto observation`, `sub band · 8 s`, `80 Hz – 800 Hz · auto observation`.
+    pub fn describe(&self) -> String {
+        let band = match self.band {
+            FinderBand::Auto => "auto band".to_string(),
+            FinderBand::Full => "full band".to_string(),
+            FinderBand::Mid => "mid band".to_string(),
+            FinderBand::Sub => "sub band".to_string(),
+            FinderBand::Custom { lo_hz, hi_hz } => format!(
+                "{} – {}",
+                format::freq_readout(lo_hz.0),
+                format::freq_readout(hi_hz.0)
+            ),
+        };
+        let obs = self.observation.map_or_else(
+            || "auto observation".to_string(),
+            |o| format!("{} s", format::fixed(o.0, 1).trim_end_matches(".0")),
+        );
+        format!("{band} · {obs}")
+    }
+}
+
 fn dbfs(v: f64) -> String {
     format!("{} dBFS", format::signed(v, 1))
 }
@@ -221,6 +277,12 @@ pub enum PromptKind {
     SessionSave,
     SessionLoad,
     InputMics,
+    /// `input=mic` of a calibration on the session's capture device to delete from.
+    CalDelete(CalPart),
+    /// Custom delay-finder band edges.
+    FinderBand,
+    /// Delay-finder observation.
+    FinderObservation,
 }
 
 impl PromptKind {
@@ -235,6 +297,19 @@ impl PromptKind {
             PromptKind::SessionSave => "Save session as (name or path)",
             PromptKind::SessionLoad => "Load session, disarmed (name or path)",
             PromptKind::InputMics => "Mic per input (1-based, e.g. 3=M30, 4=ECM; 3= clears)",
+            PromptKind::CalDelete(CalPart::All) => {
+                "Delete calibration and mic curve of input=mic on this device (e.g. 3=M30)"
+            }
+            PromptKind::CalDelete(CalPart::Sensitivity) => {
+                "Delete sensitivity calibration of input=mic on this device (e.g. 3=M30)"
+            }
+            PromptKind::CalDelete(CalPart::MicCurve) => {
+                "Delete mic curve of input=mic on this device (e.g. 3=M30)"
+            }
+            PromptKind::FinderBand => "Delay finder band edges (Hz, e.g. 80-800)",
+            PromptKind::FinderObservation => {
+                "Delay finder observation (s; empty = automatic; sub band: 2, 4 or 8)"
+            }
         }
     }
 }
@@ -342,6 +417,14 @@ pub struct AppState {
     /// time.
     pub peaks: BTreeMap<MeasId, (u64, u64, PeakHold)>,
     pub stimulus: Stimulus,
+    /// Remembered between runs (stimulus outputs per device).
+    pub prefs: UiPrefs,
+    /// `prefs` changed since the app last saved them.
+    pub prefs_dirty: bool,
+    /// The output device the stimulus outputs belong to (the open session's).
+    stim_device: Option<String>,
+    /// Band and observation X / Shift+X run the finder with.
+    pub finder: FinderChoice,
     pub overlay: Overlay,
     pub toasts: Vec<Toast>,
     pub now_s: f64,
@@ -388,6 +471,10 @@ impl AppState {
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
             stimulus: Stimulus::default(),
+            prefs: UiPrefs::default(),
+            prefs_dirty: false,
+            stim_device: None,
+            finder: FinderChoice::default(),
             overlay: Overlay::None,
             toasts: Vec::new(),
             now_s: 0.0,
@@ -671,9 +758,24 @@ impl AppState {
         let r = match kind {
             PromptKind::StimulusLevel => self.set_level_text(&text, out),
             PromptKind::StimulusOutputs => parse_outputs(&text).map(|o| {
+                if let Some(dev) = &self.stim_device {
+                    self.prefs.outputs.insert(dev.clone(), o.clone());
+                    self.prefs_dirty = true;
+                }
                 self.stimulus.outputs = o;
                 self.resend_stimulus(out);
             }),
+            PromptKind::CalDelete(part) => self.cal_delete(&text, part, out),
+            PromptKind::FinderBand => parse_band(&text).map(|(lo, hi)| {
+                self.set_finder(FinderChoice {
+                    band: FinderBand::Custom {
+                        lo_hz: Hz(lo),
+                        hi_hz: Hz(hi),
+                    },
+                    observation: None,
+                });
+            }),
+            PromptKind::FinderObservation => self.set_observation(&text),
             PromptKind::Offset(id) => parse_number(&text, &["db"]).map(|v| {
                 self.edits.entry(id).or_default().offset_db = v;
             }),
@@ -823,6 +925,115 @@ impl AppState {
             self.armed_with = Some(settings.clone());
             out.push(Request::StimArm { settings, force });
         }
+    }
+
+    fn set_finder(&mut self, f: FinderChoice) {
+        self.finder = f;
+        self.toast(format!("delay finder: {} · X finds", f.describe()));
+    }
+
+    fn set_observation(&mut self, text: &str) -> Result<(), String> {
+        let observation = if text.trim().is_empty() {
+            None
+        } else {
+            let v = parse_number(text, &["s"])?;
+            if !(v > 0.0 && v <= MAX_OBSERVATION_S) {
+                return Err(format!(
+                    "observation must be above 0 and at most {MAX_OBSERVATION_S} s"
+                ));
+            }
+            Some(Seconds(v))
+        };
+        let f = FinderChoice {
+            observation,
+            ..self.finder
+        };
+        if let Some(o) = observation
+            && f.sub_like()
+            && !SUB_OBSERVATIONS_S.contains(&o.0)
+        {
+            return Err("the sub band observes 2, 4 or 8 s".into());
+        }
+        self.set_finder(f);
+        Ok(())
+    }
+
+    /// The prompt text of a calibration to delete: the selected measurement's input and its
+    /// mic name.
+    fn cal_delete_text(&self) -> String {
+        self.selected_meas()
+            .map(|m| {
+                let input = meas_input(&m.config.kind);
+                let mic = self.input_setup(input).mic.unwrap_or_default();
+                format!("{}={mic}", u32::from(input) + 1)
+            })
+            .unwrap_or_default()
+    }
+
+    fn cal_delete(
+        &mut self,
+        text: &str,
+        part: CalPart,
+        out: &mut Vec<Request>,
+    ) -> Result<(), String> {
+        let (channel, mic) = match parse_mics(text)?.as_slice() {
+            [(c, Some(m))] => (*c, m.clone()),
+            [(c, None)] => {
+                return Err(format!("type the mic name after {}=", u32::from(*c) + 1));
+            }
+            _ => return Err("one input=mic".into()),
+        };
+        let Some(device) = self
+            .daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map(|o| o.input_device.clone())
+        else {
+            return Err(
+                "no open session: calibrations of other devices are deleted with `ac2 cal rm --device`"
+                    .into(),
+            );
+        };
+        let what = match part {
+            CalPart::All => "calibration",
+            CalPart::Sensitivity => "sensitivity calibration",
+            CalPart::MicCurve => "mic curve",
+        };
+        out.push(Request::Call {
+            what: format!(
+                "{what} of {mic} on input {} deleted",
+                u32::from(channel) + 1
+            ),
+            cmd: Command::CalDelete {
+                key: CalKey {
+                    device,
+                    channel,
+                    mic,
+                },
+                part,
+            },
+        });
+        Ok(())
+    }
+
+    /// The stimulus outputs follow the open session's output device: the ones last used on
+    /// it, output 1 on a device never used (decision K4). Outputs never change under a held
+    /// stimulus; a device change re-opens the session, which disarms it anyway.
+    fn follow_output_device(&mut self) {
+        let dev = self
+            .daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map(|o| o.output_device.0.clone());
+        let Some(dev) = dev else {
+            return;
+        };
+        if self.stim_device.as_ref() == Some(&dev) || self.stimulus.phase != StimPhase::Idle {
+            return;
+        }
+        self.stimulus.outputs = self
+            .prefs
+            .outputs_for(&dev)
+            .map_or_else(|| vec![0], <[u16]>::to_vec);
+        self.stim_device = Some(dev);
     }
 
     fn need_meas(&mut self, want: &[fn(&MeasKind) -> bool], what: &str) -> Option<Measurement> {
@@ -1075,6 +1286,42 @@ impl AppState {
                     .unwrap_or_default();
                 self.prompt(PromptKind::InputMics, mics_text(&rows));
             }
+            C::CalDelete | C::CalDeleteSensitivity | C::CalDeleteCurve => {
+                let part = match c {
+                    C::CalDeleteSensitivity => CalPart::Sensitivity,
+                    C::CalDeleteCurve => CalPart::MicCurve,
+                    _ => CalPart::All,
+                };
+                let text = self.cal_delete_text();
+                self.prompt(PromptKind::CalDelete(part), text);
+            }
+            C::FinderAuto | C::FinderFull | C::FinderMid | C::FinderSub => {
+                let band = match c {
+                    C::FinderFull => FinderBand::Full,
+                    C::FinderMid => FinderBand::Mid,
+                    C::FinderSub => FinderBand::Sub,
+                    _ => FinderBand::Auto,
+                };
+                self.set_finder(FinderChoice {
+                    band,
+                    observation: None,
+                });
+            }
+            C::FinderCustom => {
+                let text = match self.finder.band {
+                    FinderBand::Custom { lo_hz, hi_hz } => format!("{}-{}", lo_hz.0, hi_hz.0),
+                    _ => String::new(),
+                };
+                self.prompt(PromptKind::FinderBand, text);
+            }
+            C::FinderObservation => {
+                let text = self
+                    .finder
+                    .observation
+                    .map(|o| o.0.to_string())
+                    .unwrap_or_default();
+                self.prompt(PromptKind::FinderObservation, text);
+            }
             C::MicCurve => {
                 if let Some(m) = self.need_meas(
                     &[|k| {
@@ -1157,7 +1404,12 @@ impl AppState {
                     if matches!(self.overlay, Overlay::DelayPick(_)) {
                         self.overlay = Overlay::None;
                     }
-                    out.push(Request::FindDelay { meas: m.id, pick });
+                    out.push(Request::FindDelay {
+                        meas: m.id,
+                        pick,
+                        band: self.finder.band,
+                        observation: self.finder.observation,
+                    });
                 }
             }
             C::TypeDelay => {
@@ -1341,6 +1593,7 @@ impl AppState {
                 {
                     self.view.tf.phase_reference = None;
                 }
+                self.follow_output_device();
             }
             ConnEvent::Data(d) => {
                 if self.view.spectrum.peak_hold {
@@ -1608,7 +1861,6 @@ pub fn parse_number(text: &str, units: &[&str]) -> Result<f64, String> {
     }
 }
 
-/// `1, 2` (one-based) → `[0, 1]`.
 /// The input a measurement's mic curve belongs to (a transfer function's measurement input).
 pub fn meas_input(k: &MeasKind) -> u16 {
     match k {
@@ -1664,6 +1916,21 @@ pub fn parse_mics(text: &str) -> Result<Vec<(u16, Option<String>)>, String> {
     Ok(v)
 }
 
+/// `80-800`, `80 – 800 Hz`: band edges in Hz, lower first.
+pub fn parse_band(text: &str) -> Result<(f64, f64), String> {
+    let t = text.replace(['–', '—'], "-");
+    let (a, b) = t
+        .split_once('-')
+        .ok_or_else(|| format!("{:?}: expected low-high, e.g. 80-800", text.trim()))?;
+    let lo = parse_number(a, &["hz"])?;
+    let hi = parse_number(b, &["hz"])?;
+    if !(lo > 0.0 && hi > lo) {
+        return Err("band edges must be above 0 Hz, the upper above the lower".into());
+    }
+    Ok((lo, hi))
+}
+
+/// `1, 2` (one-based) → `[0, 1]`.
 pub fn parse_outputs(text: &str) -> Result<Vec<u16>, String> {
     let mut v = Vec::new();
     for part in text.split([',', ' ']).filter(|s| !s.is_empty()) {

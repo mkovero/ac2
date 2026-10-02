@@ -101,6 +101,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
 | `cal.mic_curve` | `input`, `mic`, `action: import{file_name, content: bin} \| clear` | `calibration` (`import`), `ack` (`clear`) | |
 | `cal.list` | — | `calibrations` | |
+| `cal.delete` | `key: CalKey`, `part: sensitivity \| mic_curve \| all` | `ack` | |
 | `spl.log_start` | `meas`, `interval: Seconds` | `spl_log` | |
 | `spl.log_stop` | `meas` | `spl_log` | |
 | `ir.capture` | `lease_token`, `input`, `sweep: EssSpec`, `name` | `trace` | L (held for the capture) |
@@ -156,6 +157,12 @@ it: `first_arrival` takes the accepted first arrival or, when ambiguous, the pre
 `ranked[0]`; `strongest` the strongest arrival; `ranked{index}` an entry of the ambiguous
 list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an explicit operator
 value) clears `last_finding`; a delay tracking moves keeps it.
+
+`DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`,
+`tracking` (the operator's switch), `awaiting_pick`, `last_finding: DelayFinding | nil`. An
+`ambiguous` finding sets `awaiting_pick` (decision 1c): tracking is paused — it moves nothing
+— until the operator resolves it with `delay.insert` or `delay.set`, or runs `delay.find`
+again (a new finding that is not ambiguous clears it).
 
 #### Traces (`trace.*`)
 
@@ -246,11 +253,15 @@ capture device, the input channel and the mic name (`CalKey`), so `cal.spl` and
   `not_ascending`. `clear` removes the curve; an entry holding neither a calibration nor a
   curve is deleted.
 - Both set the input's mic name to `mic` (the name is typed once, at calibration time).
+- `cal.delete` removes from the entry `key` (any device; no open session needed) its
+  sensitivity calibration (`sensitivity`), its curve (`mic_curve`) or both (`all`); an entry
+  left with neither is deleted (`calibration` event `deleted`). `not_found` when there is no
+  such entry or it does not hold the part named. The input setup is not changed.
 - `InputSetup` = {`channel`, `mic`: string | nil, `mic_curve`: bool (on/off of the curve,
   decision 7c)}. Mic names are 1–64 characters.
 - When the daemon's calibration store file cannot be read it is never written: `cal.spl`,
-  `cal.mic_curve`, `cal.list` and `session.inputs` are `refused` with `detail: {type:
-  cal_store, path, reason}`.
+  `cal.mic_curve`, `cal.delete`, `cal.list` and `session.inputs` are `refused` with
+  `detail: {type: cal_store, path, reason}`.
 
 Which calibration a measurement uses (shown as `CalStatus` in `spl`, `rta` and `spec`
 frames): the entry of device + input + the input's mic → `verified`; else the newest one

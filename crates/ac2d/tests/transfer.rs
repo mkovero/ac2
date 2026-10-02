@@ -367,3 +367,139 @@ fn transfer_magnitude_delay_timing_and_ir() {
     }
     stop.join().unwrap();
 }
+
+/// Two arrivals 200 samples apart, the earlier 12.3 dB under the later: within 2 dB of the
+/// first-arrival threshold, so the finder leaves the pick to the operator (decision 1c).
+fn two_arrival_rig() -> ac2_audio::FakeBackend {
+    use ac2_audio::FakeConfig;
+    use ac2_audio::fake::{FakeDrive, FakePath};
+    let mut fir = vec![0.0; 201];
+    fir[0] = ACOUSTIC_GAIN * 10f32.powf(-12.3 / 20.0);
+    fir[200] = ACOUSTIC_GAIN;
+    ac2_audio::FakeBackend::new(FakeConfig {
+        sample_rate: FS,
+        block_frames: BLOCK,
+        inputs: 4,
+        outputs: 2,
+        drive: FakeDrive::Manual,
+        seed: 7,
+        paths: vec![
+            FakePath::loopback(0, 0, LOOP_DELAY),
+            FakePath::acoustic(0, 1, LOOP_DELAY + ACOUSTIC_DELAY, fir, 1e-4),
+        ],
+        ..FakeConfig::default()
+    })
+    .unwrap()
+}
+
+fn delay_state(r: ReplyBody) -> ac2_proto::model::DelayState {
+    match r {
+        ReplyBody::Measurement(m) => m.delay.unwrap(),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn snapshot_delay(c: &mut Client) -> ac2_proto::model::DelayState {
+    match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state.measurements[0].delay.clone().unwrap(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn an_ambiguous_finding_awaits_a_pick() {
+    init_log();
+    let backend = two_arrival_rig();
+    let mut cfg = config(backend.clone(), inproc("tf-ambiguous"));
+    cfg.lease_expiry = Duration::from_secs(60);
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let st = delay_state(c.ok(Command::DelayTrack {
+        meas: MeasId(1),
+        enabled: true,
+    }));
+    assert!(st.tracking && !st.awaiting_pick);
+    let tok = match c.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::GenSet {
+        lease_token: tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
+    let mut d = driver(&backend);
+    for _ in 0..6 {
+        run_tf(&mut d, &sub, 0.5, 0);
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+
+    let early = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
+    match c.ok(find(FinderBand::Full, None)) {
+        ReplyBody::DelayFinding(f) => {
+            let DelayOutcome::Ambiguous { ranked, .. } = &f.outcome else {
+                panic!("{f:?}");
+            };
+            assert!(
+                ranked
+                    .iter()
+                    .any(|a| (a.delay.0 - early).abs() < 1.0 / f64::from(FS)),
+                "{ranked:?}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let st = snapshot_delay(&mut c);
+    assert!(st.awaiting_pick, "{st:?}");
+    assert!(st.tracking, "the operator's switch stays on while paused");
+
+    // Paused tracking moves nothing while more audio arrives.
+    let before = st.applied_samples;
+    for _ in 0..4 {
+        run_tf(&mut d, &sub, 0.5, 0);
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+    assert_eq!(snapshot_delay(&mut c).applied_samples, before);
+
+    // The operator picks a candidate: resolved, tracking resumes; the finding stays (the
+    // other ranked picks remain insertable).
+    let st = delay_state(c.ok(Command::DelayInsert {
+        meas: MeasId(1),
+        pick: DelayPick::Ranked { index: 0 },
+    }));
+    assert!(!st.awaiting_pick);
+    assert!(st.last_finding.is_some());
+
+    // A new ambiguous finding pauses again; a typed value resolves it too.
+    c.ok(find(FinderBand::Full, None));
+    assert!(snapshot_delay(&mut c).awaiting_pick);
+    let st = delay_state(c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(early),
+    }));
+    assert!(!st.awaiting_pick);
+    assert!(st.last_finding.is_none());
+
+    c.ok(Command::GenStop);
+    let stop = std::thread::spawn(move || h.shutdown());
+    while !stop.is_finished() {
+        d.run_blocks(4);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    stop.join().unwrap();
+}

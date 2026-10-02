@@ -156,7 +156,9 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             if let Some(d) = &m.delay {
                 // Distance stays in the transfer legend's reference line.
                 text.push_str(&format!(" · {}", format::ms(d.applied.0, 2)));
-                if d.tracking {
+                if d.tracking && d.awaiting_pick {
+                    text.push_str(" · tracking paused");
+                } else if d.tracking {
                     text.push_str(" · tracking");
                 }
             }

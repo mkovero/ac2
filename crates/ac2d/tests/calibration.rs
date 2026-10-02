@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
 use ac2_proto::frame::{FrameData, SpecFrame, SplMeta, TfFrame};
 use ac2_proto::model::{
-    BandFraction, CalKey, CalState, CalStatus, GeneratorDesired, GeneratorSettings, InputSetup,
-    LevelScale, MeasConfig, MeasKind, MicCurveAction, MicState, RtaConfig, Signal, SpecAveraging,
-    SpectrumConfig, State, TraceMeta, Weighting, Window,
+    BandFraction, CalKey, CalPart, CalState, CalStatus, GeneratorDesired, GeneratorSettings,
+    InputSetup, LevelScale, MeasConfig, MeasKind, MicCurveAction, MicState, RtaConfig, Signal,
+    SpecAveraging, SpectrumConfig, State, TraceMeta, Weighting, Window,
 };
 use ac2_proto::units::{Blob, DbSpl, Dbfs, Hz, MeasId, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody, Stream, Subscription, Topic};
@@ -484,6 +484,40 @@ async fn calibration_mic_curve_and_matching_end_to_end() {
     })
     .await
     .unwrap_err(); // no session open: tied to the session's device
+
+    // `cal.delete` is by key, so it needs no session: the curve first (the calibration
+    // stays), then the sensitivity, which leaves nothing and deletes the entry.
+    let del = |part| Command::CalDelete {
+        key: key.clone(),
+        part,
+    };
+    let missing =
+        |e: ClientError| matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::NotFound);
+    let r = c.call(del(CalPart::MicCurve)).await.unwrap();
+    assert!(matches!(r, ReplyBody::Ack { .. }), "{r:?}");
+    let st = state_until(&c, |s| s.calibrations.iter().all(|e| e.mic_curve.is_none())).await;
+    assert_eq!(st.calibrations.len(), 1);
+    assert_eq!(st.calibrations[0].spl, Some(cal));
+    assert_eq!(st.calibrations[0].mic_curve, None);
+    assert!(missing(c.call(del(CalPart::MicCurve)).await.unwrap_err()));
+    c.call(del(CalPart::Sensitivity)).await.unwrap();
+    let st = state_until(&c, |s| s.calibrations.is_empty()).await;
+    assert_eq!(
+        st.inputs[0].mic.as_deref(),
+        Some("ECM"),
+        "input setup untouched"
+    );
+    assert!(missing(c.call(del(CalPart::All)).await.unwrap_err()));
+    drop(c);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+
+    // The deletion is in the file.
+    let h = start(&store);
+    let c = connect(&h).await;
+    let st = state_until(&c, |_| true).await;
+    assert!(st.calibrations.is_empty(), "{:?}", st.calibrations);
     drop(c);
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
@@ -501,6 +535,14 @@ async fn unreadable_store_is_refused_and_untouched() {
     let c = connect(&h).await;
     for cmd in [
         Command::CalList,
+        Command::CalDelete {
+            key: CalKey {
+                device: ac2_proto::model::DeviceId("fake:loop".into()),
+                channel: 1,
+                mic: "M30".into(),
+            },
+            part: CalPart::All,
+        },
         Command::SessionInputs {
             inputs: vec![InputSetup {
                 channel: 0,

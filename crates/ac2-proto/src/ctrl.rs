@@ -12,10 +12,10 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
-    AverageMethod, CalEntry, DelayFinding, DelayPick, DelayReference, DeviceInfo, EssSpec,
-    ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, ImportRole, InputSetup,
-    Lease, MathOp, MeasConfig, Measurement, MicCurveAction, Session, SessionConfig, SessionFile,
-    SessionRef, SplLog, TraceData, TraceEdit, TraceMeta,
+    AverageMethod, CalEntry, CalKey, CalPart, DelayFinding, DelayPick, DelayReference, DeviceInfo,
+    EssSpec, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, ImportRole,
+    InputSetup, Lease, MathOp, MeasConfig, Measurement, MicCurveAction, Session, SessionConfig,
+    SessionFile, SessionRef, SplLog, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, DbSpl, Hz, LeaseToken, MeasId, RequestId, Rev, Seconds,
@@ -307,6 +307,15 @@ pub enum Command {
     /// List calibrations.
     #[serde(rename = "cal.list")]
     CalList,
+    /// Delete the sensitivity calibration and/or the mic curve of an entry, on any device
+    /// (no open session needed).
+    #[serde(rename = "cal.delete")]
+    CalDelete {
+        /// Entry.
+        key: CalKey,
+        /// What to remove; an entry left with neither is deleted.
+        part: CalPart,
+    },
 
     // -- spl ----------------------------------------------------------------------------
     /// Start logging an SPL measurement.
@@ -410,6 +419,7 @@ impl Command {
             Self::CalSpl { .. } => "cal.spl",
             Self::CalMicCurve { .. } => "cal.mic_curve",
             Self::CalList => "cal.list",
+            Self::CalDelete { .. } => "cal.delete",
             Self::SplLogStart { .. } => "spl.log_start",
             Self::SplLogStop { .. } => "spl.log_stop",
             Self::IrCapture { .. } => "ir.capture",

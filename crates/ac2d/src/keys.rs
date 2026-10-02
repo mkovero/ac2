@@ -7,9 +7,8 @@
 
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use ac2_zmq::{AuthorizedKeys, KeyPair, KeyStoreError, PublicKey, SecretKey};
 
@@ -54,46 +53,6 @@ fn io_err(path: &Path) -> impl FnOnce(io::Error) -> KeyFileError + '_ {
         path: path.to_owned(),
         source,
     }
-}
-
-/// Writes `contents` to `path` atomically; the file is created owner-only on Unix.
-pub fn write_private_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let dir = match path.parent() {
-        Some(d) if !d.as_os_str().is_empty() => d,
-        _ => Path::new("."),
-    };
-    fs::create_dir_all(dir)?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let tmp = dir.join(format!(
-        ".{}.tmp-{}-{}",
-        name.to_string_lossy(),
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    let written = (|| {
-        let mut opts = fs::OpenOptions::new();
-        opts.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp)?;
-        f.write_all(contents)?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, path)
-    })();
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
-    written?;
-    #[cfg(unix)]
-    fs::File::open(dir)?.sync_all()?;
-    Ok(())
 }
 
 const KEY_HEADER: &str = "# ac2d server CURVE key pair; keep this file private";
@@ -154,7 +113,8 @@ pub fn load_or_create_server_keys(path: &Path) -> Result<KeyPair, KeyFileError> 
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let kp = KeyPair::generate().map_err(|e| KeyFileError::Generate(e.to_string()))?;
-            write_private_atomic(path, key_text(&kp).as_bytes()).map_err(io_err(path))?;
+            ac2_paths::write_private_atomic(path, key_text(&kp).as_bytes())
+                .map_err(io_err(path))?;
             tracing::info!(
                 "generated server key pair {} (public {})",
                 path.display(),
@@ -173,7 +133,8 @@ pub fn load_or_create_authorized(path: &Path) -> Result<AuthorizedKeys, KeyFileE
         Ok(_) => AuthorizedKeys::load(path).map_err(KeyFileError::Authorized),
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             let keys = AuthorizedKeys::new();
-            write_private_atomic(path, keys.to_text().as_bytes()).map_err(io_err(path))?;
+            ac2_paths::write_private_atomic(path, keys.to_text().as_bytes())
+                .map_err(io_err(path))?;
             tracing::warn!(
                 "{}: created an empty authorized-clients list; no client can connect until one is added",
                 path.display()

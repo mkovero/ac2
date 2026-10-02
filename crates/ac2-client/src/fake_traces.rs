@@ -407,6 +407,7 @@ impl Shared {
                 applied: d.applied,
                 applied_samples: Samples((d.applied.0 * 48_000.0).round() as i64),
                 tracking: d.tracking,
+                awaiting_pick: false,
                 last_finding: None,
             });
             let meas = Measurement {

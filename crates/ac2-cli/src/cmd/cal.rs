@@ -1,15 +1,15 @@
-//! Calibration (`cal spl`, `cal mic-curve`, `cal list`) and the input setup
+//! Calibration (`cal spl`, `cal mic-curve`, `cal list`, `cal rm`) and the input setup
 //! (`session inputs`, `session open --mic`): `docs/design/q7-calibration.md`.
 
 use ac2_client::{Client, expect_body};
-use ac2_proto::model::{CalEntry, InputSetup, MicCurveAction, State};
+use ac2_proto::model::{CalEntry, CalKey, CalPart, DeviceId, InputSetup, MicCurveAction, State};
 use ac2_proto::units::Blob;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
 use super::{connect, state};
 use crate::CliError;
-use crate::args::{CalCmd, CalMicCurve, CalSpl, Cli, CurveSwitch, MicAssign, SessionInputs};
+use crate::args::{CalCmd, CalMicCurve, CalRm, CalSpl, Cli, CurveSwitch, MicAssign, SessionInputs};
 use crate::output::{self, Out};
 
 /// The input setup row of `channel`, or the daemon's default (no name, curve on).
@@ -138,11 +138,81 @@ async fn mic_curve(cli: &Cli, a: &CalMicCurve, out: &mut Out<'_>) -> Result<(), 
     Ok(())
 }
 
+/// The device of the calibration `cal rm` names: `--device`, else the open session's
+/// capture device, else the one device holding a calibration for this input and mic.
+fn rm_device(s: &State, a: &CalRm, mic: &str) -> Result<DeviceId, CliError> {
+    if let Some(d) = &a.device {
+        return Ok(DeviceId(d.clone()));
+    }
+    if let Some(o) = &s.session.open {
+        return Ok(o.input_device.clone());
+    }
+    let mut devices: Vec<&DeviceId> = s
+        .calibrations
+        .iter()
+        .filter(|e| e.key.channel == a.input.0 && e.key.mic == mic)
+        .map(|e| &e.key.device)
+        .collect();
+    devices.dedup();
+    match devices.as_slice() {
+        [d] => Ok((*d).clone()),
+        [] => Err(CliError::Usage(format!(
+            "no calibration of {mic} on input {}",
+            a.input
+        ))),
+        many => Err(CliError::Usage(format!(
+            "calibrations of {mic} on input {} exist for several devices ({}): give --device",
+            a.input,
+            many.iter()
+                .map(|d| d.0.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+/// `cal rm`.
+async fn rm(cli: &Cli, a: &CalRm, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let s = state(&c).await?;
+    let mic = mic_for(&s, a.input.0, a.mic.as_ref())?;
+    let key = CalKey {
+        device: rm_device(&s, a, &mic)?,
+        channel: a.input.0,
+        mic,
+    };
+    let part = match (a.sensitivity, a.curve) {
+        (true, _) => CalPart::Sensitivity,
+        (_, true) => CalPart::MicCurve,
+        _ => CalPart::All,
+    };
+    let r = c
+        .call(Command::CalDelete {
+            key: key.clone(),
+            part,
+        })
+        .await?;
+    let rev = expect_body!("cal.delete", r, ReplyBody::Ack { rev } => rev)?;
+    let what = match part {
+        CalPart::Sensitivity => "sensitivity calibration",
+        CalPart::MicCurve => "mic curve",
+        CalPart::All => "calibration",
+    };
+    out.emit(&json!({ "rev": rev, "key": key, "deleted": part }), || {
+        format!(
+            "{what} of {} on input {} of {} deleted",
+            key.mic, a.input, key.device.0
+        )
+    })?;
+    Ok(())
+}
+
 /// `cal …`.
 pub(crate) async fn run(cli: &Cli, cmd: &CalCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
         CalCmd::Spl(a) => cal_spl(cli, a, out).await,
         CalCmd::MicCurve(a) => mic_curve(cli, a, out).await,
+        CalCmd::Rm(a) => rm(cli, a, out).await,
         CalCmd::List => {
             let c = connect(cli, false).await?;
             let r = c.call(Command::CalList).await?;

@@ -247,7 +247,7 @@ impl CalStore {
             };
             let text = serde_json::to_vec_pretty(&file)
                 .map_err(|e| perr(ErrorCode::Internal, format!("calibration store: {e}")))?;
-            crate::keys::write_private_atomic(path, &text).map_err(|e| {
+            ac2_paths::write_private_atomic(path, &text).map_err(|e| {
                 perr(
                     ErrorCode::Internal,
                     format!("cannot write calibration store {}: {e}", path.display()),

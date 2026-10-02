@@ -21,9 +21,9 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    CalEntry, CalKey, DelayState, FinderBand, GenAction, GenAudit, Generator, GeneratorDesired,
-    InputSetup, Lease as WireLease, MeasConfig, MeasKind, Measurement, MicCurveAction, MicCurveRef,
-    Session, SessionConfig, SplCal, TimingStatus,
+    CalEntry, CalKey, CalPart, DelayOutcome, DelayState, FinderBand, GenAction, GenAudit,
+    Generator, GeneratorDesired, InputSetup, Lease as WireLease, MeasConfig, MeasKind, Measurement,
+    MicCurveAction, MicCurveRef, Session, SessionConfig, SplCal, TimingStatus,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -111,6 +111,17 @@ struct PendingFind {
     client: ClientId,
     id: RequestId,
     meas: MeasId,
+}
+
+/// Where an applied delay came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DelaySource {
+    /// `delay.insert` of the last finding.
+    Insert,
+    /// `delay.set`: a value the operator typed.
+    Typed,
+    /// Tracking agreed on a new delay.
+    Tracking,
 }
 
 struct Lease {
@@ -621,6 +632,7 @@ impl Control {
                     applied: Seconds(0.0),
                     applied_samples: Samples(0),
                     tracking: false,
+                    awaiting_pick: false,
                     last_finding: None,
                 });
                 let m = Measurement {
@@ -649,6 +661,7 @@ impl Control {
                         applied: Seconds(0.0),
                         applied_samples: Samples(0),
                         tracking: false,
+                        awaiting_pick: false,
                         last_finding: None,
                     });
                 }
@@ -735,9 +748,9 @@ impl Control {
                         )
                     })?
                     .delay;
-                self.set_delay(meas, delay, false)
+                self.set_delay(meas, delay, DelaySource::Insert)
             }
-            Command::DelaySet { meas, delay } => self.set_delay(meas, delay, true),
+            Command::DelaySet { meas, delay } => self.set_delay(meas, delay, DelaySource::Typed),
             Command::DelayTrack { meas, enabled } => {
                 self.transfer_delay(meas)?;
                 let mut m = self.meas(meas)?.clone();
@@ -784,6 +797,7 @@ impl Control {
                     self.store.state().calibrations.clone(),
                 ))
             }
+            Command::CalDelete { key, part } => self.cal_delete(&key, part),
             Command::SessionInputs { inputs } => self.session_inputs(inputs),
 
             Command::SplLogStart { .. } => Err(unsupported("spl.log_start")),
@@ -1057,6 +1071,7 @@ impl Control {
                     applied: Seconds(0.0),
                     applied_samples: Samples(0),
                     tracking: false,
+                    awaiting_pick: false,
                     last_finding: None,
                 });
                 let a = jobs::transfer::Transfer::new(
@@ -1070,6 +1085,7 @@ impl Control {
                     m.frozen,
                     m.config_rev,
                     d.tracking,
+                    d.awaiting_pick,
                     rt.epoch,
                     self.s.to_self.clone(),
                     self.input_cal(rt, config.measurement_input)
@@ -1207,14 +1223,15 @@ impl Control {
         }
     }
 
-    /// Applies `delay`. An explicit operator value (`clear_finding`) drops the last finding:
-    /// it no longer describes the applied delay, and a refusal must not keep showing as the
-    /// reason there is no delay.
+    /// Applies `delay`. An explicit operator value drops the last finding: it no longer
+    /// describes the applied delay, and a refusal must not keep showing as the reason there
+    /// is no delay. The operator's insert or value resolves an ambiguous finding, so tracking
+    /// resumes (decision 1c); a delay tracking moved changes neither.
     fn set_delay(
         &mut self,
         meas: MeasId,
         delay: Seconds,
-        clear_finding: bool,
+        source: DelaySource,
     ) -> Result<ReplyBody, ProtoError> {
         self.transfer_delay(meas)?;
         if !(delay.0.is_finite() && delay.0.abs() <= MAX_DELAY_S) {
@@ -1232,11 +1249,15 @@ impl Control {
         let samples = (delay.0 * fs).round() as i64;
         let mut m = self.meas(meas)?.clone();
         let rev = Rev(self.store.rev().0 + 1);
+        let operator = source != DelaySource::Tracking;
         if let Some(d) = &mut m.delay {
             d.applied = Seconds(samples as f64 / fs);
             d.applied_samples = Samples(samples);
-            if clear_finding {
+            if source == DelaySource::Typed {
                 d.last_finding = None;
+            }
+            if operator {
+                d.awaiting_pick = false;
             }
         }
         m.config_rev = rev;
@@ -1245,6 +1266,7 @@ impl Control {
                 samples,
                 seconds: samples as f64 / fs,
                 rev,
+                resume: operator,
             });
         }
         self.commit(Change::Measurement(Patch::Set(m.clone())));
@@ -1295,6 +1317,8 @@ impl Control {
                     Err(e) => Err(e),
                     Ok(mut m) => {
                         if let Some(d) = &mut m.delay {
+                            // The job paused tracking on an ambiguous result (1c).
+                            d.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
                             d.last_finding = Some(f.clone());
                         }
                         self.commit(Change::Measurement(Patch::Set(m)));
@@ -1323,7 +1347,8 @@ impl Control {
         };
         if d.tracking
             && d.applied_samples.0 != samples
-            && let Err(e) = self.set_delay(meas, Seconds(samples as f64 / fs), false)
+            && let Err(e) =
+                self.set_delay(meas, Seconds(samples as f64 / fs), DelaySource::Tracking)
         {
             tracing::warn!("tracked delay not applied: {}", e.msg);
         }
@@ -1531,6 +1556,63 @@ impl Control {
                 Ok(ReplyBody::Ack { rev })
             }
         }
+    }
+
+    /// Removes `part` from the entry `key`, on any device: housekeeping of calibrations that
+    /// no longer describe the hardware (a mic sold, a device retired) needs no open session.
+    fn cal_delete(&mut self, key: &CalKey, part: CalPart) -> Result<ReplyBody, ProtoError> {
+        self.cal.check()?;
+        let missing = |what: &str| {
+            perr(
+                ErrorCode::NotFound,
+                format!(
+                    "no {what} for {} on input {} of {}",
+                    key.mic, key.channel, key.device.0
+                ),
+            )
+        };
+        let Some(prev) = self
+            .store
+            .state()
+            .calibrations
+            .iter()
+            .find(|e| e.key == *key)
+            .cloned()
+        else {
+            return Err(missing("calibration"));
+        };
+        let mut curves = self.cal.curves();
+        let entry = match part {
+            CalPart::All => None,
+            CalPart::Sensitivity => {
+                if prev.spl.is_none() {
+                    return Err(missing("sensitivity calibration"));
+                }
+                Some(CalEntry { spl: None, ..prev })
+            }
+            CalPart::MicCurve => {
+                if prev.mic_curve.is_none() {
+                    return Err(missing("mic curve"));
+                }
+                Some(CalEntry {
+                    mic_curve: None,
+                    ..prev
+                })
+            }
+        }
+        .filter(|e| e.spl.is_some() || e.mic_curve.is_some());
+        if entry.as_ref().is_none_or(|e| e.mic_curve.is_none()) {
+            curves.remove(key);
+        }
+        let inputs = self.store.state().inputs.clone();
+        let rev = self.commit_cal(key, entry, inputs, curves)?;
+        tracing::info!(
+            "calibration of {} on input {} of {}: {part:?} deleted",
+            key.mic,
+            key.channel,
+            key.device.0
+        );
+        Ok(ReplyBody::Ack { rev })
     }
 
     fn session_inputs(&mut self, rows: Vec<InputSetup>) -> Result<ReplyBody, ProtoError> {

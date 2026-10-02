@@ -26,6 +26,7 @@ jack = ["ac2-audio/jack"]
 [dependencies]
 ac2-audio = { path = "../ac2-audio" }
 ac2-core = { path = "../ac2-core" }
+ac2-paths = { path = "../ac2-paths" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }

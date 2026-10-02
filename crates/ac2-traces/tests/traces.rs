@@ -434,6 +434,108 @@ fn a_minus_b() {
     );
 }
 
+/// A spectrum or RTA trace at -20 dB on `g`.
+fn level_trace(id: u32, kind: TraceKind, g: GridDef) -> StoredTrace {
+    let n = frequencies(&g).len();
+    StoredTrace {
+        meta: meta(id, captured(2), 0.0, kind, &g),
+        columns: Columns {
+            mag_db: vec![-20.0; n],
+            phase_deg: None,
+            coherence: None,
+        },
+        grid: g,
+    }
+}
+
+fn third_octaves(lo: i32, hi: i32) -> GridDef {
+    GridDef::IecBands {
+        fraction: BandFraction::Third,
+        centres: (lo..=hi)
+            .map(|x| Hz(1000.0 * 10f64.powf(f64::from(x) / 10.0)))
+            .collect(),
+    }
+}
+
+/// Band powers and FFT bins are not resampled: averaging or subtracting spectra / RTA on
+/// different grids is refused with a typed error, while the same operations
+/// on one grid work. Transfer traces on different grids are resampled instead (above).
+#[test]
+fn spectrum_and_rta_math_across_grids_is_refused() {
+    let refd = DelayReference::Trace { trace: TraceId(1) };
+    let cases = [
+        (
+            TraceKind::Rta {
+                scale: LevelScale::Dbfs,
+            },
+            third_octaves(-17, 13),
+            third_octaves(-10, 13),
+        ),
+        (
+            TraceKind::Rta {
+                scale: LevelScale::Dbfs,
+            },
+            third_octaves(-17, 13),
+            GridDef::IecBands {
+                fraction: BandFraction::Octave,
+                centres: vec![Hz(125.0), Hz(250.0), Hz(500.0), Hz(1000.0)],
+            },
+        ),
+        (
+            TraceKind::Spectrum {
+                scale: LevelScale::Dbfs,
+            },
+            GridDef::Linear {
+                fs: Hz(48_000.0),
+                n: 8192,
+            },
+            GridDef::Linear {
+                fs: Hz(48_000.0),
+                n: 16_384,
+            },
+        ),
+        (
+            TraceKind::Spectrum {
+                scale: LevelScale::Dbfs,
+            },
+            GridDef::Linear {
+                fs: Hz(48_000.0),
+                n: 8192,
+            },
+            GridDef::Linear {
+                fs: Hz(44_100.0),
+                n: 8192,
+            },
+        ),
+    ];
+    for (kind, ga, gb) in cases {
+        let a = level_trace(1, kind, ga.clone());
+        let b = level_trace(2, kind, gb);
+        assert_eq!(
+            average(&[&a, &b], AverageMethod::Power, refd),
+            Err(OpError::GridMismatch),
+            "{kind:?}"
+        );
+        assert_eq!(
+            math(&a, &b, MathOp::MagnitudeDifference),
+            Err(OpError::GridMismatch),
+            "{kind:?}"
+        );
+        assert!(
+            OpError::GridMismatch
+                .to_string()
+                .contains("must share one grid"),
+            "the message says why"
+        );
+        // The same grid combines.
+        let same = level_trace(3, kind, ga);
+        let r = average(&[&a, &same], AverageMethod::Power, refd).unwrap();
+        assert!((r.columns.mag_db[0] + 20.0).abs() < 1e-9);
+        let d = math(&a, &same, MathOp::MagnitudeDifference).unwrap();
+        assert_eq!(d.columns.mag_db[0], 0.0);
+    }
+}
+
 // ---- sessions ----------------------------------------------------------------------
 
 fn session_sample() -> Session {

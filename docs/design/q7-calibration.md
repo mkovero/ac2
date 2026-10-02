@@ -49,6 +49,14 @@ them, and recalibrating after a gain change is the operator's job.
   away when it holds neither a sensitivity nor a curve). Reply: the entry (`calibration`),
   or nil after a clear that removed it.
 - `cal.list` → every entry.
+- `cal.delete {key, part}` removes the sensitivity calibration (`sensitivity`), the curve
+  (`mic_curve`) or both (`all`) from the entry `key`, on any device: a mic sold or an
+  interface retired leaves entries that no session can reach through `cal.spl` /
+  `cal.mic_curve`, so deletion is by the full key and needs no open session. An entry left
+  with neither is deleted; the input setup is untouched. `not_found` when the entry or the
+  named part is missing. CLI `ac2 cal rm --input N [--mic NAME] [--device ID] [--sensitivity
+  | --curve]` (device: the open session's, else the one device holding that input + mic);
+  UI palette `Calibration: delete …` (the session's capture device).
 - `session.inputs {inputs: [InputSetup]}` upserts the listed rows (others unchanged); reply
   `inputs` (the full list). Duplicate channels or empty / over-long mic names are invalid.
 
@@ -87,12 +95,14 @@ nothing double-counts (§5.7).
 | readout | cal state | curve flag |
 |---|---|---|
 | SPL meter (`spl` frame) | `cal: uncalibrated \| verified{calibrated_at} \| other_mic_or_input{calibrated_at}` | `mic_curve` |
-| RTA (`rta`), spectrum (`spec`) | same `cal` (they are in dB SPL when calibrated) | `mic_curve` |
+| RTA (`rta`), spectrum (`spec`) | same `cal` (they are in dB SPL when calibrated); the caption shows it too (round 5, C3) | `mic_curve` |
 | TF (`tf`) | — (a ratio; sensitivity cancels) | `mic_curve` (measurement input only) |
 
 The age is `capture_wall_ns − calibrated_at`, both on the daemon clock, so no client clock
 offset enters it. Wording (`ac2-scene`): `cal 3 h ago`, `cal from other mic / input`,
-`uncalibrated`; when a curve is applied the line adds `· mic curve`.
+`uncalibrated`; when a curve is applied the line adds `· mic curve`. Spectrum and RTA
+captions append the same (`1/3 oct · A-weighted · cal 3 h ago · mic curve`), saying
+nothing when uncalibrated (the axis unit says dBFS).
 
 ## 4. Mic-curve files
 
@@ -166,8 +176,12 @@ it by. The peak readout therefore never carries the curve; this is stated in the
 
 ## 7. Store file
 
-- Location: `<config dir>/ac2/calibrations.json` (`--cal-store PATH` overrides; tests and
-  in-process daemons may run without a file — memory only).
+- Location: `calibrations.json` in the platform config directory (`ac2_paths::cal_store`):
+  `~/.config/ac2` on Linux (`$XDG_CONFIG_HOME/ac2`), `~/Library/Application Support/ac2` on
+  macOS, `%APPDATA%\ac2\config` on Windows; `$AC2_CONFIG_DIR` or `--cal-store PATH`
+  override (tests and in-process daemons may run without a file — memory only). The store
+  is machine configuration (it describes the hardware), so it lives with the config, not with
+  the sessions in the data directory (round 5, C2).
 - Format: JSON `{"format": "ac2-calibrations", "version": 1, "entries": [...], "inputs":
   [...]}`, entries with their curve points. Human-readable, diffable, hand-repairable.
 - Writes are atomic: a temporary file in the same directory, flushed and synced, renamed
@@ -199,3 +213,6 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   and untouched, matching rules (verified / other mic / other input / uncalibrated),
   frames carry the state, TF/RTA/spectrum corrected and flagged, on/off.
 - CLI, client fake, scene wording, UI reducer (mic-name prompt, curve toggle).
+- `cal.delete`: daemon (part by part, persisted across a restart, refused on an unreadable
+  store, `not_found`), client fake, CLI `cal rm`, UI palette prompt; spectrum / RTA caption
+  age (`ac2-scene`).

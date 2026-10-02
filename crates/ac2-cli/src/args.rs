@@ -649,6 +649,30 @@ pub enum CalCmd {
     MicCurve(CalMicCurve),
     /// List calibrations and the input setup.
     List,
+    /// Delete a calibration: its sensitivity, its mic curve, or both (the default).
+    Rm(CalRm),
+}
+
+/// `cal rm`.
+#[derive(Debug, Args)]
+pub struct CalRm {
+    /// Input channel of the calibration.
+    #[arg(long)]
+    pub input: Channel,
+    /// Mic name of the calibration (default: the input's mic name in the session's input
+    /// setup).
+    #[arg(long)]
+    pub mic: Option<String>,
+    /// Capture device of the calibration (default: the open session's; without a session,
+    /// the one device holding a calibration for this input and mic).
+    #[arg(long, value_name = "ID")]
+    pub device: Option<String>,
+    /// Delete only the sensitivity calibration (keep the mic curve).
+    #[arg(long, conflicts_with = "curve")]
+    pub sensitivity: bool,
+    /// Delete only the mic curve (keep the sensitivity calibration).
+    #[arg(long)]
+    pub curve: bool,
 }
 
 /// `cal mic-curve`.

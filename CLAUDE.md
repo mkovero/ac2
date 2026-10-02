@@ -24,6 +24,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | `ac2d` | daemon (`ac2d` binary) |
 | `ac2-cli` | CLI (`ac2` binary) |
 | `ac2-traces` | stored traces: capture columns, average / A−B, text import/export, session files |
+| `ac2-paths` | where files live (platform config / data dirs) and atomic writes; shared by the daemon and the UI |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
 | `ac2-ui` | desktop app |

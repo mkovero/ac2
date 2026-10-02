@@ -276,8 +276,16 @@ Behaviour (decision 1c):
   IR panel marks all listed candidates.
 - CLI: `delay: AMBIGUOUS (borderline_level) 1) +6.250 ms −12.3 dB  2) +10.417 ms 0.0 dB …`.
   The exit status distinguishes accepted, ambiguous and no estimate.
-- Tracking never acts on `Ambiguous` (§10). It pauses until an `Accepted` result arrives or the
-  operator picks a candidate.
+- Tracking never acts on `Ambiguous` (§10). An ambiguous `delay.find` result also pauses
+  tracking outright (the measurement's `delay.awaiting_pick`): no window is observed until the
+  operator resolves it with `delay.insert` (a candidate) or `delay.set` (a typed value), or runs
+  `delay.find` again (a result that is not ambiguous resumes it). Otherwise two later
+  `Accepted` windows of one of the candidates could move the delay to a choice the operator
+  was just asked to make. A resumed tracker starts over: the audio skipped while paused cannot
+  be spliced onto what follows.
+- UI: X / Shift+X run the finder in the band and over the observation chosen in the palette
+  (`Delay finder: auto / full / mid / sub band`, `custom band (Hz)…`, `observation length
+  (s)…`); auto band and automatic observation by default.
 
 ---
 

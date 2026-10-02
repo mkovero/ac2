@@ -15,5 +15,5 @@ pub mod text;
 
 pub use columns::{Columns, StoredTrace, frequencies, resample};
 pub use ops::{OpError, average, capture_columns, math};
-pub use session::{SessionError, default_session_dir};
+pub use session::SessionError;
 pub use text::{ImportError, Imported, export_csv, import};

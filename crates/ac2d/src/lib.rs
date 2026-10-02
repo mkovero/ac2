@@ -52,7 +52,7 @@ use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType};
 
 pub use config::{
     DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError, NetworkSecurity, ReplayLimits,
-    config_dir, default_cal_store, pid_file, runtime_dir,
+    pid_file, runtime_dir,
 };
 
 pub use backend::{BackendChoice, FAKE_RIG, backend};

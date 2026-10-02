@@ -19,6 +19,7 @@ pub mod embedded;
 pub mod keys;
 pub mod palette;
 pub mod plot;
+pub mod prefs;
 pub mod scenes;
 pub mod state;
 pub mod theme;

@@ -118,6 +118,8 @@ pub struct Shared {
     pub expiries: u32,
     /// What `delay.find` answers.
     pub finding: FakeFinding,
+    /// Band and observation of the last `delay.find`.
+    pub last_find: Option<(FinderBand, Option<Seconds>)>,
     traces: traces::FakeTraces,
     lease: Option<LeaseSlot>,
     dedup: HashMap<(Vec<u8>, u64), Vec<u8>>,
@@ -220,6 +222,7 @@ impl Shared {
             refreshes: 0,
             expiries: 0,
             finding: FakeFinding::default(),
+            last_find: None,
             traces: traces::FakeTraces::default(),
             lease: None,
             dedup: HashMap::new(),
@@ -499,6 +502,7 @@ impl Shared {
                                 applied: Seconds(0.0),
                                 applied_samples: Samples(0),
                                 tracking: false,
+                                awaiting_pick: false,
                                 last_finding: None,
                             }),
                             Some(gid),
@@ -547,13 +551,19 @@ impl Shared {
                 self.meas(meas)?;
                 ReplyBody::Ack { rev: self.rev }
             }
-            C::DelayFind { meas, band, .. } => {
+            C::DelayFind {
+                meas,
+                band,
+                observation,
+            } => {
                 let mut m = self.meas(meas)?;
+                self.last_find = Some((band, observation));
                 let f = finding(self.finding, band, self.now_ns());
                 let st = m
                     .delay
                     .as_mut()
                     .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?;
+                st.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
                 st.last_finding = Some(f.clone());
                 self.commit(Change::Measurement(Patch::Set(m)));
                 ReplyBody::DelayFinding(f)
@@ -703,6 +713,37 @@ impl Shared {
                 }
             }
             C::CalList => ReplyBody::Calibrations(self.state.calibrations.clone()),
+            C::CalDelete { key, part } => {
+                let Some(p) = self
+                    .state
+                    .calibrations
+                    .iter()
+                    .find(|e| e.key == key)
+                    .cloned()
+                else {
+                    return Err(err(ErrorCode::NotFound, "no such calibration"));
+                };
+                let left = match part {
+                    CalPart::All => None,
+                    CalPart::Sensitivity if p.spl.is_some() => Some(CalEntry { spl: None, ..p }),
+                    CalPart::MicCurve if p.mic_curve.is_some() => Some(CalEntry {
+                        mic_curve: None,
+                        ..p
+                    }),
+                    _ => {
+                        return Err(err(
+                            ErrorCode::NotFound,
+                            format!("no {part:?} on the entry"),
+                        ));
+                    }
+                }
+                .filter(|e| e.spl.is_some() || e.mic_curve.is_some());
+                let rev = self.commit(Change::Calibration(match left {
+                    Some(e) => Patch::Set(e),
+                    None => Patch::Deleted(key),
+                }));
+                ReplyBody::Ack { rev }
+            }
             C::SessionInputs { inputs } => {
                 let mut all: Vec<InputSetup> = self
                     .state
@@ -843,11 +884,13 @@ fn finding(kind: FakeFinding, band: FinderBand, now: u64) -> DelayFinding {
     }
 }
 
+/// An operator-set delay (insert or typed), which also resolves an ambiguous finding.
 fn set_delay(m: &mut Measurement, d: Seconds) -> Result<(), ProtoError> {
     let st = m
         .delay
         .as_mut()
         .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?;
+    st.awaiting_pick = false;
     st.applied = d;
     st.applied_samples = Samples((d.0 * 48_000.0).round() as i64);
     Ok(())

@@ -252,7 +252,17 @@ async fn delay_find_outcomes_and_insert() -> R {
     assert_eq!(e.code(), Some(ErrorCode::Refused));
 
     f.lock().finding = FakeFinding::Ambiguous;
+    let awaiting = |b: ReplyBody| match b {
+        ReplyBody::Measurement(m) => m.delay.is_some_and(|d| d.awaiting_pick),
+        other => panic!("{other:?}"),
+    };
     c.call(find()).await?;
+    assert_eq!(
+        f.lock().last_find,
+        Some((FinderBand::Sub, Some(Seconds(8.0))))
+    );
+    let st = c.call(Command::MeasStart { meas: m }).await?;
+    assert!(awaiting(st), "an ambiguous finding awaits a pick");
     let applied = |b: ReplyBody| match b {
         ReplyBody::Measurement(m) => m.delay.map(|d| d.applied.0),
         other => panic!("{other:?}"),

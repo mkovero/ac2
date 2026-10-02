@@ -220,6 +220,7 @@ impl Control {
                     applied: fs.map_or(d.applied, |fs| Seconds(samples as f64 / fs)),
                     applied_samples: Samples(samples),
                     tracking: d.tracking,
+                    awaiting_pick: false,
                     last_finding: None,
                 }
             });

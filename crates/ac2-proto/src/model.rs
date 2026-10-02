@@ -719,6 +719,9 @@ pub struct DelayState {
     pub applied_samples: Samples,
     /// Tracking enabled.
     pub tracking: bool,
+    /// The last finding is ambiguous and the operator has not picked yet (decision 1c):
+    /// tracking is paused until `delay.insert`, `delay.set` or a new `delay.find`.
+    pub awaiting_pick: bool,
     /// Last finder result.
     pub last_finding: Option<DelayFinding>,
 }
@@ -1235,6 +1238,18 @@ pub enum MicCurveAction {
     },
     /// Remove the curve from the entry.
     Clear,
+}
+
+/// What `cal.delete` removes from an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalPart {
+    /// The sensitivity calibration (`spl`); a curve on the entry stays.
+    Sensitivity,
+    /// The mic curve; a sensitivity calibration on the entry stays.
+    MicCurve,
+    /// The whole entry.
+    All,
 }
 
 /// Input setup of one input channel (decision K8): which mic is on it and whether its

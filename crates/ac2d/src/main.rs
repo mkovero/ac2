@@ -21,8 +21,9 @@ With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), c
   --key-file <path>      server key pair (network mode; generated if missing)
   --authorized <path>    authorized clients (network mode; created empty if missing)
   --max-level <dBFS>     global generator maximum, dBFS RMS (default -10)
-  --cal-store <path>     calibration store (default <config dir>/ac2/calibrations.json);
-                         an unreadable file is never overwritten
+  --cal-store <path>     calibration store (default calibrations.json in the ac2 config
+                         directory, ~/.config/ac2 on Linux); an unreadable
+                         file is never overwritten
   -h, --help             this text
 
 Logging: RUST_LOG (default info).";
@@ -106,7 +107,7 @@ fn main() -> ExitCode {
     };
     let listen = match (&args.listen, &args.ctrl, &args.data) {
         (Some(l), None, None) => {
-            let dir = ac2d::config_dir();
+            let dir = ac2_paths::config_dir();
             let sec = NetworkSecurity {
                 server_key_file: args
                     .key_file
@@ -136,11 +137,7 @@ fn main() -> ExitCode {
         }
     };
     let mut config = DaemonConfig::new(backend, listen, args.max_level);
-    config.cal_store = Some(
-        args.cal_store
-            .clone()
-            .unwrap_or_else(ac2d::default_cal_store),
-    );
+    config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
     let handle = match Daemon::start(config) {
         Ok(h) => h,
         Err(e) => {
@@ -151,7 +148,7 @@ fn main() -> ExitCode {
     // `ac2 daemon stop` reads this and sends SIGTERM (taskkill on Windows).
     let pid_file = ac2d::pid_file();
     if let Err(e) =
-        ac2d::keys::write_private_atomic(&pid_file, format!("{}\n", std::process::id()).as_bytes())
+        ac2_paths::write_private_atomic(&pid_file, format!("{}\n", std::process::id()).as_bytes())
     {
         tracing::warn!("cannot write {}: {e}", pid_file.display());
     }
