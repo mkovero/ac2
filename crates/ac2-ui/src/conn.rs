@@ -16,8 +16,9 @@ use ac2_client::{
     Client, ClientConfig, ClientError, Latest, MirrorView, OnDrop, StimulusLease, expect_body,
 };
 use ac2_proto::model::{
-    DelayFinding, DelayPick, DeviceInfo, FinderBand, GeneratorDesired, GeneratorSettings,
-    ImportFormat, ImportRole, MeasConfig, Measurement, TraceData, TraceMeta,
+    BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
+    GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
+    Measurement, Preview, SessionConfig, TraceData, TraceMeta,
 };
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
@@ -78,7 +79,16 @@ pub enum ConnEvent {
     },
     Stimulus(StimEvent),
     /// `session.devices` answered (or could not be asked).
-    Devices(Result<Vec<DeviceInfo>, String>),
+    Devices(Result<Vec<BackendInfo>, String>),
+    /// `session.preview` answered.
+    Preview(Result<Preview, String>),
+    /// `session.detect_loopback` answered (or could not run).
+    LoopbackDetected(Result<LoopbackDetection, String>),
+    /// The session dialog's session is open (and its mic names set); `transfers` are the
+    /// measurements it offers to create.
+    SessionOpened {
+        transfers: Vec<MeasConfig>,
+    },
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
 }
@@ -134,6 +144,25 @@ pub enum Request {
     },
     /// `session.devices`, for the session dialog.
     Devices,
+    /// `session.open`, then `session.inputs` with the mic names; [`ConnEvent::SessionOpened`]
+    /// carries `transfers` back once both succeeded.
+    OpenSession {
+        config: SessionConfig,
+        inputs: Vec<InputSetup>,
+        transfers: Vec<MeasConfig>,
+        what: String,
+    },
+    /// Open or renew the capture-only preview of a device.
+    Preview {
+        backend: BackendKind,
+        device: DeviceId,
+    },
+    /// Close the preview.
+    PreviewStop,
+    /// Subscribe to the input meters (`session/`), or stop.
+    Meters(bool),
+    /// `session.detect_loopback` under the stimulus lease (taken for it when not held).
+    DetectLoopback(crate::session_dialog::DetectRequest),
     /// `meas.create` then `meas.start` (as `ac2 meas new --start`).
     CreateMeas { config: MeasConfig },
     /// Drop the connection and connect again now.
@@ -275,6 +304,8 @@ enum Next {
 }
 
 async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
+    // The input meters stay subscribed across reconnects while a dialog wants them.
+    let mut meters = false;
     loop {
         out.send(ConnEvent::Connecting {
             target: target.describe.clone(),
@@ -284,13 +315,21 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
         let client = match attempt {
             Ok(Ok(c)) => c,
             Ok(Err(e)) => {
-                if wait_retry(&target, &mut ctl, &out, describe_err(&e)).await {
+                if wait_retry(&target, &mut ctl, &out, describe_err(&e), &mut meters).await {
                     continue;
                 }
                 return;
             }
             Err(_) => {
-                if wait_retry(&target, &mut ctl, &out, "not responding".into()).await {
+                if wait_retry(
+                    &target,
+                    &mut ctl,
+                    &out,
+                    "not responding".into(),
+                    &mut meters,
+                )
+                .await
+                {
                     continue;
                 }
                 return;
@@ -302,7 +341,7 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
             server: w.server,
             client_id: w.client_id,
         });
-        match session(client, &mut ctl, &out).await {
+        match session(client, &mut ctl, &out, &mut meters).await {
             Next::Reconnect => continue,
             Next::Exit => return,
         }
@@ -322,6 +361,7 @@ async fn wait_retry(
     ctl: &mut mpsc::UnboundedReceiver<Ctl>,
     out: &Out,
     error: String,
+    meters: &mut bool,
 ) -> bool {
     out.send(ConnEvent::Failed {
         target: target.describe.clone(),
@@ -343,6 +383,15 @@ async fn wait_retry(
                 Some(Ctl::Req(Request::Devices)) => {
                     out.send(ConnEvent::Devices(Err("not connected".into())));
                 }
+                Some(Ctl::Req(Request::Preview { .. })) => {
+                    out.send(ConnEvent::Preview(Err("not connected".into())));
+                }
+                Some(Ctl::Req(Request::DetectLoopback(_))) => {
+                    out.send(ConnEvent::LoopbackDetected(Err("not connected".into())));
+                }
+                // Applied on the next connection.
+                Some(Ctl::Req(Request::Meters(on))) => *meters = on,
+                Some(Ctl::Req(Request::PreviewStop)) => {}
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
                     result: Err("not connected".into()),
@@ -350,6 +399,14 @@ async fn wait_retry(
             },
         }
     }
+}
+
+/// A link problem that is not a command's failure, as an error toast.
+fn tracing_free_note(out: &Out, what: &str, e: &str) {
+    out.send(ConnEvent::Reply {
+        what: what.into(),
+        result: Err(e.into()),
+    });
 }
 
 fn request_name(r: &Request) -> String {
@@ -362,6 +419,11 @@ fn request_name(r: &Request) -> String {
         Request::Import { path, .. } => format!("import {}", path.display()),
         Request::FindDelay { .. } => "delay find".into(),
         Request::Devices => "list devices".into(),
+        Request::OpenSession { what, .. } => what.clone(),
+        Request::Preview { .. } => "device meters".into(),
+        Request::PreviewStop => "close device meters".into(),
+        Request::Meters(_) => "meters".into(),
+        Request::DetectLoopback(_) => "detect loopback".into(),
         Request::CreateMeas { config } => format!("new measurement {}", config.name),
         Request::Reconnect => "reconnect".into(),
     }
@@ -374,14 +436,23 @@ enum StimOp {
     },
     Set(GeneratorDesired),
     Stop,
+    Detect(crate::session_dialog::DetectRequest),
 }
 
-async fn session(client: Client, ctl: &mut mpsc::UnboundedReceiver<Ctl>, out: &Out) -> Next {
+async fn session(
+    client: Client,
+    ctl: &mut mpsc::UnboundedReceiver<Ctl>,
+    out: &Out,
+    meters: &mut bool,
+) -> Next {
     if let Err(e) = client.subscribe(Subscription::AllData) {
         out.send(ConnEvent::Reply {
             what: "subscribe".into(),
             result: Err(e.to_string()),
         });
+    }
+    if *meters {
+        let _ = client.subscribe(Subscription::InputMeters);
     }
     let (stim_tx, stim_rx) = mpsc::unbounded_channel();
     let stim = tokio::spawn(stimulus_task(client.clone(), stim_rx, out.clone()));
@@ -398,6 +469,19 @@ async fn session(client: Client, ctl: &mut mpsc::UnboundedReceiver<Ctl>, out: &O
             c = ctl.recv() => match c {
                 None | Some(Ctl::Shutdown) => break Next::Exit,
                 Some(Ctl::Req(Request::Reconnect)) => break Next::Reconnect,
+                Some(Ctl::Req(Request::Meters(on))) => {
+                    if on != *meters {
+                        *meters = on;
+                        let r = if on {
+                            client.subscribe(Subscription::InputMeters)
+                        } else {
+                            client.unsubscribe(Subscription::InputMeters)
+                        };
+                        if let Err(e) = r {
+                            tracing_free_note(out, "meters", &e.to_string());
+                        }
+                    }
+                }
                 Some(Ctl::Req(r)) => handle(&client, r, &stim_tx, out),
             },
             changed = mirror.changed() => {
@@ -532,10 +616,63 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 let r = c
                     .call(Command::SessionDevices)
                     .await
-                    .and_then(|r| expect_body!("session.devices", r, ReplyBody::Devices(d) => d))
+                    .and_then(|r| expect_body!("session.devices", r, ReplyBody::Backends(d) => d))
                     .map_err(|e| e.to_string());
                 o.send(ConnEvent::Devices(r));
             });
+        }
+        Request::OpenSession {
+            config,
+            inputs,
+            transfers,
+            what,
+        } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                if let Err(e) = c.call(Command::SessionOpen { config }).await {
+                    o.send(ConnEvent::Reply {
+                        what,
+                        result: Err(e.to_string()),
+                    });
+                    return;
+                }
+                if !inputs.is_empty()
+                    && let Err(e) = c.call(Command::SessionInputs { inputs }).await
+                {
+                    o.send(ConnEvent::Reply {
+                        what: format!("{what}, but the mic names were not set"),
+                        result: Err(e.to_string()),
+                    });
+                    return;
+                }
+                o.send(ConnEvent::Reply {
+                    what,
+                    result: Ok(()),
+                });
+                o.send(ConnEvent::SessionOpened { transfers });
+            });
+        }
+        Request::Preview { backend, device } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let r = c
+                    .call(Command::SessionPreview { backend, device })
+                    .await
+                    .and_then(|r| expect_body!("session.preview", r, ReplyBody::Preview(p) => p))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::Preview(r));
+            });
+        }
+        Request::PreviewStop => {
+            let c = client.clone();
+            tokio::spawn(async move {
+                // A preview the daemon already closed (session open, expiry) is fine.
+                let _ = c.call(Command::SessionPreviewStop).await;
+            });
+        }
+        Request::Meters(_) => {}
+        Request::DetectLoopback(d) => {
+            let _ = stim.send(StimOp::Detect(d));
         }
         Request::CreateMeas { config } => {
             let (c, o) = (client.clone(), out.clone());
@@ -655,6 +792,11 @@ async fn stimulus_task(client: Client, mut ops: mpsc::UnboundedReceiver<StimOp>,
                         None => StimEvent::Failed("no stimulus lease held".into()),
                     },
                     StimOp::Stop => stop(&client, &mut lease).await,
+                    StimOp::Detect(d) => {
+                        let r = detect(&client, &mut lease, d).await;
+                        out.send(ConnEvent::LoopbackDetected(r));
+                        continue;
+                    }
                 };
                 out.send(ConnEvent::Stimulus(ev));
             }
@@ -698,6 +840,46 @@ async fn arm(
         Ok(_) => StimEvent::Armed,
         Err(e) => StimEvent::Failed(e.to_string()),
     }
+}
+
+/// Runs a loopback detection under the lease: the held one, else one taken for it (never by
+/// force) and released after.
+async fn detect(
+    client: &Client,
+    lease: &mut Option<StimulusLease>,
+    d: crate::session_dialog::DetectRequest,
+) -> Result<LoopbackDetection, String> {
+    let taken = if lease.is_none() {
+        Some(
+            client
+                .acquire_lease(false, OnDrop::StopAndRelease)
+                .await
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+    let token = match (&taken, lease.as_ref()) {
+        (Some(l), _) | (None, Some(l)) => l.token(),
+        (None, None) => return Err("no stimulus lease".into()),
+    };
+    let r = client
+        .call(Command::SessionDetectLoopback {
+            lease_token: token,
+            backend: d.backend,
+            device: d.device,
+            output: d.output,
+            level: Some(d.level),
+        })
+        .await
+        .and_then(
+            |r| expect_body!("session.detect_loopback", r, ReplyBody::LoopbackDetection(x) => x),
+        )
+        .map_err(|e| e.to_string());
+    if let Some(l) = taken {
+        let _ = l.end().await;
+    }
+    r
 }
 
 async fn stop(client: &Client, lease: &mut Option<StimulusLease>) -> StimEvent {

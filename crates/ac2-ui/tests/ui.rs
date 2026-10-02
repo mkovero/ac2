@@ -7,6 +7,8 @@
 
 mod common;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ac2_client::ClientConfig;
@@ -413,37 +415,184 @@ fn empty_session_hint() {
     h.snapshot_options("empty_session_hint", &snapshot_options());
 }
 
-/// Shift+O: the session dialog with the daemon's device and the simulated rig's defaults;
-/// Enter opens the session.
+/// Publishes steady input meters on the fake daemon: the preview of `fake:loop` (in 1 the
+/// loopback at −12 dBFS, in 2 the room at −31, in 3–4 silent) and, once a session is open,
+/// its session meters.
+struct Meters {
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Meters {
+    fn start(fake: Arc<ac2_client::fake::FakeDaemon>) -> Self {
+        use ac2_proto::frame::{
+            ClipFlags, LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta, SessionLevelsFrame,
+        };
+        use ac2_proto::model::{BackendKind, DeviceId};
+        use ac2_proto::{Frame, FrameData};
+        let stop = Arc::new(AtomicBool::new(false));
+        let s = Arc::clone(&stop);
+        let peak = [-1.5f32, -19.0, f32::NEG_INFINITY, f32::NEG_INFINITY];
+        let rms = [-12.0f32, -31.0, f32::NEG_INFINITY, f32::NEG_INFINITY];
+        let thread = std::thread::spawn(move || {
+            let mut seq = 1;
+            while !s.load(Ordering::Acquire) {
+                {
+                    let mut st = fake.lock();
+                    let preview = FrameData::PreviewLevels(PreviewLevelsFrame {
+                        meta: PreviewLevelsMeta {
+                            backend: BackendKind::Fake,
+                            device: DeviceId("fake:loop".into()),
+                            channels: vec![0, 1, 2, 3],
+                        },
+                        peak: peak.to_vec(),
+                        rms: rms.to_vec(),
+                        clip: vec![ClipFlags::NONE; 4],
+                    });
+                    let frame = Frame {
+                        stamp: st.stamp(seq, None),
+                        data: preview,
+                    };
+                    st.publish(&frame);
+                    if let Some(o) = st.state.session.open.clone() {
+                        let ch = o.config.input_channels;
+                        let pick = |v: &[f32]| ch.iter().map(|c| v[usize::from(*c)]).collect();
+                        let frame = Frame {
+                            stamp: st.stamp(seq, None),
+                            data: FrameData::SessionLevels(SessionLevelsFrame {
+                                meta: LevelsMeta {
+                                    channels: ch.clone(),
+                                },
+                                peak: pick(&peak),
+                                rms: pick(&rms),
+                                clip: vec![ClipFlags::NONE; ch.len()],
+                            }),
+                        };
+                        st.publish(&frame);
+                    }
+                }
+                seq += 1;
+                std::thread::sleep(Duration::from_millis(40));
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Meters {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+fn session_dialog_of(a: &App) -> Option<&ac2_ui::session_dialog::SessionDialog> {
+    match &a.state.overlay {
+        Overlay::Session(d) => Some(d),
+        _ => None,
+    }
+}
+
+/// Shift+O: the session dialog lists the backends and the rig's channels by name with their
+/// live meters and roles; the mic is named inline, the loopback detected after a typed
+/// level, Enter opens and one more key creates the transfer measurement.
 #[test]
 fn session_dialog() {
     if !have_gpu("session_dialog") {
         return;
     }
-    let fake = ac2_client::fake::FakeDaemon::start(ac2_client::fake::FakeOptions::default())
-        .expect("fake daemon");
+    let fake = Arc::new(
+        ac2_client::fake::FakeDaemon::start(ac2_client::fake::FakeOptions::default())
+            .expect("fake daemon"),
+    );
+    let _meters = Meters::start(Arc::clone(&fake));
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced", |a| {
         a.state.mirror.as_ref().is_some_and(|m| m.synced())
     });
     h.key_press_modifiers(Modifiers::SHIFT, Key::O);
-    step_until(
-        &mut h,
-        "dialog with devices",
-        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.device().is_some()),
-    );
+    step_until(&mut h, "dialog with devices and meters", |a| {
+        session_dialog_of(a).is_some_and(|d| d.device_info().is_some())
+            && a.state.input_meters().len() == 4
+    });
+    assert!(fake.lock().preview.is_some(), "the device is previewed");
+    // ↓↓↓ to input 2, N names its mic.
+    for _ in 0..3 {
+        h.key_press(Key::ArrowDown);
+    }
+    h.key_press(Key::N);
+    h.event(Event::Text("n".into()));
+    h.event(Event::Text("M30 FOH".into()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "mic named", |a| {
+        session_dialog_of(a).is_some_and(|d| d.inputs[1].mic == "M30 FOH" && d.edit.is_none())
+    });
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("session_dialog", &snapshot_options());
+
+    // D, a typed level, Enter: the fake answers in 1, which becomes the Reference.
+    h.key_press(Key::D);
+    h.event(Event::Text("d".into()));
+    h.event(Event::Text("-30".into()));
+    step_until(&mut h, "level typed", |a| {
+        session_dialog_of(a)
+            .and_then(|d| d.detect.as_ref())
+            .is_some_and(|p| p.level == "-30")
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("session_dialog_detect_confirm", &snapshot_options());
     h.key_press(Key::Enter);
-    step_until(&mut h, "session open", |a| {
-        a.state.overlay == Overlay::None && a.state.open_session().is_some()
+    step_until(&mut h, "detected", |a| {
+        session_dialog_of(a).is_some_and(|d| {
+            matches!(
+                d.detect.as_ref().map(|p| &p.phase),
+                Some(ac2_ui::session_dialog::DetectPhase::Done(_))
+            )
+        })
+    });
+    assert_eq!(fake.executions("session.detect_loopback"), 1);
+    step_until(&mut h, "lease released", |a| {
+        a.state
+            .daemon()
+            .is_some_and(|s| s.generator.owner.is_none())
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("session_dialog_detected", &snapshot_options());
+
+    h.key_press(Key::Enter);
+    step_until(&mut h, "session open, offer shown", |a| {
+        a.state.open_session().is_some() && matches!(a.state.overlay, Overlay::Offer(_))
     });
     assert_eq!(fake.executions("session.open"), 1);
+    assert_eq!(fake.executions("session.inputs"), 1);
     assert!(
-        h.state()
-            .state
-            .empty_hint(&h.state().keymap)
-            .is_some_and(|t| t.starts_with("No measurements"))
+        fake.lock().preview.is_none(),
+        "the session replaced the preview"
     );
+    h.key_press(Key::Enter);
+    step_until(&mut h, "measurement created", |a| {
+        a.state
+            .measurements()
+            .iter()
+            .any(|m| m.config.name == "Reference → M30 FOH")
+    });
+
+    // The new-measurement dialog picks inputs by name, with the session's meters.
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::NewTransfer,
+    ));
+    step_until(&mut h, "transfer dialog with meters", |a| {
+        matches!(a.state.overlay, Overlay::Form(_)) && a.state.input_meters().len() == 2
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("transfer_dialog", &snapshot_options());
 }

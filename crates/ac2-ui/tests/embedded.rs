@@ -136,8 +136,8 @@ impl Driver {
 }
 
 /// From a daemon with no session to frames, using only the app: the hint, Shift+O, the
-/// dialog's defaults for the simulated rig, Enter; the hint again, the palette's new
-/// transfer measurement, Enter; the stimulus.
+/// dialog's roles for the simulated rig with its meters, Enter; the offered transfer
+/// measurement, Enter; the stimulus.
 fn measure_from_empty(d: &mut Driver) -> R {
     d.synced()?;
     assert!(d.st.open_session().is_none());
@@ -152,9 +152,13 @@ fn measure_from_empty(d: &mut Driver) -> R {
 
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until("the device list", |s| {
-        matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Session && f.device().is_some())
-    })?;
+    d.until(
+        "the device list",
+        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
+    )?;
+    // The rig's own wiring as roles: in 1 the reference (loopback of out 1), in 2 the mic;
+    // every input of the device metered before the session opens.
+    d.until("the meters of the device", |s| s.input_meters().len() == 4)?;
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
     let open = d.st.open_session().cloned().ok_or("session")?;
@@ -163,10 +167,24 @@ fn measure_from_empty(d: &mut Driver) -> R {
         open.config.loopback.map(|l| (l.output, l.input)),
         Some((0, 0))
     );
-    let hint = d.st.empty_hint(&d.keys).unwrap_or_default();
-    assert!(hint.starts_with("No measurements"), "{hint}");
+    // One key: a transfer measurement per mic.
+    d.until("the measurement offer", |s| {
+        matches!(s.overlay, Overlay::Offer(_))
+    })?;
+    d.key("Enter");
+    d.until("the measurement, running and selected", |s| {
+        s.selected_meas().is_some_and(|m| m.running)
+    })?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
+    assert_eq!(m.config.name, "Reference \u{2192} Room mic");
+    assert_eq!(d.st.empty_hint(&d.keys), None);
+    let MeasKind::Transfer { config } = &m.config.kind else {
+        return Err("not a transfer measurement".into());
+    };
+    assert_eq!((config.reference_input, config.measurement_input), (0, 1));
+    assert_eq!(config.averaging, TfAveraging::Fifo { blocks: 8 });
 
-    // The palette: Ctrl+K, "new transfer", Enter opens the dialog; Enter creates.
+    // The palette still makes more: Ctrl+K, "new transfer", Enter opens the dialog.
     d.key("Ctrl+K");
     d.send(Msg::Text("new transfer".into()));
     d.key("Enter");
@@ -175,18 +193,7 @@ fn measure_from_empty(d: &mut Driver) -> R {
         "{:?}",
         d.st.overlay
     );
-    d.key("Enter");
-    d.until("the measurement, running and selected", |s| {
-        s.selected_meas().is_some_and(|m| m.running)
-    })?;
-    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
-    assert_eq!(m.config.name, "TF 1");
-    assert_eq!(d.st.empty_hint(&d.keys), None);
-    let MeasKind::Transfer { config } = &m.config.kind else {
-        return Err("not a transfer measurement".into());
-    };
-    assert_eq!((config.reference_input, config.measurement_input), (0, 1));
-    assert_eq!(config.averaging, TfAveraging::Fifo { blocks: 8 });
+    d.key("Escape");
 
     d.fire()?;
     d.tf_frames(m.id, 240)?;

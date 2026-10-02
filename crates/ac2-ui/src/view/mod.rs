@@ -4,6 +4,7 @@
 mod chrome;
 mod overlays;
 mod panes;
+mod session;
 
 use ac2_scene::theme::Theme;
 use eframe::egui;

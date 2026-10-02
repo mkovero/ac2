@@ -18,11 +18,13 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         Overlay::Prompt(_) => prompt(app, ctx, ch),
         Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
         Overlay::Form(_) => form(app, ctx, ch),
+        Overlay::Session(_) => super::session::session(app, ctx, ch),
+        Overlay::Offer(_) => super::session::offer(app, ctx, ch),
     }
     toasts(app, ctx, ch);
 }
 
-fn backdrop(ctx: &egui::Context) {
+pub(super) fn backdrop(ctx: &egui::Context) {
     let screen = ctx.content_rect();
     egui::Area::new(egui::Id::new("ac2-backdrop"))
         .order(egui::Order::Middle)
@@ -34,7 +36,7 @@ fn backdrop(ctx: &egui::Context) {
         });
 }
 
-fn card(ch: &Chrome) -> egui::Frame {
+pub(super) fn card(ch: &Chrome) -> egui::Frame {
     egui::Frame::new()
         .fill(ch.raised)
         .stroke(egui::Stroke::new(1.0, ch.border))
@@ -370,13 +372,14 @@ fn prompt(app: &App, ctx: &egui::Context, ch: &Chrome) {
         });
 }
 
-/// The session dialog and the new-measurement dialogs: one row per field, the focused row
-/// highlighted; keys drive it, the mouse can too.
+/// The new-measurement dialogs: one row per field, the focused row highlighted; inputs by
+/// name with their meters; keys drive it, the mouse can too.
 fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     let Overlay::Form(f) = &app.state.overlay else {
         return;
     };
     let f = f.clone();
+    let meters = app.state.input_meters();
     backdrop(ctx);
     let mut msg = None;
     egui::Area::new(egui::Id::new("ac2-form"))
@@ -422,7 +425,8 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                             msg = Some(FormMsg::Focus(i));
                                         }
                                     }
-                                    Value::Choice { options, .. } => {
+                                    Value::Choice { options, .. }
+                                    | Value::Channel { options, .. } => {
                                         let shown = field.display();
                                         let shown = if options.is_empty() {
                                             "—".to_owned()
@@ -433,12 +437,24 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                             msg = Some(FormMsg::Cycle(i, -1));
                                         }
                                         let text = RichText::new(shown).color(ch.text);
-                                        if ui.add(egui::Button::selectable(focused, text)).clicked()
-                                        {
+                                        let b = egui::Button::selectable(focused, text);
+                                        let r = if field.channel_value().is_some() {
+                                            // Fixed width: the meters line up.
+                                            ui.add_sized([170.0, 20.0], b)
+                                        } else {
+                                            ui.add(b)
+                                        };
+                                        if r.clicked() {
                                             msg = Some(FormMsg::Cycle(i, 1));
                                         }
                                         if ui.small_button("›").clicked() {
                                             msg = Some(FormMsg::Cycle(i, 1));
+                                        }
+                                        if let Some(c) = field.channel_value() {
+                                            let m = meters.get(&c).cloned().unwrap_or_else(
+                                                ac2_scene::meter::MeterReading::none,
+                                            );
+                                            super::session::meter(ui, &m, ch);
                                         }
                                     }
                                 }
@@ -453,10 +469,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    let verb = match f.kind {
-                        crate::forms::FormKind::Session => "Open",
-                        _ => "Create and start",
-                    };
+                    let verb = "Create and start";
                     if ui.button(verb).clicked() {
                         msg = Some(FormMsg::Submit);
                     }
@@ -467,7 +480,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(format!(
-                        "{} · ↑↓ field · ←→ choose · Esc closes (and stops stimulus)",
+                        "{} · ↑↓ field · ←→ choose (inputs by name) · Esc closes (and stops stimulus)",
                         f.kind.submit()
                     ))
                     .small()

@@ -21,8 +21,8 @@ across the network it requires pairing ([install.md](install.md#remote-use-foh--
 
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on the session: transfer functions (`tf`), spectrum,
-RTA and SPL meters. In the app, **Shift+O** opens the session dialog (it lists the daemon's
-interfaces; **Enter** opens), and the command palette (**Ctrl+K**) has *New transfer
+RTA and SPL meters. In the app, **Shift+O** opens the session dialog
+([below](#the-session-dialog)), and the command palette (**Ctrl+K**) has *New transfer
 measurement…*, *New spectrum…*, *New RTA…* and *New SPL meter…* (created, started and
 selected on **Enter**), *Delete selected measurement* and *Close audio session*. Until there
 is a session, or a measurement, the transfer pane says which of these comes next. This
@@ -44,6 +44,37 @@ the session dialog preselects a real interface whenever the daemon lists one. Ch
 transfer measurement "demo" running); *This computer's audio* starts with no session and
 opens the session dialog.
 
+### The session dialog
+
+Nothing in the dialog is a channel number to type. From the top:
+
+- **Backend** (**←/→**): every backend the daemon offers, with what it is; one it cannot use
+  now says why (*JACK server not running*). A daemon started on real audio offers JACK and
+  the system's audio; the simulated rig only appears on a daemon started on it.
+- **Device** (**←/→**): its name and *N in / M out · rate · buffer*.
+- **Channels**: one row per input and output, named by the backend where it can (JACK port
+  names; system audio has none, so *Input 3*), and for inputs a **live meter** (RMS bar,
+  peak tick, *CLIP* held for a second). The meters run before the session opens: the daemon
+  opens the device for capture only — no output stream exists — so you can find the mic by
+  tapping it. While a session is open on that device the dialog shows the session's own
+  meters instead.
+- **Roles**: **R** Reference (the loopback return, one input), **M** measurement mic (any
+  number; **N** names one — the name is the mic's identity for calibrations), **S** Stimulus
+  (the output feeding the system and the loopback). **Space** puts a row in or out of the
+  session. The mouse works too: the boxes, the R / M / S chips, a double click on a name.
+- **Detect loopback…** (**D**): asks for a level (no default; the stimulus level you typed
+  last is offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus
+  output — under the stimulus lease and the global ceiling, faded in and out — and marks the
+  input it returns on as the Reference (or says that none answered and which came closest).
+- **Enter** opens; what is missing is said in words (*Pick a reference input: the loopback
+  from your stimulus output*). The session's inputs, outputs and loopback follow from the
+  roles; the roles and mic names are remembered per device (`ui.toml`) and come back next
+  time. With a Reference, at least one mic and no measurements yet, one more **Enter**
+  creates *Reference → <mic>* transfer measurements. **Esc** closes the dialog — and, as
+  everywhere, stops the stimulus.
+
+The measurement dialogs pick inputs the same way: by name, with their meters, **←/→**.
+
 ## Reference wiring and loopback
 
 A transfer function divides what the microphone hears by what you sent. "What you sent" is
@@ -57,9 +88,10 @@ out 1 ──┬──► processor / amp / speaker ··· mic ──► in 2   (
 ```
 
 ac2 needs that reference: without signal on it, the transfer pane shows **NO REFERENCE**
-instead of a curve. With a loopback that also returns the generator's own output
-(`session open --loopback-out 1 --loopback-in 1`), the daemon continuously checks the
-output → input timing and warns about dropped or repeated output samples.
+instead of a curve. With a loopback that also returns the generator's own output (the
+**R** and **S** roles in the session dialog, `session open --loopback-out 1 --loopback-in 1`
+from the CLI), the daemon continuously checks the output → input timing and warns about
+dropped or repeated output samples.
 
 You can measure any signal, not only ac2's generator: program material from the console,
 fed to the reference input, works the same way (coherence then tells you which frequencies
@@ -140,8 +172,8 @@ plays until someone types a level and fires.
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (`ac2 session open … --mic 3=M30`, or **Input setup** in the
-palette). Calibrations are stored per device, input channel and mic, so moving a mic to
+Inputs carry a **mic name** (**N** on the input in the session dialog,
+`ac2 session open … --mic 3=M30`, or **Input setup** in the palette). Calibrations are stored per device, input channel and mic, so moving a mic to
 another input, or plugging in another mic, is noticed:
 
 - **Sensitivity**: put a 94 dB (or 114 dB) acoustic calibrator on the mic and run

@@ -204,6 +204,7 @@ impl Rig {
                 epoch: SessionEpoch(2),
                 open: Some(OpenSession {
                     config: SessionConfig {
+                        backend: Some(BackendKind::Fake),
                         input_device: DeviceSelector::Default,
                         output_device: DeviceSelector::Default,
                         input_channels: vec![0, 1, 2, 3],
@@ -215,6 +216,7 @@ impl Rig {
                             input: 0,
                         }),
                     },
+                    backend: BackendKind::Fake,
                     input_device: DeviceId("fake:loop".into()),
                     output_device: DeviceId("fake:loop".into()),
                     sample_rate_hz: 48_000,

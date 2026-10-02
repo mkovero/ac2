@@ -32,6 +32,7 @@ use crate::forms::{Form, FormKind};
 use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
+use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 
 /// The four panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -348,9 +349,24 @@ pub enum Overlay {
     /// Candidate list of an ambiguous finding over the transfer pane. Keys other than 1–3
     /// keep working; Esc closes it (and stops the stimulus, as always).
     DelayPick(Box<DelayChoice>),
-    /// The audio session dialog or a new-measurement dialog.
+    /// A new-measurement dialog.
     Form(Box<Form>),
+    /// The audio session dialog.
+    Session(Box<SessionDialog>),
+    /// After a session opened with a reference and mics on a daemon without measurements:
+    /// one key creates a transfer measurement per mic.
+    Offer(Box<Offer>),
 }
+
+/// Transfer measurements offered after the session dialog opened a session.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Offer {
+    pub transfers: Vec<ac2_proto::model::MeasConfig>,
+}
+
+/// Seconds between renewals of the device preview (the daemon closes one not renewed
+/// within 5 s).
+pub const PREVIEW_RENEW_S: f64 = 2.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Toast {
@@ -401,6 +417,29 @@ pub enum Msg {
     CursorAt(Option<f64>),
     /// Mouse on an open dialog.
     Form(FormMsg),
+    /// Mouse on the session dialog.
+    Session(SessionMsg),
+    /// Mouse on the measurement offer: `true` creates, `false` skips.
+    Offer(bool),
+}
+
+/// What the mouse does on the session dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionMsg {
+    Focus(Row),
+    /// ‹/› on the backend or device row.
+    Cycle(Row, i32),
+    /// The in-session box of an input or output.
+    Toggle(Row),
+    Role(Row, RoleKey),
+    /// The mic name of an input.
+    EditMic(Row),
+    Detect,
+    DetectConfirm,
+    DetectCancel,
+    Submit,
+    /// Closes the dialog without touching the stimulus.
+    Cancel,
 }
 
 /// What the mouse does on a dialog (the keyboard goes through [`Msg::Key`]).
@@ -455,6 +494,10 @@ pub struct AppState {
     /// Open the session dialog once the daemon's state shows no audio session (an embedded
     /// daemon on real audio starts without one).
     pub open_session_when_empty: bool,
+    /// The daemon's backends and devices as last listed (channel names for the dialogs).
+    pub devices: Option<Vec<ac2_proto::model::BackendInfo>>,
+    /// When the device preview was last asked for.
+    preview_sent_s: f64,
 }
 
 impl Default for AppState {
@@ -504,6 +547,8 @@ impl AppState {
             armed_with: None,
             pending_select: None,
             open_session_when_empty: false,
+            devices: None,
+            preview_sent_s: f64::NEG_INFINITY,
         }
     }
 
@@ -643,21 +688,153 @@ impl AppState {
 
     pub fn update(&mut self, msg: Msg, keymap: &Keymap) -> Vec<Request> {
         let mut out = Vec::new();
+        let before = self.meter_wants();
+        let tick = matches!(msg, Msg::Tick { .. });
+        self.update_inner(msg, keymap, &mut out);
+        self.sync_meters(before, tick, &mut out);
+        out
+    }
+
+    /// What the open dialog needs metered: the input meters subscription, and a device
+    /// preview (the session dialog on a device the session does not capture).
+    fn meter_wants(
+        &self,
+    ) -> (
+        bool,
+        Option<(ac2_proto::model::BackendKind, ac2_proto::model::DeviceId)>,
+    ) {
+        match &self.overlay {
+            Overlay::Session(d) => (true, d.preview_target()),
+            Overlay::Form(_) => (true, None),
+            _ => (false, None),
+        }
+    }
+
+    /// Subscribes, opens, renews and closes what [`Self::meter_wants`] changed to.
+    fn sync_meters(
+        &mut self,
+        before: (
+            bool,
+            Option<(ac2_proto::model::BackendKind, ac2_proto::model::DeviceId)>,
+        ),
+        tick: bool,
+        out: &mut Vec<Request>,
+    ) {
+        let after = self.meter_wants();
+        if before.0 != after.0 {
+            out.push(Request::Meters(after.0));
+        }
+        let renew = tick && self.now_s - self.preview_sent_s >= PREVIEW_RENEW_S;
+        match (&before.1, &after.1) {
+            (_, Some((backend, device))) if before.1 != after.1 || renew => {
+                out.push(Request::Preview {
+                    backend: *backend,
+                    device: device.clone(),
+                });
+                self.preview_sent_s = self.now_s;
+            }
+            (Some(_), None) => out.push(Request::PreviewStop),
+            _ => {}
+        }
+    }
+
+    /// Input meters of the session dialog's device (its preview, or the session's own
+    /// meters when the session captures it) or, for the measurement dialogs, of the
+    /// session: device input → reading. Stale frames read as nothing.
+    pub fn input_meters(&self) -> BTreeMap<u16, ac2_scene::meter::MeterReading> {
+        use ac2_proto::FrameData;
+        use ac2_proto::topic::Topic;
+        let mut out = BTreeMap::new();
+        let Some(d) = &self.data else {
+            return out;
+        };
+        let from_preview = match &self.overlay {
+            Overlay::Session(s) => s.preview_target(),
+            _ => None,
+        };
+        let topic = if from_preview.is_some() {
+            Topic::PreviewLevels
+        } else {
+            Topic::SessionLevels
+        };
+        let Some(tf) = d.latest.get(&topic).filter(|f| !f.stale) else {
+            return out;
+        };
+        let (channels, peak, rms, clip) = match &tf.frame.data {
+            FrameData::SessionLevels(f) => (&f.meta.channels, &f.peak, &f.rms, &f.clip),
+            FrameData::PreviewLevels(f) => {
+                if from_preview.as_ref() != Some(&(f.meta.backend, f.meta.device.clone())) {
+                    return out;
+                }
+                (&f.meta.channels, &f.peak, &f.rms, &f.clip)
+            }
+            _ => return out,
+        };
+        for (i, c) in channels.iter().enumerate() {
+            let (Some(p), Some(r), Some(k)) = (peak.get(i), rms.get(i), clip.get(i)) else {
+                continue;
+            };
+            out.insert(
+                *c,
+                ac2_scene::meter::MeterReading::new(
+                    *p,
+                    *r,
+                    *k != ac2_proto::frame::ClipFlags::NONE,
+                ),
+            );
+        }
+        out
+    }
+
+    /// The names of the open session's inputs, as the dialogs show them: mic name, else the
+    /// device's channel name, else `Input N`.
+    pub fn session_input_names(&self) -> Vec<(u16, String)> {
+        let Some(o) = self.open_session() else {
+            return Vec::new();
+        };
+        let device_names = self
+            .devices
+            .iter()
+            .flatten()
+            .filter(|b| b.kind == o.backend)
+            .flat_map(|b| &b.devices)
+            .find(|d| d.id == o.input_device)
+            .and_then(|d| d.input.as_ref())
+            .and_then(|i| i.channel_names.clone());
+        o.config
+            .input_channels
+            .iter()
+            .map(|&c| {
+                let mic = self.input_setup(c).mic;
+                let dev = device_names
+                    .as_ref()
+                    .and_then(|n| n.get(usize::from(c)).cloned());
+                let name = ac2_scene::meter::input_name(c, mic.as_deref(), dev.as_deref());
+                (c, ac2_scene::meter::channel_choice(c, &name))
+            })
+            .collect()
+    }
+
+    fn update_inner(&mut self, msg: Msg, keymap: &Keymap, out: &mut Vec<Request>) {
+        let out = &mut *out;
         match msg {
-            Msg::Key(chord) => self.key(chord, keymap, &mut out),
+            Msg::Key(chord) => self.key(chord, keymap, out),
             Msg::Text(t) => self.text(&t),
             Msg::Backspace => match &mut self.overlay {
                 Overlay::Palette(p) => p.backspace(),
                 Overlay::Form(f) => f.backspace(),
+                Overlay::Session(d) => d.backspace(),
                 Overlay::Prompt(p) => {
                     p.text.pop();
                     p.error = None;
                 }
                 _ => {}
             },
-            Msg::Command(c) => self.command(c, keymap, &mut out),
-            Msg::Conn(e) => self.conn_event(*e, keymap, &mut out),
-            Msg::Form(m) => self.form_msg(m, &mut out),
+            Msg::Command(c) => self.command(c, keymap, out),
+            Msg::Conn(e) => self.conn_event(*e, keymap, out),
+            Msg::Form(m) => self.form_msg(m, out),
+            Msg::Session(m) => self.session_msg(m, out),
+            Msg::Offer(create) => self.offer(create, out),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
@@ -679,7 +856,6 @@ impl AppState {
             }
             Msg::CursorAt(hz) => self.view.cursor_hz = hz,
         }
-        out
     }
 
     fn toast(&mut self, text: impl Into<String>) {
@@ -737,6 +913,18 @@ impl AppState {
                 }
                 return;
             }
+            Overlay::Session(_) => {
+                self.session_key(chord, swallow, out);
+                return;
+            }
+            Overlay::Offer(_) => {
+                if chord.key == Key::Enter {
+                    self.offer(true, out);
+                } else if matches!(chord.key, Key::Backspace | Key::N) {
+                    self.offer(false, out);
+                }
+                return;
+            }
             Overlay::Form(f) => {
                 match chord.key {
                     Key::Enter => self.submit_form(out),
@@ -779,7 +967,7 @@ impl AppState {
             self.command(c, keymap, out);
             let opened_text = matches!(
                 self.overlay,
-                Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_)
+                Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Session(_)
             );
             if opened_text && std::mem::discriminant(&self.overlay) != before {
                 self.swallow_text = typed_char(&chord);
@@ -801,6 +989,7 @@ impl AppState {
         match &mut self.overlay {
             Overlay::Palette(p) => p.type_text(&t),
             Overlay::Form(f) => f.type_text(&t),
+            Overlay::Session(d) => d.type_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;
@@ -1349,7 +1538,9 @@ impl AppState {
                     self.error("not connected");
                 } else {
                     let open = self.open_session().cloned();
-                    self.overlay = Overlay::Form(Box::new(Form::session(open.as_ref())));
+                    let setup = self.daemon().map(|s| s.inputs.clone()).unwrap_or_default();
+                    self.overlay =
+                        Overlay::Session(Box::new(SessionDialog::new(open.as_ref(), &setup)));
                     out.push(Request::Devices);
                 }
             }
@@ -1373,8 +1564,24 @@ impl AppState {
                         open_session_hint(keymap)
                     )),
                     Some(o) => {
-                        let f = Form::measurement(kind, Some(&o), &self.measurements());
+                        let names = self.session_input_names();
+                        let mics: Vec<u16> = self
+                            .daemon()
+                            .map(|s| {
+                                s.inputs
+                                    .iter()
+                                    .filter(|i| i.mic.is_some())
+                                    .map(|i| i.channel)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        let f =
+                            Form::measurement(kind, Some(&o), &self.measurements(), &names, &mics);
                         self.overlay = Overlay::Form(Box::new(f));
+                        if self.devices.is_none() {
+                            // Channel names arrive with the device list.
+                            out.push(Request::Devices);
+                        }
                     }
                 }
             }
@@ -1722,14 +1929,44 @@ impl AppState {
                     }
                 }
             }
-            ConnEvent::Devices(r) => match (&mut self.overlay, r) {
-                (Overlay::Form(f), Ok(d)) if f.kind == FormKind::Session => f.set_devices(d),
-                (Overlay::Form(f), Err(e)) if f.kind == FormKind::Session => {
-                    f.error = Some(format!("cannot list devices: {e}"));
+            ConnEvent::Devices(r) => {
+                if let Ok(d) = &r {
+                    self.devices = Some(d.clone());
                 }
-                // The dialog was closed meanwhile.
-                _ => {}
-            },
+                let names = self.session_input_names();
+                match (&mut self.overlay, r) {
+                    (Overlay::Session(s), Ok(d)) => s.set_backends(d, &self.prefs),
+                    (Overlay::Session(s), Err(e)) => {
+                        s.error = Some(format!("cannot list devices: {e}"));
+                    }
+                    (Overlay::Form(f), Ok(_)) => {
+                        // Channel names arrived: relabel the inputs.
+                        relabel(f, &names);
+                    }
+                    // The dialog was closed meanwhile.
+                    _ => {}
+                }
+            }
+            ConnEvent::Preview(r) => {
+                if let Overlay::Session(s) = &mut self.overlay {
+                    s.preview_error = r.err().map(|e| format!("meters unavailable: {e}"));
+                }
+            }
+            ConnEvent::LoopbackDetected(r) => {
+                if let Overlay::Session(s) = &mut self.overlay {
+                    s.detect_result(r);
+                    // The detection closed the preview on the daemon: reopen it now.
+                    self.preview_sent_s = f64::NEG_INFINITY;
+                } else if let Err(e) = r {
+                    self.error(format!("detect loopback: {e}"));
+                }
+            }
+            ConnEvent::SessionOpened { transfers } => {
+                let none_yet = self.daemon().is_some_and(|s| s.measurements.is_empty());
+                if none_yet && !transfers.is_empty() && self.overlay == Overlay::None {
+                    self.overlay = Overlay::Offer(Box::new(Offer { transfers }));
+                }
+            }
             ConnEvent::MeasCreated(m) => {
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);
@@ -1795,15 +2032,9 @@ impl AppState {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
-        let r = match f.kind {
-            FormKind::Session => f.session_config().map(|(config, dev)| Request::Call {
-                cmd: Command::SessionOpen { config },
-                what: format!("audio session open on {dev}"),
-            }),
-            _ => f
-                .meas_config(open.as_ref())
-                .map(|config| Request::CreateMeas { config }),
-        };
+        let r = f
+            .meas_config(open.as_ref())
+            .map(|config| Request::CreateMeas { config });
         match r {
             Ok(req) => {
                 out.push(req);
@@ -1811,6 +2042,167 @@ impl AppState {
             }
             Err(e) => f.error = Some(e),
         }
+    }
+
+    /// Keys on the session dialog. Esc never gets here: it closes the dialog and stops the
+    /// stimulus like everywhere else.
+    fn session_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
+        use eframe::egui::Key;
+        let Overlay::Session(d) = &mut self.overlay else {
+            return;
+        };
+        let plain = !(chord.command || chord.alt);
+        match chord.key {
+            Key::Enter => {
+                if d.edit == Some(Edit::DetectLevel) {
+                    self.session_msg(SessionMsg::DetectConfirm, out);
+                } else if matches!(d.edit, Some(Edit::Mic(_))) {
+                    d.finish_edit();
+                } else {
+                    self.submit_session(out);
+                }
+            }
+            Key::ArrowUp => {
+                d.detect_cancel();
+                d.move_focus(-1);
+            }
+            Key::Tab if chord.shift => {
+                d.detect_cancel();
+                d.move_focus(-1);
+            }
+            Key::ArrowDown | Key::Tab => {
+                d.detect_cancel();
+                d.move_focus(1);
+            }
+            Key::ArrowLeft | Key::ArrowRight if d.edit.is_none() => {
+                let step = if chord.key == Key::ArrowLeft { -1 } else { 1 };
+                d.cycle(step, &self.prefs);
+            }
+            // Everything below types text while a text row or edit has the keyboard.
+            _ if d.text_focus() => self.swallow_text = swallow,
+            Key::Space if plain => d.toggle(),
+            Key::R if plain => d.assign(RoleKey::Reference),
+            Key::M if plain => d.assign(RoleKey::Mic),
+            Key::S if plain => d.assign(RoleKey::Stimulus),
+            Key::N | Key::F2 if plain => {
+                if d.start_mic_edit() {
+                    // The N that started the edit also arrives as text.
+                    self.swallow_text = typed_char(&chord);
+                }
+            }
+            Key::D if plain => {
+                self.session_msg(SessionMsg::Detect, out);
+                if let Overlay::Session(d) = &self.overlay
+                    && d.edit == Some(Edit::DetectLevel)
+                {
+                    self.swallow_text = typed_char(&chord);
+                }
+            }
+            _ => self.swallow_text = swallow,
+        }
+    }
+
+    fn session_msg(&mut self, m: SessionMsg, out: &mut Vec<Request>) {
+        let level = self.stimulus.level;
+        let ceiling = self.ceiling();
+        let Overlay::Session(d) = &mut self.overlay else {
+            return;
+        };
+        match m {
+            SessionMsg::Focus(r) => {
+                d.detect_cancel();
+                d.focus_row(r);
+            }
+            SessionMsg::Cycle(r, step) => {
+                d.detect_cancel();
+                d.focus_row(r);
+                d.cycle(step, &self.prefs);
+            }
+            SessionMsg::Toggle(r) => {
+                d.focus_row(r);
+                d.toggle();
+            }
+            SessionMsg::Role(r, k) => {
+                d.focus_row(r);
+                d.assign(k);
+            }
+            SessionMsg::EditMic(r) => {
+                d.focus_row(r);
+                d.start_mic_edit();
+            }
+            SessionMsg::Detect => {
+                if let Err(e) = d.detect_start(level) {
+                    d.error = Some(e);
+                }
+            }
+            SessionMsg::DetectConfirm => {
+                if let Some(req) = d.detect_confirm(ceiling) {
+                    out.push(Request::DetectLoopback(req));
+                }
+            }
+            SessionMsg::DetectCancel => d.detect_cancel(),
+            SessionMsg::Submit => self.submit_session(out),
+            SessionMsg::Cancel => self.overlay = Overlay::None,
+        }
+    }
+
+    /// Enter on the session dialog: opens the session its roles describe, remembers them
+    /// for the device, and points the stimulus at the chosen outputs (K4).
+    fn submit_session(&mut self, out: &mut Vec<Request>) {
+        let no_measurements = self.daemon().is_some_and(|s| s.measurements.is_empty());
+        let Overlay::Session(d) = &mut self.overlay else {
+            return;
+        };
+        d.finish_edit();
+        let plan = match d.plan() {
+            Ok(p) => p,
+            Err(e) => {
+                d.error = Some(e);
+                return;
+            }
+        };
+        let backend = plan
+            .config
+            .backend
+            .unwrap_or(ac2_proto::model::BackendKind::Fake);
+        self.prefs.sessions.insert(
+            crate::prefs::UiPrefs::device_key(backend, &plan.device_id),
+            plan.roles.clone(),
+        );
+        if !plan.roles.stimulus.is_empty() {
+            self.prefs
+                .outputs
+                .insert(plan.device_id.clone(), plan.roles.stimulus.clone());
+            if self.stimulus.phase == StimPhase::Idle {
+                self.stimulus.outputs = plan.roles.stimulus.clone();
+                self.stim_device = Some(plan.device_id.clone());
+            }
+        }
+        self.prefs_dirty = true;
+        out.push(Request::OpenSession {
+            config: plan.config,
+            inputs: plan.inputs,
+            transfers: if no_measurements {
+                plan.transfers
+            } else {
+                Vec::new()
+            },
+            what: format!("audio session open on {}", plan.device_name),
+        });
+        self.overlay = Overlay::None;
+    }
+
+    /// The measurement offer: create every transfer measurement, or skip.
+    fn offer(&mut self, create: bool, out: &mut Vec<Request>) {
+        let Overlay::Offer(o) = &self.overlay else {
+            return;
+        };
+        if create {
+            for config in o.transfers.clone() {
+                out.push(Request::CreateMeas { config });
+            }
+        }
+        self.overlay = Overlay::None;
     }
 
     /// X inserts the first arrival, Shift+X the strongest — when the finder accepted. An
@@ -1982,6 +2374,22 @@ impl AppState {
                 e.2.update(level, Some(validity), dt);
                 e.0 = seq;
                 e.1 = at;
+            }
+        }
+    }
+}
+
+/// Renames the channel choices of a measurement dialog (the device's channel names arrived).
+fn relabel(f: &mut Form, names: &[(u16, String)]) {
+    for field in &mut f.fields {
+        if let crate::forms::Value::Channel {
+            channels, options, ..
+        } = &mut field.value
+        {
+            for (c, o) in channels.iter().zip(options.iter_mut()) {
+                if let Some((_, n)) = names.iter().find(|(x, _)| x == c) {
+                    o.clone_from(n);
+                }
             }
         }
     }

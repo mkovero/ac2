@@ -22,6 +22,7 @@ pub mod finding;
 pub mod format;
 pub mod grid;
 pub mod ir;
+pub mod meter;
 pub mod primitives;
 pub mod readout;
 pub mod spectrum;

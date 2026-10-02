@@ -33,6 +33,7 @@ pub enum Setup {
 /// The session the simulated rig opens: inputs 1–2, output 1, loopback out 1 → in 1.
 pub fn demo_session() -> SessionConfig {
     SessionConfig {
+        backend: Some(ac2_proto::model::BackendKind::Fake),
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,
         input_channels: vec![0, 1],

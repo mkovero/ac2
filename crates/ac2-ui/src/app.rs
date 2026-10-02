@@ -243,7 +243,7 @@ impl App {
     fn input(&mut self, ctx: &egui::Context) {
         let text_overlay = matches!(
             self.state.overlay,
-            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_)
+            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Session(_)
         );
         let events = ctx.input_mut(|i| {
             let (mine, rest): (Vec<Event>, Vec<Event>) =
@@ -361,6 +361,10 @@ impl eframe::App for App {
 
         if self.state.animating() || self.startup.first_frame.is_none() {
             ctx.request_repaint();
+        } else if matches!(self.state.overlay, Overlay::Session(_)) {
+            // The dialog renews its device preview from the frame tick, also when no meter
+            // frame arrives to wake the UI.
+            ctx.request_repaint_after(Duration::from_millis(500));
         } else if let Some(next) = self
             .state
             .toasts

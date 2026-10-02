@@ -113,17 +113,30 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 **In the app** (any daemon: hosted by the app, per-user, or remote; no terminal needed):
 
 1. Until there is an audio session the transfer pane says *No audio session — press
-   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens the session dialog:
-   it lists the daemon's interfaces. **↑/↓** move between fields, **←/→** pick the backend
-   and device, type the input channels (`1-2`), the number of output channels, optionally a
-   rate and buffer (empty: the device's defaults) and the loopback (`1>1`: output 1 returns
-   on input 1; leave it empty if your interface does not loop the output back). **Enter**
-   opens it.
-2. The pane now says *No measurements*. **Ctrl+K**, type `new transfer`, **Enter**: the
-   dialog proposes the loopback input as reference and the next input as measurement
-   (**Enter** creates and starts it; it is selected). *New spectrum…*, *New RTA…* and *New
-   SPL meter…* work the same way; *Delete selected measurement* and *Close audio session*
-   are in the palette too.
+   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens the session dialog.
+   The top rows pick the **backend** (JACK, system audio; one that cannot be used says why,
+   e.g. *JACK server not running*) and the **device** (*8 in / 8 out · 48 kHz*) with
+   **←/→**. Below them is one row per input and output with its name and, for inputs, a
+   live level meter — tap the mic or play something and you see which input it is on,
+   before anything is opened (the dialog only listens; it never plays).
+2. Mark what each channel is for, with **↑/↓** to the row and one key:
+   - **R** on the input the loopback cable returns on: the **Reference**;
+   - **M** on each input with a measurement mic; **N** types its name (`M30 FOH`), which
+     is what calibrations are kept under;
+   - **S** on the output that feeds the system and the loopback: the **Stimulus**.
+
+   **Space** adds or removes a row from the session. Not sure which input the loopback
+   is on? **D** (*Detect loopback…*) plays a 0.5 s noise burst on the stimulus output at a
+   level you type (there is no default level; **Enter** plays) and marks the input it
+   comes back on as the Reference. The dialog says in words what is missing (*Pick a
+   reference input: the loopback from your stimulus output*); rate and buffer stay at the
+   device's defaults unless you type them. The roles and names are remembered per device.
+3. **Enter** opens the session. With a reference and at least one mic, and no measurements
+   yet, the app offers *Reference → M30 FOH* — one transfer measurement per mic; **Enter**
+   creates and starts them. Later, **Ctrl+K** → *New transfer measurement…* (or *New
+   spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
+   (**←/→**); *Delete selected measurement* and *Close audio session* are in the palette
+   too.
 
 **Or from a terminal**, with a per-user daemon running (see above):
 

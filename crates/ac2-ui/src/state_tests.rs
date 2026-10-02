@@ -12,6 +12,7 @@ use ac2_proto::units::*;
 use super::*;
 use crate::conn::{ConnEvent, Request, StimEvent};
 use crate::keys::{Chord, Keymap};
+use crate::session_dialog::{InputRole, RoleKey, Row, SessionDialog};
 
 fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     let delay = matches!(kind, MeasKind::Transfer { .. }).then(|| DelayState {
@@ -70,6 +71,7 @@ fn daemon_state() -> State {
     s.measurements = vec![meas(2, "Sub", spectrum()), meas(1, "Main L", transfer())];
     s.session.open = Some(OpenSession {
         config: SessionConfig {
+            backend: None,
             input_device: DeviceSelector::Default,
             output_device: DeviceSelector::Default,
             input_channels: vec![0, 1],
@@ -78,6 +80,7 @@ fn daemon_state() -> State {
             buffer_frames: Some(256),
             loopback: None,
         },
+        backend: BackendKind::Cpal,
         input_device: DeviceId("fake:loop".into()),
         output_device: DeviceId("fake:loop".into()),
         sample_rate_hz: 48_000,
@@ -1414,8 +1417,8 @@ fn no_session_state() -> State {
     s
 }
 
-fn device(backend: BackendKind, id: &str) -> DeviceInfo {
-    let dir = |ch| DirectionInfo {
+fn backends(fake_names: bool) -> Vec<BackendInfo> {
+    let dir = |ch, names: Option<Vec<&str>>| DirectionInfo {
         max_channels: ch,
         rates_hz: vec![RangeU32 {
             min: 48_000,
@@ -1423,17 +1426,69 @@ fn device(backend: BackendKind, id: &str) -> DeviceInfo {
         }],
         buffer_frames: Some(RangeU32 { min: 256, max: 256 }),
         default_rate_hz: Some(48_000),
+        default_buffer_frames: Some(256),
+        channel_names: names.map(|n| n.into_iter().map(String::from).collect()),
     };
-    DeviceInfo {
+    let dev = |backend, id: &str, names: bool| DeviceInfo {
         backend,
         host: "test".into(),
         id: DeviceId(id.into()),
         name: id.into(),
-        input: Some(dir(4)),
-        output: Some(dir(2)),
+        input: Some(dir(
+            4,
+            names.then(|| vec!["Loop return", "Room mic", "Line 3", "Line 4"]),
+        )),
+        output: Some(dir(2, None)),
         duplex_clock: ClockRelation::SingleCallback,
         index: IndexExactness::Exact,
         notes: vec![],
+    };
+    vec![
+        BackendInfo {
+            kind: BackendKind::Fake,
+            description: "Simulated rig".into(),
+            availability: Availability::Available,
+            devices: vec![dev(BackendKind::Fake, "fake:loop", fake_names)],
+        },
+        BackendInfo {
+            kind: BackendKind::Jack,
+            description: "JACK".into(),
+            availability: Availability::Unavailable {
+                reason: "JACK server not running".into(),
+            },
+            devices: vec![],
+        },
+    ]
+}
+
+fn real_backends() -> Vec<BackendInfo> {
+    let mut b = backends(false);
+    b.push(BackendInfo {
+        kind: BackendKind::Cpal,
+        description: "System audio".into(),
+        availability: Availability::Available,
+        devices: vec![
+            DeviceInfo {
+                backend: BackendKind::Cpal,
+                id: DeviceId("card".into()),
+                name: "card".into(),
+                ..b[0].devices[0].clone()
+            },
+            DeviceInfo {
+                backend: BackendKind::Cpal,
+                id: DeviceId("other".into()),
+                name: "other".into(),
+                ..b[0].devices[0].clone()
+            },
+        ],
+    });
+    b
+}
+
+fn dialog(t: &T) -> &SessionDialog {
+    match &t.st.overlay {
+        Overlay::Session(d) => d,
+        other => panic!("no session dialog: {other:?}"),
     }
 }
 
@@ -1449,6 +1504,44 @@ fn created(r: &[Request]) -> Option<&MeasConfig> {
         Request::CreateMeas { config } => Some(config),
         _ => None,
     })
+}
+
+fn opened(r: &[Request]) -> Option<(&SessionConfig, &[InputSetup], &[MeasConfig])> {
+    r.iter().find_map(|r| match r {
+        Request::OpenSession {
+            config,
+            inputs,
+            transfers,
+            ..
+        } => Some((config, inputs.as_slice(), transfers.as_slice())),
+        _ => None,
+    })
+}
+
+fn previewed(r: &[Request]) -> Option<&DeviceId> {
+    r.iter().find_map(|r| match r {
+        Request::Preview { device, .. } => Some(device),
+        _ => None,
+    })
+}
+
+/// Focuses the session dialog row `row` with ↓ from the top.
+fn focus(t: &mut T, row: Row) {
+    for _ in 0..64 {
+        if dialog(t).focus == row {
+            return;
+        }
+        t.key("Down");
+    }
+    panic!("row {row:?} not reached");
+}
+
+/// Shift+O on a daemon without a session, the simulated rig listed.
+fn open_dialog(t: &mut T, list: Vec<BackendInfo>) -> Vec<Request> {
+    t.conn(mirror(no_session_state()));
+    let mut r = t.type_key("Shift+O", "O");
+    r.extend(t.conn(ConnEvent::Devices(Ok(list))));
+    r
 }
 
 /// Key labels as this platform shows them (`Shift+O` / `⇧O`, `Ctrl+K` / `⌘K`).
@@ -1530,109 +1623,432 @@ fn arming_without_a_session_names_the_key() {
     );
 }
 
+/// Shift+O, the simulated rig's own wiring as roles, Enter: the session, its mic names and
+/// one transfer per mic, without a channel number typed.
 #[test]
-fn session_dialog_opens_a_session() {
+fn session_dialog_opens_a_session_from_roles() {
     let mut t = T::new();
     t.conn(mirror(no_session_state()));
-    // Shift+O opens the dialog and asks for the devices; the O it types is swallowed.
+    // Shift+O opens the dialog, asks for the devices and subscribes to the meters; the O it
+    // types is swallowed.
     let r = t.type_key("Shift+O", "O");
-    assert!(matches!(r.as_slice(), [Request::Devices]), "{r:?}");
-    let f = form(&t);
-    assert_eq!(f.kind, FormKind::Session);
-    assert!(f.devices.is_none());
+    assert!(
+        matches!(r.as_slice(), [Request::Devices, Request::Meters(true)]),
+        "{r:?}"
+    );
+    assert!(dialog(&t).backends.is_none());
     // Enter before the list arrives says so and sends nothing.
     assert!(t.key("Enter").is_empty());
-    assert!(form(&t).error.is_some());
-    t.conn(ConnEvent::Devices(Ok(vec![device(
-        BackendKind::Fake,
-        "fake:loop",
-    )])));
-    // A daemon offering only the simulated rig (started on it explicitly) preselects it,
-    // with its wiring.
-    assert_eq!(form(&t).backend(), Some(BackendKind::Fake));
-    assert_eq!(form(&t).text(crate::forms::FieldId::Loopback), "1>1");
-    // ↓↓ to the input channels, retype them.
-    t.key("Down");
-    t.key("Down");
-    for _ in 0..3 {
-        t.st.update(Msg::Backspace, &t.keys);
-    }
-    t.text("1-3");
-    // A bad output count keeps the dialog open with the reason.
-    t.key("Tab");
-    t.st.update(Msg::Backspace, &t.keys);
-    t.text("5");
+    assert!(dialog(&t).error.is_some());
+    let r = t.conn(ConnEvent::Devices(Ok(backends(true))));
+    // A daemon offering only the simulated rig preselects it, its device previewed.
+    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Fake));
+    assert_eq!(previewed(&r), Some(&DeviceId("fake:loop".into())));
+    let d = dialog(&t);
+    assert_eq!(d.inputs[0].role, InputRole::Reference);
+    assert_eq!(d.inputs[1].role, InputRole::Mic);
+    assert_eq!(d.inputs[1].label(), "Room mic");
+    assert!(!d.inputs[2].in_session);
+    assert!(d.outputs[0].stimulus);
+    // Name the mic: N on its row, type, Enter ends the edit (it does not open).
+    focus(&mut t, Row::Input(1));
+    let r = t.type_key("N", "n");
+    assert!(r.is_empty(), "{r:?}");
+    t.text("M30 FOH");
     assert!(t.key("Enter").is_empty());
-    let err = form(&t).error.clone().unwrap_or_default();
-    assert!(err.contains("output channels"), "{err}");
-    t.st.update(Msg::Backspace, &t.keys);
-    t.text("2");
+    assert_eq!(dialog(&t).inputs[1].mic, "M30 FOH");
+    assert_eq!(dialog(&t).edit, None);
     let r = t.key("Enter");
-    match r.as_slice() {
-        [
-            Request::Call {
-                cmd: Command::SessionOpen { config },
-                what,
-            },
-        ] => {
-            assert_eq!(config.input_channels, vec![0, 1, 2]);
-            assert_eq!(config.output_channels, 2);
-            assert_eq!(
-                config.loopback,
-                Some(LoopbackRoute {
-                    output: 0,
-                    input: 0
-                })
-            );
-            assert_eq!(
-                config.input_device,
-                DeviceSelector::Id {
-                    id: DeviceId("fake:loop".into())
-                }
-            );
-            assert!(what.contains("fake:loop"), "{what}");
+    let (config, inputs, transfers) = opened(&r).expect("session.open");
+    assert_eq!(config.backend, Some(BackendKind::Fake));
+    assert_eq!(config.input_channels, vec![0, 1]);
+    assert_eq!(config.output_channels, 2);
+    assert_eq!(
+        config.loopback,
+        Some(LoopbackRoute {
+            output: 0,
+            input: 0
+        })
+    );
+    assert_eq!(
+        config.input_device,
+        DeviceSelector::Id {
+            id: DeviceId("fake:loop".into())
         }
-        other => panic!("{other:?}"),
+    );
+    assert_eq!(
+        inputs,
+        &[
+            InputSetup {
+                channel: 0,
+                mic: None,
+                mic_curve: true
+            },
+            InputSetup {
+                channel: 1,
+                mic: Some("M30 FOH".into()),
+                mic_curve: true
+            },
+        ]
+    );
+    assert_eq!(transfers.len(), 1);
+    assert_eq!(transfers[0].name, "Reference → M30 FOH");
+    // Closing the dialog closes the preview and the meter subscription.
+    assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
+    assert!(
+        r.iter().any(|x| matches!(x, Request::Meters(false))),
+        "{r:?}"
+    );
+    assert_eq!(t.st.overlay, Overlay::None);
+    // Remembered for the device, the stimulus follows the S output (K4).
+    let roles = &t.st.prefs.sessions["fake/fake:loop"];
+    assert_eq!(roles.reference, Some(0));
+    assert_eq!(roles.mics, vec![1]);
+    assert_eq!(roles.mic_names[&1], "M30 FOH");
+    assert_eq!(t.st.prefs.outputs["fake:loop"], vec![0]);
+    assert!(t.st.prefs_dirty);
+}
+
+#[test]
+fn roles_move_toggle_and_explain_themselves() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    // R moves the reference; the old row keeps its place in the session.
+    focus(&mut t, Row::Input(2));
+    t.key("R");
+    let d = dialog(&t);
+    assert_eq!(d.inputs[2].role, InputRole::Reference);
+    assert!(d.inputs[2].in_session);
+    assert_eq!(d.inputs[0].role, InputRole::None);
+    assert!(d.inputs[0].in_session);
+    // M marks several mics; Space takes a row out of the session with its role.
+    focus(&mut t, Row::Input(3));
+    t.key("M");
+    assert_eq!(dialog(&t).inputs[3].role, InputRole::Mic);
+    assert_eq!(dialog(&t).inputs[1].role, InputRole::Mic);
+    t.type_key("Space", " ");
+    assert!(!dialog(&t).inputs[3].in_session);
+    assert_eq!(dialog(&t).inputs[3].role, InputRole::None);
+    // S belongs on an output: on an input it says so and changes nothing.
+    t.key("S");
+    assert!(
+        dialog(&t)
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("S marks an output")),
+        "{:?}",
+        dialog(&t).notice
+    );
+    // Without the reference, mics have nothing to be measured against.
+    focus(&mut t, Row::Input(2));
+    t.key("R");
+    assert!(
+        t.key("Enter")
+            .iter()
+            .all(|r| opened(std::slice::from_ref(r)).is_none())
+    );
+    let e = dialog(&t).error.clone().unwrap_or_default();
+    assert!(e.starts_with("Pick a reference input: the loopback"), "{e}");
+    t.key("R");
+    // Without a stimulus output the loopback has no source.
+    focus(&mut t, Row::Output(0));
+    t.key("S");
+    assert!(opened(&t.key("Enter")).is_none());
+    let e = dialog(&t).error.clone().unwrap_or_default();
+    assert!(e.starts_with("Pick the stimulus output"), "{e}");
+    t.key("S");
+    // Space on output 2 shrinks the session to output 1, and back.
+    focus(&mut t, Row::Output(1));
+    t.type_key("Space", " ");
+    assert_eq!(dialog(&t).out_count, 1);
+    t.type_key("Space", " ");
+    assert_eq!(dialog(&t).out_count, 2);
+    // Every input out of the session: refused in plain words.
+    for i in 0..4 {
+        if dialog(&t).inputs[i].in_session {
+            focus(&mut t, Row::Input(i));
+            t.type_key("Space", " ");
+        }
     }
+    assert!(opened(&t.key("Enter")).is_none());
+    let e = dialog(&t).error.clone().unwrap_or_default();
+    assert!(e.starts_with("Choose at least one input"), "{e}");
+}
+
+#[test]
+fn mic_names_must_differ_and_the_mouse_assigns_roles() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(false));
+    // Unnamed channels read Input N.
+    assert_eq!(dialog(&t).inputs[2].label(), "Input 3");
+    for i in [1, 2] {
+        t.st.update(Msg::Session(SessionMsg::EditMic(Row::Input(i))), &t.keys);
+        t.text("ECM");
+        t.key("Enter");
+    }
+    assert!(opened(&t.key("Enter")).is_none());
+    let e = dialog(&t).error.clone().unwrap_or_default();
+    assert!(e.contains("Two mics are named \"ECM\""), "{e}");
+    // The R chip of input 3 by mouse; N on the reference refuses a mic name.
+    t.st.update(
+        Msg::Session(SessionMsg::Role(Row::Input(2), RoleKey::Reference)),
+        &t.keys,
+    );
+    assert_eq!(dialog(&t).inputs[2].role, InputRole::Reference);
+    t.key("N");
+    assert_eq!(dialog(&t).edit, None);
+    let r = t.st.update(Msg::Session(SessionMsg::Submit), &t.keys);
+    let (config, inputs, transfers) = opened(&r).expect("open");
+    assert_eq!(config.loopback.map(|l| l.input), Some(2));
+    assert_eq!(config.input_channels, vec![0, 1, 2]);
+    assert_eq!(inputs[1].mic.as_deref(), Some("ECM"));
+    assert_eq!(inputs[2].mic, None);
+    assert_eq!(transfers[0].name, "Reference → ECM");
+    // Cancel closes without touching the stimulus (Esc would stop it).
+    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.stimulus.phase = StimPhase::Armed;
+    let r = t.st.update(Msg::Session(SessionMsg::Cancel), &t.keys);
+    assert!(!r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+}
+
+#[test]
+fn roles_are_remembered_per_device() {
+    let mut t = T::new();
+    t.st.prefs.sessions.insert(
+        "fake/fake:loop".into(),
+        crate::prefs::DeviceRoles {
+            inputs: vec![0, 2, 3],
+            outputs: 2,
+            reference: Some(3),
+            mics: vec![0, 2],
+            stimulus: vec![1],
+            mic_names: [(0, "M30".to_owned()), (2, "KM184".to_owned())].into(),
+        },
+    );
+    open_dialog(&mut t, backends(true));
+    let d = dialog(&t);
+    assert_eq!(d.inputs[3].role, InputRole::Reference);
+    assert_eq!(d.inputs[0].role, InputRole::Mic);
+    assert_eq!(d.inputs[0].mic, "M30");
+    assert_eq!(d.inputs[0].label(), "M30");
+    assert!(!d.inputs[1].in_session);
+    assert!(d.outputs[1].stimulus && !d.outputs[0].stimulus);
+    let r = t.key("Enter");
+    let (config, _, transfers) = opened(&r).expect("open");
+    assert_eq!(
+        config.loopback,
+        Some(LoopbackRoute {
+            output: 1,
+            input: 3
+        })
+    );
+    let names: Vec<&str> = transfers.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, ["Reference → M30", "Reference → KM184"]);
+    assert!(matches!(
+        &transfers[1].kind,
+        MeasKind::Transfer { config } if config.reference_input == 3 && config.measurement_input == 2
+    ));
+}
+
+#[test]
+fn a_real_backend_is_preferred_and_an_unavailable_one_says_why() {
+    let mut t = T::new();
+    let r = open_dialog(&mut t, real_backends());
+    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Cpal));
+    assert_eq!(previewed(&r), Some(&DeviceId("card".into())));
+    // A real interface starts without roles: its wiring is the operator's to say.
+    assert!(dialog(&t).inputs.iter().all(|i| i.role == InputRole::None));
+    // → on the device row previews the other device.
+    t.key("Down");
+    let r = t.key("Right");
+    assert_eq!(previewed(&r), Some(&DeviceId("other".into())));
+    // The backend row: JACK is listed but not available.
+    t.key("Up");
+    let r = t.key("Left");
+    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Jack));
+    assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
+    assert!(opened(&t.key("Enter")).is_none());
+    let e = dialog(&t).error.clone().unwrap_or_default();
+    assert_eq!(
+        e,
+        "JACK is not available: JACK server not running. Pick another backend (← → on the first row)."
+    );
+}
+
+#[test]
+fn preview_renews_and_the_open_device_uses_the_session_meters() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    let tick = |t: &mut T, s: f64| {
+        t.st.update(
+            Msg::Tick {
+                now_s: s,
+                dt_s: 0.1,
+            },
+            &t.keys,
+        )
+    };
+    assert!(previewed(&tick(&mut t, 1.0)).is_none());
+    assert!(previewed(&tick(&mut t, 2.5)).is_some());
+    assert!(previewed(&tick(&mut t, 3.0)).is_none());
+    t.conn(ConnEvent::Preview(Err("device busy".into())));
+    assert_eq!(
+        dialog(&t).preview_error.as_deref(),
+        Some("meters unavailable: device busy")
+    );
+    t.key("Escape");
+    // The open session's own device: its session meters, no preview.
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.backend = BackendKind::Fake;
+    }
+    t.conn(mirror(s));
+    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    let r = t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert!(dialog(&t).is_open_device());
+    assert!(previewed(&r).is_none(), "{r:?}");
+    // Prefilled from the session: inputs 1–2, no loopback.
+    assert!(dialog(&t).inputs[0].in_session && dialog(&t).inputs[1].in_session);
+    assert!(dialog(&t).inputs.iter().all(|i| i.role == InputRole::None));
+}
+
+#[test]
+fn esc_closes_the_dialog_stops_the_stimulus_and_the_preview() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    t.st.stimulus.phase = StimPhase::Firing;
+    let r = t.key("Escape");
+    assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
+    assert!(
+        r.iter().any(|x| matches!(x, Request::Meters(false))),
+        "{r:?}"
+    );
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
 #[test]
-fn session_dialog_errors_and_mouse() {
+fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    // Without a stimulus output there is nothing to play on.
+    focus(&mut t, Row::Output(0));
+    t.key("S");
+    t.type_key("D", "d");
+    let e = dialog(&t).error.clone().unwrap_or_default();
+    assert!(e.starts_with("Pick the stimulus output first"), "{e}");
+    assert!(dialog(&t).detect.is_none());
+    t.key("S");
+    // D asks first: no level, no burst.
+    let r = t.type_key("D", "d");
+    assert!(r.is_empty(), "{r:?}");
+    let p = dialog(&t).detect.clone().expect("panel");
+    assert_eq!(p.level, "", "never a default level");
+    assert_eq!(p.output, 0);
+    assert!(t.key("Enter").is_empty());
+    assert!(
+        dialog(&t)
+            .detect
+            .as_ref()
+            .and_then(|d| d.error.as_deref())
+            .is_some_and(|e| e.contains("no default level"))
+    );
+    // Above the ceiling (−6 dBFS on this daemon) is refused before anything is sent.
+    t.text("-3");
+    assert!(t.key("Enter").is_empty());
+    for _ in 0..2 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("-30");
+    let r = t.key("Enter");
+    let req = r
+        .iter()
+        .find_map(|x| match x {
+            Request::DetectLoopback(d) => Some(d.clone()),
+            _ => None,
+        })
+        .expect("detect");
+    assert_eq!(req.level, Dbfs(-30.0));
+    assert_eq!(req.output, 0);
+    assert_eq!(req.device, DeviceId("fake:loop".into()));
+    // The burst holds the device: no preview meanwhile.
+    assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
+    // The answer: input 3 is the loopback; it becomes the Reference and the preview resumes.
+    let mut det = ac2_client::fake::fake_detection();
+    det.loopback = Some(2);
+    det.ranked[0].input = 2;
+    let r = t.conn(ConnEvent::LoopbackDetected(Ok(det)));
+    assert!(previewed(&r).is_some(), "{r:?}");
+    let d = dialog(&t);
+    assert_eq!(d.inputs[2].role, InputRole::Reference);
+    assert_eq!(d.inputs[0].role, InputRole::None);
+    assert_eq!(d.focus, Row::Input(2));
+    let text = d.detect_text().unwrap_or_default();
+    assert!(
+        text.starts_with("Loopback found on input 3 (Line 3)"),
+        "{text}"
+    );
+    // A typed stimulus level is offered again for the next detection.
+    t.st.stimulus.level = Some(Dbfs(-24.0));
+    t.type_key("D", "d");
+    assert_eq!(
+        dialog(&t).detect.as_ref().map(|d| d.level.as_str()),
+        Some("-24.0")
+    );
+    // ↑ leaves the confirmation without playing.
+    t.key("Up");
+    assert!(dialog(&t).detect.is_none());
+}
+
+#[test]
+fn opening_offers_one_transfer_per_mic_on_an_empty_daemon() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    focus(&mut t, Row::Input(2));
+    t.key("M");
+    let r = t.key("Enter");
+    let (_, _, transfers) = opened(&r).expect("open");
+    assert_eq!(transfers.len(), 2);
+    let transfers = transfers.to_vec();
+    t.conn(ConnEvent::SessionOpened {
+        transfers: transfers.clone(),
+    });
+    assert!(matches!(&t.st.overlay, Overlay::Offer(o) if o.transfers == transfers));
+    let r = t.key("Enter");
+    let made: Vec<&str> = r
+        .iter()
+        .filter_map(|x| match x {
+            Request::CreateMeas { config } => Some(config.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(made, ["Reference → Room mic", "Reference → Line 3"]);
+    assert_eq!(t.st.overlay, Overlay::None);
+    // N skips; a daemon that has measurements by then gets no offer.
+    t.conn(ConnEvent::SessionOpened {
+        transfers: transfers.clone(),
+    });
+    assert!(t.key("N").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    t.conn(mirror(daemon_state()));
+    t.conn(ConnEvent::SessionOpened { transfers });
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn session_dialog_errors() {
     let mut t = T::new();
     t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
-    // The open session prefills the dialog.
-    assert_eq!(form(&t).text(crate::forms::FieldId::Inputs), "1-2");
     t.conn(ConnEvent::Devices(Err("not connected".into())));
     assert!(
-        form(&t)
+        dialog(&t)
             .error
             .as_deref()
             .is_some_and(|e| e.contains("not connected"))
     );
-    t.conn(ConnEvent::Devices(Ok(vec![
-        device(BackendKind::Fake, "fake:loop"),
-        device(BackendKind::Cpal, "card"),
-    ])));
-    // The open session's device is preselected, and its backend with it.
-    assert_eq!(form(&t).backend(), Some(BackendKind::Fake));
-    // The mouse: › on the backend switches to the real interface.
-    t.st.update(Msg::Form(FormMsg::Cycle(0, 1)), &t.keys);
-    assert_eq!(form(&t).backend(), Some(BackendKind::Cpal));
-    assert_eq!(form(&t).device().map(|d| d.id.0.as_str()), Some("card"));
-    let r = t.st.update(Msg::Form(FormMsg::Submit), &t.keys);
-    assert!(
-        matches!(r.as_slice(), [Request::Call { cmd: Command::SessionOpen { config }, .. }]
-            if config.input_device == DeviceSelector::Id { id: DeviceId("card".into()) }),
-        "{r:?}"
-    );
-    // Cancel closes without touching the stimulus (Esc would stop it).
-    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
-    t.st.stimulus.phase = StimPhase::Armed;
-    let r = t.st.update(Msg::Form(FormMsg::Cancel), &t.keys);
-    assert!(r.is_empty());
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    t.key("Escape");
     // Not connected: no dialog.
     let mut t = T::disconnected();
     assert!(
@@ -1641,6 +2057,68 @@ fn session_dialog_errors_and_mouse() {
     );
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(t.last_toast().contains("not connected"));
+}
+
+#[test]
+fn input_meters_follow_the_dialog() {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{ClipFlags, PreviewLevelsFrame, PreviewLevelsMeta, SessionLevelsFrame};
+    use ac2_proto::topic::Topic;
+    use ac2_proto::{Frame, FrameData};
+    let mut t = T::new();
+    let frame = |data: FrameData| TopicFrame {
+        topic: data.topic(),
+        frame: Arc::new(Frame {
+            stamp: ac2_proto::samples::stamp(None),
+            data,
+        }),
+        received: Instant::now(),
+        since_new: std::time::Duration::ZERO,
+        age: Some(0.0),
+        stale: false,
+    };
+    let mut latest = Latest::default();
+    for f in [
+        frame(FrameData::SessionLevels(SessionLevelsFrame {
+            meta: ac2_proto::frame::LevelsMeta {
+                channels: vec![0, 1],
+            },
+            peak: vec![-10.0, -30.0],
+            rms: vec![-20.0, -40.0],
+            clip: vec![ClipFlags::NONE, ClipFlags::HELD],
+        })),
+        frame(FrameData::PreviewLevels(PreviewLevelsFrame {
+            meta: PreviewLevelsMeta {
+                backend: BackendKind::Fake,
+                device: DeviceId("fake:loop".into()),
+                channels: vec![0, 1, 2, 3],
+            },
+            peak: vec![-6.0, f32::NEG_INFINITY, -50.0, -50.0],
+            rms: vec![-12.0, f32::NEG_INFINITY, -60.0, -60.0],
+            clip: vec![ClipFlags::NONE; 4],
+        })),
+    ] {
+        latest.frames.insert(f.topic.to_string(), f);
+    }
+    assert!(latest.get(&Topic::PreviewLevels).is_some());
+    t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids: Default::default(),
+        drained: Instant::now(),
+    }));
+    // A measurement dialog shows the session's meters.
+    t.st.update(Msg::Command(CommandId::NewTransfer), &t.keys);
+    let m = t.st.input_meters();
+    assert_eq!(m.len(), 2);
+    assert_eq!(m[&0].text, "\u{2212}20.0");
+    assert_eq!(m[&1].state, ac2_scene::meter::MeterState::Clip);
+    t.key("Escape");
+    // The session dialog on a device the session does not capture: its preview.
+    open_dialog(&mut t, backends(true));
+    let m = t.st.input_meters();
+    assert_eq!(m.len(), 4);
+    assert_eq!(m[&0].text, "\u{2212}12.0");
+    assert_eq!(m[&1].state, ac2_scene::meter::MeterState::Silent);
 }
 
 #[test]
@@ -1728,17 +2206,12 @@ fn new_measurements_start_and_become_selected() {
         };
         assert_eq!(kind, (want, 1));
     }
-    // An input the session does not capture is refused in the dialog.
+    // Inputs are picked by name among the captured ones: ←/→ walks them.
     t.st.update(Msg::Command(CommandId::NewSpl), &t.keys);
-    t.st.update(Msg::Backspace, &t.keys);
-    t.text("4");
-    assert!(created(&t.key("Enter")).is_none());
-    assert!(
-        form(&t)
-            .error
-            .as_deref()
-            .is_some_and(|e| e.contains("not captured"))
-    );
+    assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(1));
+    assert_eq!(form(&t).fields[0].display(), "2 · Input 2");
+    t.key("Right");
+    assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(0));
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
 
@@ -1758,8 +2231,11 @@ fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
     t.st.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (cpal)");
     let r = t.conn(mirror(no_session_state()));
-    assert!(matches!(r.as_slice(), [Request::Devices]), "{r:?}");
-    assert_eq!(form(&t).kind, FormKind::Session);
+    assert!(
+        matches!(r.as_slice(), [Request::Devices, Request::Meters(true)]),
+        "{r:?}"
+    );
+    assert!(dialog(&t).backends.is_none());
     t.key("Escape");
     // Only once: the operator closed it.
     assert!(t.conn(mirror(no_session_state())).is_empty());

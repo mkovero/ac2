@@ -23,6 +23,7 @@ pub mod palette;
 pub mod plot;
 pub mod prefs;
 pub mod scenes;
+pub mod session_dialog;
 pub mod state;
 pub mod theme;
 mod view;
