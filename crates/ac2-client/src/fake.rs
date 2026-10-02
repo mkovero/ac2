@@ -110,8 +110,12 @@ pub struct Shared {
     pub requests: Vec<(&'static str, u64)>,
     /// Grids known to `grid.get`.
     pub grids: HashMap<GridId, GridDef>,
-    /// Devices.
-    pub devices: Vec<DeviceInfo>,
+    /// Backends and their devices (`session.devices`).
+    pub backends: Vec<BackendInfo>,
+    /// The device `session.preview` last opened; `None` once stopped.
+    pub preview: Option<(BackendKind, DeviceId)>,
+    /// What `session.detect_loopback` answers (output, level and device are the request's).
+    pub detection: LoopbackDetection,
     /// Lease refreshes accepted.
     pub refreshes: u32,
     /// Lease expiries.
@@ -160,8 +164,11 @@ pub fn empty_state() -> State {
     }
 }
 
-fn fake_devices() -> Vec<DeviceInfo> {
-    let dir = |ch| DirectionInfo {
+/// The fake's backends: the simulated rig (4 in, 2 out, inputs named like `ac2d`'s rig) and
+/// a JACK backend whose server is not running.
+pub fn fake_backends() -> Vec<BackendInfo> {
+    let names = |n: &[&str]| Some(n.iter().map(|s| (*s).to_owned()).collect());
+    let dir = |ch, channel_names| DirectionInfo {
         max_channels: ch,
         rates_hz: vec![RangeU32 {
             min: 48_000,
@@ -169,18 +176,64 @@ fn fake_devices() -> Vec<DeviceInfo> {
         }],
         buffer_frames: Some(RangeU32 { min: 256, max: 256 }),
         default_rate_hz: Some(48_000),
+        default_buffer_frames: Some(256),
+        channel_names,
     };
-    vec![DeviceInfo {
+    vec![
+        BackendInfo {
+            kind: BackendKind::Fake,
+            description: "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)"
+                .into(),
+            availability: Availability::Available,
+            devices: vec![DeviceInfo {
+                backend: BackendKind::Fake,
+                host: "fake".into(),
+                id: DeviceId("fake:loop".into()),
+                name: "Fake loopback".into(),
+                input: Some(dir(
+                    4,
+                    names(&["Loop return", "Room mic", "Line 3", "Line 4"]),
+                )),
+                output: Some(dir(2, names(&["Out 1 (speaker + loop)", "Out 2"]))),
+                duplex_clock: ClockRelation::SingleCallback,
+                index: IndexExactness::Exact,
+                notes: vec![],
+            }],
+        },
+        BackendInfo {
+            kind: BackendKind::Jack,
+            description: "JACK audio server".into(),
+            availability: Availability::Unavailable {
+                reason: "JACK server not running".into(),
+            },
+            devices: vec![],
+        },
+    ]
+}
+
+/// What the fake's `session.detect_loopback` answers by default: input 1 is the loopback.
+pub fn fake_detection() -> LoopbackDetection {
+    let c = |input, samples: i64, correlation, gain: Option<f64>| LoopbackCandidate {
+        input,
+        delay: Seconds(samples as f64 / 48_000.0),
+        delay_samples: Samples(samples),
+        correlation,
+        gain: gain.map(Db),
+    };
+    LoopbackDetection {
         backend: BackendKind::Fake,
-        host: "fake".into(),
-        id: DeviceId("fake:loop".into()),
-        name: "Fake loopback".into(),
-        input: Some(dir(4)),
-        output: Some(dir(2)),
-        duplex_clock: ClockRelation::SingleCallback,
-        index: IndexExactness::Exact,
-        notes: vec![],
-    }]
+        device: DeviceId("fake:loop".into()),
+        output: 0,
+        level: Dbfs(-30.0),
+        ranked: vec![
+            c(0, 32, 0.9998, Some(0.0)),
+            c(1, 272, 0.9991, Some(-6.0)),
+            c(2, 0, 0.0, None),
+            c(3, 0, 0.0, None),
+        ],
+        loopback: Some(0),
+        clock: ClockRelation::SingleCallback,
+    }
 }
 
 /// The fake's calibration key: its one device.
@@ -218,7 +271,9 @@ impl Shared {
             executions: HashMap::new(),
             requests: vec![],
             grids: HashMap::new(),
-            devices: fake_devices(),
+            backends: fake_backends(),
+            preview: None,
+            detection: fake_detection(),
             refreshes: 0,
             expiries: 0,
             finding: FakeFinding::default(),
@@ -297,9 +352,9 @@ impl Shared {
     /// Simulates a restart: new incarnation, fresh state, empty replay and dedup, no lease.
     pub fn restart(&mut self, incarnation: u64) {
         let opts = self.opts.clone();
-        let devices = std::mem::take(&mut self.devices);
+        let backends = std::mem::take(&mut self.backends);
         *self = Self::new(opts, incarnation);
-        self.devices = devices;
+        self.backends = backends;
     }
 
     /// Evicts the whole replay buffer: every `state.since` below the current rev answers
@@ -367,15 +422,63 @@ impl Shared {
                 session_epoch: self.state.session.epoch,
                 rev: self.rev,
             }),
-            C::SessionDevices => ReplyBody::Devices(self.devices.clone()),
+            C::SessionDevices => ReplyBody::Backends(self.backends.clone()),
+            C::SessionPreview { backend, device } => {
+                let channels = self
+                    .backends
+                    .iter()
+                    .flat_map(|b| &b.devices)
+                    .find(|d| d.backend == backend && d.id == device)
+                    .and_then(|d| d.input.as_ref())
+                    .map(|i| i.max_channels)
+                    .ok_or_else(|| err(ErrorCode::NotFound, "no such device"))?;
+                self.preview = Some((backend, device.clone()));
+                ReplyBody::Preview(Preview {
+                    backend,
+                    device,
+                    channels,
+                    sample_rate_hz: 48_000,
+                    expires_in_ms: 5000,
+                })
+            }
+            C::SessionPreviewStop => {
+                self.preview = None;
+                ReplyBody::Ack { rev: self.rev }
+            }
+            C::SessionDetectLoopback {
+                lease_token,
+                backend,
+                device,
+                output,
+                level,
+            } => {
+                self.expire_lease();
+                self.check_lease(lease_token)?;
+                let Some(level) = level else {
+                    return Err(err(ErrorCode::Refused, "no level"));
+                };
+                if level.0 > self.state.generator.ceiling.0 {
+                    return Err(err(ErrorCode::Refused, "level above ceiling"));
+                }
+                self.preview = None;
+                ReplyBody::LoopbackDetection(LoopbackDetection {
+                    backend,
+                    device,
+                    output,
+                    level,
+                    ..self.detection.clone()
+                })
+            }
             C::SessionOpen { config } => {
                 let dev = |s: &DeviceSelector| match s {
                     DeviceSelector::Default => DeviceId("fake:loop".into()),
                     DeviceSelector::Id { id } => id.clone(),
                 };
+                self.preview = None;
                 let s = Session {
                     epoch: SessionEpoch(self.state.session.epoch.0 + 1),
                     open: Some(OpenSession {
+                        backend: config.backend.unwrap_or(BackendKind::Fake),
                         input_device: dev(&config.input_device),
                         output_device: dev(&config.output_device),
                         sample_rate_hz: config.sample_rate_hz.unwrap_or(48_000),

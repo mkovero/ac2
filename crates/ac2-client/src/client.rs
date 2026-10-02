@@ -145,7 +145,9 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
     match b {
         ReplyBody::Ack { .. } => "ack",
         ReplyBody::Welcome(_) => "welcome",
-        ReplyBody::Devices(_) => "devices",
+        ReplyBody::Backends(_) => "backends",
+        ReplyBody::Preview(_) => "preview",
+        ReplyBody::LoopbackDetection(_) => "loopback_detection",
         ReplyBody::Session(_) => "session",
         ReplyBody::Lease(_) => "lease",
         ReplyBody::Generator(_) => "generator",

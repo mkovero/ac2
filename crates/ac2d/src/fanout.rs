@@ -74,6 +74,23 @@ impl InputMeters {
     }
 }
 
+/// The next whole captured block, stamped with the daemon's wall clock.
+pub(crate) fn pop_block(stream: &mut DuplexStream) -> Option<Block> {
+    stream.capture().pop_with(|h, a, b| {
+        let mut data = Vec::with_capacity(a.len() + b.len());
+        data.extend_from_slice(a);
+        data.extend_from_slice(b);
+        Block {
+            start_sample: h.start_sample,
+            frames: h.frames,
+            channels: h.channels,
+            flags: h.flags,
+            wall_ns: wall_ns(),
+            data: data.into_boxed_slice(),
+        }
+    })
+}
+
 pub(crate) enum FanoutMsg {
     Attach(u64, SyncSender<Arc<Block>>),
     Detach(u64),
@@ -174,19 +191,7 @@ fn run(
         }
         let mut got = 0usize;
         while got < 64 {
-            let Some(block) = stream.capture().pop_with(|h, a, b| {
-                let mut data = Vec::with_capacity(a.len() + b.len());
-                data.extend_from_slice(a);
-                data.extend_from_slice(b);
-                Block {
-                    start_sample: h.start_sample,
-                    frames: h.frames,
-                    channels: h.channels,
-                    flags: h.flags,
-                    wall_ns: wall_ns(),
-                    data: data.into_boxed_slice(),
-                }
-            }) else {
+            let Some(block) = pop_block(&mut stream) else {
                 break;
             };
             got += 1;

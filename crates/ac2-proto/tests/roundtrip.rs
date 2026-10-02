@@ -110,6 +110,43 @@ fn every_event_roundtrips() {
     assert_eq!(kinds.len(), 8);
 }
 
+/// The input-meter kinds only travel on their own topics, with one channel per column.
+#[test]
+fn meter_frames_are_checked_against_topic_and_channels() {
+    let meters: Vec<Frame> = samples::frames()
+        .into_iter()
+        .filter(|f| {
+            matches!(
+                f.data,
+                FrameData::SessionLevels(_) | FrameData::PreviewLevels(_)
+            )
+        })
+        .collect();
+    assert_eq!(meters.len(), 2);
+    for f in &meters {
+        let mut parts = bytes_of(f);
+        assert!(
+            parts[0].starts_with(&Subscription::InputMeters.prefix()),
+            "{:?}",
+            f.topic()
+        );
+        // Swapping the two meter topics is a kind mismatch.
+        parts[0] = match f.topic() {
+            Topic::SessionLevels => Topic::PreviewLevels.to_bytes(),
+            _ => Topic::SessionLevels.to_bytes(),
+        };
+        assert_eq!(decode_parts(&parts), Err(DecodeError::KindMismatch));
+    }
+    let mut bad = meters[0].clone();
+    if let FrameData::SessionLevels(s) = &mut bad.data {
+        s.meta.channels.pop();
+    }
+    assert!(matches!(
+        decode_parts(&bytes_of(&bad)),
+        Err(DecodeError::Schema(_))
+    ));
+}
+
 #[test]
 fn event_wire_shape_is_rev_kind_payload() {
     #[derive(serde::Deserialize)]
@@ -147,7 +184,7 @@ fn every_frame_kind_roundtrips() {
         assert_eq!(back.topic(), f.topic());
         kinds.insert(format!("{:?}", f.data.kind()));
     }
-    assert_eq!(kinds.len(), 8);
+    assert_eq!(kinds.len(), 10);
 }
 
 #[test]

@@ -23,6 +23,10 @@ STREAMS = ("tf", "ir", "rta", "spec", "spl", "levels")
 _DATA_TOPIC = re.compile(r"^d/(0|[1-9][0-9]*)/(" + "|".join(STREAMS) + r")$")
 
 
+# Input-meter topics and the frame kind each carries.
+_METER_TOPICS = {"session/levels": "session_levels", "session/preview": "preview_levels"}
+
+
 class DecodeError(Exception):
     pass
 
@@ -65,6 +69,8 @@ def parse_topic(b: bytes):
     s = b.decode("utf-8")
     if s in ("timing", "evt", "ka"):
         return {"topic": s}
+    if s in _METER_TOPICS:
+        return {"topic": s, "kind": _METER_TOPICS[s]}
     m = _DATA_TOPIC.match(s)
     if not m:
         raise DecodeError(f"bad topic {s!r}")
@@ -133,7 +139,7 @@ def decode_frame(parts: list) -> dict:
         if len(p) != 4 * n:
             raise DecodeError(f"array {desc['name']}: {len(p)} bytes, expected {4 * n}")
         out[desc["name"]] = list(struct.unpack("<%d%s" % (n, _ELEM[desc["elem"]]), p))
-    expected_kind = topic.get("stream", topic["topic"])
+    expected_kind = topic.get("stream", topic.get("kind", topic["topic"]))
     if h["kind"] != expected_kind or list(h["meta"].keys()) != [h["kind"]]:
         raise DecodeError("kind mismatch")
     return {"topic": parts[0].decode(), "header": h, "arrays": out}

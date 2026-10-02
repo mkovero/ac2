@@ -178,16 +178,22 @@ fn direction(d: &audio::DirectionCaps) -> pm::DirectionInfo {
             max: b.max,
         }),
         default_rate_hz: d.default_rate,
+        default_buffer_frames: d.default_buffer,
+        channel_names: d.channel_names.clone(),
+    }
+}
+
+pub(crate) fn backend_kind(k: audio::BackendKind) -> pm::BackendKind {
+    match k {
+        audio::BackendKind::Jack => pm::BackendKind::Jack,
+        audio::BackendKind::Cpal => pm::BackendKind::Cpal,
+        audio::BackendKind::Fake => pm::BackendKind::Fake,
     }
 }
 
 pub(crate) fn device_info(c: &audio::DeviceCaps) -> pm::DeviceInfo {
     pm::DeviceInfo {
-        backend: match c.backend {
-            audio::BackendKind::Jack => pm::BackendKind::Jack,
-            audio::BackendKind::Cpal => pm::BackendKind::Cpal,
-            audio::BackendKind::Fake => pm::BackendKind::Fake,
-        },
+        backend: backend_kind(c.backend),
         host: c.host.clone(),
         id: pm::DeviceId(c.id.0.clone()),
         name: c.name.clone(),

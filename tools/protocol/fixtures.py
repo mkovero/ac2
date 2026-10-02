@@ -202,6 +202,30 @@ def frames():
                 (arr("clip", "bitmask", "u32"), [CLIP | HELD, 0]),
             ],
         ),
+        "session_levels": frame(
+            "session/levels",
+            "session_levels",
+            None,
+            {"channels": [0, 1, 2]},
+            [
+                (arr("peak", "dbfs"), [-6.0, -0.0625, -INF]),
+                (arr("rms", "dbfs"), [-18.5, -3.25, -INF]),
+                (arr("clip", "bitmask", "u32"), [0, HELD, 0]),
+            ],
+            protection=0,
+        ),
+        "preview_levels": frame(
+            "session/preview",
+            "preview_levels",
+            None,
+            {"backend": "jack", "device": "jack", "channels": [0, 1]},
+            [
+                (arr("peak", "dbfs"), [-12.0, -40.5]),
+                (arr("rms", "dbfs"), [-20.0, -52.25]),
+                (arr("clip", "bitmask", "u32"), [0, CLIP]),
+            ],
+            protection=0,
+        ),
         "timing": frame(
             "timing",
             "timing",
@@ -320,6 +344,22 @@ def requests():
     return [
         req(0, "hello", {"client": "ac2-cli 0.0.0"}, mutation=False),
         req(
+            2,
+            "session.open",
+            {
+                "config": {
+                    "backend": "cpal",
+                    "input_device": {"type": "id", "id": "hw:UMC1820"},
+                    "output_device": {"type": "default"},
+                    "input_channels": [0, 1, 2],
+                    "output_channels": 2,
+                    "sample_rate_hz": 48000,
+                    "buffer_frames": None,
+                    "loopback": {"output": 1, "input": 0},
+                }
+            },
+        ),
+        req(
             6,
             "gen.set",
             {
@@ -376,6 +416,20 @@ def requests():
                 "key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"},
                 "part": "sensitivity",
             },
+        ),
+        req(44, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
+        req(45, "session.preview_stop", mutation=False),
+        req(
+            46,
+            "session.detect_loopback",
+            {
+                "lease_token": TOKEN,
+                "backend": "jack",
+                "device": "jack",
+                "output": 0,
+                "level": -30.0,
+            },
+            mutation=False,
         ),
     ]
 

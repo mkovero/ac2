@@ -61,27 +61,42 @@ fn fake() -> R<FakeDaemon> {
 async fn devices_json() -> R {
     let f = fake()?;
     let v = ok_json(&f, &["devices", "--json"]).await?;
-    let dir = |ch| {
+    let dir = |ch, names: serde_json::Value| {
         json!({
             "max_channels": ch,
             "rates_hz": [{ "min": 48000, "max": 48000 }],
             "buffer_frames": { "min": 256, "max": 256 },
-            "default_rate_hz": 48000
+            "default_rate_hz": 48000,
+            "default_buffer_frames": 256,
+            "channel_names": names
         })
     };
     assert_eq!(
         v,
-        json!([{
-            "backend": "fake",
-            "host": "fake",
-            "id": "fake:loop",
-            "name": "Fake loopback",
-            "input": dir(4),
-            "output": dir(2),
-            "duplex_clock": "single_callback",
-            "index": "exact",
-            "notes": []
-        }])
+        json!([
+            {
+                "kind": "fake",
+                "description": "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)",
+                "availability": { "type": "available" },
+                "devices": [{
+                    "backend": "fake",
+                    "host": "fake",
+                    "id": "fake:loop",
+                    "name": "Fake loopback",
+                    "input": dir(4, json!(["Loop return", "Room mic", "Line 3", "Line 4"])),
+                    "output": dir(2, json!(["Out 1 (speaker + loop)", "Out 2"])),
+                    "duplex_clock": "single_callback",
+                    "index": "exact",
+                    "notes": []
+                }]
+            },
+            {
+                "kind": "jack",
+                "description": "JACK audio server",
+                "availability": { "type": "unavailable", "reason": "JACK server not running" },
+                "devices": []
+            }
+        ])
     );
     Ok(())
 }

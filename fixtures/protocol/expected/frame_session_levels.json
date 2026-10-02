@@ -1,0 +1,60 @@
+{
+ "topic": "session/levels",
+ "header": {
+  "v": 1,
+  "kind": "session_levels",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 0,
+  "n": 3,
+  "arrays": [
+   {
+    "name": "peak",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "rms",
+    "unit": "dbfs",
+    "elem": "f32"
+   },
+   {
+    "name": "clip",
+    "unit": "bitmask",
+    "elem": "u32"
+   }
+  ],
+  "meta": {
+   "session_levels": {
+    "channels": [
+     0,
+     1,
+     2
+    ]
+   }
+  }
+ },
+ "arrays": {
+  "peak": [
+   -6.0,
+   -0.0625,
+   -Infinity
+  ],
+  "rms": [
+   -18.5,
+   -3.25,
+   -Infinity
+  ],
+  "clip": [
+   0,
+   2,
+   0
+  ]
+ }
+}

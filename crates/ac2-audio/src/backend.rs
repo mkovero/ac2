@@ -129,6 +129,12 @@ pub struct DirectionCaps {
     pub formats: Vec<SampleFormat>,
     /// The host's default rate, if any.
     pub default_rate: Option<u32>,
+    /// The callback size the device runs at unless asked otherwise, when the host states
+    /// one.
+    pub default_buffer: Option<u32>,
+    /// One name per channel (`max_channels` of them) where the host names its channels
+    /// (JACK ports); `None` where it does not (cpal).
+    pub channel_names: Option<Vec<String>>,
 }
 
 /// Opaque device identifier, stable for as long as the host keeps it stable.

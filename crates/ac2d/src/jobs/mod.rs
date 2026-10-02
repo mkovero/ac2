@@ -26,6 +26,7 @@ use crate::io::Interest;
 use crate::outbox::Outbox;
 
 pub(crate) mod finder;
+pub(crate) mod meters;
 pub(crate) mod rta;
 pub(crate) mod spectrum;
 pub(crate) mod spl;
@@ -82,6 +83,17 @@ pub(crate) struct Emitter {
 }
 
 impl Emitter {
+    /// An emitter for a thread that is not a job (the preview).
+    pub(crate) fn connect(env: JobEnv) -> std::io::Result<Self> {
+        let outbox = Outbox::connect(&env.ctx, &env.endpoint, 64)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        Ok(Self {
+            outbox,
+            env,
+            latest: Arc::new(Mutex::new(None)),
+        })
+    }
+
     pub(crate) fn wants(&self, t: Topic) -> bool {
         self.env.interest.wants(&t.to_bytes())
     }
@@ -286,6 +298,15 @@ const CLIP_PEAK: f32 = 0.988_553_1;
 /// mean square with a 300 ms time constant (VU-like ballistics) while peak stays per interval.
 const METER_RMS_TAU_S: f64 = 0.3;
 
+/// One interval's meters.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Meters {
+    pub(crate) meta: LevelsMeta,
+    pub(crate) peak: Vec<f32>,
+    pub(crate) rms: Vec<f32>,
+    pub(crate) clip: Vec<ClipFlags>,
+}
+
 /// Input meters of a job's channels: per-interval peak and clip, 300 ms integrated RMS.
 #[derive(Debug)]
 pub(crate) struct LevelsMeter {
@@ -350,6 +371,23 @@ impl LevelsMeter {
 
     /// The interval's meters, then a new interval; `None` if nothing was captured.
     pub(crate) fn take(&mut self, meas: MeasId) -> Option<LevelsFrame> {
+        let m = self.take_meters()?;
+        Some(LevelsFrame {
+            meas,
+            meta: m.meta,
+            peak: m.peak,
+            rms: m.rms,
+            clip: m.clip,
+        })
+    }
+
+    /// One past the newest sample metered.
+    pub(crate) fn end(&self) -> u64 {
+        self.end
+    }
+
+    /// [`Self::take`] without a measurement.
+    pub(crate) fn take_meters(&mut self) -> Option<Meters> {
         if self.frames == 0 {
             return None;
         }
@@ -373,8 +411,7 @@ impl LevelsMeter {
             self.clipped[m] = false;
         }
         self.frames = 0;
-        Some(LevelsFrame {
-            meas,
+        Some(Meters {
             meta: LevelsMeta {
                 channels: self.channels.clone(),
             },

@@ -4,10 +4,10 @@ use std::io::{self, Write};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    CalEntry, CalState, CalStatus, DelayReference, DepthPolicy, DeviceInfo, InputSetup, LevelScale,
-    MeasKind, Measurement, PeakWeighting, Polarity, Session, SessionFile, SmoothingFraction,
-    SmoothingMode, TimeWeighting, TimingState, TimingStatus, TraceData, TraceKind, TraceMeta,
-    TraceSource, Weighting,
+    Availability, BackendInfo, CalEntry, CalState, CalStatus, DelayReference, DepthPolicy,
+    InputSetup, LevelScale, MeasKind, Measurement, PeakWeighting, Polarity, Session, SessionFile,
+    SmoothingFraction, SmoothingMode, TimeWeighting, TimingState, TimingStatus, TraceData,
+    TraceKind, TraceMeta, TraceSource, Weighting,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
@@ -194,10 +194,20 @@ pub fn yes(b: bool) -> String {
     if b { "yes" } else { "no" }.to_owned()
 }
 
-/// Devices table.
-pub fn devices(d: &[DeviceInfo]) -> String {
+/// Devices table: every device of every available backend, and a line per unavailable
+/// backend saying why.
+pub fn devices(backends: &[BackendInfo]) -> String {
     let mut t = table(&["backend", "id", "name", "in", "out", "rate", "clock"]);
-    for dev in d {
+    let mut unavailable = Vec::new();
+    for b in backends {
+        if let Availability::Unavailable { reason } = &b.availability {
+            unavailable.push(format!(
+                "{}: unavailable ({reason})",
+                format!("{:?}", b.kind).to_lowercase()
+            ));
+        }
+    }
+    for dev in backends.iter().flat_map(|b| &b.devices) {
         let ch = |x: &Option<ac2_proto::model::DirectionInfo>| {
             x.as_ref().map_or_else(
                 || format::NO_VALUE.to_owned(),
@@ -223,7 +233,12 @@ pub fn devices(d: &[DeviceInfo]) -> String {
             format!("{:?}", dev.duplex_clock),
         ]);
     }
-    t.to_string()
+    let mut out = t.to_string();
+    for u in unavailable {
+        out.push('\n');
+        out.push_str(&u);
+    }
+    out
 }
 
 /// Session, as lines.

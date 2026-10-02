@@ -98,6 +98,39 @@ fn silent_duplex_has_exact_flagged_indices() {
     );
 }
 
+/// Every physical port is listed with a name an operator recognises (its alias, else its
+/// short name), and the server's period is the default buffer.
+#[test]
+fn enumerate_names_every_port() {
+    let b = backend("ac2-test-names", false);
+    if server_or_skip(&b).is_none() {
+        return;
+    }
+    let caps = b.enumerate().expect("caps");
+    let dev = &caps[0];
+    for d in [dev.input.as_ref(), dev.output.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        let names = d.channel_names.as_ref().expect("JACK names its ports");
+        assert_eq!(names.len(), usize::from(d.max_channels));
+        assert!(names.iter().all(|n| !n.is_empty()), "{names:?}");
+        assert_eq!(d.default_buffer, d.buffer_frames.map(|f| f.min));
+    }
+    // The dummy driver's ports have no aliases: their short names are listed.
+    if std::env::var_os("AC2_JACK_DUMMY").is_some()
+        && let Some(i) = &dev.input
+    {
+        assert_eq!(
+            i.channel_names
+                .as_ref()
+                .and_then(|n| n.first())
+                .map(String::as_str),
+            Some("capture_1")
+        );
+    }
+}
+
 #[test]
 fn server_rate_and_size_are_fixed() {
     let b = backend("ac2-test-fixed", false);

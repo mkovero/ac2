@@ -111,6 +111,7 @@ pub fn local_tcp() -> Listen {
 
 pub fn session(loopback: bool) -> SessionConfig {
     SessionConfig {
+        backend: None,
         input_device: DeviceSelector::Default,
         output_device: DeviceSelector::Default,
         input_channels: vec![0, 1],

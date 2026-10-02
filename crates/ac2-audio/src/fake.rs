@@ -200,6 +200,11 @@ pub struct FakeConfig {
     pub stop_after_blocks: Option<u64>,
     /// How far ahead DAC history is kept for drift, in seconds of run time.
     pub drift_horizon_seconds: f64,
+    /// Names of the input channels as listed (one per input); `None`: unnamed, like a cpal
+    /// device.
+    pub input_names: Option<Vec<String>>,
+    /// Names of the output channels as listed (one per output).
+    pub output_names: Option<Vec<String>>,
 }
 
 impl Default for FakeConfig {
@@ -219,6 +224,8 @@ impl Default for FakeConfig {
             counter_origin: 0,
             stop_after_blocks: None,
             drift_horizon_seconds: 1800.0,
+            input_names: None,
+            output_names: None,
         }
     }
 }
@@ -251,6 +258,9 @@ pub enum FakeConfigError {
     /// Two output faults overlap, or one has zero frames.
     #[error("output faults overlap or are empty")]
     OutputFaults,
+    /// Channel names given, but not one per channel.
+    #[error("channel names must name every channel of their direction")]
+    ChannelNames,
 }
 
 impl FakeConfig {
@@ -263,6 +273,17 @@ impl FakeConfig {
         }
         if self.inputs == 0 {
             return Err(FakeConfigError::Zero("inputs"));
+        }
+        if self
+            .input_names
+            .as_ref()
+            .is_some_and(|n| n.len() != usize::from(self.inputs))
+            || self
+                .output_names
+                .as_ref()
+                .is_some_and(|n| n.len() != usize::from(self.outputs))
+        {
+            return Err(FakeConfigError::ChannelNames);
         }
         let ok = |x: f64| x.is_finite() && x >= 0.0;
         if !ok(f64::from(self.input_noise_rms)) {
@@ -475,7 +496,7 @@ impl Backend for FakeBackend {
 
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
         let c = &self.config;
-        let dir = |channels: u16| DirectionCaps {
+        let dir = |channels: u16, names: &Option<Vec<String>>| DirectionCaps {
             max_channels: channels,
             rates: vec![RateRange {
                 min: c.sample_rate,
@@ -487,14 +508,16 @@ impl Backend for FakeBackend {
             }),
             formats: vec![SampleFormat::F32],
             default_rate: Some(c.sample_rate),
+            default_buffer: Some(c.block_frames),
+            channel_names: names.clone(),
         };
         Ok(vec![DeviceCaps {
             backend: BackendKind::Fake,
             host: "fake".into(),
             id: DeviceId(FAKE_DEVICE_ID.into()),
             name: "simulated duplex device".into(),
-            input: Some(dir(c.inputs)),
-            output: (c.outputs > 0).then(|| dir(c.outputs)),
+            input: Some(dir(c.inputs, &c.input_names)),
+            output: (c.outputs > 0).then(|| dir(c.outputs, &c.output_names)),
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,

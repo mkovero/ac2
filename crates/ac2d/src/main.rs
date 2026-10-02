@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use ac2d::{Advertise, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
 
@@ -10,9 +11,10 @@ usage: ac2d [options]
 
 With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), cpal backend.
 
-  --backend <name>       audio backend: cpal (default), jack, or fake (a simulated rig:
-                         out 1 → in 1 loopback, out 1 → in 2 acoustic path; only when
-                         named here, never as a fallback)
+  --backend <name>       default audio backend: cpal (default), jack, or fake (a
+                         simulated rig: out 1 → in 1 loopback, out 1 → in 2 acoustic
+                         path; only when named here, never as a fallback). On real
+                         audio the other real backends of the build are offered too.
   --listen <tcp://iface[:port]>
                          network mode: ctrl on port (default 47820), data on port+1,
                          CURVE on both
@@ -117,7 +119,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let backend = match ac2d::backend(args.backend) {
+    let backends = match ac2d::backends(args.backend) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("ac2d: {e}");
@@ -162,7 +164,8 @@ fn main() -> ExitCode {
             .unwrap_or_else(ac2_discovery::default_rig_name),
         mdns: ac2_discovery::Options::default(),
     });
-    let mut config = DaemonConfig::new(backend, listen, args.max_level);
+    let mut config = DaemonConfig::new(Arc::clone(&backends[0]), listen, args.max_level);
+    config.backends = backends;
     config.advertise = advertise;
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
     let handle = match Daemon::start(config) {

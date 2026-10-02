@@ -15,8 +15,8 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
-    BandFraction, CalStatus, LevelScale, PeakWeighting, Smoothing, TimeWeighting, TimingState,
-    TimingStatus, Weighting, Window,
+    BackendKind, BandFraction, CalStatus, DeviceId, LevelScale, PeakWeighting, Smoothing,
+    TimeWeighting, TimingState, TimingStatus, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -136,6 +136,10 @@ pub enum FrameKind {
     Spl,
     /// Input meters.
     Levels,
+    /// Input meters of the open session.
+    SessionLevels,
+    /// Input meters of a device preview.
+    PreviewLevels,
     /// Loopback timing.
     Timing,
     /// Keepalive.
@@ -313,6 +317,18 @@ pub struct LevelsMeta {
     pub channels: Vec<u16>,
 }
 
+/// Device preview meters metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewLevelsMeta {
+    /// Backend previewed.
+    pub backend: BackendKind,
+    /// Device previewed.
+    pub device: DeviceId,
+    /// Device input channel of each column.
+    pub channels: Vec<u16>,
+}
+
 /// One timing correlation window.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -382,6 +398,10 @@ pub enum FrameMeta {
     Spl(SplMeta),
     /// Levels.
     Levels(LevelsMeta),
+    /// Session levels.
+    SessionLevels(LevelsMeta),
+    /// Preview levels.
+    PreviewLevels(PreviewLevelsMeta),
     /// Timing.
     Timing(TimingMeta),
     /// Keepalive.
@@ -397,6 +417,8 @@ impl FrameMeta {
             Self::Spec(_) => FrameKind::Spec,
             Self::Spl(_) => FrameKind::Spl,
             Self::Levels(_) => FrameKind::Levels,
+            Self::SessionLevels(_) => FrameKind::SessionLevels,
+            Self::PreviewLevels(_) => FrameKind::PreviewLevels,
             Self::Timing(_) => FrameKind::Timing,
             Self::Ka(_) => FrameKind::Ka,
         }
@@ -545,6 +567,32 @@ pub struct LevelsFrame {
     pub clip: Vec<ClipFlags>,
 }
 
+/// Meters of every input of the open session, independent of measurements.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionLevelsFrame {
+    /// Channels.
+    pub meta: LevelsMeta,
+    /// Peak per channel, dBFS (sample peak).
+    pub peak: Vec<f32>,
+    /// RMS per channel, dBFS.
+    pub rms: Vec<f32>,
+    /// Clip state per channel.
+    pub clip: Vec<ClipFlags>,
+}
+
+/// Meters of every input of a previewed device.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreviewLevelsFrame {
+    /// Device and channels.
+    pub meta: PreviewLevelsMeta,
+    /// Peak per channel, dBFS (sample peak).
+    pub peak: Vec<f32>,
+    /// RMS per channel, dBFS.
+    pub rms: Vec<f32>,
+    /// Clip state per channel.
+    pub clip: Vec<ClipFlags>,
+}
+
 /// Every frame body.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FrameData {
@@ -560,6 +608,10 @@ pub enum FrameData {
     Spl(SplFrame),
     /// `d/<meas>/levels`.
     Levels(LevelsFrame),
+    /// `session/levels`.
+    SessionLevels(SessionLevelsFrame),
+    /// `session/preview`.
+    PreviewLevels(PreviewLevelsFrame),
     /// `timing`.
     Timing(TimingMeta),
     /// `ka`.
@@ -585,6 +637,8 @@ impl FrameData {
             Self::Spec(_) => FrameKind::Spec,
             Self::Spl(_) => FrameKind::Spl,
             Self::Levels(_) => FrameKind::Levels,
+            Self::SessionLevels(_) => FrameKind::SessionLevels,
+            Self::PreviewLevels(_) => FrameKind::PreviewLevels,
             Self::Timing(_) => FrameKind::Timing,
             Self::Ka(_) => FrameKind::Ka,
         }
@@ -600,6 +654,8 @@ impl FrameData {
             Self::Spec(f) => data(f.meas, Stream::Spec),
             Self::Spl(f) => data(f.meas, Stream::Spl),
             Self::Levels(f) => data(f.meas, Stream::Levels),
+            Self::SessionLevels(_) => Topic::SessionLevels,
+            Self::PreviewLevels(_) => Topic::PreviewLevels,
             Self::Timing(_) => Topic::Timing,
             Self::Ka(_) => Topic::Ka,
         }
@@ -843,6 +899,24 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             ));
             FrameMeta::Levels(f.meta.clone())
         }
+        FrameData::SessionLevels(f) => {
+            cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
+            cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
+            cols.push((
+                desc(ArrayName::Clip, Unit::Bitmask),
+                Col::U(mask_slice(&f.clip)),
+            ));
+            FrameMeta::SessionLevels(f.meta.clone())
+        }
+        FrameData::PreviewLevels(f) => {
+            cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
+            cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
+            cols.push((
+                desc(ArrayName::Clip, Unit::Bitmask),
+                Col::U(mask_slice(&f.clip)),
+            ));
+            FrameMeta::PreviewLevels(f.meta.clone())
+        }
         FrameData::Timing(m) => FrameMeta::Timing(*m),
         FrameData::Ka(m) => FrameMeta::Ka(m.clone()),
     };
@@ -1052,6 +1126,8 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
     }
     let topic_kind = match topic {
         Topic::Data { stream, .. } => stream_kind(stream),
+        Topic::SessionLevels => FrameKind::SessionLevels,
+        Topic::PreviewLevels => FrameKind::PreviewLevels,
         Topic::Timing => FrameKind::Timing,
         Topic::Ka => FrameKind::Ka,
         Topic::Evt => return Err(DecodeError::KindMismatch),
@@ -1107,6 +1183,32 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             }
             FrameData::Levels(LevelsFrame {
                 meas,
+                meta,
+                peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
+                rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
+                clip: a.mask(ArrayName::Clip)?,
+            })
+        }
+        FrameMeta::SessionLevels(meta) => {
+            if meta.channels.len() != h.n as usize {
+                return Err(DecodeError::Schema(
+                    "session levels: channels.len() != n".into(),
+                ));
+            }
+            FrameData::SessionLevels(SessionLevelsFrame {
+                meta,
+                peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
+                rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
+                clip: a.mask(ArrayName::Clip)?,
+            })
+        }
+        FrameMeta::PreviewLevels(meta) => {
+            if meta.channels.len() != h.n as usize {
+                return Err(DecodeError::Schema(
+                    "preview levels: channels.len() != n".into(),
+                ));
+            }
+            FrameData::PreviewLevels(PreviewLevelsFrame {
                 meta,
                 peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
                 rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,

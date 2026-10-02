@@ -126,6 +126,10 @@ fn direction_caps(
         buffer_frames,
         formats,
         default_rate,
+        // cpal states a buffer range, never the size a default stream would use, and has
+        // no channel names.
+        default_buffer: None,
+        channel_names: None,
     })
 }
 

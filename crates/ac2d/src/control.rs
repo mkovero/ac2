@@ -21,9 +21,10 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    CalEntry, CalKey, CalPart, DelayOutcome, DelayState, FinderBand, GenAction, GenAudit,
-    Generator, GeneratorDesired, InputSetup, Lease as WireLease, MeasConfig, MeasKind, Measurement,
-    MicCurveAction, MicCurveRef, Session, SessionConfig, SplCal, TimingStatus,
+    Availability, BackendInfo, CalEntry, CalKey, CalPart, DelayOutcome, DelayState, FinderBand,
+    GenAction, GenAudit, Generator, GeneratorDesired, InputSetup, Lease as WireLease,
+    LoopbackDetection, MeasConfig, MeasKind, Measurement, MicCurveAction, MicCurveRef, Session,
+    SessionConfig, SplCal, TimingStatus,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -42,6 +43,7 @@ use crate::dedup::Dedup;
 use crate::io::Interest;
 use crate::jobs::{self, Analysis, JobCmd, JobEnv, JobHandle, Seqs, block_index};
 use crate::outbox::Outbox;
+use crate::preview::Preview;
 use crate::session::{self, Runtime};
 use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource};
@@ -76,6 +78,11 @@ pub(crate) enum ControlMsg {
         epoch: SessionEpoch,
         samples: i64,
     },
+    /// A `session.detect_loopback` started under `token` finished.
+    LoopbackDetected {
+        token: u64,
+        result: Box<Result<LoopbackDetection, ProtoError>>,
+    },
     /// The network sockets are gone (ZAP handler exited); shut down.
     Fatal(String),
     /// Orderly shutdown.
@@ -84,7 +91,8 @@ pub(crate) enum ControlMsg {
 
 /// Construction parameters.
 pub(crate) struct Setup {
-    pub(crate) backend: Arc<dyn Backend>,
+    /// Offered backends, the default first.
+    pub(crate) backends: Vec<Arc<dyn Backend>>,
     pub(crate) incarnation: DaemonIncarnation,
     pub(crate) ceiling_dbfs: f64,
     pub(crate) max_level: MaxLevel,
@@ -103,6 +111,13 @@ pub(crate) struct Setup {
     /// Network mode: `file.*` accept names only, never paths.
     pub(crate) network: bool,
     pub(crate) cal_store: Option<std::path::PathBuf>,
+}
+
+/// A request answered when a worker thread reports back.
+struct PendingReply {
+    routing_id: Vec<u8>,
+    client: ClientId,
+    id: RequestId,
 }
 
 /// A `delay.find` running on a job thread; answered when the result arrives.
@@ -146,6 +161,12 @@ pub(crate) struct Control {
     session: Option<Runtime>,
     jobs: BTreeMap<MeasId, JobHandle>,
     timing_job: Option<JobHandle>,
+    /// Session input meters (`session/levels`).
+    meter_job: Option<JobHandle>,
+    /// Capture-only meters of a device before a session opens on it.
+    preview: Option<Preview>,
+    /// The loopback detection running, by token.
+    detecting: Option<(u64, PendingReply)>,
     next_fanout_id: u64,
     next_meas: u32,
     lease: Option<Lease>,
@@ -321,6 +342,9 @@ impl Control {
             session: None,
             jobs: BTreeMap::new(),
             timing_job: None,
+            meter_job: None,
+            preview: None,
+            detecting: None,
             next_fanout_id: 1,
             next_meas: 1,
             lease: None,
@@ -346,9 +370,16 @@ impl Control {
                 self.send_ka();
                 self.next_ka = now + self.s.keepalive;
             }
+            if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
+                tracing::info!("preview not renewed: closing it");
+                self.close_preview();
+            }
             let mut wake = self.next_ka;
             if let Some(l) = &self.lease {
                 wake = wake.min(l.deadline);
+            }
+            if let Some(p) = &self.preview {
+                wake = wake.min(p.deadline);
             }
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
                 Ok(ControlMsg::Request {
@@ -377,6 +408,16 @@ impl Control {
                     }
                 }
                 Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
+                Ok(ControlMsg::LoopbackDetected { token, result }) => {
+                    if let Some((t, p)) = self.detecting.take() {
+                        if t == token {
+                            let r = (*result).map(ReplyBody::LoopbackDetection);
+                            self.answer(&p.routing_id, &p.client, p.id, r, Instant::now());
+                        } else {
+                            self.detecting = Some((t, p));
+                        }
+                    }
+                }
                 Ok(ControlMsg::DelayTracked {
                     meas,
                     epoch,
@@ -395,6 +436,7 @@ impl Control {
 
     fn shutdown(&mut self) {
         tracing::info!("shutting down");
+        self.close_preview();
         self.stop_output();
         self.stop_all_jobs();
         if let Some(rt) = self.session.take() {
@@ -494,6 +536,30 @@ impl Control {
             _ => match req.cmd {
                 // The finder runs for a while on the job thread; the reply follows its result
                 // and other clients are served meanwhile.
+                // The burst and its capture take about a second on their own thread; the
+                // reply follows the result.
+                Command::SessionDetectLoopback {
+                    lease_token,
+                    backend,
+                    device,
+                    output,
+                    level,
+                } => {
+                    match self.start_detect(&client, lease_token, backend, device, output, level) {
+                        Ok(token) => {
+                            self.detecting = Some((
+                                token,
+                                PendingReply {
+                                    routing_id: routing_id.to_vec(),
+                                    client,
+                                    id: req.id,
+                                },
+                            ));
+                            return;
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
                 Command::DelayFind {
                     meas,
                     band,
@@ -570,16 +636,16 @@ impl Control {
                     rev: self.store.rev(),
                 }))
             }
-            Command::SessionDevices => {
-                let devs = self
-                    .s
-                    .backend
-                    .enumerate()
-                    .map_err(|e| perr(ErrorCode::Unsupported, e.to_string()))?;
-                Ok(ReplyBody::Devices(
-                    devs.iter().map(conv::device_info).collect(),
-                ))
+            Command::SessionDevices => Ok(ReplyBody::Backends(self.backend_infos())),
+            Command::SessionPreview { backend, device } => self.session_preview(backend, device),
+            Command::SessionPreviewStop => {
+                self.close_preview();
+                ack(self.store.rev())
             }
+            Command::SessionDetectLoopback { .. } => Err(perr(
+                ErrorCode::Internal,
+                "session.detect_loopback is answered asynchronously",
+            )),
             Command::SessionOpen { config } => self.session_open(client, config),
             Command::SessionClose => {
                 self.session_close(client);
@@ -866,12 +932,15 @@ impl Control {
         config: SessionConfig,
     ) -> Result<ReplyBody, ProtoError> {
         session::validate(&config)?;
+        let backend = self.backend_for(config.backend)?;
+        // The preview may hold the very device the session is about to open.
+        self.close_preview();
         if self.session.is_some() {
             self.session_close(client);
         }
         let epoch = SessionEpoch(self.epoch().0 + 1);
         let rt = match Runtime::open(
-            &*self.s.backend,
+            &*backend,
             &config,
             &[],
             self.s.max_level,
@@ -929,6 +998,7 @@ impl Control {
             }
         }
         self.start_timing_job();
+        self.start_meter_job();
     }
 
     fn session_close(&mut self, client: &ClientId) {
@@ -948,6 +1018,7 @@ impl Control {
             rt.close();
             self.s.outbox.clear(b"d/");
             self.s.outbox.clear(b"timing");
+            self.s.outbox.clear(b"session/levels");
             let epoch = SessionEpoch(self.epoch().0 + 1);
             self.commit(Change::Session(Session { epoch, open: None }));
         }
@@ -966,14 +1037,16 @@ impl Control {
             return Err(perr(ErrorCode::Invalid, "no open session"));
         };
         let config = rt.open.config.clone();
+        let backend = self.backend_for(Some(rt.open.backend))?;
         self.stop_all_jobs();
         self.level = None;
         self.source = None;
         rt.close();
         self.s.outbox.clear(b"d/");
         self.s.outbox.clear(b"timing");
+        self.s.outbox.clear(b"session/levels");
         match Runtime::open(
-            &*self.s.backend,
+            &*backend,
             &config,
             routes,
             self.s.max_level,
@@ -1005,14 +1078,181 @@ impl Control {
         }
     }
 
+    // -- backends, preview, loopback detection ----------------------------------------------
+
+    /// The backend `kind` names; `None` = the default one.
+    fn backend_for(
+        &self,
+        kind: Option<ac2_proto::model::BackendKind>,
+    ) -> Result<Arc<dyn Backend>, ProtoError> {
+        match kind {
+            None => self.s.backends.first().cloned(),
+            Some(k) => self
+                .s
+                .backends
+                .iter()
+                .find(|b| conv::backend_kind(b.kind()) == k)
+                .cloned(),
+        }
+        .ok_or_else(|| {
+            perr(
+                ErrorCode::NotFound,
+                format!("this daemon offers no {kind:?} backend"),
+            )
+        })
+    }
+
+    fn backend_infos(&self) -> Vec<BackendInfo> {
+        self.s
+            .backends
+            .iter()
+            .map(|b| {
+                let (availability, devices) = match b.enumerate() {
+                    Ok(d) => (
+                        Availability::Available,
+                        d.iter().map(conv::device_info).collect(),
+                    ),
+                    Err(ac2_audio::AudioError::Unavailable { reason, .. }) => {
+                        (Availability::Unavailable { reason }, Vec::new())
+                    }
+                    Err(e) => (
+                        Availability::Unavailable {
+                            reason: e.to_string(),
+                        },
+                        Vec::new(),
+                    ),
+                };
+                BackendInfo {
+                    kind: conv::backend_kind(b.kind()),
+                    description: crate::backend::describe(b.kind()),
+                    availability,
+                    devices,
+                }
+            })
+            .collect()
+    }
+
+    fn close_preview(&mut self) {
+        if let Some(p) = self.preview.take() {
+            p.close();
+            self.s.outbox.clear(b"session/preview");
+        }
+    }
+
+    fn session_preview(
+        &mut self,
+        kind: ac2_proto::model::BackendKind,
+        device: ac2_proto::model::DeviceId,
+    ) -> Result<ReplyBody, ProtoError> {
+        if let Some(p) = &mut self.preview
+            && p.backend == kind
+            && p.device == device
+        {
+            p.renew();
+            return Ok(ReplyBody::Preview(p.wire()));
+        }
+        let backend = self.backend_for(Some(kind))?;
+        self.close_preview();
+        let p = Preview::open(
+            &*backend,
+            kind,
+            device,
+            self.s.max_level,
+            self.env_at(self.epoch()),
+        )?;
+        let wire = p.wire();
+        self.preview = Some(p);
+        Ok(ReplyBody::Preview(wire))
+    }
+
+    /// Checks a `session.detect_loopback` and starts it on its own thread.
+    fn start_detect(
+        &mut self,
+        client: &ClientId,
+        token: LeaseToken,
+        kind: ac2_proto::model::BackendKind,
+        device: ac2_proto::model::DeviceId,
+        output: u16,
+        level: Option<Dbfs>,
+    ) -> Result<u64, ProtoError> {
+        self.check_lease(Instant::now());
+        self.lease_check(client, token)?;
+        let Some(level) = level else {
+            return Err(perr(
+                ErrorCode::Refused,
+                "type the burst level: loopback detection has no default level",
+            ));
+        };
+        if !level.0.is_finite() {
+            return Err(perr(ErrorCode::Invalid, "level must be finite"));
+        }
+        if level.0 > self.s.ceiling_dbfs {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "{:.1} dBFS is above the global maximum {:.1} dBFS",
+                    level.0, self.s.ceiling_dbfs
+                ),
+            ));
+        }
+        let g = &self.store.state().generator;
+        if g.armed || g.firing {
+            return Err(perr(
+                ErrorCode::Refused,
+                "the stimulus is armed: stop it before detecting the loopback",
+            ));
+        }
+        if self.detecting.is_some() {
+            return Err(perr(
+                ErrorCode::Refused,
+                "a loopback detection is already running",
+            ));
+        }
+        let backend = self.backend_for(Some(kind))?;
+        self.close_preview();
+        let token = self.next_token;
+        self.next_token += 1;
+        let req = crate::detect::DetectRequest {
+            backend,
+            kind,
+            device,
+            output,
+            level_dbfs: level.0,
+            ceiling_dbfs: self.s.ceiling_dbfs,
+            max_level: self.s.max_level,
+        };
+        tracing::info!(
+            target: "ac2d::audit",
+            "loopback detection on output {} by {}",
+            output + 1,
+            client.0
+        );
+        let to = self.s.to_self.clone();
+        std::thread::Builder::new()
+            .name("ac2d-detect".into())
+            .spawn(move || {
+                let result = crate::detect::run(&req);
+                let _ = to.send(ControlMsg::LoopbackDetected {
+                    token,
+                    result: Box::new(result),
+                });
+            })
+            .map_err(|e| perr(ErrorCode::Internal, format!("cannot start detection: {e}")))?;
+        Ok(token)
+    }
+
     // -- jobs ------------------------------------------------------------------------------
 
     fn job_env(&self, rt: &Runtime) -> JobEnv {
+        self.env_at(rt.epoch)
+    }
+
+    fn env_at(&self, epoch: SessionEpoch) -> JobEnv {
         JobEnv {
             ctx: self.s.ctx.clone(),
             endpoint: self.s.endpoint.clone(),
             incarnation: self.s.incarnation,
-            epoch: rt.epoch,
+            epoch,
             seqs: Arc::clone(&self.seqs),
             interest: Arc::clone(&self.s.interest),
             fps: self.s.fps,
@@ -1185,11 +1425,31 @@ impl Control {
         for id in ids {
             self.stop_job(id);
         }
-        if let Some(h) = self.timing_job.take() {
+        for h in [self.timing_job.take(), self.meter_job.take()]
+            .into_iter()
+            .flatten()
+        {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);
             }
             drop(h);
+        }
+    }
+
+    /// Starts the session input meters.
+    fn start_meter_job(&mut self) {
+        let Some(rt) = self.session.as_ref() else {
+            return;
+        };
+        let a = jobs::meters::SessionMeters::new(&rt.input_map, rt.sample_rate, self.store.rev());
+        let fid = self.next_fanout_id;
+        self.next_fanout_id += 1;
+        match jobs::spawn("ac2d-meters".into(), self.job_env(rt), fid, Box::new(a)) {
+            Ok((h, tx)) => {
+                rt.fanout.attach(fid, tx);
+                self.meter_job = Some(h);
+            }
+            Err(e) => tracing::error!("cannot start the session meters: {e}"),
         }
     }
 
@@ -1778,6 +2038,12 @@ impl Control {
         }
         if desired.firing && self.session.is_none() {
             return Err(perr(ErrorCode::Refused, "no open session to emit on"));
+        }
+        if desired.firing && self.detecting.is_some() {
+            return Err(perr(
+                ErrorCode::Refused,
+                "a loopback detection is playing its burst; fire once it is done",
+            ));
         }
 
         let deadline = Instant::now() + self.s.lease_expiry;

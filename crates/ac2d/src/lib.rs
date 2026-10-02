@@ -32,11 +32,13 @@ pub mod config;
 mod control;
 mod conv;
 mod dedup;
+mod detect;
 mod fanout;
 mod io;
 mod jobs;
 pub mod keys;
 mod outbox;
+mod preview;
 mod session;
 mod state;
 mod stimulus;
@@ -55,7 +57,7 @@ pub use config::{
     ReplayLimits, pid_file, runtime_dir,
 };
 
-pub use backend::{BackendChoice, FAKE_RIG, backend};
+pub use backend::{BackendChoice, FAKE_RIG, backend, backends};
 use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};
 use outbox::Outbox;
@@ -84,6 +86,8 @@ pub enum StartError {
     },
     /// A thread could not be spawned, or a directory not created.
     Io(std::io::Error),
+    /// No audio backend was given.
+    NoBackend,
 }
 
 impl fmt::Display for StartError {
@@ -94,6 +98,7 @@ impl fmt::Display for StartError {
             Self::Keys(e) => write!(f, "{e}"),
             Self::Zmq { what, source } => write!(f, "{what}: {source}"),
             Self::Io(e) => write!(f, "{e}"),
+            Self::NoBackend => f.write_str("no audio backend"),
         }
     }
 }
@@ -255,6 +260,9 @@ impl Daemon {
     /// until a client sends `session.open`.
     pub fn start(config: DaemonConfig) -> Result<Handle, StartError> {
         config.listen.validate().map_err(StartError::Listen)?;
+        if config.backends.is_empty() {
+            return Err(StartError::NoBackend);
+        }
         let max_level = stimulus::peak_limit(config.max_level_dbfs)
             .map_err(|e| StartError::Level(e.to_string()))?;
         if config.max_level_dbfs > 0.0 {
@@ -361,7 +369,7 @@ impl Daemon {
         )
         .map_err(StartError::Io)?;
         let control = Control::new(Setup {
-            backend: Arc::clone(&config.backend),
+            backends: config.backends.clone(),
             incarnation,
             ceiling_dbfs: config.max_level_dbfs,
             max_level,
@@ -388,9 +396,9 @@ impl Daemon {
             _ => None,
         };
         tracing::info!(
-            "ac2d {} up: ctrl {ctrl}, data {data}, backend {:?}, incarnation {:016x}",
+            "ac2d {} up: ctrl {ctrl}, data {data}, backends {:?}, incarnation {:016x}",
             env!("CARGO_PKG_VERSION"),
-            config.backend.kind(),
+            config.backends.iter().map(|b| b.kind()).collect::<Vec<_>>(),
             incarnation.0
         );
         Ok(Handle {

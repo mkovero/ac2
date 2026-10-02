@@ -10,9 +10,10 @@ use ac2_audio::Backend;
 /// Everything [`crate::Daemon::start`] needs.
 #[derive(Clone)]
 pub struct DaemonConfig {
-    /// The audio backend. Chosen explicitly by the caller: there is no default and no
-    /// fallback (a fake device must never stand in for a missing real one).
-    pub backend: Arc<dyn Backend>,
+    /// The audio backends offered, the default one (used when `session.open` names none)
+    /// first. Chosen explicitly by the caller: there is no default and no fallback (a fake
+    /// device must never stand in for a missing real one). See [`crate::backends`].
+    pub backends: Vec<Arc<dyn Backend>>,
     /// Where the ctrl and data sockets listen.
     pub listen: Listen,
     /// Global maximum generator level, dBFS RMS (0 dBFS = RMS of a full-scale sine).
@@ -52,7 +53,10 @@ pub struct Advertise {
 impl fmt::Debug for DaemonConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DaemonConfig")
-            .field("backend", &self.backend.kind())
+            .field(
+                "backends",
+                &self.backends.iter().map(|b| b.kind()).collect::<Vec<_>>(),
+            )
             .field("listen", &self.listen)
             .field("max_level_dbfs", &self.max_level_dbfs)
             .field("lease_expiry", &self.lease_expiry)
@@ -68,11 +72,11 @@ impl fmt::Debug for DaemonConfig {
 }
 
 impl DaemonConfig {
-    /// Default limits (Q2/Q5/Q6) for `backend` listening on `listen`, with a global maximum
-    /// of `max_level_dbfs`.
+    /// Default limits (Q2/Q5/Q6) for `backend` (the only one offered) listening on
+    /// `listen`, with a global maximum of `max_level_dbfs`.
     pub fn new(backend: Arc<dyn Backend>, listen: Listen, max_level_dbfs: f64) -> Self {
         Self {
-            backend,
+            backends: vec![backend],
             listen,
             max_level_dbfs,
             lease_expiry: Duration::from_millis(1500),

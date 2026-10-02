@@ -10,8 +10,9 @@ use crate::ctrl::{
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
     ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LevelsFrame,
-    LevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SpecFrame, SpecMeta, SplFrame, SplMeta,
-    TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta,
+    SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
+    TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -47,6 +48,7 @@ fn token() -> LeaseToken {
 
 fn session_config() -> SessionConfig {
     SessionConfig {
+        backend: Some(BackendKind::Cpal),
         input_device: DeviceSelector::Id {
             id: DeviceId("hw:UMC1820".into()),
         },
@@ -293,6 +295,18 @@ pub fn commands() -> Vec<Command> {
             key: cal_key(),
             part: CalPart::Sensitivity,
         },
+        Command::SessionPreview {
+            backend: BackendKind::Jack,
+            device: DeviceId("jack".into()),
+        },
+        Command::SessionPreviewStop,
+        Command::SessionDetectLoopback {
+            lease_token: token(),
+            backend: BackendKind::Jack,
+            device: DeviceId("jack".into()),
+            output: 0,
+            level: Some(Dbfs(-30.0)),
+        },
     ]
 }
 
@@ -495,6 +509,7 @@ fn session() -> Session {
         epoch: SessionEpoch(2),
         open: Some(OpenSession {
             config: session_config(),
+            backend: BackendKind::Cpal,
             input_device: DeviceId("hw:UMC1820".into()),
             output_device: DeviceId("hw:UMC1820".into()),
             sample_rate_hz: 48_000,
@@ -582,25 +597,73 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             session_epoch: SessionEpoch(2),
             rev: Rev(42),
         })),
-        Ok(ReplyBody::Devices(vec![DeviceInfo {
-            backend: BackendKind::Jack,
-            host: "jack".into(),
-            id: DeviceId("jack".into()),
-            name: "JACK server".into(),
-            input: Some(DirectionInfo {
-                max_channels: 8,
-                rates_hz: vec![RangeU32 {
-                    min: 48_000,
-                    max: 48_000,
+        Ok(ReplyBody::Backends(vec![
+            BackendInfo {
+                kind: BackendKind::Jack,
+                description: "JACK audio server".into(),
+                availability: Availability::Available,
+                devices: vec![DeviceInfo {
+                    backend: BackendKind::Jack,
+                    host: "jack".into(),
+                    id: DeviceId("jack".into()),
+                    name: "JACK server".into(),
+                    input: Some(DirectionInfo {
+                        max_channels: 2,
+                        rates_hz: vec![RangeU32 {
+                            min: 48_000,
+                            max: 48_000,
+                        }],
+                        buffer_frames: Some(RangeU32 { min: 256, max: 256 }),
+                        default_rate_hz: Some(48_000),
+                        default_buffer_frames: Some(256),
+                        channel_names: Some(vec!["capture_1".into(), "capture_2".into()]),
+                    }),
+                    output: None,
+                    duplex_clock: ClockRelation::SingleCallback,
+                    index: IndexExactness::Exact,
+                    notes: vec![],
                 }],
-                buffer_frames: Some(RangeU32 { min: 256, max: 256 }),
-                default_rate_hz: Some(48_000),
-            }),
-            output: None,
-            duplex_clock: ClockRelation::SingleCallback,
-            index: IndexExactness::Exact,
-            notes: vec![],
-        }])),
+            },
+            BackendInfo {
+                kind: BackendKind::Cpal,
+                description: "system audio".into(),
+                availability: Availability::Unavailable {
+                    reason: "no devices".into(),
+                },
+                devices: vec![],
+            },
+        ])),
+        Ok(ReplyBody::Preview(Preview {
+            backend: BackendKind::Jack,
+            device: DeviceId("jack".into()),
+            channels: 2,
+            sample_rate_hz: 48_000,
+            expires_in_ms: 5000,
+        })),
+        Ok(ReplyBody::LoopbackDetection(LoopbackDetection {
+            backend: BackendKind::Jack,
+            device: DeviceId("jack".into()),
+            output: 0,
+            level: Dbfs(-30.0),
+            ranked: vec![
+                LoopbackCandidate {
+                    input: 0,
+                    delay: Seconds(32.0 / 48_000.0),
+                    delay_samples: Samples(32),
+                    correlation: 0.999,
+                    gain: Some(Db(-0.5)),
+                },
+                LoopbackCandidate {
+                    input: 1,
+                    delay: Seconds(0.0),
+                    delay_samples: Samples(0),
+                    correlation: 0.0,
+                    gain: None,
+                },
+            ],
+            loopback: Some(0),
+            clock: ClockRelation::SingleCallback,
+        })),
         Ok(ReplyBody::Session(session())),
         Ok(ReplyBody::Lease(Lease {
             lease_token: token(),
@@ -842,6 +905,36 @@ pub fn frames() -> Vec<Frame> {
                 peak: vec![-0.1, -18.0],
                 rms: vec![-12.0, -30.5],
                 clip: vec![ClipFlags::CLIP.with(ClipFlags::HELD), ClipFlags::NONE],
+            }),
+        },
+        Frame {
+            stamp: FrameStamp {
+                protection: ProtectionFlags::NONE,
+                ..stamp(None)
+            },
+            data: FrameData::SessionLevels(SessionLevelsFrame {
+                meta: LevelsMeta {
+                    channels: vec![0, 1, 2],
+                },
+                peak: vec![-6.0, -0.0625, f32::NEG_INFINITY],
+                rms: vec![-18.5, -3.25, f32::NEG_INFINITY],
+                clip: vec![ClipFlags::NONE, ClipFlags::HELD, ClipFlags::NONE],
+            }),
+        },
+        Frame {
+            stamp: FrameStamp {
+                protection: ProtectionFlags::NONE,
+                ..stamp(None)
+            },
+            data: FrameData::PreviewLevels(PreviewLevelsFrame {
+                meta: PreviewLevelsMeta {
+                    backend: BackendKind::Jack,
+                    device: DeviceId("jack".into()),
+                    channels: vec![0, 1],
+                },
+                peak: vec![-12.0, -40.5],
+                rms: vec![-20.0, -52.25],
+                clip: vec![ClipFlags::NONE, ClipFlags::CLIP],
             }),
         },
         Frame {

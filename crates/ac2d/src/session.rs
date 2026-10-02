@@ -31,7 +31,7 @@ pub(crate) struct Runtime {
     pub(crate) fanout: Fanout,
 }
 
-fn audio_err(e: AudioError) -> ProtoError {
+pub(crate) fn audio_err(e: AudioError) -> ProtoError {
     let code = match &e {
         AudioError::DeviceNotFound { .. } => ErrorCode::NotFound,
         AudioError::Unsupported(_) | AudioError::Unavailable { .. } => ErrorCode::Unsupported,
@@ -102,6 +102,7 @@ impl Runtime {
         let history = stream.history().cloned();
         let open = OpenSession {
             config: cfg.clone(),
+            backend: conv::backend_kind(backend.kind()),
             input_device: ac2_proto::model::DeviceId(n.input_device.0.clone()),
             output_device: ac2_proto::model::DeviceId(n.output_device.0.clone()),
             sample_rate_hz: n.sample_rate,

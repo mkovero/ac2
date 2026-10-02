@@ -68,7 +68,10 @@ Lease column: **L** = `lease_token` required (Q6).
 | op | args | reply body | lease |
 |---|---|---|---|
 | `hello` | `client` | `welcome` | |
-| `session.devices` | — | `devices` | |
+| `session.devices` | — | `backends` | |
+| `session.preview` | `backend: BackendKind`, `device: DeviceId` | `preview` | |
+| `session.preview_stop` | — | `ack` | |
+| `session.detect_loopback` | `lease_token`, `backend`, `device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L |
 | `session.open` | `config: SessionConfig` | `session` | |
 | `session.close` | — | `ack` | |
 | `session.status` | — | `session` | |
@@ -118,6 +121,57 @@ the last refresh fades out (20 ms), disarms and clears the owner. `gen.acquire{f
 stops and disarms before handing over. Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
 owner whose lease expired).
+
+#### Devices, preview and loopback detection (`session.*`)
+
+`session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
+started on first: `kind: BackendKind` (`jack` \| `cpal` \| `fake`), `description` (for the
+operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}, e.g.
+`JACK server not running`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon
+started on real audio offers every real backend of its build; one started on the simulated
+rig offers only that (a simulated device never stands in for a missing real one).
+
+`DeviceInfo`: `backend`, `host`, `id`, `name` (display name), `input` / `output`:
+`DirectionInfo | nil`, `duplex_clock`, `index`, `notes`. `DirectionInfo`: `max_channels`,
+`rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
+`default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
+where the backend does not name channels: JACK gives the port alias or short name, cpal
+nothing).
+
+`SessionConfig`: `backend: BackendKind | nil` (nil = the default backend), `input_device`,
+`output_device` (`DeviceSelector`: `default` \| `id` {`id`}), `input_channels` ([u16],
+zero-based), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`,
+`loopback` ({`output`, `input`} \| nil). `OpenSession` adds `backend` (the one used),
+`input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`.
+
+While a session is open the daemon meters every captured input on `session/levels` (§5.1)
+whether or not a measurement runs: per-interval sample peak, 300 ms integrated RMS and clip
+(held 1 s), at most 30 frames per second, published only while subscribed.
+
+**Preview.** `session.preview` opens a device for capture only — no output stream exists,
+so nothing can be emitted — and publishes meters of every input on `session/preview`
+(meta names the device). Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
+`0 .. channels`), `sample_rate_hz`, `expires_in_ms`. There is one preview per daemon;
+naming the same device again renews it, another device replaces it. It closes on
+`session.preview_stop`, `session.open`, `session.detect_loopback`, or when not renewed
+within `expires_in_ms` (5 s). Opening it may fail where the host allows a device only one
+stream (`unsupported` / `not_found` with the host's reason).
+
+**Loopback detection.** `session.detect_loopback` needs the stimulus lease (`lease_required`
+otherwise) and an explicit `level` (`refused` when nil; there is no default level); a level
+above the global ceiling, or a request while the stimulus is armed or firing, is `refused`.
+The daemon closes the preview, opens the device with every input and `output + 1` outputs,
+plays a 0.5 s pink-noise burst band-limited to 100 Hz – 10 kHz at `level` (RMS) on `output`
+only — faded in and out (20 ms), under the global ceiling and the output path's peak limit —
+then closes the stream. Each input's capture is cross-correlated with the burst as emitted
+(over delays 0 … 0.5 s). Reply `LoopbackDetection`: `backend`, `device`, `output`, `level`,
+`ranked: [LoopbackCandidate]` (every input, best first: by normalised correlation, the
+earlier arrival first among equally good ones), `loopback: u16 | nil` (the first-ranked
+input when its |correlation| ≥ 0.8, else nil), `clock`. `LoopbackCandidate`: `input`,
+`delay: Seconds`, `delay_samples: Samples`, `correlation` (−1 … 1), `gain: Db | nil` (nil:
+silent input). Delays are exact on a `single_callback` clock; otherwise they share an
+unknown offset (the ranking is unaffected). The burst is audited in the daemon log; it is
+not generator state.
 
 #### Delay finder (`delay.find`, `delay.insert`)
 
@@ -281,7 +335,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 ### 3.3 Reply bodies
 
-`{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `devices`, `session`,
+`{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
+`loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `export`, `calibration`, `calibrations`, `inputs`, `spl_log`, `snapshot`, `events`,
 `grid`, `session_file`, `sessions`.
@@ -346,13 +401,16 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `d/<meas>/spec` | narrowband spectrum |
 | `d/<meas>/spl` | SPL meter |
 | `d/<meas>/levels` | input meters of the measurement's channels |
+| `session/levels` | input meters of every input of the open session |
+| `session/preview` | input meters of every input of the previewed device |
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
 | `ka` | keepalive, every 250 ms |
 
 `<meas>` is the decimal measurement id without sign or leading zeros; a topic has exactly
 one spelling. Prefixes: `d/` (all measurement streams), `d/<meas>/` (one measurement —
-the trailing slash keeps `d/1/` from matching `d/12/…`). Longest topic: 32 bytes.
+the trailing slash keeps `d/1/` from matching `d/12/…`), `session/` (both input-meter
+topics). Longest topic: 32 bytes.
 
 ### 5.2 Layout
 
@@ -370,7 +428,7 @@ bitmask array says why.
 | field | type | meaning |
 |---|---|---|
 | `v` | u16 | protocol version |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `levels`, `timing`, `ka`; equals the topic and the `meta` key |
+| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `levels`, `session_levels`, `preview_levels`, `timing`, `ka`; equals the topic and the `meta` key |
 | `seq` | u64 | per topic per incarnation; clients keep the max per topic when draining |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
@@ -397,6 +455,8 @@ bitmask array says why.
 | `spec` | `level`: dbfs or db_spl (tone level), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve` |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
+| `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
+| `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing} |
 

@@ -14,7 +14,7 @@ use crate::watch;
 pub(crate) async fn devices(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
     let r = c.call(Command::SessionDevices).await?;
-    let d = expect_body!("session.devices", r, ReplyBody::Devices(d) => d)?;
+    let d = expect_body!("session.devices", r, ReplyBody::Backends(d) => d)?;
     out.emit(&d, || output::devices(&d))?;
     Ok(())
 }
@@ -36,9 +36,19 @@ pub(crate) async fn session(
     match cmd {
         SessionCmd::Open(o) => {
             let r = c.call(Command::SessionDevices).await?;
-            let devs = expect_body!("session.devices", r, ReplyBody::Devices(d) => d)?;
+            let backends = expect_body!("session.devices", r, ReplyBody::Backends(d) => d)?;
             let want = backend(o.backend);
-            let of_backend: Vec<&DeviceInfo> = devs.iter().filter(|d| d.backend == want).collect();
+            let Some(b) = backends.iter().find(|b| b.kind == want) else {
+                return Err(CliError::Usage(format!(
+                    "the daemon offers no {want:?} backend (see `ac2 devices`)"
+                )));
+            };
+            if let Availability::Unavailable { reason } = &b.availability {
+                return Err(CliError::Usage(format!(
+                    "{want:?} is unavailable: {reason}"
+                )));
+            }
+            let of_backend: Vec<&DeviceInfo> = b.devices.iter().collect();
             let dev = match &o.device {
                 Some(sel) => of_backend
                     .iter()
@@ -90,6 +100,7 @@ pub(crate) async fn session(
             };
             let sel = DeviceSelector::Id { id: dev.id.clone() };
             let config = SessionConfig {
+                backend: Some(want),
                 input_device: sel.clone(),
                 output_device: sel,
                 input_channels: o.inputs.0.clone(),

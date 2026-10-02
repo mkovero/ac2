@@ -264,6 +264,11 @@ pub struct DirectionInfo {
     pub buffer_frames: Option<RangeU32>,
     /// Default rate, Hz.
     pub default_rate_hz: Option<u32>,
+    /// Callback size the device runs at unless asked otherwise, when the host states one.
+    pub default_buffer_frames: Option<u32>,
+    /// One name per channel (`max_channels` of them) where the backend names its channels
+    /// (JACK ports: alias or short name); `None` where it does not (cpal).
+    pub channel_names: Option<Vec<String>>,
 }
 
 /// A device as listed by `session.devices`.
@@ -288,6 +293,33 @@ pub struct DeviceInfo {
     pub index: IndexExactness,
     /// Non-fatal problems.
     pub notes: Vec<String>,
+}
+
+/// Whether a backend can be used now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Availability {
+    /// Devices listed.
+    Available,
+    /// Nothing can be opened on it now.
+    Unavailable {
+        /// Why, for the operator (`JACK server not running`).
+        reason: String,
+    },
+}
+
+/// One backend the daemon offers, as listed by `session.devices`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendInfo {
+    /// Backend.
+    pub kind: BackendKind,
+    /// What it is, for the operator.
+    pub description: String,
+    /// Usable now, or why not.
+    pub availability: Availability,
+    /// Its devices; empty while unavailable.
+    pub devices: Vec<DeviceInfo>,
 }
 
 /// Which device to open.
@@ -318,6 +350,9 @@ pub struct LoopbackRoute {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
+    /// Backend the devices belong to; `None` = the daemon's default backend (the one it was
+    /// started on).
+    pub backend: Option<BackendKind>,
     /// Capture device.
     pub input_device: DeviceSelector,
     /// Playback device.
@@ -340,6 +375,8 @@ pub struct SessionConfig {
 pub struct OpenSession {
     /// Requested configuration.
     pub config: SessionConfig,
+    /// Backend actually used.
+    pub backend: BackendKind,
     /// Device actually opened for capture.
     pub input_device: DeviceId,
     /// Device actually opened for playback.
@@ -362,6 +399,60 @@ pub struct Session {
     pub epoch: SessionEpoch,
     /// `None` while closed.
     pub open: Option<OpenSession>,
+}
+
+/// Reply of `session.preview`: capture-only meters of a device before a session opens on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Preview {
+    /// Backend.
+    pub backend: BackendKind,
+    /// Device metered.
+    pub device: DeviceId,
+    /// Inputs metered: every input of the device, `0 .. channels`.
+    pub channels: u16,
+    /// Rate it runs at.
+    pub sample_rate_hz: u32,
+    /// The preview closes unless `session.preview` names this device again within this.
+    pub expires_in_ms: u32,
+}
+
+/// How well one input matched the loopback-detection burst.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoopbackCandidate {
+    /// Zero-based device input.
+    pub input: u16,
+    /// Arrival after the burst left the output (exact on a single-callback clock; with
+    /// separate callbacks it includes an offset common to every input).
+    pub delay: Seconds,
+    /// The same in samples.
+    pub delay_samples: Samples,
+    /// Normalised cross-correlation at that delay, −1 … 1 (negative: polarity inverted).
+    pub correlation: f64,
+    /// Level of the return relative to the burst; `None` for a silent input.
+    pub gain: Option<Db>,
+}
+
+/// Reply of `session.detect_loopback`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoopbackDetection {
+    /// Backend.
+    pub backend: BackendKind,
+    /// Device.
+    pub device: DeviceId,
+    /// Output the burst played on (zero-based).
+    pub output: u16,
+    /// RMS level of the burst.
+    pub level: Dbfs,
+    /// Every input, best match first.
+    pub ranked: Vec<LoopbackCandidate>,
+    /// The best-ranked input when it correlates as a loopback cable does; `None` when no
+    /// input does.
+    pub loopback: Option<u16>,
+    /// Clock relation of the stream the burst played on.
+    pub clock: ClockRelation,
 }
 
 // ---------------------------------------------------------------------------------------

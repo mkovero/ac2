@@ -12,14 +12,15 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
-    AverageMethod, CalEntry, CalKey, CalPart, DelayFinding, DelayPick, DelayReference, DeviceInfo,
-    EssSpec, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, ImportRole,
-    InputSetup, Lease, MathOp, MeasConfig, Measurement, MicCurveAction, Session, SessionConfig,
-    SessionFile, SessionRef, SplLog, TraceData, TraceEdit, TraceMeta,
+    AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, CalPart, DelayFinding, DelayPick,
+    DelayReference, DeviceId, EssSpec, ExportFormat, FinderBand, Generator, GeneratorDesired,
+    ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig,
+    Measurement, MicCurveAction, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLog,
+    TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
-    Blob, ClientId, DaemonIncarnation, DbSpl, Hz, LeaseToken, MeasId, RequestId, Rev, Seconds,
-    SessionEpoch, TraceId,
+    Blob, ClientId, DaemonIncarnation, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
+    Seconds, SessionEpoch, TraceId,
 };
 
 /// Largest ctrl message accepted, bytes (trace import / export bodies included).
@@ -64,9 +65,39 @@ pub enum Command {
     },
 
     // -- session ------------------------------------------------------------------------
-    /// List devices.
+    /// List the daemon's backends and their devices.
     #[serde(rename = "session.devices")]
     SessionDevices,
+    /// Meter every input of a device without opening a session on it: capture only, the
+    /// outputs are never opened. Naming the same device again keeps the preview open;
+    /// another device replaces it. Closed by `session.preview_stop`, `session.open`,
+    /// `session.detect_loopback` or when not renewed within `expires_in_ms`.
+    #[serde(rename = "session.preview")]
+    SessionPreview {
+        /// Backend.
+        backend: BackendKind,
+        /// Device.
+        device: DeviceId,
+    },
+    /// Close the preview.
+    #[serde(rename = "session.preview_stop")]
+    SessionPreviewStop,
+    /// Play a short band-limited noise burst at `level` on `output` of a device and find
+    /// the input it returns on. Needs the stimulus lease and an explicit level; refused while
+    /// the stimulus is firing.
+    #[serde(rename = "session.detect_loopback")]
+    SessionDetectLoopback {
+        /// Lease.
+        lease_token: LeaseToken,
+        /// Backend.
+        backend: BackendKind,
+        /// Device.
+        device: DeviceId,
+        /// Output to play the burst on (zero-based).
+        output: u16,
+        /// RMS level of the burst; refused when absent (there is no default level).
+        level: Option<Dbfs>,
+    },
     /// Open the audio session (new epoch).
     #[serde(rename = "session.open")]
     SessionOpen {
@@ -387,6 +418,9 @@ impl Command {
         match self {
             Self::Hello { .. } => "hello",
             Self::SessionDevices => "session.devices",
+            Self::SessionPreview { .. } => "session.preview",
+            Self::SessionPreviewStop => "session.preview_stop",
+            Self::SessionDetectLoopback { .. } => "session.detect_loopback",
             Self::SessionOpen { .. } => "session.open",
             Self::SessionClose => "session.close",
             Self::SessionStatus => "session.status",
@@ -438,6 +472,9 @@ impl Command {
             self,
             Self::Hello { .. }
                 | Self::SessionDevices
+                | Self::SessionPreview { .. }
+                | Self::SessionPreviewStop
+                | Self::SessionDetectLoopback { .. }
                 | Self::SessionStatus
                 | Self::TraceList
                 | Self::TraceGet { .. }
@@ -458,6 +495,7 @@ impl Command {
             Self::GenSet { lease_token, .. }
             | Self::GenRefresh { lease_token }
             | Self::GenRelease { lease_token }
+            | Self::SessionDetectLoopback { lease_token, .. }
             | Self::IrCapture { lease_token, .. } => Some(*lease_token),
             _ => None,
         }
@@ -496,8 +534,12 @@ pub enum ReplyBody {
     },
     /// `hello`.
     Welcome(Welcome),
-    /// `session.devices`.
-    Devices(Vec<DeviceInfo>),
+    /// `session.devices`: every backend the daemon offers, the default one first.
+    Backends(Vec<BackendInfo>),
+    /// `session.preview`.
+    Preview(Preview),
+    /// `session.detect_loopback`.
+    LoopbackDetection(LoopbackDetection),
     /// `session.open` / `session.status`.
     Session(Session),
     /// `gen.acquire` / `gen.refresh`.

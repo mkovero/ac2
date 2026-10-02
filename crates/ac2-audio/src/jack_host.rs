@@ -86,7 +86,42 @@ fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
 fn connect(name: &str) -> Result<Client, AudioError> {
     Client::new(name, ClientOptions::NO_START_SERVER)
         .map(|(c, _)| c)
-        .map_err(unavailable)
+        .map_err(|e| match e {
+            // The one failure an operator meets in practice; the status bits say nothing
+            // more useful to them.
+            jack::Error::ClientError(s) if s.contains(ClientStatus::SERVER_FAILED) => {
+                unavailable("JACK server not running")
+            }
+            e => unavailable(e),
+        })
+}
+
+/// What an operator calls a physical port: its short name (`capture_1`, or `capture_FL`
+/// where the server names channels), unless an alias names the jack itself (`Mic1_in` from
+/// a driver that knows its front panel). Aliases that only number the port again
+/// (`alsa_pcm:hw:USB:in1`, `dummy_pcm:dummy:out1`) add nothing and are skipped.
+fn port_label(client: &Client, full: &str) -> String {
+    let tail = |s: &str| s.rsplit(':').next().unwrap_or(s).to_owned();
+    let Some(port) = client.port_by_name(full) else {
+        return tail(full);
+    };
+    let descriptive = port
+        .aliases()
+        .unwrap_or_default()
+        .iter()
+        .map(|a| tail(a))
+        .find(|a| !generic_port_name(a));
+    descriptive.unwrap_or_else(|| port.short_name().unwrap_or_else(|_| tail(full)))
+}
+
+/// `in1`, `out_2`, `capture_3`, `playback4`: a direction and a number, nothing more.
+fn generic_port_name(name: &str) -> bool {
+    let stem = name
+        .trim_end_matches(|c: char| c.is_ascii_digit())
+        .trim_end_matches(['_', '-', ' '])
+        .to_ascii_lowercase();
+    stem.is_empty()
+        || ["in", "out", "input", "output", "capture", "playback"].contains(&stem.as_str())
 }
 
 /// Physical ports for capture (`true`) or playback (`false`). A physical capture source is
@@ -141,7 +176,15 @@ impl Backend for JackBackend {
         let frames = client.buffer_size();
         let capture = physical(&client, true);
         let playback = physical(&client, false);
-        let dir = |n: usize| DirectionCaps {
+        let labels = |ports: &[String]| -> Vec<String> {
+            ports
+                .iter()
+                .take(MAX_PORTS)
+                .map(|p| port_label(&client, p))
+                .collect()
+        };
+        let (capture_names, playback_names) = (labels(&capture), labels(&playback));
+        let dir = |n: usize, names: &Vec<String>| DirectionCaps {
             max_channels: n.min(MAX_PORTS) as u16,
             rates: vec![RateRange {
                 min: rate,
@@ -153,6 +196,8 @@ impl Backend for JackBackend {
             }),
             formats: vec![SampleFormat::F32],
             default_rate: Some(rate),
+            default_buffer: Some(frames),
+            channel_names: Some(names.clone()),
         };
         Ok(vec![DeviceCaps {
             backend: BackendKind::Jack,
@@ -163,8 +208,8 @@ impl Backend for JackBackend {
                 capture.len(),
                 playback.len()
             ),
-            input: Some(dir(capture.len())),
-            output: Some(dir(playback.len())),
+            input: Some(dir(capture.len(), &capture_names)),
+            output: Some(dir(playback.len(), &playback_names)),
             duplex_clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: static_latency(&client, &capture, &playback),
@@ -425,5 +470,18 @@ impl jack::ProcessHandler for Process {
             self.events.config_change();
         }
         Control::Continue
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn numbered_aliases_are_not_names() {
+        for g in ["in1", "out_2", "capture_3", "playback4", "12"] {
+            assert!(super::generic_port_name(g), "{g}");
+        }
+        for n in ["Mic1_in", "capture_FL", "Front Left"] {
+            assert!(!super::generic_port_name(n), "{n}");
+        }
     }
 }

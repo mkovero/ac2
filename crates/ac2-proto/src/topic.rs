@@ -1,6 +1,8 @@
 //! Data-socket topics and subscription prefixes.
 //!
-//! Topic strings: `d/<meas>/<stream>` (measurement streams), `timing`, `evt`, `ka`.
+//! Topic strings: `d/<meas>/<stream>` (measurement streams), `session/levels` and
+//! `session/preview` (input meters of the session and of a device preview), `timing`,
+//! `evt`, `ka`.
 //! `<meas>` is the decimal [`MeasId`] without sign or leading zeros, so every topic has
 //! exactly one spelling and ZMQ prefix matching on `d/<meas>/` selects one measurement.
 
@@ -70,6 +72,10 @@ pub enum Topic {
         /// Stream.
         stream: Stream,
     },
+    /// `session/levels`: meters of every input of the open session.
+    SessionLevels,
+    /// `session/preview`: meters of every input of the previewed device.
+    PreviewLevels,
     /// `timing`: loopback timing monitor.
     Timing,
     /// `evt`: state events.
@@ -98,6 +104,8 @@ impl Topic {
         let s = std::str::from_utf8(b).map_err(|_| err())?;
         match s {
             "timing" => return Ok(Self::Timing),
+            "session/levels" => return Ok(Self::SessionLevels),
+            "session/preview" => return Ok(Self::PreviewLevels),
             "evt" => return Ok(Self::Evt),
             "ka" => return Ok(Self::Ka),
             _ => {}
@@ -126,6 +134,8 @@ impl fmt::Display for Topic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Data { meas, stream } => write!(f, "d/{}/{}", meas.0, stream.as_str()),
+            Self::SessionLevels => f.write_str("session/levels"),
+            Self::PreviewLevels => f.write_str("session/preview"),
             Self::Timing => f.write_str("timing"),
             Self::Evt => f.write_str("evt"),
             Self::Ka => f.write_str("ka"),
@@ -140,6 +150,8 @@ pub enum Subscription {
     AllData,
     /// Every stream of one measurement (`d/<meas>/`).
     Meas(MeasId),
+    /// The session's and the preview's input meters (`session/`).
+    InputMeters,
     /// Exactly one topic.
     Topic(Topic),
 }
@@ -150,6 +162,7 @@ impl Subscription {
         match self {
             Self::AllData => b"d/".to_vec(),
             Self::Meas(m) => format!("d/{}/", m.0).into_bytes(),
+            Self::InputMeters => b"session/".to_vec(),
             Self::Topic(t) => t.to_bytes(),
         }
     }
@@ -160,6 +173,7 @@ impl Subscription {
         match (self, topic) {
             (Self::AllData, Topic::Data { .. }) => true,
             (Self::Meas(m), Topic::Data { meas, .. }) => m == meas,
+            (Self::InputMeters, Topic::SessionLevels | Topic::PreviewLevels) => true,
             (Self::Topic(t), other) => t == other,
             _ => false,
         }
@@ -191,9 +205,25 @@ mod tests {
                 );
             }
         }
-        for t in [Topic::Evt, Topic::Ka, Topic::Timing] {
+        for t in [
+            Topic::Evt,
+            Topic::Ka,
+            Topic::Timing,
+            Topic::SessionLevels,
+            Topic::PreviewLevels,
+        ] {
             assert_eq!(Topic::parse(&t.to_bytes()), Ok(t));
         }
+        for t in [Topic::SessionLevels, Topic::PreviewLevels] {
+            assert!(
+                t.to_bytes()
+                    .starts_with(&Subscription::InputMeters.prefix())
+            );
+            assert!(Subscription::InputMeters.matches(&t));
+            assert!(!Subscription::AllData.matches(&t));
+        }
+        assert!(Topic::parse(b"session/").is_err());
+        assert!(Topic::parse(b"session/levelsx").is_err());
         for bad in [
             &b"d/01/tf"[..],
             b"d/+1/tf",

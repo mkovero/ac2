@@ -12,6 +12,38 @@
  },
  {
   "v": 1,
+  "id": 2,
+  "cmd": {
+   "op": "session.open",
+   "args": {
+    "config": {
+     "backend": "cpal",
+     "input_device": {
+      "type": "id",
+      "id": "hw:UMC1820"
+     },
+     "output_device": {
+      "type": "default"
+     },
+     "input_channels": [
+      0,
+      1,
+      2
+     ],
+     "output_channels": 2,
+     "sample_rate_hz": 48000,
+     "buffer_frames": null,
+     "loopback": {
+      "output": 1,
+      "input": 0
+     }
+    }
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 1,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -190,5 +222,42 @@
    }
   },
   "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 44,
+  "cmd": {
+   "op": "session.preview",
+   "args": {
+    "backend": "jack",
+    "device": "jack"
+   }
+  },
+  "expect_rev": null
+ },
+ {
+  "v": 1,
+  "id": 45,
+  "cmd": {
+   "op": "session.preview_stop"
+  },
+  "expect_rev": null
+ },
+ {
+  "v": 1,
+  "id": 46,
+  "cmd": {
+   "op": "session.detect_loopback",
+   "args": {
+    "lease_token": {
+     "$bin": "0123456789abcdeffedcba9876543210"
+    },
+    "backend": "jack",
+    "device": "jack",
+    "output": 0,
+    "level": -30.0
+   }
+  },
+  "expect_rev": null
  }
 ]

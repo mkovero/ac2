@@ -58,14 +58,56 @@ pub const FAKE_RIG: &str =
 
 fn fake_config() -> FakeConfig {
     const LOOP: u32 = 32;
+    let names = |n: &[&str]| Some(n.iter().map(|s| (*s).to_owned()).collect());
     FakeConfig {
         drive: FakeDrive::Thread(Pace::Realtime),
         paths: vec![
             FakePath::loopback(0, 0, LOOP),
             FakePath::acoustic(0, 1, LOOP + 240, vec![0.5], 1e-4),
         ],
+        input_names: names(&["Loop return", "Room mic", "Line 3", "Line 4"]),
+        output_names: names(&["Out 1 (speaker + loop)", "Out 2"]),
         ..FakeConfig::default()
     }
+}
+
+/// What a backend is, for the operator choosing one.
+pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
+    match kind {
+        ac2_audio::BackendKind::Jack => {
+            "JACK audio server: every port on one clock, rate and buffer set by the server".into()
+        }
+        ac2_audio::BackendKind::Cpal => {
+            let host = if cfg!(target_os = "macos") {
+                "Core Audio"
+            } else if cfg!(target_os = "windows") {
+                "WASAPI"
+            } else {
+                "ALSA"
+            };
+            format!("System audio ({host}): the interfaces the operating system lists")
+        }
+        ac2_audio::BackendKind::Fake => {
+            "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)".into()
+        }
+    }
+}
+
+/// Every backend a daemon started on `choice` offers, `choice` first. On real audio that
+/// is every real backend of this build (so the operator can pick JACK or the system's
+/// audio from one daemon); the simulated rig is offered only when named, and then alone.
+pub fn backends(choice: BackendChoice) -> Result<Vec<Arc<dyn Backend>>, String> {
+    let mut out = vec![backend(choice)?];
+    if choice != BackendChoice::Fake {
+        for other in [BackendChoice::Jack, BackendChoice::Cpal] {
+            if other != choice
+                && let Ok(b) = backend(other)
+            {
+                out.push(b);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Builds the backend `choice` names.
@@ -99,5 +141,20 @@ mod tests {
         }
         assert!("alsa".parse::<BackendChoice>().is_err());
         assert!(backend(BackendChoice::Fake).is_ok());
+    }
+
+    #[test]
+    fn the_simulated_rig_is_offered_alone_and_real_audio_never_offers_it() {
+        let kinds = |c| {
+            backends(c)
+                .expect("backends")
+                .iter()
+                .map(|b| b.kind())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(kinds(BackendChoice::Fake), [ac2_audio::BackendKind::Fake]);
+        let real = kinds(BackendChoice::Cpal);
+        assert_eq!(real[0], ac2_audio::BackendKind::Cpal);
+        assert!(!real.contains(&ac2_audio::BackendKind::Fake));
     }
 }
