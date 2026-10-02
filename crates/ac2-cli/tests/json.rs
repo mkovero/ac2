@@ -582,7 +582,8 @@ async fn trace_commands_json() -> R {
                 "offset": 0.0,
                 "polarity": "normal",
                 "delay_nudge": 0.0,
-                "slot": 1
+                "slot": 1,
+                "smoothing": null
             },
             "kind": { "type": "transfer" },
             "source": {
@@ -594,7 +595,6 @@ async fn trace_commands_json() -> R {
             },
             "grid_id": 0x79ec_3d16_ae0e_94d0u64,
             "delay": 0.01,
-            "smoothing": null,
             "depth": { "type": "equal_confidence" },
             "cal": { "type": "uncalibrated" },
             "mic": null,

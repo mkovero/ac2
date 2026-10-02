@@ -17,9 +17,10 @@ use ac2_proto::units::MeasId;
 use ac2_scene::theme::ThemeName;
 use ac2_ui::conn::Target;
 use ac2_ui::keys::Keymap;
-use ac2_ui::state::{ConnState, Overlay};
+use ac2_ui::state::{ConnState, Overlay, PaneKind};
 use ac2_ui::{App, AppOptions};
 use eframe::egui::{self, Event, Key, Modifiers};
+use egui_kittest::kittest::Queryable;
 use egui_kittest::{Harness, SnapshotOptions};
 
 const SIZE: egui::Vec2 = egui::vec2(1280.0, 800.0);
@@ -390,6 +391,99 @@ fn stored_traces_and_target() {
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("transfer_stored_traces", &snapshot_options());
+}
+
+/// The transfer pane's title chip names the measurement it shows; a click opens the list of
+/// transfer measurements and a pick switches the pane (and the selection) to it.
+#[test]
+fn pane_measurement_chip_and_list() {
+    if !have_gpu("pane_measurement_chip_and_list") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    // The transfer pane's chip (the IR pane's names the same measurement, drawn after it).
+    h.get_all_by_label("Main L")
+        .next()
+        .expect("transfer pane chip")
+        .click();
+    step_until(
+        &mut h,
+        "list",
+        |a| matches!(a.state.overlay, Overlay::PaneMenu(m) if m.pane == PaneKind::Transfer),
+    );
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("pane_measurement_list", &snapshot_options());
+    h.get_by_label("TF  Delay tower").click();
+    step_until(&mut h, "delay tower shown", |a| {
+        a.state.overlay == Overlay::None
+            && a.state.selected == Some(MeasId(2))
+            && a.state.pane_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
+    });
+    // The pane now leads with it: first legend row, IR of it.
+    let st = &h.state().state;
+    let s = ac2_ui::scenes::transfer(
+        st,
+        &ac2_scene::theme::Theme::dark(),
+        ac2_scene::primitives::Viewport {
+            width: 1000.0,
+            height: 450.0,
+        },
+        ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        },
+    );
+    assert_eq!(s.legend[0].name, "Delay tower");
+    assert_eq!(ac2_ui::scenes::focus_tf(st).map(|m| m.id), Some(MeasId(2)));
+}
+
+/// A slot selected in the list takes the smoothing keys: K re-smooths the stored capture
+/// (the daemon serves it at the new setting) while the live curves keep theirs.
+#[test]
+fn slot_resmoothed() {
+    if !have_gpu("slot_resmoothed") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1 with data", |a| {
+        a.state.slots()[0].is_some() && a.state.traces.len() == 1
+    });
+    let id = h.state().state.slots()[0].map(|t| t.id).expect("slot 1");
+    h.get_by_label("1  Main L S1 · 1/6 oct").click();
+    step_until(&mut h, "slot selected", |a| {
+        a.state.selected_trace == Some(id)
+    });
+    let before = h.state().state.traces[&id].0.mag_db.clone();
+    h.key_press(Key::K);
+    step_until(&mut h, "re-smoothed data", |a| {
+        a.state.traces.get(&id).is_some_and(|(d, _)| {
+            d.meta
+                .edit
+                .smoothing
+                .is_some_and(|s| s.fraction == ac2_proto::model::SmoothingFraction::Third)
+        })
+    });
+    let st = &h.state().state;
+    assert_ne!(st.traces[&id].0.mag_db, before, "served at the new setting");
+    assert_eq!(
+        st.smoothing_caption().as_deref(),
+        Some("slot 1 (Main L S1): smoothing 1/3 oct")
+    );
+    // The live measurement was not touched.
+    assert!(st.meas(MeasId(1)).is_some_and(|m| matches!(
+        &m.config.kind,
+        ac2_proto::model::MeasKind::Transfer { config }
+            if config.smoothing.is_some_and(|s| s.fraction == ac2_proto::model::SmoothingFraction::Sixth)
+    )));
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("slot_resmoothed", &snapshot_options());
 }
 
 /// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):

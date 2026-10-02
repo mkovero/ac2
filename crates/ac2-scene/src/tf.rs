@@ -91,6 +91,9 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64) -> LegendEntry {
     if t.offset_db != 0.0 {
         tags.push(format::db_readout(t.offset_db));
     }
+    if t.smoothing.is_some() {
+        tags.push(format::smoothing(t.smoothing));
+    }
     let stale = t.is_stale();
     if let Some(f) = t.freshness
         && stale
@@ -109,6 +112,12 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64) -> LegendEntry {
         text,
         stale,
     }
+}
+
+/// What the transfer pane's title says about smoothing of the trace its keys act on:
+/// `smoothing 1/6 oct`, `smoothing off`.
+pub fn smoothing_caption(s: Option<ac2_proto::model::Smoothing>) -> String {
+    format!("smoothing {}", format::smoothing(s))
 }
 
 fn signed_ms(s: f64) -> String {
@@ -521,7 +530,7 @@ mod tests {
     use crate::time::Freshness;
     use crate::trace::TimeBase;
     use ac2_proto::frame::ValidityMask;
-    use ac2_proto::model::Polarity;
+    use ac2_proto::model::{Polarity, Smoothing, SmoothingFraction, SmoothingMode};
     use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
     const SIZE: Viewport = Viewport {
@@ -572,6 +581,7 @@ mod tests {
                 delay: Seconds(delay),
             },
             freshness: Some(Freshness::from_age(0.1)),
+            smoothing: None,
         }
     }
 
@@ -691,11 +701,33 @@ mod tests {
     }
 
     #[test]
+    fn smoothing_captions() {
+        let s = |fraction, mode| Some(Smoothing { fraction, mode });
+        assert_eq!(smoothing_caption(None), "smoothing off");
+        assert_eq!(
+            smoothing_caption(s(SmoothingFraction::Third, SmoothingMode::Power)),
+            "smoothing 1/3 oct"
+        );
+        assert_eq!(
+            smoothing_caption(s(SmoothingFraction::FortyEighth, SmoothingMode::Power)),
+            "smoothing 1/48 oct"
+        );
+        assert_eq!(
+            smoothing_caption(s(SmoothingFraction::Twelfth, SmoothingMode::Complex)),
+            "smoothing 1/12 oct complex"
+        );
+    }
+
+    #[test]
     fn legend_cursor_delay_and_stale() {
         let a = cols(97);
         let b = cols(97);
         let mut ta = trace(&a, TraceKey::Live(MeasId(1)), 0.010);
         ta.name = "Main L".into();
+        ta.smoothing = Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::Power,
+        });
         let mut tb = trace(&b, TraceKey::Live(MeasId(2)), 0.0115);
         tb.name = "Delay tower".into();
         tb.polarity = Polarity::Inverted;
@@ -706,6 +738,10 @@ mod tests {
         ti.time_base = TimeBase::Independent;
         ti.freshness = None;
         ti.nudge = Seconds(0.00025);
+        ti.smoothing = Some(Smoothing {
+            fraction: SmoothingFraction::TwentyFourth,
+            mode: SmoothingMode::Complex,
+        });
         let view = ViewState {
             cursor_hz: Some(1000.0),
             ..ViewState::default()
@@ -719,9 +755,9 @@ mod tests {
         assert_eq!(
             texts,
             [
-                "Main L · ref",
+                "Main L · ref · 1/6 oct",
                 "Delay tower · Δt +1.50 ms · inv · +3.0 dB · STALE 3.2 s",
-                "imported · indep. · nudge +0.25 ms"
+                "imported · indep. · nudge +0.25 ms · 1/24 oct complex"
             ]
         );
         assert_eq!(
@@ -746,7 +782,7 @@ mod tests {
             .iter()
             .map(|l| l.text.as_str())
             .collect();
-        assert!(labels.contains(&"Main L · ref"));
+        assert!(labels.contains(&"Main L · ref · 1/6 oct"));
         assert!(labels.contains(&"1.00 kHz"));
         assert!(labels.contains(&"+3.0 dB  0°  1.00"));
     }
@@ -799,6 +835,10 @@ mod tests {
         let a = cols(97);
         let mut ta = trace(&a, TraceKey::Live(MeasId(1)), 0.010);
         ta.name = "Main L".into();
+        ta.smoothing = Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::Power,
+        });
         let mut tb = trace(&a, TraceKey::Live(MeasId(2)), 0.0115);
         tb.name = "Delay tower".into();
         tb.offset_db = 3.0;

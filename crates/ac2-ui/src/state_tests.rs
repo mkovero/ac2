@@ -478,12 +478,323 @@ fn transfer_commands() {
 #[test]
 fn transfer_commands_need_a_transfer_measurement() {
     let mut t = T::new();
-    t.key("N");
+    // The spectrum picked in the list while the transfer pane has the keys.
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(2)));
     assert!(t.key("X").is_empty());
     assert!(t.last_toast().contains("transfer-function"));
+    // N in the transfer pane only goes through transfer measurements.
     t.key("Shift+N");
     assert_eq!(t.st.selected, Some(MeasId(1)));
+}
+
+fn rta() -> MeasKind {
+    MeasKind::Rta {
+        config: RtaConfig::on_input(1, BandFraction::Third),
+    }
+}
+
+/// Two transfer measurements, a spectrum and an RTA.
+fn four() -> State {
+    let mut s = daemon_state();
+    s.measurements.push(meas(3, "Delay tower", transfer()));
+    s.measurements.push(meas(4, "Room", rta()));
+    s
+}
+
+#[test]
+fn panes_show_and_select_their_measurement() {
+    let mut t = T::new();
+    t.conn(mirror(four()));
+    let shown = |t: &T, p: PaneKind| t.st.pane_meas(p).map(|m| m.id.0);
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
+    assert_eq!(shown(&t, PaneKind::Ir), Some(1));
+    assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
+    assert_eq!(shown(&t, PaneKind::Spl), None);
+
+    // A click in a pane focuses it and selects what it shows.
+    t.st.update(Msg::FocusPane(PaneKind::Spectrum), &t.keys);
+    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.st.selected, Some(MeasId(2)));
+    // N / Shift+N go through the focused pane's kind only: spectrum and RTA here.
+    t.key("N");
+    assert_eq!(t.st.selected, Some(MeasId(4)));
+    assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
+    t.key("N");
+    assert_eq!(t.st.selected, Some(MeasId(2)));
+    // The transfer pane kept its own measurement.
+    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    t.key("N");
+    assert_eq!(t.st.selected, Some(MeasId(3)));
+    assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
+    assert_eq!(
+        shown(&t, PaneKind::Ir),
+        Some(3),
+        "IR follows the transfer pane"
+    );
+    // Focus by key selects too.
+    t.key("Alt+2");
+    assert_eq!(t.st.selected, Some(MeasId(2)));
+    t.key("Alt+3");
+    assert_eq!(t.st.selected, Some(MeasId(3)));
+
+    // A list selection updates the pane that shows that kind, not the focused one.
+    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
+    assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
+
+    // The title chip: the pane's list with what it shows highlighted; Down Enter shows the
+    // next one.
+    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    t.st.update(Msg::PaneMenu(PaneKind::Transfer), &t.keys);
+    assert_eq!(
+        t.st.overlay,
+        Overlay::PaneMenu(PaneMenu {
+            pane: PaneKind::Transfer,
+            index: 1
+        })
+    );
+    // Keys other than the list's do nothing while it is open.
+    assert!(t.key("X").is_empty());
+    t.key("Down");
+    t.key("Enter");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
+    // A click on the chip again closes the list; a pick by mouse shows it.
+    t.st.update(Msg::PaneMenu(PaneKind::Spectrum), &t.keys);
+    assert!(
+        matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == PaneKind::Spectrum && m.index == 1)
+    );
+    t.st.update(Msg::PaneMenu(PaneKind::Spectrum), &t.keys);
+    assert_eq!(t.st.overlay, Overlay::None);
+    t.st.update(Msg::PaneMenu(PaneKind::Spectrum), &t.keys);
+    t.st.update(Msg::PaneShow(PaneKind::Spectrum, MeasId(2)), &t.keys);
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(t.st.selected, Some(MeasId(2)));
+    // A measurement the pane cannot show is ignored.
+    t.st.update(Msg::PaneShow(PaneKind::Spectrum, MeasId(3)), &t.keys);
+    assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
+    // Palette entry for the keyboard: the focused pane's list.
+    t.st.update(Msg::Command(CommandId::PaneMeasurement), &t.keys);
+    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == PaneKind::Spectrum));
+    t.key("Esc");
+    assert_eq!(t.st.overlay, Overlay::None);
+    // Nothing to list: said, nothing opens.
+    t.st.update(Msg::PaneMenu(PaneKind::Spl), &t.keys);
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(t.last_toast().contains("no SPL measurements"));
+    t.key("Alt+4");
+    t.key("N");
+    assert!(t.last_toast().contains("no SPL measurements"));
+
+    // A deleted measurement leaves its pane showing the next one that fits.
+    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    t.key("N");
+    assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
+    let mut s = four();
+    s.measurements.retain(|m| m.id != MeasId(3));
+    t.conn(mirror(s));
+    assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
+}
+
+fn smoothing(f: SmoothingFraction, mode: SmoothingMode) -> Option<Smoothing> {
+    Some(Smoothing { fraction: f, mode })
+}
+
+/// The smoothing a request sets, and on what.
+fn smoothing_set(r: &[Request]) -> (String, Option<Smoothing>) {
+    match r {
+        [
+            Request::Call {
+                cmd: Command::MeasUpdate { meas, config },
+                ..
+            },
+        ] => match &config.kind {
+            MeasKind::Transfer { config } => (format!("m{}", meas.0), config.smoothing),
+            other => panic!("{other:?}"),
+        },
+        [
+            Request::Call {
+                cmd: Command::TraceUpdate { trace, edit },
+                ..
+            },
+        ] => (format!("t{}", trace.0), edit.smoothing),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn smoothing_keys_step_the_pane_measurement() {
+    let mut t = T::new();
+    assert_eq!(t.st.smoothing_caption().as_deref(), Some("smoothing off"));
+    // K coarser: off → 1/48 (power), with the measurement's config otherwise unchanged.
+    let r = t.key("K");
+    assert_eq!(
+        smoothing_set(&r),
+        (
+            "m1".into(),
+            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Power)
+        )
+    );
+    match r.as_slice() {
+        [
+            Request::Call {
+                cmd: Command::MeasUpdate { config, .. },
+                what,
+            },
+        ] => {
+            assert_eq!(what, "Main L: smoothing 1/48 oct");
+            let MeasKind::Transfer { config } = &config.kind else {
+                unreachable!()
+            };
+            let MeasKind::Transfer { config: was } = transfer() else {
+                unreachable!()
+            };
+            assert_eq!(config.averaging, was.averaging);
+            assert_eq!(config.grid, was.grid);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Finer than off: nothing sent, said.
+    assert!(t.key("Shift+K").is_empty());
+    assert!(t.last_toast().contains("finest"), "{}", t.last_toast());
+
+    // The mirror says 1/6 complex: K → 1/3 (mode kept), Shift+K → 1/12, at 1/3 K stops.
+    let mut s = daemon_state();
+    if let MeasKind::Transfer { config } = &mut s.measurements[1].config.kind {
+        config.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Complex);
+    }
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        t.st.smoothing_caption().as_deref(),
+        Some("smoothing 1/6 oct complex")
+    );
+    assert_eq!(
+        smoothing_set(&t.key("K")).1,
+        smoothing(SmoothingFraction::Third, SmoothingMode::Complex)
+    );
+    assert_eq!(
+        smoothing_set(&t.key("Shift+K")).1,
+        smoothing(SmoothingFraction::Twelfth, SmoothingMode::Complex)
+    );
+    if let MeasKind::Transfer { config } = &mut s.measurements[1].config.kind {
+        config.smoothing = smoothing(SmoothingFraction::Third, SmoothingMode::Power);
+    }
+    t.conn(mirror(s));
+    assert!(t.key("K").is_empty());
+    assert!(t.last_toast().contains("widest"), "{}", t.last_toast());
+    // Palette entries set a step directly.
+    let r = t.st.update(Msg::Command(CommandId::SmoothOff), &t.keys);
+    assert_eq!(smoothing_set(&r).1, None);
+    let r = t.st.update(Msg::Command(CommandId::Smooth24), &t.keys);
+    assert_eq!(
+        smoothing_set(&r).1,
+        smoothing(SmoothingFraction::TwentyFourth, SmoothingMode::Power)
+    );
+    // K is a transfer-pane key.
+    t.key("Alt+2");
+    assert!(t.key("K").is_empty());
+}
+
+#[test]
+fn smoothing_keys_change_a_selected_slot() {
+    let mut t = T::new();
+    let mut spec = stored(11, Some(4), 2);
+    spec.kind = TraceKind::Spectrum {
+        scale: LevelScale::Dbfs,
+    };
+    let mut locked = stored(12, Some(5), 2);
+    locked.edit.locked = true;
+    t.conn(with_traces(vec![stored(10, Some(3), 2), spec, locked]));
+    // A click on slot 3 selects it: K changes its trace, the caption says so.
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(
+        t.st.smoothing_caption().as_deref(),
+        Some("slot 3 (t10): smoothing off")
+    );
+    let r = t.key("K");
+    assert_eq!(
+        smoothing_set(&r),
+        (
+            "t10".into(),
+            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Power)
+        )
+    );
+    match r.as_slice() {
+        [
+            Request::Call {
+                cmd: Command::TraceUpdate { edit, .. },
+                what,
+            },
+        ] => {
+            assert_eq!(what, "slot 3 (t10): smoothing 1/48 oct");
+            // Its other edits are sent unchanged.
+            let mut want = stored(10, Some(3), 2).edit;
+            want.smoothing = edit.smoothing;
+            assert_eq!(*edit, want);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Spectra cannot be smoothed; a locked slot says so; neither sends anything.
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    assert!(t.key("K").is_empty());
+    assert!(t.last_toast().contains("transfer traces only"));
+    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    assert!(t.key("K").is_empty());
+    assert!(t.last_toast().contains("locked"));
+    // A second click deselects; the keys act on the pane's measurement again.
+    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
+    // Selecting a measurement (list, pane click, N) deselects the slot.
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.update(Msg::FocusPane(PaneKind::Transfer), &t.keys);
+    assert_eq!(t.st.selected_trace, None);
+    // A selected trace that goes away is forgotten.
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.conn(with_traces(vec![]));
+    assert_eq!(t.st.selected_trace, None);
+}
+
+#[test]
+fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
+    let mut t = T::new();
+    let meta = stored(10, Some(3), 2);
+    t.conn(with_traces(vec![meta.clone()]));
+    let data = Arc::new(TraceData {
+        meta: meta.clone(),
+        mag_db: vec![0.0; 4],
+        phase_deg: None,
+        coherence: None,
+    });
+    let grid = Arc::new(GridDef::Log {
+        ppo: 1,
+        k_min: 0,
+        k_max: 3,
+    });
+    t.conn(ConnEvent::Trace(data, grid.clone()));
+    // The mirror says 1/6 now; the columns held were served unsmoothed, so the drawn
+    // trace keeps saying so (other edits follow at once) until the new data arrives.
+    let mut m2 = meta.clone();
+    m2.edit.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Power);
+    m2.edit.name = "renamed".into();
+    t.conn(with_traces(vec![m2.clone()]));
+    let held = &t.st.traces[&TraceId(10)].0.meta;
+    assert_eq!(held.edit.smoothing, None);
+    assert_eq!(held.edit.name, "renamed");
+    let fresh = Arc::new(TraceData {
+        meta: m2.clone(),
+        mag_db: vec![1.0; 4],
+        phase_deg: None,
+        coherence: None,
+    });
+    t.conn(ConnEvent::Trace(fresh, grid));
+    assert_eq!(t.st.traces[&TraceId(10)].0.meta, m2);
 }
 
 fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
@@ -499,6 +810,7 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
             polarity: Polarity::Normal,
             delay_nudge: Seconds(0.0),
             slot,
+            smoothing: None,
         },
         kind: TraceKind::Transfer,
         source: TraceSource::Captured {
@@ -509,7 +821,6 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         },
         grid_id: ac2_proto::GridId(1),
         delay: Seconds(0.0),
-        smoothing: None,
         depth: Some(DepthPolicy::EqualConfidence),
         cal: CalState::Uncalibrated,
         mic: None,

@@ -45,13 +45,24 @@ pub struct StoredTrace {
 }
 
 impl StoredTrace {
-    /// The `trace.get` reply.
+    /// The columns as displayed: the stored ones with the trace's display smoothing.
+    pub fn display_columns(&self) -> Columns {
+        match self.meta.edit.smoothing {
+            Some(s) if crate::smooth::smoothable(self.meta.kind) => {
+                crate::smooth::smooth(&self.grid, &self.columns, s)
+            }
+            _ => self.columns.clone(),
+        }
+    }
+
+    /// The `trace.get` reply: display columns (smoothing applied).
     pub fn data(&self) -> TraceData {
+        let c = self.display_columns();
         TraceData {
             meta: self.meta.clone(),
-            mag_db: self.columns.mag_db.clone(),
-            phase_deg: self.columns.phase_deg.clone(),
-            coherence: self.columns.coherence.clone(),
+            mag_db: c.mag_db,
+            phase_deg: c.phase_deg,
+            coherence: c.coherence,
         }
     }
 }

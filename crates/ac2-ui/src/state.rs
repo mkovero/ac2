@@ -17,7 +17,8 @@ use ac2_proto::GridDef;
 use ac2_proto::model::{
     AverageMethod, CalKey, CalPart, DelayFinding, DelayOutcome, DelayPick, DelayReference,
     FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind,
-    Measurement, SessionRef, Signal, State, TraceData, TraceKind, TraceMeta,
+    Measurement, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode, State, TraceData,
+    TraceKind, TraceMeta,
 };
 use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, TraceId};
 use ac2_scene::spectrum::PeakHold;
@@ -72,6 +73,91 @@ impl PaneKind {
     fn index(self) -> usize {
         self as usize
     }
+
+    /// Whether the pane shows measurements of kind `k` (the IR pane shows the transfer
+    /// pane's measurement).
+    pub fn shows(self, k: &MeasKind) -> bool {
+        match self {
+            PaneKind::Transfer | PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
+            PaneKind::Spectrum => matches!(k, MeasKind::Spectrum { .. } | MeasKind::Rta { .. }),
+            PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
+        }
+    }
+
+    /// The pane whose measurement choice this one follows.
+    pub fn owner(self) -> PaneKind {
+        match self {
+            PaneKind::Ir => PaneKind::Transfer,
+            p => p,
+        }
+    }
+
+    /// The pane that shows measurements of kind `k`.
+    pub fn for_kind(k: &MeasKind) -> PaneKind {
+        match k {
+            MeasKind::Transfer { .. } => PaneKind::Transfer,
+            MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => PaneKind::Spectrum,
+            MeasKind::Spl { .. } => PaneKind::Spl,
+        }
+    }
+
+    /// What the pane's measurements are, for messages.
+    pub fn what(self) -> &'static str {
+        match self {
+            PaneKind::Transfer | PaneKind::Ir => "transfer",
+            PaneKind::Spectrum => "spectrum or RTA",
+            PaneKind::Spl => "SPL",
+        }
+    }
+}
+
+/// Smoothing steps K / Shift+K walk through, finest first.
+pub const SMOOTHING_STEPS: [Option<SmoothingFraction>; 6] = [
+    None,
+    Some(SmoothingFraction::FortyEighth),
+    Some(SmoothingFraction::TwentyFourth),
+    Some(SmoothingFraction::Twelfth),
+    Some(SmoothingFraction::Sixth),
+    Some(SmoothingFraction::Third),
+];
+
+/// What the smoothing keys change: the selected slot's trace, or the transfer pane's
+/// measurement.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SmoothTarget {
+    Trace(TraceMeta),
+    Meas(Measurement),
+}
+
+impl SmoothTarget {
+    pub fn smoothing(&self) -> Option<Smoothing> {
+        match self {
+            SmoothTarget::Trace(t) => t.edit.smoothing,
+            SmoothTarget::Meas(m) => match &m.config.kind {
+                MeasKind::Transfer { config } => config.smoothing,
+                _ => None,
+            },
+        }
+    }
+
+    /// `slot 3 (Main L S3)` or the measurement name.
+    pub fn label(&self) -> String {
+        match self {
+            SmoothTarget::Trace(t) => match t.edit.slot {
+                Some(n) => format!("slot {n} ({})", t.edit.name),
+                None => t.edit.name.clone(),
+            },
+            SmoothTarget::Meas(m) => m.config.name.clone(),
+        }
+    }
+}
+
+/// The measurement list a pane's title chip opens: the pane's compatible measurements, one
+/// highlighted (Up/Down move, Enter shows it, Esc closes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaneMenu {
+    pub pane: PaneKind,
+    pub index: usize,
 }
 
 /// Which panes are shown and which has the keyboard.
@@ -353,6 +439,8 @@ pub enum Overlay {
     Form(Box<Form>),
     /// The audio session dialog.
     Session(Box<SessionDialog>),
+    /// A pane's measurement list, opened from its title chip.
+    PaneMenu(PaneMenu),
     /// After a session opened with a reference and mics on a daemon without measurements:
     /// one key creates a transfer measurement per mic.
     Offer(Box<Offer>),
@@ -403,8 +491,16 @@ pub enum Msg {
         now_s: f64,
         dt_s: f64,
     },
+    /// A measurement clicked in the list: selected, and shown by its pane.
     SelectMeas(MeasId),
+    /// A slot clicked in the list: selected for the smoothing keys (again: deselected).
+    SelectTrace(TraceId),
+    /// A click in a pane: focuses it and selects the measurement it shows.
     FocusPane(PaneKind),
+    /// The pane title chip: opens (or closes) the pane's measurement list.
+    PaneMenu(PaneKind),
+    /// A measurement picked from a pane's list: the pane shows it, and it is selected.
+    PaneShow(PaneKind, MeasId),
     /// Mouse wheel / pinch on a frequency axis.
     Zoom {
         about_hz: f64,
@@ -467,6 +563,12 @@ pub struct AppState {
     pub nav: FreqNav,
     pub layout: Layout,
     pub selected: Option<MeasId>,
+    /// The measurement each pane shows (keys act on it); a pane without a choice shows the
+    /// selected measurement if it fits, else its first one.
+    pub pane_meas: BTreeMap<PaneKind, MeasId>,
+    /// A slot's trace selected in the list: the smoothing keys change it instead of the
+    /// transfer pane's measurement.
+    pub selected_trace: Option<TraceId>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
     /// time.
@@ -532,6 +634,8 @@ impl AppState {
             nav: FreqNav::new(FreqRange::default()),
             layout: Layout::default(),
             selected: None,
+            pane_meas: BTreeMap::new(),
+            selected_trace: None,
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
             stimulus: Stimulus::default(),
@@ -574,6 +678,51 @@ impl AppState {
 
     pub fn selected_meas(&self) -> Option<&Measurement> {
         self.meas(self.selected?)
+    }
+
+    /// Measurements pane `p` can show, in list order.
+    pub fn pane_candidates(&self, p: PaneKind) -> Vec<&Measurement> {
+        self.measurements()
+            .into_iter()
+            .filter(|m| p.shows(&m.config.kind))
+            .collect()
+    }
+
+    /// The measurement pane `p` shows: its own choice, else the selected measurement if it
+    /// fits, else the first that fits.
+    pub fn pane_meas(&self, p: PaneKind) -> Option<&Measurement> {
+        let c = self.pane_candidates(p);
+        let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
+        pick(self.pane_meas.get(&p.owner()).copied())
+            .or_else(|| pick(self.selected))
+            .or_else(|| c.first().copied())
+    }
+
+    /// The stored trace selected in the list, if it still exists.
+    pub fn selected_trace_meta(&self) -> Option<&TraceMeta> {
+        let id = self.selected_trace?;
+        self.daemon()?.traces.iter().find(|t| t.id == id)
+    }
+
+    /// What K / Shift+K change now.
+    pub fn smooth_target(&self) -> Option<SmoothTarget> {
+        match self.selected_trace_meta() {
+            Some(t) => Some(SmoothTarget::Trace(t.clone())),
+            None => self
+                .pane_meas(PaneKind::Transfer)
+                .map(|m| SmoothTarget::Meas(m.clone())),
+        }
+    }
+
+    /// The transfer pane's title caption: what the smoothing keys act on and its setting,
+    /// `smoothing 1/6 oct` (the pane's measurement) or `slot 3 (Main L S3): smoothing off`.
+    pub fn smoothing_caption(&self) -> Option<String> {
+        let t = self.smooth_target()?;
+        let c = ac2_scene::tf::smoothing_caption(t.smoothing());
+        Some(match t {
+            SmoothTarget::Trace(_) => format!("{}: {c}", t.label()),
+            SmoothTarget::Meas(_) => c,
+        })
     }
 
     pub fn edit(&self, id: MeasId) -> LiveEdit {
@@ -842,8 +991,22 @@ impl AppState {
                 let now = self.now_s;
                 self.toasts.retain(|t| t.until_s > now);
             }
-            Msg::SelectMeas(id) => self.selected = Some(id),
+            Msg::SelectMeas(id) => self.select(id),
+            Msg::SelectTrace(id) => {
+                self.selected_trace = if self.selected_trace == Some(id) {
+                    None
+                } else {
+                    Some(id)
+                };
+            }
             Msg::FocusPane(p) => self.focus(p),
+            Msg::PaneMenu(p) => {
+                self.overlay = match self.overlay {
+                    Overlay::PaneMenu(m) if m.pane == p => Overlay::None,
+                    _ => self.pane_menu(p),
+                };
+            }
+            Msg::PaneShow(p, id) => self.pane_show(p, id),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);
@@ -959,6 +1122,33 @@ impl AppState {
                     );
                     return;
                 }
+            }
+            Overlay::PaneMenu(menu) => {
+                let mut menu = *menu;
+                let n = self.pane_candidates(menu.pane).len();
+                match chord.key {
+                    Key::ArrowDown | Key::ArrowUp if n > 0 => {
+                        let d = if chord.key == Key::ArrowDown {
+                            1
+                        } else {
+                            n - 1
+                        };
+                        menu.index = (menu.index + d) % n;
+                        self.overlay = Overlay::PaneMenu(menu);
+                    }
+                    Key::Enter => {
+                        self.overlay = Overlay::None;
+                        let id = self
+                            .pane_candidates(menu.pane)
+                            .get(menu.index)
+                            .map(|m| m.id);
+                        if let Some(id) = id {
+                            self.pane_show(menu.pane, id);
+                        }
+                    }
+                    _ => {}
+                }
+                return;
             }
             Overlay::Help | Overlay::None => {}
         }
@@ -1324,9 +1514,119 @@ impl AppState {
         )
     }
 
+    /// Focuses `p` and selects the measurement it shows.
     fn focus(&mut self, p: PaneKind) {
         self.layout.shown[p.index()] = true;
         self.layout.focus = p;
+        self.select_shown(p);
+    }
+
+    /// Selects the measurement pane `p` shows, if any.
+    fn select_shown(&mut self, p: PaneKind) {
+        if let Some(id) = self.pane_meas(p).map(|m| m.id) {
+            self.select(id);
+        }
+    }
+
+    /// Selects `id` (deselecting a slot) and makes it what its pane shows.
+    fn select(&mut self, id: MeasId) {
+        self.selected = Some(id);
+        self.selected_trace = None;
+        if let Some(p) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) {
+            self.pane_meas.insert(p, id);
+        }
+    }
+
+    /// Pane `p` shows `id`; it gets the focus and `id` is selected.
+    fn pane_show(&mut self, p: PaneKind, id: MeasId) {
+        if matches!(self.overlay, Overlay::PaneMenu(_)) {
+            self.overlay = Overlay::None;
+        }
+        let Some(m) = self.meas(id) else {
+            return;
+        };
+        if !p.shows(&m.config.kind) {
+            return;
+        }
+        self.layout.shown[p.index()] = true;
+        self.layout.focus = p;
+        self.select(id);
+    }
+
+    /// The measurement list of pane `p`, the shown one highlighted.
+    fn pane_menu(&mut self, p: PaneKind) -> Overlay {
+        let c = self.pane_candidates(p);
+        if c.is_empty() {
+            self.error(format!("no {} measurements", p.what()));
+            return Overlay::None;
+        }
+        let shown = self.pane_meas(p).map(|m| m.id);
+        let index = c.iter().position(|m| Some(m.id) == shown).unwrap_or(0);
+        Overlay::PaneMenu(PaneMenu { pane: p, index })
+    }
+
+    /// Sets the smoothing of what the smoothing keys act on (`step`: +1 coarser / -1 finer
+    /// through [`SMOOTHING_STEPS`]; `to`: an explicit setting instead).
+    fn smooth(&mut self, step: i32, to: Option<Option<SmoothingFraction>>, out: &mut Vec<Request>) {
+        let Some(target) = self.smooth_target() else {
+            self.error("no transfer measurement to smooth");
+            return;
+        };
+        let cur = target.smoothing();
+        let want = match to {
+            Some(f) => f,
+            None => {
+                let i = SMOOTHING_STEPS
+                    .iter()
+                    .position(|f| *f == cur.map(|s| s.fraction))
+                    .unwrap_or(0) as i32;
+                let j = (i + step).clamp(0, SMOOTHING_STEPS.len() as i32 - 1);
+                if i == j {
+                    self.toast(format!(
+                        "{}: {} is the {}",
+                        target.label(),
+                        ac2_scene::tf::smoothing_caption(cur),
+                        if step > 0 { "widest" } else { "finest" }
+                    ));
+                    return;
+                }
+                SMOOTHING_STEPS[j as usize]
+            }
+        };
+        let new = want.map(|fraction| Smoothing {
+            fraction,
+            mode: cur.map_or(SmoothingMode::Power, |s| s.mode),
+        });
+        let what = format!(
+            "{}: {}",
+            target.label(),
+            ac2_scene::tf::smoothing_caption(new)
+        );
+        match target {
+            SmoothTarget::Trace(t) => {
+                let label = SmoothTarget::Trace(t.clone()).label();
+                if !matches!(t.kind, TraceKind::Transfer) {
+                    self.error(format!(
+                        "{label}: smoothing applies to transfer traces only"
+                    ));
+                    return;
+                }
+                if t.edit.locked {
+                    self.error(format!("{label} is locked"));
+                    return;
+                }
+                let mut edit = t.edit.clone();
+                edit.smoothing = new;
+                self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
+            }
+            SmoothTarget::Meas(m) => {
+                let mut config = m.config.clone();
+                if let MeasKind::Transfer { config: tf } = &mut config.kind {
+                    tf.smoothing = new;
+                }
+                self.call(out, Command::MeasUpdate { meas: m.id, config }, what);
+            }
+        }
     }
 
     fn cycle_pane(&mut self, d: i32) {
@@ -1343,19 +1643,22 @@ impl AppState {
             .unwrap_or(0) as i32;
         let n = vis.len() as i32;
         self.layout.focus = vis[((i + d).rem_euclid(n)) as usize];
+        self.select_shown(self.layout.focus);
     }
 
+    /// N / Shift+N: the next / previous measurement the focused pane can show.
     fn cycle_meas(&mut self, d: i32) {
-        let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
+        let p = self.layout.focus;
+        let ids: Vec<MeasId> = self.pane_candidates(p).iter().map(|m| m.id).collect();
         if ids.is_empty() {
-            self.error("no measurements");
+            self.error(format!("no {} measurements", p.what()));
             return;
         }
         let i = self
-            .selected
-            .and_then(|s| ids.iter().position(|x| *x == s))
+            .pane_meas(p)
+            .and_then(|s| ids.iter().position(|x| *x == s.id))
             .map_or(if d > 0 { -1 } else { 0 }, |i| i as i32);
-        self.selected = Some(ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
+        self.select(ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
     }
 
     fn call(&mut self, out: &mut Vec<Request>, cmd: Command, what: String) {
@@ -1429,6 +1732,15 @@ impl AppState {
             C::MaximizePane => self.layout.maximized = !self.layout.maximized,
             C::NextMeasurement => self.cycle_meas(1),
             C::PrevMeasurement => self.cycle_meas(-1),
+            C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
+            C::SmoothCoarser => self.smooth(1, None, out),
+            C::SmoothFiner => self.smooth(-1, None, out),
+            C::SmoothOff => self.smooth(0, Some(None), out),
+            C::Smooth48 => self.smooth(0, Some(Some(SmoothingFraction::FortyEighth)), out),
+            C::Smooth24 => self.smooth(0, Some(Some(SmoothingFraction::TwentyFourth)), out),
+            C::Smooth12 => self.smooth(0, Some(Some(SmoothingFraction::Twelfth)), out),
+            C::Smooth6 => self.smooth(0, Some(Some(SmoothingFraction::Sixth)), out),
+            C::Smooth3 => self.smooth(0, Some(Some(SmoothingFraction::Third)), out),
             C::CycleTheme => {
                 self.theme = match self.theme {
                     ThemeName::Dark => ThemeName::Light,
@@ -1902,19 +2214,22 @@ impl AppState {
                         .map(|m| m.id);
                 }
                 self.edits.retain(|k, _| ids.contains(k));
+                self.pane_meas.retain(|_, m| ids.contains(m));
                 let metas: BTreeMap<TraceId, TraceMeta> = self
                     .daemon()
                     .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
                     .unwrap_or_default();
                 // Fetched data keeps its columns; its metadata follows the mirror (edits,
-                // visibility and slots change by event, the columns never do).
+                // visibility and slots change by event). The smoothing stays the one the
+                // columns were served with until the re-smoothed data arrives.
                 self.traces.retain(|k, _| metas.contains_key(k));
                 for (id, (data, _)) in &mut self.traces {
-                    if let Some(m) = metas.get(id)
-                        && data.meta != *m
-                    {
-                        Arc::make_mut(data).meta = m.clone();
+                    if let Some(m) = metas.get(id) {
+                        follow_meta(data, m);
                     }
+                }
+                if self.selected_trace.is_some_and(|t| !metas.contains_key(&t)) {
+                    self.selected_trace = None;
                 }
                 if let Some(TraceKey::Stored(r)) = self.view.tf.phase_reference
                     && !metas.contains_key(&r)
@@ -1981,9 +2296,9 @@ impl AppState {
                 if let Some(m) = self
                     .daemon()
                     .and_then(|s| s.traces.iter().find(|x| x.id == t.meta.id))
-                    && t.meta != *m
+                    .cloned()
                 {
-                    Arc::make_mut(&mut t).meta = m.clone();
+                    follow_meta(&mut t, &m);
                 }
                 self.traces.insert(t.meta.id, (t, g));
             }
@@ -2376,6 +2691,16 @@ impl AppState {
                 e.1 = at;
             }
         }
+    }
+}
+
+/// Fetched trace data takes the mirrored metadata, except the display smoothing: that one
+/// describes the columns it was served with.
+fn follow_meta(data: &mut Arc<TraceData>, m: &TraceMeta) {
+    let mut want = m.clone();
+    want.edit.smoothing = data.meta.edit.smoothing;
+    if data.meta != want {
+        Arc::make_mut(data).meta = want;
     }
 }
 

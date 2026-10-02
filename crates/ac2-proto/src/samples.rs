@@ -137,6 +137,10 @@ fn edit() -> TraceEdit {
         polarity: Polarity::Inverted,
         delay_nudge: Seconds(0.000_25),
         slot: Some(3),
+        smoothing: Some(Smoothing {
+            fraction: SmoothingFraction::Twelfth,
+            mode: SmoothingMode::Complex,
+        }),
     }
 }
 
@@ -427,7 +431,6 @@ fn trace_meta() -> TraceMeta {
         },
         grid_id: log_grid().id(),
         delay: Seconds(0.0125),
-        smoothing: None,
         depth: Some(DepthPolicy::EqualConfidence),
         cal: CalState::Calibrated {
             key: cal_key(),

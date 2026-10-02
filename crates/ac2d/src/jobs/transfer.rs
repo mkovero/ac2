@@ -115,6 +115,17 @@ fn column_correction(grid: &LogGrid, c: &Correction) -> Vec<f64> {
     grid.frequencies().into_iter().map(|f| c.db(f)).collect()
 }
 
+/// The kernel for `smoothing` on `grid`.
+fn smoother(
+    grid: LogGrid,
+    smoothing: Option<ac2_proto::model::Smoothing>,
+) -> Option<(Smoother, SmoothingMode)> {
+    smoothing.map(|s| {
+        let (f, m) = conv::smoothing(s);
+        (Smoother::new(grid, f), m)
+    })
+}
+
 /// Why a transfer job cannot start.
 pub(crate) type StartError = String;
 
@@ -153,10 +164,7 @@ impl Transfer {
         })
         .map_err(|e| e.to_string())?;
         mtw.set_frozen(frozen);
-        let smoother = cfg.smoothing.map(|s| {
-            let (f, m) = conv::smoothing(s);
-            (Smoother::new(grid, f), m)
-        });
+        let smoother = smoother(grid, cfg.smoothing);
         let grid_id = ac2_proto::grid::GridDef::Log {
             ppo: grid.ppo,
             k_min: grid.k_min,
@@ -331,6 +339,12 @@ impl Analysis for Transfer {
             }
             JobCmd::Reset => self.mtw.reset_averages(),
             JobCmd::Cal(cal) => self.set_correction(cal.correction.as_deref()),
+            JobCmd::Smoothing { smoothing, rev } => {
+                self.cfg.smoothing = smoothing;
+                self.smoother = smoother(self.grid, smoothing);
+                self.config_rev = rev;
+                self.apply_pending = true;
+            }
         }
     }
 
@@ -382,58 +396,77 @@ impl Analysis for Transfer {
                 Validity::NoMeasurement => ValidityMask::NO_MEASUREMENT,
             })
             .collect();
-        let (mut mag, phase): (Vec<f32>, Vec<f32>) = match &self.smoother {
-            None => (
-                f.magnitude_db.iter().map(|v| *v as f32).collect(),
-                f.phase_deg.iter().map(|v| *v as f32).collect(),
-            ),
-            Some((sm, mode)) => {
-                let valid: Vec<bool> = validity.iter().map(|v| *v == ValidityMask::NONE).collect();
-                let s = sm.smooth(
-                    TfColumns {
-                        h: &f.h1,
-                        coherence: &f.coherence,
-                        valid: &valid,
-                    },
-                    *mode,
-                );
-                s.h.iter()
-                    .zip(&s.valid)
-                    .map(|(h, ok)| {
-                        if *ok {
-                            (
-                                (20.0 * h.norm().log10()) as f32,
-                                h.arg().to_degrees() as f32,
-                            )
-                        } else {
-                            (f32::NAN, f32::NAN)
-                        }
-                    })
-                    .unzip()
-            }
-        };
+        // The measured curve with the mic curve taken off; what a capture stores.
+        let mut raw_mag: Vec<f32> = f.magnitude_db.iter().map(|v| *v as f32).collect();
         if let Some(c) = &self.corr {
-            for (m, d) in mag.iter_mut().zip(c) {
+            for (m, d) in raw_mag.iter_mut().zip(c) {
                 *m -= *d as f32;
             }
         }
-        e.send(
-            stamp,
-            FrameData::Tf(TfFrame {
-                meas: self.meas,
-                meta: TfMeta {
-                    delay: Seconds(self.delay_s),
-                    frozen: self.frozen,
-                    smoothing: self.cfg.smoothing,
-                    mic_curve: self.corr.is_some(),
+        let raw_phase: Vec<f32> = f.phase_deg.iter().map(|v| *v as f32).collect();
+        // Display smoothing averages the corrected curve, so a capture re-smoothed at this
+        // setting reads the same as this frame.
+        let smoothed = self.smoother.as_ref().map(|(sm, mode)| {
+            let valid: Vec<bool> = validity.iter().map(|v| *v == ValidityMask::NONE).collect();
+            let h: Vec<Complex64> = match &self.corr {
+                None => f.h1.clone(),
+                Some(c) => {
+                    f.h1.iter()
+                        .zip(c)
+                        .map(|(h, d)| h * 10f64.powf(-d / 20.0))
+                        .collect()
+                }
+            };
+            let s = sm.smooth(
+                TfColumns {
+                    h: &h,
+                    coherence: &f.coherence,
+                    valid: &valid,
                 },
-                mag,
-                phase,
-                coh: f.coherence.iter().map(|v| *v as f32).collect(),
-                eff_avg: Some(f.eff_avg.iter().map(|v| *v as f32).collect()),
-                validity,
-            }),
-        );
+                *mode,
+            );
+            s.h.iter()
+                .zip(&s.valid)
+                .map(|(h, ok)| {
+                    if *ok {
+                        (
+                            (20.0 * h.norm().log10()) as f32,
+                            h.arg().to_degrees() as f32,
+                        )
+                    } else {
+                        (f32::NAN, f32::NAN)
+                    }
+                })
+                .unzip::<f32, f32, Vec<f32>, Vec<f32>>()
+        });
+        let meta = TfMeta {
+            delay: Seconds(self.delay_s),
+            frozen: self.frozen,
+            smoothing: self.cfg.smoothing,
+            mic_curve: self.corr.is_some(),
+        };
+        let coh: Vec<f32> = f.coherence.iter().map(|v| *v as f32).collect();
+        let eff_avg: Option<Vec<f32>> = Some(f.eff_avg.iter().map(|v| *v as f32).collect());
+        let raw = TfFrame {
+            meas: self.meas,
+            meta,
+            mag: raw_mag,
+            phase: raw_phase,
+            coh,
+            eff_avg,
+            validity,
+        };
+        match smoothed {
+            None => e.send(stamp, FrameData::Tf(raw)),
+            Some((mag, phase)) => {
+                let shown = TfFrame {
+                    mag,
+                    phase,
+                    ..raw.clone()
+                };
+                e.send_with_capture(stamp, FrameData::Tf(shown), FrameData::Tf(raw));
+            }
+        }
 
         if e.wants(Topic::Data {
             meas: self.meas,

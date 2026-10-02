@@ -33,7 +33,7 @@
 //! `Δ = −ν`. The rotation changes phase only; magnitude and coherence are untouched.
 
 use ac2_proto::frame::{FrameStamp, TfFrame, ValidityMask};
-use ac2_proto::model::{Polarity, TraceData, TraceSource};
+use ac2_proto::model::{Polarity, Smoothing, TraceData, TraceSource};
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
 use crate::primitives::Color;
@@ -77,6 +77,8 @@ pub struct TfTrace<'a> {
     pub time_base: TimeBase,
     /// Live traces: age of the newest frame. Stored traces: `None`.
     pub freshness: Option<Freshness>,
+    /// Display smoothing the columns arrived with (the daemon applied it).
+    pub smoothing: Option<Smoothing>,
 }
 
 impl<'a> TfTrace<'a> {
@@ -106,6 +108,7 @@ impl<'a> TfTrace<'a> {
                 delay: frame.meta.delay,
             },
             freshness: Some(freshness),
+            smoothing: frame.meta.smoothing,
         }
     }
 
@@ -136,6 +139,7 @@ impl<'a> TfTrace<'a> {
             nudge: m.edit.delay_nudge,
             time_base,
             freshness: None,
+            smoothing: m.edit.smoothing,
         }
     }
 }
@@ -241,6 +245,7 @@ pub struct DisplayTrace {
     /// Per-column opacity from coherence.
     pub alpha: Vec<f32>,
     pub freshness: Option<Freshness>,
+    pub smoothing: Option<Smoothing>,
 }
 
 impl DisplayTrace {
@@ -392,6 +397,7 @@ pub fn display_trace(
         coherence,
         alpha,
         freshness: t.freshness,
+        smoothing: t.smoothing,
     }
 }
 
@@ -466,6 +472,7 @@ mod tests {
                 nudge: Seconds(0.0),
                 time_base,
                 freshness: None,
+                smoothing: None,
             }
         }
     }

@@ -21,7 +21,7 @@ use ac2_scene::theme::Theme;
 use ac2_scene::time::{ClockOffset, Freshness};
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey};
 
-use crate::state::AppState;
+use crate::state::{AppState, PaneKind};
 
 /// Inputs that come from the clock, passed in so the assembly stays testable.
 #[derive(Clone, Copy, Debug)]
@@ -79,12 +79,19 @@ fn is_tf(m: &Measurement) -> bool {
     matches!(m.config.kind, MeasKind::Transfer { .. })
 }
 
-/// The TF measurement the IR pane and the delay banner follow: the selected one if it is a
-/// transfer measurement, else the first.
+/// The TF measurement the IR pane and the delay banner follow: the one the transfer pane
+/// shows.
 pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
-    st.selected_meas()
-        .filter(|m| is_tf(m))
-        .or_else(|| st.measurements().into_iter().find(|m| is_tf(m)))
+    st.pane_meas(PaneKind::Transfer)
+}
+
+/// Measurements in list order with the one pane `p` shows first (its legend row and
+/// caption lead).
+fn pane_order(st: &AppState, p: PaneKind) -> Vec<(usize, &Measurement)> {
+    let shown = st.pane_meas(p).map(|m| m.id);
+    let mut v: Vec<(usize, &Measurement)> = st.measurements().into_iter().enumerate().collect();
+    v.sort_by_key(|(_, m)| Some(m.id) != shown);
+    v
 }
 
 struct LiveTf<'a> {
@@ -98,7 +105,7 @@ struct LiveTf<'a> {
 pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfScene {
     let grids = st.data.as_ref().map(|d| &d.grids);
     let mut live = Vec::new();
-    for (i, m) in st.measurements().into_iter().enumerate() {
+    for (i, m) in pane_order(st, PaneKind::Transfer) {
         if !is_tf(m) {
             continue;
         }
@@ -181,7 +188,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         color: usize,
     }
     let mut cols = Vec::new();
-    for (i, m) in st.measurements().into_iter().enumerate() {
+    for (i, m) in pane_order(st, PaneKind::Spectrum) {
         let stream = match m.config.kind {
             MeasKind::Spectrum { .. } => Stream::Spec,
             MeasKind::Rta { .. } => Stream::Rta,
@@ -316,13 +323,15 @@ pub fn ir(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<IrSc
     ))
 }
 
-/// The first SPL measurement with a frame.
+/// The SPL measurement the pane shows (else the first one with a frame).
 pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<SplScene> {
-    let (m, tf) = st.measurements().into_iter().find_map(|m| {
-        matches!(m.config.kind, MeasKind::Spl { .. })
-            .then(|| frame(st, m.id, Stream::Spl).map(|f| (m, f)))
-            .flatten()
-    })?;
+    let (m, tf) = pane_order(st, PaneKind::Spl)
+        .into_iter()
+        .find_map(|(_, m)| {
+            matches!(m.config.kind, MeasKind::Spl { .. })
+                .then(|| frame(st, m.id, Stream::Spl).map(|f| (m, f)))
+                .flatten()
+        })?;
     let FrameData::Spl(f) = &tf.frame.data else {
         return None;
     };

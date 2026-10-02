@@ -354,8 +354,9 @@ commands! {
     NextPane => "next_pane", "Focus next pane", [Global];
     PrevPane => "prev_pane", "Focus previous pane", [Global];
     MaximizePane => "maximize_pane", "Focused pane only / split layout", [Global];
-    NextMeasurement => "next_measurement", "Select next measurement", [Global];
-    PrevMeasurement => "prev_measurement", "Select previous measurement", [Global];
+    NextMeasurement => "next_measurement", "Select next measurement of the focused pane", [Global];
+    PrevMeasurement => "prev_measurement", "Select previous measurement of the focused pane", [Global];
+    PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
     ZoomIn => "zoom_in", "Zoom frequency in", [Global];
     ZoomOut => "zoom_out", "Zoom frequency out", [Global];
@@ -429,6 +430,14 @@ commands! {
     MathDifference => "math_difference", "A − B: dB difference of the two lowest shown slots", [Transfer];
     MathDivide => "math_divide", "A / B: complex division of the two lowest shown slots", [Transfer];
     PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
+    SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected slot or pane's measurement)", [Transfer];
+    SmoothFiner => "smooth_finer", "Smoothing finer (selected slot or pane's measurement)", [Transfer];
+    SmoothOff => "smooth_off", "Smoothing: off", [Transfer];
+    Smooth48 => "smooth_48", "Smoothing: 1/48 oct", [Transfer];
+    Smooth24 => "smooth_24", "Smoothing: 1/24 oct", [Transfer];
+    Smooth12 => "smooth_12", "Smoothing: 1/12 oct", [Transfer];
+    Smooth6 => "smooth_6", "Smoothing: 1/6 oct", [Transfer];
+    Smooth3 => "smooth_3", "Smoothing: 1/3 oct", [Transfer];
     GroupDelay => "group_delay", "Phase / group delay", [Transfer];
 
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
@@ -526,6 +535,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::CoherencePlacement, S::Transfer, sh(K::C)),
         (C::Average, S::Transfer, k(K::M)),
         (C::PhaseUnwrap, S::Transfer, k(K::P)),
+        // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
+        (C::SmoothCoarser, S::Transfer, k(K::K)),
+        (C::SmoothFiner, S::Transfer, sh(K::K)),
         (C::GroupDelay, S::Transfer, sh(K::P)),
         (C::Freeze, S::Transfer, k(K::F)),
         (C::Freeze, S::Spectrum, k(K::F)),
@@ -817,6 +829,13 @@ mod tests {
             CommandId::FinderSub,
             CommandId::FinderCustom,
             CommandId::FinderObservation,
+            CommandId::PaneMeasurement,
+            CommandId::SmoothOff,
+            CommandId::Smooth48,
+            CommandId::Smooth24,
+            CommandId::Smooth12,
+            CommandId::Smooth6,
+            CommandId::Smooth3,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {
@@ -854,6 +873,8 @@ mod tests {
             ("Ctrl+K", CommandId::Palette),
             ("Shift+O", CommandId::OpenSession),
             ("O", CommandId::ZoomOut),
+            ("K", CommandId::SmoothCoarser),
+            ("Shift+K", CommandId::SmoothFiner),
         ] {
             assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
         }

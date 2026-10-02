@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 2`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 3`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -121,6 +121,15 @@ the last refresh fades out (20 ms), disarms and clears the owner. `gen.acquire{f
 stops and disarms before handing over. Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
 owner whose lease expired).
+
+#### Measurements (`meas.*`)
+
+`meas.update` replaces the configuration and restarts a running job (averages start over),
+except when a transfer measurement's configuration differs only in `smoothing` (and the
+name): display smoothing then changes in place, averaging goes on, and the first `tf` frame
+with the new `config_rev` carries it (`TfMeta.smoothing`). Smoothing (`Smoothing`:
+`fraction` `third` \| `sixth` \| `twelfth` \| `twenty_fourth` \| `forty_eighth`, `mode`
+`power` \| `complex`) is fractional-octave and applies to transfer functions only.
 
 #### Devices, preview and loopback detection (`session.*`)
 
@@ -224,15 +233,24 @@ again (a new finding that is not ambiguous clears it).
 A trace's metadata (`TraceMeta`, §4.1) is mirrored state; its columns leave the daemon only
 through `trace.get` (`TraceData`: `meta`, `mag_db`, `phase_deg` (nil = magnitude only),
 `coherence` (nil = unknown), column order = the trace's grid, NaN = no value), `trace.export`
-and `file.save`. Columns are stored as measured: offset, polarity and nudge are display
-edits and are never applied to the data.
+and `file.save`. Columns are stored as measured: offset, polarity, nudge and smoothing are
+display edits and are never applied to the stored data.
+
+- **Smoothing.** `TraceEdit.smoothing` (`Smoothing` \| nil; transfer traces only — any
+  other kind is `invalid`) is applied by the daemon when it serves `trace.get`, with the
+  live transfer job's kernel; coherence is never smoothed. `trace.export` and `file.save`
+  write the unsmoothed columns (the setting is listed in the CSV header), and
+  `trace.average` / `trace.math` combine unsmoothed columns. A capture starts with the
+  smoothing its measurement had; an average or A − B starts with the smoothing its inputs
+  share (nil when they differ).
 
 - `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
-  exactly what clients were shown — with columns whose validity mask is set stored as NaN.
+  what clients were shown, for a `tf` frame before its display smoothing — with columns
+  whose validity mask is set stored as NaN.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
-  `epoch`, `at_sample`}, `delay` (the delay the DSP used), `smoothing`, `depth` (transfer),
+  `epoch`, `at_sample`}, `delay` (the delay the DSP used), `depth` (transfer),
   `cal` (spectrum / RTA: the calibration the measurement used, picked by the calibration
   matching rules below — its `key` names another mic or input when it was not this mic's;
   transfer functions are ratios and always `uncalibrated`), `mic` (the input setup's mic
@@ -241,7 +259,7 @@ edits and are never applied to the data.
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
-  `locked`; `trace.delete` of a locked trace is `refused`.
+  `locked` (not `smoothing`); `trace.delete` of a locked trace is `refused`.
 - **Time base (decisions 8a / 8b).** Captured traces share the time base of their session
   epoch; every other source (`imported`, `average`, `math`) is independent.
 - `trace.average`: ≥ 2 distinct traces of one kind (no targets). Transfer: `power` (RMS
@@ -360,8 +378,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
-polarity, delay_nudge, slot}, `kind`, `source` {captured | imported | average | math |
-ir_capture}, `grid_id`, `delay`, `smoothing`, `depth`, `cal`, `mic`, `created_at`), `generator` (`owner`,
+polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported | average |
+math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `created_at`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal | nil, `mic_curve`: MicCurveRef | nil),
 `inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
@@ -518,7 +536,8 @@ columns) = `0x79ec3d16ae0e94d0`.
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
 `# ac2 trace export v1` (another version is `bad_header`); then `# key: value` lines with
 every metadata field (`name`, `kind`, `source`, `time_base`, `delay_ms`,
-`delay_nudge_ms`, `polarity`, `offset_db`, `smoothing`, `depth`, `cal`, `mic`,
+`delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not applied),
+`depth`, `cal`, `mic`,
 `created_ns`, `note`, `grid` as the JSON `GridDef`); then the header
 `freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column. Values are written in
 their shortest exact form and gaps as `nan`, so an export re-imports bit for bit onto the
@@ -541,13 +560,15 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace
 ```
 
-`session.json`: `{format: "ac2-session", version: 1, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 2, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
 [{meta: TraceMeta, grid: GridDef, file}]}` (JSON, field names as in this document). A save
 writes the trace files of a new generation first, then replaces `session.json` atomically
 (temporary file + rename), then removes older generations: a reader sees the old session
 or the new one, never a mix. `format` and `version` are read first; any other version is
-refused (no migration). A directory that holds other files is never written into.
+refused (no migration). Trace files hold the unsmoothed columns; each trace's display
+smoothing is its `meta.edit.smoothing` (version 1 files, whose transfer captures could hold
+smoothed columns, are refused). A directory that holds other files is never written into.
 
 ## 8. Cross-language fixtures
 

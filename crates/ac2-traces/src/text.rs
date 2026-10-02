@@ -14,8 +14,8 @@
 //! 19.99700,-3.25,45.5,0.98
 //! ```
 //!
-//! Columns are as measured: offset, polarity and nudge are display edits, listed in the
-//! header but not applied. `phase_deg` / `coherence` are present only when the trace has
+//! Columns are as measured: offset, polarity, nudge and smoothing are display edits, listed
+//! in the header but not applied. `phase_deg` / `coherence` are present only when the trace has
 //! them. A gap is `nan`. Values are written in their shortest exact form, so an export
 //! re-imports bit-for-bit onto the grid named in the header.
 //!
@@ -627,7 +627,7 @@ fn smoothing_text(s: Option<ac2_proto::model::Smoothing>) -> String {
                 SmoothingMode::Power => "power",
                 SmoothingMode::Complex => "complex",
             };
-            format!("1/{f} octave, {m}")
+            format!("1/{f} octave, {m} (display only, not applied)")
         }
     }
 }
@@ -703,7 +703,7 @@ pub fn export_csv(t: &StoredTrace) -> String {
         },
     );
     line("offset_db", format!("{}", m.edit.offset.0));
-    line("smoothing", smoothing_text(m.smoothing));
+    line("smoothing", smoothing_text(m.edit.smoothing));
     line(
         "depth",
         match m.depth {

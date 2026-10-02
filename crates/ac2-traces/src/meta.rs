@@ -59,6 +59,7 @@ pub fn new_edit(id: TraceId, name: String, slot: Option<u8>) -> TraceEdit {
         polarity: Polarity::Normal,
         delay_nudge: Seconds(0.0),
         slot,
+        smoothing: None,
     }
 }
 
@@ -88,14 +89,15 @@ pub fn check_values(e: &TraceEdit) -> Result<(), String> {
 }
 
 /// What a lock protects: the curve's identity and display (name, colour, offset, polarity,
-/// nudge). Showing, hiding, reordering, slotting and unlocking stay possible.
+/// nudge, smoothing). Showing, hiding, reordering, slotting and unlocking stay possible.
 pub fn lock_allows(old: &TraceEdit, new: &TraceEdit) -> bool {
     !old.locked
         || (old.name == new.name
             && old.color == new.color
             && old.offset == new.offset
             && old.polarity == new.polarity
-            && old.delay_nudge == new.delay_nudge)
+            && old.delay_nudge == new.delay_nudge
+            && old.smoothing == new.smoothing)
 }
 
 /// Other traces that hold `slot` and must give it up for trace `id`, with the slot cleared.

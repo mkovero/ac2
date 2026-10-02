@@ -103,7 +103,10 @@ impl Analysis for Spl {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.meter.reset_interval(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
-            JobCmd::SetDelay { .. } | JobCmd::Find { .. } | JobCmd::Track { .. } => {}
+            JobCmd::SetDelay { .. }
+            | JobCmd::Find { .. }
+            | JobCmd::Track { .. }
+            | JobCmd::Smoothing { .. } => {}
         }
     }
 

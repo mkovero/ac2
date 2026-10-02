@@ -315,6 +315,22 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     Ok(())
 }
 
+/// The new smoothing when `new` is `old` with only the display smoothing changed (a
+/// transfer measurement); such an update is applied in place instead of restarting the job.
+fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<Option<ac2_proto::model::Smoothing>> {
+    match (old, new) {
+        (MeasKind::Transfer { config: a }, MeasKind::Transfer { config: b })
+            if ac2_proto::model::TransferConfig {
+                smoothing: b.smoothing,
+                ..a.clone()
+            } == *b =>
+        {
+            Some(b.smoothing)
+        }
+        _ => None,
+    }
+}
+
 /// Grid of a transfer measurement; known without a session.
 fn static_grid(kind: &MeasKind) -> Option<GridDef> {
     match kind {
@@ -716,6 +732,20 @@ impl Control {
             Command::MeasUpdate { meas, config } => {
                 validate_meas(&config)?;
                 let mut m = self.meas(meas)?.clone();
+                if let Some(smoothing) = smoothing_only(&m.config.kind, &config.kind) {
+                    // Display smoothing changes in place: averaging goes on, and the next
+                    // frame carries the new setting under the new rev.
+                    m.config = config;
+                    m.config_rev = Rev(self.store.rev().0 + 1);
+                    if let Some(j) = self.jobs.get(&meas) {
+                        j.send(JobCmd::Smoothing {
+                            smoothing,
+                            rev: m.config_rev,
+                        });
+                    }
+                    self.commit(Change::Measurement(Patch::Set(m.clone())));
+                    return Ok(ReplyBody::Measurement(m));
+                }
                 let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
                 let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });
                 m.config = config;

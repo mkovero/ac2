@@ -67,7 +67,13 @@ fn fixture(name: &str) -> Vec<u8> {
 }
 
 /// Runs audio (refreshing the lease) until a TF frame of config rev ≥ `rev` covers it.
-fn settle(d: &mut FakeDriver, c: &mut Client, sub: &Sub, tok: LeaseToken, rev: u64) {
+fn settle(
+    d: &mut FakeDriver,
+    c: &mut Client,
+    sub: &Sub,
+    tok: LeaseToken,
+    rev: u64,
+) -> ac2_proto::Frame {
     for _ in 0..5 {
         run(d, 0.5);
         c.ok(Command::GenRefresh { lease_token: tok });
@@ -78,7 +84,7 @@ fn settle(d: &mut FakeDriver, c: &mut Client, sub: &Sub, tok: LeaseToken, rev: u
             && f.stamp.audio_sample.0 + 1 >= end
             && f.stamp.config_rev.0 >= rev
     })
-    .expect("settled tf frame");
+    .expect("settled tf frame")
 }
 
 struct Rig {
@@ -375,6 +381,183 @@ fn capture_average_math_export_import() {
     r.h.shutdown();
 }
 
+fn sixth() -> Smoothing {
+    Smoothing {
+        fraction: SmoothingFraction::Sixth,
+        mode: SmoothingMode::Power,
+    }
+}
+
+/// Mean squared second difference over the band: how rough a curve is.
+fn roughness(v: &[f32]) -> f64 {
+    let b = band();
+    b.windows(3)
+        .map(|w| {
+            let d = f64::from(v[w[0]]) - 2.0 * f64::from(v[w[1]]) + f64::from(v[w[2]]);
+            d * d
+        })
+        .sum::<f64>()
+        / b.len() as f64
+}
+
+fn set_smoothing(c: &mut Client, t: &TraceMeta, s: Option<Smoothing>) -> TraceMeta {
+    let mut e = t.edit.clone();
+    e.smoothing = s;
+    trace(c.ok(Command::TraceUpdate {
+        trace: t.id,
+        edit: e,
+    }))
+}
+
+/// Smoothing changes on a running transfer measurement without restarting its averages;
+/// captures keep the unsmoothed curve, are served smoothed as the live curve was, and can be
+/// re-smoothed at any time; averages and A − B combine the unsmoothed columns.
+#[test]
+fn live_smoothing_and_resmoothed_captures() {
+    let mut r = rig("smoothing");
+    let c = &mut r.c;
+    let settled = settle(&mut r.d, c, &r.sub, r.tok, 0);
+    let eff = |f: &ac2_proto::Frame| match &f.data {
+        FrameData::Tf(t) => band()
+            .iter()
+            .map(|i| t.eff_avg.as_ref().unwrap()[*i])
+            .fold(f32::INFINITY, f32::min),
+        _ => unreachable!(),
+    };
+    let eff_before = eff(&settled);
+    assert!(eff_before >= 2.0, "{eff_before}");
+
+    // Live change: same job, averages kept, new rev, frames say so.
+    let mut cfg = transfer("main");
+    if let MeasKind::Transfer { config } = &mut cfg.kind {
+        config.smoothing = Some(sixth());
+    }
+    let m = match c.ok(Command::MeasUpdate {
+        meas: MeasId(1),
+        config: cfg,
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert!(m.running);
+    run(&mut r.d, 0.1);
+    c.ok(Command::GenRefresh { lease_token: r.tok });
+    let first = r
+        .sub
+        .frame(T, |f| {
+            matches!(f.data, FrameData::Tf(_)) && f.stamp.config_rev.0 >= m.config_rev.0
+        })
+        .expect("frame with the new smoothing");
+    let FrameData::Tf(tf) = &first.data else {
+        unreachable!()
+    };
+    assert_eq!(tf.meta.smoothing, Some(sixth()));
+    assert!(
+        eff(&first) >= eff_before,
+        "averages restarted: {} < {eff_before}",
+        eff(&first)
+    );
+    let shown = settle(&mut r.d, c, &r.sub, r.tok, m.config_rev.0);
+    let FrameData::Tf(shown) = shown.data else {
+        unreachable!()
+    };
+
+    // The capture shows what the live curve showed…
+    let a = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "a".into(),
+        slot: Some(1),
+    }));
+    assert_eq!(a.edit.smoothing, Some(sixth()));
+    let smoothed = data(c, a.id);
+    for i in band() {
+        assert!(
+            (smoothed.mag_db[i] - shown.mag[i]).abs() < 1e-3,
+            "{} Hz: {} vs live {}",
+            grid_freq(i),
+            smoothed.mag_db[i],
+            shown.mag[i]
+        );
+    }
+    // …but holds it unsmoothed: switched off, the curve is rougher; switched back, the same.
+    let a = set_smoothing(c, &a, None);
+    let raw = data(c, a.id);
+    assert!(
+        roughness(&raw.mag_db) > 2.0 * roughness(&smoothed.mag_db),
+        "{} vs {}",
+        roughness(&raw.mag_db),
+        roughness(&smoothed.mag_db)
+    );
+    let a = set_smoothing(c, &a, Some(sixth()));
+    let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&data(c, a.id).mag_db), bits(&smoothed.mag_db));
+
+    // A second capture of the same result; average and A − B of the two use the unsmoothed
+    // columns and start with the smoothing the inputs share.
+    let b = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "b".into(),
+        slot: Some(2),
+    }));
+    let avg = trace(c.ok(Command::TraceAverage {
+        traces: vec![a.id, b.id],
+        method: AverageMethod::Power,
+        reference: DelayReference::Trace { trace: a.id },
+        name: "avg".into(),
+    }));
+    assert_eq!(avg.edit.smoothing, Some(sixth()));
+    let avg = set_smoothing(c, &avg, None);
+    let ad = data(c, avg.id);
+    for i in band() {
+        assert!(
+            (ad.mag_db[i] - raw.mag_db[i]).abs() < 1e-3,
+            "{}",
+            ad.mag_db[i]
+        );
+    }
+    let b = set_smoothing(c, &b, None);
+    let diff = trace(c.ok(Command::TraceMath {
+        a: a.id,
+        b: b.id,
+        op: MathOp::MagnitudeDifference,
+        name: "a-b".into(),
+    }));
+    assert_eq!(diff.edit.smoothing, None, "inputs differ in smoothing");
+
+    // Smoothing is a protected edit and applies to transfer curves only.
+    let mut locked = a.edit.clone();
+    locked.locked = true;
+    c.ok(Command::TraceUpdate {
+        trace: a.id,
+        edit: locked.clone(),
+    });
+    locked.smoothing = None;
+    let e = c
+        .call(Command::TraceUpdate {
+            trace: a.id,
+            edit: locked,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused);
+    let tgt = trace(c.ok(Command::TraceImport {
+        file_name: "house_curve.txt".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Target,
+        content: Blob(fixture("house_curve.txt")),
+    }));
+    let mut te = tgt.edit.clone();
+    te.smoothing = Some(sixth());
+    let e = c
+        .call(Command::TraceUpdate {
+            trace: tgt.id,
+            edit: te,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid);
+    drop(r.backend);
+    r.h.shutdown();
+}
+
 #[test]
 fn session_save_load_round_trip() {
     let mut r = rig("sessions");
@@ -384,6 +567,16 @@ fn session_save_load_round_trip() {
         name: "pre".into(),
         slot: Some(3),
     }));
+    // Display smoothing is an edit: saved with the trace, applied again after the load.
+    let mut ae = a.edit.clone();
+    ae.smoothing = Some(Smoothing {
+        fraction: SmoothingFraction::Third,
+        mode: SmoothingMode::Complex,
+    });
+    c.ok(Command::TraceUpdate {
+        trace: a.id,
+        edit: ae,
+    });
     let tgt = trace(c.ok(Command::TraceImport {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
@@ -502,7 +695,7 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 1", "\"version\": 7")).unwrap();
+    std::fs::write(&manifest, text.replace("\"version\": 2", "\"version\": 7")).unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -515,7 +708,7 @@ fn session_save_load_round_trip() {
         e.detail,
         Some(ErrorDetail::SessionVersion {
             found: 7,
-            supported: 1
+            supported: 2
         })
     );
     assert_eq!(traces(c).len(), n);

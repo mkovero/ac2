@@ -126,6 +126,7 @@ mod tests {
             coherence: vec![0.987; n],
             alpha: vec![1.0; n],
             freshness: None,
+            smoothing: None,
         }
     }
 

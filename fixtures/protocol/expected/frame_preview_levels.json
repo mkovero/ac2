@@ -1,7 +1,7 @@
 {
  "topic": "session/preview",
  "header": {
-  "v": 2,
+  "v": 3,
   "kind": "preview_levels",
   "seq": 1234,
   "audio_sample": 172800000,

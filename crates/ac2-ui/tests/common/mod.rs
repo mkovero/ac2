@@ -187,7 +187,11 @@ fn transfer(meas_in: u16) -> MeasKind {
                 k_min: -135,
                 k_max: 103,
             },
-            smoothing: None,
+            // As the frames say (`tf_frame`).
+            smoothing: Some(Smoothing {
+                fraction: SmoothingFraction::Sixth,
+                mode: SmoothingMode::Power,
+            }),
             depth: ac2_proto::model::DepthPolicy::EqualConfidence,
         },
     }

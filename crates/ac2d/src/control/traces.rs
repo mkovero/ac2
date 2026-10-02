@@ -69,6 +69,15 @@ pub(crate) fn import_err(e: ImportError) -> ProtoError {
     )
 }
 
+/// Smoothing a derived trace of `kind` shows: its inputs' common smoothing. The inputs are
+/// combined unsmoothed either way.
+fn common_smoothing(inputs: &[&StoredTrace], kind: TraceKind) -> Option<Smoothing> {
+    let first = inputs.first()?.meta.edit.smoothing;
+    (ac2_traces::smooth::smoothable(kind) && inputs.iter().all(|t| t.meta.edit.smoothing == first))
+        .then_some(first)
+        .flatten()
+}
+
 fn no_trace(id: TraceId) -> ProtoError {
     perr(ErrorCode::NotFound, format!("no trace {id}"))
 }
@@ -199,9 +208,12 @@ impl Control {
             cal
         };
         let id = self.traces.alloc();
+        let mut edit = meta::new_edit(id, name, slot);
+        // The capture holds the unsmoothed curve and shows it as the measurement did.
+        edit.smoothing = smoothing;
         let t = TraceMeta {
             id,
-            edit: meta::new_edit(id, name, slot),
+            edit,
             kind,
             source: TraceSource::Captured {
                 meas,
@@ -211,7 +223,6 @@ impl Control {
             },
             grid_id: grid.id(),
             delay,
-            smoothing,
             depth,
             cal,
             mic,
@@ -232,6 +243,12 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_values(&edit).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let mut t = self.trace_meta(id)?.clone();
+        if edit.smoothing.is_some() && !ac2_traces::smooth::smoothable(t.kind) {
+            return Err(perr(
+                ErrorCode::Invalid,
+                "smoothing applies to transfer traces only",
+            ));
+        }
         if !meta::lock_allows(&t.edit, &edit) {
             return Err(perr(
                 ErrorCode::Refused,
@@ -265,16 +282,11 @@ impl Control {
         source: TraceSource,
         d: Derived,
         inputs: &[&StoredTrace],
+        smoothing: Option<Smoothing>,
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let first = inputs.first().map(|t| &t.meta);
         let same = |f: &dyn Fn(&TraceMeta) -> bool| inputs.iter().all(|t| f(&t.meta));
-        let smoothing = first.and_then(|m| m.smoothing);
-        let smoothing = if same(&|m| m.smoothing == smoothing) {
-            smoothing
-        } else {
-            None
-        };
         let cal = first.map_or(CalState::Uncalibrated, |m| m.cal.clone());
         let cal = if d.kind != TraceKind::Transfer && same(&|m| m.cal == cal) {
             cal
@@ -284,14 +296,15 @@ impl Control {
         let mic = first.and_then(|m| m.mic.clone());
         let mic = if same(&|m| m.mic == mic) { mic } else { None };
         let id = self.traces.alloc();
+        let mut edit = meta::new_edit(id, name, None);
+        edit.smoothing = smoothing;
         let t = TraceMeta {
             id,
-            edit: meta::new_edit(id, name, None),
+            edit,
             kind: d.kind,
             source,
             grid_id: d.grid.id(),
             delay: d.delay,
-            smoothing,
             depth: None,
             cal,
             mic,
@@ -318,7 +331,8 @@ impl Control {
             method,
             reference,
         };
-        self.derived(name, source, d, &refs)
+        let smoothing = common_smoothing(&refs, d.kind);
+        self.derived(name, source, d, &refs, smoothing)
     }
 
     pub(super) fn trace_math(
@@ -330,7 +344,8 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         let (ta, tb) = (self.stored(a)?, self.stored(b)?);
         let d = ops::math(&ta, &tb, op).map_err(|e| op_err(&e))?;
-        self.derived(name, TraceSource::Math { a, b, op }, d, &[])
+        let smoothing = common_smoothing(&[&ta, &tb], d.kind);
+        self.derived(name, TraceSource::Math { a, b, op }, d, &[], smoothing)
     }
 
     pub(super) fn trace_import(
@@ -363,7 +378,6 @@ impl Control {
             },
             grid_id: imp.grid.id(),
             delay: Seconds(0.0),
-            smoothing: None,
             depth: None,
             cal: CalState::Uncalibrated,
             mic: None,

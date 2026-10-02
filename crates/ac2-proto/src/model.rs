@@ -60,6 +60,28 @@ pub enum SmoothingFraction {
     FortyEighth,
 }
 
+impl SmoothingFraction {
+    /// Every bandwidth, narrowest first.
+    pub const ALL: [SmoothingFraction; 5] = [
+        Self::FortyEighth,
+        Self::TwentyFourth,
+        Self::Twelfth,
+        Self::Sixth,
+        Self::Third,
+    ];
+
+    /// The designator b of 1/b octave.
+    pub fn b(self) -> u32 {
+        match self {
+            Self::Third => 3,
+            Self::Sixth => 6,
+            Self::Twelfth => 12,
+            Self::TwentyFourth => 24,
+            Self::FortyEighth => 48,
+        }
+    }
+}
+
 /// What smoothing averages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1264,6 +1286,10 @@ pub struct TraceEdit {
     pub delay_nudge: Seconds,
     /// Slot 1…9 the trace occupies (Ctrl+1…9 in the UI); a slot holds at most one trace.
     pub slot: Option<u8>,
+    /// Display smoothing (transfer traces only): applied when the daemon serves the trace's
+    /// data. The stored columns stay unsmoothed, so it can be changed at any time; a capture
+    /// starts with the smoothing its measurement had.
+    pub smoothing: Option<Smoothing>,
 }
 
 /// Trace metadata entity (mandatory metadata of PLAN §3.5).
@@ -1283,8 +1309,6 @@ pub struct TraceMeta {
     /// Delay the phase is referred to: the measured delay at capture; for an average the
     /// common reference delay; 0 for imported traces.
     pub delay: Seconds,
-    /// Smoothing at capture.
-    pub smoothing: Option<Smoothing>,
     /// Averaging depth policy at capture (transfer captures).
     pub depth: Option<DepthPolicy>,
     /// Calibration at capture.
@@ -1327,7 +1351,8 @@ pub enum SessionRef {
     },
 }
 
-/// Stored trace data (reply to `trace.get`). Column order = grid order.
+/// Stored trace data (reply to `trace.get`): the stored columns with the trace's display
+/// smoothing (`meta.edit.smoothing`) applied. Column order = grid order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceData {

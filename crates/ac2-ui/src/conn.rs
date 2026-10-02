@@ -6,7 +6,7 @@
 //! UI renders on change: a new frame `seq`, a mirror change, a reply — plus a 4 Hz refresh
 //! while live data is shown, so frame ages and STALE keep counting when frames stop.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::sync::mpsc as std_mpsc;
 use std::thread::JoinHandle;
@@ -18,7 +18,7 @@ use ac2_client::{
 use ac2_proto::model::{
     BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
     GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
-    Measurement, Preview, SessionConfig, TraceData, TraceMeta,
+    Measurement, Preview, SessionConfig, Smoothing, TraceData, TraceMeta,
 };
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
@@ -59,7 +59,8 @@ pub enum ConnEvent {
     },
     Mirror(Arc<MirrorView>),
     Data(Arc<DataSnapshot>),
-    /// A stored trace's data and grid (fetched once per trace).
+    /// A stored trace's data and grid (fetched once per trace, again when its display
+    /// smoothing changes).
     Trace(Arc<TraceData>, Arc<GridDef>),
     /// A command finished; `Err` carries the daemon's (or the transport's) message.
     Reply {
@@ -463,7 +464,8 @@ async fn session(
     let mut responding = false;
     let mut last_push = Instant::now();
     let mut last_mirror = Instant::now();
-    let mut fetched: HashSet<TraceId> = HashSet::new();
+    // Served columns carry the trace's display smoothing: a new setting means new data.
+    let mut fetched: HashMap<TraceId, Option<Smoothing>> = HashMap::new();
     let next = loop {
         tokio::select! {
             c = ctl.recv() => match c {
@@ -491,7 +493,7 @@ async fn session(
                 let v = mirror.borrow_and_update().clone();
                 if let Some(st) = &v.state {
                     for t in &st.traces {
-                        if fetched.insert(t.id) {
+                        if fetched.insert(t.id, t.edit.smoothing) != Some(t.edit.smoothing) {
                             tokio::spawn(fetch_trace(client.clone(), t.id, t.grid_id, out.clone()));
                         }
                     }

@@ -124,6 +124,39 @@ Averaging accumulates the cross- and auto-spectra; **F** freezes the average, **
 it. Smoothing (1/3 … 1/48 octave) is applied after coherence, so it never makes bad data look
 coherent.
 
+### Choosing what a pane shows
+
+Each pane's title has a **chip** naming the measurement it shows (the transfer pane draws
+every transfer measurement, with that one first in the legend; the IR pane follows the
+transfer pane's choice). Click the chip for the list of measurements the pane can show and
+pick one, or use the keyboard: focus the pane (click it, **Tab**, **Alt+1 … Alt+4**) and
+**N** / **Shift+N** step through that pane's kind only — transfer measurements in the
+transfer pane, spectra and RTAs in the spectrum pane. **Choose the measurement the focused
+pane shows…** in the palette opens the same list (**↑/↓**, **Enter**).
+
+A click inside a pane selects the measurement it shows, exactly as clicking it in the
+measurement list does; selecting one in the list makes its pane show it. Keys such as **F**,
+**R**, **S** and **X** act on the selected measurement.
+
+### Smoothing
+
+**K** makes the smoothing coarser and **Shift+K** finer, through off, 1/48, 1/24, 1/12, 1/6
+and 1/3 octave; the palette also sets a step directly (**Smoothing: 1/6 oct**, …). The
+transfer pane's title says what the keys act on and its setting (`smoothing 1/6 oct`), and
+every legend row shows the smoothing of its curve.
+
+- On a **live measurement** the keys act on the measurement the transfer pane shows. The
+  change applies at once and the averages carry on — nothing restarts.
+- On a **stored trace**: click its slot in the list (the slot is highlighted and the title
+  says `slot 3 (…): smoothing …`), then **K** / **Shift+K**. Click it again, or select a
+  measurement, to go back to the live one.
+
+Smoothing never changes stored data. A capture keeps the unsmoothed curve and starts with
+the smoothing its measurement had, so a trace can be re-smoothed at any time; averages and
+A − B combine the unsmoothed curves and start with the smoothing their inputs share. Spectra
+and RTA bands are not smoothed (RTA bands already are fractional-octave; a smoothed
+narrowband spectrum would no longer read as tone level).
+
 The banners say what is wrong rather than showing a misleading curve: **NO REFERENCE**, **NO
 SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (no fresh frame; the age is shown), **NO
 DELAY ESTIMATE**.
@@ -151,6 +184,8 @@ The inserted delay is also the time origin of the impulse-response pane (**H**).
 
 A **trace** is a stored snapshot of a measurement's live result, with the metadata needed to
 interpret it later: delay, polarity, offset, smoothing, calibration state, mic and time.
+Its curve is stored unsmoothed; the smoothing is a display setting you can change later
+(see *Smoothing* above).
 
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
   there); **1 … 9** show and hide a slot.
@@ -166,8 +201,10 @@ interpret it later: delay, polarity, offset, smoothing, calibration state, mic a
 ## Sessions
 
 `ac2 session save <name>` (or **Session: save** in the palette) stores the measurements and
-traces, including slots and display edits, in the daemon's session directory;
-`ac2 session load <name>` restores them. A loaded session always comes up disarmed: nothing
+traces, including slots and display edits (smoothing among them; curves are saved
+unsmoothed), in the daemon's session directory; `ac2 session load <name>` restores them.
+Sessions saved by an earlier version with a different session format are refused with the
+version named. A loaded session always comes up disarmed: nothing
 plays until someone types a level and fires.
 
 ## Calibration and SPL
@@ -236,8 +273,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Tab` | Focus next pane | `next_pane` |
 | `Shift+Tab` | Focus previous pane | `prev_pane` |
 | `W` | Focused pane only / split layout | `maximize_pane` |
-| `N` | Select next measurement | `next_measurement` |
-| `Shift+N` | Select previous measurement | `prev_measurement` |
+| `N` | Select next measurement of the focused pane | `next_measurement` |
+| `Shift+N` | Select previous measurement of the focused pane | `prev_measurement` |
 | `T` | Theme: dark → light → high contrast | `cycle_theme` |
 | `I` | Zoom frequency in | `zoom_in` |
 | `O` | Zoom frequency out | `zoom_out` |
@@ -289,6 +326,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+C` | Coherence: own pane / over magnitude | `coherence_placement` |
 | `M` | Average shown stored traces (power) | `average` |
 | `P` | Phase wrapped / unwrapped | `phase_unwrap` |
+| `K` | Smoothing coarser (selected slot or pane's measurement) | `smooth_coarser` |
+| `Shift+K` | Smoothing finer (selected slot or pane's measurement) | `smooth_finer` |
 | `Shift+P` | Phase / group delay | `group_delay` |
 
 #### Spectrum / RTA
@@ -321,6 +360,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|
 | Stimulus: type output channels… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
+| Choose the measurement the focused pane shows… | `pane_measurement` |
 | Import a trace file (CSV / analyzer text)… | `import_trace` |
 | Session: save (name or path)… | `session_save` |
 | Session: load, disarmed (name or path)… | `session_load` |
@@ -346,6 +386,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Average shown stored traces (coherence-weighted) | `average_coherence` |
 | A − B: dB difference of the two lowest shown slots | `math_difference` |
 | A / B: complex division of the two lowest shown slots | `math_divide` |
+| Smoothing: off | `smooth_off` |
+| Smoothing: 1/48 oct | `smooth_48` |
+| Smoothing: 1/24 oct | `smooth_24` |
+| Smoothing: 1/12 oct | `smooth_12` |
+| Smoothing: 1/6 oct | `smooth_6` |
+| Smoothing: 1/3 oct | `smooth_3` |
 
 <!-- keymap:end -->
 

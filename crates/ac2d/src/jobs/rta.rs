@@ -167,7 +167,10 @@ impl Analysis for Rta {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.reset(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
-            JobCmd::SetDelay { .. } | JobCmd::Find { .. } | JobCmd::Track { .. } => {}
+            JobCmd::SetDelay { .. }
+            | JobCmd::Find { .. }
+            | JobCmd::Track { .. }
+            | JobCmd::Smoothing { .. } => {}
         }
     }
 

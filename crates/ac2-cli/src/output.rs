@@ -332,7 +332,7 @@ fn time_base(s: &TraceSource) -> &'static str {
 
 /// Every metadata field of one trace.
 pub fn trace_meta(t: &TraceMeta) -> String {
-    let smoothing = match t.smoothing {
+    let smoothing = match t.edit.smoothing {
         None => "none".to_owned(),
         Some(s) => {
             let f = match s.fraction {

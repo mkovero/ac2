@@ -16,6 +16,8 @@
 //!
 //! What a session holds: measurement configurations (with their applied delay, tracking,
 //! running and frozen flags) and stored traces with all metadata, display edits and slots.
+//! Trace columns are saved unsmoothed; a trace's display smoothing is one of its edits
+//! (`edit.smoothing`), applied again when the loaded trace is served.
 //! It never holds generator state: a loaded session is always disarmed with no owner.
 //! Calibrations are the calibration store's, not the session's.
 
@@ -35,7 +37,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 const TRACE_DIR: &str = "traces";

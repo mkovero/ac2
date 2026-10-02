@@ -72,7 +72,8 @@ pub(crate) struct StampArgs {
 }
 
 /// The newest `tf` / `spec` / `rta` frame a job published, for `trace.capture`: a capture
-/// stores exactly what clients were shown, never a separately computed result.
+/// stores what clients were shown, never a separately computed result — for a transfer
+/// function the same frame before display smoothing, so a stored trace can be re-smoothed.
 pub(crate) type LatestFrame = Arc<Mutex<Option<Frame>>>;
 
 /// A job's way out.
@@ -99,8 +100,18 @@ impl Emitter {
     }
 
     pub(crate) fn send(&self, s: StampArgs, data: FrameData) {
+        self.publish(s, data, None);
+    }
+
+    /// Publishes `data`, keeping `capture` (the same result before display smoothing) as
+    /// what `trace.capture` stores.
+    pub(crate) fn send_with_capture(&self, s: StampArgs, data: FrameData, capture: FrameData) {
+        self.publish(s, data, Some(capture));
+    }
+
+    fn publish(&self, s: StampArgs, data: FrameData, capture: Option<FrameData>) {
         let topic = data.topic();
-        let frame = Frame {
+        let mut frame = Frame {
             stamp: FrameStamp {
                 seq: self.env.seqs.next(topic),
                 audio_sample: SampleIndex(s.audio_sample),
@@ -122,6 +133,9 @@ impl Emitter {
                 tracing::error!("{topic}: frame not encodable: {e}");
                 return;
             }
+        }
+        if let Some(c) = capture {
+            frame.data = c;
         }
         if matches!(
             frame.data,
@@ -155,6 +169,11 @@ pub(crate) enum JobCmd {
     Freeze(bool),
     /// Clear averages.
     Reset,
+    /// New display smoothing (transfer); `rev` is the commit that set it. Averaging goes on.
+    Smoothing {
+        smoothing: Option<ac2_proto::model::Smoothing>,
+        rev: Rev,
+    },
     /// The input's calibration or mic curve changed (on the measurement input of a
     /// transfer function only the curve matters).
     Cal(Box<crate::calstore::InputCal>),

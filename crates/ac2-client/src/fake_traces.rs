@@ -113,7 +113,6 @@ impl Shared {
             source,
             grid_id: grid.id(),
             delay,
-            smoothing: None,
             depth: None,
             cal: CalState::Uncalibrated,
             mic: None,
@@ -155,7 +154,7 @@ impl Shared {
             &grid,
             m.delay.as_ref().map_or(Seconds(0.0), |d| d.applied),
         );
-        t.smoothing = config.smoothing;
+        t.edit.smoothing = config.smoothing;
         t.depth = Some(config.depth);
         let c = synthetic(&grid);
         Ok(self.add_trace(t, grid, c))

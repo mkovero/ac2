@@ -132,8 +132,19 @@ fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
     ui.label(badge_text);
 }
 
+/// Short kind tag of a measurement in lists.
+pub(super) fn kind_tag(k: &MeasKind) -> &'static str {
+    match k {
+        MeasKind::Transfer { .. } => "TF",
+        MeasKind::Spectrum { .. } => "FFT",
+        MeasKind::Rta { .. } => "RTA",
+        MeasKind::Spl { .. } => "SPL",
+    }
+}
+
 pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let mut clicked = None;
+    let mut clicked_trace = None;
     {
         let st = &app.state;
         ui.label(RichText::new("Measurements").strong());
@@ -143,13 +154,8 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             ui.label(RichText::new("none").color(ch.dim));
         }
         for m in ms {
-            let selected = st.selected == Some(m.id);
-            let kind = match m.config.kind {
-                MeasKind::Transfer { .. } => "TF",
-                MeasKind::Spectrum { .. } => "FFT",
-                MeasKind::Rta { .. } => "RTA",
-                MeasKind::Spl { .. } => "SPL",
-            };
+            let selected = st.selected == Some(m.id) && st.selected_trace.is_none();
+            let kind = kind_tag(&m.config.kind);
             let state = match (m.running, m.frozen) {
                 (_, true) => "frozen",
                 (true, false) => "running",
@@ -164,6 +170,11 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 } else if d.tracking {
                     text.push_str(" · tracking");
                 }
+            }
+            if let MeasKind::Transfer { config } = &m.config.kind
+                && config.smoothing.is_some()
+            {
+                text.push_str(&format!(" · {}", format::smoothing(config.smoothing)));
             }
             let e = st.edit(m.id);
             if e.inverted {
@@ -191,14 +202,29 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 " (no data)"
             };
             let lock = if t.edit.locked { " 🔒" } else { "" };
-            let text = format!("{}  {}{data}{lock}", i + 1, t.edit.name);
+            let smooth = t
+                .edit
+                .smoothing
+                .map(|s| format!(" · {}", format::smoothing(Some(s))))
+                .unwrap_or_default();
+            let text = format!("{}  {}{data}{lock}{smooth}", i + 1, t.edit.name);
             let c = t.edit.color;
             let color = if t.edit.visible {
                 egui::Color32::from_rgb(c.r, c.g, c.b)
             } else {
                 ch.dim
             };
-            ui.label(RichText::new(text).color(color));
+            // A selected slot is what the smoothing keys change.
+            let r = ui.add(
+                egui::Button::selectable(
+                    st.selected_trace == Some(t.id),
+                    RichText::new(text).color(color),
+                )
+                .wrap_mode(egui::TextWrapMode::Wrap),
+            );
+            if r.clicked() {
+                clicked_trace = Some(t.id);
+            }
         }
         if !any {
             ui.label(
@@ -212,5 +238,8 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     }
     if let Some(id) = clicked {
         app.dispatch(Msg::SelectMeas(id));
+    }
+    if let Some(id) = clicked_trace {
+        app.dispatch(Msg::SelectTrace(id));
     }
 }
