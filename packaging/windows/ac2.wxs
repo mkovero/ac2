@@ -33,13 +33,24 @@
         <Component Id="DaemonExe">
           <File Id="ac2d.exe" Source="$(var.BinDir)\ac2d.exe" KeyPath="yes" />
         </Component>
-        <Component Id="Docs">
+        <!-- One unversioned file per component, so WiX can derive stable component GUIDs. -->
+        <Component Id="Readme">
           <File Id="README.md" Source="$(var.RootDir)\README.md" KeyPath="yes" />
-          <File Id="LICENSE" Source="$(var.RootDir)\LICENSE" Name="LICENSE.txt" />
-          <File Id="install.md" Source="$(var.RootDir)\docs\install.md" />
-          <File Id="userguide.md" Source="$(var.RootDir)\docs\user-guide.md" />
-          <File Id="protocol.md" Source="$(var.RootDir)\docs\protocol.md" />
         </Component>
+        <Component Id="License">
+          <File Id="LICENSE" Source="$(var.RootDir)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+        </Component>
+        <Directory Id="DocsFolder" Name="docs">
+          <Component Id="DocInstall">
+            <File Id="install.md" Source="$(var.RootDir)\docs\install.md" KeyPath="yes" />
+          </Component>
+          <Component Id="DocGuide">
+            <File Id="userguide.md" Source="$(var.RootDir)\docs\user-guide.md" KeyPath="yes" />
+          </Component>
+          <Component Id="DocProtocol">
+            <File Id="protocol.md" Source="$(var.RootDir)\docs\protocol.md" KeyPath="yes" />
+          </Component>
+        </Directory>
         <Component Id="PathEntry">
           <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Part="last"
                        Action="set" System="yes" Permanent="no" />
@@ -63,7 +74,11 @@
       <ComponentRef Id="AppExe" />
       <ComponentRef Id="CliExe" />
       <ComponentRef Id="DaemonExe" />
-      <ComponentRef Id="Docs" />
+      <ComponentRef Id="Readme" />
+      <ComponentRef Id="License" />
+      <ComponentRef Id="DocInstall" />
+      <ComponentRef Id="DocGuide" />
+      <ComponentRef Id="DocProtocol" />
       <ComponentRef Id="PathEntry" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>

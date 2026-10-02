@@ -30,7 +30,7 @@ mkdir -p "$stage/bin" "$stage/launchd" "$stage/docs"
 
 for b in ac2 ac2d ac2-ui; do
     lipo -create -output "$work/$b" "$arm/$b" "$x86/$b"
-    lipo -verify_arch "$work/$b" arm64 x86_64
+    lipo "$work/$b" -verify_arch arm64 x86_64
 done
 
 app="$stage/ac2.app"
