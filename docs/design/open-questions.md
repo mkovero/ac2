@@ -69,6 +69,26 @@ Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the Decided
 
 Round 4 answered 2026-10-02: all proposals accepted (rows K1–K8 in the Decided table above).
 
+### → round 5 (raised by phase 5 traces & sessions)
+
+Fill `Answer:` (empty = proposal accepted).
+
+**T1. Pane focus keys.** Digits 1–9 now show/hide trace slots (Ctrl+1–9 captures), so pane
+focus moved from 1–4 to Alt+1–4 (Tab / Shift+Tab still cycle panes).
+- Proposal: keep (slots are used far more often than pane focus while tuning).
+- Answer:
+
+**T2. Calibrations in sessions.** Sessions save measurements, traces and slots; calibrations
+stay in the per-machine calibration store (they belong to the hardware, not the show).
+- Proposal: keep; a session records which calibration each trace used (already in trace
+  metadata), so a loaded session shows "cal from other mic / input" if the rig differs.
+- Answer:
+
+**T3. Spectrum/RTA trace math across grids.** Averaging/A−B of spectrum or RTA traces needs
+identical grids (band powers aren't interpolated); transfer/target traces are resampled.
+- Proposal: keep; refuse with a clear message when grids differ.
+- Answer:
+
 ---
 
 ## Q1 — Delay target and acceptance (before phase 2)
