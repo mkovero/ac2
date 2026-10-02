@@ -152,3 +152,45 @@ fn python_events_decode_to_the_samples() {
         assert_eq!(&got, want);
     }
 }
+
+/// The wire lock ties the encoded fixtures to `PROTO_VERSION`: any change to what goes on the
+/// wire must come with a version bump, so mismatched builds refuse each other at `hello`
+/// instead of misreading each other's messages.
+#[test]
+fn wire_changes_bump_the_protocol_version() {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    let mut fixtures = rust_fixtures();
+    fixtures.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, bytes) in &fixtures {
+        h.update(name.as_bytes());
+        h.update((bytes.len() as u64).to_le_bytes());
+        h.update(bytes);
+    }
+    let digest: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let current = format!("version {}\nsha256 {digest}\n", ac2_proto::PROTO_VERSION);
+    let path = dir().join("WIRE_LOCK");
+    if std::env::var_os("AC2_UPDATE_FIXTURES").is_some() {
+        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        let committed_version = committed
+            .lines()
+            .find_map(|l| l.strip_prefix("version "))
+            .and_then(|v| v.parse::<u16>().ok());
+        let committed_digest = committed.lines().find_map(|l| l.strip_prefix("sha256 "));
+        assert!(
+            committed_digest == Some(digest.as_str())
+                || committed_version != Some(ac2_proto::PROTO_VERSION),
+            "the wire format changed: bump PROTO_VERSION before updating the fixtures"
+        );
+        std::fs::write(&path, &current).expect("wire lock");
+        return;
+    }
+    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        committed == current,
+        "the wire format or PROTO_VERSION changed without updating {}:\n\
+         bump PROTO_VERSION if the encoded messages changed (pre-1.0: no compatibility shims),\n\
+         then AC2_UPDATE_FIXTURES=1 cargo test -p ac2-proto --test fixtures",
+        path.display()
+    );
+}

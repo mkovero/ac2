@@ -42,6 +42,8 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 - Put a new dependency in the crate's own `Cargo.toml`; don't edit `[workspace.dependencies]`
   in parallel branches.
 - Audio callback: no allocation, locks or syscalls.
+- Any change to what goes on the wire bumps `PROTO_VERSION` (pre-1.0: no compatibility);
+  `fixtures/protocol/WIRE_LOCK` and its test enforce it.
 
 ## Audio safety
 - Never emit sound on real hardware from automated runs. Tests and spikes output silence on

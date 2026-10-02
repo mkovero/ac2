@@ -19,7 +19,11 @@ pub enum ClientError {
         attempts: u32,
     },
     /// The daemon speaks another protocol version. There is no fallback.
-    #[error("protocol version mismatch: daemon speaks {daemon}, this client speaks {client}")]
+    #[error(
+        "protocol version mismatch: daemon speaks {daemon}, this program speaks {client} \
+         (they are different ac2 builds; restart or update the daemon, e.g. \
+         `systemctl --user restart ac2d` after installing the new build)"
+    )]
     VersionMismatch {
         /// Daemon version (0 when the daemon did not say).
         daemon: u16,

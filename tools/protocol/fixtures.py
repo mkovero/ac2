@@ -81,7 +81,7 @@ TIMING_STATUS = {
 def frame(topic, kind, grid, meta, arrays, protection=WEAK_REFERENCE):
     """arrays: list of (desc, values). Values are rounded to what the wire carries."""
     n = len(arrays[0][1]) if arrays else 0
-    header = {"v": 1, "kind": kind}
+    header = {"v": p.PROTO_VERSION, "kind": kind}
     header.update(stamp(grid, protection))
     header["n"] = n
     header["arrays"] = [d for d, _ in arrays]
@@ -265,7 +265,7 @@ def req(idx, op, args=None, mutation=True):
     cmd = {"op": op}
     if args is not None:
         cmd["args"] = args
-    return {"v": 1, "id": idx, "cmd": cmd, "expect_rev": 41 if mutation else None}
+    return {"v": p.PROTO_VERSION, "id": idx, "cmd": cmd, "expect_rev": 41 if mutation else None}
 
 
 MEAS_CONFIG = {
