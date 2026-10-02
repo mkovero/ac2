@@ -121,7 +121,7 @@ impl Emitter {
 }
 
 /// Commands to a running job.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) enum JobCmd {
     /// Run the delay finder now; the result goes to control under `token`.
     Find {
@@ -141,6 +141,9 @@ pub(crate) enum JobCmd {
     Freeze(bool),
     /// Clear averages.
     Reset,
+    /// The input's calibration or mic curve changed (on the measurement input of a
+    /// transfer function only the curve matters).
+    Cal(Box<crate::calstore::InputCal>),
 }
 
 /// One analysis.

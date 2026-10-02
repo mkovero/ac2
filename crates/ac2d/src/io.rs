@@ -64,8 +64,12 @@ struct Slot {
 /// Most messages taken from one socket per poll round, so no source starves the others.
 const BATCH: usize = 256;
 
-/// Smallest per-peer send queue (Q2: 3 × subscribed topics, at least 16).
-const MIN_SNDHWM: u32 = 16;
+/// Per-peer send queue of the data socket, set once before it binds: three frames per topic
+/// for a full desk (about 40 topics). It is never changed on the live socket: libzmq applies
+/// a new SNDHWM to existing pipes by sending commands to their peers, and such a command
+/// racing with a disconnecting peer's pipe teardown is a use-after-free in libzmq 4.3.5's
+/// I/O thread (it crashed the daemon at shutdown after a client with many subscriptions left).
+pub(crate) const DATA_SNDHWM: u32 = 128;
 
 pub(crate) fn spawn(
     sockets: IoSockets,
@@ -88,7 +92,6 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
     let mut net: Option<(Socket, Socket)> = Some((router, xpub));
     let period = Duration::from_secs_f64(1.0 / f64::from(fps.max(1)));
     let mut slots: HashMap<Vec<u8>, Slot> = HashMap::new();
-    let mut hwm = MIN_SNDHWM;
     loop {
         if let Some(sc) = &secure
             && net.is_some()
@@ -148,7 +151,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         let Some(ev) = ac2_zmq::SubscriptionEvent::parse(&m) else {
                             continue;
                         };
-                        let n = interest.update(|t| t.apply_event(&ev));
+                        interest.update(|t| t.apply_event(&ev));
                         if let ac2_zmq::SubscriptionEvent::Subscribe(prefix) = &ev {
                             tracing::debug!("subscribe {:?}", String::from_utf8_lossy(prefix));
                             let now = Instant::now();
@@ -158,15 +161,6 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                                     slot.dirty = false;
                                     slot.last_sent = Some(now);
                                 }
-                            }
-                        }
-                        // SNDHWM applies to pipes created after it is set, so this sizes the
-                        // queues of peers that connect from now on.
-                        let want = (3 * n as u32).max(MIN_SNDHWM);
-                        if want != hwm {
-                            hwm = want;
-                            if let Err(e) = xpub.set_send_hwm(hwm) {
-                                tracing::warn!("set SNDHWM: {e}");
                             }
                         }
                     }

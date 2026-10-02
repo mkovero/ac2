@@ -46,24 +46,31 @@ impl Block {
     }
 }
 
-/// Per-input running mean square (1 s time constant), f64 bits; read by `cal.spl`.
+/// Per-input running mean square, f64 bits; read by `cal.spl`. Two time constants: the
+/// 1 s one is the reading, the 0.2 s one tells whether the level has been steady long
+/// enough for the slow one to have settled.
 #[derive(Debug)]
 pub(crate) struct InputMeters {
     ms: Box<[AtomicU64]>,
+    fast: Box<[AtomicU64]>,
 }
+
+/// Time constants of [`InputMeters`], s.
+const METER_SLOW_S: f64 = 1.0;
+const METER_FAST_S: f64 = 0.2;
 
 impl InputMeters {
     fn new(channels: usize) -> Self {
         Self {
             ms: (0..channels).map(|_| AtomicU64::new(0)).collect(),
+            fast: (0..channels).map(|_| AtomicU64::new(0)).collect(),
         }
     }
 
-    /// Mean square of block channel `ch`.
-    pub(crate) fn mean_square(&self, ch: usize) -> Option<f64> {
-        self.ms
-            .get(ch)
-            .map(|a| f64::from_bits(a.load(Ordering::Acquire)))
+    /// Mean square of block channel `ch` (τ = 1 s) and its fast companion (τ = 0.2 s).
+    pub(crate) fn mean_square(&self, ch: usize) -> Option<(f64, f64)> {
+        let load = |a: &AtomicU64| f64::from_bits(a.load(Ordering::Acquire));
+        Some((load(self.ms.get(ch)?), load(self.fast.get(ch)?)))
     }
 }
 
@@ -146,7 +153,7 @@ fn run(
     rate: f64,
 ) {
     let mut jobs: BTreeMap<u64, SyncSender<Arc<Block>>> = BTreeMap::new();
-    let mut ms: Vec<f64> = vec![0.0; meters.ms.len()];
+    let mut ms: Vec<(f64, f64)> = vec![(0.0, 0.0); meters.ms.len()];
     let mut ended_reported = false;
     loop {
         loop {
@@ -197,9 +204,10 @@ fn run(
                     block.flags
                 );
             }
-            // Running per-input mean square, τ = 1 s.
+            // Running per-input mean square, τ = 1 s and 0.2 s.
             let n = usize::from(block.channels).max(1);
-            let alpha = 1.0 - (-f64::from(block.frames) / rate).exp();
+            let alpha = |tau: f64| 1.0 - (-f64::from(block.frames) / (rate * tau)).exp();
+            let (a_slow, a_fast) = (alpha(METER_SLOW_S), alpha(METER_FAST_S));
             for (ch, m) in ms.iter_mut().enumerate().take(n) {
                 let frames = block.data.len() / n;
                 if frames == 0 {
@@ -213,8 +221,10 @@ fn run(
                     .map(|v| f64::from(*v) * f64::from(*v))
                     .sum::<f64>()
                     / frames as f64;
-                *m += alpha * (sq - *m);
-                meters.ms[ch].store(m.to_bits(), Ordering::Release);
+                m.0 += a_slow * (sq - m.0);
+                m.1 += a_fast * (sq - m.1);
+                meters.ms[ch].store(m.0.to_bits(), Ordering::Release);
+                meters.fast[ch].store(m.1.to_bits(), Ordering::Release);
             }
             latest.store(block.end_sample(), Ordering::Release);
             let block = Arc::new(block);

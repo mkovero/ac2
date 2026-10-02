@@ -57,7 +57,10 @@ Daemon:
 - Each job writes its newest result to a per-topic latest slot. The publisher sends each
   dirty slot at most at the topic's rate: 60 fps for local transports, 30 for network,
   configurable per subscriber class (2b).
-- XPUB: `XPUB_VERBOSE`, per-peer `SNDHWM` = 3 × subscribed topics (minimum 16).
+- XPUB: `XPUB_VERBOSE`, per-peer `SNDHWM` = 128 (three frames per topic for a full desk),
+  set once before binding. It is not resized with the subscriptions: libzmq 4.3.5 applies a
+  changed SNDHWM to live pipes with commands that race with a leaving peer's pipe teardown
+  (a use-after-free in its I/O thread, reproduced at daemon shutdown).
   `XPUB_NODROP` is never set.
 - On a new subscription, the daemon re-sends that topic's latest slot so late joiners
   don't wait.

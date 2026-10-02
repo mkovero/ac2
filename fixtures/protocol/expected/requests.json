@@ -133,5 +133,46 @@
    }
   },
   "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 31,
+  "cmd": {
+   "op": "cal.mic_curve",
+   "args": {
+    "input": 1,
+    "mic": "M30 #1234",
+    "action": {
+     "type": "import",
+     "file_name": "M30-1234.frd",
+     "content": {
+      "$bin": "3230202d302e350a323030303020312e350a"
+     }
+    }
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 42,
+  "cmd": {
+   "op": "session.inputs",
+   "args": {
+    "inputs": [
+     {
+      "channel": 1,
+      "mic": "M30 #1234",
+      "mic_curve": true
+     },
+     {
+      "channel": 2,
+      "mic": null,
+      "mic_curve": false
+     }
+    ]
+   }
+  },
+  "expect_rev": 41
  }
 ]

@@ -155,6 +155,67 @@ pub enum SessionCmd {
     },
     /// Saved sessions in the daemon's session directory.
     List,
+    /// Input setup: the mic on each input and its mic-curve switch (shown without options).
+    Inputs(SessionInputs),
+}
+
+/// `IN=NAME`: the mic on a 1-based input; `IN=` clears the name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MicAssign {
+    /// Input.
+    pub input: Channel,
+    /// Mic name; `None` clears it.
+    pub mic: Option<String>,
+}
+
+impl FromStr for MicAssign {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let (ch, name) = s
+            .split_once('=')
+            .ok_or_else(|| format!("{s:?}: expected IN=NAME, e.g. 3=M30"))?;
+        let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
+        let name = name.trim();
+        Ok(Self {
+            input,
+            mic: (!name.is_empty()).then(|| name.to_owned()),
+        })
+    }
+}
+
+/// `IN=on|off`: a 1-based input's mic-curve switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CurveSwitch {
+    /// Input.
+    pub input: Channel,
+    /// Apply the mic curve.
+    pub on: bool,
+}
+
+impl FromStr for CurveSwitch {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || format!("{s:?}: expected IN=on or IN=off, e.g. 3=off");
+        let (ch, v) = s.split_once('=').ok_or_else(bad)?;
+        let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
+        let on = match v.trim().to_lowercase().as_str() {
+            "on" => true,
+            "off" => false,
+            _ => return Err(bad()),
+        };
+        Ok(Self { input, on })
+    }
+}
+
+/// `session inputs`.
+#[derive(Debug, Args)]
+pub struct SessionInputs {
+    /// Mic on an input, e.g. `3=M30` (repeatable; `3=` clears the name).
+    #[arg(long = "mic", value_name = "IN=NAME")]
+    pub mics: Vec<MicAssign>,
+    /// Mic-curve switch of an input, e.g. `3=off` (repeatable).
+    #[arg(long = "curve", value_name = "IN=on|off")]
+    pub curves: Vec<CurveSwitch>,
 }
 
 /// `session open`.
@@ -184,6 +245,9 @@ pub struct SessionOpen {
     /// Input channel the loopback returns on.
     #[arg(long, requires = "loopback_out")]
     pub loopback_in: Option<Channel>,
+    /// Mic on an input, e.g. `3=M30` (repeatable): the input setup calibrations match on.
+    #[arg(long = "mic", value_name = "IN=NAME")]
+    pub mics: Vec<MicAssign>,
 }
 
 /// `gen …`.
@@ -581,8 +645,27 @@ pub struct SplWatch {
 pub enum CalCmd {
     /// Calibrate an input against an acoustic calibrator.
     Spl(CalSpl),
-    /// List calibrations.
+    /// Import a mic's magnitude curve (.frd / .txt / CSV) for an input, or clear it.
+    MicCurve(CalMicCurve),
+    /// List calibrations and the input setup.
     List,
+}
+
+/// `cal mic-curve`.
+#[derive(Debug, Args)]
+pub struct CalMicCurve {
+    /// Curve file: frequency and dB per line (further columns ignored).
+    #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+    pub file: Option<PathBuf>,
+    /// Input channel the mic is on.
+    #[arg(long)]
+    pub input: Channel,
+    /// Mic name (default: the input's mic name in the session's input setup).
+    #[arg(long)]
+    pub mic: Option<String>,
+    /// Remove the curve instead.
+    #[arg(long)]
+    pub clear: bool,
 }
 
 /// `cal spl`.
@@ -597,9 +680,10 @@ pub struct CalSpl {
     /// Calibrator frequency.
     #[arg(long, default_value = "1khz")]
     pub freq: Freq,
-    /// Mic name the calibration is bound to.
-    #[arg(long, default_value = "mic")]
-    pub mic: String,
+    /// Mic name the calibration is bound to (default: the input's mic name in the
+    /// session's input setup); it also becomes the input's mic name.
+    #[arg(long)]
+    pub mic: Option<String>,
 }
 
 /// `trace …`.

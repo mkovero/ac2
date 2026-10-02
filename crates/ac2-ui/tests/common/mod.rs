@@ -125,6 +125,8 @@ fn spec_frame(meas: u32) -> SpecFrame {
         meta: SpecMeta {
             window: Window::Hann,
             scale: LevelScale::Dbfs,
+            cal: CalStatus::Uncalibrated,
+            mic_curve: false,
         },
         level,
         validity: vec![ValidityMask::NONE; freqs.len()],
@@ -145,6 +147,8 @@ fn spl_frame(meas: u32) -> SplFrame {
             leq: -24.1,
             lpeak: -9.6,
             duration: Seconds(83.0),
+            cal: CalStatus::Uncalibrated,
+            mic_curve: false,
         },
     }
 }

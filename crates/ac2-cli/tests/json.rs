@@ -390,6 +390,94 @@ async fn gen_refusals_never_touch_the_lease() -> R {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn input_setup_mic_curve_and_cal_flow() -> R {
+    let f = fake()?;
+    // No mic name on input 2 yet: cal commands ask for one instead of guessing.
+    let r = ac2(
+        &f,
+        &["cal", "spl", "--input", "2", "--ref", "94db", "--json"],
+    )
+    .await?;
+    assert_ne!(r.code, 0);
+    assert!(
+        r.stdout.contains("no mic name"),
+        "{} {}",
+        r.stdout,
+        r.stderr
+    );
+
+    let i = ok_json(
+        &f,
+        &[
+            "session",
+            "inputs",
+            "--mic",
+            "2=UMIK 7001",
+            "--mic",
+            "3=M30",
+            "--curve",
+            "3=off",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(
+        i,
+        json!([
+            { "channel": 1, "mic": "UMIK 7001", "mic_curve": true },
+            { "channel": 2, "mic": "M30", "mic_curve": false },
+        ])
+    );
+    // Only the named rows change; `IN=` clears a name.
+    let i = ok_json(&f, &["session", "inputs", "--mic", "3=", "--json"]).await?;
+    assert_eq!(
+        i[1],
+        json!({ "channel": 2, "mic": null, "mic_curve": false })
+    );
+    assert_eq!(i[0]["mic"], "UMIK 7001");
+
+    // The input's mic name is the default for --mic.
+    let c = ok_json(
+        &f,
+        &["cal", "spl", "--input", "2", "--ref", "114db", "--json"],
+    )
+    .await?;
+    assert_eq!(c["key"]["mic"], "UMIK 7001");
+
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("UMIK 7001.txt");
+    std::fs::write(&file, "\"Sens Factor =-1.3dB\"\n20 -1.5\n1000 0\n20000 2\n")?;
+    let path = file.to_string_lossy().into_owned();
+    let e = ok_json(&f, &["cal", "mic-curve", &path, "--input", "2", "--json"]).await?;
+    assert_eq!(e["mic_curve"]["file_name"], "UMIK 7001.txt");
+    assert_eq!(e["mic_curve"]["name"], "UMIK 7001");
+    assert_eq!(e["mic_curve"]["points"], 3);
+    assert_eq!(
+        e["spl"]["calibrator_level"], 114.0,
+        "the calibration is kept"
+    );
+
+    // A refused file: typed error, nothing stored.
+    std::fs::write(&file, "only text\n")?;
+    let r = ac2(&f, &["cal", "mic-curve", &path, "--input", "2", "--json"]).await?;
+    assert_ne!(r.code, 0);
+    let err = r.json()?;
+    assert_eq!(err["error"]["code"], "invalid", "{err}");
+
+    let cleared = ok_json(
+        &f,
+        &["cal", "mic-curve", "--clear", "--input", "2", "--json"],
+    )
+    .await?;
+    assert_eq!(cleared["cleared"], true);
+    let l = ok_json(&f, &["cal", "list", "--json"]).await?;
+    assert_eq!(l["calibrations"][0]["mic_curve"], Value::Null);
+    let text = ac2(&f, &["cal", "list"]).await?;
+    assert!(text.stdout.contains("UMIK 7001"), "{}", text.stdout);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn cal_and_unreachable_daemon() -> R {
     let f = fake()?;
     let c = ok_json(
@@ -403,10 +491,15 @@ async fn cal_and_unreachable_daemon() -> R {
         c["key"],
         json!({ "device": "fake:loop", "channel": 2, "mic": "M30" })
     );
-    assert_eq!(c["calibrator_level"], 94.0);
-    assert_eq!(c["calibrator_freq"], 1000.0);
+    assert_eq!(c["spl"]["calibrator_level"], 94.0);
+    assert_eq!(c["spl"]["calibrator_freq"], 1000.0);
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
-    assert_eq!(l.as_array().map(Vec::len), Some(1));
+    assert_eq!(l["calibrations"].as_array().map(Vec::len), Some(1));
+    // Calibrating bound the input's mic name.
+    assert_eq!(
+        l["inputs"],
+        json!([{ "channel": 2, "mic": "M30", "mic_curve": true }])
+    );
 
     f.lock().mute = true;
     let r = ac2(&f, &["--timeout", "100ms", "devices", "--json"]).await?;

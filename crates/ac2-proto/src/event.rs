@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    CalEntry, CalKey, Generator, Measurement, MicCurve, Session, SplLog, State, TimingStatus,
+    CalEntry, CalKey, Generator, InputSetup, Measurement, Session, SplLog, State, TimingStatus,
     TraceMeta,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
@@ -44,8 +44,8 @@ pub enum Change {
     Generator(Generator),
     /// A calibration.
     Calibration(Patch<CalEntry, CalKey>),
-    /// A mic curve assignment, keyed by input channel.
-    MicCurve(Patch<MicCurve, u16>),
+    /// The whole input setup (mic names, mic-curve switches), sorted by channel.
+    Inputs(Vec<InputSetup>),
     /// An SPL log.
     SplLog(Patch<SplLog, MeasId>),
     /// Timing monitor state.
@@ -101,12 +101,12 @@ pub enum WireEvent {
         /// Payload.
         payload: Patch<CalEntry, CalKey>,
     },
-    /// [`Change::MicCurve`].
-    MicCurve {
+    /// [`Change::Inputs`].
+    Inputs {
         /// Rev.
         rev: Rev,
         /// Payload.
-        payload: Patch<MicCurve, u16>,
+        payload: Vec<InputSetup>,
     },
     /// [`Change::SplLog`].
     SplLog {
@@ -133,7 +133,7 @@ impl From<Event> for WireEvent {
             Change::Trace(payload) => Self::Trace { rev, payload },
             Change::Generator(payload) => Self::Generator { rev, payload },
             Change::Calibration(payload) => Self::Calibration { rev, payload },
-            Change::MicCurve(payload) => Self::MicCurve { rev, payload },
+            Change::Inputs(payload) => Self::Inputs { rev, payload },
             Change::SplLog(payload) => Self::SplLog { rev, payload },
             Change::Timing(payload) => Self::Timing { rev, payload },
         }
@@ -148,7 +148,7 @@ impl From<WireEvent> for Event {
             WireEvent::Trace { rev, payload } => (rev, Change::Trace(payload)),
             WireEvent::Generator { rev, payload } => (rev, Change::Generator(payload)),
             WireEvent::Calibration { rev, payload } => (rev, Change::Calibration(payload)),
-            WireEvent::MicCurve { rev, payload } => (rev, Change::MicCurve(payload)),
+            WireEvent::Inputs { rev, payload } => (rev, Change::Inputs(payload)),
             WireEvent::SplLog { rev, payload } => (rev, Change::SplLog(payload)),
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
         };
@@ -165,7 +165,7 @@ impl Change {
             Self::Trace(_) => "trace",
             Self::Generator(_) => "generator",
             Self::Calibration(_) => "calibration",
-            Self::MicCurve(_) => "mic_curve",
+            Self::Inputs(_) => "inputs",
             Self::SplLog(_) => "spl_log",
             Self::Timing(_) => "timing",
         }

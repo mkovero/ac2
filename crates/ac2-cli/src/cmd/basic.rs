@@ -100,7 +100,15 @@ pub(crate) async fn session(
             };
             let r = c.call(Command::SessionOpen { config }).await?;
             let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
-            out.emit(&s, || output::session(&s))?;
+            let inputs = if o.mics.is_empty() {
+                None
+            } else {
+                Some(super::cal::set_inputs(&c, &o.mics, &[]).await?)
+            };
+            out.emit(&s, || match &inputs {
+                None => output::session(&s),
+                Some(i) => format!("{}\n{}", output::session(&s), output::inputs(i)),
+            })?;
         }
         SessionCmd::Close => {
             let r = c.call(Command::SessionClose).await?;
@@ -119,6 +127,7 @@ pub(crate) async fn session(
             super::traces::save_or_load(cli, &c, session, true, out).await?;
         }
         SessionCmd::List => super::traces::list(&c, out).await?,
+        SessionCmd::Inputs(a) => return super::cal::session_inputs(cli, a, out).await,
     }
     Ok(())
 }
@@ -515,7 +524,7 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
 
 pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
-        SplCmd::Cal(a) => cal_spl(cli, a, out).await,
+        SplCmd::Cal(a) => super::cal::cal_spl(cli, a, out).await,
         SplCmd::Watch(w) => {
             let c = connect(cli, true).await?;
             let s = state(&c).await?;
@@ -574,34 +583,6 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
                 let _ = c.call(Command::MeasStop { meas: id }).await;
             }
             result
-        }
-    }
-}
-
-async fn cal_spl(cli: &Cli, a: &CalSpl, out: &mut Out<'_>) -> Result<(), CliError> {
-    let c = connect(cli, false).await?;
-    let r = c
-        .call(Command::CalSpl {
-            input: a.input.0,
-            mic: a.mic.clone(),
-            calibrator_level: a.reference.0,
-            calibrator_freq: a.freq.0,
-        })
-        .await?;
-    let e = expect_body!("cal.spl", r, ReplyBody::Calibration(e) => e)?;
-    out.emit(&e, || output::calibrations(std::slice::from_ref(&e)))?;
-    Ok(())
-}
-
-pub(crate) async fn cal(cli: &Cli, cmd: &CalCmd, out: &mut Out<'_>) -> Result<(), CliError> {
-    match cmd {
-        CalCmd::Spl(a) => cal_spl(cli, a, out).await,
-        CalCmd::List => {
-            let c = connect(cli, false).await?;
-            let r = c.call(Command::CalList).await?;
-            let l = expect_body!("cal.list", r, ReplyBody::Calibrations(l) => l)?;
-            out.emit(&l, || output::calibrations(&l))?;
-            Ok(())
         }
     }
 }

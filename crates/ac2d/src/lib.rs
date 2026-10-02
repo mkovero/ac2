@@ -27,6 +27,7 @@
 #![deny(unsafe_code)]
 
 mod backend;
+mod calstore;
 pub mod config;
 mod control;
 mod conv;
@@ -51,7 +52,7 @@ use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType};
 
 pub use config::{
     DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError, NetworkSecurity, ReplayLimits,
-    pid_file, runtime_dir,
+    config_dir, default_cal_store, pid_file, runtime_dir,
 };
 
 pub use backend::{BackendChoice, FAKE_RIG, backend};
@@ -230,7 +231,7 @@ fn prepare_ipc(_endpoint: &str) -> Result<(), StartError> {
 
 fn data_socket_options(xpub: &Socket, network: bool) -> Result<(), StartError> {
     xpub.set_xpub_verbose(true).map_err(zerr("XPUB_VERBOSE"))?;
-    xpub.set_send_hwm(16).map_err(zerr("SNDHWM"))?;
+    xpub.set_send_hwm(io::DATA_SNDHWM).map_err(zerr("SNDHWM"))?;
     if network {
         xpub.set_send_buffer(Some(NETWORK_SNDBUF))
             .map_err(zerr("SNDBUF"))?;
@@ -364,6 +365,7 @@ impl Daemon {
             to_self: tx.clone(),
             session_dir: config.session_dir.clone(),
             network,
+            cal_store: config.cal_store.clone(),
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

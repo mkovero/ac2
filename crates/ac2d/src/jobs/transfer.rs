@@ -1,8 +1,11 @@
 //! Transfer-function job: protection → MTW ladder → optional smoothing → `tf` frames, plus
-//! the live IR view (only while someone subscribes to it) and input meters.
+//! the live IR view (only while someone subscribes to it) and input meters. The measurement
+//! input's mic curve, when on, is subtracted from the displayed magnitude (never the phase,
+//! the IR or the delay finder: decision 7c).
 
 use ac2_core::grid::LogGrid;
 use ac2_core::ir_view::{ImpulseResponse, UniformTf};
+use ac2_core::mic_curve::Correction;
 use ac2_core::mtw::{Ladder, Mtw, MtwConfig, SampleGate, Validity};
 use ac2_core::protection::{BlockDecision, BlockLevels, Guard, ProtectionConfig};
 use ac2_core::smoothing::{Smoother, SmoothingMode, TfColumns};
@@ -102,6 +105,14 @@ pub(crate) struct Transfer {
     finder: Finder,
     epoch: SessionEpoch,
     to_control: Sender<ControlMsg>,
+    grid: LogGrid,
+    /// Mic-curve correction per column (dB subtracted from `mag`).
+    corr: Option<Vec<f64>>,
+}
+
+/// The mic-curve correction at each column of `grid`.
+fn column_correction(grid: &LogGrid, c: &Correction) -> Vec<f64> {
+    grid.frequencies().into_iter().map(|f| c.db(f)).collect()
 }
 
 /// Why a transfer job cannot start.
@@ -122,6 +133,7 @@ impl Transfer {
         tracking: bool,
         epoch: SessionEpoch,
         to_control: Sender<ControlMsg>,
+        correction: Option<&Correction>,
     ) -> Result<Self, StartError> {
         let fs = f64::from(sample_rate);
         let grid = LogGrid {
@@ -153,6 +165,8 @@ impl Transfer {
         let mut finder = Finder::new(fs);
         finder.track(tracking, delay_samples);
         Ok(Self {
+            corr: correction.map(|c| column_correction(&grid, c)),
+            grid,
             finder,
             epoch,
             to_control,
@@ -185,6 +199,10 @@ impl Transfer {
             discontinuity_until: 0,
             weak_until: 0,
         })
+    }
+
+    fn set_correction(&mut self, c: Option<&Correction>) {
+        self.corr = c.map(|c| column_correction(&self.grid, c));
     }
 
     fn mark_discontinuity(&mut self, at: u64) {
@@ -306,6 +324,7 @@ impl Analysis for Transfer {
                 self.mtw.set_frozen(f);
             }
             JobCmd::Reset => self.mtw.reset_averages(),
+            JobCmd::Cal(cal) => self.set_correction(cal.correction.as_deref()),
         }
     }
 
@@ -357,7 +376,7 @@ impl Analysis for Transfer {
                 Validity::NoMeasurement => ValidityMask::NO_MEASUREMENT,
             })
             .collect();
-        let (mag, phase): (Vec<f32>, Vec<f32>) = match &self.smoother {
+        let (mut mag, phase): (Vec<f32>, Vec<f32>) = match &self.smoother {
             None => (
                 f.magnitude_db.iter().map(|v| *v as f32).collect(),
                 f.phase_deg.iter().map(|v| *v as f32).collect(),
@@ -387,6 +406,11 @@ impl Analysis for Transfer {
                     .unzip()
             }
         };
+        if let Some(c) = &self.corr {
+            for (m, d) in mag.iter_mut().zip(c) {
+                *m -= *d as f32;
+            }
+        }
         e.send(
             stamp,
             FrameData::Tf(TfFrame {
@@ -395,7 +419,7 @@ impl Analysis for Transfer {
                     delay: Seconds(self.delay_s),
                     frozen: self.frozen,
                     smoothing: self.cfg.smoothing,
-                    mic_curve: false,
+                    mic_curve: self.corr.is_some(),
                 },
                 mag,
                 phase,

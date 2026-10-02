@@ -43,7 +43,7 @@ impl Store {
                     last_action: None,
                 },
                 calibrations: Vec::new(),
-                mic_curves: Vec::new(),
+                inputs: Vec::new(),
                 spl_logs: Vec::new(),
                 timing: TimingStatus {
                     epoch: 0,
@@ -57,6 +57,17 @@ impl Store {
             replay: VecDeque::new(),
             limits,
         }
+    }
+
+    /// The initial state carries the calibration store's contents (rev 0, no events).
+    pub(crate) fn with_calibrations(
+        mut self,
+        calibrations: Vec<ac2_proto::model::CalEntry>,
+        inputs: Vec<ac2_proto::model::InputSetup>,
+    ) -> Self {
+        self.state.calibrations = calibrations;
+        self.state.inputs = inputs;
+        self
     }
 
     pub(crate) fn rev(&self) -> Rev {
@@ -145,7 +156,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g.clone(),
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),
-        Change::MicCurve(p) => upsert(&mut s.mic_curves, p, |m| m.input),
+        Change::Inputs(i) => s.inputs = i.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,
     }

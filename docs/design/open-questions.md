@@ -207,6 +207,9 @@ disarms, stop is universal, CLI holds a lease only while a foreground command ru
 
 ## Q7 — Calibration store (before phase 5)
 
+**Design:** [q7-calibration.md](q7-calibration.md) (accepted; implemented in phase 5, with
+K8's mic name per input in the session's input setup).
+
 **Question.** Calibration store details (decided: 7a/7b, 7c — device + channel + mic name,
 cal age, no gain/phantom fields).
 

@@ -29,7 +29,12 @@
    "rta": {
     "fraction": "third",
     "weighting": "z",
-    "scale": "db_spl"
+    "scale": "db_spl",
+    "cal": {
+     "type": "verified",
+     "calibrated_at": 1789000000000000000
+    },
+    "mic_curve": true
    }
   }
  },

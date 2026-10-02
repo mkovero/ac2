@@ -30,6 +30,9 @@ pub struct DaemonConfig {
     pub keepalive: Duration,
     /// Where `file.save` / `file.load` put sessions given by name.
     pub session_dir: PathBuf,
+    /// Calibration store file (`docs/design/q7-calibration.md` §7); `None` keeps
+    /// calibrations in memory only.
+    pub cal_store: Option<PathBuf>,
 }
 
 impl fmt::Debug for DaemonConfig {
@@ -44,6 +47,7 @@ impl fmt::Debug for DaemonConfig {
             .field("publish_fps", &self.publish_fps)
             .field("keepalive", &self.keepalive)
             .field("session_dir", &self.session_dir)
+            .field("cal_store", &self.cal_store)
             .finish()
     }
 }
@@ -62,6 +66,7 @@ impl DaemonConfig {
             publish_fps: None,
             keepalive: Duration::from_millis(250),
             session_dir: ac2_traces::default_session_dir(),
+            cal_store: None,
         }
     }
 }
@@ -168,6 +173,23 @@ pub fn runtime_dir() -> PathBuf {
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "user".to_owned());
     std::env::temp_dir().join(format!("ac2-{user}"))
+}
+
+/// Per-user configuration directory: `$XDG_CONFIG_HOME/ac2`, `~/.config/ac2`, or
+/// `%APPDATA%\ac2`.
+pub fn config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("ac2")
+}
+
+/// Default calibration store: `<config dir>/calibrations.json`.
+pub fn default_cal_store() -> PathBuf {
+    config_dir().join("calibrations.json")
 }
 
 /// The pid file of the local daemon, in [`runtime_dir`].

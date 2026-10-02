@@ -1089,3 +1089,120 @@ fn own_client_id_follows_the_daemon_incarnation() {
     t.conn(mirror_of(s, 2, Some("c9")));
     assert_eq!(t.st.my_client_id(), Some(&ClientId("c9".into())));
 }
+
+fn inputs_call(r: &[Request]) -> Option<Vec<InputSetup>> {
+    r.iter().find_map(|r| match r {
+        Request::Call {
+            cmd: Command::SessionInputs { inputs },
+            ..
+        } => Some(inputs.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn input_mics_prompt_sets_the_input_setup() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.inputs = vec![InputSetup {
+        channel: 1,
+        mic: Some("M30".into()),
+        mic_curve: false,
+    }];
+    t.conn(mirror(s));
+    let r = t.st.update(Msg::Command(CommandId::InputMics), &t.keys);
+    assert!(r.is_empty());
+    match &t.st.overlay {
+        Overlay::Prompt(p) => {
+            assert_eq!(p.kind, PromptKind::InputMics);
+            assert_eq!(p.text, "2=M30");
+        }
+        o => panic!("{o:?}"),
+    }
+    for _ in 0..3 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text(", 3= ECM 8000 ");
+    let r = t.key("Enter");
+    assert_eq!(
+        inputs_call(&r),
+        Some(vec![
+            InputSetup {
+                channel: 1,
+                mic: None,
+                mic_curve: false,
+            },
+            InputSetup {
+                channel: 2,
+                mic: Some("ECM 8000".into()),
+                mic_curve: true,
+            },
+        ]),
+        "{r:?}"
+    );
+    // Bad text keeps the prompt open with the reason.
+    t.st.update(Msg::Command(CommandId::InputMics), &t.keys);
+    for _ in 0..5 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("M30");
+    let r = t.key("Enter");
+    assert!(inputs_call(&r).is_none());
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
+}
+
+#[test]
+fn mic_curve_toggles_the_selected_measurements_input() {
+    let mut t = T::new();
+    // Main L (transfer): its measurement input is 1 (shown as 2); curve on by default.
+    let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
+    assert_eq!(
+        inputs_call(&r),
+        Some(vec![InputSetup {
+            channel: 1,
+            mic: None,
+            mic_curve: false,
+        }])
+    );
+    assert!(t.last_toast().contains("no mic name"), "{}", t.last_toast());
+    let mut s = daemon_state();
+    s.inputs = vec![InputSetup {
+        channel: 1,
+        mic: Some("M30".into()),
+        mic_curve: false,
+    }];
+    t.conn(mirror(s));
+    let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
+    assert_eq!(
+        inputs_call(&r),
+        Some(vec![InputSetup {
+            channel: 1,
+            mic: Some("M30".into()),
+            mic_curve: true,
+        }])
+    );
+}
+
+#[test]
+fn mic_text_round_trips() {
+    let rows = vec![
+        InputSetup {
+            channel: 0,
+            mic: Some("M30 #1".into()),
+            mic_curve: true,
+        },
+        InputSetup {
+            channel: 3,
+            mic: Some("ECM".into()),
+            mic_curve: false,
+        },
+    ];
+    assert_eq!(mics_text(&rows), "1=M30 #1, 4=ECM");
+    assert_eq!(
+        parse_mics(&mics_text(&rows)),
+        Ok(vec![(0, Some("M30 #1".into())), (3, Some("ECM".into()))])
+    );
+    for bad in ["", "M30", "0=M30", "x=M30", "1=a, 1=b"] {
+        assert!(parse_mics(bad).is_err(), "{bad:?}");
+    }
+}

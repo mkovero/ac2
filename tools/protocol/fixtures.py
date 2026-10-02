@@ -121,6 +121,14 @@ def tf_frame():
     )
 
 
+CAL_AT = 1_789_000_000_000_000_000
+
+INPUTS = [
+    {"channel": 1, "mic": "M30 #1234", "mic_curve": True},
+    {"channel": 2, "mic": None, "mic_curve": False},
+]
+
+
 def frames():
     return {
         "tf": tf_frame(),
@@ -141,7 +149,13 @@ def frames():
             "d/3/rta",
             "rta",
             BAND_GRID,
-            {"fraction": "third", "weighting": "z", "scale": "db_spl"},
+            {
+                "fraction": "third",
+                "weighting": "z",
+                "scale": "db_spl",
+                "cal": {"type": "verified", "calibrated_at": CAL_AT},
+                "mic_curve": True,
+            },
             [
                 (arr("level", "db_spl"), [NAN, 74.5, 61.25]),
                 (arr("validity", "bitmask", "u32"), [INSUFFICIENT_RESOLUTION, 0, 0]),
@@ -151,7 +165,7 @@ def frames():
             "d/5/spec",
             "spec",
             LIN_GRID,
-            {"window": "hann", "scale": "dbfs"},
+            {"window": "hann", "scale": "dbfs", "cal": {"type": "uncalibrated"}, "mic_curve": False},
             [
                 (arr("level", "dbfs"), [-120.0, -20.0, INF, -INF]),
                 (arr("validity", "bitmask", "u32"), [0, 0, 0, 0]),
@@ -172,6 +186,8 @@ def frames():
                 "leq": 92.0,
                 "lpeak": 112.7,
                 "duration": 60.0,
+                "cal": {"type": "other_mic_or_input", "calibrated_at": CAL_AT},
+                "mic_curve": True,
             },
             [],
         ),
@@ -338,6 +354,20 @@ def requests():
                 "content": b"20 -3.0 10\n",
             },
         ),
+        req(
+            31,
+            "cal.mic_curve",
+            {
+                "input": 1,
+                "mic": "M30 #1234",
+                "action": {
+                    "type": "import",
+                    "file_name": "M30-1234.frd",
+                    "content": b"20 -0.5\n20000 1.5\n",
+                },
+            },
+        ),
+        req(42, "session.inputs", {"inputs": INPUTS}),
     ]
 
 
@@ -355,7 +385,7 @@ def events():
                 "value": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"},
             },
         },
-        {"kind": "mic_curve", "rev": 51, "payload": {"type": "deleted", "value": 1}},
+        {"kind": "inputs", "rev": 50, "payload": INPUTS},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},
     ]
 

@@ -13,8 +13,8 @@ use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, CalEntry, DelayFinding, DelayPick, DelayReference, DeviceInfo, EssSpec,
-    ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, ImportRole, Lease, MathOp,
-    MeasConfig, Measurement, MicCurve, MicCurveAction, Session, SessionConfig, SessionFile,
+    ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat, ImportRole, InputSetup,
+    Lease, MathOp, MeasConfig, Measurement, MicCurveAction, Session, SessionConfig, SessionFile,
     SessionRef, SplLog, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
@@ -79,6 +79,12 @@ pub enum Command {
     /// Current session.
     #[serde(rename = "session.status")]
     SessionStatus,
+    /// Set the mic name and mic-curve switch of the listed inputs (others unchanged).
+    #[serde(rename = "session.inputs")]
+    SessionInputs {
+        /// Rows to upsert, one per channel.
+        inputs: Vec<InputSetup>,
+    },
 
     // -- gen (Q6 lease) -----------------------------------------------------------------
     /// Acquire the stimulus lease.
@@ -288,11 +294,13 @@ pub enum Command {
         /// Calibrator frequency.
         calibrator_freq: Hz,
     },
-    /// Assign, bypass or clear an input's mic curve.
+    /// Import or clear the mic curve of the open session's device + `input` + `mic`.
     #[serde(rename = "cal.mic_curve")]
     CalMicCurve {
         /// Input channel.
         input: u16,
+        /// Mic name.
+        mic: String,
         /// Action.
         action: MicCurveAction,
     },
@@ -373,6 +381,7 @@ impl Command {
             Self::SessionOpen { .. } => "session.open",
             Self::SessionClose => "session.close",
             Self::SessionStatus => "session.status",
+            Self::SessionInputs { .. } => "session.inputs",
             Self::GenAcquire { .. } => "gen.acquire",
             Self::GenSet { .. } => "gen.set",
             Self::GenRefresh { .. } => "gen.refresh",
@@ -502,12 +511,12 @@ pub enum ReplyBody {
         /// Content.
         content: Blob,
     },
-    /// `cal.spl`.
+    /// `cal.spl`, `cal.mic_curve` import.
     Calibration(CalEntry),
     /// `cal.list`.
     Calibrations(Vec<CalEntry>),
-    /// `cal.mic_curve`.
-    MicCurve(Option<MicCurve>),
+    /// `session.inputs`: the whole input setup.
+    Inputs(Vec<InputSetup>),
     /// `spl.log_*`.
     SplLog(SplLog),
     /// `state.snapshot`.
@@ -588,6 +597,42 @@ pub enum ErrorDetail {
         /// The one version this build reads.
         supported: u32,
     },
+    /// `invalid` from `cal.mic_curve`: why the file was refused.
+    MicCurveFile {
+        /// 1-based line, where one applies.
+        line: Option<u32>,
+        /// Reason.
+        reason: MicCurveFileReason,
+    },
+    /// `refused`: the calibration store file cannot be read, so it is never written.
+    CalStore {
+        /// File on the daemon host.
+        path: String,
+        /// What is wrong with it.
+        reason: String,
+    },
+}
+
+/// Why a mic-curve file was refused (`docs/design/q7-calibration.md` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MicCurveFileReason {
+    /// Fewer than two data lines.
+    TooFewPoints,
+    /// More than 10 000 data lines.
+    TooManyPoints,
+    /// The gain field is not a number.
+    BadNumber,
+    /// A frequency without a gain.
+    MissingGain,
+    /// Frequency ≤ 0.
+    NonPositiveFrequency,
+    /// NaN or infinite value.
+    NonFinite,
+    /// |gain| > 40 dB.
+    GainOutOfRange,
+    /// Frequencies not strictly ascending.
+    NotAscending,
 }
 
 /// Why `trace.import` refused a file.

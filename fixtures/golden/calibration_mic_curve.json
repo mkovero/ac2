@@ -1,0 +1,104 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "calibration_mic_curve",
+  "description": "Analog mic model sampled at 1/12-octave points (the curve file); exact normalised correction at IEC 1/3-octave centres and its log-f power average over each 1/3-octave band",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_calibration_mic_curve"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "model": "butter(2, 18 Hz, highpass) · RBJ analog peaking (9 kHz, +3 dB, Q 1.2) · 1st-order low-pass 30 kHz",
+    "curve_points": "1000·2^(k/12) Hz within 10 Hz … 25 kHz",
+    "f_norm_hz": 1000.0,
+    "band_average": "−10·lg(mean over ln f of 10^(−c_n/10)), ideal base-10 1/3-oct edges"
+  },
+  "references": [
+    "docs/design/q7-calibration.md §5, §6",
+    "scipy.signal.freqs, scipy.integrate.quad",
+    "IEC 61260-1 base-10 mid-band frequencies"
+  ],
+  "scalars": {
+    "f_norm_hz": 1000.0,
+    "ref_db": 0.021823067157547824
+  },
+  "blob": {
+    "file": "calibration_mic_curve.bin",
+    "nbytes": 2880,
+    "sha256": "e781139d8e0c0238b979846a389562cbf99b6005e292e7f2ca6e1bfb55d781a2"
+  },
+  "arrays": [
+    {
+      "name": "curve_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        135
+      ],
+      "offset": 0,
+      "nbytes": 1080,
+      "unit": "Hz",
+      "description": "curve file frequencies"
+    },
+    {
+      "name": "curve_gain_db",
+      "dtype": "f64",
+      "shape": [
+        135
+      ],
+      "offset": 1080,
+      "nbytes": 1080,
+      "unit": "dB",
+      "description": "mic response at the points",
+      "axis": "curve_freq_hz"
+    },
+    {
+      "name": "test_freq_hz",
+      "dtype": "f64",
+      "shape": [
+        30
+      ],
+      "offset": 2160,
+      "nbytes": 240,
+      "unit": "Hz",
+      "description": "IEC 1/3-octave centres 20 Hz–20 kHz"
+    },
+    {
+      "name": "subtract_db",
+      "dtype": "f64",
+      "shape": [
+        30
+      ],
+      "offset": 2400,
+      "nbytes": 240,
+      "unit": "dB",
+      "description": "exact c_n(f) = G(f) − G(1 kHz): subtracted from displayed magnitude",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.03,
+        "rel": 0.0
+      },
+      "axis": "test_freq_hz"
+    },
+    {
+      "name": "band_subtract_db",
+      "dtype": "f64",
+      "shape": [
+        30
+      ],
+      "offset": 2640,
+      "nbytes": 240,
+      "unit": "dB",
+      "description": "log-f power average of c_n over each ideal 1/3-octave band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.03,
+        "rel": 0.0
+      },
+      "axis": "test_freq_hz"
+    }
+  ]
+}

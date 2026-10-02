@@ -76,6 +76,7 @@ that an estimator is not expected to match exactly).
 | `spectrum_hann_tone_noise` | one 4096-sample frame at 48 kHz: bin-centred 3 kHz sine (peak 0.5) + white noise; periodic Hann; one-sided amplitude spectrum (FS RMS, and dBFS) and PSD (FS²/Hz, and dB) |
 | `transfer_h1_biquad_delay` | white noise through an RBJ peaking biquad + 24-sample delay + uncorrelated noise; scipy Welch `Pxx`, `Pyy`, `Pxy`, H1 and coherence; analytic `h_true` |
 | `weighting_iec61672` | A and C weighting in dB at the exact base-10 one-third-octave frequencies 10 Hz–20 kHz from IEC 61672-1 Annex E, plus the standard's rounded Table 3 values |
+| `calibration_mic_curve` | analog mic model (HP 18 Hz, +3 dB at 9 kHz, LP 30 kHz) at 1/12-octave points; exact correction normalised at 1 kHz at IEC 1/3-octave centres, and its log-f power average per band (`sets/calibration.py`) |
 | `delay_integer_pos_neg` | white-noise reference `x` and `y_pos` / `y_neg` delayed by +137 / −61 samples plus noise; expected lags in `scalars` |
 
 ## Conventions

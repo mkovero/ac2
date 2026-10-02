@@ -111,6 +111,7 @@ fn plan_examples_parse() {
     };
     assert_eq!(a.reference.0.0, 94.0);
     assert_eq!(a.freq, Freq(Hz(1000.0)));
+    assert_eq!(a.mic, None);
 
     ok(&["trace", "capture", "main-l", "--name", "l-pre-eq"]);
     let c = ok(&["trace", "export", "l-pre-eq", "--csv", "out.csv"]);
@@ -229,6 +230,116 @@ fn other_commands_parse() {
 }
 
 #[test]
+fn calibration_and_input_setup_parse() {
+    let c = ok(&[
+        "cal",
+        "mic-curve",
+        "m30.frd",
+        "--input",
+        "3",
+        "--mic",
+        "M30 #1",
+    ]);
+    let Cmd::Cal {
+        cmd: CalCmd::MicCurve(a),
+    } = c.cmd
+    else {
+        panic!("not cal mic-curve");
+    };
+    assert_eq!(a.input, Channel(2));
+    assert_eq!(a.mic.as_deref(), Some("M30 #1"));
+    assert_eq!(a.file.as_deref(), Some(std::path::Path::new("m30.frd")));
+    assert!(!a.clear);
+    let c = ok(&["cal", "mic-curve", "--clear", "--input", "3"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Cal {
+            cmd: CalCmd::MicCurve(CalMicCurve {
+                clear: true,
+                file: None,
+                ..
+            })
+        }
+    ));
+
+    let c = ok(&[
+        "session",
+        "inputs",
+        "--mic",
+        "3=M30",
+        "--mic",
+        "4= ECM 8000 ",
+        "--mic",
+        "5=",
+        "--curve",
+        "3=off",
+        "--curve",
+        "4=ON",
+    ]);
+    let Cmd::Session {
+        cmd: SessionCmd::Inputs(i),
+    } = c.cmd
+    else {
+        panic!("not session inputs");
+    };
+    assert_eq!(
+        i.mics,
+        vec![
+            MicAssign {
+                input: Channel(2),
+                mic: Some("M30".into())
+            },
+            MicAssign {
+                input: Channel(3),
+                mic: Some("ECM 8000".into())
+            },
+            MicAssign {
+                input: Channel(4),
+                mic: None
+            },
+        ]
+    );
+    assert_eq!(
+        i.curves,
+        vec![
+            CurveSwitch {
+                input: Channel(2),
+                on: false
+            },
+            CurveSwitch {
+                input: Channel(3),
+                on: true
+            },
+        ]
+    );
+    let c = ok(&[
+        "session",
+        "open",
+        "--backend",
+        "fake",
+        "--in",
+        "1-4",
+        "--mic",
+        "3=M30",
+        "--mic",
+        "4=ECM",
+    ]);
+    let Cmd::Session {
+        cmd: SessionCmd::Open(o),
+    } = c.cmd
+    else {
+        panic!("not session open");
+    };
+    assert_eq!(o.mics.len(), 2);
+    assert!(matches!(
+        ok(&["session", "inputs"]).cmd,
+        Cmd::Session {
+            cmd: SessionCmd::Inputs(_)
+        }
+    ));
+}
+
+#[test]
 fn refusals() {
     let bad: &[&[&str]] = &[
         // The generator never runs without a typed level.
@@ -269,6 +380,12 @@ fn refusals() {
         &["delay", "find", "x", "--band", "80-800"],
         &["delay", "find", "x", "--observation", "8"],
         &["cal", "spl", "--input", "3", "--ref", "94"],
+        &["cal", "mic-curve", "--input", "3"],
+        &["cal", "mic-curve", "m.frd", "--clear", "--input", "3"],
+        &["cal", "mic-curve", "m.frd"],
+        &["session", "inputs", "--mic", "M30"],
+        &["session", "inputs", "--mic", "0=M30"],
+        &["session", "inputs", "--curve", "3=maybe"],
         &["spl", "watch"],
         &["spl", "watch", "--meas", "a", "--input", "1"],
         &["--timeout", "fast", "devices"],

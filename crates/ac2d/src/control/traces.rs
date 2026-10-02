@@ -110,36 +110,30 @@ impl Control {
         ReplyBody::Trace(meta)
     }
 
-    /// Calibration and mic of `input` on the open session's capture device: the newest
-    /// calibration of that device and channel (and the input's mic curve, unless bypassed).
+    /// Calibration and mic of `input` at capture (`docs/design/q7-calibration.md` §3): the
+    /// input setup's mic name with the curve applied to it, and the sensitivity calibration
+    /// the matching rules pick. A calibration of another mic or input keeps its own key, so
+    /// the trace shows that it was not this mic's.
     fn cal_and_mic(&self, input: u16) -> (CalState, Option<MicState>) {
-        let st = self.store.state();
-        let device = self.session.as_ref().map(|r| r.open.input_device.clone());
-        let cal = st
-            .calibrations
-            .iter()
-            .filter(|c| Some(&c.key.device) == device.as_ref() && c.key.channel == input)
-            .max_by_key(|c| c.calibrated_at);
-        let curve = st
-            .mic_curves
-            .iter()
-            .find(|m| m.input == input && !m.bypassed)
-            .map(|m| m.name.clone());
-        match cal {
-            // The mic is only known through its calibration (decision 7a binds them).
-            None => (CalState::Uncalibrated, None),
-            Some(c) => (
-                CalState::Calibrated {
-                    key: c.key.clone(),
-                    sensitivity: c.sensitivity,
-                    calibrated_at: c.calibrated_at,
-                },
-                Some(MicState {
-                    name: c.key.mic.clone(),
-                    curve,
-                }),
-            ),
-        }
+        let Some(rt) = self.session.as_ref() else {
+            return (CalState::Uncalibrated, None);
+        };
+        let c = self.input_cal(rt, input);
+        let cal = match c.spl_entry {
+            Some((key, s)) => CalState::Calibrated {
+                key,
+                sensitivity: s.sensitivity,
+                calibrated_at: s.calibrated_at,
+            },
+            None => CalState::Uncalibrated,
+        };
+        let mic = crate::calstore::input_setup(&self.store.state().inputs, input)
+            .mic
+            .map(|name| MicState {
+                name,
+                curve: c.curve_name,
+            });
+        (cal, mic)
     }
 
     pub(super) fn trace_capture(

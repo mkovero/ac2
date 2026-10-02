@@ -173,6 +173,15 @@ async fn live(
     result
 }
 
+/// This machine's wall clock, Unix ns.
+fn now_wall() -> ac2_proto::units::WallNs {
+    ac2_proto::units::WallNs(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)),
+    )
+}
+
 fn age_text(age: Option<f64>, stale: bool) -> String {
     let a = age.map_or_else(|| format::NO_VALUE.to_owned(), format::age);
     if stale { format!("{a} STALE") } else { a }
@@ -194,12 +203,25 @@ pub async fn spl(c: &Client, meas: MeasId, out: &mut Out<'_>) -> Result<(), CliE
         meas,
         stream: Stream::Spl,
     };
-    live(c, out, &[Subscription::Topic(topic)], |_, latest| {
+    live(c, out, &[Subscription::Topic(topic)], |view, latest| {
         let mut lines = Vec::new();
         if !latest.responding {
             lines.push(NOT_RESPONDING.to_owned());
         }
         let key = now_secs_key(latest, &topic);
+        // The input's mic name, from the mirrored measurement and input setup.
+        let mic = view.state.as_ref().and_then(|s| {
+            let input = s.measurements.iter().find(|m| m.id == meas).and_then(|m| {
+                match &m.config.kind {
+                    MeasKind::Spl { config } => Some(config.input),
+                    _ => None,
+                }
+            })?;
+            s.inputs
+                .iter()
+                .find(|i| i.channel == input)
+                .and_then(|i| i.mic.clone())
+        });
         let Some(tf) = latest.get(&topic) else {
             lines.push(format!("waiting for {topic} …"));
             return View {
@@ -235,6 +257,15 @@ pub async fn spl(c: &Client, meas: MeasId, out: &mut Out<'_>) -> Result<(), CliE
             format::duration(m.duration.0),
             age_text(tf.age, tf.stale)
         ));
+        let offset = view.clock_offset_ns.map_or(0, |o| {
+            o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+        });
+        let cal = output::cal_status(m.cal, m.mic_curve, now_wall(), offset);
+        let cal = match &mic {
+            Some(name) => format!("{name} · {cal}"),
+            None => cal,
+        };
+        lines.push(cal.clone());
         View {
             lines,
             json: json!({
@@ -244,6 +275,8 @@ pub async fn spl(c: &Client, meas: MeasId, out: &mut Out<'_>) -> Result<(), CliE
                 "stale": tf.stale,
                 "responding": latest.responding,
                 "spl": m,
+                "mic": mic,
+                "cal_text": cal,
             }),
             key,
         }

@@ -124,6 +124,24 @@ fn protocol_doc_names_everything() {
     );
     check("unit", &names_of::<Unit, _>(&"no_such"), &doc, &mut missing);
     check(
+        "cal status",
+        &names_of::<model::CalStatus, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "mic-curve action",
+        &names_of::<model::MicCurveAction, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "mic-curve file reason",
+        &names_of::<ac2_proto::MicCurveFileReason, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
         "finder band",
         &names_of::<model::FinderBand, _>(&Tagged { t: "no_such" }),
         &doc,

@@ -108,7 +108,11 @@ pub fn start_embedded(backend: EmbeddedBackend) -> Result<Embedded, EmbeddedErro
     let audio = ac2d::backend(choice).map_err(EmbeddedError::Backend)?;
     let (listen, dir) = listen();
     // The same global maximum as a stand-alone `ac2d` without `--max-level`.
-    let handle = Daemon::start(DaemonConfig::new(audio, listen, -10.0)).map_err(|e| {
+    let mut config = DaemonConfig::new(audio, listen, -10.0);
+    // Calibrations of real devices persist in the same store a stand-alone `ac2d` uses; a
+    // simulated rig's stay in memory.
+    config.cal_store = (backend != EmbeddedBackend::Fake).then(ac2d::default_cal_store);
+    let handle = Daemon::start(config).map_err(|e| {
         if let Some(d) = &dir {
             let _ = std::fs::remove_dir_all(d);
         }

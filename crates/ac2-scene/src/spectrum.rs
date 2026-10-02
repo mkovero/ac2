@@ -5,7 +5,7 @@
 //! the two are never read against each other by mistake.
 
 use ac2_proto::frame::{RtaFrame, SpecFrame, ValidityMask};
-use ac2_proto::model::{BandFraction, LevelScale, Weighting, Window};
+use ac2_proto::model::{BandFraction, CalStatus, LevelScale, Weighting, Window};
 
 use crate::axis::{self, Axis};
 use crate::banner::{BannerRow, Status};
@@ -30,6 +30,19 @@ pub enum Quantity {
 }
 
 /// Axis unit: `dBFS (tone)`, `dBFS (band)`, `dB SPL (tone)`, `dB SPL (band)`.
+/// Caption suffix for a calibrated trace: the mismatch warning of decision 7b (the age is the
+/// SPL readout's) and whether the mic curve was subtracted.
+pub fn cal_caption(cal: CalStatus, mic_curve: bool) -> String {
+    let mut s = String::new();
+    if matches!(cal, CalStatus::OtherMicOrInput { .. }) {
+        s.push_str(" · cal from other mic / input");
+    }
+    if mic_curve {
+        s.push_str(" · mic curve");
+    }
+    s
+}
+
 pub fn level_unit(scale: LevelScale, q: Quantity) -> &'static str {
     match (scale, q) {
         (LevelScale::Dbfs, Quantity::Tone) => "dBFS (tone)",
@@ -110,9 +123,10 @@ impl<'a> SpectrumTrace<'a> {
             scale: frame.meta.scale,
             quantity: Quantity::Band,
             caption: format!(
-                "{} · {}",
+                "{} · {}{}",
                 fraction_label(frame.meta.fraction),
-                weighting_label(frame.meta.weighting)
+                weighting_label(frame.meta.weighting),
+                cal_caption(frame.meta.cal, frame.meta.mic_curve)
             ),
             freshness: Some(freshness),
         }
@@ -137,7 +151,11 @@ impl<'a> SpectrumTrace<'a> {
             peak: None,
             scale: frame.meta.scale,
             quantity: Quantity::Tone,
-            caption: window_label(frame.meta.window).to_string(),
+            caption: format!(
+                "{}{}",
+                window_label(frame.meta.window),
+                cal_caption(frame.meta.cal, frame.meta.mic_curve)
+            ),
             freshness: Some(freshness),
         }
     }
@@ -500,6 +518,21 @@ mod tests {
             ),
             freshness: None,
         }
+    }
+
+    #[test]
+    fn calibration_captions() {
+        use ac2_proto::units::WallNs;
+        assert_eq!(cal_caption(CalStatus::Uncalibrated, false), "");
+        let at = WallNs(1);
+        assert_eq!(
+            cal_caption(CalStatus::Verified { calibrated_at: at }, true),
+            " · mic curve"
+        );
+        assert_eq!(
+            cal_caption(CalStatus::OtherMicOrInput { calibrated_at: at }, true),
+            " · cal from other mic / input · mic curve"
+        );
     }
 
     #[test]

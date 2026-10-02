@@ -25,7 +25,12 @@
     "lmin": 40.2,
     "leq": 92.0,
     "lpeak": 112.7,
-    "duration": 60.0
+    "duration": 60.0,
+    "cal": {
+     "type": "other_mic_or_input",
+     "calibrated_at": 1789000000000000000
+    },
+    "mic_curve": true
    }
   }
  },

@@ -72,6 +72,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `session.open` | `config: SessionConfig` | `session` | |
 | `session.close` | — | `ack` | |
 | `session.status` | — | `session` | |
+| `session.inputs` | `inputs: [InputSetup]` (upserted by channel) | `inputs` (the whole setup) | |
 | `gen.acquire` | `force: bool` | `lease` (`lease_token`, `expires_in_ms`) | |
 | `gen.set` | `lease_token`, `desired: {settings, armed, firing}` | `generator` | L |
 | `gen.refresh` | `lease_token` | `lease` | L |
@@ -98,7 +99,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| auto`, `role: trace \| target`, `content: bin` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
-| `cal.mic_curve` | `input`, `action: assign{name, provenance, points} \| bypass{bypassed} \| clear` | `mic_curve` | |
+| `cal.mic_curve` | `input`, `mic`, `action: import{file_name, content: bin} \| clear` | `calibration` (`import`), `ack` (`clear`) | |
 | `cal.list` | — | `calibrations` | |
 | `spl.log_start` | `meas`, `interval: Seconds` | `spl_log` | |
 | `spl.log_stop` | `meas` | `spl_log` | |
@@ -170,9 +171,10 @@ edits and are never applied to the data.
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
   `epoch`, `at_sample`}, `delay` (the delay the DSP used), `smoothing`, `depth` (transfer),
-  `cal` (spectrum / RTA: the newest calibration of the input on the open device; transfer
-  functions are ratios and always `uncalibrated`), `mic` (from that calibration and the
-  input's mic curve), `created_at`.
+  `cal` (spectrum / RTA: the calibration the measurement used, picked by the calibration
+  matching rules below — its `key` names another mic or input when it was not this mic's;
+  transfer functions are ratios and always `uncalibrated`), `mic` (the input setup's mic
+  name and the mic curve applied, nil without a mic name), `created_at`.
 - **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
@@ -223,6 +225,42 @@ directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or 
   `not_found`; `invalid` (not a session, bad name, damaged files); `unsupported` with
   `detail: {type: session_version, found, supported}` for another format version.
 - `file.list`: the sessions in the session directory, by name.
+#### Calibration (`cal.*`, `session.inputs`)
+
+Design: `docs/design/q7-calibration.md`. A calibration entry is keyed by the open session's
+capture device, the input channel and the mic name (`CalKey`), so `cal.spl` and
+`cal.mic_curve` need an open session.
+
+- `cal.spl` reads the input's broadband RMS (uncorrected, τ = 1 s) and stores `spl: SplCal`
+  {`sensitivity`: Db (dB SPL of 0 dBFS), `calibrator_level`, `calibrator_freq`,
+  `measured`: Dbfs, `calibrated_at`} on the entry, keeping its mic curve. It is `refused`
+  below −80 dBFS and while the level is not steady (0.2 s and 1 s readings differ by more
+  than 0.05 dB).
+- `cal.mic_curve` `import` parses a magnitude file (frequency, gain dB, further columns
+  ignored; text lines skipped; whitespace / comma or semicolon + decimal-comma separated)
+  and stores `mic_curve: MicCurveRef` {`name`, `file_name`, `content_hash` (FNV-1a 64 hex),
+  `points`, `f_lo`, `f_hi`, `imported_at`} on the entry; the points stay in the daemon. A
+  refused file is `invalid` with `detail: {type: mic_curve_file, line: u32 | nil, reason}`,
+  `reason` one of `too_few_points`, `too_many_points`, `bad_number`, `missing_gain`,
+  `non_positive_frequency`, `non_finite`, `gain_out_of_range` (|gain| > 40 dB),
+  `not_ascending`. `clear` removes the curve; an entry holding neither a calibration nor a
+  curve is deleted.
+- Both set the input's mic name to `mic` (the name is typed once, at calibration time).
+- `InputSetup` = {`channel`, `mic`: string | nil, `mic_curve`: bool (on/off of the curve,
+  decision 7c)}. Mic names are 1–64 characters.
+- When the daemon's calibration store file cannot be read it is never written: `cal.spl`,
+  `cal.mic_curve`, `cal.list` and `session.inputs` are `refused` with `detail: {type:
+  cal_store, path, reason}`.
+
+Which calibration a measurement uses (shown as `CalStatus` in `spl`, `rta` and `spec`
+frames): the entry of device + input + the input's mic → `verified`; else the newest one
+on the same device + input (another mic, or no mic name set), else the newest one for the
+same mic elsewhere → `other_mic_or_input`; else `uncalibrated` (dBFS). `CalStatus` is
+tagged by `type`: `uncalibrated` | `verified` {`calibrated_at`} | `other_mic_or_input`
+{`calibrated_at`}; the age is `capture_wall_ns − calibrated_at`. The mic curve follows the
+mic name (that entry's curve, else the newest curve for the same mic) and applies while
+the input's `mic_curve` is on; it is normalised to 0 dB at the calibrator frequency in use
+(1 kHz uncalibrated).
 
 #### Averaging depth
 
@@ -234,8 +272,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `devices`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `mic_curve` (value or nil after `clear`),
-`spl_log`, `snapshot`, `events`, `grid`, `session_file`, `sessions`.
+`export`, `calibration`, `calibrations`, `inputs`, `spl_log`, `snapshot`, `events`,
+`grid`, `session_file`, `sessions`.
 
 ### 3.4 Errors
 
@@ -245,7 +283,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 `detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
 `version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),
-`session_version` {found, supported} (§3.2 sessions).
+`session_version` {found, supported} (§3.2 sessions), `mic_curve_file` {line, reason} and
+`cal_store` {path, reason} (§3.2 calibration).
 
 ## 4. State and events
 
@@ -257,8 +296,8 @@ The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
 polarity, delay_nudge, slot}, `kind`, `source` {captured | imported | average | math |
 ir_capture}, `grid_id`, `delay`, `smoothing`, `depth`, `cal`, `mic`, `created_at`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
-`key` {device, channel, mic}, `sensitivity`, `calibrator_level`, `calibrator_freq`,
-`measured`, `calibrated_at`), `mic_curves`, `spl_logs`, `timing` (`TimingStatus`: `epoch`,
+`key` {device, channel, mic}, `spl`: SplCal | nil, `mic_curve`: MicCurveRef | nil),
+`inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
 `drift`, `internal_reference`).
 
@@ -267,9 +306,9 @@ ir_capture}, `grid_id`, `delay`, `smoothing`, `depth`, `cal`, `mic`, `created_at
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `mic_curve`, `spl_log`, `timing`. `payload` is the entity's
-full new value; for keyed entities (`measurement`, `trace`, `calibration`, `mic_curve`,
-`spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
+`generator`, `calibration`, `inputs`, `spl_log`, `timing`. `payload` is the entity's
+full new value (`inputs`: the whole list); for keyed entities (`measurement`, `trace`,
+`calibration`, `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB.
 
@@ -343,12 +382,17 @@ bitmask array says why.
 |---|---|---|
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `eff_avg`: count (optional — presence = listed), `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve` |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
-| `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale` |
-| `spec` | `level`: dbfs or db_spl (tone level), `validity`: bitmask | `window`, `scale` |
-| `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration` |
+| `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
+| `spec` | `level`: dbfs or db_spl (tone level), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve` |
+| `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
 | `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing} |
+
+`cal` is a `CalStatus` (§3.2, calibration); `mic_curve` says the mic curve was applied:
+subtracted from `mag` (tf, measurement input only; phase untouched) or `level` (spec per
+bin, rta per band as a log-frequency power average), or, for `spl`, run as a minimum-phase
+filter before frequency weighting — never on `lpeak`, which stays uncorrected.
 
 The unit of `level` must match `meta.scale`. A required array missing, an array listed
 twice or one that does not belong to the kind refuses the frame.

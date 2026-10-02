@@ -15,8 +15,8 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
-    BandFraction, LevelScale, PeakWeighting, Smoothing, TimeWeighting, TimingState, TimingStatus,
-    Weighting, Window,
+    BandFraction, CalStatus, LevelScale, PeakWeighting, Smoothing, TimeWeighting, TimingState,
+    TimingStatus, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -255,6 +255,10 @@ pub struct RtaMeta {
     pub weighting: Weighting,
     /// Unit of `level` (band power).
     pub scale: LevelScale,
+    /// Calibration applied (`uncalibrated` with dBFS).
+    pub cal: CalStatus,
+    /// A mic curve was subtracted from `level`.
+    pub mic_curve: bool,
 }
 
 /// Spectrum metadata.
@@ -265,6 +269,10 @@ pub struct SpecMeta {
     pub window: Window,
     /// Unit of `level` (tone level per bin, decision 4b).
     pub scale: LevelScale,
+    /// Calibration applied (`uncalibrated` with dBFS).
+    pub cal: CalStatus,
+    /// A mic curve was subtracted from `level`.
+    pub mic_curve: bool,
 }
 
 /// SPL meter readings; values in `scale`.
@@ -291,6 +299,10 @@ pub struct SplMeta {
     pub lpeak: f64,
     /// Interval length.
     pub duration: Seconds,
+    /// Calibration applied (`uncalibrated` with dBFS).
+    pub cal: CalStatus,
+    /// The mic-curve correction filter ran before frequency weighting (never on `lpeak`).
+    pub mic_curve: bool,
 }
 
 /// Input meters metadata.

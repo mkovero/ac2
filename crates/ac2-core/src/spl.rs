@@ -14,9 +14,12 @@
 //!       └── C/Z (uncorrected) ── |x| max ── Lpeak
 //! ```
 //!
-//! The mic-curve correction filter is not part of this module yet; see
-//! [`SplMeter::process`] for where it belongs.
+//! The mic-curve correction is a minimum-phase FIR ([`crate::mic_curve`]) normalised to
+//! 0 dB at the calibrator frequency. Lpeak stays on the uncorrected samples (§5.3): the
+//! corrected path lags by one convolution partition and carries the curve's HF boost,
+//! which would change a crest-factor reading without a standard tolerance to judge it by.
 
+use crate::mic_curve::PartitionedFir;
 use crate::spectrum::power_dbfs;
 use crate::weighting::{Weighting, WeightingError, WeightingFilter};
 
@@ -342,6 +345,8 @@ pub struct SplMeter {
     min_ms: f64,
     settle_left: u64,
     settle_samples: u64,
+    correction: Option<PartitionedFir>,
+    corrected: Vec<f64>,
 }
 
 impl SplMeter {
@@ -364,8 +369,29 @@ impl SplMeter {
             min_ms: f64::INFINITY,
             settle_left: settle_samples,
             settle_samples,
+            correction: None,
+            corrected: Vec::new(),
             cfg,
         })
+    }
+
+    /// Runs the time-weighted, Lmax/Lmin and Leq paths through `taps` (a mic-curve
+    /// correction from [`crate::mic_curve::Correction::design_fir`]) before frequency
+    /// weighting; `None` removes it. Filter state starts silent; the interval continues.
+    pub fn set_correction(&mut self, taps: Option<&[f64]>) {
+        let part = crate::mic_curve::fir_partition(self.cfg.fs);
+        self.correction = taps.map(|h| PartitionedFir::new(h, part));
+        let lat = self.correction.as_ref().map_or(0, PartitionedFir::latency);
+        self.corrected = vec![0.0; lat];
+        // The corrected path starts one partition late: Lmin waits for it too.
+        let base = (5.0 * self.cfg.time_weighting.rise_s() * self.cfg.fs).ceil() as u64;
+        self.settle_samples = base + lat as u64;
+        self.settle_left = self.settle_left.max(self.settle_samples);
+    }
+
+    /// Whether a mic-curve correction filter is in the path.
+    pub fn has_correction(&self) -> bool {
+        self.correction.is_some()
     }
 
     /// Configuration.
@@ -375,23 +401,40 @@ impl SplMeter {
 
     /// Processes raw input samples (FS). Does not allocate.
     ///
-    /// Mic-curve hook (PLAN.md §5.7, phase 5): a per-input magnitude correction filter,
-    /// normalised at the calibrator frequency, goes on `x` immediately before
+    /// The mic-curve correction (PLAN.md §5.7), when set, goes on `x` immediately before
     /// `self.weight` — so it feeds the time-weighted, Lmax/Lmin and Leq paths — and never
-    /// before `self.peak_weight`, whose LCpeak stays on the uncorrected samples unless the
-    /// correction filter's latency and pre-ringing are characterised (§5.3).
+    /// before `self.peak_weight`: LCpeak stays on the uncorrected samples (§5.3).
     pub fn process(&mut self, block: &[f64]) {
-        for &x in block {
-            let y = self.weight.process_sample(x);
-            let ms = self.detector.push(y);
-            self.leq.push_sample(y);
-            self.peak.push(self.peak_weight.process_sample(x));
-            self.max_ms = self.max_ms.max(ms);
-            if self.settle_left > 0 {
-                self.settle_left -= 1;
-            } else {
-                self.min_ms = self.min_ms.min(ms);
+        let Some(mut fir) = self.correction.take() else {
+            for &x in block {
+                self.step(x, x);
             }
+            return;
+        };
+        let mut corrected = std::mem::take(&mut self.corrected);
+        for chunk in block.chunks(corrected.len().max(1)) {
+            let c = &mut corrected[..chunk.len()];
+            fir.process(chunk, c);
+            for (&x, &xc) in chunk.iter().zip(c.iter()) {
+                self.step(x, xc);
+            }
+        }
+        self.corrected = corrected;
+        self.correction = Some(fir);
+    }
+
+    /// One sample: `x` raw (peak path), `xc` mic-corrected (everything else).
+    #[inline]
+    fn step(&mut self, x: f64, xc: f64) {
+        let y = self.weight.process_sample(xc);
+        let ms = self.detector.push(y);
+        self.leq.push_sample(y);
+        self.peak.push(self.peak_weight.process_sample(x));
+        self.max_ms = self.max_ms.max(ms);
+        if self.settle_left > 0 {
+            self.settle_left -= 1;
+        } else {
+            self.min_ms = self.min_ms.min(ms);
         }
     }
 
@@ -430,6 +473,9 @@ impl SplMeter {
     pub fn reset(&mut self) {
         self.weight.reset();
         self.peak_weight.reset();
+        if let Some(c) = &mut self.correction {
+            c.reset();
+        }
         self.detector.reset();
         self.reset_interval();
         self.max_ms = 0.0;
@@ -751,6 +797,101 @@ mod tests {
         assert_eq!(spl.scale, LevelScale::DbSpl);
         assert!((spl.leq - 94.0).abs() < 1e-12);
         assert!((spl.level - 94.0).abs() < 0.01);
+    }
+
+    /// A smooth mic model: 2nd-order Butterworth roll-off at 30 Hz and a first-order
+    /// shelf rising towards +6 dB above 8 kHz, sampled at 1/6-octave points.
+    fn mic_model_db(f: f64) -> f64 {
+        let hp = 10.0 * (f.powi(4) / (f.powi(4) + 30f64.powi(4))).log10();
+        let shelf =
+            10.0 * ((1.0 + (f / 4000.0).powi(2) * 4.0) / (1.0 + (f / 4000.0).powi(2))).log10();
+        hp + shelf
+    }
+
+    fn mic_curve() -> crate::mic_curve::Correction {
+        use crate::mic_curve::MicCurve;
+        let pts: Vec<(f64, f64)> = (-36..=26)
+            .map(|k| 1000.0 * 2f64.powf(f64::from(k) / 6.0))
+            .map(|f| (f, mic_model_db(f)))
+            .collect();
+        MicCurve::from_points(&pts)
+            .expect("curve")
+            .normalised(1000.0)
+    }
+
+    fn mic_correction(fs: f64) -> Vec<f64> {
+        mic_curve().design_fir(fs)
+    }
+
+    /// The calibrator frequency reads the same with and without the curve (nothing counts
+    /// twice); elsewhere a tone reads its level minus the curve; Lpeak is untouched.
+    #[test]
+    fn mic_correction_levels() {
+        for fs in RATES {
+            let h = mic_correction(fs);
+            let c = mic_curve();
+            for f in [1000.0, 8000.0, 31.5, 63.0, 12_500.0] {
+                let curve_db = c.db(f);
+                let amp = 0.25;
+                // One continuous tone: a phase jump between the intervals would ring the LF boost.
+                let x = sine(f, amp, fs, (fs * 6.0) as usize);
+                let (x1, x2) = x.split_at(x.len() / 2);
+                let mut plain = meter(fs, Weighting::Z, TimeWeighting::Slow, PeakWeighting::Z);
+                let mut corr = meter(fs, Weighting::Z, TimeWeighting::Slow, PeakWeighting::Z);
+                corr.set_correction(Some(&h));
+                assert!(corr.has_correction() && !plain.has_correction());
+                for m in [&mut plain, &mut corr] {
+                    m.process(x1);
+                    m.reset_interval();
+                    m.process(x2);
+                }
+                let (p, cl) = (plain.levels(), corr.levels());
+                let err = cl.leq - (p.leq - curve_db);
+                eprintln!("{fs} Hz, tone {f} Hz: corrected − expected = {err:+.4} dB");
+                assert!(err.abs() < 0.02, "{fs} {f}: {err}");
+                assert_eq!(cl.lpeak, p.lpeak, "Lpeak must stay on the raw path");
+            }
+        }
+    }
+
+    /// Toneburst responses relative to the steady level are unchanged by a correction in
+    /// the path (minimum phase: no pre-ringing, the filter's energy sits at its start).
+    #[test]
+    fn mic_correction_keeps_toneburst_response() {
+        let fs = 48_000.0;
+        let h = mic_correction(fs);
+        let amp = 0.5;
+        let steady = |corrected: bool| {
+            let mut m = meter(fs, Weighting::A, TimeWeighting::Fast, PeakWeighting::Z);
+            if corrected {
+                m.set_correction(Some(&h));
+            }
+            m.process(&sine(4000.0, amp, fs, fs as usize));
+            m.reset_interval();
+            m.process(&sine(4000.0, amp, fs, fs as usize));
+            m.levels().leq
+        };
+        let (s_corr, s_plain) = (steady(true), steady(false));
+        for tw in [
+            TimeWeighting::Fast,
+            TimeWeighting::Slow,
+            TimeWeighting::Impulse,
+        ] {
+            for tb_ms in [1000.0, 200.0, 50.0, 10.0, 2.0] {
+                let x = burst(fs, amp, 0.01, tb_ms * 1e-3, 5.0 * tw.fall_s());
+                let mut m = meter(fs, Weighting::A, tw, PeakWeighting::Z);
+                m.set_correction(Some(&h));
+                m.process(&x);
+                let mut r = meter(fs, Weighting::A, tw, PeakWeighting::Z);
+                r.process(&x);
+                let d = (m.levels().lmax - s_corr) - (r.levels().lmax - s_plain);
+                // A 2 ms burst spreads ±500 Hz around 4 kHz, where the curve slopes, so it
+                // is corrected slightly differently from the steady tone; the class 1
+                // tolerance there is +1/−1.5 dB.
+                let tol = if tb_ms < 5.0 { 0.1 } else { 0.02 };
+                assert!(d.abs() < tol, "{tw:?} Tb={tb_ms}: {d}");
+            }
+        }
     }
 
     #[test]

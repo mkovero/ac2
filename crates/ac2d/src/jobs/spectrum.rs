@@ -1,4 +1,5 @@
-//! Narrowband spectrum job: tone level per FFT bin (`spec` frames) and input meters.
+//! Narrowband spectrum job: tone level per FFT bin (`spec` frames) and input meters. A
+//! calibrated input reads dB SPL; its mic curve, when on, is subtracted per bin.
 
 use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig};
 use ac2_proto::frame::{FrameData, ProtectionFlags, SpecFrame, SpecMeta, ValidityMask};
@@ -7,6 +8,7 @@ use ac2_proto::model::{LevelScale, SpectrumConfig as WireConfig};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
 use super::{Analysis, Emitter, JobCmd, LevelsMeter, StampArgs, channel_f64};
+use crate::calstore::InputCal;
 use crate::conv;
 use crate::fanout::Block;
 
@@ -16,8 +18,9 @@ pub(crate) struct Spectrum {
     idx: usize,
     analyzer: SpectrumAnalyzer,
     grid_id: GridId,
-    /// dB SPL of 0 dBFS when the input is calibrated.
-    sensitivity: Option<f64>,
+    cal: InputCal,
+    /// Mic-curve correction per bin (dB subtracted).
+    corr: Option<Vec<f64>>,
     frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
@@ -41,7 +44,7 @@ impl Spectrum {
         cfg: WireConfig,
         sample_rate: u32,
         idx: usize,
-        sensitivity: Option<f64>,
+        cal: InputCal,
         frozen: bool,
         config_rev: Rev,
     ) -> Result<Self, String> {
@@ -62,14 +65,31 @@ impl Spectrum {
             cfg,
             idx,
             analyzer,
-            sensitivity,
+            corr: None,
+            cal: InputCal::none(),
             frozen,
             config_rev,
             applied_at: None,
             buf: Vec::new(),
             end: None,
             wall: 0,
-        })
+        }
+        .with_cal(cal))
+    }
+
+    fn with_cal(mut self, cal: InputCal) -> Self {
+        self.set_cal(cal);
+        self
+    }
+
+    fn set_cal(&mut self, cal: InputCal) {
+        let n = self.cfg.fft_len as usize;
+        let df = self.analyzer.config().fs / n as f64;
+        self.corr = cal
+            .correction
+            .as_ref()
+            .map(|c| (0..=n / 2).map(|k| c.db(k as f64 * df)).collect());
+        self.cal = cal;
     }
 }
 
@@ -94,6 +114,7 @@ impl Analysis for Spectrum {
         match c {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.analyzer.reset_average(),
+            JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::SetDelay { .. } | JobCmd::Find { .. } | JobCmd::Track { .. } => {}
         }
     }
@@ -115,11 +136,13 @@ impl Analysis for Spectrum {
             },
         };
         if let Some(ps) = self.analyzer.average() {
-            let off = self.sensitivity.unwrap_or(0.0);
+            let off = self.cal.sensitivity.unwrap_or(0.0);
+            let corr = self.corr.as_deref();
             let mut validity = Vec::with_capacity(ps.bins());
             let level: Vec<f32> = (0..ps.bins())
                 .map(|k| {
-                    let v = ps.amplitude_dbfs(k) + off;
+                    let c = corr.and_then(|c| c.get(k)).copied().unwrap_or(0.0);
+                    let v = ps.amplitude_dbfs(k) + off - c;
                     validity.push(if v.is_finite() {
                         ValidityMask::NONE
                     } else {
@@ -134,11 +157,13 @@ impl Analysis for Spectrum {
                     meas: self.meas,
                     meta: SpecMeta {
                         window: self.cfg.window,
-                        scale: if self.sensitivity.is_some() {
+                        scale: if self.cal.sensitivity.is_some() {
                             LevelScale::DbSpl
                         } else {
                             LevelScale::Dbfs
                         },
+                        cal: self.cal.status,
+                        mic_curve: self.corr.is_some(),
                     },
                     level,
                     validity,

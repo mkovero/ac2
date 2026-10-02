@@ -326,24 +326,17 @@ pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Spl
                 o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
             }),
     );
-    // The daemon applies the calibration of this device + input; the mic name is not in the
-    // meter config, so the entry for the input is shown with its own key, and a different
-    // device or channel reads as "cal from other mic / input".
-    let device = daemon.session.open.as_ref().map(|o| o.input_device.clone());
-    let entry = daemon
-        .calibrations
+    // The daemon decided which calibration applies (verified / other mic or input) and
+    // whether the mic curve ran; the readout names the input's mic next to it.
+    let cal = cal_text(f.meta.cal, f.meta.mic_curve, now.wall, offset);
+    let cal = match daemon
+        .inputs
         .iter()
-        .find(|e| Some(&e.key.device) == device.as_ref() && e.key.channel == config.input);
-    let cal = match (f.meta.scale, entry) {
-        (LevelScale::DbSpl, Some(e)) => cal_text(f.meta.scale, &e.key, Some(e), now.wall, offset),
-        (scale, _) => {
-            let key = ac2_proto::model::CalKey {
-                device: device.unwrap_or_else(|| ac2_proto::model::DeviceId(String::new())),
-                channel: config.input,
-                mic: String::new(),
-            };
-            cal_text(scale, &key, None, now.wall, offset)
-        }
+        .find(|i| i.channel == config.input)
+        .and_then(|i| i.mic.as_deref())
+    {
+        Some(mic) => format!("{mic} · {cal}"),
+        None => cal,
     };
     let r = spl_readout(f, cal, Some(freshness(tf)));
     let status = status(st, &[tf], None, now);

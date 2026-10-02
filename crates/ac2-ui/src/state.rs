@@ -16,8 +16,8 @@ use ac2_proto::Command;
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     AverageMethod, DelayFinding, DelayOutcome, DelayPick, DelayReference, GeneratorDesired,
-    GeneratorSettings, ImportRole, MathOp, MeasKind, Measurement, SessionRef, Signal, State,
-    TraceData, TraceKind, TraceMeta,
+    GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind, Measurement, SessionRef, Signal,
+    State, TraceData, TraceKind, TraceMeta,
 };
 use ac2_proto::units::{ClientId, Dbfs, MeasId, Seconds, TraceId};
 use ac2_scene::spectrum::PeakHold;
@@ -220,6 +220,7 @@ pub enum PromptKind {
     ImportFile(ImportRole),
     SessionSave,
     SessionLoad,
+    InputMics,
 }
 
 impl PromptKind {
@@ -233,6 +234,7 @@ impl PromptKind {
             PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
             PromptKind::SessionSave => "Save session as (name or path)",
             PromptKind::SessionLoad => "Load session, disarmed (name or path)",
+            PromptKind::InputMics => "Mic per input (1-based, e.g. 3=M30, 4=ECM; 3= clears)",
         }
     }
 }
@@ -708,6 +710,20 @@ impl AppState {
                     out.push(Request::Call { cmd, what });
                 })
             }
+            PromptKind::InputMics => parse_mics(&text).map(|mics| {
+                let inputs: Vec<InputSetup> = mics
+                    .into_iter()
+                    .map(|(channel, mic)| {
+                        let mut row = self.input_setup(channel);
+                        row.mic = mic;
+                        row
+                    })
+                    .collect();
+                out.push(Request::Call {
+                    what: format!("input setup ({})", mics_text(&inputs)),
+                    cmd: Command::SessionInputs { inputs },
+                });
+            }),
             PromptKind::Delay(id) => parse_number(&text, &["ms"]).and_then(|v| {
                 if !(0.0..=10_000.0).contains(&v) {
                     return Err("delay must be 0 … 10000 ms".to_string());
@@ -817,6 +833,17 @@ impl AppState {
                 None
             }
         }
+    }
+
+    /// The daemon's input setup row of `channel` (default: no mic name, curve on).
+    fn input_setup(&self, channel: u16) -> InputSetup {
+        self.daemon()
+            .and_then(|s| s.inputs.iter().find(|i| i.channel == channel).cloned())
+            .unwrap_or(InputSetup {
+                channel,
+                mic: None,
+                mic_curve: true,
+            })
     }
 
     fn need_tf(&mut self) -> Option<Measurement> {
@@ -1035,6 +1062,49 @@ impl AppState {
             C::SessionSave => self.prompt(PromptKind::SessionSave, String::new()),
             C::SessionLoad => self.prompt(PromptKind::SessionLoad, String::new()),
             C::Reconnect => out.push(Request::Reconnect),
+            C::InputMics => {
+                let rows: Vec<InputSetup> = self
+                    .daemon()
+                    .map(|s| {
+                        s.inputs
+                            .iter()
+                            .filter(|i| i.mic.is_some())
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                self.prompt(PromptKind::InputMics, mics_text(&rows));
+            }
+            C::MicCurve => {
+                if let Some(m) = self.need_meas(
+                    &[|k| {
+                        matches!(
+                            k,
+                            MeasKind::Transfer { .. }
+                                | MeasKind::Spectrum { .. }
+                                | MeasKind::Rta { .. }
+                                | MeasKind::Spl { .. }
+                        )
+                    }],
+                    "transfer, spectrum, RTA or SPL",
+                ) {
+                    let input = meas_input(&m.config.kind);
+                    let mut row = self.input_setup(input);
+                    row.mic_curve = !row.mic_curve;
+                    let what = format!(
+                        "mic curve {} on input {}",
+                        if row.mic_curve { "on" } else { "off" },
+                        u32::from(input) + 1
+                    );
+                    if row.mic.is_none() {
+                        self.toast(format!(
+                            "input {} has no mic name: a curve applies once one is set",
+                            u32::from(input) + 1
+                        ));
+                    }
+                    self.call(out, Command::SessionInputs { inputs: vec![row] }, what);
+                }
+            }
 
             C::Freeze => {
                 if let Some(m) = self.need_meas(
@@ -1539,6 +1609,61 @@ pub fn parse_number(text: &str, units: &[&str]) -> Result<f64, String> {
 }
 
 /// `1, 2` (one-based) → `[0, 1]`.
+/// The input a measurement's mic curve belongs to (a transfer function's measurement input).
+pub fn meas_input(k: &MeasKind) -> u16 {
+    match k {
+        MeasKind::Transfer { config } => config.measurement_input,
+        MeasKind::Spectrum { config } => config.input,
+        MeasKind::Rta { config } => config.input,
+        MeasKind::Spl { config } => config.input,
+    }
+}
+
+/// `3=M30, 4=ECM` (1-based) of the rows with a mic name, or `3=` for a cleared one.
+pub fn mics_text(rows: &[InputSetup]) -> String {
+    rows.iter()
+        .map(|r| {
+            format!(
+                "{}={}",
+                u32::from(r.channel) + 1,
+                r.mic.as_deref().unwrap_or("")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Parses `3=M30, 4=ECM, 5=` into zero-based channels and names (`None` clears).
+pub fn parse_mics(text: &str) -> Result<Vec<(u16, Option<String>)>, String> {
+    let mut v: Vec<(u16, Option<String>)> = Vec::new();
+    for part in text.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let (ch, name) = part
+            .split_once('=')
+            .ok_or_else(|| format!("{part:?}: expected input=name, e.g. 3=M30"))?;
+        let n: u16 = ch
+            .trim()
+            .parse()
+            .map_err(|_| format!("not an input number: {:?}", ch.trim()))?;
+        if n == 0 {
+            return Err("inputs count from 1".into());
+        }
+        let name = name.trim();
+        if name.chars().count() > 64 {
+            return Err(format!(
+                "mic name of input {n} is longer than 64 characters"
+            ));
+        }
+        if v.iter().any(|(c, _)| *c == n - 1) {
+            return Err(format!("input {n} given twice"));
+        }
+        v.push((n - 1, (!name.is_empty()).then(|| name.to_owned())));
+    }
+    if v.is_empty() {
+        return Err("type at least one input=name".into());
+    }
+    Ok(v)
+}
+
 pub fn parse_outputs(text: &str) -> Result<Vec<u16>, String> {
     let mut v = Vec::new();
     for part in text.split([',', ' ']).filter(|s| !s.is_empty()) {

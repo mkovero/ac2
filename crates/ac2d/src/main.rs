@@ -21,6 +21,8 @@ With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), c
   --key-file <path>      server key pair (network mode; generated if missing)
   --authorized <path>    authorized clients (network mode; created empty if missing)
   --max-level <dBFS>     global generator maximum, dBFS RMS (default -10)
+  --cal-store <path>     calibration store (default <config dir>/ac2/calibrations.json);
+                         an unreadable file is never overwritten
   -h, --help             this text
 
 Logging: RUST_LOG (default info).";
@@ -34,6 +36,7 @@ struct Args {
     key_file: Option<PathBuf>,
     authorized: Option<PathBuf>,
     max_level: f64,
+    cal_store: Option<PathBuf>,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -47,6 +50,7 @@ fn parse() -> Result<Option<Args>, String> {
         key_file: None,
         authorized: None,
         max_level: -10.0,
+        cal_store: None,
     };
     while let Some(flag) = it.next() {
         let mut val = || it.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -58,6 +62,7 @@ fn parse() -> Result<Option<Args>, String> {
             "--data" => a.data = Some(val()?),
             "--key-file" => a.key_file = Some(PathBuf::from(val()?)),
             "--authorized" => a.authorized = Some(PathBuf::from(val()?)),
+            "--cal-store" => a.cal_store = Some(PathBuf::from(val()?)),
             "--max-level" => {
                 let v = val()?;
                 let v = v.strip_suffix("dbfs").unwrap_or(&v);
@@ -72,15 +77,6 @@ fn parse() -> Result<Option<Args>, String> {
         a.backend = b.parse()?;
     }
     Ok(Some(a))
-}
-
-fn config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("ac2")
 }
 
 fn main() -> ExitCode {
@@ -110,7 +106,7 @@ fn main() -> ExitCode {
     };
     let listen = match (&args.listen, &args.ctrl, &args.data) {
         (Some(l), None, None) => {
-            let dir = config_dir();
+            let dir = ac2d::config_dir();
             let sec = NetworkSecurity {
                 server_key_file: args
                     .key_file
@@ -139,7 +135,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let handle = match Daemon::start(DaemonConfig::new(backend, listen, args.max_level)) {
+    let mut config = DaemonConfig::new(backend, listen, args.max_level);
+    config.cal_store = Some(
+        args.cal_store
+            .clone()
+            .unwrap_or_else(ac2d::default_cal_store),
+    );
+    let handle = match Daemon::start(config) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("ac2d: {e}");

@@ -1,7 +1,8 @@
 //! Fractional-octave RTA job: IEC 61260-1 filterbank band power (`rta` frames).
 //!
 //! Each frame interval's band powers form one "frame" for averaging, which acts on power
-//! (never on dB) like the spectrum's.
+//! (never on dB) like the spectrum's. A calibrated input reads dB SPL; its mic curve, when
+//! on, is subtracted per band as the curve's log-frequency power average over the band.
 
 use std::collections::VecDeque;
 
@@ -14,6 +15,7 @@ use ac2_proto::model::{LevelScale, RtaConfig, SpecAveraging};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
 use super::{Analysis, Emitter, JobCmd, LevelsMeter, StampArgs, channel_f64};
+use crate::calstore::InputCal;
 use crate::conv;
 use crate::fanout::Block;
 
@@ -58,7 +60,9 @@ pub(crate) struct Rta {
     bank: OctaveFilterBank,
     grid_id: GridId,
     avg: Avg,
-    sensitivity: Option<f64>,
+    cal: InputCal,
+    /// Mic-curve correction per band (dB subtracted).
+    corr: Option<Vec<f64>>,
     frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
@@ -76,7 +80,7 @@ impl Rta {
         cfg: RtaConfig,
         sample_rate: u32,
         idx: usize,
-        sensitivity: Option<f64>,
+        cal: InputCal,
         frozen: bool,
         config_rev: Rev,
     ) -> Result<Self, String> {
@@ -95,7 +99,7 @@ impl Rta {
             }
             _ => return Err("invalid averaging".into()),
         };
-        Ok(Self {
+        let mut r = Self {
             grid_id: grid(&cfg, &bank).id(),
             powers: vec![0.0; bank.len()],
             levels: LevelsMeter::new(vec![idx], vec![cfg.input], sample_rate),
@@ -106,7 +110,8 @@ impl Rta {
             weight,
             bank,
             avg,
-            sensitivity,
+            cal: InputCal::none(),
+            corr: None,
             frozen,
             config_rev,
             applied_at: None,
@@ -114,7 +119,19 @@ impl Rta {
             shown: None,
             end: None,
             wall: 0,
-        })
+        };
+        r.set_cal(cal);
+        Ok(r)
+    }
+
+    fn set_cal(&mut self, cal: InputCal) {
+        self.corr = cal.correction.as_ref().map(|c| {
+            self.bank
+                .bands()
+                .map(|b| c.band_db(b.lower_hz, b.upper_hz))
+                .collect()
+        });
+        self.cal = cal;
     }
 
     fn reset(&mut self) {
@@ -149,6 +166,7 @@ impl Analysis for Rta {
         match c {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.reset(),
+            JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::SetDelay { .. } | JobCmd::Find { .. } | JobCmd::Track { .. } => {}
         }
     }
@@ -204,10 +222,15 @@ impl Analysis for Rta {
             },
         };
         if let Some(shown) = &self.shown {
-            let off = self.sensitivity.unwrap_or(0.0);
+            let off = self.cal.sensitivity.unwrap_or(0.0);
+            let corr = self.corr.as_deref();
             let level: Vec<f32> = shown
                 .iter()
-                .map(|p| (power_dbfs(*p) + off) as f32)
+                .enumerate()
+                .map(|(i, p)| {
+                    let c = corr.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
+                    (power_dbfs(*p) + off - c) as f32
+                })
                 .collect();
             let validity = level
                 .iter()
@@ -226,11 +249,13 @@ impl Analysis for Rta {
                     meta: RtaMeta {
                         fraction: self.cfg.fraction,
                         weighting: self.cfg.weighting,
-                        scale: if self.sensitivity.is_some() {
+                        scale: if self.cal.sensitivity.is_some() {
                             LevelScale::DbSpl
                         } else {
                             LevelScale::Dbfs
                         },
+                        cal: self.cal.status,
+                        mic_curve: self.corr.is_some(),
                     },
                     level,
                     validity,

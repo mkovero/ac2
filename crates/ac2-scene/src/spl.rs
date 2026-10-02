@@ -5,7 +5,7 @@
 //! (`LAF` = A-weighted, Fast), `LAeq`, `LCpeak`, `LAFmax`, `LAFmin`.
 
 use ac2_proto::frame::SplFrame;
-use ac2_proto::model::{CalEntry, CalKey, LevelScale, PeakWeighting, TimeWeighting, Weighting};
+use ac2_proto::model::{CalStatus, LevelScale, PeakWeighting, TimeWeighting, Weighting};
 use ac2_proto::units::WallNs;
 
 use crate::banner::{BannerRow, Status};
@@ -57,34 +57,35 @@ pub struct SplReadout {
     pub stats: Vec<SplStat>,
     /// `over 1 min 23 s`.
     pub interval: String,
-    /// `cal 3 h ago`, `cal from other mic / input`, `uncalibrated`.
+    /// `cal 3 h ago`, `cal from other mic / input`, `uncalibrated`; `· mic curve` when the
+    /// curve is applied.
     pub cal: String,
     /// `STALE 3.2 s` when the frame is stale.
     pub stale: Option<String>,
 }
 
-/// Calibration text for a reading in `scale` from the input identified by `current`,
-/// given the calibration entry that applies to it (`entry`; the daemon picks it, the
-/// client looks it up by key).
+/// Calibration text of a readout (decisions 7a/7b, `docs/design/q7-calibration.md` §3):
+/// the calibration's age when it belongs to this device + input + mic, a mismatch warning
+/// when it belongs to another mic or input, `uncalibrated` otherwise; `· mic curve` when the
+/// mic's correction curve is applied. The age is on the daemon clock (`offset`).
 pub fn cal_text(
-    scale: LevelScale,
-    current: &CalKey,
-    entry: Option<&CalEntry>,
+    cal: CalStatus,
+    mic_curve: bool,
     client_now: WallNs,
     offset: ClockOffset,
 ) -> String {
-    match (scale, entry) {
-        (LevelScale::Dbfs, _) => "uncalibrated".to_string(),
-        (LevelScale::DbSpl, None) => "cal not found".to_string(),
-        (LevelScale::DbSpl, Some(e)) if e.key != *current => {
-            "cal from other mic / input".to_string()
-        }
-        (LevelScale::DbSpl, Some(e)) => {
-            format!(
-                "cal {}",
-                format::ago(time::age_s(e.calibrated_at, client_now, offset))
-            )
-        }
+    let base = match cal {
+        CalStatus::Uncalibrated => "uncalibrated".to_string(),
+        CalStatus::OtherMicOrInput { .. } => "cal from other mic / input".to_string(),
+        CalStatus::Verified { calibrated_at } => format!(
+            "cal {}",
+            format::ago(time::age_s(calibrated_at, client_now, offset))
+        ),
+    };
+    if mic_curve {
+        format!("{base} · mic curve")
+    } else {
+        base
     }
 }
 
@@ -234,8 +235,7 @@ pub struct SplScene {
 mod tests {
     use super::*;
     use ac2_proto::frame::SplMeta;
-    use ac2_proto::model::DeviceId;
-    use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds};
+    use ac2_proto::units::{MeasId, Seconds};
 
     const H: u64 = 3600 * 1_000_000_000;
 
@@ -253,26 +253,11 @@ mod tests {
                 leq: 92.06,
                 lpeak: 110.31,
                 duration: Seconds(83.9),
+                cal: CalStatus::Verified {
+                    calibrated_at: WallNs(97 * H),
+                },
+                mic_curve: false,
             },
-        }
-    }
-
-    fn key(mic: &str, channel: u16) -> CalKey {
-        CalKey {
-            device: DeviceId("hw:1".into()),
-            channel,
-            mic: mic.into(),
-        }
-    }
-
-    fn entry(k: CalKey, at: u64) -> CalEntry {
-        CalEntry {
-            key: k,
-            sensitivity: Db(120.0),
-            calibrator_level: DbSpl(94.0),
-            calibrator_freq: Hz(1000.0),
-            measured: Dbfs(-26.0),
-            calibrated_at: WallNs(at),
         }
     }
 
@@ -308,38 +293,48 @@ mod tests {
 
     #[test]
     fn calibration_state() {
-        let k = key("M30 #1", 2);
         let now = WallNs(100 * H);
         let off = ClockOffset(0);
-        let e = entry(k.clone(), 97 * H - 1);
+        let verified = CalStatus::Verified {
+            calibrated_at: WallNs(97 * H - 1),
+        };
+        assert_eq!(cal_text(verified, false, now, off), "cal 3 h ago");
         assert_eq!(
-            cal_text(LevelScale::DbSpl, &k, Some(&e), now, off),
-            "cal 3 h ago"
+            cal_text(verified, true, now, off),
+            "cal 3 h ago · mic curve"
         );
-        // Same device and channel, another mic: mismatch.
-        let other = entry(key("M30 #2", 2), 99 * H);
+        let other = CalStatus::OtherMicOrInput {
+            calibrated_at: WallNs(99 * H),
+        };
         assert_eq!(
-            cal_text(LevelScale::DbSpl, &k, Some(&other), now, off),
+            cal_text(other, false, now, off),
             "cal from other mic / input"
         );
-        let other = entry(key("M30 #1", 3), 99 * H);
         assert_eq!(
-            cal_text(LevelScale::DbSpl, &k, Some(&other), now, off),
-            "cal from other mic / input"
-        );
-        assert_eq!(
-            cal_text(LevelScale::Dbfs, &k, Some(&e), now, off),
+            cal_text(CalStatus::Uncalibrated, false, now, off),
             "uncalibrated"
         );
         assert_eq!(
-            cal_text(LevelScale::DbSpl, &k, None, now, off),
-            "cal not found"
+            cal_text(CalStatus::Uncalibrated, true, now, off),
+            "uncalibrated · mic curve"
         );
         // The clock offset applies: client 2 h behind the daemon.
         let off = ClockOffset(2 * H as i64);
         assert_eq!(
-            cal_text(LevelScale::DbSpl, &k, Some(&e), WallNs(98 * H), off),
+            cal_text(verified, false, WallNs(98 * H), off),
             "cal 3 h ago"
+        );
+        // Minutes and days.
+        let v = |ago: u64| CalStatus::Verified {
+            calibrated_at: WallNs(100 * H - ago),
+        };
+        assert_eq!(
+            cal_text(v(H / 6), false, now, ClockOffset(0)),
+            "cal 10 min ago"
+        );
+        assert_eq!(
+            cal_text(v(50 * H), false, now, ClockOffset(0)),
+            "cal 2 d ago"
         );
     }
 

@@ -28,7 +28,11 @@
   "meta": {
    "spec": {
     "window": "hann",
-    "scale": "dbfs"
+    "scale": "dbfs",
+    "cal": {
+     "type": "uncalibrated"
+    },
+    "mic_curve": false
    }
   }
  },

@@ -2,6 +2,7 @@
 
 mod auth;
 mod basic;
+mod cal;
 mod daemon;
 mod gen_;
 mod traces;
@@ -11,7 +12,7 @@ use std::time::Duration;
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, KeyDir, Retry};
 use ac2_proto::model::{Measurement, State, TraceMeta};
 
-use crate::args::{Cli, Cmd, MeasRef};
+use crate::args::{Cli, Cmd, MeasRef, SessionCmd};
 use crate::output::Out;
 use crate::{BUILD_ID, CliError};
 
@@ -20,12 +21,15 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Devices => basic::devices(cli, out).await,
         Cmd::Status => daemon::status(cli, out).await,
         Cmd::Daemon { cmd } => daemon::run(cli, cmd, out).await,
+        Cmd::Session {
+            cmd: SessionCmd::Inputs(a),
+        } => cal::session_inputs(cli, a, out).await,
         Cmd::Session { cmd } => basic::session(cli, cmd, out).await,
         Cmd::Gen { cmd } => gen_::run(cli, cmd, out).await,
         Cmd::Meas { cmd } => basic::meas(cli, cmd, out).await,
         Cmd::Delay { cmd } => basic::delay(cli, cmd, out).await,
         Cmd::Spl { cmd } => basic::spl(cli, cmd, out).await,
-        Cmd::Cal { cmd } => basic::cal(cli, cmd, out).await,
+        Cmd::Cal { cmd } => cal::run(cli, cmd, out).await,
         Cmd::Timing { watch } => basic::timing(cli, *watch, out).await,
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::State { cmd } => basic::state_dump(cli, cmd, out).await,

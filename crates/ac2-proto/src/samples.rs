@@ -3,7 +3,10 @@
 //! Used by round-trip tests, the documentation parity test and the cross-language
 //! fixtures (`tools/protocol/fixtures.py` builds the same frames in Python).
 
-use crate::ctrl::{Command, ErrorCode, ErrorDetail, ImportProblem, ProtoError, ReplyBody, Welcome};
+use crate::ctrl::{
+    Command, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError, ReplyBody,
+    Welcome,
+};
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
     ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LevelsFrame,
@@ -251,19 +254,10 @@ pub fn commands() -> Vec<Command> {
         },
         Command::CalMicCurve {
             input: 1,
-            action: MicCurveAction::Assign {
-                name: "M30-1234".into(),
-                provenance: "vendor file M30-1234.txt".into(),
-                points: vec![
-                    CurvePoint {
-                        freq: Hz(20.0),
-                        gain: Db(-0.5),
-                    },
-                    CurvePoint {
-                        freq: Hz(20_000.0),
-                        gain: Db(1.5),
-                    },
-                ],
+            mic: "M30 #1234".into(),
+            action: MicCurveAction::Import {
+                file_name: "M30-1234.frd".into(),
+                content: Blob(b"20 -0.5\n20000 1.5\n".to_vec()),
             },
         },
         Command::CalList,
@@ -294,6 +288,7 @@ pub fn commands() -> Vec<Command> {
             },
         },
         Command::FileList,
+        Command::SessionInputs { inputs: inputs() },
     ]
 }
 
@@ -456,12 +451,38 @@ fn generator() -> Generator {
 fn cal_entry() -> CalEntry {
     CalEntry {
         key: cal_key(),
-        sensitivity: Db(120.5),
-        calibrator_level: DbSpl(94.0),
-        calibrator_freq: Hz(1000.0),
-        measured: Dbfs(-26.5),
-        calibrated_at: WallNs(1_789_000_000_000_000_000),
+        spl: Some(SplCal {
+            sensitivity: Db(120.5),
+            calibrator_level: DbSpl(94.0),
+            calibrator_freq: Hz(1000.0),
+            measured: Dbfs(-26.5),
+            calibrated_at: WallNs(1_789_000_000_000_000_000),
+        }),
+        mic_curve: Some(MicCurveRef {
+            name: "M30-1234".into(),
+            file_name: "M30-1234.frd".into(),
+            content_hash: "af63bd4c8601b7df".into(),
+            points: 2,
+            f_lo: Hz(20.0),
+            f_hi: Hz(20_000.0),
+            imported_at: WallNs(1_788_000_000_000_000_000),
+        }),
     }
+}
+
+fn inputs() -> Vec<InputSetup> {
+    vec![
+        InputSetup {
+            channel: 1,
+            mic: Some("M30 #1234".into()),
+            mic_curve: true,
+        },
+        InputSetup {
+            channel: 2,
+            mic: None,
+            mic_curve: false,
+        },
+    ]
 }
 
 fn session() -> Session {
@@ -500,16 +521,6 @@ fn timing() -> TimingStatus {
     }
 }
 
-fn mic_curve() -> MicCurve {
-    MicCurve {
-        input: 1,
-        name: "M30-1234".into(),
-        provenance: "vendor file".into(),
-        bypassed: false,
-        points: 2,
-    }
-}
-
 fn spl_log() -> SplLog {
     SplLog {
         meas: MeasId(4),
@@ -527,7 +538,7 @@ pub fn state() -> State {
         traces: vec![trace_meta()],
         generator: generator(),
         calibrations: vec![cal_entry()],
-        mic_curves: vec![mic_curve()],
+        inputs: inputs(),
         spl_logs: vec![spl_log()],
         timing: timing(),
     }
@@ -548,8 +559,7 @@ pub fn events() -> Vec<Event> {
         ev(47, Change::Generator(generator())),
         ev(48, Change::Calibration(Patch::Set(cal_entry()))),
         ev(49, Change::Calibration(Patch::Deleted(cal_key()))),
-        ev(50, Change::MicCurve(Patch::Set(mic_curve()))),
-        ev(51, Change::MicCurve(Patch::Deleted(1))),
+        ev(50, Change::Inputs(inputs())),
         ev(52, Change::SplLog(Patch::Set(spl_log()))),
         ev(53, Change::SplLog(Patch::Deleted(MeasId(4)))),
         ev(54, Change::Timing(timing())),
@@ -610,7 +620,12 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         }),
         Ok(ReplyBody::Calibration(cal_entry())),
         Ok(ReplyBody::Calibrations(vec![cal_entry()])),
-        Ok(ReplyBody::MicCurve(Some(mic_curve()))),
+        Ok(ReplyBody::Inputs(inputs())),
+        Ok(ReplyBody::Calibration(CalEntry {
+            key: cal_key(),
+            spl: None,
+            mic_curve: None,
+        })),
         Ok(ReplyBody::SplLog(spl_log())),
         Ok(ReplyBody::Snapshot(Box::new(StateSnapshot {
             state: state(),
@@ -653,6 +668,22 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             detail: Some(ErrorDetail::SessionVersion {
                 found: 2,
                 supported: 1,
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Invalid,
+            msg: "line 7: frequency is not above the previous line's".into(),
+            detail: Some(ErrorDetail::MicCurveFile {
+                line: Some(7),
+                reason: MicCurveFileReason::NotAscending,
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Refused,
+            msg: "calibration store is unreadable".into(),
+            detail: Some(ErrorDetail::CalStore {
+                path: "/home/op/.config/ac2/calibrations.json".into(),
+                reason: "expected value at line 1 column 1".into(),
             }),
         }),
         Err(ProtoError {
@@ -747,6 +778,10 @@ pub fn frames() -> Vec<Frame> {
                     fraction: BandFraction::Third,
                     weighting: Weighting::Z,
                     scale: LevelScale::DbSpl,
+                    cal: CalStatus::Verified {
+                        calibrated_at: WallNs(1_789_000_000_000_000_000),
+                    },
+                    mic_curve: true,
                 },
                 level: vec![f32::NAN, 74.5, 61.25],
                 validity: vec![
@@ -763,6 +798,8 @@ pub fn frames() -> Vec<Frame> {
                 meta: SpecMeta {
                     window: Window::Hann,
                     scale: LevelScale::Dbfs,
+                    cal: CalStatus::Uncalibrated,
+                    mic_curve: false,
                 },
                 level: vec![-120.0, -20.0, f32::INFINITY, f32::NEG_INFINITY],
                 validity: vec![ValidityMask::NONE; 4],
@@ -783,6 +820,10 @@ pub fn frames() -> Vec<Frame> {
                     leq: 92.0,
                     lpeak: 112.7,
                     duration: Seconds(60.0),
+                    cal: CalStatus::OtherMicOrInput {
+                        calibrated_at: WallNs(1_789_000_000_000_000_000),
+                    },
+                    mic_curve: true,
                 },
             }),
         },

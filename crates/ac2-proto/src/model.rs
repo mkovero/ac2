@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::units::{
-    ClientId, Db, DbSpl, Dbfs, Degrees, Hz, MeasId, Rev, SampleIndex, Samples, Seconds,
+    Blob, ClientId, Db, DbSpl, Dbfs, Degrees, Hz, MeasId, Rev, SampleIndex, Samples, Seconds,
     SessionEpoch, TraceId, WallNs,
 };
 
@@ -1055,7 +1055,7 @@ pub enum CalState {
 pub struct MicState {
     /// Mic name.
     pub name: String,
-    /// Mic curve applied (by name), `None` if bypassed or absent.
+    /// Mic curve applied (by name), `None` when switched off or absent.
     pub curve: Option<String>,
 }
 
@@ -1173,70 +1173,101 @@ pub struct CalKey {
     pub mic: String,
 }
 
-/// Calibration entry.
+/// A sensitivity calibration against an acoustic calibrator.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplCal {
+    /// dB SPL = dBFS + sensitivity.
+    pub sensitivity: Db,
+    /// Calibrator level.
+    pub calibrator_level: DbSpl,
+    /// Calibrator frequency; the mic curve is normalised to 0 dB here.
+    pub calibrator_freq: Hz,
+    /// Broadband level read from the calibrator, uncorrected.
+    pub measured: Dbfs,
+    /// When (daemon clock).
+    pub calibrated_at: WallNs,
+}
+
+/// Provenance of an imported mic curve (the points stay in the daemon's store).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MicCurveRef {
+    /// Display name (the file name without extension).
+    pub name: String,
+    /// File name as imported.
+    pub file_name: String,
+    /// FNV-1a 64 of the file bytes, 16 lowercase hex digits.
+    pub content_hash: String,
+    /// Points parsed.
+    pub points: u32,
+    /// Lowest point frequency.
+    pub f_lo: Hz,
+    /// Highest point frequency.
+    pub f_hi: Hz,
+    /// When (daemon clock).
+    pub imported_at: WallNs,
+}
+
+/// Calibration entry: what is known for one device + input channel + mic name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CalEntry {
     /// Key.
     pub key: CalKey,
-    /// dB SPL = dBFS + sensitivity.
-    pub sensitivity: Db,
-    /// Calibrator level.
-    pub calibrator_level: DbSpl,
-    /// Calibrator frequency.
-    pub calibrator_freq: Hz,
-    /// Level measured during calibration.
-    pub measured: Dbfs,
-    /// When.
-    pub calibrated_at: WallNs,
-}
-
-/// One point of a mic correction curve.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CurvePoint {
-    /// Frequency.
-    pub freq: Hz,
-    /// Correction subtracted from displayed magnitude.
-    pub gain: Db,
+    /// Sensitivity calibration, if taken.
+    pub spl: Option<SplCal>,
+    /// Mic curve, if imported.
+    pub mic_curve: Option<MicCurveRef>,
 }
 
 /// What `cal.mic_curve` does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MicCurveAction {
-    /// Assign a curve.
-    Assign {
-        /// Curve name.
-        name: String,
-        /// Provenance (file name, vendor serial…).
-        provenance: String,
-        /// Points, ascending frequency.
-        points: Vec<CurvePoint>,
+    /// Import a magnitude file (`.frd`, `.txt`, CSV) sent by the client; the daemon parses
+    /// and validates it.
+    Import {
+        /// Original file name.
+        file_name: String,
+        /// File content.
+        content: Blob,
     },
-    /// Turn the assigned curve on or off.
-    Bypass {
-        /// Bypassed.
-        bypassed: bool,
-    },
-    /// Remove the assignment.
+    /// Remove the curve from the entry.
     Clear,
 }
 
-/// Mic curve assignment entity.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Input setup of one input channel (decision K8): which mic is on it and whether its
+/// mic curve is applied (decision 7c, on/off per input).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MicCurve {
-    /// Input it applies to.
-    pub input: u16,
-    /// Curve name.
-    pub name: String,
-    /// Provenance.
-    pub provenance: String,
-    /// Bypassed.
-    pub bypassed: bool,
-    /// Point count (the points are in the daemon's store).
-    pub points: u32,
+pub struct InputSetup {
+    /// Zero-based device input channel.
+    pub channel: u16,
+    /// Mic name; `None` = not set.
+    pub mic: Option<String>,
+    /// Apply the mic's curve (when one resolves).
+    pub mic_curve: bool,
+}
+
+/// Calibration state of a calibrated readout (decisions 7a/7b). The age is the frame's
+/// `capture_wall_ns − calibrated_at`, both on the daemon clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CalStatus {
+    /// No sensitivity calibration applies: dBFS.
+    Uncalibrated,
+    /// The calibration of this device + input + mic.
+    Verified {
+        /// When it was taken.
+        calibrated_at: WallNs,
+    },
+    /// A calibration of another mic on this input, or of this mic on another input or
+    /// device, is applied.
+    OtherMicOrInput {
+        /// When it was taken.
+        calibrated_at: WallNs,
+    },
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1336,8 +1367,8 @@ pub struct State {
     pub generator: Generator,
     /// Calibrations.
     pub calibrations: Vec<CalEntry>,
-    /// Mic curves.
-    pub mic_curves: Vec<MicCurve>,
+    /// Input setup (mic names, mic-curve switches), sorted by channel.
+    pub inputs: Vec<InputSetup>,
     /// SPL logs.
     pub spl_logs: Vec<SplLog>,
     /// Timing.

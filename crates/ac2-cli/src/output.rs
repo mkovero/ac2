@@ -4,10 +4,12 @@ use std::io::{self, Write};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    CalEntry, CalState, DelayReference, DepthPolicy, DeviceInfo, LevelScale, MeasKind, Measurement,
-    PeakWeighting, Polarity, Session, SessionFile, SmoothingFraction, SmoothingMode, TimeWeighting,
-    TimingState, TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource, Weighting,
+    CalEntry, CalState, CalStatus, DelayReference, DepthPolicy, DeviceInfo, InputSetup, LevelScale,
+    MeasKind, Measurement, PeakWeighting, Polarity, Session, SessionFile, SmoothingFraction,
+    SmoothingMode, TimeWeighting, TimingState, TimingStatus, TraceData, TraceKind, TraceMeta,
+    TraceSource, Weighting,
 };
+use ac2_proto::units::WallNs;
 use ac2_scene::format;
 use comfy_table::{Table, presets};
 use serde::Serialize;
@@ -483,22 +485,60 @@ pub fn calibrations(c: &[CalEntry]) -> String {
         "sensitivity",
         "calibrator",
         "measured",
+        "mic curve",
     ]);
     for e in c {
+        let none = || format::NO_VALUE.to_owned();
+        let (sens, calib, measured) = match &e.spl {
+            Some(s) => (
+                format::db_readout(s.sensitivity.0),
+                format!(
+                    "{} dB SPL @ {}",
+                    format::level(s.calibrator_level.0),
+                    format::freq_readout(s.calibrator_freq.0)
+                ),
+                dbfs(s.measured.0),
+            ),
+            None => (none(), none(), none()),
+        };
         t.add_row(vec![
             e.key.device.0.clone(),
             (u32::from(e.key.channel) + 1).to_string(),
             e.key.mic.clone(),
-            format::db_readout(e.sensitivity.0),
-            format!(
-                "{} dB SPL @ {}",
-                format::level(e.calibrator_level.0),
-                format::freq_readout(e.calibrator_freq.0)
-            ),
-            dbfs(e.measured.0),
+            sens,
+            calib,
+            measured,
+            e.mic_curve.as_ref().map_or_else(none, |c| {
+                format!(
+                    "{} ({} points, {} – {})",
+                    c.file_name,
+                    c.points,
+                    format::freq_readout(c.f_lo.0),
+                    format::freq_readout(c.f_hi.0)
+                )
+            }),
         ]);
     }
     t.to_string()
+}
+
+/// Input setup table (mic names, mic-curve switches).
+pub fn inputs(i: &[InputSetup]) -> String {
+    let mut t = table(&["in", "mic", "mic curve"]);
+    for r in i {
+        t.add_row(vec![
+            (u32::from(r.channel) + 1).to_string(),
+            r.mic.clone().unwrap_or_else(|| format::NO_VALUE.to_owned()),
+            if r.mic_curve { "on" } else { "off" }.to_owned(),
+        ]);
+    }
+    t.to_string()
+}
+
+/// Calibration state of a calibrated readout, in words (`ac2-scene` wording); `offset` is
+/// the daemon − local clock offset, ns.
+pub fn cal_status(cal: CalStatus, mic_curve: bool, now: WallNs, offset: i64) -> String {
+    ac2_scene::spl::cal_text(cal, mic_curve, now, ac2_scene::time::ClockOffset(offset))
 }
 
 /// Timing state, in words.

@@ -433,7 +433,7 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::Trace(p) => upsert(&mut s.traces, p, |t| t.id),
         Change::Generator(g) => s.generator = g,
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),
-        Change::MicCurve(p) => upsert(&mut s.mic_curves, p, |m| m.input),
+        Change::Inputs(i) => s.inputs = i.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = t,
     }

@@ -157,7 +157,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Export { .. } => "export",
         ReplyBody::Calibration(_) => "calibration",
         ReplyBody::Calibrations(_) => "calibrations",
-        ReplyBody::MicCurve(_) => "mic_curve",
+        ReplyBody::Inputs(_) => "inputs",
         ReplyBody::SplLog(_) => "spl_log",
         ReplyBody::Snapshot(_) => "snapshot",
         ReplyBody::Events(_) => "events",

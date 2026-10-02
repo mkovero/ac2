@@ -146,7 +146,7 @@ pub fn empty_state() -> State {
             last_action: None,
         },
         calibrations: vec![],
-        mic_curves: vec![],
+        inputs: vec![],
         spl_logs: vec![],
         timing: TimingStatus {
             epoch: 0,
@@ -179,6 +179,18 @@ fn fake_devices() -> Vec<DeviceInfo> {
         index: IndexExactness::Exact,
         notes: vec![],
     }]
+}
+
+/// The fake's calibration key: its one device.
+fn fake_cal_key(input: u16, mic: &str) -> Result<CalKey, ProtoError> {
+    if mic.is_empty() {
+        return Err(err(ErrorCode::Invalid, "mic name is required"));
+    }
+    Ok(CalKey {
+        device: DeviceId("fake:loop".into()),
+        channel: input,
+        mic: mic.to_owned(),
+    })
 }
 
 fn err(code: ErrorCode, msg: impl Into<String>) -> ProtoError {
@@ -221,6 +233,22 @@ impl Shared {
 
     fn now_ns(&self) -> u64 {
         (wall_ns() + i128::from(self.opts.clock_skew_ns)).max(0) as u64
+    }
+
+    /// Calibrating binds the input's mic name, as the daemon does.
+    fn set_mic(&mut self, channel: u16, mic: &str) {
+        let mut all = self.state.inputs.clone();
+        match all.iter_mut().find(|i| i.channel == channel) {
+            Some(i) if i.mic.as_deref() == Some(mic) => return,
+            Some(i) => i.mic = Some(mic.to_owned()),
+            None => all.push(InputSetup {
+                channel,
+                mic: Some(mic.to_owned()),
+                mic_curve: true,
+            }),
+        }
+        all.sort_by_key(|i| i.channel);
+        self.commit(Change::Inputs(all));
     }
 
     /// A frame stamp of the current incarnation and epoch, captured now.
@@ -593,22 +621,101 @@ impl Shared {
                 calibrator_level,
                 calibrator_freq,
             } => {
+                let key = fake_cal_key(input, &mic)?;
+                let prev = self.state.calibrations.iter().find(|e| e.key == key);
                 let e = CalEntry {
-                    key: CalKey {
-                        device: DeviceId("fake:loop".into()),
-                        channel: input,
-                        mic,
-                    },
-                    sensitivity: Db(calibrator_level.0 + 20.0),
-                    calibrator_level,
-                    calibrator_freq,
-                    measured: Dbfs(-20.0),
-                    calibrated_at: WallNs(1_790_000_000_000_000_000),
+                    spl: Some(SplCal {
+                        sensitivity: Db(calibrator_level.0 + 20.0),
+                        calibrator_level,
+                        calibrator_freq,
+                        measured: Dbfs(-20.0),
+                        calibrated_at: WallNs(1_790_000_000_000_000_000),
+                    }),
+                    mic_curve: prev.and_then(|p| p.mic_curve.clone()),
+                    key,
                 };
                 self.commit(Change::Calibration(Patch::Set(e.clone())));
+                self.set_mic(input, &mic);
                 ReplyBody::Calibration(e)
             }
+            C::CalMicCurve { input, mic, action } => {
+                let key = fake_cal_key(input, &mic)?;
+                let prev = self
+                    .state
+                    .calibrations
+                    .iter()
+                    .find(|e| e.key == key)
+                    .cloned();
+                match action {
+                    MicCurveAction::Import { file_name, content } => {
+                        // Data lines only; the real parser lives in ac2-core.
+                        let points = String::from_utf8_lossy(&content.0)
+                            .lines()
+                            .filter(|l| {
+                                let mut f = l.split_whitespace().map(str::parse::<f64>);
+                                matches!((f.next(), f.next()), (Some(Ok(_)), Some(Ok(_))))
+                            })
+                            .count();
+                        if points < 2 {
+                            return Err(ProtoError {
+                                code: ErrorCode::Invalid,
+                                msg: format!("mic curve file refused: {points} data lines"),
+                                detail: Some(ErrorDetail::MicCurveFile {
+                                    line: None,
+                                    reason: ac2_proto::MicCurveFileReason::TooFewPoints,
+                                }),
+                            });
+                        }
+                        let e = CalEntry {
+                            spl: prev.and_then(|p| p.spl),
+                            mic_curve: Some(MicCurveRef {
+                                name: file_name
+                                    .rsplit_once('.')
+                                    .map_or(file_name.as_str(), |(s, _)| s)
+                                    .to_owned(),
+                                file_name: file_name.clone(),
+                                content_hash: "0000000000000000".into(),
+                                points: u32::try_from(points).unwrap_or(u32::MAX),
+                                f_lo: Hz(20.0),
+                                f_hi: Hz(20_000.0),
+                                imported_at: WallNs(1_790_000_000_000_000_000),
+                            }),
+                            key,
+                        };
+                        self.commit(Change::Calibration(Patch::Set(e.clone())));
+                        self.set_mic(input, &mic);
+                        ReplyBody::Calibration(e)
+                    }
+                    MicCurveAction::Clear => {
+                        let Some(p) = prev.filter(|p| p.mic_curve.is_some()) else {
+                            return Err(err(ErrorCode::NotFound, "no mic curve"));
+                        };
+                        let rev = if p.spl.is_some() {
+                            self.commit(Change::Calibration(Patch::Set(CalEntry {
+                                mic_curve: None,
+                                ..p
+                            })))
+                        } else {
+                            self.commit(Change::Calibration(Patch::Deleted(p.key)))
+                        };
+                        ReplyBody::Ack { rev }
+                    }
+                }
+            }
             C::CalList => ReplyBody::Calibrations(self.state.calibrations.clone()),
+            C::SessionInputs { inputs } => {
+                let mut all: Vec<InputSetup> = self
+                    .state
+                    .inputs
+                    .iter()
+                    .filter(|c| inputs.iter().all(|r| r.channel != c.channel))
+                    .cloned()
+                    .collect();
+                all.extend(inputs);
+                all.sort_by_key(|i| i.channel);
+                self.commit(Change::Inputs(all.clone()));
+                ReplyBody::Inputs(all)
+            }
             C::SplLogStart { meas, interval } => {
                 let l = SplLog {
                     meas,

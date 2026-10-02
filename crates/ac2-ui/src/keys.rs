@@ -387,6 +387,8 @@ commands! {
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
+    InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
+    MicCurve => "mic_curve", "Mic curve on / off for the selected measurement's input", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
@@ -779,6 +781,8 @@ mod tests {
             CommandId::ImportTrace,
             CommandId::SessionSave,
             CommandId::SessionLoad,
+            CommandId::InputMics,
+            CommandId::MicCurve,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {
