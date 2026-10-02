@@ -28,4 +28,12 @@ if ! check; then
     check || { echo "libsodium archive does not match the pinned SHA-256" >&2; exit 1; }
 fi
 [ -f "$sig" ] || curl -fsSL --retry 5 -o "$sig" "$base/libsodium-1.0.22-msvc.zip.minisig"
+
+# With SODIUM_DIST_DIR set, the build script reads its first choice, the source tarball it
+# bundles (LATEST.tar.gz, which cannot be configured with MSVC), from that directory too
+# before falling back to the zip. Copy it from the crate as published on crates.io.
+crate_ver=1.24.0
+cargo fetch --locked -q >&2
+src=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/libsodium-sys-stable-$crate_ver | head -n1)
+cp "$src/LATEST.tar.gz" "$src/LATEST.tar.gz.minisig" "$dir/"
 cd "$dir" && pwd -W 2>/dev/null || pwd
