@@ -216,9 +216,12 @@ fn signal_terminate(pid: u32) -> Result<(), CliError> {
     let st = std::process::Command::new("kill")
         .args(["-TERM", &pid.to_string()])
         .status();
+    // A detached console process has no window to receive taskkill's close request, so
+    // Windows can only end it forcefully; `stop` has already faded the output out and
+    // closed the session through the daemon itself.
     #[cfg(windows)]
     let st = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string()])
+        .args(["/PID", &pid.to_string(), "/F"])
         .status();
     match st {
         Ok(s) if s.success() => Ok(()),
@@ -248,6 +251,13 @@ async fn stop(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
             return Ok(());
         }
     };
+    #[cfg(windows)]
+    if let Some(c) = probe(cli).await {
+        // The forced end below skips the daemon's own shutdown, so do its safety part
+        // first: stop (fade out) any stimulus, then close the stream.
+        let _ = c.call(Command::GenStop).await;
+        let _ = c.call(Command::SessionClose).await;
+    }
     signal_terminate(pid)?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while probe(cli).await.is_some() {

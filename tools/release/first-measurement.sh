@@ -41,5 +41,5 @@ sleep 4
 "$bin/ac2" trace capture demo --name first > /dev/null
 wait "$gen"
 step "delay found and inserted; first trace captured"
-"$bin/ac2" trace show first --data | head -n 12
+"$bin/ac2" trace show first
 "$bin/ac2" daemon stop > /dev/null
