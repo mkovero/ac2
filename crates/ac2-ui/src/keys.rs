@@ -213,6 +213,11 @@ impl Chord {
 
     /// How the chord is shown: `Ctrl+K` (`⌘K` on macOS), `Shift+P`, `Space`, `↑`.
     pub fn label(&self) -> String {
+        self.label_in(label_style())
+    }
+
+    /// The label in an explicit style (help, palette and top bar use [`label_style`]).
+    pub fn label_in(&self, style: LabelStyle) -> String {
         let key = match self.key {
             Key::ArrowUp => "↑",
             Key::ArrowDown => "↓",
@@ -224,7 +229,7 @@ impl Chord {
             k if is_symbol(k) => k.symbol_or_name(),
             k => k.name(),
         };
-        let mac = cfg!(target_os = "macos");
+        let mac = style == LabelStyle::Mac;
         let mut s = String::new();
         if self.command {
             s.push_str(if mac { "⌘" } else { "Ctrl+" });
@@ -237,6 +242,48 @@ impl Chord {
         }
         s.push_str(key);
         s
+    }
+}
+
+/// How chords are written on screen: macOS glyphs (`⌘⇧K`) or PC words (`Ctrl+Shift+K`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelStyle {
+    /// `Ctrl+`, `Alt+`, `Shift+`.
+    Pc,
+    /// `⌘`, `⌥`, `⇧`.
+    Mac,
+}
+
+impl LabelStyle {
+    /// The host platform's convention.
+    pub fn platform() -> Self {
+        if cfg!(target_os = "macos") {
+            LabelStyle::Mac
+        } else {
+            LabelStyle::Pc
+        }
+    }
+}
+
+/// 0 = platform default, 1 = PC, 2 = Mac.
+static LABEL_STYLE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Overrides the label style for the whole process (snapshot tests pin `Pc` so screenshots
+/// match on every OS).
+pub fn set_label_style(style: LabelStyle) {
+    let v = match style {
+        LabelStyle::Pc => 1,
+        LabelStyle::Mac => 2,
+    };
+    LABEL_STYLE.store(v, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The label style in effect.
+pub fn label_style() -> LabelStyle {
+    match LABEL_STYLE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => LabelStyle::Pc,
+        2 => LabelStyle::Mac,
+        _ => LabelStyle::platform(),
     }
 }
 
@@ -763,10 +810,17 @@ mod tests {
             ("Home", "Home"),
         ] {
             let c = Chord::parse(s).expect(s);
-            if !cfg!(target_os = "macos") {
-                assert_eq!(c.label(), label, "{s}");
-            }
-            assert_eq!(Chord::parse(&c.label()).ok(), Some(c), "{s}");
+            assert_eq!(c.label_in(LabelStyle::Pc), label, "{s}");
+            assert_eq!(
+                Chord::parse(&c.label_in(LabelStyle::Pc)).ok(),
+                Some(c),
+                "{s}"
+            );
+            assert_eq!(
+                Chord::parse(&c.label_in(LabelStyle::Mac)).ok(),
+                Some(c),
+                "{s}"
+            );
         }
         assert_eq!(Chord::parse("⌘⇧K"), Chord::parse("Ctrl+Shift+K"));
         assert_eq!(Chord::parse("⌥←"), Chord::parse("Alt+Left"));

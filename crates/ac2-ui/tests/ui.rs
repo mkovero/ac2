@@ -56,6 +56,8 @@ fn options(rig: Option<&common::Rig>) -> AppOptions {
 }
 
 fn harness(opts: AppOptions) -> Harness<'static, App> {
+    // Screenshots are compared on every OS; macOS would otherwise label keys with glyphs.
+    ac2_ui::keys::set_label_style(ac2_ui::keys::LabelStyle::Pc);
     Harness::builder()
         .with_size(SIZE)
         .with_pixels_per_point(1.0)
