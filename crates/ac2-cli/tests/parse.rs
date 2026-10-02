@@ -250,6 +250,15 @@ fn calibration_and_input_setup_parse() {
     assert_eq!(a.mic.as_deref(), Some("M30 #1"));
     assert_eq!(a.file.as_deref(), Some(std::path::Path::new("m30.frd")));
     assert!(!a.clear);
+    let c = ok(&[
+        "cal", "rm", "--input", "3", "--mic", "M30", "--device", "hw:1", "--curve",
+    ]);
+    let Cmd::Cal { cmd: CalCmd::Rm(a) } = c.cmd else {
+        panic!("not cal rm");
+    };
+    assert_eq!(a.input, Channel(2));
+    assert_eq!(a.device.as_deref(), Some("hw:1"));
+    assert!(a.curve && !a.sensitivity);
     let c = ok(&["cal", "mic-curve", "--clear", "--input", "3"]);
     assert!(matches!(
         c.cmd,
@@ -383,6 +392,8 @@ fn refusals() {
         &["cal", "mic-curve", "--input", "3"],
         &["cal", "mic-curve", "m.frd", "--clear", "--input", "3"],
         &["cal", "mic-curve", "m.frd"],
+        &["cal", "rm", "--mic", "M30"],
+        &["cal", "rm", "--input", "3", "--sensitivity", "--curve"],
         &["session", "inputs", "--mic", "M30"],
         &["session", "inputs", "--mic", "0=M30"],
         &["session", "inputs", "--curve", "3=maybe"],

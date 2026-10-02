@@ -156,8 +156,8 @@ avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and oth
 layouts. The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** stop, **↑/↓**
 level (±1 dB, with Shift ±3 dB).
 
-Change bindings in `keys.toml` (`~/.config/ac2/keys.toml`; `%APPDATA%\ac2\keys.toml` on
-Windows):
+Change bindings in `keys.toml` in the ac2 config directory (`~/.config/ac2` on Linux,
+`~/Library/Application Support/ac2` on macOS, `%APPDATA%\ac2\config` on Windows):
 
 ```toml
 [global]
@@ -284,6 +284,15 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Reconnect to the daemon now | `reconnect` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
 | Mic curve on / off for the selected measurement's input | `mic_curve` |
+| Calibration: delete sensitivity and mic curve (input=mic)… | `cal_delete` |
+| Calibration: delete sensitivity only (input=mic)… | `cal_delete_sensitivity` |
+| Calibration: delete mic curve only (input=mic)… | `cal_delete_curve` |
+| Delay finder: auto band (full → mid → sub) | `finder_auto` |
+| Delay finder: full band (2–16 kHz) | `finder_full` |
+| Delay finder: mid band (300 Hz – 3 kHz) | `finder_mid` |
+| Delay finder: sub band (20–120 Hz) | `finder_sub` |
+| Delay finder: custom band (Hz)… | `finder_custom` |
+| Delay finder: observation length (s)… | `finder_observation` |
 | Average shown stored traces (complex) | `average_complex` |
 | Average shown stored traces (coherence-weighted) | `average_coherence` |
 | A − B: dB difference of the two lowest shown slots | `math_difference` |

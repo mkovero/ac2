@@ -145,7 +145,7 @@ jobs:
           d="$t/ac2-$VERSION-macos-universal"
           lipo -archs "$d/ac2.app/Contents/MacOS/ac2-ui"
           "$d/ac2.app/Contents/MacOS/ac2-ui" --version
-          export AC2_RUNTIME_DIR="$t/run" XDG_CONFIG_HOME="$t/config"
+          export AC2_RUNTIME_DIR="$t/run" AC2_CONFIG_DIR="$t/config"
           "$d/bin/ac2d" --version
           "$d/bin/ac2d" --backend fake > "$t/ac2d.log" 2>&1 &
           for _ in $(seq 100); do [ -S "$AC2_RUNTIME_DIR/ctrl.sock" ] && break; sleep 0.1; done
@@ -237,7 +237,7 @@ jobs:
           & "$dir\ac2d.exe" --version
           & "$dir\ac2-ui.exe" --version
           $env:AC2_RUNTIME_DIR = Join-Path $env:RUNNER_TEMP 'ac2-run'
-          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'ac2-appdata'
+          $env:AC2_CONFIG_DIR = Join-Path $env:RUNNER_TEMP 'ac2-config'
           $d = Start-Process "$dir\ac2d.exe" -ArgumentList '--backend','fake' -PassThru -RedirectStandardError ac2d.log
           Start-Sleep -Seconds 2
           & "$dir\ac2.exe" status; if ($LASTEXITCODE -ne 0) { Get-Content ac2d.log; exit 1 }

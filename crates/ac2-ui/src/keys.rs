@@ -389,6 +389,9 @@ commands! {
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
     MicCurve => "mic_curve", "Mic curve on / off for the selected measurement's input", [Global];
+    CalDelete => "cal_delete", "Calibration: delete sensitivity and mic curve (input=mic)…", [Global];
+    CalDeleteSensitivity => "cal_delete_sensitivity", "Calibration: delete sensitivity only (input=mic)…", [Global];
+    CalDeleteCurve => "cal_delete_curve", "Calibration: delete mic curve only (input=mic)…", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
@@ -398,6 +401,12 @@ commands! {
     InsertStrongest => "insert_strongest", "Delay: find and insert strongest peak", [Transfer];
     TypeDelay => "type_delay", "Delay: type value (ms)…", [Transfer];
     TrackDelay => "track_delay", "Delay tracking on / off", [Transfer];
+    FinderAuto => "finder_auto", "Delay finder: auto band (full → mid → sub)", [Transfer];
+    FinderFull => "finder_full", "Delay finder: full band (2–16 kHz)", [Transfer];
+    FinderMid => "finder_mid", "Delay finder: mid band (300 Hz – 3 kHz)", [Transfer];
+    FinderSub => "finder_sub", "Delay finder: sub band (20–120 Hz)", [Transfer];
+    FinderCustom => "finder_custom", "Delay finder: custom band (Hz)…", [Transfer];
+    FinderObservation => "finder_observation", "Delay finder: observation length (s)…", [Transfer];
     Invert => "invert", "Invert polarity of selected trace (display)", [Transfer];
     Offset => "offset", "Type dB offset of selected trace…", [Transfer];
     NudgeEarlier => "nudge_earlier", "Nudge selected trace 0.1 ms earlier", [Transfer];
@@ -553,9 +562,10 @@ enum ChordList {
     Many(Vec<String>),
 }
 
-/// Where user overrides live: `~/.config/ac2/keys.toml` (platform equivalent elsewhere).
-pub fn config_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "ac2").map(|d| d.config_dir().join("keys.toml"))
+/// Where user overrides live: `keys.toml` in the ac2 config directory
+/// (`ac2_paths::config_dir`; `~/.config/ac2` on Linux).
+pub fn config_path() -> PathBuf {
+    ac2_paths::keymap()
 }
 
 impl Keymap {
@@ -783,6 +793,15 @@ mod tests {
             CommandId::SessionLoad,
             CommandId::InputMics,
             CommandId::MicCurve,
+            CommandId::CalDelete,
+            CommandId::CalDeleteSensitivity,
+            CommandId::CalDeleteCurve,
+            CommandId::FinderAuto,
+            CommandId::FinderFull,
+            CommandId::FinderMid,
+            CommandId::FinderSub,
+            CommandId::FinderCustom,
+            CommandId::FinderObservation,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {

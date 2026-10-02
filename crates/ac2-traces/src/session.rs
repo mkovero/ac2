@@ -152,19 +152,6 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> SessionError + '_ {
     }
 }
 
-/// `$AC2_SESSION_DIR`, else the platform data directory's `ac2/sessions`
-/// (`~/.local/share/ac2/sessions`, `~/Library/Application Support/ac2/sessions`,
-/// `%APPDATA%\ac2\data\sessions`).
-pub fn default_session_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("AC2_SESSION_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d);
-    }
-    directories::ProjectDirs::from("", "", "ac2").map_or_else(
-        || PathBuf::from("ac2-sessions"),
-        |d| d.data_dir().join("sessions"),
-    )
-}
-
 /// Checks a session name (one directory level under the session directory).
 pub fn validate_name(name: &str) -> Result<(), SessionError> {
     let ok = !name.is_empty()

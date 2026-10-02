@@ -174,5 +174,21 @@
    }
   },
   "expect_rev": 41
+ },
+ {
+  "v": 1,
+  "id": 43,
+  "cmd": {
+   "op": "cal.delete",
+   "args": {
+    "key": {
+     "device": "hw:UMC1820",
+     "channel": 1,
+     "mic": "M30 #1234"
+    },
+    "part": "sensitivity"
+   }
+  },
+  "expect_rev": 41
  }
 ]

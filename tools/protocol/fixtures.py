@@ -308,6 +308,7 @@ def measurement():
             "applied": 0.0125,
             "applied_samples": 600,
             "tracking": True,
+            "awaiting_pick": False,
             "last_finding": finding(),
         },
         "grid_id": p.grid_id(LOG_GRID),
@@ -368,6 +369,14 @@ def requests():
             },
         ),
         req(42, "session.inputs", {"inputs": INPUTS}),
+        req(
+            43,
+            "cal.delete",
+            {
+                "key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"},
+                "part": "sensitivity",
+            },
+        ),
     ]
 
 

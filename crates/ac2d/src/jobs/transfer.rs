@@ -131,6 +131,7 @@ impl Transfer {
         frozen: bool,
         config_rev: Rev,
         tracking: bool,
+        awaiting_pick: bool,
         epoch: SessionEpoch,
         to_control: Sender<ControlMsg>,
         correction: Option<&Correction>,
@@ -164,6 +165,7 @@ impl Transfer {
         .id();
         let mut finder = Finder::new(fs);
         finder.track(tracking, delay_samples);
+        finder.set_paused(awaiting_pick);
         Ok(Self {
             corr: correction.map(|c| column_correction(&grid, c)),
             grid,
@@ -297,6 +299,7 @@ impl Analysis for Transfer {
                 samples,
                 seconds,
                 rev,
+                resume,
             } => {
                 self.delay_samples = samples;
                 self.delay_s = seconds;
@@ -304,6 +307,9 @@ impl Analysis for Transfer {
                 self.apply_pending = true;
                 self.mtw.set_delay(samples);
                 self.finder.set_held(samples);
+                if resume {
+                    self.finder.set_paused(false);
+                }
             }
             JobCmd::Find {
                 token,

@@ -12,7 +12,7 @@
 //! | 5 | NO SIGNAL | fault | protection `NO_SIGNAL` |
 //! | 6 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
 //! | 7 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
-//! | 8 | NO DELAY ESTIMATE | info | TF measurement without a delay, or the finder refused (the detail says why) |
+//! | 8 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
 //!
 //! CHECK ROUTING sits right under NO REFERENCE: a mis-patched reference invalidates every
 //! transfer value just as a missing one does, and fixing the patch comes before any other
@@ -105,6 +105,9 @@ pub enum NoDelayEstimate {
     NotFound,
     /// The last finder run refused, for these reasons.
     Refused(Vec<NoEstimateReason>),
+    /// The last finding is ambiguous and the operator has not picked a candidate; tracking
+    /// is paused meanwhile (decision 1c).
+    AwaitingPick,
 }
 
 /// Whether (and why) a TF measurement has no delay the operator can rely on: none inserted
@@ -116,6 +119,9 @@ pub fn no_delay_estimate(m: &Measurement) -> Option<NoDelayEstimate> {
     let Some(d) = &m.delay else {
         return Some(NoDelayEstimate::NotFound);
     };
+    if d.awaiting_pick {
+        return Some(NoDelayEstimate::AwaitingPick);
+    }
     match &d.last_finding {
         Some(f) => f
             .no_estimate()
@@ -203,6 +209,9 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             NoDelayEstimate::NotFound => "phase is not aligned; find or set the delay".into(),
             NoDelayEstimate::Refused(r) => {
                 format!("finder: {}", crate::finding::no_estimate_reasons(r))
+            }
+            NoDelayEstimate::AwaitingPick => {
+                "ambiguous: pick a candidate or set the delay · tracking paused".into()
             }
         };
         out.push(banner(
@@ -495,6 +504,7 @@ pub(crate) mod tests {
                 applied: Seconds(0.0),
                 applied_samples: Samples(0),
                 tracking: false,
+                awaiting_pick: false,
                 last_finding: Some(refused),
             }),
             grid_id: None,
@@ -525,6 +535,21 @@ pub(crate) mod tests {
             d.tracking = true;
         }
         assert_eq!(no_delay_estimate(&m), Some(NoDelayEstimate::NotFound));
+        // An ambiguous finding nobody picked from: tracking is paused, and says so.
+        if let Some(d) = &mut m.delay {
+            d.awaiting_pick = true;
+        }
+        let why = no_delay_estimate(&m);
+        assert_eq!(why, Some(NoDelayEstimate::AwaitingPick));
+        let b = banners(&Status {
+            no_delay_estimate: why,
+            ..Status::default()
+        });
+        assert_eq!(b[0].text, "NO DELAY ESTIMATE");
+        assert_eq!(
+            b[0].detail.as_deref(),
+            Some("ambiguous: pick a candidate or set the delay · tracking paused")
+        );
     }
 
     #[test]

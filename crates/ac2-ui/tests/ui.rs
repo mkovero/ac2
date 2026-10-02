@@ -49,6 +49,8 @@ fn options(rig: Option<&common::Rig>) -> AppOptions {
         theme: ThemeName::Dark,
         keymap: Keymap::default(),
         keymap_path: Some("~/.config/ac2/keys.toml".into()),
+        prefs: ac2_ui::prefs::UiPrefs::default(),
+        prefs_path: None,
         notices: vec![],
         started: Instant::now(),
         bench_startup: false,
@@ -188,6 +190,45 @@ fn command_palette() {
     h.key_press(Key::Enter);
     step_until(&mut h, "palette closed", |a| {
         a.state.overlay == Overlay::None
+    });
+}
+
+/// X on an ambiguous finding: the candidate list over the transfer pane (decision 1c), the
+/// banner saying tracking waits for the pick, and a key inserting a candidate.
+#[test]
+fn ambiguous_delay_candidate_list() {
+    if !have_gpu("ambiguous_delay_candidate_list") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.fake.lock().finding = ac2_client::fake::FakeFinding::Ambiguous;
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::ALT, Key::Num1);
+    h.key_press(Key::X);
+    step_until(&mut h, "candidate list", |a| {
+        matches!(a.state.overlay, Overlay::DelayPick(_))
+            && a.state
+                .meas(MeasId(1))
+                .is_some_and(|m| m.delay.as_ref().is_some_and(|d| d.awaiting_pick))
+    });
+    assert_eq!(
+        rig.fake.lock().last_find,
+        Some((ac2_proto::model::FinderBand::Auto, None))
+    );
+    // Toasts expire on the wall clock; the snapshot shows the list and the plots.
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("delay_pick_candidates", &snapshot_options());
+    // 2 inserts the second candidate (12.7 ms) and resolves the finding.
+    h.key_press(Key::Num2);
+    step_until(&mut h, "inserted", |a| {
+        a.state.overlay == Overlay::None
+            && a.state.meas(MeasId(1)).is_some_and(|m| {
+                m.delay
+                    .as_ref()
+                    .is_some_and(|d| !d.awaiting_pick && (d.applied.0 - 0.0127).abs() < 1e-9)
+            })
     });
 }
 

@@ -131,11 +131,13 @@ pub(crate) enum JobCmd {
     },
     /// Delay tracking on or off.
     Track { enabled: bool },
-    /// New alignment delay (transfer); `rev` is the commit that set it.
+    /// New alignment delay (transfer); `rev` is the commit that set it. `resume`: the
+    /// operator inserted or typed it, which resolves an ambiguous finding.
     SetDelay {
         samples: i64,
         seconds: f64,
         rev: Rev,
+        resume: bool,
     },
     /// Freeze or unfreeze.
     Freeze(bool),

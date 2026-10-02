@@ -474,6 +474,22 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     assert_eq!(l["calibrations"][0]["mic_curve"], Value::Null);
     let text = ac2(&f, &["cal", "list"]).await?;
     assert!(text.stdout.contains("UMIK 7001"), "{}", text.stdout);
+
+    // `cal rm`: the entry of the session's device, the input's mic by default. The curve is
+    // gone already, so only the sensitivity can go; then nothing is left.
+    let r = ac2(&f, &["cal", "rm", "--input", "2", "--curve", "--json"]).await?;
+    assert_ne!(r.code, 0);
+    assert_eq!(r.json()?["error"]["code"], "not_found");
+    let d = ok_json(&f, &["cal", "rm", "--input", "2", "--json"]).await?;
+    assert_eq!(d["deleted"], "all");
+    assert_eq!(
+        d["key"],
+        json!({ "device": "fake:loop", "channel": 1, "mic": "UMIK 7001" })
+    );
+    let l = ok_json(&f, &["cal", "list", "--json"]).await?;
+    assert_eq!(l["calibrations"], json!([]));
+    let text = ac2(&f, &["cal", "rm", "--input", "2", "--mic", "M30"]).await?;
+    assert_ne!(text.code, 0);
     Ok(())
 }
 

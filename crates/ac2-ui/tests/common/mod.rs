@@ -229,12 +229,14 @@ impl Rig {
                 applied: Seconds(0.0125),
                 applied_samples: Samples(600),
                 tracking: true,
+                awaiting_pick: false,
                 last_finding: None,
             };
             let fixed = DelayState {
                 applied: Seconds(0.0141),
                 applied_samples: Samples(677),
                 tracking: false,
+                awaiting_pick: false,
                 last_finding: None,
             };
             for m in [

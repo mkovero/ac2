@@ -18,6 +18,7 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         applied: Seconds(0.0125),
         applied_samples: Samples(600),
         tracking: false,
+        awaiting_pick: false,
         last_finding: None,
     });
     Measurement {
@@ -389,7 +390,9 @@ fn transfer_commands() {
         r.as_slice(),
         [Request::FindDelay {
             meas: MeasId(1),
-            pick: DelayPick::FirstArrival
+            pick: DelayPick::FirstArrival,
+            band: FinderBand::Auto,
+            observation: None,
         }]
     ));
     let r = t.key("Shift+X");
@@ -397,7 +400,8 @@ fn transfer_commands() {
         r.as_slice(),
         [Request::FindDelay {
             meas: MeasId(1),
-            pick: DelayPick::Strongest
+            pick: DelayPick::Strongest,
+            ..
         }]
     ));
     let r = t.key("Y");
@@ -1205,4 +1209,199 @@ fn mic_text_round_trips() {
     for bad in ["", "M30", "0=M30", "x=M30", "1=a, 1=b"] {
         assert!(parse_mics(bad).is_err(), "{bad:?}");
     }
+}
+
+fn with_output_device(dev: &str) -> State {
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.output_device = DeviceId(dev.into());
+    }
+    s
+}
+
+fn prompt_text(t: &mut T, c: CommandId, text: &str) -> Vec<Request> {
+    t.st.update(Msg::Command(c), &t.keys);
+    if let Overlay::Prompt(p) = &mut t.st.overlay {
+        p.text.clear();
+    }
+    t.text(text);
+    t.key("Enter")
+}
+
+#[test]
+fn stimulus_outputs_are_remembered_per_device() {
+    // First run: output 1, nothing to save.
+    let mut t = T::new();
+    assert_eq!(t.st.stimulus.outputs, vec![0]);
+    assert!(t.st.stimulus.describe().ends_with("→ out 1"));
+    assert!(!t.st.prefs_dirty);
+    // Choosing outputs remembers them for the session's output device.
+    prompt_text(&mut t, CommandId::StimulusOutputs, "2, 3");
+    assert_eq!(t.st.stimulus.outputs, vec![1, 2]);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.st.prefs.outputs_for("fake:loop"), Some(&[1u16, 2][..]));
+
+    // Another device: never used, so output 1; back on the first, its outputs return.
+    t.conn(mirror(with_output_device("hw:UMC1820")));
+    assert_eq!(t.st.stimulus.outputs, vec![0]);
+    t.conn(mirror(with_output_device("fake:loop")));
+    assert_eq!(t.st.stimulus.outputs, vec![1, 2]);
+
+    // A later run starts from the saved preferences.
+    let mut t2 = T::disconnected();
+    t2.st.prefs = t.st.prefs.clone();
+    t2.conn(ConnEvent::Connected {
+        target: "local daemon".into(),
+        server: "ac2d test".into(),
+        client_id: ClientId("c1".into()),
+    });
+    t2.conn(mirror(daemon_state()));
+    assert_eq!(t2.st.stimulus.outputs, vec![1, 2]);
+}
+
+#[test]
+fn outputs_never_change_under_a_held_stimulus() {
+    let mut t = T::new();
+    t.st.prefs.outputs.insert("hw:UMC1820".into(), vec![3]);
+    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    t.conn(mirror(with_output_device("hw:UMC1820")));
+    assert_eq!(t.st.stimulus.outputs, vec![0]);
+    // Once stopped, the device's remembered outputs apply.
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    t.conn(mirror(with_output_device("hw:UMC1820")));
+    assert_eq!(t.st.stimulus.outputs, vec![3]);
+}
+
+fn cal_delete(r: &[Request]) -> Option<(CalKey, CalPart)> {
+    r.iter().find_map(|r| match r {
+        Request::Call {
+            cmd: Command::CalDelete { key, part },
+            ..
+        } => Some((key.clone(), *part)),
+        _ => None,
+    })
+}
+
+#[test]
+fn calibrations_are_deleted_from_the_palette() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.inputs = vec![InputSetup {
+        channel: 1,
+        mic: Some("M30".into()),
+        mic_curve: true,
+    }];
+    t.conn(mirror(s));
+    // Prefilled with the selected measurement's input and its mic.
+    t.st.update(Msg::Command(CommandId::CalDeleteCurve), &t.keys);
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::CalDelete(CalPart::MicCurve) && p.text == "2=M30"
+    ));
+    let r = t.key("Enter");
+    let key = CalKey {
+        device: DeviceId("fake:loop".into()),
+        channel: 1,
+        mic: "M30".into(),
+    };
+    assert_eq!(cal_delete(&r), Some((key.clone(), CalPart::MicCurve)));
+    let r = prompt_text(&mut t, CommandId::CalDelete, "2=M30");
+    assert_eq!(cal_delete(&r), Some((key.clone(), CalPart::All)));
+    let r = prompt_text(&mut t, CommandId::CalDeleteSensitivity, "4=ECM 8000");
+    assert_eq!(
+        cal_delete(&r),
+        Some((
+            CalKey {
+                channel: 3,
+                mic: "ECM 8000".into(),
+                ..key
+            },
+            CalPart::Sensitivity
+        ))
+    );
+    // A mic name is required; the prompt stays with the reason.
+    let r = prompt_text(&mut t, CommandId::CalDelete, "2=");
+    assert!(cal_delete(&r).is_none());
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
+    // Without a session there is no device to name.
+    let mut s = daemon_state();
+    s.session.open = None;
+    t.conn(mirror(s));
+    let r = prompt_text(&mut t, CommandId::CalDelete, "2=M30");
+    assert!(cal_delete(&r).is_none());
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.error.as_deref().is_some_and(|e| e.contains("cal rm"))
+    ));
+}
+
+fn find_request(r: &[Request]) -> Option<(FinderBand, Option<Seconds>)> {
+    r.iter().find_map(|r| match r {
+        Request::FindDelay {
+            band, observation, ..
+        } => Some((*band, *observation)),
+        _ => None,
+    })
+}
+
+#[test]
+fn finder_band_and_observation_are_the_operators_choice() {
+    let mut t = T::new();
+    t.key("Alt+1");
+    assert_eq!(find_request(&t.key("X")), Some((FinderBand::Auto, None)));
+    t.st.update(Msg::Command(CommandId::FinderSub), &t.keys);
+    assert!(t.last_toast().contains("sub band · auto observation"));
+    assert_eq!(find_request(&t.key("X")), Some((FinderBand::Sub, None)));
+    // The sub band observes 2, 4 or 8 s.
+    prompt_text(&mut t, CommandId::FinderObservation, "3");
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
+    t.key("Escape");
+    prompt_text(&mut t, CommandId::FinderObservation, "8 s");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(
+        t.last_toast().contains("sub band · 8 s"),
+        "{}",
+        t.last_toast()
+    );
+    assert_eq!(
+        find_request(&t.key("Shift+X")),
+        Some((FinderBand::Sub, Some(Seconds(8.0))))
+    );
+    // Another band starts from its automatic observation.
+    t.st.update(Msg::Command(CommandId::FinderMid), &t.keys);
+    assert_eq!(find_request(&t.key("X")), Some((FinderBand::Mid, None)));
+    prompt_text(&mut t, CommandId::FinderObservation, "0,5");
+    assert_eq!(
+        find_request(&t.key("X")),
+        Some((FinderBand::Mid, Some(Seconds(0.5))))
+    );
+    // Empty: automatic again; above 8 s is refused.
+    prompt_text(&mut t, CommandId::FinderObservation, "");
+    assert_eq!(t.st.finder.observation, None);
+    prompt_text(&mut t, CommandId::FinderObservation, "9");
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
+    t.key("Escape");
+    // Custom edges.
+    prompt_text(&mut t, CommandId::FinderCustom, "80 – 800 Hz");
+    assert_eq!(
+        find_request(&t.key("X")),
+        Some((
+            FinderBand::Custom {
+                lo_hz: Hz(80.0),
+                hi_hz: Hz(800.0)
+            },
+            None
+        ))
+    );
+    prompt_text(&mut t, CommandId::FinderCustom, "800-80");
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
+    t.key("Escape");
+    // A custom band reaching below 150 Hz is a sub band: 2, 4 or 8 s.
+    prompt_text(&mut t, CommandId::FinderObservation, "1");
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
+    t.key("Escape");
+    t.st.update(Msg::Command(CommandId::FinderAuto), &t.keys);
+    assert_eq!(t.st.finder, FinderChoice::default());
 }

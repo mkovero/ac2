@@ -30,6 +30,10 @@ pub(crate) struct Finder {
     /// Band tracking runs in: the band of the last finding that was not refused.
     track_band: Band,
     tracking: Option<(DelayStream, Tracker)>,
+    /// An ambiguous finding awaits the operator's pick (decision 1c): tracking observes
+    /// nothing until it is resolved, so it cannot move the delay to one of the candidates
+    /// on its own.
+    paused: bool,
 }
 
 impl Finder {
@@ -43,6 +47,7 @@ impl Finder {
             scratch: FinderScratch::new(),
             track_band: Band::FullRange,
             tracking: None,
+            paused: false,
         }
     }
 
@@ -70,6 +75,9 @@ impl Finder {
             self.reference.drain(..excess);
             self.measurement.drain(..excess);
             self.start += excess as u64;
+        }
+        if self.paused {
+            return None;
         }
         let (stream, tracker) = self.tracking.as_mut()?;
         stream.push_ref(DBlock { start, samples: r });
@@ -111,6 +119,26 @@ impl Finder {
         };
     }
 
+    /// Pauses tracking while an ambiguous finding awaits a pick, or resumes it. A resumed
+    /// stream starts over: the audio skipped while paused cannot be spliced onto what
+    /// follows, and a result pending from before the pause no longer compares.
+    pub(crate) fn set_paused(&mut self, paused: bool) {
+        if self.paused
+            && !paused
+            && let Some((s, t)) = &mut self.tracking
+        {
+            s.reset();
+            t.reset();
+        }
+        self.paused = paused;
+    }
+
+    /// Tracking is paused (an ambiguous finding awaits a pick).
+    #[cfg(test)]
+    pub(crate) fn paused(&self) -> bool {
+        self.paused
+    }
+
     /// The operator set the delay.
     pub(crate) fn set_held(&mut self, held: i64) {
         if let Some((_, t)) = &mut self.tracking {
@@ -122,7 +150,8 @@ impl Finder {
     /// of the ±1 s search. `observation` (seconds) asks for exactly that block; `None` takes
     /// what has been captured, up to the band's default. Too little audio is a refusal
     /// (`ObservationTooShort`), not an error; `Err` is a configuration the finder rejects.
-    /// A finding that is not refused moves tracking to its band.
+    /// A finding that is not refused moves tracking to its band. A new finding resumes
+    /// tracking unless it is ambiguous, which pauses it until the operator picks.
     pub(crate) fn find(
         &mut self,
         band: FindBand,
@@ -152,6 +181,7 @@ impl Finder {
         };
         if room < need {
             let end = self.start + total as u64;
+            self.set_paused(false);
             return Ok(FinderResult {
                 outcome: Outcome::NoEstimate {
                     reasons: vec![NoEstimateReason::ObservationTooShort],
@@ -195,6 +225,7 @@ impl Finder {
                 self.track(true, held);
             }
         }
+        self.set_paused(matches!(res.outcome, Outcome::Ambiguous { .. }));
         Ok(res)
     }
 }
@@ -256,6 +287,83 @@ mod tests {
         assert_eq!(f.track_band, Band::Mid);
         // Observation: the mid band's default.
         assert_eq!(res.meas_window.end - res.meas_window.start, 24_000);
+    }
+
+    /// `r` through paths `(delay samples, gain)`, plus noise 30 dB down.
+    fn paths(r: &[f32], arrivals: &[(usize, f32)], seed: u64) -> Vec<f32> {
+        let n = noise(r.len(), seed);
+        (0..r.len())
+            .map(|i| {
+                arrivals
+                    .iter()
+                    .filter(|(d, _)| i >= *d)
+                    .map(|(d, g)| g * r[i - d])
+                    .sum::<f32>()
+                    + 0.03 * n[i]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_ambiguous_finding_pauses_tracking_until_resolved() {
+        let fs = 48_000.0;
+        let mut f = Finder::new(fs);
+        f.track(true, 0);
+        // A direct arrival 12.3 dB under the strongest: within 2 dB of the first-arrival
+        // threshold, so the finder will not choose for the operator.
+        let r = noise(48_000 * 4, 5);
+        let gain = 10f32.powf(-12.3 / 20.0);
+        let m = paths(&r, &[(300, gain), (500, 1.0)], 6);
+        assert_eq!(f.push(0, &r, &m), None);
+        let res = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config");
+        assert!(
+            matches!(res.outcome, Outcome::Ambiguous { .. }),
+            "{:?}",
+            res.outcome
+        );
+        assert!(f.paused());
+
+        // The room changes to one clean arrival: tracking would lock onto it within two
+        // windows, but it waits for the operator.
+        let clean = |seed: u64| {
+            let r = noise(48_000 * 2, seed);
+            let m = paths(&r, &[(500, 1.0)], seed + 1);
+            (r, m)
+        };
+        let mut start = r.len() as u64;
+        for seed in [10, 20] {
+            let (r, m) = clean(seed);
+            assert_eq!(f.push(start, &r, &m), None, "paused tracking moved");
+            start += r.len() as u64;
+        }
+
+        // The operator picks (insert / set): tracking resumes and follows the room again.
+        f.set_held(300);
+        f.set_paused(false);
+        let mut moved = None;
+        for seed in [30, 40] {
+            let (r, m) = clean(seed);
+            moved = moved.or(f.push(start, &r, &m));
+            start += r.len() as u64;
+        }
+        assert_eq!(moved, Some(500));
+    }
+
+    #[test]
+    fn a_new_finding_that_is_not_ambiguous_resumes_tracking() {
+        let mut f = Finder::new(48_000.0);
+        f.track(true, 0);
+        f.set_paused(true);
+        let r = noise(48_000 * 4, 7);
+        let m = paths(&r, &[(120, 1.0)], 8);
+        f.push(0, &r, &m);
+        let res = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config");
+        assert!(matches!(res.outcome, Outcome::Accepted { .. }), "{res:?}");
+        assert!(!f.paused());
     }
 
     #[test]

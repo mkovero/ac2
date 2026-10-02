@@ -25,6 +25,10 @@ pub struct AppOptions {
     pub keymap: Keymap,
     /// Where the keymap came from, for the help overlay.
     pub keymap_path: Option<std::path::PathBuf>,
+    /// Preferences read at start.
+    pub prefs: crate::prefs::UiPrefs,
+    /// Where changed preferences are saved; `None` keeps them in memory (tests).
+    pub prefs_path: Option<std::path::PathBuf>,
     /// Shown once as an error toast (bad `keys.toml`, embedded daemon unavailable…).
     pub notices: Vec<String>,
     /// Process start, for the startup measurement.
@@ -64,6 +68,7 @@ pub struct App {
     pub state: AppState,
     pub keymap: Keymap,
     pub(crate) keymap_path: Option<std::path::PathBuf>,
+    prefs_path: Option<std::path::PathBuf>,
     conn: Option<Conn>,
     started: Instant,
     last_tick: Option<Instant>,
@@ -109,6 +114,7 @@ impl App {
             Conn::start(t, wake).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
+        state.prefs = opts.prefs;
         for n in opts.notices {
             state.update(
                 Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
@@ -122,6 +128,7 @@ impl App {
             state,
             keymap: opts.keymap,
             keymap_path: opts.keymap_path,
+            prefs_path: opts.prefs_path,
             conn,
             started: opts.started,
             last_tick: None,
@@ -193,6 +200,18 @@ impl App {
         if let Some(c) = &self.conn {
             for r in reqs {
                 c.send(r);
+            }
+        }
+        if self.state.prefs_dirty {
+            self.state.prefs_dirty = false;
+            // A few hundred bytes, written only when the operator changes a preference.
+            if let Some(path) = &self.prefs_path
+                && let Err(e) = self.state.prefs.save(path)
+            {
+                self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
+                    what: "preferences".into(),
+                    result: Err(e),
+                })));
             }
         }
     }

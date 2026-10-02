@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 ac2-core = { path = "../ac2-core" }
 ac2-proto = { path = "../ac2-proto" }
-directories = "6"
 num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 # Session manifests must read back the exact f64 they wrote (delays, frequencies).

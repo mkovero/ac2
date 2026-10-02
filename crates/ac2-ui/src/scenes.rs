@@ -211,12 +211,24 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         let name = c.meas.config.name.clone();
         let color = theme.trace_color(c.color);
         let mut t = match &c.tf.frame.data {
-            FrameData::Spec(f) => {
-                SpectrumTrace::spectrum(f, &c.freqs, &c.edges, name, color, freshness(c.tf))
-            }
-            FrameData::Rta(f) => {
-                SpectrumTrace::rta(f, &c.freqs, &c.edges, name, color, freshness(c.tf))
-            }
+            FrameData::Spec(f) => SpectrumTrace::spectrum(
+                f,
+                c.tf.frame.stamp.capture_wall_ns,
+                &c.freqs,
+                &c.edges,
+                name,
+                color,
+                freshness(c.tf),
+            ),
+            FrameData::Rta(f) => SpectrumTrace::rta(
+                f,
+                c.tf.frame.stamp.capture_wall_ns,
+                &c.freqs,
+                &c.edges,
+                name,
+                color,
+                freshness(c.tf),
+            ),
             _ => continue,
         };
         if st.view.spectrum.peak_hold {

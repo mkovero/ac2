@@ -40,6 +40,7 @@
      "applied": 0.0125,
      "applied_samples": 600,
      "tracking": true,
+     "awaiting_pick": false,
      "last_finding": {
       "outcome": {
        "type": "ambiguous",

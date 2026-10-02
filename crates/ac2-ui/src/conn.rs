@@ -19,7 +19,7 @@ use ac2_proto::model::{
     DelayFinding, DelayPick, FinderBand, GeneratorDesired, GeneratorSettings, ImportFormat,
     ImportRole, TraceData, TraceMeta,
 };
-use ac2_proto::units::{ClientId, MeasId, TraceId};
+use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
 use tokio::sync::mpsc;
 
@@ -108,9 +108,14 @@ pub enum Request {
     StimSet(GeneratorDesired),
     /// Stop and release; without a lease, `gen.stop` (any client may stop the output).
     StimStop,
-    /// `delay.find` (auto band) on `meas`, to insert `pick` from; the reducer decides what to
-    /// insert once the finding is back.
-    FindDelay { meas: MeasId, pick: DelayPick },
+    /// `delay.find` on `meas` in `band` over `observation`, to insert `pick` from; the
+    /// reducer decides what to insert once the finding is back.
+    FindDelay {
+        meas: MeasId,
+        pick: DelayPick,
+        band: FinderBand,
+        observation: Option<Seconds>,
+    },
     /// `trace.capture` of `meas` into `slot` as `name`, deleting `replace` first.
     Capture {
         meas: MeasId,
@@ -135,12 +140,14 @@ enum Ctl {
 /// Wakes the UI thread.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
-/// Handle to the link thread. Dropping it stops the stimulus (if held), releases the lease
-/// and joins the thread.
+/// Handle to the link thread. Dropping it stops the stimulus (if held) and releases the
+/// lease, waiting at most [`QUIT_GRACE`] for that.
 pub struct Conn {
     tx: mpsc::UnboundedSender<Ctl>,
     rx: std_mpsc::Receiver<ConnEvent>,
     thread: Option<JoinHandle<()>>,
+    /// Signalled (or dropped) when the link thread is done.
+    done: std_mpsc::Receiver<()>,
 }
 
 impl std::fmt::Debug for Conn {
@@ -148,6 +155,11 @@ impl std::fmt::Debug for Conn {
         f.debug_struct("Conn").finish_non_exhaustive()
     }
 }
+
+/// Longest a quit waits for the stimulus stop and lease release (decision K6). Past it the
+/// app exits anyway: an unreachable daemon must not hold the window open, and its lease
+/// expiry (1.5 s) fades the output out regardless.
+pub const QUIT_GRACE: Duration = Duration::from_secs(1);
 
 /// Retry delay after a failed connect.
 pub const RETRY_EVERY: Duration = Duration::from_secs(2);
@@ -164,9 +176,12 @@ impl Conn {
     pub fn start(target: Target, wake: Wake) -> std::io::Result<Self> {
         let (tx, ctl_rx) = mpsc::unbounded_channel();
         let (ev_tx, rx) = std_mpsc::channel();
+        let (done_tx, done) = std_mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("ac2-ui link".into())
             .spawn(move || {
+                // Dropped on every exit path, panics included: the closer stops waiting.
+                let _done = done_tx;
                 let rt = match tokio::runtime::Builder::new_multi_thread()
                     .worker_threads(2)
                     .thread_name("ac2-ui io")
@@ -190,6 +205,7 @@ impl Conn {
             tx,
             rx,
             thread: Some(thread),
+            done,
         })
     }
 
@@ -203,14 +219,32 @@ impl Conn {
     }
 }
 
+impl Conn {
+    /// Stops the stimulus (if held), releases the lease and ends the link, waiting at most
+    /// [`QUIT_GRACE`]. `true` when the link finished in time; otherwise its thread is left
+    /// to the process exit and the daemon's lease expiry stops the output.
+    pub fn close(mut self) -> bool {
+        self.shutdown()
+    }
+
+    fn shutdown(&mut self) -> bool {
+        let Some(t) = self.thread.take() else {
+            return true;
+        };
+        let _ = self.tx.send(Ctl::Shutdown);
+        match self.done.recv_timeout(QUIT_GRACE) {
+            Err(std_mpsc::RecvTimeoutError::Timeout) => false,
+            Ok(()) | Err(std_mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = t.join();
+                true
+            }
+        }
+    }
+}
+
 impl Drop for Conn {
     fn drop(&mut self) {
-        let _ = self.tx.send(Ctl::Shutdown);
-        if let Some(t) = self.thread.take() {
-            // The stimulus stop + release round trip is bounded by the client's retry
-            // policy; the daemon's lease expiry fades the output out regardless.
-            let _ = t.join();
-        }
+        self.shutdown();
     }
 }
 
@@ -398,7 +432,7 @@ async fn session(client: Client, ctl: &mut mpsc::UnboundedReceiver<Ctl>, out: &O
     };
     // Closing the channel makes the stimulus task stop the output and release the lease.
     drop(stim_tx);
-    let _ = tokio::time::timeout(Duration::from_secs(5), stim).await;
+    let _ = tokio::time::timeout(QUIT_GRACE, stim).await;
     next
 }
 
@@ -411,14 +445,19 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 o.send(ConnEvent::Reply { what, result });
             });
         }
-        Request::FindDelay { meas, pick } => {
+        Request::FindDelay {
+            meas,
+            pick,
+            band,
+            observation,
+        } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let r = c
                     .call(Command::DelayFind {
                         meas,
-                        band: FinderBand::Auto,
-                        observation: None,
+                        band,
+                        observation,
                     })
                     .await
                     .and_then(|r| expect_body!("delay.find", r, ReplyBody::DelayFinding(f) => f));

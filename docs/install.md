@@ -180,10 +180,21 @@ ac2 auth pair 10.0.0.20 --server-key '<the 40-character key from the daemon host
 ```
 
 `auth pair` pins the daemon key and prints this client's key as one line. Add that line to
-the daemon host's `authorized_clients` file (`~/.config/ac2/authorized_clients`, or
-`%APPDATA%\ac2\authorized_clients` on Windows) and restart the daemon. Then
+the daemon host's `authorized_clients` file and restart the daemon. Then
 `ac2 --remote 10.0.0.20 status`, or open the app's connect dialog (`ac2-ui --connect`): paired
 rigs are selectable there, and an unpaired rig offers the same pairing steps.
+
+Where the keys live (the ac2 config directory, shared by every ac2 program on a machine):
+
+| file | Linux | macOS | Windows |
+|---|---|---|---|
+| daemon key pair `server.key`, accepted clients `authorized_clients` | `~/.config/ac2/` | `~/Library/Application Support/ac2/` | `%APPDATA%\ac2\config\` |
+| this client's key pair and pinned daemon keys (`keys/client.key`, `keys/client.pub`, `keys/known_servers`) | `~/.config/ac2/keys/` | `~/Library/Application Support/ac2/keys/` | `%APPDATA%\ac2\config\keys\` |
+
+`AC2_CONFIG_DIR` moves the whole directory; `ac2d --key-file` / `--authorized` and
+`ac2 --key-dir` (or `AC2_KEY_DIR`) override single locations. `ac2 auth show` prints the
+client side. The app's connect dialog pairs into the same `keys/` directory as the CLI, so a
+rig paired with either is paired for both.
 
 Discovery is only a convenience. Anyone on the network can advertise any name and any
 fingerprint; ac2 connects only with a key you pinned, and the connection fails if the daemon

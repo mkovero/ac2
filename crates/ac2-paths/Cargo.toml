@@ -1,0 +1,18 @@
+[package]
+name = "ac2-paths"
+description = "Where ac2 keeps its files (platform config and data directories) and atomic file writes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+directories = "6"
+
+[dev-dependencies]
+tempfile = "3"

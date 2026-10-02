@@ -9,6 +9,7 @@ use ac2_ui::conn::Target;
 use ac2_ui::connect::ConnectDialog;
 use ac2_ui::embedded::{Embedded, EmbeddedBackend, start_embedded};
 use ac2_ui::keys::{Keymap, config_path};
+use ac2_ui::prefs::UiPrefs;
 use ac2_ui::{App, AppOptions};
 use clap::{Parser, ValueEnum};
 use eframe::egui;
@@ -52,7 +53,8 @@ struct Args {
     /// Key directory for CURVE (default: the per-user ac2 config dir).
     #[arg(long, value_name = "DIR")]
     key_dir: Option<std::path::PathBuf>,
-    /// Key bindings file (default: `~/.config/ac2/keys.toml`).
+    /// Key bindings file (default: `keys.toml` in the ac2 config directory, `~/.config/ac2` on
+    /// Linux).
     #[arg(long, value_name = "FILE")]
     keys: Option<std::path::PathBuf>,
     #[arg(long, value_enum, default_value = "dark")]
@@ -171,7 +173,7 @@ fn main() -> ExitCode {
             }
         }
     };
-    let keymap_path = args.keys.clone().or_else(config_path);
+    let keymap_path = Some(args.keys.clone().unwrap_or_else(config_path));
     let (keymap, err) = Keymap::load(keymap_path.as_deref());
     notices.extend(err);
     let theme = match args.theme {
@@ -179,11 +181,16 @@ fn main() -> ExitCode {
         ThemeArg::Light => ThemeName::Light,
         ThemeArg::HighContrast => ThemeName::HighContrast,
     };
+    let prefs_path = ac2_paths::ui_prefs();
+    let (prefs, err) = UiPrefs::load(Some(&prefs_path));
+    notices.extend(err);
     let opts = AppOptions {
         target,
         theme,
         keymap,
         keymap_path,
+        prefs,
+        prefs_path: Some(prefs_path),
         notices,
         started,
         bench_startup: args.bench_startup,

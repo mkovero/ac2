@@ -34,7 +34,7 @@ fn main() -> Result<(), eframe::Error> {
     };
     let rig = common::Rig::start();
     let keymap_path = config_path();
-    let (keymap, err) = Keymap::load(keymap_path.as_deref());
+    let (keymap, err) = Keymap::load(Some(&keymap_path));
     let opts = AppOptions {
         target: Some(Target {
             config: ClientConfig::new(rig.fake.endpoints(), "ac2-ui fake rig"),
@@ -42,7 +42,10 @@ fn main() -> Result<(), eframe::Error> {
         }),
         theme,
         keymap,
-        keymap_path,
+        keymap_path: Some(keymap_path),
+        // The fake rig's device is not hardware worth remembering outputs for.
+        prefs: ac2_ui::prefs::UiPrefs::default(),
+        prefs_path: None,
         notices: err.into_iter().collect(),
         started,
         bench_startup: has("--bench-startup"),

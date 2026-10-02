@@ -10,7 +10,7 @@ set -euo pipefail
 tarball=$(realpath "$1")
 t=$(mktemp -d)
 trap 'kill "${daemon:-0}" 2>/dev/null || true; rm -rf "$t"' EXIT
-export HOME="$t/home" XDG_CONFIG_HOME="$t/home/.config" AC2_RUNTIME_DIR="$t/run"
+export HOME="$t/home" XDG_CONFIG_HOME="$t/home/.config" AC2_CONFIG_DIR="$t/home/.config/ac2" AC2_RUNTIME_DIR="$t/run"
 mkdir -p "$HOME"
 start=$(date +%s.%N)
 step() { awk -v s="$start" -v n="$(date +%s.%N)" -v m="$*" 'BEGIN { printf "%6.2f s  %s\n", n - s, m }'; }

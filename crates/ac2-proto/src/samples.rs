@@ -289,6 +289,10 @@ pub fn commands() -> Vec<Command> {
         },
         Command::FileList,
         Command::SessionInputs { inputs: inputs() },
+        Command::CalDelete {
+            key: cal_key(),
+            part: CalPart::Sensitivity,
+        },
     ]
 }
 
@@ -303,6 +307,7 @@ fn measurement() -> Measurement {
             applied: Seconds(0.0125),
             applied_samples: Samples(600),
             tracking: true,
+            awaiting_pick: false,
             last_finding: Some(finding()),
         }),
         grid_id: Some(log_grid().id()),

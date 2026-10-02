@@ -20,20 +20,13 @@ use ac2_zmq::{CurveClient, KeyPair, PublicKey, SecretKey};
 
 use crate::error::ClientError;
 
-/// `$AC2_KEY_DIR`, else `$XDG_CONFIG_HOME/ac2/keys`, else `~/.config/ac2/keys` (Unix) /
-/// `%APPDATA%\ac2\keys` (Windows).
+/// `$AC2_KEY_DIR`, else [`ac2_paths::client_key_dir`] (`keys` in the ac2 config directory,
+/// next to the daemon's `server.key` and `authorized_clients`).
 pub fn default_key_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("AC2_KEY_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }
-    if let Some(d) = std::env::var_os("XDG_CONFIG_HOME").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d).join("ac2").join("keys");
-    }
-    if let Some(d) = std::env::var_os("APPDATA").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d).join("ac2").join("keys");
-    }
-    let home = std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from);
-    home.join(".config").join("ac2").join("keys")
+    ac2_paths::client_key_dir()
 }
 
 /// Short, human-comparable fingerprint of a CURVE public key: the first 10 bytes of
@@ -311,6 +304,19 @@ mod tests {
             PinStatus::Unpaired
         );
         Ok(())
+    }
+
+    #[test]
+    fn client_keys_live_in_the_shared_config_dir() {
+        // The daemon's server.key / authorized_clients and the client's keys must resolve
+        // under one directory on every OS, or pairing instructions point to two places.
+        if std::env::var_os("AC2_KEY_DIR").is_none() {
+            assert_eq!(default_key_dir(), ac2_paths::config_dir().join("keys"));
+        }
+        assert_eq!(
+            ac2_paths::server_key().parent(),
+            Some(ac2_paths::config_dir().as_path())
+        );
     }
 
     #[test]

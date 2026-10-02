@@ -17,6 +17,7 @@ workspace = true
 test-support = ["dep:ac2-traces"]
 
 [dependencies]
+ac2-paths = { path = "../ac2-paths" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-traces = { path = "../ac2-traces", optional = true }
 ac2-zmq = { path = "../ac2-zmq" }
