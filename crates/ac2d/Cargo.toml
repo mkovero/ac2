@@ -18,11 +18,6 @@ path = "src/lib.rs"
 name = "ac2d"
 path = "src/main.rs"
 
-[features]
-default = ["jack"]
-# JACK backend (Linux; libjack is loaded at run time, so it is on by default).
-jack = ["ac2-audio/jack"]
-
 [dependencies]
 ac2-audio = { path = "../ac2-audio" }
 ac2-core = { path = "../ac2-core" }

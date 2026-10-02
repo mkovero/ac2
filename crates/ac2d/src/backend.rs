@@ -1,26 +1,38 @@
 //! The audio backends a front end (the `ac2d` binary, an app embedding the daemon) can name.
-//! There is no default and no fallback: a fake device must never stand in for a missing
-//! real one, so the caller always chooses.
+//!
+//! Each platform has one real backend: JACK on Linux (JACK2, or PipeWire through
+//! pipewire-jack; there is no ALSA backend), cpal on macOS and Windows (Core Audio, WASAPI).
+//! The simulated rig is never a fallback: a fake device must never stand in for a missing
+//! real one, so it runs only when named.
 
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use ac2_audio::fake::{FakeDrive, FakePath, Pace};
-use ac2_audio::{Backend, CpalBackend, FakeBackend, FakeConfig};
+use ac2_audio::{Backend, FakeBackend, FakeConfig};
 
 /// A backend by name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendChoice {
-    /// The platform audio API (ALSA / CoreAudio / WASAPI).
+    /// The OS audio host through cpal (Core Audio / WASAPI); macOS and Windows.
     Cpal,
-    /// JACK (Linux, feature `jack`).
+    /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// A simulated rig ([`FAKE_RIG`]); never real audio.
     Fake,
 }
 
 impl BackendChoice {
+    /// This platform's real backend, and the default: JACK on Linux, cpal elsewhere.
+    pub const fn platform() -> Self {
+        if cfg!(target_os = "linux") {
+            Self::Jack
+        } else {
+            Self::Cpal
+        }
+    }
+
     /// The name `--backend` takes.
     pub fn name(self) -> &'static str {
         match self {
@@ -44,7 +56,10 @@ impl FromStr for BackendChoice {
             "cpal" => Ok(Self::Cpal),
             "jack" => Ok(Self::Jack),
             "fake" => Ok(Self::Fake),
-            other => Err(format!("unknown backend {other} (jack, cpal or fake)")),
+            other => Err(format!(
+                "unknown backend {other} ({} or fake)",
+                Self::platform()
+            )),
         }
     }
 }
@@ -74,16 +89,14 @@ fn fake_config() -> FakeConfig {
 /// What a backend is, for the operator choosing one.
 pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
     match kind {
-        ac2_audio::BackendKind::Jack => {
-            "JACK audio server: every port on one clock, rate and buffer set by the server".into()
-        }
+        ac2_audio::BackendKind::Jack => "JACK audio server (JACK2, or PipeWire's JACK): every \
+                                         port on one clock, rate and buffer set by the server"
+            .into(),
         ac2_audio::BackendKind::Cpal => {
             let host = if cfg!(target_os = "macos") {
                 "Core Audio"
-            } else if cfg!(target_os = "windows") {
-                "WASAPI"
             } else {
-                "ALSA"
+                "WASAPI"
             };
             format!("System audio ({host}): the interfaces the operating system lists")
         }
@@ -93,36 +106,33 @@ pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
     }
 }
 
-/// Every backend a daemon started on `choice` offers, `choice` first. On real audio that
-/// is every real backend of this build (so the operator can pick JACK or the system's
-/// audio from one daemon); the simulated rig is offered only when named, and then alone.
+/// Every backend a daemon started on `choice` offers: that one alone. A platform has one
+/// real backend, and the simulated rig is offered only when named.
 pub fn backends(choice: BackendChoice) -> Result<Vec<Arc<dyn Backend>>, String> {
-    let mut out = vec![backend(choice)?];
-    if choice != BackendChoice::Fake {
-        for other in [BackendChoice::Jack, BackendChoice::Cpal] {
-            if other != choice
-                && let Ok(b) = backend(other)
-            {
-                out.push(b);
-            }
-        }
-    }
-    Ok(out)
+    Ok(vec![backend(choice)?])
 }
 
-/// Builds the backend `choice` names.
+/// Builds the backend `choice` names; a backend this platform does not have is refused
+/// with what to use instead.
 pub fn backend(choice: BackendChoice) -> Result<Arc<dyn Backend>, String> {
     match choice {
-        BackendChoice::Cpal => Ok(Arc::new(CpalBackend::new())),
         BackendChoice::Fake => Ok(Arc::new(
             FakeBackend::new(fake_config()).map_err(|e| e.to_string())?,
         )),
-        #[cfg(all(feature = "jack", target_os = "linux"))]
+        #[cfg(target_os = "linux")]
         BackendChoice::Jack => Ok(Arc::new(ac2_audio::JackBackend::new(
             ac2_audio::JackConfig::default(),
         ))),
-        #[cfg(not(all(feature = "jack", target_os = "linux")))]
-        BackendChoice::Jack => Err("this build has no JACK backend (feature `jack`, Linux)".into()),
+        #[cfg(target_os = "linux")]
+        BackendChoice::Cpal => Err("Linux audio goes through JACK (JACK2, or PipeWire through \
+                                    pipewire-jack); there is no ALSA backend: use --backend jack"
+            .into()),
+        #[cfg(not(target_os = "linux"))]
+        BackendChoice::Cpal => Ok(Arc::new(ac2_audio::CpalBackend::new())),
+        #[cfg(not(target_os = "linux"))]
+        BackendChoice::Jack => {
+            Err("JACK is supported on Linux only; use --backend cpal (the system audio)".into())
+        }
     }
 }
 
@@ -144,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn the_simulated_rig_is_offered_alone_and_real_audio_never_offers_it() {
+    fn one_real_backend_per_platform_and_the_simulated_rig_alone() {
         let kinds = |c| {
             backends(c)
                 .expect("backends")
@@ -153,8 +163,17 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(kinds(BackendChoice::Fake), [ac2_audio::BackendKind::Fake]);
-        let real = kinds(BackendChoice::Cpal);
-        assert_eq!(real[0], ac2_audio::BackendKind::Cpal);
-        assert!(!real.contains(&ac2_audio::BackendKind::Fake));
+        let real = kinds(BackendChoice::platform());
+        let other = if cfg!(target_os = "linux") {
+            assert_eq!(real, [ac2_audio::BackendKind::Jack]);
+            BackendChoice::Cpal
+        } else {
+            assert_eq!(real, [ac2_audio::BackendKind::Cpal]);
+            BackendChoice::Jack
+        };
+        match backend(other) {
+            Err(e) => assert!(e.contains("--backend"), "{e}"),
+            Ok(_) => panic!("the other platform's backend is refused"),
+        }
     }
 }

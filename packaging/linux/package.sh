@@ -6,9 +6,10 @@
 #
 #   packaging/linux/package.sh <version> <dir with release binaries> <out dir>
 #
-# The AppImage bundles no shared libraries: the binaries need only glibc, libstdc++ and
-# libasound, which every desktop has, and a bundled libasound would not load the system's
-# PipeWire / PulseAudio ALSA plugins. GPU and windowing libraries are opened at run time.
+# The AppImage bundles no shared libraries: the binaries need glibc and libstdc++, which
+# every desktop has, and libjack.so.0, which must be the system's (JACK2's, or PipeWire's
+# from pipewire-jack) to reach the system's server. No ALSA: nothing links libasound. GPU
+# and windowing libraries are opened at run time.
 set -euo pipefail
 
 version=$1

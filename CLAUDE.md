@@ -17,7 +17,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | crate | role |
 |---|---|
 | `ac2-core` | pure DSP/acoustics math; no I/O, no threads, `forbid(unsafe_code)` |
-| `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack, cpal, fake |
+| `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), cpal (macOS, Windows), fake |
 | `ac2-proto` | typed protocol: commands, events, frame headers, version |
 | `ac2-zmq` | the only crate linking libzmq: safe typed sockets, CURVE behind `SecureContext` (ZAP handler first) |
 | `ac2-client` | async client |

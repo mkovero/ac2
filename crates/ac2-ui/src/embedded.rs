@@ -61,12 +61,23 @@ pub fn demo_measurement() -> MeasConfig {
 /// Audio backend of the embedded daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmbeddedBackend {
-    /// The platform audio API.
+    /// System audio through cpal (Core Audio / WASAPI); macOS and Windows.
     Cpal,
-    /// JACK (Linux, feature `jack`).
+    /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// The simulated rig of `ac2d --backend fake`; never real audio.
     Fake,
+}
+
+impl EmbeddedBackend {
+    /// This platform's audio: JACK on Linux, cpal elsewhere.
+    pub const fn platform() -> Self {
+        if cfg!(target_os = "linux") {
+            Self::Jack
+        } else {
+            Self::Cpal
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

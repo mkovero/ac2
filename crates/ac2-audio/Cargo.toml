@@ -1,6 +1,6 @@
 [package]
 name = "ac2-audio"
-description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK, cpal and fake backends."
+description = "Audio backend trait with explicit capabilities, sample-indexed multichannel blocks; JACK (Linux), cpal (macOS, Windows) and fake backends."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,18 +11,18 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[features]
-default = ["jack"]
-# JACK backend through the `jack` crate (Linux only; a no-op elsewhere). On by default: the
-# crate loads libjack at run time, so builds never need libjack and a missing library or server
-# is reported as `AudioError::Unavailable`, not as a link error.
-jack = ["dep:jack"]
-
 [dependencies]
-cpal = "0.18"
 rtrb = "0.4"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 
+# Linux: JACK is the only real backend (JACK2, or PipeWire through pipewire-jack). The crate
+# loads libjack at run time, so builds never need it and a missing library or server is
+# reported as `AudioError::Unavailable`, not as a link error. No ALSA: nothing links libasound.
 [target.'cfg(target_os = "linux")'.dependencies]
-jack = { version = "0.13", optional = true }
+jack = "0.13"
+log = "0.4"
+
+# macOS and Windows: the OS audio host (Core Audio, WASAPI) through cpal.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+cpal = "0.18"

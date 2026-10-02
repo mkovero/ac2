@@ -9,12 +9,14 @@ use ac2d::{Advertise, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecuri
 const USAGE: &str = "\
 usage: ac2d [options]
 
-With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), cpal backend.
+With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), on this
+platform's audio: JACK on Linux (JACK2, or PipeWire through pipewire-jack), cpal (Core
+Audio / WASAPI) on macOS and Windows.
 
-  --backend <name>       default audio backend: cpal (default), jack, or fake (a
-                         simulated rig: out 1 → in 1 loopback, out 1 → in 2 acoustic
-                         path; only when named here, never as a fallback). On real
-                         audio the other real backends of the build are offered too.
+  --backend <name>       audio backend: jack (Linux) or cpal (macOS, Windows), the
+                         default; or fake (a simulated rig: out 1 → in 1 loopback,
+                         out 1 → in 2 acoustic path; only when named here, never as a
+                         fallback)
   --listen <tcp://iface[:port]>
                          network mode: ctrl on port (default 47820), data on port+1,
                          CURVE on both
@@ -53,7 +55,7 @@ fn parse() -> Result<Option<Args>, String> {
     let mut it = std::env::args().skip(1);
     let mut backend = None;
     let mut a = Args {
-        backend: BackendChoice::Cpal,
+        backend: BackendChoice::platform(),
         listen: None,
         ctrl: None,
         data: None,

@@ -12,8 +12,8 @@ pub enum AudioError {
     Unavailable {
         /// Which backend.
         backend: BackendKind,
-        /// Host-supplied detail.
-        reason: String,
+        /// Why, and what to do about it.
+        reason: Unavailability,
     },
     /// No device matches the selector.
     #[error("no {direction:?} device {selector}")]
@@ -39,6 +39,31 @@ pub enum AudioError {
         /// Host-supplied detail.
         detail: String,
     },
+}
+
+/// Why a backend cannot be used at all, in the operator's words, each with its remedy.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum Unavailability {
+    /// PipeWire serves audio, but the libjack that was loaded is JACK2's, which finds no
+    /// server: PipeWire's own libjack (pipewire-jack) is what talks to it.
+    #[error(
+        "PipeWire is running but its JACK library isn't in use: install pipewire-jack \
+         (e.g. `sudo apt install pipewire-jack`, `sudo pacman -S pipewire-jack`) or start the \
+         daemon with `pw-jack ac2d`"
+    )]
+    PipeWireWithoutJack,
+    /// Neither a JACK server nor PipeWire.
+    #[error("No JACK server: start JACK (e.g. `jackd -d alsa`) or use PipeWire")]
+    NoJackServer,
+    /// No libjack could be loaded at all.
+    #[error(
+        "No JACK library (libjack) is installed: install pipewire-jack where PipeWire runs \
+         (e.g. `sudo apt install pipewire-jack`), else JACK2 (e.g. `sudo apt install jackd2`)"
+    )]
+    NoJackLibrary,
+    /// Anything else the host reported.
+    #[error("{0}")]
+    Host(String),
 }
 
 /// What a backend was doing when it failed.

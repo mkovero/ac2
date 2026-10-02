@@ -836,8 +836,15 @@ impl SessionDialog {
             return Err("The daemon offers no audio backend.".into());
         };
         if let Availability::Unavailable { reason } = &b.availability {
+            // The reason carries its own remedy; another backend is a way out only where
+            // the daemon offers one.
+            let other = if backends.len() > 1 {
+                " Or pick another backend (← → on the first row)."
+            } else {
+                ""
+            };
             return Err(format!(
-                "{} is not available: {reason}. Pick another backend (← → on the first row).",
+                "{} is not available: {reason}.{other}",
                 backend_name(b.kind)
             ));
         }

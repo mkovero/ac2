@@ -13,9 +13,9 @@ use crate::stream::DuplexStream;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendKind {
-    /// The `jack` crate (Linux; feature `jack`).
+    /// The `jack` crate (Linux only: JACK2, or PipeWire through pipewire-jack).
     Jack,
-    /// cpal's default host for the OS (ALSA, CoreAudio, WASAPI).
+    /// cpal on the OS host (Core Audio, WASAPI); macOS and Windows only.
     Cpal,
     /// The simulated device of [`crate::fake`].
     Fake,
@@ -39,7 +39,7 @@ pub enum ClockRelation {
     /// One callback services both directions on one clock (JACK, ASIO, fake). Output and
     /// capture indices of one cycle are equal.
     SingleCallback,
-    /// One physical device, separate callbacks (cpal CoreAudio, ALSA on one PCM). One
+    /// One physical device, separate callbacks (cpal on Core Audio). One
     /// clock, but the phase between directions is new on every start.
     SameDeviceSeparateCallbacks,
     /// Different devices, or identity cannot be proven (WASAPI endpoints differ by
@@ -65,6 +65,25 @@ pub struct FrameRange {
     pub min: u32,
     /// Largest value.
     pub max: u32,
+}
+
+/// Frames per callback a backend asks for when the request names no buffer: 1024 at
+/// 48 kHz (21 ms), scaled with the rate.
+///
+/// A host's own default can be far larger and is delivered in bursts: PipeWire's ALSA
+/// plugin, left to choose, ran 65,536-frame periods, 1.37 s of audio arriving at once, and
+/// every published frame outlived the one-second staleness bound between bursts. A period
+/// this short keeps the latest frame well inside that bound and costs nothing in CPU.
+pub const SHORT_BUFFER_AT_48K: u32 = 1024;
+
+/// [`SHORT_BUFFER_AT_48K`] scaled to `rate`, clamped to what the device supports.
+pub fn short_buffer_frames(rate: u32, supported: Option<FrameRange>) -> u32 {
+    let want = (u64::from(rate) * u64::from(SHORT_BUFFER_AT_48K)).div_ceil(48_000);
+    let want = u32::try_from(want).unwrap_or(u32::MAX).max(1);
+    match supported {
+        Some(r) => want.clamp(r.min.min(r.max), r.max.max(r.min)),
+        None => want,
+    }
 }
 
 /// An inclusive range of sample rates.
@@ -368,6 +387,26 @@ pub trait Backend: Send + Sync + fmt::Debug {
     /// Opens one duplex stream. Capture starts immediately; the output emits silence until
     /// a generator in the request is started.
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError>;
+}
+
+#[cfg(test)]
+mod short_buffer_tests {
+    use super::*;
+
+    #[test]
+    fn about_twenty_milliseconds_within_the_device_range() {
+        assert_eq!(short_buffer_frames(48_000, None), 1024);
+        assert_eq!(short_buffer_frames(96_000, None), 2048);
+        assert_eq!(short_buffer_frames(44_100, None), 941);
+        let r = |min, max| Some(FrameRange { min, max });
+        assert_eq!(short_buffer_frames(48_000, r(64, 4096)), 1024);
+        assert_eq!(short_buffer_frames(48_000, r(2048, 8192)), 2048);
+        assert_eq!(short_buffer_frames(192_000, r(15, 512)), 512);
+        for rate in [44_100, 48_000, 88_200, 96_000, 192_000] {
+            let s = f64::from(short_buffer_frames(rate, None)) / f64::from(rate);
+            assert!((0.020..0.022).contains(&s), "{rate}: {s}");
+        }
+    }
 }
 
 #[cfg(test)]

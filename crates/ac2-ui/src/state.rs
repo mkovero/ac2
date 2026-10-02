@@ -2262,9 +2262,17 @@ impl AppState {
                     _ => {}
                 }
             }
-            ConnEvent::Preview(r) => {
-                if let Overlay::Session(s) = &mut self.overlay {
-                    s.preview_error = r.err().map(|e| format!("meters unavailable: {e}"));
+            ConnEvent::Preview {
+                backend,
+                device,
+                result,
+            } => {
+                // The answer for a device the dialog has since left says nothing about the
+                // one it shows now.
+                if let Overlay::Session(s) = &mut self.overlay
+                    && s.preview_target() == Some((backend, device))
+                {
+                    s.preview_error = result.err().map(|e| format!("meters unavailable: {e}"));
                 }
             }
             ConnEvent::LoopbackDetected(r) => {

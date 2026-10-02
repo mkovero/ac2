@@ -67,6 +67,7 @@ note at the start of the phase that implements them, within the decisions here.
 | C1 | Data-socket send queue fixed at 128 frames per client (resizing live crashes libzmq 4.3.5). (provisional) |
 | C2 | Platform-native dirs via ac2-paths: config dir for calibrations/keys/prefs, data dir for sessions. (provisional) |
 | C3 | `cal.delete` / `ac2 cal rm`; calibration age in spectrum/RTA captions. (provisional) |
+| L1 | Linux: JACK only (JACK2 or PipeWire via pipewire-jack); no ALSA/cpal. mac/win: cpal with a short fixed default buffer (~20 ms). |
 | — | Scene defaults recorded with U1/U2 (banner priority, units, coherence fade, IR dB re peak, spectrum thinning, CHECK ROUTING flag) stand. |
 
 Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).

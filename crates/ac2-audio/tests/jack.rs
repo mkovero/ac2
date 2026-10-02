@@ -1,13 +1,13 @@
 //! JACK backend against a running server. Skips cleanly without one.
 //!
 //! Local run: `jackd -d dummy -r 48000 -p 256 &` then
-//! `AC2_JACK_DUMMY=1 cargo test -p ac2-audio --features jack --test jack`.
+//! `AC2_JACK_DUMMY=1 cargo test -p ac2-audio --test jack`.
 //!
 //! Audio safety: our output ports are never connected to physical playback ports. The test
 //! that emits a generator signal additionally requires `AC2_JACK_DUMMY=1`, the operator's
 //! statement that the server runs the dummy driver; the signal only travels through a graph
 //! connection from our own output to our own input.
-#![cfg(all(feature = "jack", target_os = "linux"))]
+#![cfg(target_os = "linux")]
 
 use std::time::{Duration, Instant};
 

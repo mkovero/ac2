@@ -1,7 +1,7 @@
 # ac2
 
-Open-source live dual-channel FFT analyzer for PA system tuning — Linux (ALSA, PipeWire,
-JACK), macOS, Windows. A Rust daemon owns the audio interface; a GPU desktop app, a CLI and
+Open-source live dual-channel FFT analyzer for PA system tuning — Linux (JACK: JACK2 or
+PipeWire through pipewire-jack), macOS (Core Audio), Windows (WASAPI). A Rust daemon owns the audio interface; a GPU desktop app, a CLI and
 your own scripts connect to it over ZeroMQ, on the same machine or across the network
 (encrypted and paired).
 
@@ -51,10 +51,12 @@ documentation are done; installers are not yet code-signed. ASIO and the phase 7
 ## Building from source
 
 Rust (version pinned in `rust-toolchain.toml`) and a C/C++ toolchain; on Linux also
-`pkg-config cmake libasound2-dev libjack-jackd2-dev libudev-dev`.
+`pkg-config cmake libjack-jackd2-dev libudev-dev`. libjack is loaded at run time, so the
+binaries run (and say why audio is unavailable) where JACK is not installed; nothing links
+ALSA.
 
 ```sh
-cargo build --release -p ac2d -p ac2-cli -p ac2-ui     # --features ac2d/jack,ac2-ui/jack for JACK
+cargo build --release -p ac2d -p ac2-cli -p ac2-ui
 cargo test --workspace
 ```
 

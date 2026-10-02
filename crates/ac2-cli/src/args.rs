@@ -131,9 +131,9 @@ pub enum DaemonCmd {
 /// Audio backend, always named explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BackendArg {
-    /// JACK.
+    /// JACK (JACK2, or PipeWire through pipewire-jack): the real backend on Linux.
     Jack,
-    /// The OS audio host (ALSA, CoreAudio, WASAPI).
+    /// The OS audio host (Core Audio, WASAPI): the real backend on macOS and Windows.
     Cpal,
     /// Simulated device; never touches hardware.
     Fake,

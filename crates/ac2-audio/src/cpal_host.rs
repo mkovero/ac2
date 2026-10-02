@@ -1,4 +1,5 @@
-//! cpal backend on the OS's default host (ALSA, CoreAudio, WASAPI).
+//! cpal backend on the OS's default host (Core Audio, WASAPI). Not built on Linux, where
+//! JACK is the only real backend.
 //!
 //! cpal has no duplex stream: capture and playback are two streams with their own callbacks
 //! and, except on CoreAudio's IO thread, their own threads. Each side therefore keeps its own
@@ -21,7 +22,7 @@ use cpal::{
 use crate::backend::{
     Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
-    StaticLatency,
+    StaticLatency, short_buffer_frames,
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::TimestampClock;
@@ -113,13 +114,7 @@ fn direction_caps(
             formats.push(o);
         }
     }
-    let buffer_frames = usable.iter().find_map(|r| match r.buffer_size() {
-        SupportedBufferSize::Range { min, max } => Some(FrameRange {
-            min: *min,
-            max: *max,
-        }),
-        SupportedBufferSize::Unknown => None,
-    });
+    let buffer_frames = usable.iter().find_map(|r| frame_range(r.buffer_size()));
     Some(DirectionCaps {
         max_channels: usable.iter().map(|r| r.channels()).max().unwrap_or(0),
         rates,
@@ -133,22 +128,58 @@ fn direction_caps(
     })
 }
 
+/// A config to open: channels, cpal's format, ours, and the buffer sizes it supports.
+type Picked = (u16, cpal::SampleFormat, SampleFormat, Option<FrameRange>);
+
+fn frame_range(b: &SupportedBufferSize) -> Option<FrameRange> {
+    match b {
+        SupportedBufferSize::Range { min, max } => Some(FrameRange {
+            min: *min,
+            max: *max,
+        }),
+        SupportedBufferSize::Unknown => None,
+    }
+}
+
 /// The cheapest-to-convert config with at least `min_channels` at `rate`, fewest surplus
 /// channels first.
 fn pick_config(
     ranges: Vec<SupportedStreamConfigRange>,
     rate: u32,
     min_channels: u16,
-) -> Option<(u16, cpal::SampleFormat, SampleFormat)> {
+) -> Option<Picked> {
     ranges
         .into_iter()
         .filter(|r| r.channels() >= min_channels && r.contains_rate(rate))
         .filter_map(|r| {
             let pref = FORMATS.iter().position(|(c, _)| *c == r.sample_format())?;
-            Some((pref, r.channels(), r.sample_format()))
+            Some((pref, r))
         })
-        .min_by_key(|(pref, ch, _)| (*pref, *ch))
-        .and_then(|(_, ch, f)| our_format(f).map(|o| (ch, f, o)))
+        .min_by_key(|(pref, r)| (*pref, r.channels()))
+        .and_then(|(_, r)| {
+            our_format(r.sample_format()).map(|o| {
+                (
+                    r.channels(),
+                    r.sample_format(),
+                    o,
+                    frame_range(r.buffer_size()),
+                )
+            })
+        })
+}
+
+/// Both directions' supported ranges, intersected; `None` where neither states one.
+fn common_range(a: Option<FrameRange>, b: Option<FrameRange>) -> Option<FrameRange> {
+    match (a, b) {
+        (Some(a), Some(b)) if a.min.max(b.min) <= a.max.min(b.max) => Some(FrameRange {
+            min: a.min.max(b.min),
+            max: a.max.min(b.max),
+        }),
+        (Some(r), None) | (None, Some(r)) => Some(r),
+        // Disjoint ranges: the input side decides; the output may still accept it.
+        (Some(a), Some(_)) => Some(a),
+        (None, None) => None,
+    }
 }
 
 fn duplex_relation(d: &cpal::Device) -> ClockRelation {
@@ -298,13 +329,10 @@ impl Backend for CpalBackend {
             }
             .into());
         }
-        let (in_channels, in_cpal_fmt, in_fmt) =
-            pick_config(in_ranges, rate, need_in).ok_or(Unsupported::SampleFormat {
+        let (in_channels, in_cpal_fmt, in_fmt, in_buffers) = pick_config(in_ranges, rate, need_in)
+            .ok_or(Unsupported::SampleFormat {
                 direction: Direction::Input,
             })?;
-        let buffer_size = request
-            .buffer_frames
-            .map_or(BufferSize::Default, BufferSize::Fixed);
 
         let out_cfg = match &out_dev {
             None => None,
@@ -328,6 +356,13 @@ impl Backend for CpalBackend {
                 )?)
             }
         };
+
+        // No buffer asked for: a short fixed one, never the host's default (see
+        // `SHORT_BUFFER_AT_48K`).
+        let frames = request.buffer_frames.unwrap_or_else(|| {
+            short_buffer_frames(rate, common_range(in_buffers, out_cfg.and_then(|c| c.3)))
+        });
+        let buffer_size = BufferSize::Fixed(frames);
 
         // Variable-size hosts (WASAPI) can deliver small packets; size headers for them.
         let min_block = request.buffer_frames.unwrap_or(64).clamp(16, 64) as usize;
@@ -357,7 +392,7 @@ impl Backend for CpalBackend {
             .map_err(|e| backend_err(Operation::Open, e))?;
 
         let out_stream = match (&out_dev, out_cfg) {
-            (Some(d), Some((channels, cpal_fmt, _))) => {
+            (Some(d), Some((channels, cpal_fmt, _, _))) => {
                 let mut output = OutputSide {
                     renderer: plumbing.renderer,
                     clock: TimestampClock::new(rate),
@@ -396,7 +431,8 @@ impl Backend for CpalBackend {
             .play()
             .map_err(|e| backend_err(Operation::Start, e))?;
 
-        let buffer_frames = in_stream.buffer_size().ok();
+        // What the host runs, else what was asked for (it was accepted as a fixed size).
+        let buffer_frames = in_stream.buffer_size().ok().or(Some(frames));
         let same_device = out_dev
             .as_ref()
             .is_some_and(|d| device_id(d) == device_id(&in_dev));
@@ -408,10 +444,10 @@ impl Backend for CpalBackend {
             input_channels: request.input_map.len() as u16,
             device_input_channels: in_channels,
             output_channels: request.output_channels,
-            device_output_channels: out_cfg.map_or(0, |(c, _, _)| c),
+            device_output_channels: out_cfg.map_or(0, |(c, _, _, _)| c),
             buffer_frames,
             input_format: in_fmt,
-            output_format: out_cfg.map(|(_, _, f)| f),
+            output_format: out_cfg.map(|(_, _, f, _)| f),
             clock: if same_device {
                 duplex_relation(&in_dev)
             } else {
@@ -421,7 +457,7 @@ impl Backend for CpalBackend {
             latency: StaticLatency::PerCallbackTimestamps,
         };
         // Device buffers hold about two periods; allow three plus scheduling slack.
-        let period = buffer_frames.unwrap_or(1024);
+        let period = buffer_frames.unwrap_or(frames);
         let drain = Duration::from_secs_f64(3.0 * f64::from(period) / f64::from(rate))
             + Duration::from_millis(20);
         Ok(DuplexStream::new(StreamParts {

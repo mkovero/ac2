@@ -1,7 +1,7 @@
 //! `session.devices` on JACK: names from the server's ports, or the reason it cannot be
 //! used. Runs against whatever server is reachable (`jackd -d dummy` locally) and checks
 //! the unavailable reason when none is.
-#![cfg(all(feature = "jack", target_os = "linux"))]
+#![cfg(target_os = "linux")]
 
 mod common;
 
@@ -36,7 +36,13 @@ fn jack_lists_port_names_or_says_why_not() {
             eprintln!("JACK capture ports: {names:?}");
         }
         Availability::Unavailable { reason } => {
-            assert_eq!(reason, "JACK server not running");
+            use ac2_audio::Unavailability as U;
+            assert!(
+                [U::PipeWireWithoutJack, U::NoJackServer, U::NoJackLibrary]
+                    .iter()
+                    .any(|u| u.to_string() == *reason),
+                "{reason}"
+            );
             assert!(b[0].devices.is_empty());
         }
     }

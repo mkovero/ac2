@@ -1142,9 +1142,12 @@ impl Control {
                         Availability::Available,
                         d.iter().map(conv::device_info).collect(),
                     ),
-                    Err(ac2_audio::AudioError::Unavailable { reason, .. }) => {
-                        (Availability::Unavailable { reason }, Vec::new())
-                    }
+                    Err(ac2_audio::AudioError::Unavailable { reason, .. }) => (
+                        Availability::Unavailable {
+                            reason: reason.to_string(),
+                        },
+                        Vec::new(),
+                    ),
                     Err(e) => (
                         Availability::Unavailable {
                             reason: e.to_string(),
@@ -1174,12 +1177,27 @@ impl Control {
         kind: ac2_proto::model::BackendKind,
         device: ac2_proto::model::DeviceId,
     ) -> Result<ReplyBody, ProtoError> {
+        if self.detecting.is_some() {
+            // The burst holds the device; a preview asked for before the detection started
+            // must not reopen it under the burst.
+            return Err(perr(
+                ErrorCode::Refused,
+                "a loopback detection holds the device; the meters return with its result",
+            ));
+        }
         if let Some(p) = &mut self.preview
             && p.backend == kind
             && p.device == device
         {
-            p.renew();
-            return Ok(ReplyBody::Preview(p.wire()));
+            match p.dead(Instant::now()) {
+                None => {
+                    p.renew();
+                    return Ok(ReplyBody::Preview(p.wire()));
+                }
+                Some(why) => {
+                    tracing::warn!("preview of {kind:?} {:?}: {why}; reopening it", device.0);
+                }
+            }
         }
         let backend = self.backend_for(Some(kind))?;
         self.close_preview();

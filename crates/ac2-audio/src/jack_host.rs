@@ -6,8 +6,15 @@
 //! cpal's JACK host is not used: it creates one client per stream and loses that property.
 //!
 //! Rate and buffer size belong to the server; a request can only confirm them.
+//!
+//! On Linux this is the only real backend: it reaches JACK2 and PipeWire alike (PipeWire
+//! through its own libjack, pipewire-jack). When no server answers, the reason names the
+//! remedy, telling a PipeWire desktop without pipewire-jack apart from a machine with no
+//! audio server at all.
 
-use std::sync::Arc;
+use std::ffi::{CStr, c_char};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Once};
 
 use jack::{
     AudioIn, AudioOut, Client, ClientOptions, ClientStatus, Control, Frames, LatencyType,
@@ -21,7 +28,7 @@ use crate::backend::{
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
-use crate::error::{AudioError, Operation, Unsupported};
+use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::events::{BackendEvents, EventLatch};
 use crate::output::{OutputRenderer, OutputStamp};
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
@@ -68,11 +75,94 @@ impl JackBackend {
     }
 }
 
-fn unavailable(e: impl std::fmt::Display) -> AudioError {
+fn unavailable(reason: Unavailability) -> AudioError {
     AudioError::Unavailable {
         backend: BackendKind::Jack,
-        reason: e.to_string(),
+        reason,
     }
+}
+
+/// PipeWire's native socket, where PipeWire puts it: `$PIPEWIRE_RUNTIME_DIR`, else
+/// `$XDG_RUNTIME_DIR`, named `$PIPEWIRE_REMOTE` or `pipewire-0`.
+pub fn pipewire_socket() -> Option<PathBuf> {
+    let dir =
+        std::env::var_os("PIPEWIRE_RUNTIME_DIR").or_else(|| std::env::var_os("XDG_RUNTIME_DIR"))?;
+    let name = std::env::var_os("PIPEWIRE_REMOTE").unwrap_or_else(|| "pipewire-0".into());
+    Some(Path::new(&dir).join(name))
+}
+
+/// Why no JACK client could be opened. `library_loaded`: some libjack was found;
+/// `pipewire`: PipeWire's socket exists.
+fn no_server(library_loaded: bool, pipewire: bool) -> Unavailability {
+    match (library_loaded, pipewire) {
+        (false, _) => Unavailability::NoJackLibrary,
+        // A libjack that cannot reach a server while PipeWire runs is JACK2's: PipeWire's
+        // own libjack would have connected.
+        (true, true) => Unavailability::PipeWireWithoutJack,
+        (true, false) => Unavailability::NoJackServer,
+    }
+}
+
+/// libjack prints to stderr on its own, and probing for a server that is not there prints
+/// half a dozen errors ("Cannot connect to server socket", "jack server is not running or
+/// cannot be started", ...) that say nothing [`Unavailability`] does not. Those, and its
+/// complaints about memory locking and real-time scheduling the server copes without, go
+/// to debug; anything else stays a warning.
+fn quiet_libjack() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        jack::set_logger(jack::LoggerType::Custom {
+            info: libjack_info,
+            error: libjack_error,
+        });
+    });
+}
+
+/// libjack messages that are expected while probing or that libjack recovers from.
+fn libjack_noise(msg: &str) -> bool {
+    const NOISE: [&str; 12] = [
+        "Cannot connect to server",
+        "server is not running",
+        "connect(2) call to",
+        "attempt to connect to server failed",
+        "jack_client_open",
+        "JackShmReadWritePtr",
+        "Cannot lock down",
+        "real-time scheduling",
+        "AcquireSelfRealTime",
+        "SetInitCallback",
+        "Cannot open shm",
+        "jack_client_new",
+    ];
+    NOISE.iter().any(|n| msg.contains(n))
+}
+
+fn libjack_message(msg: *const c_char) -> String {
+    if msg.is_null() {
+        return String::new();
+    }
+    // SAFETY: libjack passes a NUL-terminated string valid for the duration of the call.
+    #[allow(unsafe_code)]
+    let s = unsafe { CStr::from_ptr(msg) };
+    s.to_string_lossy().into_owned()
+}
+
+// Called by libjack; must not unwind into C.
+#[allow(unsafe_code)]
+unsafe extern "C" fn libjack_info(msg: *const c_char) {
+    let _ = std::panic::catch_unwind(|| log::debug!(target: "libjack", "{}", libjack_message(msg)));
+}
+
+#[allow(unsafe_code)]
+unsafe extern "C" fn libjack_error(msg: *const c_char) {
+    let _ = std::panic::catch_unwind(|| {
+        let m = libjack_message(msg);
+        if libjack_noise(&m) {
+            log::debug!(target: "libjack", "{m}");
+        } else {
+            log::warn!(target: "libjack", "{m}");
+        }
+    });
 }
 
 fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
@@ -84,15 +174,18 @@ fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
 }
 
 fn connect(name: &str) -> Result<Client, AudioError> {
+    quiet_libjack();
+    let pipewire = || pipewire_socket().is_some_and(|p| p.exists());
     Client::new(name, ClientOptions::NO_START_SERVER)
         .map(|(c, _)| c)
         .map_err(|e| match e {
-            // The one failure an operator meets in practice; the status bits say nothing
-            // more useful to them.
+            jack::Error::LibraryError(_) => unavailable(no_server(false, pipewire())),
+            // The failure an operator meets in practice; the status bits say nothing more
+            // useful to them than which server is missing.
             jack::Error::ClientError(s) if s.contains(ClientStatus::SERVER_FAILED) => {
-                unavailable("JACK server not running")
+                unavailable(no_server(true, pipewire()))
             }
-            e => unavailable(e),
+            e => unavailable(Unavailability::Host(e.to_string())),
         })
 }
 
@@ -475,13 +568,56 @@ impl jack::ProcessHandler for Process {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn no_server_names_the_remedy_for_this_machine() {
+        assert_eq!(no_server(true, true), Unavailability::PipeWireWithoutJack);
+        assert_eq!(no_server(true, false), Unavailability::NoJackServer);
+        assert_eq!(no_server(false, true), Unavailability::NoJackLibrary);
+        assert_eq!(no_server(false, false), Unavailability::NoJackLibrary);
+        let pw = Unavailability::PipeWireWithoutJack.to_string();
+        for want in [
+            "pipewire-jack",
+            "sudo apt install pipewire-jack",
+            "pacman",
+            "pw-jack ac2d",
+        ] {
+            assert!(pw.contains(want), "{pw}");
+        }
+        let none = Unavailability::NoJackServer.to_string();
+        assert!(
+            none.contains("jackd -d alsa") && none.contains("PipeWire"),
+            "{none}"
+        );
+    }
+
+    #[test]
+    fn probing_noise_is_told_from_real_errors() {
+        for n in [
+            "Cannot connect to server socket err = No such file or directory",
+            "Cannot connect to server request channel",
+            "jack server is not running or cannot be started",
+            "JackShmReadWritePtr::~JackShmReadWritePtr - Init not done for -1, skipping unlock",
+            "Cannot lock down 107341340 byte memory area (Cannot allocate memory)",
+            "Cannot use real-time scheduling (RR/5) (1: Operation not permitted)",
+            "JackClient::AcquireSelfRealTime error",
+            "JackMessageBuffer::SetInitCallback : callback could not be executed",
+        ] {
+            assert!(libjack_noise(n), "{n}");
+        }
+        assert!(!libjack_noise(
+            "Cannot connect ports owned by inactive clients"
+        ));
+    }
+
     #[test]
     fn numbered_aliases_are_not_names() {
         for g in ["in1", "out_2", "capture_3", "playback4", "12"] {
-            assert!(super::generic_port_name(g), "{g}");
+            assert!(generic_port_name(g), "{g}");
         }
         for n in ["Mic1_in", "capture_FL", "Front Left"] {
-            assert!(!super::generic_port_name(n), "{n}");
+            assert!(!generic_port_name(n), "{n}");
         }
     }
 }

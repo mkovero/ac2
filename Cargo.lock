@@ -8,6 +8,7 @@ version = "0.0.0"
 dependencies = [
  "cpal",
  "jack",
+ "log",
  "rtrb",
  "serde",
  "thiserror 2.0.21",

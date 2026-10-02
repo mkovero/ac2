@@ -2184,7 +2184,35 @@ fn a_real_backend_is_preferred_and_an_unavailable_one_says_why() {
     let e = dialog(&t).error.clone().unwrap_or_default();
     assert_eq!(
         e,
-        "JACK is not available: JACK server not running. Pick another backend (← → on the first row)."
+        "JACK is not available: JACK server not running. Or pick another backend (← → on the first row)."
+    );
+}
+
+/// A Linux daemon offers JACK alone; with no server the dialog says why and what to do,
+/// and never points at another backend that is not there.
+#[test]
+fn jack_alone_and_unavailable_says_what_to_do() {
+    let reason = "PipeWire is running but its JACK library isn't in use: install pipewire-jack \
+                  (e.g. `sudo apt install pipewire-jack`, `sudo pacman -S pipewire-jack`) or \
+                  start the daemon with `pw-jack ac2d`";
+    let mut t = T::new();
+    let r = open_dialog(
+        &mut t,
+        vec![BackendInfo {
+            kind: BackendKind::Jack,
+            description: "JACK".into(),
+            availability: Availability::Unavailable {
+                reason: reason.into(),
+            },
+            devices: vec![],
+        }],
+    );
+    assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Jack));
+    assert_eq!(previewed(&r), None);
+    assert!(opened(&t.key("Enter")).is_none());
+    assert_eq!(
+        dialog(&t).error.as_deref(),
+        Some(format!("JACK is not available: {reason}.").as_str())
     );
 }
 
@@ -2204,7 +2232,19 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
     assert!(previewed(&tick(&mut t, 1.0)).is_none());
     assert!(previewed(&tick(&mut t, 2.5)).is_some());
     assert!(previewed(&tick(&mut t, 3.0)).is_none());
-    t.conn(ConnEvent::Preview(Err("device busy".into())));
+    let target = dialog(&t).preview_target().expect("previewed");
+    // A late answer for a device the dialog has left is not this device's.
+    t.conn(ConnEvent::Preview {
+        backend: BackendKind::Jack,
+        device: DeviceId("another".into()),
+        result: Err("device busy".into()),
+    });
+    assert_eq!(dialog(&t).preview_error, None);
+    t.conn(ConnEvent::Preview {
+        backend: target.0,
+        device: target.1.clone(),
+        result: Err("device busy".into()),
+    });
     assert_eq!(
         dialog(&t).preview_error.as_deref(),
         Some("meters unavailable: device busy")

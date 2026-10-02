@@ -5,9 +5,13 @@
 //! silent output source, so there is no output stream at all: nothing can be emitted,
 //! whatever else happens in the daemon. It lives until it is stopped, replaced, a session
 //! opens, or it is not renewed in time ([`PREVIEW_EXPIRY`]).
+//!
+//! A renewal checks the stream is still delivering: a stream the host ended or that has
+//! delivered nothing for [`PREVIEW_STALL`] is reopened instead of renewed, so the meters
+//! never stay blank while the dialog keeps asking for them.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -19,6 +23,7 @@ use ac2_proto::model::{BackendKind, DeviceId, Preview as WirePreview};
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
 
+use crate::burst::BurstDetector;
 use crate::fanout::pop_block;
 use crate::jobs::meters::{meter_period, meter_stamp};
 use crate::jobs::{Emitter, JobEnv, LevelsMeter, Meters};
@@ -27,6 +32,11 @@ use crate::util::perr;
 
 /// A preview not renewed within this closes.
 pub(crate) const PREVIEW_EXPIRY: Duration = Duration::from_secs(5);
+/// A preview that delivered no audio for this long is dead: a client reads its meters as
+/// stale after one second already.
+pub(crate) const PREVIEW_STALL: Duration = Duration::from_secs(2);
+/// No block yet.
+const NEVER: u64 = u64::MAX;
 /// Most inputs metered (the frame header lists one channel per column).
 const MAX_PREVIEW_INPUTS: u16 = 64;
 const STOP_TIMEOUT: Duration = Duration::from_millis(300);
@@ -38,6 +48,11 @@ pub(crate) struct Preview {
     pub(crate) channels: u16,
     pub(crate) sample_rate: u32,
     pub(crate) deadline: Instant,
+    opened: Instant,
+    /// Milliseconds after `opened` of the newest block, or [`NEVER`].
+    last_block_ms: Arc<AtomicU64>,
+    /// The host ended the stream.
+    ended: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -82,6 +97,7 @@ impl Preview {
         let mut stream = backend.open(req).map_err(audio_err)?;
         let sample_rate = stream.negotiated().sample_rate;
         let channels = stream.negotiated().input_channels;
+        let mut bursts = BurstDetector::new(sample_rate, crate::burst::label(stream.negotiated()));
         tracing::info!(
             "preview of {:?} {:?}: {channels} inputs @ {sample_rate} Hz (capture only)",
             kind,
@@ -89,6 +105,10 @@ impl Preview {
         );
         let stop = Arc::new(AtomicBool::new(false));
         let s = Arc::clone(&stop);
+        let opened = Instant::now();
+        let last_block_ms = Arc::new(AtomicU64::new(NEVER));
+        let ended_flag = Arc::new(AtomicBool::new(false));
+        let (lb, ef) = (Arc::clone(&last_block_ms), Arc::clone(&ended_flag));
         let meta = PreviewLevelsMeta {
             backend: kind,
             device: device.clone(),
@@ -119,6 +139,10 @@ impl Preview {
                         let Some(b) = pop_block(&mut stream) else {
                             break;
                         };
+                        let since =
+                            u64::try_from(opened.elapsed().as_millis()).unwrap_or(NEVER - 1);
+                        lb.store(since, Ordering::Release);
+                        bursts.observe(Instant::now(), b.frames);
                         levels.push(&b);
                         wall = b.wall_ns;
                         got += 1;
@@ -144,6 +168,7 @@ impl Preview {
                     }
                     if !ended && stream.events().ended {
                         ended = true;
+                        ef.store(true, Ordering::Release);
                         tracing::warn!("preview: the host ended the stream");
                     }
                     std::thread::sleep(Duration::from_millis(5));
@@ -163,9 +188,26 @@ impl Preview {
             channels,
             sample_rate,
             deadline: Instant::now() + PREVIEW_EXPIRY,
+            opened,
+            last_block_ms,
+            ended: ended_flag,
             stop,
             thread: Some(thread),
         })
+    }
+
+    /// Why the stream is no use any more, if it is not: the host ended it, or no audio for
+    /// [`PREVIEW_STALL`].
+    pub(crate) fn dead(&self, now: Instant) -> Option<&'static str> {
+        if self.ended.load(Ordering::Acquire) {
+            return Some("the host ended the stream");
+        }
+        let since_open = now.saturating_duration_since(self.opened);
+        let quiet = match self.last_block_ms.load(Ordering::Acquire) {
+            NEVER => since_open,
+            ms => since_open.saturating_sub(Duration::from_millis(ms)),
+        };
+        (quiet >= PREVIEW_STALL).then_some("no audio arrived")
     }
 
     /// Keeps the preview open for another [`PREVIEW_EXPIRY`].

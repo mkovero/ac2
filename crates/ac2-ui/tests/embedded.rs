@@ -286,3 +286,74 @@ fn demo_setup_is_for_the_simulated_rig_only() {
         }
     }
 }
+
+/// One real backend per platform: JACK on Linux (no ALSA), the system audio elsewhere. The
+/// other platform's is refused with what to use instead, never swapped for something else.
+#[test]
+fn the_platform_audio_is_the_only_real_backend() {
+    let (native, other) = if cfg!(target_os = "linux") {
+        (EmbeddedBackend::Jack, EmbeddedBackend::Cpal)
+    } else {
+        (EmbeddedBackend::Cpal, EmbeddedBackend::Jack)
+    };
+    assert_eq!(EmbeddedBackend::platform(), native);
+    match start_embedded(other) {
+        Err(EmbeddedError::Backend(e)) => assert!(e.contains("--backend"), "{e}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The session dialog's meters come back at once every time it is closed and opened again
+/// (Esc, Shift+O, with no frame in between). Its stop and its new preview reach the daemon
+/// in that order; were they to cross, the daemon would close the new preview and the meters
+/// would stay blank until a renewal.
+#[test]
+fn session_dialog_meters_return_every_round() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    d.synced()?;
+    let t0 = Instant::now();
+    let tick = |d: &mut Driver| {
+        d.send(Msg::Tick {
+            now_s: t0.elapsed().as_secs_f64(),
+            dt_s: 0.02,
+        })
+    };
+    let seq = |d: &Driver| {
+        d.st.data
+            .as_ref()
+            .and_then(|x| x.latest.get(&Topic::PreviewLevels))
+            .map_or(0, |f| f.frame.stamp.seq)
+    };
+    let pump_for = |d: &mut Driver, ms: u64| {
+        let end = Instant::now() + Duration::from_millis(ms);
+        while Instant::now() < end {
+            d.pump();
+            tick(d);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    for round in 0..20 {
+        d.key("Escape");
+        d.key("Shift+O");
+        d.send(Msg::Text("O".into()));
+        // Long enough for a stop that overtook the preview to have closed it.
+        pump_for(&mut d, 300);
+        let before = seq(&d);
+        let end = Instant::now() + Duration::from_millis(700);
+        loop {
+            d.pump();
+            tick(&mut d);
+            if seq(&d) > before && d.st.input_meters().len() == 4 {
+                break;
+            }
+            if Instant::now() > end {
+                return Err(format!("round {round}: the meters stopped").into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

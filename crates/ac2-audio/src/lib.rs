@@ -1,5 +1,6 @@
 //! Audio backend trait with explicit capabilities, and sample-indexed multichannel blocks.
-//! Backends: JACK (feature `jack`), cpal (the OS's default host) and a simulated device.
+//! Backends: JACK on Linux (JACK2, or PipeWire through pipewire-jack), cpal on macOS and
+//! Windows (Core Audio, WASAPI), and a simulated device everywhere.
 //!
 //! # Shape
 //!
@@ -42,25 +43,27 @@ pub mod level;
 pub mod output;
 pub mod stream;
 
+#[cfg(not(target_os = "linux"))]
 mod cpal_host;
-#[cfg(all(feature = "jack", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 mod jack_host;
 mod rng;
 
 pub use backend::{
     Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, HistoryRequest, IndexExactness, Negotiated,
-    RateRange, SampleFormat, StaticLatency,
+    RateRange, SHORT_BUFFER_AT_48K, SampleFormat, StaticLatency, short_buffer_frames,
 };
 pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
+#[cfg(not(target_os = "linux"))]
 pub use cpal_host::CpalBackend;
-pub use error::{AudioError, Operation, RequestError, Unsupported};
+pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};
 pub use events::EventSnapshot;
 pub use fake::{FakeBackend, FakeConfig, FakeDriver};
 pub use generator::{GeneratorHandle, GeneratorPort, SignalSource, generator};
 pub use history::{HistoryError, HistoryReader};
-#[cfg(all(feature = "jack", target_os = "linux"))]
-pub use jack_host::{JackBackend, JackConfig};
+#[cfg(target_os = "linux")]
+pub use jack_host::{JackBackend, JackConfig, pipewire_socket};
 pub use level::{Gain, LevelError, MaxLevel};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
 pub use stream::{DuplexStream, StopOutcome};

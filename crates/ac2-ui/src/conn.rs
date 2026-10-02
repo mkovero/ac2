@@ -81,8 +81,12 @@ pub enum ConnEvent {
     Stimulus(StimEvent),
     /// `session.devices` answered (or could not be asked).
     Devices(Result<Vec<BackendInfo>, String>),
-    /// `session.preview` answered.
-    Preview(Result<Preview, String>),
+    /// `session.preview` of `backend`/`device` answered.
+    Preview {
+        backend: BackendKind,
+        device: DeviceId,
+        result: Result<Preview, String>,
+    },
     /// `session.detect_loopback` answered (or could not run).
     LoopbackDetected(Result<LoopbackDetection, String>),
     /// The session dialog's session is open (and its mic names set); `transfers` are the
@@ -384,8 +388,12 @@ async fn wait_retry(
                 Some(Ctl::Req(Request::Devices)) => {
                     out.send(ConnEvent::Devices(Err("not connected".into())));
                 }
-                Some(Ctl::Req(Request::Preview { .. })) => {
-                    out.send(ConnEvent::Preview(Err("not connected".into())));
+                Some(Ctl::Req(Request::Preview { backend, device })) => {
+                    out.send(ConnEvent::Preview {
+                        backend,
+                        device,
+                        result: Err("not connected".into()),
+                    });
                 }
                 Some(Ctl::Req(Request::DetectLoopback(_))) => {
                     out.send(ConnEvent::LoopbackDetected(Err("not connected".into())));
@@ -457,6 +465,8 @@ async fn session(
     }
     let (stim_tx, stim_rx) = mpsc::unbounded_channel();
     let stim = tokio::spawn(stimulus_task(client.clone(), stim_rx, out.clone()));
+    let (preview_tx, preview_rx) = mpsc::unbounded_channel();
+    let preview = tokio::spawn(preview_task(client.clone(), preview_rx, out.clone()));
     let mut mirror = client.watch();
     let mut tick = tokio::time::interval(POLL_EVERY);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -483,6 +493,9 @@ async fn session(
                             tracing_free_note(out, "meters", &e.to_string());
                         }
                     }
+                }
+                Some(Ctl::Req(r @ (Request::Preview { .. } | Request::PreviewStop))) => {
+                    let _ = preview_tx.send(r);
                 }
                 Some(Ctl::Req(r)) => handle(&client, r, &stim_tx, out),
             },
@@ -529,6 +542,9 @@ async fn session(
             },
         }
     };
+    // The preview task ends with its channel; the daemon expires a preview nobody renews.
+    drop(preview_tx);
+    preview.abort();
     // Closing the channel makes the stimulus task stop the output and release the lease.
     drop(stim_tx);
     let _ = tokio::time::timeout(QUIT_GRACE, stim).await;
@@ -654,25 +670,8 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 o.send(ConnEvent::SessionOpened { transfers });
             });
         }
-        Request::Preview { backend, device } => {
-            let (c, o) = (client.clone(), out.clone());
-            tokio::spawn(async move {
-                let r = c
-                    .call(Command::SessionPreview { backend, device })
-                    .await
-                    .and_then(|r| expect_body!("session.preview", r, ReplyBody::Preview(p) => p))
-                    .map_err(|e| e.to_string());
-                o.send(ConnEvent::Preview(r));
-            });
-        }
-        Request::PreviewStop => {
-            let c = client.clone();
-            tokio::spawn(async move {
-                // A preview the daemon already closed (session open, expiry) is fine.
-                let _ = c.call(Command::SessionPreviewStop).await;
-            });
-        }
-        Request::Meters(_) => {}
+        // Ordered through `preview_task`.
+        Request::Preview { .. } | Request::PreviewStop | Request::Meters(_) => {}
         Request::DetectLoopback(d) => {
             let _ = stim.send(StimOp::Detect(d));
         }
@@ -770,6 +769,36 @@ async fn fetch_trace(c: Client, id: TraceId, grid: GridId, out: Out) {
     };
     if let Ok(g) = c.grid(grid).await {
         out.send(ConnEvent::Trace(Arc::new(data), g));
+    }
+}
+
+/// Opens, renews and stops the device preview strictly in the order the reducer asked:
+/// closing the session dialog and opening it again sends a stop and then a preview, and a
+/// stop that overtook its preview would close the preview just asked for, leaving the
+/// meters blank until the next renewal.
+async fn preview_task(client: Client, mut reqs: mpsc::UnboundedReceiver<Request>, out: Out) {
+    while let Some(r) = reqs.recv().await {
+        match r {
+            Request::Preview { backend, device } => {
+                let result = client
+                    .call(Command::SessionPreview {
+                        backend,
+                        device: device.clone(),
+                    })
+                    .await
+                    .and_then(|r| expect_body!("session.preview", r, ReplyBody::Preview(p) => p))
+                    .map_err(|e| e.to_string());
+                out.send(ConnEvent::Preview {
+                    backend,
+                    device,
+                    result,
+                });
+            }
+            // A preview the daemon already closed (session open, expiry) is fine.
+            _ => {
+                let _ = client.call(Command::SessionPreviewStop).await;
+            }
+        }
     }
 }
 

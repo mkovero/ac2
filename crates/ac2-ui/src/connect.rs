@@ -68,6 +68,10 @@ impl Entry {
                 "a daemon in this app with a built-in loopback + speaker model, for trying ac2"
                     .into()
             }
+            Entry::Embedded(EmbeddedBackend::Jack) => {
+                "a daemon inside this app on JACK (JACK2 or PipeWire's); closes with the window"
+                    .into()
+            }
             Entry::Embedded(_) => "a daemon inside this app; closes with the window".into(),
             Entry::Rig { rig, status } => {
                 let mut s = format!(

@@ -363,3 +363,116 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     let e = c.call(detect(token, Some(Dbfs(-30.0)))).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
 }
+
+/// The fake rig presented as a second backend (JACK), so a test can move the preview
+/// between backends the way the session dialog's ←/→ does, without a JACK server.
+#[derive(Debug)]
+struct AsJack(FakeBackend);
+
+impl Backend for AsJack {
+    fn kind(&self) -> AudioKind {
+        AudioKind::Jack
+    }
+
+    fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
+        let mut caps = self.0.enumerate()?;
+        for c in &mut caps {
+            c.backend = AudioKind::Jack;
+        }
+        Ok(caps)
+    }
+
+    fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
+        self.0.open(request)
+    }
+}
+
+/// The next preview frame, skipping any of another device still in flight.
+fn preview_of(s: &Sub, kind: BackendKind) -> Option<ac2_proto::frame::Frame> {
+    s.frame(
+        T,
+        |f| matches!(&f.data, FrameData::PreviewLevels(l) if l.meta.backend == kind),
+    )
+}
+
+/// Cycling the preview between backends and devices, closing and reopening the dialog
+/// between rounds: every round meters the device asked for, at once and for as long as it
+/// is renewed, and nothing of the previous device keeps arriving.
+#[test]
+fn preview_follows_the_device_through_every_round() {
+    init_log();
+    let fake: Arc<dyn Backend> = Arc::new(named_rig(FakeDrive::Thread(Pace::Realtime), 1e-3));
+    let jack: Arc<dyn Backend> =
+        Arc::new(AsJack(named_rig(FakeDrive::Thread(Pace::Realtime), 1e-3)));
+    let mut cfg = DaemonConfig::new(Arc::clone(&fake), inproc("cycle"), -10.0);
+    cfg.backends = vec![fake, jack];
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
+    let preview = |c: &mut Client, kind| {
+        c.ok(Command::SessionPreview {
+            backend: kind,
+            device: fake_dev(),
+        })
+    };
+    for round in 0..3 {
+        for kind in [BackendKind::Fake, BackendKind::Jack, BackendKind::Fake] {
+            preview(&mut c, kind);
+            let f = preview_of(&s, kind).unwrap_or_else(|| panic!("round {round}: {kind:?}"));
+            let FrameData::PreviewLevels(l) = &f.data else {
+                unreachable!()
+            };
+            // Noise of RMS 1e-3 on every input: live audio, not a held frame.
+            assert!(l.rms.iter().all(|r| *r > -70.0), "{:?}", l.rms);
+        }
+        // Renewals keep it metering past the expiry.
+        for _ in 0..3 {
+            std::thread::sleep(Duration::from_millis(2_000));
+            preview(&mut c, BackendKind::Fake);
+            while s.frame(Duration::from_millis(20), |_| true).is_some() {}
+            preview_of(&s, BackendKind::Fake).expect("renewed preview");
+        }
+        // The dialog closes: the device is released and nothing more arrives.
+        c.ok(Command::SessionPreviewStop);
+        while s.frame(Duration::from_millis(100), |_| true).is_some() {}
+        assert!(
+            s.frame(Duration::from_millis(300), |f| matches!(
+                f.data,
+                FrameData::PreviewLevels(_)
+            ))
+            .is_none(),
+            "round {round}: a stopped preview kept metering"
+        );
+    }
+}
+
+/// A preview whose stream stopped delivering (the host stalled or ended it) is reopened by
+/// the next renewal instead of being kept alive with blank meters.
+#[test]
+fn a_renewal_reopens_a_preview_that_stopped_delivering() {
+    let opened: Opened = Arc::default();
+    let mut rig = named_rig(FakeDrive::Thread(Pace::Realtime), 1e-3)
+        .config()
+        .clone();
+    // About 0.2 s of audio per stream, then nothing.
+    rig.stop_after_blocks = Some(40);
+    let rec = Recording {
+        inner: FakeBackend::new(rig).unwrap(),
+        opened: Arc::clone(&opened),
+    };
+    let h = start(Arc::new(rec));
+    let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
+    let preview = |c: &mut Client| {
+        c.ok(Command::SessionPreview {
+            backend: BackendKind::Fake,
+            device: fake_dev(),
+        })
+    };
+    preview(&mut c);
+    preview_of(&s, BackendKind::Fake).expect("first frames");
+    // The stream goes quiet; past the stall bound a renewal reopens it.
+    std::thread::sleep(Duration::from_millis(2_500));
+    while s.frame(Duration::from_millis(20), |_| true).is_some() {}
+    preview(&mut c);
+    preview_of(&s, BackendKind::Fake).expect("frames after the renewal reopened the stream");
+    assert_eq!(opened.lock().unwrap().len(), 2);
+}

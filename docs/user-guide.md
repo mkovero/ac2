@@ -30,15 +30,22 @@ works the same against a daemon the app hosts, a per-user daemon and a remote on
 does the same from a script, with the same defaults:
 
 ```sh
-ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz
+ac2 session open --backend jack --in 1-4                     # Linux: the JACK server
+ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz   # macOS, Windows
 ac2 meas new tf --ref 1 --meas 2 --name main-l
 ac2 meas new tf --ref 1 --meas 3 --name sub
 ac2 meas new rta --input 2 --name rta
 ac2 meas start main-l
 ```
 
-The backend is always named: `cpal` (the OS audio host: ALSA, CoreAudio, WASAPI), `jack`, or
-`fake`. The fake backend is a simulated rig for trying things out and is never chosen for you:
+The backend is always named. Each platform has one real backend: `jack` on Linux (a JACK2
+server, or PipeWire through pipewire-jack; there is no ALSA backend), `cpal` on macOS and
+Windows (Core Audio, WASAPI). On JACK the rate and buffer are the server's; on cpal, with
+no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 48 kHz,
+within what the device allows) rather than the host's default, which can be large enough
+to deliver audio in lumps. Should a host still deliver in lumps, the daemon log says so
+once a minute (*audio arrives in bursts on …*) with the device and buffer to change.
+`fake` is a simulated rig. The fake backend is a simulated rig for trying things out and is never chosen for you:
 the session dialog preselects a real interface whenever the daemon lists one. Choosing
 *Simulated rig* in the app's connect dialog starts it ready to measure (session open, a
 transfer measurement "demo" running); *This computer's audio* starts with no session and
@@ -49,8 +56,10 @@ opens the session dialog.
 Nothing in the dialog is a channel number to type. From the top:
 
 - **Backend** (**←/→**): every backend the daemon offers, with what it is; one it cannot use
-  now says why (*JACK server not running*). A daemon started on real audio offers JACK and
-  the system's audio; the simulated rig only appears on a daemon started on it.
+  now says why and what to do (*PipeWire is running but its JACK library isn't in use:
+  install pipewire-jack … or start the daemon with `pw-jack ac2d`*). A daemon on real
+  audio offers its platform's backend (JACK on Linux, the system's audio on macOS and
+  Windows); the simulated rig only appears on a daemon started on it.
 - **Device** (**←/→**): its name and *N in / M out · rate · buffer*.
 - **Channels**: one row per input and output, named by the backend where it can (JACK port
   names; system audio has none, so *Input 3*), and for inputs a **live meter** (RMS bar,

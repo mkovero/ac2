@@ -17,7 +17,6 @@ use serde::Serialize;
 use serde_json::json;
 
 use spike_audio_duplex::backend::{AudioBackend, ConnectPolicy, DuplexRequest};
-use spike_audio_duplex::cpal_backend::CpalBackend;
 use spike_audio_duplex::fake::FakeBackend;
 use spike_audio_duplex::output::{EmitLevel, OutputMode};
 use spike_audio_duplex::stats::RunStats;
@@ -117,7 +116,14 @@ fn parse_args() -> Result<Args, String> {
             None | Some("all") => vec![Which::Cpal, Which::Jack, Which::Fake],
             Some(b) => vec![Which::parse(b)?],
         }),
-        (false, Some(secs)) => Mode::Run(Which::parse(backend.as_deref().unwrap_or("cpal"))?, secs),
+        (false, Some(secs)) => {
+            let default = if cfg!(target_os = "linux") {
+                "jack"
+            } else {
+                "cpal"
+            };
+            Mode::Run(Which::parse(backend.as_deref().unwrap_or(default))?, secs)
+        }
         _ => return Err("give exactly one of --list or --run <seconds>".into()),
     };
     Ok(Args {
@@ -130,7 +136,15 @@ fn parse_args() -> Result<Args, String> {
 
 fn backend(which: Which, host: &Option<String>) -> Result<Box<dyn AudioBackend>, String> {
     match which {
-        Which::Cpal => Ok(Box::new(CpalBackend { host: host.clone() })),
+        #[cfg(not(target_os = "linux"))]
+        Which::Cpal => Ok(Box::new(spike_audio_duplex::cpal_backend::CpalBackend {
+            host: host.clone(),
+        })),
+        #[cfg(target_os = "linux")]
+        Which::Cpal => {
+            let _ = host;
+            Err("cpal is not built on Linux (ac2 uses JACK there)".into())
+        }
         Which::Fake => Ok(Box::new(FakeBackend::default())),
         #[cfg(all(feature = "jack", target_os = "linux"))]
         Which::Jack => Ok(Box::new(

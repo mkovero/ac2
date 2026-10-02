@@ -27,6 +27,7 @@
 #![deny(unsafe_code)]
 
 mod backend;
+mod burst;
 mod calstore;
 pub mod config;
 mod control;
@@ -401,6 +402,13 @@ impl Daemon {
             config.backends.iter().map(|b| b.kind()).collect::<Vec<_>>(),
             incarnation.0
         );
+        // Say at once why a backend cannot be used, and what to do about it, instead of
+        // leaving the operator to find out from an empty device list.
+        for b in &config.backends {
+            if let Err(ac2_audio::AudioError::Unavailable { backend, reason }) = b.enumerate() {
+                tracing::warn!("{backend:?} unavailable: {reason}");
+            }
+        }
         Ok(Handle {
             incarnation,
             ctrl,

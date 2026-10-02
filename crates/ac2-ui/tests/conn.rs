@@ -88,3 +88,52 @@ fn quit_waits_at_most_the_grace_period_for_a_silent_daemon() {
     }
     assert_eq!(fake.lock().expiries, 1);
 }
+
+/// The reducer's preview requests reach the daemon in the order it issued them. Closing and
+/// reopening the session dialog sends `preview_stop` then `preview` back to back; were they
+/// to cross on the way, the daemon would close the preview just asked for and the meters
+/// would stay blank until the next renewal.
+#[test]
+fn preview_requests_reach_the_daemon_in_order() {
+    use ac2_proto::model::{BackendKind, DeviceId};
+    let fake = FakeDaemon::start(FakeOptions::default()).unwrap();
+    let conn = link(&fake);
+    wait_for(&conn, "connected", |e| {
+        matches!(e, ConnEvent::Connected { .. })
+    });
+    let dev = DeviceId("fake:loop".into());
+    let preview = || Request::Preview {
+        backend: BackendKind::Fake,
+        device: dev.clone(),
+    };
+    let rounds = 100;
+    for _ in 0..rounds {
+        conn.send(Request::PreviewStop);
+        conn.send(preview());
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let ops = loop {
+        let ops: Vec<&'static str> = fake
+            .lock()
+            .requests
+            .iter()
+            .map(|(op, _)| *op)
+            .filter(|op| op.starts_with("session.preview"))
+            .collect();
+        if ops.len() >= 2 * rounds {
+            break ops;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{} of {} arrived",
+            ops.len(),
+            2 * rounds
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let want: Vec<&str> = (0..rounds)
+        .flat_map(|_| ["session.preview_stop", "session.preview"])
+        .collect();
+    assert_eq!(ops, want);
+    assert_eq!(fake.lock().preview, Some((BackendKind::Fake, dev)));
+}

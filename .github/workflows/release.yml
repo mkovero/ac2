@@ -76,7 +76,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev
+            pkg-config cmake libjack-jackd2-dev libudev-dev
       - name: Build
         # JACK is loaded at run time, so the JACK backend costs nothing where JACK is absent.
         run: cargo build --release --locked $BINS

@@ -16,9 +16,9 @@ use eframe::egui;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendArg {
-    /// Platform audio (ALSA / CoreAudio / WASAPI).
+    /// System audio through cpal (Core Audio / WASAPI); macOS and Windows.
     Cpal,
-    /// JACK (Linux, feature `jack`).
+    /// JACK (JACK2, or PipeWire through pipewire-jack); Linux.
     Jack,
     /// Simulated rig: out 1 → in 1 loopback, out 1 → in 2 acoustic path. No real audio.
     Fake,
@@ -47,9 +47,10 @@ struct Args {
     /// Host an embedded daemon instead of connecting to one.
     #[arg(long, conflicts_with = "ctrl")]
     embedded: bool,
-    /// Audio backend of the embedded daemon (fake only when named here).
-    #[arg(long, value_enum, default_value = "cpal", requires = "embedded")]
-    backend: BackendArg,
+    /// Audio backend of the embedded daemon: this platform's audio (jack on Linux, cpal on
+    /// macOS and Windows) unless named; fake only when named here.
+    #[arg(long, value_enum, requires = "embedded")]
+    backend: Option<BackendArg>,
     /// Key directory for CURVE (default: the per-user ac2 config dir).
     #[arg(long, value_name = "DIR")]
     key_dir: Option<std::path::PathBuf>,
@@ -106,9 +107,10 @@ fn target(
     }
     if a.embedded {
         let backend = match a.backend {
-            BackendArg::Cpal => EmbeddedBackend::Cpal,
-            BackendArg::Jack => EmbeddedBackend::Jack,
-            BackendArg::Fake => EmbeddedBackend::Fake,
+            None => EmbeddedBackend::platform(),
+            Some(BackendArg::Cpal) => EmbeddedBackend::Cpal,
+            Some(BackendArg::Jack) => EmbeddedBackend::Jack,
+            Some(BackendArg::Fake) => EmbeddedBackend::Fake,
         };
         // An embedded daemon that cannot start is an error, never a silent switch to
         // another daemon (the operator asked for this one, on this backend).
@@ -131,12 +133,7 @@ fn embedded_backends() -> Vec<EmbeddedBackend> {
     if !cfg!(feature = "embedded") {
         return Vec::new();
     }
-    let mut v = vec![EmbeddedBackend::Cpal];
-    if cfg!(feature = "jack") {
-        v.push(EmbeddedBackend::Jack);
-    }
-    v.push(EmbeddedBackend::Fake);
-    v
+    vec![EmbeddedBackend::platform(), EmbeddedBackend::Fake]
 }
 
 fn main() -> ExitCode {
@@ -196,7 +193,7 @@ fn main() -> ExitCode {
         bench_startup: args.bench_startup,
         // An embedded daemon on real audio starts without a session; the simulated rig
         // starts measuring.
-        open_session_dialog: embedded.is_some() && !matches!(args.backend, BackendArg::Fake),
+        open_session_dialog: embedded.is_some() && !matches!(args.backend, Some(BackendArg::Fake)),
     };
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

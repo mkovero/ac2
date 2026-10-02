@@ -135,10 +135,12 @@ with the new `config_rev` carries it (`TfMeta.smoothing`). Smoothing (`Smoothing
 
 `session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
 started on first: `kind: BackendKind` (`jack` \| `cpal` \| `fake`), `description` (for the
-operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}, e.g.
-`JACK server not running`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon
-started on real audio offers every real backend of its build; one started on the simulated
-rig offers only that (a simulated device never stands in for a missing real one).
+operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
+in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
+use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
+real audio offers its platform's backend (`jack` on Linux, `cpal` on macOS and Windows);
+one started on the simulated rig offers only that (a simulated device never stands in for
+a missing real one).
 
 `DeviceInfo`: `backend`, `host`, `id`, `name` (display name), `input` / `output`:
 `DirectionInfo | nil`, `duplex_clock`, `index`, `notes`. `DirectionInfo`: `max_channels`,

@@ -32,9 +32,29 @@ systemctl --user enable --now ac2d                # the daemon, now and at every
 `install.sh --uninstall` (same `--prefix`) removes it again. Make sure `~/.local/bin` is on
 your `PATH`; most distributions add it once it exists (log out and in).
 
-The daemon uses the platform audio host (ALSA; PipeWire and PulseAudio through their ALSA
-plugins) unless a session names JACK. JACK, including PipeWire-JACK, is loaded at run time:
-`ac2 session open --backend jack …` works wherever `libjack.so.0` is installed.
+**Audio on Linux is JACK**: either a JACK2 server, or PipeWire through its JACK library
+(pipewire-jack). There is no ALSA backend: an ALSA device left to choose its own buffer
+under PipeWire delivered audio in 1.4-second lumps, and every meter went stale between
+them. JACK gives every port one clock, exact sample indices and the server's short period.
+
+- **PipeWire desktops** (Ubuntu 22.10+, Fedora, Debian 12+, Arch with PipeWire): install
+  PipeWire's JACK library, then nothing else is needed:
+  ```sh
+  sudo apt install pipewire-jack          # Debian / Ubuntu
+  sudo dnf install pipewire-jack-audio-connection-kit   # Fedora
+  sudo pacman -S pipewire-jack            # Arch
+  ```
+  On Debian and Ubuntu the package does not replace the system libjack; either run the
+  daemon through it (`pw-jack ac2d`, `pw-jack ac2-ui --embedded`) or make it the system's
+  libjack once:
+  `sudo cp /usr/share/doc/pipewire/examples/ld.so.conf.d/pipewire-jack-*.conf /etc/ld.so.conf.d/ && sudo ldconfig`.
+- **JACK2**: start the server on your interface before the daemon, e.g.
+  `jackd -d alsa -d hw:UMC1820 -r 48000 -p 256` (or with QjackCtl).
+
+When JACK cannot be used, `ac2 devices`, the session dialog and the daemon log say why and
+what to do: *PipeWire is running but its JACK library isn't in use: install pipewire-jack …
+or start the daemon with `pw-jack ac2d`*, or *No JACK server: start JACK (e.g.
+`jackd -d alsa`) or use PipeWire*. libjack is loaded at run time, so ac2 starts either way.
 
 **AppImage** (the desktop app only, with its embedded daemon):
 
@@ -43,12 +63,14 @@ chmod +x ac2-ui-<version>-x86_64.AppImage
 ./ac2-ui-<version>-x86_64.AppImage
 ```
 
-The AppImage bundles no system libraries; it needs glibc, libstdc++ and libasound, which
-every desktop has. Without FUSE, run it with `--appimage-extract-and-run`.
+The AppImage bundles no system libraries; it needs glibc and libstdc++, which every desktop
+has, and `libjack.so.0` (pipewire-jack or JACK2, above), which it must take from the system
+to reach the system's JACK or PipeWire. Without FUSE, run it with
+`--appimage-extract-and-run`.
 
 Real-time scheduling: the audio thread asks for real-time priority. With PipeWire this is
-granted through rtkit; with plain ALSA or JACK add yourself to the `audio` (or `realtime`)
-group your distribution configures in `/etc/security/limits.d`.
+granted through rtkit; with JACK2 add yourself to the `audio` (or `realtime`) group your
+distribution configures in `/etc/security/limits.d`.
 
 ## macOS (11 Big Sur or newer, Apple silicon and Intel)
 
@@ -114,8 +136,9 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 
 1. Until there is an audio session the transfer pane says *No audio session — press
    Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens the session dialog.
-   The top rows pick the **backend** (JACK, system audio; one that cannot be used says why,
-   e.g. *JACK server not running*) and the **device** (*8 in / 8 out · 48 kHz*) with
+   The top rows pick the **backend** (JACK on Linux, system audio on macOS and Windows; one
+   that cannot be used says why and what to do, e.g. *No JACK server: start JACK (e.g.
+   `jackd -d alsa`) or use PipeWire*) and the **device** (*8 in / 8 out · 48 kHz*) with
    **←/→**. Below them is one row per input and output with its name and, for inputs, a
    live level meter — tap the mic or play something and you see which input it is on,
    before anything is opened (the dialog only listens; it never plays).
@@ -142,7 +165,8 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 
 ```sh
 ac2 devices                                       # find your interface
-ac2 session open --backend cpal --device "<name>" --in 1-2
+ac2 session open --backend jack --in 1-2                    # Linux
+ac2 session open --backend cpal --device "<name>" --in 1-2  # macOS, Windows
 ac2 meas new tf --ref 1 --meas 2 --name main
 ac2 meas start main
 ac2-ui                                            # or start ac2 from the menu

@@ -6,6 +6,7 @@
 pub mod backend;
 pub mod block;
 pub mod clock;
+#[cfg(not(target_os = "linux"))]
 pub mod cpal_backend;
 pub mod fake;
 #[cfg(all(feature = "jack", target_os = "linux"))]

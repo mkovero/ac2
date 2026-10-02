@@ -56,7 +56,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev
+            pkg-config cmake libjack-jackd2-dev libudev-dev
 
       - name: Windows linker
         if: runner.os == 'Windows'
@@ -101,7 +101,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            pkg-config cmake libjack-jackd2-dev libasound2-dev libudev-dev \
+            pkg-config cmake libjack-jackd2-dev libudev-dev \
             mesa-vulkan-drivers libvulkan1
           # Hosted Linux runners have no GPU; lavapipe (Vulkan) is the only adapter wgpu can use.
           {

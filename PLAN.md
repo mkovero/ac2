@@ -223,7 +223,7 @@ fixtures/      raw captures from real rigs + synthetic scenario captures
 | Need | Choice | Notes |
 |---|---|---|
 | FFT | `realfft` / `rustfft` | plans cached |
-| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio/WASAPI/ALSA | ASIO feature opt-in; cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
+| Audio | `jack` crate directly (not cpal's JACK host), `cpal` for CoreAudio/WASAPI; Linux is JACK only (JACK2 or pipewire-jack, decision L1) | ASIO feature opt-in; cpal has no duplex API and no exact hardware index — see `docs/design/spike-audio-duplex.md` |
 | Rings | `rtrb` | SPSC wait-free |
 | ZMQ | own thin binding over libzmq 4.3.5 + libsodium built from source (`zeromq-src`, `libsodium-sys-stable`) | `zmq` crate's vendored build has CURVE off; pure-Rust options lack CURVE or are too young — see `docs/design/spike-zmq-curve.md`. ZAP handler must be bound before CURVE sockets (fails open otherwise) |
 | Serialization | `rmp-serde` headers + raw `f32` LE arrays | decode via `bytemuck::try_cast_slice` with copy fallback on misalignment / big-endian |

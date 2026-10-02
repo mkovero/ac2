@@ -11,11 +11,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TryRecvError, TrySendError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ac2_audio::{BlockFlags, DuplexStream};
 use ac2_proto::units::SessionEpoch;
 
+use crate::burst::BurstDetector;
 use crate::control::ControlMsg;
 use crate::util::wall_ns;
 
@@ -117,6 +118,10 @@ impl Fanout {
     ) -> std::io::Result<Self> {
         let channels = usize::from(stream.negotiated().input_channels);
         let rate = f64::from(stream.negotiated().sample_rate);
+        let bursts = BurstDetector::new(
+            stream.negotiated().sample_rate,
+            crate::burst::label(stream.negotiated()),
+        );
         let (tx, rx) = std::sync::mpsc::channel();
         let meters = Arc::new(InputMeters::new(channels));
         let latest = Arc::new(AtomicU64::new(0));
@@ -124,7 +129,7 @@ impl Fanout {
         let l = Arc::clone(&latest);
         let thread = std::thread::Builder::new()
             .name("ac2d-fanout".into())
-            .spawn(move || run(stream, &rx, epoch, &to_control, &m, &l, rate))?;
+            .spawn(move || run(stream, &rx, epoch, &to_control, &m, &l, rate, bursts))?;
         Ok(Self {
             tx,
             thread: Some(thread),
@@ -160,6 +165,7 @@ impl Drop for Fanout {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     mut stream: DuplexStream,
     rx: &Receiver<FanoutMsg>,
@@ -168,6 +174,7 @@ fn run(
     meters: &InputMeters,
     latest: &AtomicU64,
     rate: f64,
+    mut bursts: BurstDetector,
 ) {
     let mut jobs: BTreeMap<u64, SyncSender<Arc<Block>>> = BTreeMap::new();
     let mut ms: Vec<(f64, f64)> = vec![(0.0, 0.0); meters.ms.len()];
@@ -195,6 +202,7 @@ fn run(
                 break;
             };
             got += 1;
+            bursts.observe(Instant::now(), block.frames);
             if block.flags.contains(BlockFlags::CONFIG_CHANGE) {
                 tracing::warn!(
                     "audio configuration changed at sample {}",
