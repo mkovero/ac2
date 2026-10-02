@@ -197,12 +197,16 @@ fn help(app: &App, ctx: &egui::Context, ch: &Chrome) {
     let active = app.state.scope();
     let screen = ctx.content_rect();
     let cols = columns(help_rows(&app.keymap, active), 3);
+    // Explicit position and width: centring by anchor uses the previous frame's size, so an
+    // overlay wider than its first measurement slid off the left edge.
+    let width = (screen.width() - 40.0).clamp(320.0, 1200.0);
+    let left = screen.center().x - width / 2.0;
     egui::Area::new(egui::Id::new("ac2-help"))
         .order(egui::Order::Foreground)
-        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .fixed_pos(egui::pos2(left.max(screen.min.x), screen.min.y + 40.0))
         .show(ctx, |ui| {
             card(ch).show(ui, |ui| {
-                ui.set_width((screen.width() - 40.0).min(1200.0));
+                ui.set_width(width - 24.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Keys").strong().size(16.0));
                     ui.label(
@@ -266,7 +270,15 @@ fn help_row(ui: &mut egui::Ui, row: &HelpRow, ch: &Chrome) {
                     egui::TextStyle::Monospace.resolve(ui.style()),
                     ch.focus,
                 );
-                ui.label(RichText::new(title).color(if *live { ch.text } else { ch.dim }));
+                // Wrap within the column so a long title never widens the overlay.
+                ui.add(
+                    egui::Label::new(RichText::new(title).color(if *live {
+                        ch.text
+                    } else {
+                        ch.dim
+                    }))
+                    .wrap(),
+                );
             });
         }
     }

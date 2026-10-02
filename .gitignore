@@ -3,3 +3,5 @@
 *.pyc
 .venv/
 .claude/worktrees/
+crates/ac2-ui/tests/snapshots/*.diff.png
+crates/ac2-ui/tests/snapshots/*.old.png
