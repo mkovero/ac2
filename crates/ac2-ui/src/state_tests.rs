@@ -1973,6 +1973,14 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
     assert_eq!(req.level, Dbfs(-30.0));
     assert_eq!(req.output, 0);
     assert_eq!(req.device, DeviceId("fake:loop".into()));
+    // While the burst plays, Enter does not open a session on the same device.
+    assert!(opened(&t.key("Enter")).is_none());
+    assert!(
+        dialog(&t)
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("still playing"))
+    );
     // The burst holds the device: no preview meanwhile.
     assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
     // The answer: input 3 is the loopback; it becomes the Reference and the preview resumes.

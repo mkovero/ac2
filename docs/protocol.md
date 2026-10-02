@@ -150,7 +150,8 @@ whether or not a measurement runs: per-interval sample peak, 300 ms integrated R
 
 **Preview.** `session.preview` opens a device for capture only — no output stream exists,
 so nothing can be emitted — and publishes meters of every input on `session/preview`
-(meta names the device). Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
+(meta names the device; `audio_sample` counts from the preview's start, `session_epoch` is
+the epoch it opened in). Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
 `0 .. channels`), `sample_rate_hz`, `expires_in_ms`. There is one preview per daemon;
 naming the same device again renews it, another device replaces it. It closes on
 `session.preview_stop`, `session.open`, `session.detect_loopback`, or when not renewed

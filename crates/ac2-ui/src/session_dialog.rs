@@ -291,12 +291,7 @@ impl SessionDialog {
     /// open session already captures it (its `session/levels` are shown then) or a
     /// loopback detection holds the device.
     pub fn preview_target(&self) -> Option<(BackendKind, DeviceId)> {
-        if self.is_open_device()
-            || self
-                .detect
-                .as_ref()
-                .is_some_and(|d| d.phase == DetectPhase::Running)
-        {
+        if self.is_open_device() || self.detecting() {
             return None;
         }
         let b = self.backend_info()?;
@@ -648,6 +643,9 @@ impl SessionDialog {
     /// no default level.
     pub fn detect_start(&mut self, typed: Option<Dbfs>) -> Result<(), String> {
         self.finish_edit();
+        if self.detecting() {
+            return Err("the loopback detection is still playing; wait for its result".into());
+        }
         if self
             .backend_info()
             .is_none_or(|b| b.availability != Availability::Available)
@@ -817,8 +815,20 @@ impl SessionDialog {
 
     // ----- the session -------------------------------------------------------------------
 
+    /// A detection burst is playing.
+    pub fn detecting(&self) -> bool {
+        self.detect
+            .as_ref()
+            .is_some_and(|d| d.phase == DetectPhase::Running)
+    }
+
     /// Enter: what to open, or why not (in plain words).
     pub fn plan(&self) -> Result<SessionPlan, String> {
+        if self.detecting() {
+            return Err(
+                "The loopback detection is still playing: wait for its result, then Enter.".into(),
+            );
+        }
         let Some(backends) = &self.backends else {
             return Err("The device list has not arrived yet.".into());
         };
