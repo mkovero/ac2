@@ -13,9 +13,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    # TEMPORARY dry-run trigger: workflow_dispatch only works once this file is on the
-    # default branch. Remove before merging.
-    branches: ["phase6/release"]
+  # Dispatchable once this file is on the default branch (GitHub's rule for
+  # workflow_dispatch); `gh workflow run release.yml --ref <branch>` then dry-runs any branch.
   workflow_dispatch:
 
 concurrency:
@@ -208,6 +207,8 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           wix build packaging/windows/ac2.wxs -arch x64 -d "Version=$env:MSI_VERSION" -d "BinDir=$PWD\target\release" -d "RootDir=$PWD" -o "dist\ac2-$env:VERSION-windows-x64.msi"
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          # The debug symbols of the installer itself are not a release artifact.
+          Remove-Item dist\*.wixpdb
       - name: Sign MSI
         if: env.HAVE_CERT == 'true'
         shell: pwsh
@@ -244,8 +245,8 @@ jobs:
           & "$dir\ac2.exe" session open --backend fake --in 1-2; if ($LASTEXITCODE -ne 0) { exit 1 }
           & "$dir\ac2.exe" meas new tf --ref 1 --meas 2 --name smoke; if ($LASTEXITCODE -ne 0) { exit 1 }
           & "$dir\ac2.exe" meas list; if ($LASTEXITCODE -ne 0) { exit 1 }
-          $d.WaitForExit(10000) | Out-Null
           & "$dir\ac2.exe" daemon stop; if ($LASTEXITCODE -ne 0) { Get-Content ac2d.log; exit 1 }
+          $d.WaitForExit(10000) | Out-Null
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /l*v msi-uninstall.log" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content msi-uninstall.log -Tail 50; exit 1 }
           if (Test-Path "$dir\ac2.exe") { throw 'uninstall left ac2.exe behind' }
