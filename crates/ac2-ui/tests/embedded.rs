@@ -143,7 +143,10 @@ fn measure_from_empty(d: &mut Driver) -> R {
     assert!(d.st.open_session().is_none());
     let hint = d.st.empty_hint(&d.keys).unwrap_or_default();
     assert!(
-        hint.starts_with("No audio session — press Shift+O"),
+        hint.starts_with(&format!(
+            "No audio session — press {}",
+            Chord::parse("Shift+O")?.label()
+        )),
         "{hint}"
     );
 

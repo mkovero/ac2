@@ -1451,6 +1451,15 @@ fn created(r: &[Request]) -> Option<&MeasConfig> {
     })
 }
 
+/// Key labels as this platform shows them (`Shift+O` / `⇧O`, `Ctrl+K` / `⌘K`).
+fn open_key() -> String {
+    Chord::parse("Shift+O").expect("chord").label()
+}
+
+fn palette_key() -> String {
+    Chord::parse("Ctrl+K").expect("chord").label()
+}
+
 fn connected_to(t: &mut T, target: &str) {
     t.conn(ConnEvent::Connected {
         target: target.into(),
@@ -1469,14 +1478,22 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     t.conn(mirror(no_session_state()));
     assert_eq!(
         t.st.empty_hint(&t.keys).as_deref(),
-        Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
+        Some(format!(
+            "No audio session — press {} (or {} → Open audio session)",
+            open_key(),
+            palette_key()
+        ))
+        .as_deref()
     );
     let mut s = daemon_state();
     s.measurements.clear();
     t.conn(mirror(s));
     let hint = t.st.empty_hint(&t.keys).unwrap_or_default();
     assert!(
-        hint.starts_with("No measurements — Ctrl+K → New transfer measurement…"),
+        hint.starts_with(&format!(
+            "No measurements — {} → New transfer measurement…",
+            palette_key()
+        )),
         "{hint}"
     );
     t.conn(mirror(daemon_state()));
@@ -1486,7 +1503,11 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     t.conn(mirror(no_session_state()));
     assert_eq!(
         t.st.empty_hint(&keys).as_deref(),
-        Some("No audio session — Ctrl+K → Open audio session")
+        Some(format!(
+            "No audio session — {} → Open audio session",
+            palette_key()
+        ))
+        .as_deref()
     );
 }
 
@@ -1499,8 +1520,11 @@ fn arming_without_a_session_names_the_key() {
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
     assert!(
-        t.last_toast()
-            .contains("press Shift+O (or Ctrl+K → Open audio session)"),
+        t.last_toast().contains(&format!(
+            "press {} (or {} → Open audio session)",
+            open_key(),
+            palette_key()
+        )),
         "{}",
         t.last_toast()
     );
@@ -1725,7 +1749,7 @@ fn new_measurements_start_and_become_selected() {
             .is_empty()
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(t.last_toast().contains("Shift+O"), "{}", t.last_toast());
+    assert!(t.last_toast().contains(&open_key()), "{}", t.last_toast());
 }
 
 #[test]
