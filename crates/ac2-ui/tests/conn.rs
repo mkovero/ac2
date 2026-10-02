@@ -74,9 +74,10 @@ fn quit_waits_at_most_the_grace_period_for_a_silent_daemon() {
     // The daemon stops answering: stop and release can never complete.
     fake.lock().mute = true;
     let t0 = Instant::now();
-    let finished = conn.close();
+    // The link gives up on the stop at the same deadline, so `close` may see it finish
+    // just in time or not; either way the quit takes the grace period and no longer.
+    conn.close();
     let took = t0.elapsed();
-    assert!(!finished, "nothing could have answered");
     assert!(took >= QUIT_GRACE - Duration::from_millis(50), "{took:?}");
     assert!(took <= QUIT_GRACE + Duration::from_millis(500), "{took:?}");
     // The daemon side's lease expiry is what stops the output.
