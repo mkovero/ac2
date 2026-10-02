@@ -384,6 +384,9 @@ commands! {
     ShowSlot7 => "show_slot_7", "Show / hide slot 7", [Global];
     ShowSlot8 => "show_slot_8", "Show / hide slot 8", [Global];
     ShowSlot9 => "show_slot_9", "Show / hide slot 9", [Global];
+    NextSlot => "next_slot", "Select next shown slot (then live)", [Global];
+    PrevSlot => "prev_slot", "Select previous shown slot (then live)", [Global];
+    SelectLive => "select_live", "Deselect the slot: keys act on the live measurement again", [Global];
     ImportTrace => "import_trace", "Import a trace file (CSV / analyzer text)…", [Global];
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
@@ -519,6 +522,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::ShowSlot7, S::Global, k(K::Num7)),
         (C::ShowSlot8, S::Global, k(K::Num8)),
         (C::ShowSlot9, S::Global, k(K::Num9)),
+        // Shift+digit is punctuation on most layouts, so slot selection steps with V.
+        (C::NextSlot, S::Global, k(K::V)),
+        (C::PrevSlot, S::Global, sh(K::V)),
         (C::InsertDelay, S::Transfer, k(K::X)),
         (C::InsertStrongest, S::Transfer, sh(K::X)),
         (C::TypeDelay, S::Transfer, k(K::D)),
@@ -830,6 +836,8 @@ mod tests {
             CommandId::FinderCustom,
             CommandId::FinderObservation,
             CommandId::PaneMeasurement,
+            // Esc also deselects (when no dialog is open); this is its palette entry.
+            CommandId::SelectLive,
             CommandId::SmoothOff,
             CommandId::Smooth48,
             CommandId::Smooth24,
@@ -875,6 +883,8 @@ mod tests {
             ("O", CommandId::ZoomOut),
             ("K", CommandId::SmoothCoarser),
             ("Shift+K", CommandId::SmoothFiner),
+            ("V", CommandId::NextSlot),
+            ("Shift+V", CommandId::PrevSlot),
         ] {
             assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
         }

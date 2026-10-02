@@ -762,6 +762,77 @@ fn smoothing_keys_change_a_selected_slot() {
 }
 
 #[test]
+fn slots_are_selected_from_the_keyboard() {
+    let mut t = T::new();
+    // No shown slot: V says so.
+    assert!(t.key("V").is_empty());
+    assert!(t.last_toast().contains("no shown slots"));
+    let mut hidden = stored(11, Some(2), 2);
+    hidden.edit.visible = false;
+    let unslotted = stored(13, None, 2);
+    t.conn(with_traces(vec![
+        stored(12, Some(5), 2),
+        hidden,
+        stored(10, Some(1), 2),
+        unslotted,
+    ]));
+    // V steps through the shown slots in slot order (hidden and unslotted skipped), then
+    // back to the live measurement; it sends nothing.
+    assert!(t.key("V").is_empty());
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert!(t.last_toast().contains("slot 1 (t10) selected"));
+    t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(12)));
+    t.key("V");
+    assert_eq!(t.st.selected_trace, None);
+    assert!(t.last_toast().contains("live measurement"));
+    // Shift+V goes the other way, from live to the last shown slot.
+    t.key("Shift+V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(12)));
+    // K then changes the selected slot.
+    assert_eq!(smoothing_set(&t.key("K")).0, "t12");
+    t.key("Shift+V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    t.key("Shift+V");
+    assert_eq!(t.st.selected_trace, None);
+    // A hidden slot selected by click: V starts from the first shown one.
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    // The palette entry deselects.
+    t.st.update(Msg::Command(CommandId::SelectLive), &t.keys);
+    assert_eq!(t.st.selected_trace, None);
+    // Esc with a dialog open only closes it (and stops); with nothing open it also hands
+    // the keys back to the live measurement.
+    t.key("V");
+    t.key("/");
+    assert!(t.key("Esc").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    t.key("Esc");
+    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
+    // N (another measurement) deselects too.
+    t.key("V");
+    t.key("N");
+    assert_eq!(t.st.selected_trace, None);
+}
+
+#[test]
+fn escape_stops_the_stimulus_with_a_slot_selected() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![stored(10, Some(1), 2)]));
+    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    let r = t.key("Esc");
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    assert_eq!(t.st.selected_trace, None);
+}
+
+#[test]
 fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
     let mut t = T::new();
     let meta = stored(10, Some(3), 2);

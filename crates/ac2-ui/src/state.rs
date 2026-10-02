@@ -1040,10 +1040,14 @@ impl AppState {
     fn key(&mut self, chord: Chord, keymap: &Keymap, out: &mut Vec<Request>) {
         use eframe::egui::Key;
         let swallow = self.swallow_text.take();
-        // Esc always stops, whatever is open; it also closes the overlay.
+        // Esc always stops, whatever is open; it also closes the overlay, or with nothing
+        // open hands the keys back from a selected slot to the live measurement.
         if chord == Chord::key(Key::Escape) {
-            self.overlay = Overlay::None;
+            let closed = std::mem::replace(&mut self.overlay, Overlay::None) != Overlay::None;
             self.command(CommandId::StimulusStop, keymap, out);
+            if !closed {
+                self.selected_trace = None;
+            }
             return;
         }
         match &mut self.overlay {
@@ -1661,6 +1665,43 @@ impl AppState {
         self.select(ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
     }
 
+    /// V / Shift+V: the next / previous shown slot, with the live measurement as the stop
+    /// between the last slot and the first.
+    fn cycle_slot(&mut self, d: i32) {
+        let ids: Vec<TraceId> = self
+            .slots()
+            .iter()
+            .flatten()
+            .filter(|t| t.edit.visible)
+            .map(|t| t.id)
+            .collect();
+        if ids.is_empty() {
+            self.error("no shown slots (1 … 9 show one)");
+            return;
+        }
+        // Position 0 is the live measurement, slot k is k + 1.
+        let n = ids.len() as i32 + 1;
+        let i = self
+            .selected_trace
+            .and_then(|s| ids.iter().position(|x| *x == s))
+            .map_or(0, |i| i as i32 + 1);
+        match (i + d).rem_euclid(n) {
+            0 => self.select_live(),
+            k => {
+                self.selected_trace = Some(ids[(k - 1) as usize]);
+                if let Some(t) = self.selected_trace_meta() {
+                    let label = SmoothTarget::Trace(t.clone()).label();
+                    self.toast(format!("{label} selected"));
+                }
+            }
+        }
+    }
+
+    fn select_live(&mut self) {
+        self.selected_trace = None;
+        self.toast("keys act on the live measurement");
+    }
+
     fn call(&mut self, out: &mut Vec<Request>, cmd: Command, what: String) {
         out.push(Request::Call { cmd, what });
     }
@@ -1733,6 +1774,9 @@ impl AppState {
             C::NextMeasurement => self.cycle_meas(1),
             C::PrevMeasurement => self.cycle_meas(-1),
             C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
+            C::NextSlot => self.cycle_slot(1),
+            C::PrevSlot => self.cycle_slot(-1),
+            C::SelectLive => self.select_live(),
             C::SmoothCoarser => self.smooth(1, None, out),
             C::SmoothFiner => self.smooth(-1, None, out),
             C::SmoothOff => self.smooth(0, Some(None), out),

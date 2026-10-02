@@ -156,9 +156,12 @@ every legend row shows the smoothing of its curve.
 
 - On a **live measurement** the keys act on the measurement the transfer pane shows. The
   change applies at once and the averages carry on — nothing restarts.
-- On a **stored trace**: click its slot in the list (the slot is highlighted and the title
-  says `slot 3 (…): smoothing …`), then **K** / **Shift+K**. Click it again, or select a
-  measurement, to go back to the live one.
+- On a **stored trace**: select its slot — **V** steps through the shown slots in slot
+  order and **Shift+V** backwards, or click it in the list. The slot is highlighted and the
+  title says `slot 3 (…): smoothing …`; then **K** / **Shift+K**. To go back to the live
+  measurement press **Esc** (it also stops the stimulus, as always; with a dialog open the
+  first Esc only closes it), step past the last slot with **V**, click the slot again, or
+  select a measurement (**N**, **Alt+1 … Alt+4**, a click).
 
 Smoothing never changes stored data. A capture keeps the unsmoothed curve and starts with
 the smoothing its measurement had, so a trace can be re-smoothed at any time; averages and
@@ -197,7 +200,8 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 (see *Smoothing* above).
 
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
-  there); **1 … 9** show and hide a slot.
+  there); **1 … 9** show and hide a slot; **V** / **Shift+V** select the next / previous
+  shown slot (highlighted in the list) and **Esc** goes back to the live measurement.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
   times between traces stay visible. **E** makes the selected trace the phase reference.
 - **C** turns on the comparison cursor, synchronised across panes and traces; **Shift+←/→**
@@ -311,6 +315,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `7` | Show / hide slot 7 | `show_slot_7` |
 | `8` | Show / hide slot 8 | `show_slot_8` |
 | `9` | Show / hide slot 9 | `show_slot_9` |
+| `V` | Select next shown slot (then live) | `next_slot` |
+| `Shift+V` | Select previous shown slot (then live) | `prev_slot` |
 | `Shift+O` | Open audio session… | `session_open` |
 
 #### Transfer function
@@ -370,6 +376,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Stimulus: type output channels… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
+| Deselect the slot: keys act on the live measurement again | `select_live` |
 | Import a trace file (CSV / analyzer text)… | `import_trace` |
 | Session: save (name or path)… | `session_save` |
 | Session: load, disarmed (name or path)… | `session_load` |
