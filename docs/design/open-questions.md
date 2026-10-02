@@ -89,6 +89,26 @@ identical grids (band powers aren't interpolated); transfer/target traces are re
 - Proposal: keep; refuse with a clear message when grids differ.
 - Answer:
 
+**C1. Data-socket send queue fixed at 128 frames per client.** Resizing SNDHWM on live
+connections triggers a use-after-free inside libzmq 4.3.5 when a client with many
+subscriptions disconnects (daemon crash, reproduced 3–5/10 under load). The queue is now set
+once (128) before binding. A stalled client can hold up to 128 stale frames; the client-side
+drain discards them on recovery, and frame age/STALE makes any delay visible.
+- Proposal: keep (safety over a smaller backlog).
+- Answer:
+
+**C2. Where files live.** Calibrations are in `~/.config/ac2` on every OS; sessions use the
+OS data dir (e.g. Application Support on macOS).
+- Proposal: both platform-native via the `directories` crate — calibrations (machine config)
+  in the config dir, sessions (user documents) in the data dir; Linux stays ~/.config/ac2 and
+  ~/.local/share/ac2.
+- Answer:
+
+**C3. Calibration housekeeping.** No command deletes a sensitivity calibration (only mic curves
+can be cleared); calibration age shows only in the SPL pane.
+- Proposal: add `cal.delete` (CLI + palette); show cal age in spectrum/RTA captions too.
+- Answer:
+
 ---
 
 ## Q1 — Delay target and acceptance (before phase 2)
