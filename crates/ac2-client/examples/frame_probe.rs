@@ -14,15 +14,15 @@ async fn main() {
     let c = Client::connect(ClientConfig::local("frame-probe"))
         .await
         .expect("connect");
-    c.subscribe(Subscription::AllData).unwrap();
-    c.subscribe(Subscription::InputMeters).unwrap();
+    c.subscribe(Subscription::AllData).expect("subscribe");
+    c.subscribe(Subscription::InputMeters).expect("subscribe");
     let start = Instant::now();
     let mut last_seq: BTreeMap<String, (u64, Instant)> = BTreeMap::new();
     let mut max_gap: BTreeMap<String, Duration> = BTreeMap::new();
     let mut stale_count: BTreeMap<String, u32> = BTreeMap::new();
     let mut frames: BTreeMap<String, u32> = BTreeMap::new();
     while start.elapsed() < Duration::from_secs(secs) {
-        let l = c.latest().unwrap();
+        let l = c.latest().expect("latest");
         for (t, f) in &l.frames {
             let seq = f.frame.stamp.seq;
             let e = last_seq.entry(t.clone()).or_insert((seq, f.received));
