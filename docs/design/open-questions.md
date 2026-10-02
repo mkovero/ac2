@@ -53,53 +53,21 @@ note at the start of the phase that implements them, within the decisions here.
 | D2 | Sub observation 4 s default, operator choice 2/4/8 s. |
 | D3 | Sub tracking agreement ±0.1 ms. |
 | D4 | GCC-PHAT is a diagnostic option, not a fallback. |
+| K1 | Esc is a universal panic stop, even when another client owns the generator. |
+| K2 | Enter applies an open prompt/palette selection instead of firing (fails safe). |
+| K3 | No key repeat on level; Shift+↑/↓ steps 3 dB; `L` types a value. |
+| K4 | Remember last stimulus outputs per device; first run defaults to output 1, shown in the top bar. |
+| K5 | Narrowband spectra always draw as a thinned line; bars only for RTA bands. |
+| K6 | Quit waits at most 1 s for lease stop/release; daemon expiry is the safety net. |
+| K7 | Slots are UI-only until sessions; they persist in sessions from phase 5. |
+| K8 | Mic name per input in the session's input setup; calibration matches device + channel + mic name. |
 | — | Scene defaults recorded with U1/U2 (banner priority, units, coherence fade, IR dB re peak, spectrum thinning, CHECK ROUTING flag) stand. |
 
 Round 2 answered 2026-10-01: all proposals accepted (rows above the line in the table below).
 
 Round 3 answered 2026-10-01: all proposals accepted (rows M1–D4 in the Decided table above).
 
-### → round 4 (raised by the desktop app, phase 4)
-
-Fill `Answer:` (empty = proposal accepted).
-
-**K1. Esc and other people's stimulus.** Esc sends a universal stop even when another
-client (e.g. a laptop at the delay tower) owns the generator.
-- Proposal: keep it. Esc is the panic key; any operator can always silence the PA.
-- Answer:
-
-**K2. Enter while a prompt or the palette is open** applies the prompt/selection instead of
-firing the stimulus.
-- Proposal: keep (fails safe; firing needs no overlay open).
-- Answer:
-
-**K3. Holding ↑/↓ on level.** Key repeat is off, so holding ↑ doesn't ramp the level.
-- Proposal: keep off (no accidental ramps into the PA); Shift+↑/↓ steps 3 dB, `L` types a value.
-- Answer:
-
-**K4. Stimulus output default.** Outputs default to channel 1; changed via the palette.
-- Proposal: remember the last outputs per device; first run defaults to output 1 and
-  shows it in the top bar (as now).
-- Answer:
-
-**K5. Spectrum "bars" style for narrowband FFT.** A single-bin tone vanishes as a sub-pixel
-bar, so narrowband spectra always draw as a thinned line; bars only for RTA bands.
-- Proposal: keep.
-- Answer:
-
-**K6. Quitting with the daemon gone** can wait up to ~5 s on lease stop/release timeouts
-(the daemon's own 1.5 s expiry is the real safety net).
-- Proposal: cap the quit wait at 1 s.
-- Answer:
-
-**K7. Slots.** Ctrl+1…9 slots are UI-only and lost on restart until sessions exist (phase 5).
-- Proposal: fine for now; slots become part of sessions in phase 5.
-- Answer:
-
-**K8. Mic name in SPL calibration.** The meter config has no mic name, so the UI matches a
-calibration by device + channel only (decision 7a wants mic name too).
-- Proposal: add a mic name per input in the session's input setup (phase 5) and match on it.
-- Answer:
+Round 4 answered 2026-10-02: all proposals accepted (rows K1–K8 in the Decided table above).
 
 ---
 
