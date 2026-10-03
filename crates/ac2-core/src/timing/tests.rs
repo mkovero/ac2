@@ -496,3 +496,88 @@ fn zero_db_snr_ten_minutes() {
     zero_db_snr(Signal::White, 600.0);
     zero_db_snr(Signal::Pink, 600.0);
 }
+
+/// A slow sweep starts as a near-tone (20–35 Hz over a whole window). PHAT gives the bins
+/// outside that band unit weight too; with a rectangular capture window they carry only the
+/// leakage of its ends, which lines up with the ends of the reference slice and reads as a
+/// confident offset exactly on an end of the searched range (`min` or `max`), reported as an
+/// output timing jump. The window must give no estimate rather than a wrong one: pink noise
+/// locks, the generator stops, and the first seconds of a 20 Hz – 20 kHz, 12 s sweep follow.
+#[test]
+fn a_slow_sweep_start_never_reads_as_a_range_edge() {
+    use crate::generator::EssConfig;
+    const DELAY: usize = 900;
+    let mk = |signal| {
+        Generator::new(&GeneratorConfig {
+            signal,
+            sample_rate: FS,
+            seed: 3,
+            band: BandLimit::NONE,
+            level_dbfs: -50.0,
+            ceiling_dbfs: -10.0,
+        })
+        .expect("generator")
+    };
+    let n = |s: f64| (s * FS) as usize;
+    let mut out = vec![0.0f32; n(2.0)];
+    mk(Signal::Pink).fill(&mut out);
+    out.extend(std::iter::repeat_n(0.0, n(1.0)));
+    let rate = 12.0 / 1000f64.ln();
+    let mut sweep = vec![0.0f32; n(by_build(3, 6) as f64)];
+    mk(Signal::Ess(EssConfig {
+        start_hz: 20.0,
+        end_hz: 20_000.0,
+        duration_s: 12.0,
+        fade_in_s: rate * std::f64::consts::LN_2 / 6.0,
+        fade_out_s: rate * std::f64::consts::LN_2 / 24.0,
+    }))
+    .fill(&mut sweep);
+    out.extend_from_slice(&sweep);
+    let mut noise = Rng::new(9);
+    let noise_rms = dbfs_to_rms(-110.0);
+    let cap: Vec<f32> = (0..out.len())
+        .map(|i| {
+            let s = i.checked_sub(DELAY).map_or(0.0, |j| out[j]);
+            s + (noise.uniform_unit_rms() * noise_rms) as f32
+        })
+        .collect();
+
+    let cfg = TimingConfig::for_rate(FS);
+    let mut mon = LoopbackTiming::new(cfg);
+    let mut ev = Vec::new();
+    let mut start = 0u64;
+    loop {
+        let range = mon.search_range();
+        let r0 = range.reference_start(start);
+        let len = range.reference_len(cfg.window);
+        if r0 + len as i64 > out.len() as i64 {
+            break;
+        }
+        let reference: Vec<f32> = (r0..r0 + len as i64)
+            .map(|i| usize::try_from(i).map_or(0.0, |i| out[i]))
+            .collect();
+        let capture = &cap[start as usize..start as usize + cfg.window];
+        let (m, e) = mon
+            .process_window(start, capture, &reference, range)
+            .expect("window");
+        if let Outcome::Offset(p) = m.outcome {
+            assert!(
+                (p.offset - DELAY as i64).abs() <= 1,
+                "window at {:.2} s read offset {} (searched {range:?})",
+                start as f64 / FS,
+                p.offset
+            );
+        }
+        ev.extend(e.iter().copied());
+        start += cfg.hop as u64;
+    }
+    assert!(
+        ev.iter()
+            .any(|e| matches!(e, TimingEvent::Locked { offset, .. } if *offset == DELAY as i64)),
+        "{ev:?}"
+    );
+    assert!(
+        !ev.iter().any(|e| matches!(e, TimingEvent::Jump { .. })),
+        "{ev:?}"
+    );
+}

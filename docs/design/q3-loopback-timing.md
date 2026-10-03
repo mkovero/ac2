@@ -43,6 +43,13 @@ block is rendered, and is lock-free.
   at 48 kHz (≈ 0.68 s; scaled with the rate), hop 0.25 s, zero-padded to avoid wrap.
   GCC-PHAT is chosen because our own stimulus is known and broadband, so the sharpest
   peak wins. Excitation colour doesn't matter here; it does for Q1.
+- The capture window is tapered (raised cosine over its first and last eighth). PHAT weights
+  every bin alike, so for a narrowband stimulus (the first seconds of a slow sweep, a tone)
+  the out-of-band bins hold only the leakage of a rectangular window's ends; that leakage
+  lines up with the reference slice's ends and gave confident peaks exactly on an end of the
+  search range (offset `min` or `max`: "jumps" of 0 ↔ 1 s). Tapered, those windows are "no
+  measurement" (the state may read Lost while a slow sweep is in its lower part) instead of a
+  false offset.
 - Sub-sample peak by parabolic interpolation on the correlation magnitude, reported with
   the integer offset. Integer stability is the criterion; the fraction is diagnostics.
 - **Acquisition** searches the whole configured range (default 0–1 s of output→input

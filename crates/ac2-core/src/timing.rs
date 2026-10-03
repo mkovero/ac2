@@ -208,6 +208,32 @@ pub struct GccPhat {
     window: usize,
     max_span: usize,
     plans: Vec<Plan>,
+    /// Capture taper, see [`capture_taper`].
+    taper: Vec<f64>,
+}
+
+/// Fraction of the capture window tapered at each end.
+const TAPER_FRACTION: f64 = 0.125;
+
+/// Raised-cosine (Tukey) taper for the capture window. PHAT whitening gives every bin unit
+/// weight, so when the stimulus is narrowband (a sweep's first second is a 20–35 Hz tone)
+/// the bins outside its band carry only the leakage of the window's truncation steps. Those
+/// steps then correlate with the reference slice's own ends and the peak lands exactly on
+/// an end of the searched range (offset `min` or `max`) with a high peak-to-sidelobe ratio.
+/// Fading the capture in and out removes its steps, so out-of-band bins are noise and stay
+/// incoherent; the flat middle keeps most of the window's energy for the true peak.
+fn capture_taper(window: usize) -> Vec<f64> {
+    let edge = ((window as f64 * TAPER_FRACTION) as usize).max(1);
+    (0..window)
+        .map(|i| {
+            let d = i.min(window - 1 - i);
+            if d >= edge {
+                1.0
+            } else {
+                0.5 - 0.5 * (std::f64::consts::PI * (d as f64 + 0.5) / edge as f64).cos()
+            }
+        })
+        .collect()
 }
 
 /// Lags within this distance of the peak are its main lobe and excluded from the sidelobe
@@ -244,6 +270,7 @@ impl GccPhat {
             window,
             max_span,
             plans,
+            taper: capture_taper(window),
         }
     }
 
@@ -278,8 +305,8 @@ impl GccPhat {
         let n = p.n;
         p.a.fill(0.0);
         p.b.fill(0.0);
-        for (d, &s) in p.a.iter_mut().zip(capture) {
-            *d = f64::from(s);
+        for ((d, &s), w) in p.a.iter_mut().zip(capture).zip(&self.taper) {
+            *d = f64::from(s) * w;
         }
         for (d, &s) in p.b.iter_mut().zip(reference) {
             *d = f64::from(s);
