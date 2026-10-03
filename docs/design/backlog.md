@@ -22,6 +22,13 @@ the commit when it lands.
 - **Autosave rewrites the whole session once a minute while a meter logs** (trace files
   included); appending to the log file would cut that to the new rows.
 
+## UI focus (2026-10-03)
+
+- **egui focus wanders to the sidebar's measurement chip** after arrow keys in the Leq dialog
+  (seen while testing preset cycling): the chip gets egui's focus highlight. Check whether a
+  dialog leaves focus on the side panel in the app too, and keep keyboard focus inside the open
+  dialog.
+
 ## Windows (2026-10-03, operator's Windows 11 VM, release build of 6c122d5)
 
 - MSI installed cleanly (unsigned: SmartScreen "More info → Run anyway"), Start-menu entry and
