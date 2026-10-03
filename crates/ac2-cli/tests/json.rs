@@ -740,3 +740,46 @@ async fn trace_commands_json() -> R {
     assert_eq!(r.json()?["error"]["code"], "not_found");
     Ok(())
 }
+
+/// A measurement named with digits is found by its name; a reference that is one
+/// measurement's id and another's name is refused, naming both.
+#[tokio::test(flavor = "multi_thread")]
+async fn numeric_names_resolve_and_ambiguity_is_refused() -> R {
+    let f = fake()?;
+    let tf = |name: &'static str| {
+        [
+            "meas", "new", "tf", "--ref", "1", "--meas", "2", "--name", name, "--json",
+        ]
+    };
+    let a = ok_json(&f, &tf("1083")).await?;
+    assert_eq!(a["id"], 1);
+    let d = ok_json(&f, &["delay", "find", "1083", "--json"]).await?;
+    assert_eq!(d["finding"]["outcome"]["type"], "accepted");
+    let m = ok_json(&f, &["meas", "start", "1083", "--json"]).await?;
+    assert_eq!(m["id"], 1);
+
+    let b = ok_json(&f, &tf("1")).await?;
+    assert_eq!(b["id"], 2);
+    // "2" is only measurement 2's id.
+    let m = ok_json(&f, &["meas", "start", "2", "--json"]).await?;
+    assert_eq!(m["id"], 2);
+    // "1" is measurement 1's id and measurement 2's name.
+    let r = ac2(&f, &["delay", "find", "1", "--json"]).await?;
+    assert_eq!(r.code, 1);
+    let e = r.json()?;
+    assert_eq!(e["error"]["code"], "usage");
+    let msg = e["error"]["msg"].as_str().ok_or("msg")?;
+    assert!(
+        msg.contains("ambiguous")
+            && msg.contains("measurement 1 (\"1083\") by id")
+            && msg.contains("measurement 2 (\"1\") by name"),
+        "{msg}"
+    );
+    let r = ac2(&f, &["delay", "find", "999", "--json"]).await?;
+    assert_eq!(r.code, 1);
+    assert_eq!(
+        r.json()?["error"]["msg"],
+        "no measurement with id or name 999"
+    );
+    Ok(())
+}

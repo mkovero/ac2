@@ -389,13 +389,17 @@ pub enum FractionArg {
     F48,
 }
 
-/// A measurement by id or name.
+/// A measurement (or trace) by id or name, as typed. Which one it means is decided against
+/// the daemon's state: a name may be all digits, so `1083` can be an id, a name, or both
+/// (then it is refused as ambiguous).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MeasRef {
-    /// Numeric id.
-    Id(u32),
-    /// Name.
-    Name(String),
+pub struct MeasRef(pub String);
+
+impl MeasRef {
+    /// The id it would be, if it is a number.
+    pub fn id(&self) -> Option<u32> {
+        self.0.parse().ok()
+    }
 }
 
 impl FromStr for MeasRef {
@@ -405,10 +409,7 @@ impl FromStr for MeasRef {
         if s.is_empty() {
             return Err("empty measurement reference".into());
         }
-        Ok(match s.parse::<u32>() {
-            Ok(n) => Self::Id(n),
-            Err(_) => Self::Name(s.to_owned()),
-        })
+        Ok(Self(s.to_owned()))
     }
 }
 
@@ -625,8 +626,9 @@ pub enum DelayCmd {
 /// `spl …`.
 #[derive(Debug, Subcommand)]
 pub enum SplCmd {
-    /// Live SPL readout (q/Esc/Ctrl-C quits). Uses `--meas`, or an SPL measurement on
-    /// `--input` (created for the duration of the command if none exists).
+    /// Live SPL readout (q/Esc/Ctrl-C quits). Uses `--meas`, or its own SPL meter on
+    /// `--input`, created for the duration of the command (Leq, Lmax and Lmin integrate
+    /// from the command's start).
     Watch(SplWatch),
     /// Calibrate an input against an acoustic calibrator (same as `cal spl`).
     Cal(CalSpl),
@@ -647,6 +649,9 @@ pub struct SplWatch {
     /// Time weighting.
     #[arg(long, value_enum, default_value = "fast")]
     pub time: TimeWeightArg,
+    /// Quit after this long, e.g. `10s` (scripts).
+    #[arg(long = "for", value_name = "TIME")]
+    pub duration: Option<Time>,
 }
 
 /// `cal …`.

@@ -53,18 +53,18 @@ fn plan_examples_parse() {
     let c = ok(&["delay", "find", "main-l", "--insert"]);
     assert!(matches!(
         c.cmd,
-        Cmd::Delay { cmd: DelayCmd::Find { meas: MeasRef::Name(ref n), band: BandArg::Auto, observation: None, insert: Some(PickArg::First) } } if n == "main-l"
+        Cmd::Delay { cmd: DelayCmd::Find { meas: MeasRef(ref n), band: BandArg::Auto, observation: None, insert: Some(PickArg::First) } } if n == "main-l"
     ));
     let c = ok(&["delay", "find", "3", "--insert", "strongest"]);
     assert!(matches!(
         c.cmd,
         Cmd::Delay {
             cmd: DelayCmd::Find {
-                meas: MeasRef::Id(3),
+                meas: MeasRef(ref n),
                 insert: Some(PickArg::Strongest),
                 ..
             }
-        }
+        } if n == "3"
     ));
     let c = ok(&[
         "delay",

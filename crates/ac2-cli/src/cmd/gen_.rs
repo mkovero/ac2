@@ -20,7 +20,7 @@ use crate::CliError;
 use crate::args::{Cli, GenCmd, GenOpts, SlopeArg};
 use crate::output::{self, Out};
 use crate::units::channels_text;
-use crate::watch::{Key, RawTerm};
+use crate::watch::{Key, RawTerm, quit_signal};
 
 /// The settings `gen` would send, validated without a daemon.
 pub fn settings(cmd: &GenCmd) -> Result<Option<(GeneratorSettings, bool)>, CliError> {
@@ -205,12 +205,12 @@ async fn foreground(
         &format!("ARMED  {what}\nEnter: fire / hold   Esc, q, Ctrl-C: stop"),
         json!({ "settings": settings, "client_id": c.client_id() }),
     );
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
+    let quit = quit_signal();
+    tokio::pin!(quit);
     let mut firing = false;
     let outcome: Result<(), CliError> = loop {
         tokio::select! {
-            _ = &mut ctrl_c => break Ok(()),
+            _ = &mut quit => break Ok(()),
             lost = lease.wait_lost() => {
                 let LeaseLost::Refused { msg, .. } = &lost;
                 say(out, raw, "lost", &format!("LEASE LOST: {msg}"), json!({ "reason": msg }));

@@ -114,10 +114,46 @@ pub struct View {
 
 const NOT_RESPONDING: &str = "DAEMON NOT RESPONDING";
 
+/// Resolves when the process is asked to quit: Ctrl-C, and on Unix also SIGTERM and SIGHUP
+/// (a closed terminal or SSH session), so a foreground command always gets to clean up
+/// (stop its stimulus, delete its own meter) instead of leaving it behind.
+pub async fn quit_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let (Ok(mut term), Ok(mut hup)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::hangup()),
+        ) else {
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+            _ = hup.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 async fn live(
     c: &Client,
     out: &mut Out<'_>,
     subs: &[Subscription],
+    render: impl FnMut(&MirrorView, &Latest) -> View,
+) -> Result<(), CliError> {
+    live_until(c, out, subs, None, render).await
+}
+
+async fn live_until(
+    c: &Client,
+    out: &mut Out<'_>,
+    subs: &[Subscription],
+    until: Option<Instant>,
     mut render: impl FnMut(&MirrorView, &Latest) -> View,
 ) -> Result<(), CliError> {
     for s in subs {
@@ -133,15 +169,18 @@ async fn live(
     let mut tick = tokio::time::interval(REDRAW);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut last_key: Option<Vec<u64>> = None;
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
+    let quit = quit_signal();
+    tokio::pin!(quit);
     let result = loop {
         tokio::select! {
-            _ = &mut ctrl_c => break Ok(()),
+            _ = &mut quit => break Ok(()),
             k = keys.recv(), if term.is_some() => {
                 if matches!(k, Some(Key::Quit) | None) { break Ok(()); }
             }
             _ = tick.tick() => {
+                if until.is_some_and(|u| Instant::now() >= u) {
+                    break Ok(());
+                }
                 let latest = match c.latest() {
                     Ok(l) => l,
                     Err(e) => break Err(e.into()),
@@ -198,89 +237,101 @@ fn now_secs_key(latest: &Latest, topic: &Topic) -> Vec<u64> {
 }
 
 /// `spl watch`.
-pub async fn spl(c: &Client, meas: MeasId, out: &mut Out<'_>) -> Result<(), CliError> {
+/// `spl watch` of measurement `meas` on (zero-based) `input`.
+pub async fn spl(
+    c: &Client,
+    meas: MeasId,
+    input: u16,
+    until: Option<Instant>,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
     let topic = Topic::Data {
         meas,
         stream: Stream::Spl,
     };
-    live(c, out, &[Subscription::Topic(topic)], |view, latest| {
-        let mut lines = Vec::new();
-        if !latest.responding {
-            lines.push(NOT_RESPONDING.to_owned());
-        }
-        let key = now_secs_key(latest, &topic);
-        // The input's mic name, from the mirrored measurement and input setup.
-        let mic = view.state.as_ref().and_then(|s| {
-            let input = s.measurements.iter().find(|m| m.id == meas).and_then(|m| {
-                match &m.config.kind {
-                    MeasKind::Spl { config } => Some(config.input),
-                    _ => None,
-                }
-            })?;
-            s.inputs
-                .iter()
-                .find(|i| i.channel == input)
-                .and_then(|i| i.mic.clone())
-        });
-        let Some(tf) = latest.get(&topic) else {
-            lines.push(format!("waiting for {topic} …"));
-            return View {
-                lines,
-                json: json!({ "topic": topic.to_string(), "frame": null }),
-                key,
+    live_until(
+        c,
+        out,
+        &[Subscription::Topic(topic)],
+        until,
+        |view, latest| {
+            let mut lines = Vec::new();
+            if !latest.responding {
+                lines.push(NOT_RESPONDING.to_owned());
+            }
+            let key = now_secs_key(latest, &topic);
+            // The input's mic name, from the mirrored input setup.
+            let mic = view.state.as_ref().and_then(|s| {
+                s.inputs
+                    .iter()
+                    .find(|i| i.channel == input)
+                    .and_then(|i| i.mic.clone())
+            });
+            // 1-based, as the operator typed it.
+            let input_no = u32::from(input) + 1;
+            let Some(tf) = latest.get(&topic) else {
+                lines.push(format!("waiting for {topic} …"));
+                return View {
+                    lines,
+                    json: json!({ "topic": topic.to_string(), "frame": null }),
+                    key,
+                };
             };
-        };
-        let FrameData::Spl(f) = &tf.frame.data else {
-            return View {
-                lines,
-                json: json!(null),
-                key,
+            let FrameData::Spl(f) = &tf.frame.data else {
+                return View {
+                    lines,
+                    json: json!(null),
+                    key,
+                };
             };
-        };
-        let m = &f.meta;
-        let name = format!(
-            "L{}{}",
-            output::weighting(m.weighting),
-            output::time_weighting(m.time_weighting)
-        );
-        lines.push(format!(
-            "{name} {}   Leq {}   Lmax {}   Lmin {}   L{}peak {}",
-            output::level(m.level, m.scale),
-            format::level(m.leq),
-            format::level(m.lmax),
-            format::level(m.lmin),
-            output::peak_weighting(m.peak_weighting),
-            format::level(m.lpeak),
-        ));
-        lines.push(format!(
-            "integrated {}   age {}",
-            format::duration(m.duration.0),
-            age_text(tf.age, tf.stale)
-        ));
-        let offset = view.clock_offset_ns.map_or(0, |o| {
-            o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
-        });
-        let cal = output::cal_status(m.cal, m.mic_curve, now_wall(), offset);
-        let cal = match &mic {
-            Some(name) => format!("{name} · {cal}"),
-            None => cal,
-        };
-        lines.push(cal.clone());
-        View {
-            lines,
-            json: json!({
-                "topic": topic.to_string(),
-                "seq": tf.frame.stamp.seq,
-                "age_s": tf.age,
-                "stale": tf.stale,
-                "responding": latest.responding,
-                "spl": m,
-                "mic": mic,
-                "cal_text": cal,
-            }),
-            key,
-        }
-    })
+            let m = &f.meta;
+            let name = format!(
+                "L{}{}",
+                output::weighting(m.weighting),
+                output::time_weighting(m.time_weighting)
+            );
+            lines.push(format!(
+                "{name} {}   Leq {}   Lmax {}   Lmin {}   L{}peak {}",
+                output::level(m.level, m.scale),
+                format::level(m.leq),
+                format::level(m.lmax),
+                format::level(m.lmin),
+                output::peak_weighting(m.peak_weighting),
+                format::level(m.lpeak),
+            ));
+            lines.push(format!(
+                "integrated {}   age {}",
+                format::duration(m.duration.0),
+                age_text(tf.age, tf.stale)
+            ));
+            let offset = view.clock_offset_ns.map_or(0, |o| {
+                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            });
+            let cal = output::cal_status(m.cal, m.mic_curve, now_wall(), offset);
+            let cal = match &mic {
+                Some(name) => format!("{name} · {cal}"),
+                None => cal,
+            };
+            let cal = format!("in {input_no} · {cal}");
+            lines.push(cal.clone());
+            View {
+                lines,
+                json: json!({
+                    "topic": topic.to_string(),
+                    "meas": meas.0,
+                    "input": input_no,
+                    "seq": tf.frame.stamp.seq,
+                    "age_s": tf.age,
+                    "stale": tf.stale,
+                    "responding": latest.responding,
+                    "spl": m,
+                    "mic": mic,
+                    "cal_text": cal,
+                }),
+                key,
+            }
+        },
+    )
     .await
 }
 

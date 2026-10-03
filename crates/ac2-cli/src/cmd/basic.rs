@@ -547,43 +547,38 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
         SplCmd::Watch(w) => {
             let c = connect(cli, true).await?;
             let s = state(&c).await?;
-            let (id, created) = match (&w.meas, w.input) {
+            let (id, input, created) = match (&w.meas, w.input) {
                 (Some(r), _) => {
                     let m = find_meas(&s, r)?;
-                    if !matches!(m.config.kind, MeasKind::Spl { .. }) {
+                    let MeasKind::Spl { config } = &m.config.kind else {
                         return Err(CliError::Usage(format!(
                             "{} is not an SPL measurement",
                             m.config.name
                         )));
-                    }
-                    (m.id, false)
+                    };
+                    (m.id, config.input, false)
                 }
                 (None, Some(input)) => {
+                    // Always a meter of its own: another one on the same input (the UI's, or
+                    // one a killed watch left behind) integrates over a span this command
+                    // knows nothing of, and its Leq would not describe what it watched.
                     let want = SplConfig {
                         input: input.0,
                         weighting: weighting(w.weight),
                         time_weighting: time_weighting(w.time),
                         peak_weighting: PeakWeighting::C,
                     };
-                    let existing = s.measurements.iter().find(
-                        |m| matches!(&m.config.kind, MeasKind::Spl { config } if *config == want),
-                    );
-                    match existing {
-                        Some(m) => (m.id, false),
-                        None => {
-                            let m = meas_call(
-                                &c,
-                                Command::MeasCreate {
-                                    config: MeasConfig {
-                                        name: format!("spl-in{input}"),
-                                        kind: MeasKind::Spl { config: want },
-                                    },
-                                },
-                            )
-                            .await?;
-                            (m.id, true)
-                        }
-                    }
+                    let m = meas_call(
+                        &c,
+                        Command::MeasCreate {
+                            config: MeasConfig {
+                                name: format!("spl-in{input}"),
+                                kind: MeasKind::Spl { config: want },
+                            },
+                        },
+                    )
+                    .await?;
+                    (m.id, input.0, true)
                 }
                 (None, None) => return Err(CliError::Usage("give --meas or --input".into())),
             };
@@ -595,7 +590,10 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
             if !running {
                 meas_call(&c, Command::MeasStart { meas: id }).await?;
             }
-            let result = watch::spl(&c, id, out).await;
+            let until = w.duration.map(|t| {
+                std::time::Instant::now() + std::time::Duration::from_secs_f64(t.0.0.max(0.0))
+            });
+            let result = watch::spl(&c, id, input, until, out).await;
             if created {
                 let _ = c.call(Command::MeasDelete { meas: id }).await;
             } else if !running {

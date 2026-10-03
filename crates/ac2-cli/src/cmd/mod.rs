@@ -93,11 +93,13 @@ pub(crate) async fn connect(cli: &Cli, mirror: bool) -> Result<Client, CliError>
             )));
         }
     }
+    let hint = cfg.endpoints.firewall_hint();
     match Client::connect(cfg).await {
         Ok(c) => Ok(c),
-        Err(ClientError::Timeout { .. }) => {
-            Err(CliError::NotRunning(format!("{what} is not responding")))
-        }
+        Err(ClientError::Timeout { .. }) => Err(CliError::NotRunning(match hint {
+            Some(h) => format!("{what} is not responding; {h}"),
+            None => format!("{what} is not responding"),
+        })),
         Err(e) => Err(e.into()),
     }
 }
@@ -106,50 +108,59 @@ pub(crate) async fn state(c: &Client) -> Result<State, CliError> {
     Ok(c.snapshot().await?.state)
 }
 
-pub(crate) fn find_meas<'s>(s: &'s State, r: &MeasRef) -> Result<&'s Measurement, CliError> {
-    match r {
-        MeasRef::Id(id) => s
-            .measurements
-            .iter()
-            .find(|m| m.id.0 == *id)
-            .ok_or_else(|| CliError::Usage(format!("no measurement {id}"))),
-        MeasRef::Name(n) => {
-            let found: Vec<&Measurement> = s
-                .measurements
-                .iter()
-                .filter(|m| &m.config.name == n)
-                .collect();
-            match found.as_slice() {
-                [m] => Ok(m),
-                [] => Err(CliError::Usage(format!("no measurement named {n:?}"))),
-                _ => Err(CliError::Usage(format!(
-                    "{} measurements are named {n:?}; use the id",
-                    found.len()
-                ))),
-            }
+/// Resolves `r` among `items` (`what` names them in messages): the item whose id it is,
+/// else the one item of that name. A reference that is one item's id and another item's
+/// name is refused, naming both.
+fn resolve<'s, T>(
+    items: &'s [T],
+    r: &MeasRef,
+    what: &str,
+    id: impl Fn(&T) -> u32,
+    name: impl Fn(&T) -> &str,
+) -> Result<&'s T, CliError> {
+    let text = r.0.as_str();
+    let by_id = r.id().and_then(|n| items.iter().find(|t| id(t) == n));
+    let by_name: Vec<&T> = items.iter().filter(|t| name(t) == text).collect();
+    let describe = |t: &T| format!("{what} {} ({:?})", id(t), name(t));
+    match (by_id, by_name.as_slice()) {
+        (Some(t), named) if named.iter().all(|n| id(n) == id(t)) => Ok(t),
+        (Some(t), named) => {
+            let mut all = vec![format!("{} by id", describe(t))];
+            all.extend(named.iter().map(|n| format!("{} by name", describe(n))));
+            Err(CliError::Usage(format!(
+                "{text:?} is ambiguous: it matches {}; rename one of them",
+                all.join(" and ")
+            )))
         }
+        (None, [t]) => Ok(t),
+        (None, []) if r.id().is_some() => {
+            Err(CliError::Usage(format!("no {what} with id or name {text}")))
+        }
+        (None, []) => Err(CliError::Usage(format!("no {what} named {text:?}"))),
+        (None, named) => Err(CliError::Usage(format!(
+            "{} {what}s are named {text:?} (ids {}); use the id",
+            named.len(),
+            named
+                .iter()
+                .map(|t| id(t).to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
     }
 }
 
+pub(crate) fn find_meas<'s>(s: &'s State, r: &MeasRef) -> Result<&'s Measurement, CliError> {
+    resolve(
+        &s.measurements,
+        r,
+        "measurement",
+        |m| m.id.0,
+        |m| &m.config.name,
+    )
+}
+
 pub(crate) fn find_trace<'s>(s: &'s State, r: &MeasRef) -> Result<&'s TraceMeta, CliError> {
-    match r {
-        MeasRef::Id(id) => s
-            .traces
-            .iter()
-            .find(|t| t.id.0 == *id)
-            .ok_or_else(|| CliError::Usage(format!("no trace {id}"))),
-        MeasRef::Name(n) => {
-            let found: Vec<&TraceMeta> = s.traces.iter().filter(|t| &t.edit.name == n).collect();
-            match found.as_slice() {
-                [t] => Ok(t),
-                [] => Err(CliError::Usage(format!("no trace named {n:?}"))),
-                _ => Err(CliError::Usage(format!(
-                    "{} traces are named {n:?}; use the id",
-                    found.len()
-                ))),
-            }
-        }
-    }
+    resolve(&s.traces, r, "trace", |t| t.id.0, |t| &t.edit.name)
 }
 
 /// The open session's sample rate.
