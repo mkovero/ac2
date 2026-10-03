@@ -60,10 +60,12 @@ pub use cpal_host::CpalBackend;
 pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};
 pub use events::EventSnapshot;
 pub use fake::{FakeBackend, FakeConfig, FakeDriver};
-pub use generator::{GeneratorHandle, GeneratorPort, SignalSource, generator};
+pub use generator::{
+    GeneratorHandle, GeneratorPort, MAX_ROUTED_CHANNELS, RouteError, SignalSource, generator,
+};
 pub use history::{HistoryError, HistoryReader};
 #[cfg(target_os = "linux")]
 pub use jack_host::{JackBackend, JackConfig, pipewire_socket};
 pub use level::{Gain, LevelError, MaxLevel};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
-pub use stream::{DuplexStream, StopOutcome};
+pub use stream::{DuplexStream, OutputPatch, PatchLink, PatchState, StopOutcome};

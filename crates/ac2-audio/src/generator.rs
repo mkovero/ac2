@@ -56,6 +56,43 @@ pub enum RouteError {
     /// The same output channel is listed twice.
     #[error("output channel {0} is routed twice")]
     Duplicate(u16),
+    /// The channel is beyond the largest channel a generator can carry.
+    #[error("output channel {0} is above the routable maximum {max}", max = MAX_ROUTED_CHANNELS - 1)]
+    OutOfRange(u16),
+    /// Earlier routing changes are still waiting for the callback.
+    #[error("generator routing queue is full; the callback has not caught up")]
+    QueueFull,
+}
+
+/// Output channels a generator can be routed to (zero-based channels below this).
+pub const MAX_ROUTED_CHANNELS: u16 = 256;
+
+/// The set of output channels carrying the generator: a fixed-size bit set, so a routing
+/// change crosses to the callback without allocation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RouteSet([u64; (MAX_ROUTED_CHANNELS as usize) / 64]);
+
+impl RouteSet {
+    /// Checks `routes` (no duplicates, all routable) and builds the set.
+    pub(crate) fn new(routes: &[u16]) -> Result<Self, RouteError> {
+        let mut set = Self::default();
+        for &r in routes {
+            if r >= MAX_ROUTED_CHANNELS {
+                return Err(RouteError::OutOfRange(r));
+            }
+            if set.contains(usize::from(r)) {
+                return Err(RouteError::Duplicate(r));
+            }
+            set.0[usize::from(r) / 64] |= 1 << (r % 64);
+        }
+        Ok(set)
+    }
+
+    pub(crate) fn contains(&self, channel: usize) -> bool {
+        self.0
+            .get(channel / 64)
+            .is_some_and(|w| w & (1 << (channel % 64)) != 0)
+    }
 }
 
 /// Pending replacements the control side may queue before the callback takes them.
@@ -63,31 +100,36 @@ const SOURCE_QUEUE: usize = 2;
 /// Replaced sources waiting to be dropped on the control side. Larger than the inbound
 /// queue so the callback always has room to hand back what it replaces.
 const RETIRED_QUEUE: usize = 8;
+/// Pending routing changes the control side may queue before the callback takes them.
+const ROUTE_QUEUE: usize = 4;
 
 /// Creates a generator routed to `routes` (zero-based output channels). Every routed channel
-/// carries the same signal: stimulus and reference leave through the same converter.
+/// carries the same signal: stimulus and reference leave through the same converter. The
+/// routing can change later without reopening the stream
+/// ([`GeneratorHandle::set_routes`]).
 pub fn generator(
     routes: impl Into<Vec<u16>>,
 ) -> Result<(GeneratorHandle, GeneratorPort), RouteError> {
     let routes = routes.into();
-    for (i, r) in routes.iter().enumerate() {
-        if routes[..i].contains(r) {
-            return Err(RouteError::Duplicate(*r));
-        }
-    }
+    let set = RouteSet::new(&routes)?;
     let (sp, sc) = rtrb::RingBuffer::new(SOURCE_QUEUE);
     let (rp, rc) = rtrb::RingBuffer::new(RETIRED_QUEUE);
+    let (tp, tc) = rtrb::RingBuffer::new(ROUTE_QUEUE);
     let shared = Arc::new(OutputShared::default());
     Ok((
         GeneratorHandle {
             sources: sp,
             retired: rc,
+            route_changes: tp,
+            routes: routes.clone(),
             shared: Arc::clone(&shared),
         },
         GeneratorPort {
             routes,
+            set,
             sources: sc,
             retired: rp,
+            route_changes: tc,
             shared,
         },
     ))
@@ -97,6 +139,8 @@ pub fn generator(
 pub struct GeneratorHandle {
     sources: rtrb::Producer<Box<dyn SignalSource>>,
     retired: rtrb::Consumer<Box<dyn SignalSource>>,
+    route_changes: rtrb::Producer<RouteSet>,
+    routes: Vec<u16>,
     shared: Arc<OutputShared>,
 }
 
@@ -116,6 +160,24 @@ impl GeneratorHandle {
         self.sources
             .push(source)
             .map_err(|rtrb::PushError::Full(s)| SourceQueueFull(s))
+    }
+
+    /// Routes the generator to `routes` (zero-based output channels) from now on. If the
+    /// generator is audible, the callback fades out, switches the routing, and fades back
+    /// in, so no channel starts or stops with a hard cut. Channels the stream does not
+    /// have are ignored by the callback; the caller checks them against the stream.
+    pub fn set_routes(&mut self, routes: &[u16]) -> Result<(), RouteError> {
+        let set = RouteSet::new(routes)?;
+        self.route_changes
+            .push(set)
+            .map_err(|_| RouteError::QueueFull)?;
+        self.routes = routes.to_vec();
+        Ok(())
+    }
+
+    /// The routing last set ([`generator`] or [`set_routes`](Self::set_routes)).
+    pub fn routes(&self) -> &[u16] {
+        &self.routes
     }
 
     /// Requests output: fades in over [`FADE_SECONDS`](crate::FADE_SECONDS) once a source is
@@ -155,8 +217,10 @@ impl GeneratorHandle {
 /// Audio side of a generator; moved into the backend through the request.
 pub struct GeneratorPort {
     pub(crate) routes: Vec<u16>,
+    pub(crate) set: RouteSet,
     pub(crate) sources: rtrb::Consumer<Box<dyn SignalSource>>,
     pub(crate) retired: rtrb::Producer<Box<dyn SignalSource>>,
+    pub(crate) route_changes: rtrb::Consumer<RouteSet>,
     pub(crate) shared: Arc<OutputShared>,
 }
 
@@ -169,7 +233,7 @@ impl fmt::Debug for GeneratorPort {
 }
 
 impl GeneratorPort {
-    /// Output channels that carry the generator.
+    /// Output channels that carry the generator when the stream opens.
     pub fn routes(&self) -> &[u16] {
         &self.routes
     }
@@ -239,7 +303,18 @@ mod tests {
     #[test]
     fn duplicate_routes_are_rejected() {
         assert_eq!(generator([0, 1, 0]).err(), Some(RouteError::Duplicate(0)));
-        assert!(generator([0, 1]).is_ok());
+        assert_eq!(
+            generator([MAX_ROUTED_CHANNELS]).err(),
+            Some(RouteError::OutOfRange(MAX_ROUTED_CHANNELS))
+        );
+        let (mut h, _port) = generator([0, 1]).expect("routes");
+        assert_eq!(h.set_routes(&[3, 3]), Err(RouteError::Duplicate(3)));
+        assert_eq!(h.routes(), [0, 1], "a refused routing changes nothing");
+        h.set_routes(&[2, 200]).expect("routes");
+        assert_eq!(h.routes(), [2, 200]);
+        let set = RouteSet::new(&[2, 200]).expect("set");
+        assert!(set.contains(2) && set.contains(200) && !set.contains(0));
+        assert!(!set.contains(10_000));
     }
 
     #[test]

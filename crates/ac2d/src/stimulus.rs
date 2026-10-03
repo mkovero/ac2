@@ -3,12 +3,16 @@
 //! The lease deadline is an atomic the control thread moves forward on every refresh. The
 //! signal source checks it at the start of every fill, i.e. on the audio callback, so an
 //! expired lease silences the output even if the control thread is stuck (Q6): the source
-//! mutes its generator, whose gain ramps to zero over 20 ms (decision 6b), and stays silent
-//! for good. Reading a monotonic clock there is a vDSO / QPC / mach read, not a blocking
-//! system call; no allocation or lock is involved.
+//! mutes its generator, whose gain ramps to zero over 20 ms (decision 6b), stays silent for
+//! good, and raises the gate's `tripped` flag so the control thread disarms and says so:
+//! the state never shows a firing generator whose output path has muted itself. A source
+//! that has not played yet only waits for the gate: it outputs zeros while the gate is
+//! closed and latches nothing, so no ordering of gate and source can silence a stimulus
+//! before it starts. Reading a monotonic clock there is a vDSO / QPC / mach read, not a
+//! blocking system call; no allocation or lock is involved.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use ac2_audio::{LevelError, MaxLevel, SignalSource};
@@ -20,6 +24,8 @@ pub(crate) struct LeaseGate {
     origin: Instant,
     /// Deadline in ns since `origin`; 0 = closed.
     deadline_ns: AtomicU64,
+    /// A playing source found the deadline passed and muted itself.
+    tripped: AtomicBool,
 }
 
 impl LeaseGate {
@@ -27,6 +33,7 @@ impl LeaseGate {
         Self {
             origin: Instant::now(),
             deadline_ns: AtomicU64::new(0),
+            tripped: AtomicBool::new(false),
         }
     }
 
@@ -50,14 +57,31 @@ impl LeaseGate {
     fn expired(&self) -> bool {
         self.now_ns() >= self.deadline_ns.load(Ordering::Acquire)
     }
+
+    /// Whether a playing source muted itself on an expired deadline since the last call.
+    pub(crate) fn take_tripped(&self) -> bool {
+        self.tripped.swap(false, Ordering::AcqRel)
+    }
 }
 
-/// A generator that fades itself out for good once the lease deadline has passed.
+/// Where a [`LeasedSource`] is in its life.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    /// Never played: zeros while the gate is closed, nothing latched.
+    Waiting,
+    /// Played under an open gate.
+    Playing,
+    /// The deadline passed while playing: faded out for good.
+    Expired,
+}
+
+/// A generator that fades itself out for good once the lease deadline passes while it
+/// plays.
 pub(crate) struct LeasedSource {
     generator: Generator,
     level: LevelControl,
     gate: Arc<LeaseGate>,
-    expired: bool,
+    phase: Phase,
 }
 
 impl LeasedSource {
@@ -66,17 +90,31 @@ impl LeasedSource {
             level: generator.level_control(),
             generator,
             gate,
-            expired: false,
+            phase: Phase::Waiting,
         }
     }
 }
 
 impl SignalSource for LeasedSource {
     fn fill(&mut self, out: &mut [f32]) {
-        if !self.expired && self.gate.expired() {
-            self.expired = true;
-            // An atomic store: the generator ramps to zero over its 20 ms ramp.
-            self.level.fade_out();
+        let expired = self.gate.expired();
+        match (self.phase, expired) {
+            (Phase::Waiting, true) => {
+                out.fill(0.0);
+                return;
+            }
+            (Phase::Waiting, false) => self.phase = Phase::Playing,
+            (Phase::Playing, true) => {
+                self.phase = Phase::Expired;
+                // An atomic store: the generator ramps to zero over its 20 ms ramp.
+                self.level.fade_out();
+                // A closed gate is the control side's own stop; only a deadline that
+                // passed on its own is news to it.
+                if self.gate.deadline_ns.load(Ordering::Acquire) != 0 {
+                    self.gate.tripped.store(true, Ordering::Release);
+                }
+            }
+            (Phase::Playing, false) | (Phase::Expired, _) => {}
         }
         self.generator.fill(out);
     }
@@ -130,10 +168,45 @@ mod tests {
         let mut after = vec![0.0f32; 4800];
         s.fill(&mut after);
         assert!(after.iter().all(|v| *v == 0.0), "silent after the fade");
+        assert!(!gate.take_tripped(), "a deliberate close is not an expiry");
         // Re-opening the gate does not revive a source that expired.
         gate.open_until(Instant::now() + Duration::from_secs(60));
         s.fill(&mut after);
         assert!(after.iter().all(|v| *v == 0.0));
+    }
+
+    #[test]
+    fn a_source_waits_for_the_gate_without_latching() {
+        let gate = Arc::new(LeaseGate::new());
+        let mut s = source(Arc::clone(&gate));
+        let mut buf = vec![1.0f32; 4800];
+        // Installed before the gate opened: zeros, and nothing is latched or reported.
+        s.fill(&mut buf);
+        assert!(buf.iter().all(|v| *v == 0.0));
+        assert!(!gate.take_tripped());
+        gate.open_until(Instant::now() + Duration::from_secs(60));
+        s.fill(&mut buf);
+        assert!(
+            buf[2000..].iter().any(|v| v.abs() > 0.05),
+            "plays once open"
+        );
+    }
+
+    #[test]
+    fn expiry_while_playing_is_reported_once() {
+        let gate = Arc::new(LeaseGate::new());
+        gate.open_until(Instant::now() + Duration::from_secs(60));
+        let mut s = source(Arc::clone(&gate));
+        let mut buf = vec![0.0f32; 480];
+        s.fill(&mut buf);
+        assert!(!gate.take_tripped());
+        // The deadline passes on its own.
+        gate.open_until(Instant::now());
+        s.fill(&mut buf);
+        assert!(gate.take_tripped(), "the control thread learns of the mute");
+        assert!(!gate.take_tripped());
+        s.fill(&mut buf);
+        assert!(!gate.take_tripped(), "reported once");
     }
 
     #[test]

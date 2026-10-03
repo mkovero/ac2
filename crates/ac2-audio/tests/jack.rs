@@ -3,10 +3,10 @@
 //! Local run: `jackd -d dummy -r 48000 -p 256 &` then
 //! `AC2_JACK_DUMMY=1 cargo test -p ac2-audio --test jack`.
 //!
-//! Audio safety: our output ports are never connected to physical playback ports. The test
-//! that emits a generator signal additionally requires `AC2_JACK_DUMMY=1`, the operator's
-//! statement that the server runs the dummy driver; the signal only travels through a graph
-//! connection from our own output to our own input.
+//! Audio safety: tests that emit a generator signal or connect our outputs to physical
+//! playback ports require `AC2_JACK_DUMMY=1`, the operator's statement that the server runs
+//! the dummy driver, whose playback ports lead nowhere. Emitted signals only travel through
+//! graph connections from our own outputs to our own inputs.
 #![cfg(target_os = "linux")]
 
 use std::time::{Duration, Instant};
@@ -26,7 +26,6 @@ fn backend(name: &str, connect_inputs: bool) -> JackBackend {
     JackBackend::new(JackConfig {
         client_name: name.into(),
         connect_inputs,
-        connect_outputs: false,
     })
 }
 
@@ -212,4 +211,105 @@ fn generator_loopback_through_graph_has_constant_offset() {
     );
     eprintln!("graph loopback offset: {lags:?} samples");
     assert_eq!(s.stop(Duration::from_millis(500)), StopOutcome::FadedOut);
+}
+
+/// The output patch connects exactly the chosen outputs to the physical playback ports of
+/// the same number, never removes a connection it did not make, and a routing change needs
+/// no reopen: a port connection made by someone else survives it.
+#[test]
+fn output_patch_connects_chosen_outputs_only() {
+    if std::env::var_os("AC2_JACK_DUMMY").is_none() {
+        eprintln!("skipping: patching playback ports needs AC2_JACK_DUMMY=1 (dummy driver only)");
+        return;
+    }
+    let b = backend("ac2-test-patch-out", false);
+    if server_or_skip(&b).is_none() {
+        return;
+    }
+    let (other, _) = jack::Client::new("ac2-test-other", jack::ClientOptions::NO_START_SERVER)
+        .expect("other client");
+    let playback = other.ports(
+        None,
+        Some("32 bit float mono audio"),
+        jack::PortFlags::IS_PHYSICAL | jack::PortFlags::IS_INPUT,
+    );
+    if playback.len() < 2 {
+        eprintln!("skipping: the dummy server has fewer than 2 playback ports");
+        return;
+    }
+    let (mut g, port) = generator(Vec::<u16>::new()).expect("routes");
+    g.set_source(Box::new(WhiteNoise::new(0.05, 7)))
+        .expect("queue");
+    let mut req = DuplexRequest::new(vec![0, 1], 2, level());
+    req.output = OutputSource::Generator(port);
+    let mut s = b.open(req).expect("open");
+    let patch = s.output_patch().expect("JACK streams have a patch");
+    let ours = |k: usize| format!("ac2-test-patch-out:out_{}", k + 1);
+    let linked = |a: &str, b: &str| {
+        other
+            .port_by_name(a)
+            .is_some_and(|p| p.is_connected_to(b).unwrap_or(false))
+    };
+    // Nothing is connected at open.
+    assert!(!linked(&ours(0), &playback[0]) && !linked(&ours(1), &playback[1]));
+
+    let st = patch.connect_only(&[0, 7]).expect("patch");
+    assert_eq!(st.unmatched, [7], "the stream has no output 8");
+    assert_eq!(st.links.len(), 1);
+    assert_eq!(
+        (st.links[0].from.as_str(), st.links[0].to.as_str()),
+        (ours(0).as_str(), playback[0].as_str())
+    );
+    assert!(linked(&ours(0), &playback[0]));
+    assert!(
+        !linked(&ours(1), &playback[1]),
+        "never an output not chosen"
+    );
+
+    // The operator patches output 2 by hand and records output 1 and 2 (graph loopback
+    // into our own inputs).
+    other
+        .connect_ports_by_name(&ours(1), &playback[1])
+        .expect("manual patch");
+    other
+        .connect_ports_by_name(&ours(0), "ac2-test-patch-out:in_1")
+        .expect("recorder 1");
+    other
+        .connect_ports_by_name(&ours(1), "ac2-test-patch-out:in_2")
+        .expect("recorder 2");
+    g.set_routes(&[0]).expect("routes");
+    g.start();
+    let level_of = |blocks: &[(ac2_audio::BlockHeader, Vec<f32>)], ch: usize| {
+        let tail = &blocks[blocks.len() / 2..];
+        tail.iter()
+            .flat_map(|(_, d)| d.iter().skip(ch).step_by(2))
+            .fold(0.0f32, |m, v| m.max(v.abs()))
+    };
+    let first = collect(&mut s, Duration::from_millis(400));
+    assert!(level_of(&first, 0) > 0.05, "plays on output 1");
+    assert_eq!(level_of(&first, 1), 0.0);
+
+    // Re-routing to output 2: no reopen, so every connection is still there.
+    g.set_routes(&[1]).expect("routes");
+    let st = patch.connect_only(&[1]).expect("patch");
+    assert_eq!(st.links.len(), 1);
+    assert!(
+        !linked(&ours(0), &playback[0]),
+        "its own connection is removed"
+    );
+    assert!(linked(&ours(1), &playback[1]), "the manual one is kept");
+    assert!(linked(&ours(0), "ac2-test-patch-out:in_1"));
+    let second = collect(&mut s, Duration::from_millis(400));
+    assert_eq!(level_of(&second, 0), 0.0);
+    assert!(level_of(&second, 1) > 0.05, "plays on output 2");
+
+    // The manual connection was not the patch's: dropping output 2 leaves it alone.
+    patch.connect_only(&[]).expect("patch");
+    assert!(linked(&ours(1), &playback[1]));
+    g.stop();
+    assert_eq!(s.stop(Duration::from_millis(500)), StopOutcome::FadedOut);
+    assert!(
+        patch.connect_only(&[0]).is_err(),
+        "a closed stream is never patched"
+    );
 }

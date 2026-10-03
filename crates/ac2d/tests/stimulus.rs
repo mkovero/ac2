@@ -152,7 +152,7 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
 
-    // Fire. The output routing is part of the stream, so this reopens it (new epoch).
+    // Fire: routes the generator within the running stream.
     a.ok(Command::GenSet {
         lease_token: tok_a,
         desired: fire(-20.0),

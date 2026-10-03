@@ -467,6 +467,7 @@ impl Backend for CpalBackend {
             events,
             drain,
             guard: Box::new((in_stream, out_stream)),
+            patch: None,
         }))
     }
 }

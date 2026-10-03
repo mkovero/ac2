@@ -484,6 +484,7 @@ impl FakeBackend {
             // Simulated: nothing to drain in wall-clock time.
             drain: Duration::ZERO,
             guard: Box::new(()),
+            patch: None,
         });
         Ok((stream, FakeDriver { sim: Box::new(sim) }))
     }

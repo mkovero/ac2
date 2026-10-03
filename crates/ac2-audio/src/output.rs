@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::block::BlockFlags;
-use crate::generator::{GeneratorPort, SignalSource};
+use crate::generator::{GeneratorPort, RouteSet, SignalSource};
 use crate::history::{HistoryReader, HistoryWriter, history};
 use crate::level::{Gain, MaxLevel};
 
@@ -197,7 +197,9 @@ pub(crate) struct OutputRenderer {
     sources: Option<rtrb::Consumer<Box<dyn SignalSource>>>,
     retired: Option<rtrb::Producer<Box<dyn SignalSource>>>,
     source: Option<Box<dyn SignalSource>>,
-    routed: Box<[bool]>,
+    route_changes: Option<rtrb::Consumer<RouteSet>>,
+    routes: RouteSet,
+    output_channels: usize,
     history_channel: usize,
     history: Option<HistoryWriter>,
     max: f32,
@@ -216,7 +218,7 @@ pub(crate) struct OutputRenderer {
 impl std::fmt::Debug for OutputRenderer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputRenderer")
-            .field("routed", &self.routed)
+            .field("routes", &self.routes)
             .field("env_pos", &self.env_pos)
             .finish_non_exhaustive()
     }
@@ -226,17 +228,21 @@ impl OutputRenderer {
     /// Builds the renderer. Routes and history channel must have been validated against
     /// `output_channels` by the caller.
     pub(crate) fn new(cfg: RendererConfig) -> (Self, RendererParts) {
-        let mut routed = vec![false; usize::from(cfg.output_channels)].into_boxed_slice();
-        let (shared, sources, retired) = match cfg.source {
-            OutputSource::Silence => (Arc::new(OutputShared::default()), None, None),
-            OutputSource::Generator(port) => {
-                for &r in &port.routes {
-                    if let Some(slot) = routed.get_mut(usize::from(r)) {
-                        *slot = true;
-                    }
-                }
-                (port.shared, Some(port.sources), Some(port.retired))
-            }
+        let (shared, sources, retired, route_changes, routes) = match cfg.source {
+            OutputSource::Silence => (
+                Arc::new(OutputShared::default()),
+                None,
+                None,
+                None,
+                RouteSet::default(),
+            ),
+            OutputSource::Generator(port) => (
+                port.shared,
+                Some(port.sources),
+                Some(port.retired),
+                Some(port.route_changes),
+                port.set,
+            ),
         };
         let (history_writer, history_reader, history_channel) = match cfg.history {
             Some((ch, frames)) => {
@@ -252,7 +258,9 @@ impl OutputRenderer {
             sources,
             retired,
             source: None,
-            routed,
+            route_changes,
+            routes,
+            output_channels: usize::from(cfg.output_channels),
             history_channel,
             history: history_writer,
             max: cfg.max_level.linear(),
@@ -275,7 +283,26 @@ impl OutputRenderer {
     }
 
     fn is_routed(&self, channel: usize) -> bool {
-        self.routed.get(channel).copied().unwrap_or(false)
+        channel < self.output_channels && self.routes.contains(channel)
+    }
+
+    /// Applies a queued routing change once nothing is audible. Returns true while a change
+    /// is waiting for the fade-out: a channel never starts or stops carrying the signal
+    /// mid-waveform.
+    fn service_route_queue(&mut self) -> bool {
+        let Some(queue) = self.route_changes.as_mut() else {
+            return false;
+        };
+        loop {
+            let Ok(next) = queue.peek().copied() else {
+                return false;
+            };
+            if next != self.routes && self.env_pos > 0 {
+                return true;
+            }
+            self.routes = next;
+            let _ = queue.pop();
+        }
     }
 
     /// Takes a queued source when it can be swapped without a click. Returns true while a
@@ -318,7 +345,7 @@ impl OutputRenderer {
         channels: usize,
         mut write: impl FnMut(usize, usize, f32),
     ) {
-        let swap_waiting = self.service_source_queue();
+        let swap_waiting = self.service_source_queue() | self.service_route_queue();
         let sh = &*self.shared;
         let audible = sh.run.load(Ordering::Acquire)
             && !sh.shutdown.load(Ordering::Acquire)
@@ -381,7 +408,7 @@ impl OutputRenderer {
             }
             for (f, &v) in buf.iter().enumerate() {
                 for c in 0..channels {
-                    let routed = self.routed.get(c).copied().unwrap_or(false);
+                    let routed = c < self.output_channels && self.routes.contains(c);
                     write(done + f, c, if routed { v } else { 0.0 });
                 }
             }
@@ -612,6 +639,44 @@ mod tests {
         assert!(peak(b[..48].iter().map(|f| f[0])) < 0.01);
         assert!(peak(b[FADE..].iter().map(|f| f[0])) > 0.02);
         assert_eq!(handle.collect_retired(), 1);
+    }
+
+    #[test]
+    fn routing_changes_without_reopening_and_fades_through_silence() {
+        let (mut handle, port) = generator([0]).expect("routes");
+        handle
+            .set_source(Box::new(Sine::new(1000.0, RATE, 0.05)))
+            .expect("queue");
+        let (mut r, parts) = renderer(OutputSource::Generator(port), -6.0);
+        // Silent: a routing change applies at once.
+        handle.set_routes(&[2]).expect("routes");
+        assert!(run(&mut r, 0, 256).iter().flatten().all(|&v| v == 0.0));
+        handle.start();
+        let out = run(&mut r, 256, 4800);
+        assert!(out.iter().all(|f| f[0] == 0.0 && f[1] == 0.0));
+        assert!(peak(out[FADE..].iter().map(|f| f[2])) > 0.04, "plays on 2");
+
+        // Audible: fade out on the old channel, then fade in on the new one.
+        handle.set_routes(&[0, 1]).expect("routes");
+        let a = run(&mut r, 5056, FADE);
+        assert!(a.iter().all(|f| f[0] == 0.0 && f[1] == 0.0));
+        assert!(peak(a[..48].iter().map(|f| f[2])) > 0.04, "no hard cut");
+        assert_eq!(a[FADE - 1][2], 0.0);
+        let b = run(&mut r, 5056 + FADE as u64, 4800);
+        assert!(b.iter().all(|f| f[2] == 0.0), "2 no longer routed");
+        assert!(peak(b[..48].iter().map(|f| f[0])) < 0.01, "fades in");
+        assert!(peak(b[FADE..].iter().map(|f| f[0])) > 0.04);
+        assert!(b.iter().all(|f| f[0] == f[1]));
+        // The history follows its channel's routing (channel 1 now carries the signal).
+        let mut h = vec![0.0; 4800];
+        parts
+            .history
+            .as_ref()
+            .expect("history")
+            .read(5056 + FADE as u64, &mut h)
+            .expect("read");
+        assert!(h.iter().zip(&b).all(|(a, f)| *a == f[1]));
+        assert_eq!(parts.shared.stats().limited_samples, 0);
     }
 
     #[test]

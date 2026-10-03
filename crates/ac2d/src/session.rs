@@ -1,10 +1,11 @@
 //! The open audio session: one duplex stream, its generator handle and the capture fan-out.
 
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use ac2_audio::{
     AudioError, Backend, DuplexRequest, GeneratorHandle, HistoryReader, HistoryRequest, MaxLevel,
-    OutputSource, generator,
+    OutputPatch, OutputSource, generator,
 };
 use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
@@ -24,9 +25,11 @@ pub(crate) struct Runtime {
     /// Device input channel per block channel.
     pub(crate) input_map: Vec<u16>,
     pub(crate) output_channels: u16,
-    /// Output channels the generator is routed to (fixed per stream).
+    /// Output channels the generator is routed to.
     pub(crate) routes: Vec<u16>,
     pub(crate) gen_handle: GeneratorHandle,
+    /// Connections of the stream's outputs to the device's physical outputs (JACK).
+    patch: Option<Arc<dyn OutputPatch>>,
     pub(crate) history: Option<HistoryReader>,
     pub(crate) fanout: Fanout,
 }
@@ -73,7 +76,8 @@ pub(crate) fn validate(cfg: &SessionConfig) -> Result<(), ProtoError> {
 
 impl Runtime {
     /// Opens the stream with the generator routed to `routes`; silent until a source is set
-    /// and started.
+    /// and started. The stream carries every output of the session, so a later routing
+    /// change ([`Self::set_routes`]) never reopens it.
     pub(crate) fn open(
         backend: &dyn Backend,
         cfg: &SessionConfig,
@@ -100,6 +104,7 @@ impl Runtime {
         let stream = backend.open(req).map_err(audio_err)?;
         let n = stream.negotiated().clone();
         let history = stream.history().cloned();
+        let patch = stream.output_patch();
         let open = OpenSession {
             config: cfg.clone(),
             backend: conv::backend_kind(backend.kind()),
@@ -122,7 +127,7 @@ impl Runtime {
         );
         let fanout = Fanout::spawn(stream, epoch, to_control)
             .map_err(|e| perr(ErrorCode::Internal, format!("cannot start fan-out: {e}")))?;
-        Ok(Self {
+        let rt = Self {
             epoch,
             open,
             sample_rate: n.sample_rate,
@@ -130,9 +135,57 @@ impl Runtime {
             output_channels: cfg.output_channels,
             routes: routes.to_vec(),
             gen_handle,
+            patch,
             history,
             fanout,
-        })
+        };
+        rt.connect_outputs();
+        Ok(rt)
+    }
+
+    /// Routes the generator to `routes` on the running stream (it fades through silence if
+    /// audible) and connects the outputs that now carry the stimulus.
+    pub(crate) fn set_routes(&mut self, routes: &[u16]) -> Result<(), ProtoError> {
+        if self.routes == routes {
+            return Ok(());
+        }
+        self.gen_handle
+            .set_routes(routes)
+            .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        self.routes = routes.to_vec();
+        self.connect_outputs();
+        Ok(())
+    }
+
+    /// Outputs the operator chose to carry the stimulus: the generator's routes and the
+    /// loopback output of the session. On a backend whose outputs are graph ports (JACK)
+    /// these, and only these, are connected to the physical playback ports of the same
+    /// number; connections the daemon made for outputs no longer chosen are removed.
+    fn connect_outputs(&self) {
+        let Some(patch) = &self.patch else {
+            return;
+        };
+        let mut chosen = self.routes.clone();
+        if let Some(l) = self.open.config.loopback
+            && !chosen.contains(&l.output)
+        {
+            chosen.push(l.output);
+        }
+        chosen.sort_unstable();
+        match patch.connect_only(&chosen) {
+            Ok(st) => {
+                for l in &st.links {
+                    tracing::info!("output {} connected: {} → {}", l.output + 1, l.from, l.to);
+                }
+                for o in &st.unmatched {
+                    tracing::warn!(
+                        "output {} has no physical playback port to connect to",
+                        o + 1
+                    );
+                }
+            }
+            Err(e) => tracing::warn!("cannot connect the stimulus outputs: {e}"),
+        }
     }
 
     /// Fades out, stops the stream and its threads.

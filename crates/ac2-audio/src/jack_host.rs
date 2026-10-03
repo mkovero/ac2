@@ -12,9 +12,10 @@
 //! remedy, telling a PipeWire desktop without pipewire-jack apart from a machine with no
 //! audio server at all.
 
+use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Once};
+use std::sync::{Arc, Mutex, Once, Weak};
 
 use jack::{
     AudioIn, AudioOut, Client, ClientOptions, ClientStatus, Control, Frames, LatencyType,
@@ -31,7 +32,7 @@ use crate::clock::FrameCounterClock;
 use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::events::{BackendEvents, EventLatch};
 use crate::output::{OutputRenderer, OutputStamp};
-use crate::stream::{DuplexStream, Plumbing, StreamParts};
+use crate::stream::{DuplexStream, OutputPatch, PatchLink, PatchState, Plumbing, StreamParts};
 
 /// Ports per direction. The callback gathers port buffers into fixed arrays of this size,
 /// so it never allocates.
@@ -41,15 +42,16 @@ pub const JACK_DEVICE_ID: &str = "jack";
 const AUDIO_TYPE: &str = "32 bit float mono audio";
 
 /// JACK client settings.
+///
+/// Output ports are never connected at open: which outputs reach the physical playback
+/// ports is the operator's choice, made through the stream's
+/// [`output_patch`](DuplexStream::output_patch).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JackConfig {
     /// Client name shown in the graph.
     pub client_name: String,
     /// Connect our input ports to the physical capture ports named by the input map.
     pub connect_inputs: bool,
-    /// Connect our output ports to the physical playback ports in order. Off by default:
-    /// automated runs must never reach real speakers.
-    pub connect_outputs: bool,
 }
 
 impl Default for JackConfig {
@@ -57,7 +59,6 @@ impl Default for JackConfig {
         Self {
             client_name: "ac2".into(),
             connect_inputs: true,
-            connect_outputs: false,
         }
     }
 }
@@ -409,9 +410,11 @@ impl Backend for JackBackend {
             events: Arc::clone(&events),
             sample_rate: rate,
         };
-        let active = client
-            .activate_async(notifications, process)
-            .map_err(|e| backend_err(Operation::Start, e))?;
+        let active = Arc::new(
+            client
+                .activate_async(notifications, process)
+                .map_err(|e| backend_err(Operation::Start, e))?,
+        );
 
         let c = active.as_client();
         if self.config.connect_inputs {
@@ -422,12 +425,12 @@ impl Backend for JackBackend {
                 }
             }
         }
-        if self.config.connect_outputs {
-            for (ours, dst) in out_names.iter().zip(&playback) {
-                c.connect_ports_by_name(ours, dst)
-                    .map_err(|e| backend_err(Operation::Connect, e))?;
-            }
-        }
+        let patch = JackPatch {
+            client: Arc::downgrade(&active),
+            ours: out_names,
+            playback,
+            made: Mutex::new(BTreeMap::new()),
+        };
 
         let negotiated = Negotiated {
             backend: BackendKind::Jack,
@@ -459,7 +462,73 @@ impl Backend for JackBackend {
             events,
             drain,
             guard: Box::new(active),
+            patch: Some(Arc::new(patch)),
         }))
+    }
+}
+
+type Active = jack::AsyncClient<Notifications, Process>;
+
+/// Connections from our output ports to the physical playback ports. Holds the client
+/// weakly: the stream's guard alone keeps it alive, so a patch kept by the control side
+/// never delays closing the stream.
+struct JackPatch {
+    client: Weak<Active>,
+    /// Our output ports, full names, by output channel.
+    ours: Vec<String>,
+    /// Physical playback ports in the order the device listing names them.
+    playback: Vec<String>,
+    /// Connections this patch made, by output channel.
+    made: Mutex<BTreeMap<u16, (String, String)>>,
+}
+
+impl OutputPatch for JackPatch {
+    fn connect_only(&self, outputs: &[u16]) -> Result<PatchState, AudioError> {
+        let active = self
+            .client
+            .upgrade()
+            .ok_or_else(|| backend_err(Operation::Connect, "the stream is closed"))?;
+        let c = active.as_client();
+        let mut made = self
+            .made
+            .lock()
+            .map_err(|_| backend_err(Operation::Connect, "patch state poisoned"))?;
+        let mut state = PatchState::default();
+        // Our own connections of outputs no longer chosen go first.
+        let dropped: Vec<u16> = made
+            .keys()
+            .copied()
+            .filter(|k| !outputs.contains(k))
+            .collect();
+        for k in dropped {
+            if let Some((from, to)) = made.remove(&k) {
+                // Already gone (the operator removed it) is fine.
+                let _ = c.disconnect_ports_by_name(&from, &to);
+            }
+        }
+        for &k in outputs {
+            let (Some(from), Some(to)) = (
+                self.ours.get(usize::from(k)),
+                self.playback.get(usize::from(k)),
+            ) else {
+                state.unmatched.push(k);
+                continue;
+            };
+            let connected = c
+                .port_by_name(from)
+                .is_some_and(|p| p.is_connected_to(to).unwrap_or(false));
+            if !connected {
+                c.connect_ports_by_name(from, to)
+                    .map_err(|e| backend_err(Operation::Connect, format!("{from} → {to}: {e}")))?;
+                made.insert(k, (from.clone(), to.clone()));
+            }
+            state.links.push(PatchLink {
+                output: k,
+                from: from.clone(),
+                to: to.clone(),
+            });
+        }
+        Ok(state)
     }
 }
 

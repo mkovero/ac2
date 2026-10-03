@@ -120,7 +120,18 @@ desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 
 the last refresh fades out (20 ms), disarms and clears the owner. `gen.acquire{force}`
 stops and disarms before handing over. Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
-owner whose lease expired).
+owner whose lease expired). The output path enforces the deadline itself; if it mutes on an
+expired deadline before the control side noticed, the daemon disarms with the same `expiry`
+event, so the state never says firing while the output is silent.
+
+The stream carries every output of the session: arming routes the generator to
+`settings.outputs` without reopening the stream (same session epoch; running measurements,
+and on JACK every port connection, stay). Re-routing while firing fades out, switches and
+fades back in. On JACK the daemon connects the outputs the operator chose for the stimulus
+(the generator's outputs and the session's loopback output), and only those, to the
+physical playback ports of the same number as the device listing names them (output 1 →
+the first playback port), removes the connections it made for outputs no longer chosen,
+never touches connections made by anyone else, and connects again after any reopen.
 
 #### Measurements (`meas.*`)
 

@@ -39,3 +39,6 @@ ac2-client = { path = "../ac2-client" }
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time"] }
 rmp-serde = "1.3"
 tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+jack = "0.13"

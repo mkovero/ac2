@@ -23,6 +23,7 @@ dependencies = [
  "ac2-proto",
  "ac2-scene",
  "ac2-zmq",
+ "ac2d",
  "clap",
  "comfy-table",
  "crossterm",
@@ -65,7 +66,9 @@ name = "ac2-discovery"
 version = "0.0.0"
 dependencies = [
  "gethostname",
+ "if-addrs",
  "mdns-sd",
+ "socket2",
 ]
 
 [[package]]
@@ -181,6 +184,7 @@ dependencies = [
  "ac2-zmq",
  "ctrlc",
  "getrandom 0.3.4",
+ "jack",
  "num-complex",
  "rmp-serde",
  "serde",

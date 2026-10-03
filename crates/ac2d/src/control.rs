@@ -391,6 +391,7 @@ impl Control {
         loop {
             let now = Instant::now();
             self.check_lease(now);
+            self.check_muted();
             if now >= self.next_ka {
                 self.send_ka();
                 self.next_ka = now + self.s.keepalive;
@@ -1063,8 +1064,8 @@ impl Control {
         }
     }
 
-    /// Reopens the stream with the same configuration and new generator routes: a routing
-    /// or device change is a configuration change, so it starts a new session epoch (5b).
+    /// Reopens the stream with the same configuration and the given generator routes: a
+    /// device change is a configuration change, so it starts a new session epoch (5b).
     fn reopen(&mut self, routes: &[u16]) -> Result<(), ProtoError> {
         let epoch = SessionEpoch(self.epoch().0 + 1);
         self.reopen_at(routes, epoch)
@@ -2001,7 +2002,7 @@ impl Control {
         if self.lease.as_ref().is_some_and(|l| l.deadline <= now) {
             let owner = self.lease.take().map(|l| l.owner);
             tracing::warn!(
-                "stimulus lease of {} expired",
+                "stimulus lease of {} expired: output muted",
                 owner.as_ref().map_or("?", |o| o.0.as_str())
             );
             self.stop_output();
@@ -2012,6 +2013,27 @@ impl Control {
             self.audit(&mut g, GenAction::Expiry, owner.as_ref());
             self.commit(Change::Generator(g));
         }
+    }
+
+    /// The output path muted itself on an expired gate: whatever the control side believed,
+    /// the stimulus is silent, so the state must not say firing. Disarms with an expiry
+    /// audit, and the lease goes with it.
+    fn check_muted(&mut self) {
+        if !self.gate.take_tripped() || !self.store.state().generator.firing {
+            return;
+        }
+        let owner = self.lease.take().map(|l| l.owner);
+        tracing::warn!(
+            "stimulus lease of {} expired: output muted",
+            owner.as_ref().map_or("?", |o| o.0.as_str())
+        );
+        self.stop_output();
+        let mut g = self.store.state().generator.clone();
+        g.owner = None;
+        g.armed = false;
+        g.firing = false;
+        self.audit(&mut g, GenAction::Expiry, owner.as_ref());
+        self.commit(Change::Generator(g));
     }
 
     fn gen_acquire(&mut self, client: &ClientId, force: bool) -> Result<ReplyBody, ProtoError> {
@@ -2109,18 +2131,13 @@ impl Control {
         }
         let prev = self.store.state().generator.clone();
 
-        // Routes are fixed per stream: a different output set reopens it.
-        if (desired.armed || desired.firing)
-            && self
-                .session
-                .as_ref()
-                .is_some_and(|r| r.routes != st.outputs)
+        // The stream carries every session output: arming routes the generator (and
+        // connects the chosen outputs) without reopening it, so the session, its jobs and
+        // every port connection stay as they are.
+        if desired.armed
+            && let Some(rt) = self.session.as_mut()
         {
-            let was_firing = prev.firing;
-            if was_firing {
-                self.stop_output();
-            }
-            self.reopen(&st.outputs)?;
+            rt.set_routes(&st.outputs)?;
         }
 
         if desired.firing {

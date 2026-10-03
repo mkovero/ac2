@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::{DuplexRequest, Negotiated};
 use crate::block::{BlockConsumer, BlockProducer, TransportStats, transport};
+use crate::error::AudioError;
 use crate::events::{BackendEvents, EventSnapshot};
 use crate::history::HistoryReader;
 use crate::output::{
@@ -67,6 +68,38 @@ pub enum StopOutcome {
     TimedOut,
 }
 
+/// One connection an [`OutputPatch`] holds: a stream output and the physical port it feeds.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchLink {
+    /// Stream output channel, zero-based.
+    pub output: u16,
+    /// The stream's port (`ac2:out_1`).
+    pub from: String,
+    /// The physical playback port it is connected to (`system:playback_1`).
+    pub to: String,
+}
+
+/// What [`OutputPatch::connect_only`] left in place.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchState {
+    /// Connections the patch holds now.
+    pub links: Vec<PatchLink>,
+    /// Outputs asked for that have no physical playback port of the same number.
+    pub unmatched: Vec<u16>,
+}
+
+/// Connections from a stream's outputs to the device's physical outputs, on a backend whose
+/// stream outputs are ports in a graph (JACK) rather than the device's channels themselves.
+///
+/// Stream output `k` goes to the `k`-th physical playback port, in the order the device
+/// listing names them. Only connections the patch made itself are ever removed; a
+/// connection someone else made is left alone.
+pub trait OutputPatch: Send + Sync {
+    /// Connects exactly the outputs in `outputs` (zero-based) to their physical playback
+    /// ports, and removes the patch's own connections of every other output.
+    fn connect_only(&self, outputs: &[u16]) -> Result<PatchState, AudioError>;
+}
+
 /// Pieces a backend hands to [`DuplexStream::new`].
 pub(crate) struct StreamParts {
     pub(crate) negotiated: Negotiated,
@@ -76,6 +109,8 @@ pub(crate) struct StreamParts {
     /// Time for a rendered block to leave the device after the callback produced it.
     pub(crate) drain: Duration,
     pub(crate) guard: Box<dyn StreamGuard>,
+    /// How the stream's outputs reach the device, when that takes graph connections.
+    pub(crate) patch: Option<Arc<dyn OutputPatch>>,
 }
 
 /// An open duplex stream.
@@ -91,6 +126,7 @@ pub struct DuplexStream {
     events: Arc<BackendEvents>,
     drain: Duration,
     guard: Option<Box<dyn StreamGuard>>,
+    patch: Option<Arc<dyn OutputPatch>>,
 }
 
 impl fmt::Debug for DuplexStream {
@@ -117,6 +153,7 @@ impl DuplexStream {
             events: parts.events,
             drain: parts.drain,
             guard: Some(parts.guard),
+            patch: parts.patch,
         }
     }
 
@@ -130,6 +167,14 @@ impl DuplexStream {
     /// What was opened.
     pub fn negotiated(&self) -> &Negotiated {
         &self.negotiated
+    }
+
+    /// The connections from this stream's outputs to the device's physical outputs, on a
+    /// backend where those are graph connections (JACK). `None` where the stream's outputs
+    /// are the device's channels themselves (cpal, the fake device). The patch outlives
+    /// the stream harmlessly: once the stream is stopped, it refuses to connect.
+    pub fn output_patch(&self) -> Option<Arc<dyn OutputPatch>> {
+        self.patch.clone()
     }
 
     /// Capture blocks.
