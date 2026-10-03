@@ -596,20 +596,24 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
 
     // The strip's Stop button (the same command as Esc).
     d.send(Msg::Command(CommandId::StimulusStop));
+    // The app ends its sweep mode once it has seen the stop, which can be a step after the
+    // daemon's state says so: wait for both.
     d.until("stopped and disarmed, the run discarded", |s| {
-        s.daemon().is_some_and(|x| {
-            !x.generator.firing
-                && !x.generator.armed
-                && x.sweep.as_ref().is_some_and(|r| {
-                    matches!(
-                        r.status,
-                        SweepStatus::Failed {
-                            reason: SweepFailure::Stopped,
-                            ..
-                        }
-                    )
-                })
-        })
+        s.sweep.plan.is_none()
+            && s.operation().is_none()
+            && s.daemon().is_some_and(|x| {
+                !x.generator.firing
+                    && !x.generator.armed
+                    && x.sweep.as_ref().is_some_and(|r| {
+                        matches!(
+                            r.status,
+                            SweepStatus::Failed {
+                                reason: SweepFailure::Stopped,
+                                ..
+                            }
+                        )
+                    })
+            })
     })?;
     assert_eq!(d.st.operation(), None);
     assert!(d.st.sweep.plan.is_none());
