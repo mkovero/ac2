@@ -109,3 +109,12 @@ async fn unauthorized_client_hears_its_fingerprint() {
     );
     h.shutdown();
 }
+
+/// Z85 includes `-`, so about one daemon key in 85 starts with it; `--server-key` must still
+/// take such a key as its value rather than as an unknown option.
+#[test]
+fn a_server_key_may_start_with_a_hyphen() {
+    let key = "-b".to_string() + &"a".repeat(38);
+    let cli = Cli::try_parse_from(["ac2", "auth", "pair", "pupu", "--server-key", key.as_str()]);
+    assert!(cli.is_ok(), "{:?}", cli.err());
+}

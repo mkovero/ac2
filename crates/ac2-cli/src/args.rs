@@ -977,8 +977,9 @@ pub enum AuthCmd {
     Pair {
         /// Daemon host as used with `--remote`.
         host: RemoteAddr,
-        /// The daemon's Z85 public key (40 characters).
-        #[arg(long)]
+        /// The daemon's Z85 public key (40 characters). Z85 includes `-`, so a key may start
+        /// with one; it is still read as the value.
+        #[arg(long, allow_hyphen_values = true)]
         server_key: String,
         /// Name to authorize this client under (default: this host's name).
         #[arg(long)]
