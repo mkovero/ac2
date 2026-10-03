@@ -119,7 +119,7 @@ impl App {
             Conn::start(t, wake).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
-        state.prefs = opts.prefs;
+        state.set_prefs(opts.prefs);
         state.open_session_when_empty = opts.open_session_dialog;
         for n in opts.notices {
             state.update(

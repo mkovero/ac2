@@ -436,17 +436,30 @@ Both run as long as the meter runs, whether or not any app or terminal is watchi
 on when the meter is stopped and started, its windows are changed, the session is reopened or
 the daemon restarts (the log is in the autosave and in saved sessions).
 
-- **G** in the SPL pane switches between the meter and its windows: one tile per window, as
-  large as the pane allows. A tile turns **amber** within the warn margin (3 dB by default) of
-  its limit and **red** above it, and goes back when the window recovers; each going over and
-  each recovery also shows as a message. **W** gives the pane the whole window, **F11** the
-  whole screen. Below the tiles a strip shows each window over time against its limit
-  (dashed), red where it was over.
-- Each tile shows the window's Leq; its limit; the **headroom**: the highest steady level
-  for the next minute that keeps the window at or below its limit ("next 1 min ≤ 101.5 dB"),
-  or "over — can't recover within 1 min" with how long it takes at the limit; while the window
-  fills, how much of it there is ("12:30 / 30:00"); and "gaps" when part of it was not
+- **G** in the SPL pane switches between the meter and its windows. The windows show as
+  **columns**, made to be read from the stage or across the room: one full-height column per
+  window, the shortest on the left, each a bar that fills from the bottom with the window's
+  Leq, the value in large digits on top and the window's name at the bottom ("LAeq 30 min",
+  shortened to "30 min" or "30m" when the columns are narrow — the caption then says
+  "LAeq"). The limit is a line across the column; a column turns **amber** within the warn
+  margin (3 dB by default) of its limit and the whole column goes **red** above it, and goes
+  back when the window recovers; each going over and each recovery also shows as a message. A
+  window still filling has a paler bar and how much of it there is ("12:30 / 30:00"), without
+  any alarm colour. All columns share one scale so their bars compare: from 30 dB below the
+  (lowest) limit to 6 dB above the (highest); without limits, or uncalibrated, a 40 dB range
+  that follows the loudest window in 10 dB steps and stays put from second to second.
+- **B** switches between columns and **tiles** (a grid with every figure written out), **H**
+  shows or hides the **history strip** below them: each window over time against its limit
+  (dashed), red where it was over. The app remembers both. **W** gives the pane the whole
+  window, **F11** the whole screen; both together are the **stage view**: nothing but the
+  columns and a one-line caption with the meter's name and its calibration (the top bar comes
+  back while a stimulus is armed or playing). F11 again leaves it.
+- Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
+  steady level for the next minute that keeps the window at or below its limit ("next 1 min ≤
+  101.5 dB"), or, over and unable to recover within the minute, how long it takes at the
+  limit; while the window fills, how much of it there is; and "gaps" when part of it was not
   measured (the meter stopped, the capture lost samples). Gaps are never counted as silence.
+  Narrow columns use the shorter wordings, or leave a line out.
 - **Shift+L** (or "Leq windows and limits…" in Ctrl+K) sets them: the window lengths and
   weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
   **preset** row and the headroom horizon. ↑/↓ moves between rows, Tab between cells,
@@ -601,6 +614,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
 | `G` | SPL: meter / Leq windows | `spl_leq_view` |
+| `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
+| `H` | SPL Leq windows: history strip on / off | `spl_leq_history` |
 
 #### Sweep / distortion
 

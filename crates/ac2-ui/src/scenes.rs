@@ -467,6 +467,9 @@ pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Leq
         stale: fresh
             .is_stale()
             .then(|| format!("STALE {}", format::age(fresh.age_s()))),
+        scale: f.meta.scale,
+        horizon: ac2_scene::leq::length(f.meta.horizon.0),
+        layout: st.view.spl.layout,
     };
     let status = status(st, &[], None, now);
     Some(leq_scene(&v, &status, theme, size))

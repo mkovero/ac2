@@ -16,6 +16,9 @@ use ac2_proto::FrameData;
 use ac2_proto::model::{MeasKind, TfAveraging};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::MeasId;
+use ac2_scene::primitives::Color;
+use ac2_scene::theme::Theme;
+use ac2_scene::view::LeqStyle;
 use ac2_ui::conn::{Conn, Target};
 use ac2_ui::embedded::{
     EmbeddedBackend, EmbeddedError, Setup, start_embedded, start_embedded_with,
@@ -828,11 +831,38 @@ fn tiles(s: &AppState) -> Vec<ac2_scene::leq::LeqTile> {
     }
 }
 
+/// The columns the SPL pane draws now, as the app builds them (the pane at 1280 × 720):
+/// each window's name, background and bar colour, shortest window first.
+fn columns(s: &AppState) -> Vec<(String, Color, Color)> {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    ac2_ui::scenes::leq(s, &Theme::dark(), size, now)
+        .and_then(|x| x.columns)
+        .map(|k| {
+            k.columns
+                .into_iter()
+                .map(|c| (c.name, c.background, c.bar_color))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Leq windows with limits from an empty daemon, using the app: the session from its dialog,
 /// an SPL meter from the palette, its windows from the Leq dialog by keys (a 5 s and a 10 s
 /// window limited to 85 dB), the stimulus from the keys. Pink noise at −20 dBFS reads about
-/// 91 dB(A) on the calibrated mic: both tiles turn red, the alarms arrive as toasts; the
-/// stop brings both back under the limit, and that is a toast too.
+/// 91 dB(A) on the calibrated mic: both windows' columns (the default layout) and tiles turn
+/// red, the alarms arrive as toasts; the stop brings both back under the limit, and that is
+/// a toast too.
 #[test]
 fn leq_limits_go_over_and_recover_from_the_app() -> R {
     use ac2_proto::model::LeqJudgement;
@@ -902,6 +932,12 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     assert_eq!(d.st.overlay, Overlay::None);
     assert!(d.st.view.spl.leq, "the SPL pane shows the windows");
     assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    assert_eq!(d.st.view.spl.layout.style, LeqStyle::Columns);
+    let th = Theme::dark();
+    let red = th.banner_fault.background;
+    let column_is = |s: &AppState, i: usize, f: &dyn Fn(Color, Color) -> bool| {
+        columns(s).get(i).is_some_and(|c| f(c.1, c.2))
+    };
     // The windows are rebuilt from the meter's log, which may still hold the calibrator's
     // 94 dB seconds (they go over and come back on their own). Then quiet, judged.
     let quiet = |t: &ac2_scene::leq::LeqTile| {
@@ -929,6 +965,15 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
         let t = tiles(s);
         t.len() >= 2 && t[0].state == TileState::Over && t[1].state == TileState::Over
     })?;
+    // The 5 s and 10 s columns, leftmost, the whole column red.
+    d.until("both columns red", |s| {
+        (0..2).all(|i| column_is(s, i, &|bg, bar| bg != th.plot_background && bar == red))
+    })?;
+    let c = columns(&d.st);
+    assert_eq!(
+        (c[0].0.as_str(), c[1].0.as_str()),
+        ("LAeq 5 s", "LAeq 10 s")
+    );
     let t = tiles(&d.st);
     assert_eq!(t[0].name, "LAeq 5 s");
     assert_eq!(t[0].state_text.as_deref(), Some("OVER"));
@@ -944,6 +989,13 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
         t.len() >= 2
             && t[..2].iter().all(|x| x.state == TileState::Ok)
             && judgement(s, 1) == Some(LeqJudgement::Ok)
+    })?;
+    d.until("both columns back to plain", |s| {
+        (0..2).all(|i| {
+            column_is(s, i, &|bg, bar| {
+                bg == th.plot_background && bar == th.level_ok
+            })
+        })
     })?;
     d.until("the recoveries as toasts", |s| {
         new_toasts(s, "back within its limit", false) == 2

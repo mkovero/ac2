@@ -54,6 +54,8 @@ pub struct Theme {
     pub small_font_size: f32,
     /// SPL big number.
     pub big_font_size: f32,
+    /// A level judged within its limit (the Leq columns' bars).
+    pub level_ok: Color,
 }
 
 fn hex(v: u32) -> Color {
@@ -102,6 +104,7 @@ impl Theme {
             font_size: 12.0,
             small_font_size: 10.5,
             big_font_size: 64.0,
+            level_ok: hex(0x2fa66a),
         }
     }
 
@@ -146,6 +149,7 @@ impl Theme {
             font_size: 12.0,
             small_font_size: 10.5,
             big_font_size: 64.0,
+            level_ok: hex(0x1b7a45),
         }
     }
 
@@ -190,6 +194,7 @@ impl Theme {
             font_size: 14.0,
             small_font_size: 12.0,
             big_font_size: 72.0,
+            level_ok: hex(0x00e676),
         }
     }
 
@@ -269,6 +274,14 @@ mod tests {
                 let r = contrast_ratio(b.text, b.background);
                 assert!(r >= 4.5, "{:?} banner {what}: {r:.2}", t.name);
             }
+        }
+    }
+
+    #[test]
+    fn level_ok_stands_out_from_the_plot() {
+        for t in all() {
+            let r = contrast_ratio(t.level_ok, t.plot_background);
+            assert!(r >= 3.0, "{:?} level_ok: contrast {r:.2}", t.name);
         }
     }
 

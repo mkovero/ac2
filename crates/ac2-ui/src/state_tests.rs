@@ -3846,6 +3846,83 @@ fn leq_windows_from_the_keyboard() {
     assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
 }
 
+/// The Leq view starts as columns without the history strip; B switches columns / tiles, H
+/// the strip, each showing the windows on the SPL pane and remembered in the preferences,
+/// which the next start applies. Full screen with the pane maximised is the stage view,
+/// unless a stimulus may be sounding.
+#[test]
+fn leq_layout_keys_and_prefs() {
+    use ac2_scene::view::{LeqLayout, LeqStyle};
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    t.conn(leq_data(1, 100, 80.0, ac2_proto::frame::LeqFlags::NONE));
+    assert_eq!(
+        t.st.view.spl.layout,
+        LeqLayout {
+            style: LeqStyle::Columns,
+            history: false
+        }
+    );
+    assert!(!t.st.view.spl.leq);
+    t.key("Alt+4");
+    assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    // B from the meter: the windows, as tiles.
+    t.key("B");
+    assert!(t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.layout.style, LeqStyle::Tiles);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
+    t.st.prefs_dirty = false;
+    t.key("H");
+    assert!(t.st.view.spl.layout.history);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(
+        t.st.prefs.leq,
+        LeqLayout {
+            style: LeqStyle::Tiles,
+            history: true
+        }
+    );
+    // G still flips meter / windows and leaves the layout alone.
+    t.key("G");
+    assert!(!t.st.view.spl.leq);
+    t.key("G");
+    assert_eq!(t.st.prefs.leq.style, LeqStyle::Tiles);
+    t.key("B");
+    t.key("H");
+    assert_eq!(t.st.view.spl.layout, LeqLayout::default());
+    // Elsewhere B and H keep their meanings (the RTA's bars, the transfer pane's IR).
+    t.key("Alt+2");
+    t.key("H");
+    assert!(t.st.view.spectrum.peak_hold);
+    assert_eq!(t.st.view.spl.layout, LeqLayout::default());
+    // The next start takes the remembered layout.
+    let prefs = crate::prefs::UiPrefs {
+        leq: LeqLayout {
+            style: LeqStyle::Tiles,
+            history: true,
+        },
+        ..Default::default()
+    };
+    let mut u = T::new();
+    u.st.set_prefs(prefs.clone());
+    assert_eq!(u.st.view.spl.layout, prefs.leq);
+    // The stage view: full screen, the SPL pane maximised on its windows.
+    t.key("Alt+4");
+    assert!(t.st.view.spl.leq);
+    assert!(!t.st.stage_view());
+    t.key("W");
+    assert!(!t.st.stage_view());
+    t.key("F11");
+    assert!(t.st.stage_view());
+    // Not with the stimulus armed: what drives the speakers stays in view.
+    t.st.stimulus.phase = StimPhase::Armed;
+    assert!(!t.st.stage_view());
+    t.st.stimulus.phase = StimPhase::Idle;
+    t.key("G");
+    assert!(!t.st.stage_view());
+}
+
 /// A resync (no daemon state for a moment) is not "every meter deleted": the history strip
 /// keeps what it gathered and goes on from there.
 #[test]

@@ -11,8 +11,9 @@ Each SPL meter carries a list of rolling windows — by default LAeq over 1, 5, 
 Every second the daemon publishes, per window: the Leq, how much of the window has elapsed
 and how much of it was measured, its state (ok / near / over), and the **headroom**: the
 highest steady level for the next minute that keeps the window at or below its limit. The
-app shows one tile per window, amber when near, red when over, back to normal when it
-recovers, with a history strip below; `ac2 spl leq watch` is the terminal equivalent.
+app shows each window amber when near, red when over, back to normal when it recovers — as
+columns filling like meter bars or as tiles, with an optional history strip;
+`ac2 spl leq watch` is the terminal equivalent.
 
 ## One-second blocks
 
@@ -78,17 +79,55 @@ daemon logs each over and recovery. Clients toast them. There is no hysteresis b
 
 ## Where it shows
 
-- App: **G** switches the SPL pane between the meter and its tiles (amber near, red over,
-  with the headroom; **W** maximises the pane, **F11** goes full screen) and a history strip
-  of each window against its limit, from the frames received since the app connected.
-  **Shift+L** opens the windows dialog (lengths and weightings picked, limits typed, a
-  preset row, the horizon). Over / recovered alarms are toasts.
+- App: **G** switches the SPL pane between the meter and its windows; **B** lays the
+  windows out as columns or tiles, **H** shows the history strip (from the frames received
+  since the app connected), both remembered in `ui.toml`; **W** maximises the pane, **F11**
+  goes full screen, the two together are the stage view. **Shift+L** opens the windows
+  dialog (lengths and weightings picked, limits typed, a preset row, the horizon). Over /
+  recovered alarms are toasts. See *Display* below.
 - CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second),
   `ac2 spl leq set` (`--windows`, `--preset`, `--limit 30min=99db`, `--warn`, `--horizon`),
   `ac2 spl leq export` (the CSV).
 
 What is left: `docs/design/backlog.md` (history backfill, peak limits, position
 correction, a fresh start of the windows, alarm hysteresis).
+
+## Display
+
+The columns are the default: the view is for whoever reads it from a distance (stage,
+FOH, performers), and a row of bars filling towards a line reads at a glance where a grid of
+figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app only draws.
+
+- **Order**: one full-height column per window, by length, shortest left (equal lengths: A,
+  C, Z), whatever order the configuration lists them in.
+- **Scale**: one for all columns, so bars compare. With judged limits: from 30 dB below the
+  lowest limit to 6 dB above the highest (`BELOW_LIMIT_DB`, `ABOVE_LIMIT_DB`) — anchored to
+  the limit, so the line sits at the same height show after show, and windows with different
+  limits (93 and 100 dB) share a scale that covers both. Without a judged limit (no limits,
+  or uncalibrated dBFS): 40 dB whose top is a multiple of 10 dB at least 5 dB above the
+  loudest window; it is kept while the loudest window stays between 20 and 2 dB under its
+  top, so it steps only when a level nears the top or has fallen well below it (up at 98,
+  back down below 90 on a 100 dB top). The memory lives in `LeqHistory` with the frames.
+  Levels off the scale fill the track or leave it empty; the value on top is always exact.
+- **Colour**: judged only (as the tiles). Over: the bar in the fault colour and the whole
+  column tinted towards it; near: an amber bar and a lighter tint; ok: the theme's
+  `level_ok` bar; not judged: a neutral bar. A window still filling (and not near or over)
+  has its bar part way between the track and its colour, and its progress written above its
+  name ("12:30 / 30:00"): a level, visibly not a whole window, never an alarm. The limit is a
+  line across the whole column.
+- **Text**: the value as large as the column width allows (sized for five characters, the
+  same in every column, so it does not jump at 100 dB), then the state, the limit and the
+  headroom (or the time to recover at the limit), each in the longest wording that fits the
+  column and left out when the bar would get too short; the name at the bottom, shortened
+  uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the
+  weighting; mixed weightings keep their letter). Tested: 2–8 windows, 320–1920 px, no text
+  overlaps.
+- **Tiles** (B) keep every figure written out in a grid; the **history strip** (H) goes under
+  either. Defaults: columns, no strip.
+- **Stage view**: full screen with the SPL pane maximised on its windows draws only the
+  scene — columns and the caption (meter, unit, calibration) — without the app's top bar,
+  measurement list or pane title. While a stimulus is armed or playing, or a sweep runs, the
+  top bar is shown anyway: what drives the speakers is never hidden.
 
 ## Presets (informational, not legal advice)
 

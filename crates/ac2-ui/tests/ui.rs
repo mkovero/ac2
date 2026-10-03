@@ -1253,10 +1253,11 @@ fn leq_frame(
 
 /// From an empty fake daemon, using the app: the session from its dialog, an SPL meter from
 /// the palette, Shift+L for its Leq windows — a preset (DIN 15905-5 on LAeq 30 min) and a
-/// typed limit on LAeq 1 min — Enter sends them and the SPL pane shows the tiles. The daemon
-/// (here the test, through the fake) then reports the 1 min and 30 min windows over: the
-/// tiles turn red and the alarms toast; maximised, the tiles fill the screen with the history
-/// strip below. Then they recover.
+/// typed limit on LAeq 1 min — Enter sends them and the SPL pane shows them as columns. The
+/// daemon (here the test, through the fake) then reports the 1 min and 30 min windows over:
+/// their columns turn red and the alarms toast; maximised, the columns fill the screen. B and
+/// H switch to tiles with the history strip below. Then they recover, and back on columns,
+/// F11 is the stage view.
 #[test]
 fn leq_tiles_from_an_empty_daemon() {
     use ac2_proto::frame::LeqFlags;
@@ -1351,6 +1352,10 @@ fn leq_tiles_from_an_empty_daemon() {
     assert_eq!(fake.executions("meas.update"), 1);
     assert!(h.state().state.view.spl.leq);
     assert_eq!(h.state().state.layout.focus, PaneKind::Spl);
+    assert_eq!(
+        h.state().state.view.spl.layout,
+        ac2_scene::view::LeqLayout::default()
+    );
 
     // The daemon's view: calibrated 3 h ago, the 1 min and 30 min windows over.
     let cal_at = (std::time::SystemTime::now()
@@ -1358,14 +1363,15 @@ fn leq_tiles_from_an_empty_daemon() {
         .map_or(0, |d| d.as_nanos() as u64))
     .saturating_sub(3 * 3600 * 1_000_000_000 + 600_000_000_000);
     let full = [60.0, 300.0, 600.0, 1800.0, 2730.0];
-    leq.set(leq_frame(
+    let over_frame = leq_frame(
         meas,
         [103.1, 99.6, 98.7, 99.4, 97.2],
         [Some(LeqFlags::OVER), None, None, Some(LeqFlags::OVER), None],
         [102.0, f32::NAN, f32::NAN, 85.3, f32::NAN],
         full,
         cal_at,
-    ));
+    );
+    leq.set(over_frame.clone());
     let alarm = |at: u64, duration: f64, kind, leq: f64, limit: f64| LeqAlarm {
         at: WallNs(at),
         duration: Seconds(duration),
@@ -1447,19 +1453,33 @@ fn leq_tiles_from_an_empty_daemon() {
             .leq_history
             .insert(meas, (u64::MAX, history.clone()));
     };
-    snapshot_when(&mut h, "leq_tiles_over", pin, |a| {
-        a.state.data.as_ref().is_some_and(|d| {
-            d.latest
-                .get(&Topic::Data {
-                    meas,
-                    stream: Stream::Leq,
-                })
-                .is_some_and(|f| match &f.frame.data {
-                    ac2_proto::FrameData::Leq(l) => l.leq[0] > 103.0,
-                    _ => false,
-                })
-        })
+    let first_is = move |over: bool| {
+        move |a: &ac2_ui::App| {
+            a.state.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Data {
+                        meas,
+                        stream: Stream::Leq,
+                    })
+                    .is_some_and(|f| match &f.frame.data {
+                        ac2_proto::FrameData::Leq(l) => (l.leq[0] > 103.0) == over,
+                        _ => false,
+                    })
+            })
+        }
+    };
+    snapshot_when(&mut h, "leq_columns_over", pin, first_is(true));
+    // B: tiles, H: the history strip under them.
+    h.key_press(Key::B);
+    h.key_press(Key::H);
+    step_until(&mut h, "tiles with history", |a| {
+        a.state.view.spl.layout
+            == ac2_scene::view::LeqLayout {
+                style: ac2_scene::view::LeqStyle::Tiles,
+                history: true,
+            }
     });
+    snapshot_when(&mut h, "leq_tiles_over", pin, first_is(true));
 
     // Back under: the 1 min window plain again, the 30 min one near its limit.
     leq.set(leq_frame(
@@ -1485,18 +1505,19 @@ fn leq_tiles_from_an_empty_daemon() {
             .count()
             == 2
     });
-    snapshot_when(&mut h, "leq_tiles_recovered", pin, |a| {
-        a.state.data.as_ref().is_some_and(|d| {
-            d.latest
-                .get(&Topic::Data {
-                    meas,
-                    stream: Stream::Leq,
-                })
-                .is_some_and(|f| match &f.frame.data {
-                    ac2_proto::FrameData::Leq(l) => l.leq[0] < 97.0,
-                    _ => false,
-                })
-        })
+    snapshot_when(&mut h, "leq_tiles_recovered", pin, first_is(false));
+    // Back to columns without the strip.
+    h.key_press(Key::B);
+    h.key_press(Key::H);
+    step_until(&mut h, "columns again", |a| {
+        a.state.view.spl.layout == ac2_scene::view::LeqLayout::default()
     });
+    snapshot_when(&mut h, "leq_columns_recovered", pin, first_is(false));
+
+    // F11 with the pane maximised: the stage view, the columns alone; over again.
+    leq.set(over_frame);
+    h.key_press(Key::F11);
+    step_until(&mut h, "the stage view", |a| a.state.stage_view());
+    snapshot_when(&mut h, "leq_columns_fullscreen", pin, first_is(true));
     drop(leq);
 }

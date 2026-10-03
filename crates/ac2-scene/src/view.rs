@@ -223,11 +223,29 @@ impl Default for DistortionView {
     }
 }
 
+/// How the Leq windows are laid out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LeqStyle {
+    /// One full-height bar per window, shortest left: read from a distance.
+    #[default]
+    Columns,
+    /// A grid of tiles with every figure written out.
+    Tiles,
+}
+
+/// The Leq view's layout: the windows' style and whether the history strip is under them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct LeqLayout {
+    pub style: LeqStyle,
+    pub history: bool,
+}
+
 /// The SPL pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct SplView {
     /// The meter's rolling Leq windows instead of its readout.
     pub leq: bool,
+    pub layout: LeqLayout,
 }
 
 /// Everything the operator chose about the view.

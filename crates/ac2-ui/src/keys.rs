@@ -459,6 +459,8 @@ commands! {
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
 
     SplLeqView => "spl_leq_view", "SPL: meter / Leq windows", [Spl];
+    SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
+    SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
 
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
     SweepIr => "sweep_ir", "Sweep: distortion / impulse response", [Distortion];
@@ -578,6 +580,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::PeakHold, S::Spectrum, k(K::H)),
         (C::IrMode, S::Ir, k(K::G)),
         (C::SplLeqView, S::Spl, k(K::G)),
+        // B as the RTA's bars / line (C is the global cursor), H as the other panes' "show
+        // the other thing".
+        (C::SplLeqStyle, S::Spl, k(K::B)),
+        (C::SplLeqHistory, S::Spl, k(K::H)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
         (C::IrMode, S::Distortion, k(K::G)),

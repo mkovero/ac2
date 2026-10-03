@@ -18,6 +18,13 @@ use crate::primitives::{
     Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
+use crate::view::{LeqLayout, LeqStyle};
+
+mod columns;
+pub use columns::{
+    ABOVE_LIMIT_DB, BELOW_LIMIT_DB, FREE_SPAN_DB, LeqColumn, LeqColumns, column_colors,
+    column_range,
+};
 
 fn w_letter(w: Weighting) -> &'static str {
     match w {
@@ -109,6 +116,17 @@ pub struct LeqTile {
     pub filling: Option<String>,
     /// `gaps: 28:10 of 30:00 measured`.
     pub incomplete: Option<String>,
+    /// The figures the columns draw: the window's weighting and length (s), the Leq as
+    /// shown (rounded to 0.1 dB, NaN before anything was measured), its limit when judged,
+    /// the floored headroom when it can recover within the horizon, the time to recover
+    /// when it cannot, and how much of the window has elapsed (s).
+    pub weighting: Weighting,
+    pub duration_s: f64,
+    pub leq_db: f64,
+    pub limit_db: Option<f64>,
+    pub allowed_db: Option<f64>,
+    pub recover_s: Option<f64>,
+    pub elapsed_s: f64,
 }
 
 /// The tiles of a meter's windows from its configuration and newest `leq` frame. A frame
@@ -143,23 +161,29 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
             let measured = f64::from(f.measured[i]);
             let duration = w.duration.0;
             let judged = flags.contains(LeqFlags::JUDGED);
+            let cannot = flags.contains(LeqFlags::CANNOT_RECOVER);
+            // Floored: the figure is a ceiling to stay under (the margin only absorbs the
+            // f32 the frame carries it in).
+            let allowed_db = (judged && !cannot)
+                .then(|| (f64::from(f.allowed[i]) * 10.0 + 1e-3).floor() / 10.0)
+                .filter(|a| a.is_finite());
             let headroom = judged.then(|| {
-                if flags.contains(LeqFlags::CANNOT_RECOVER) {
+                if cannot {
                     format!("over — can't recover within {horizon}")
                 } else {
-                    // Floored: the figure is a ceiling to stay under (the margin only
-                    // absorbs the f32 the frame carries it in).
-                    let a = (f64::from(f.allowed[i]) * 10.0 + 1e-3).floor() / 10.0;
+                    let a = allowed_db.unwrap_or(f64::NAN);
                     format!("next {horizon} ≤ {} dB", format::level(a))
                 }
             });
-            let recover = (judged && flags.contains(LeqFlags::CANNOT_RECOVER))
+            let recover_s = (judged && cannot)
                 .then(|| f64::from(f.recover[i]))
-                .filter(|r| r.is_finite())
-                .map(|r| format!("at the limit: back under in {}", format::duration(r)));
+                .filter(|r| r.is_finite());
+            let recover =
+                recover_s.map(|r| format!("at the limit: back under in {}", format::duration(r)));
+            let leq = f64::from(f.leq[i]);
             LeqTile {
                 name: window_name(w),
-                value: format::level(f64::from(f.leq[i])),
+                value: format::level(leq),
                 unit: unit.to_string(),
                 state,
                 state_text: match state {
@@ -181,6 +205,17 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                         clock(elapsed.min(duration))
                     )
                 }),
+                weighting: w.weighting,
+                duration_s: duration,
+                leq_db: if leq.is_finite() {
+                    (leq * 10.0).round() / 10.0
+                } else {
+                    f64::NAN
+                },
+                limit_db: w.limit.filter(|_| judged).map(|l| l.0),
+                allowed_db,
+                recover_s,
+                elapsed_s: elapsed,
             }
         })
         .collect()
@@ -219,6 +254,9 @@ pub struct HistoryPoint {
 pub struct LeqHistory {
     series: Vec<((u64, Weighting), VecDeque<HistoryPoint>)>,
     scale: Option<LevelScale>,
+    /// The columns' scale as of the newest frame ([`column_range`] keeps it while the
+    /// levels allow).
+    range: Option<Range>,
 }
 
 fn key(w: &LeqWindow) -> (u64, Weighting) {
@@ -235,7 +273,10 @@ impl LeqHistory {
         if self.scale != Some(f.meta.scale) {
             self.series.clear();
             self.scale = Some(f.meta.scale);
+            self.range = None;
         }
+        let (limits, values) = scale_inputs(cfg, f);
+        self.range = Some(column_range(&limits, &values, f.meta.scale, self.range));
         for (i, w) in cfg.windows.iter().enumerate() {
             let k = key(w);
             let at = match self.series.iter().position(|(sk, _)| *sk == k) {
@@ -278,6 +319,25 @@ impl LeqHistory {
     pub fn is_empty(&self) -> bool {
         self.series.iter().all(|(_, s)| s.is_empty())
     }
+
+    /// The columns' scale as of the newest frame.
+    pub fn range(&self) -> Option<Range> {
+        self.range
+    }
+}
+
+/// What the columns' scale follows: the limits of the windows the daemon judges, and every
+/// window's value.
+fn scale_inputs(cfg: &LeqConfig, f: &LeqFrame) -> (Vec<f64>, Vec<f64>) {
+    let limits = cfg
+        .windows
+        .iter()
+        .zip(&f.flags)
+        .filter(|(_, fl)| fl.contains(LeqFlags::JUDGED))
+        .filter_map(|(w, _)| w.limit.map(|l| l.0))
+        .collect();
+    let values = f.leq.iter().map(|v| f64::from(*v)).collect();
+    (limits, values)
 }
 
 /// Time span the strip shows: twice the longest window, between 2 min and 2 h.
@@ -459,14 +519,21 @@ pub struct LeqView<'a> {
     pub history: Option<&'a LeqHistory>,
     /// `STALE 3.2 s`.
     pub stale: Option<String>,
+    /// What the values are in (the columns' scale without limits starts from it).
+    pub scale: LevelScale,
+    /// The headroom's horizon in words: `1 min`.
+    pub horizon: String,
+    pub layout: LeqLayout,
 }
 
 /// The Leq view as drawn.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeqScene {
     pub scene: Scene,
-    /// Each tile's rectangle, in window order.
+    /// Each tile's rectangle, in window order (tiles layout).
     pub tiles: Vec<Rect>,
+    /// The columns, shortest window left (columns layout).
+    pub columns: Option<LeqColumns>,
     /// The history strip, when there is room for it.
     pub history: Option<HistoryStrip>,
     pub strip: Rect,
@@ -633,14 +700,100 @@ fn draw_history(c: &mut Canvas, s: &HistoryStrip, theme: &Theme) {
 }
 
 /// Lays the view out in `size` below the banner strip: the meter and calibration on one
-/// line, the tiles, and the history strip below them when the pane is tall enough.
+/// line, the windows as columns or tiles, and the history strip below them when it is on
+/// and the pane is tall enough.
 pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport) -> LeqScene {
     let mut c = Canvas::new(size, theme);
     let pad = 10.0;
     let strip = canvas::banner_strip(&mut c, status, pad, size.width - 2.0 * pad, size, theme);
     let top = strip.rect.bottom() + pad;
+    let area = Rect::new(
+        pad,
+        top + theme.font_size * 1.6,
+        (size.width - 2.0 * pad).max(1.0),
+        (size.height - top - theme.font_size * 1.6 - pad).max(1.0),
+    );
+    // The strip takes a third of a tall pane; a short one is all windows.
+    let show_history =
+        v.layout.history && v.history.is_some() && area.h >= 300.0 && area.w >= 300.0;
+    let (tiles_area, hist_area) = if show_history {
+        let hh = (area.h * 0.34).min(260.0);
+        (
+            Rect::new(area.x, area.y, area.w, area.h - hh - pad),
+            Some(Rect::new(
+                area.x + canvas::MARGINS.left - pad,
+                area.bottom() - hh + canvas::MARGINS.top,
+                area.w - canvas::MARGINS.left + pad,
+                hh - canvas::MARGINS.top - canvas::MARGINS.bottom,
+            )),
+        )
+    } else {
+        (area, None)
+    };
+    let n = v.tiles.len();
+    let mut rects = Vec::new();
+    let mut cols = None;
+    if n == 0 {
+        c.overlay.labels.push(label(
+            "no Leq windows: add them with Leq windows… (Ctrl+K)",
+            [
+                tiles_area.x + tiles_area.w / 2.0,
+                tiles_area.y + tiles_area.h / 2.0,
+            ],
+            anchor(HAlign::Center, VAlign::Center),
+            theme.font_size,
+            theme.text_dim,
+        ));
+    } else if v.layout.style == LeqStyle::Columns {
+        let limits: Vec<f64> = v.tiles.iter().filter_map(|t| t.limit_db).collect();
+        let values: Vec<f64> = v.tiles.iter().map(|t| t.leq_db).collect();
+        let range = column_range(
+            &limits,
+            &values,
+            v.scale,
+            v.history.and_then(LeqHistory::range),
+        );
+        cols = Some(columns::draw_columns(
+            &mut c,
+            &v.tiles,
+            range,
+            &v.horizon,
+            tiles_area,
+            v.stale.is_some(),
+            theme,
+        ));
+    } else {
+        let gap = 8.0;
+        let ncols = columns(n, tiles_area.w, tiles_area.h);
+        let rows = n.div_ceil(ncols);
+        let tw = (tiles_area.w - gap * (ncols as f32 - 1.0)) / ncols as f32;
+        let th = (tiles_area.h - gap * (rows as f32 - 1.0)) / rows as f32;
+        for (i, t) in v.tiles.iter().enumerate() {
+            let (row, col) = (i / ncols, i % ncols);
+            let r = Rect::new(
+                tiles_area.x + col as f32 * (tw + gap),
+                tiles_area.y + row as f32 * (th + gap),
+                tw.max(1.0),
+                th.max(1.0),
+            );
+            draw_tile(&mut c, t, r, v.stale.is_some(), theme);
+            rects.push(r);
+        }
+    }
+    // The caption: the meter (with the unit, and the weighting the columns' names leave
+    // out), and the calibration.
+    let left = match &cols {
+        Some(k) => {
+            let unit = v.tiles.first().map_or("", |t| t.unit.as_str());
+            match &k.weighting {
+                Some(w) => format!("{} · {w}, {unit}", v.meter),
+                None => format!("{} · {unit}", v.meter),
+            }
+        }
+        None => v.meter.clone(),
+    };
     c.overlay.labels.push(label(
-        v.meter.clone(),
+        left,
         [pad, top],
         anchor(HAlign::Left, VAlign::Top),
         theme.font_size,
@@ -661,59 +814,6 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
             theme.text_dim
         },
     ));
-    let area = Rect::new(
-        pad,
-        top + theme.font_size * 1.6,
-        (size.width - 2.0 * pad).max(1.0),
-        (size.height - top - theme.font_size * 1.6 - pad).max(1.0),
-    );
-    // The strip takes a third of a tall pane; a short one is all tiles.
-    let show_history = v.history.is_some() && area.h >= 300.0 && area.w >= 300.0;
-    let (tiles_area, hist_area) = if show_history {
-        let hh = (area.h * 0.34).min(260.0);
-        (
-            Rect::new(area.x, area.y, area.w, area.h - hh - pad),
-            Some(Rect::new(
-                area.x + canvas::MARGINS.left - pad,
-                area.bottom() - hh + canvas::MARGINS.top,
-                area.w - canvas::MARGINS.left + pad,
-                hh - canvas::MARGINS.top - canvas::MARGINS.bottom,
-            )),
-        )
-    } else {
-        (area, None)
-    };
-    let n = v.tiles.len();
-    let gap = 8.0;
-    let mut rects = Vec::with_capacity(n);
-    if n > 0 {
-        let cols = columns(n, tiles_area.w, tiles_area.h);
-        let rows = n.div_ceil(cols);
-        let tw = (tiles_area.w - gap * (cols as f32 - 1.0)) / cols as f32;
-        let th = (tiles_area.h - gap * (rows as f32 - 1.0)) / rows as f32;
-        for (i, t) in v.tiles.iter().enumerate() {
-            let (row, col) = (i / cols, i % cols);
-            let r = Rect::new(
-                tiles_area.x + col as f32 * (tw + gap),
-                tiles_area.y + row as f32 * (th + gap),
-                tw.max(1.0),
-                th.max(1.0),
-            );
-            draw_tile(&mut c, t, r, v.stale.is_some(), theme);
-            rects.push(r);
-        }
-    } else {
-        c.overlay.labels.push(label(
-            "no Leq windows: add them with Leq windows… (Ctrl+K)",
-            [
-                tiles_area.x + tiles_area.w / 2.0,
-                tiles_area.y + tiles_area.h / 2.0,
-            ],
-            anchor(HAlign::Center, VAlign::Center),
-            theme.font_size,
-            theme.text_dim,
-        ));
-    }
     let judged = v
         .tiles
         .iter()
@@ -729,6 +829,7 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
     LeqScene {
         scene: c.into_scene(size),
         tiles: rects,
+        columns: cols,
         history,
         strip: strip.rect,
         banners: strip.rows,

@@ -1,7 +1,7 @@
 //! UI preferences kept between runs (`ui.toml` in the ac2 config directory): the stimulus
-//! outputs last used on each output device (decision K4), and the session dialog's choices
+//! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
-//! names.
+//! names — and the Leq view's layout.
 //!
 //! ```toml
 //! [stimulus_outputs]
@@ -14,6 +14,10 @@
 //! mics = [2, 3]
 //! stimulus = [1]
 //! mic_names = { 2 = "M30 FOH", 3 = "ECM8000" }
+//!
+//! [leq]
+//! style = "tiles"
+//! history = true
 //! ```
 //!
 //! Channels are one-based in the file, as everywhere the operator reads or types them. The
@@ -23,6 +27,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use ac2_scene::view::{LeqLayout, LeqStyle};
 use serde::{Deserialize, Serialize};
 
 /// The session dialog's choices for one device (zero-based channels).
@@ -49,6 +54,8 @@ pub struct UiPrefs {
     pub outputs: BTreeMap<String, Vec<u16>>,
     /// Session dialog choices per `backend/device id` ([`UiPrefs::device_key`]).
     pub sessions: BTreeMap<String, DeviceRoles>,
+    /// How the SPL pane lays the Leq windows out.
+    pub leq: LeqLayout,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -60,6 +67,23 @@ struct File {
     /// Per `backend/device id`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     sessions: BTreeMap<String, RolesFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    leq: Option<LeqFile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StyleFile {
+    Columns,
+    Tiles,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LeqFile {
+    style: StyleFile,
+    #[serde(default)]
+    history: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -168,7 +192,18 @@ impl UiPrefs {
             })?;
             sessions.insert(device, roles);
         }
-        Ok(Self { outputs, sessions })
+        let leq = f.leq.map_or_else(LeqLayout::default, |l| LeqLayout {
+            style: match l.style {
+                StyleFile::Columns => LeqStyle::Columns,
+                StyleFile::Tiles => LeqStyle::Tiles,
+            },
+            history: l.history,
+        });
+        Ok(Self {
+            outputs,
+            sessions,
+            leq,
+        })
     }
 
     /// The file text.
@@ -184,6 +219,13 @@ impl UiPrefs {
                 .iter()
                 .map(|(d, r)| (d.clone(), RolesFile::from_roles(r)))
                 .collect(),
+            leq: (self.leq != LeqLayout::default()).then_some(LeqFile {
+                style: match self.leq.style {
+                    LeqStyle::Columns => StyleFile::Columns,
+                    LeqStyle::Tiles => StyleFile::Tiles,
+                },
+                history: self.leq.history,
+            }),
         };
         toml::to_string(&f).unwrap_or_default()
     }
@@ -244,6 +286,33 @@ mod tests {
         assert!(text.contains("2 = \"M30 FOH\""), "{text}");
         assert_eq!(UiPrefs::from_toml(&text), Ok(p));
         assert_eq!(UiPrefs::from_toml(""), Ok(UiPrefs::default()));
+    }
+
+    #[test]
+    fn leq_layout_round_trips() {
+        let mut p = UiPrefs::default();
+        assert_eq!(
+            p.leq,
+            LeqLayout {
+                style: LeqStyle::Columns,
+                history: false
+            }
+        );
+        // The default is not written.
+        assert!(!p.to_toml().contains("[leq]"));
+        p.leq = LeqLayout {
+            style: LeqStyle::Tiles,
+            history: true,
+        };
+        let text = p.to_toml();
+        assert!(text.contains("[leq]"), "{text}");
+        assert!(text.contains("style = \"tiles\""), "{text}");
+        assert!(text.contains("history = true"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+        let q = UiPrefs::from_toml("[leq]\nstyle = \"columns\"\nhistory = true\n").expect("parse");
+        assert_eq!(q.leq.style, LeqStyle::Columns);
+        assert!(q.leq.history);
+        assert!(UiPrefs::from_toml("[leq]\nstyle = \"bars\"\n").is_err());
     }
 
     #[test]

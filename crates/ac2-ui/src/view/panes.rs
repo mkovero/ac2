@@ -130,7 +130,29 @@ fn placeholder(pane: PaneKind, app: &App) -> &'static str {
 pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome) {
     let area = ui.available_rect_before_wrap();
     let visible = app.state.layout.visible();
+    // The stage view is the pane's picture alone: no frame, no title.
+    let stage = app.state.stage_view();
     for (pane, rect) in layout(&visible, area) {
+        if stage {
+            let built = if app.plots {
+                scene_for(app, pane, rect.size(), theme)
+            } else {
+                None
+            };
+            match built {
+                Some((scene, _)) => plot::paint(ui, slot(pane), rect, scene),
+                None => {
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        placeholder(pane, app),
+                        egui::FontId::proportional(13.0),
+                        ch.dim,
+                    );
+                }
+            }
+            continue;
+        }
         let focused = app.state.layout.focus == pane;
         let stroke = if focused {
             egui::Stroke::new(1.5, ch.focus)

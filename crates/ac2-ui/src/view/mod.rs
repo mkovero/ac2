@@ -27,6 +27,13 @@ pub(crate) fn now() -> Now {
 
 pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
     let ch = crate::theme::chrome(theme);
+    if app.state.stage_view() {
+        egui::CentralPanel::no_frame()
+            .frame(egui::Frame::new().fill(ch.panel))
+            .show(ui, |ui| panes::panes(app, ui, theme, &ch));
+        overlays::draw(app, ui.ctx(), &ch);
+        return;
+    }
     egui::Panel::top("ac2-top")
         .frame(
             egui::Frame::new()

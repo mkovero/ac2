@@ -26,7 +26,8 @@ use ac2_scene::spectrum::PeakHold;
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
-    CoherencePlacement, DistortionUnit, FreqRange, IrMode, PhaseView, SpectrumStyle, ViewState,
+    CoherencePlacement, DistortionUnit, FreqRange, IrMode, LeqStyle, PhaseView, SpectrumStyle,
+    ViewState,
 };
 use ac2_scene::{axis::Range, format};
 
@@ -1234,6 +1235,26 @@ impl AppState {
                 }
             }
         }
+    }
+
+    /// Takes the preferences read at startup, and the view choices they hold.
+    pub fn set_prefs(&mut self, prefs: UiPrefs) {
+        self.view.spl.layout = prefs.leq;
+        self.prefs = prefs;
+    }
+
+    /// The stage view: full screen with the SPL pane maximised on its Leq windows, so the
+    /// window holds only them (no top bar, list or pane title). Whenever a stimulus may be
+    /// sounding or an operation runs, the top bar comes back: what is driving the speakers
+    /// is never hidden.
+    pub fn stage_view(&self) -> bool {
+        self.fullscreen
+            && self.layout.maximized
+            && self.layout.focus == PaneKind::Spl
+            && self.view.spl.leq
+            && self.stimulus.phase == StimPhase::Idle
+            && !self.daemon().is_some_and(|d| d.generator.firing)
+            && self.operation().is_none()
     }
 
     /// The multi-step operation running on the daemon (a set of sweeps), as the progress
@@ -3028,6 +3049,22 @@ impl AppState {
             C::SplLeqView => {
                 self.view.spl.leq = !self.view.spl.leq;
                 self.focus(PaneKind::Spl);
+            }
+            // Either shows the windows (a layout change is about them) and is remembered.
+            C::SplLeqStyle | C::SplLeqHistory => {
+                let l = &mut self.view.spl.layout;
+                if c == C::SplLeqStyle {
+                    l.style = match l.style {
+                        LeqStyle::Columns => LeqStyle::Tiles,
+                        LeqStyle::Tiles => LeqStyle::Columns,
+                    };
+                } else {
+                    l.history = !l.history;
+                }
+                self.view.spl.leq = true;
+                self.focus(PaneKind::Spl);
+                self.prefs.leq = self.view.spl.layout;
+                self.prefs_dirty = true;
             }
             C::LeqWindows => match self.pane_meas(PaneKind::Spl).cloned() {
                 Some(m) => {
