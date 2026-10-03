@@ -17,23 +17,28 @@ pub(crate) fn band_fraction(f: pm::BandFraction) -> core::rta::BandFraction {
     }
 }
 
+pub(crate) fn smoothing_fraction(f: pm::SmoothingFraction) -> core::smoothing::SmoothingFraction {
+    use core::smoothing::SmoothingFraction as F;
+    match f {
+        pm::SmoothingFraction::Third => F::Third,
+        pm::SmoothingFraction::Sixth => F::Sixth,
+        pm::SmoothingFraction::Twelfth => F::Twelfth,
+        pm::SmoothingFraction::TwentyFourth => F::TwentyFourth,
+        pm::SmoothingFraction::FortyEighth => F::FortyEighth,
+    }
+}
+
 pub(crate) fn smoothing(
     s: pm::Smoothing,
 ) -> (
     core::smoothing::SmoothingFraction,
     core::smoothing::SmoothingMode,
 ) {
-    use core::smoothing::{SmoothingFraction as F, SmoothingMode as M};
-    let f = match s.fraction {
-        pm::SmoothingFraction::Third => F::Third,
-        pm::SmoothingFraction::Sixth => F::Sixth,
-        pm::SmoothingFraction::Twelfth => F::Twelfth,
-        pm::SmoothingFraction::TwentyFourth => F::TwentyFourth,
-        pm::SmoothingFraction::FortyEighth => F::FortyEighth,
-    };
+    use core::smoothing::SmoothingMode as M;
+    let f = smoothing_fraction(s.fraction);
     let m = match s.mode {
-        pm::SmoothingMode::Power => M::Power,
-        pm::SmoothingMode::Complex => M::Complex,
+        pm::SmoothingMode::Magnitude => M::Magnitude,
+        pm::SmoothingMode::MagnitudePhase => M::MagnitudePhase,
     };
     (f, m)
 }

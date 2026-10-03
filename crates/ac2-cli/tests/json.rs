@@ -266,7 +266,7 @@ async fn session_meas_delay_trace_flow() -> R {
             "measurement_input": 1,
             "averaging": { "type": "fifo", "blocks": 8 },
             "grid": { "ppo": 48, "k_min": -240, "k_max": 239 },
-            "smoothing": { "fraction": "sixth", "mode": "power" },
+            "smoothing": { "fraction": "sixth", "mode": "magnitude_phase" },
             "depth": { "type": "equal_confidence" }
         }})
     );

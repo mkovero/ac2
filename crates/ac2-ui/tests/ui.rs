@@ -472,7 +472,7 @@ fn slot_resmoothed() {
     let st = &h.state().state;
     assert_ne!(st.traces[&id].0.mag_db, before, "served at the new setting");
     assert_eq!(
-        st.smoothing_caption().as_deref(),
+        st.smoothing_caption(PaneKind::Transfer).as_deref(),
         Some("slot 1 (Main L S1): smoothing 1/3 oct")
     );
     // The live measurement was not touched.
@@ -484,6 +484,61 @@ fn slot_resmoothed() {
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("slot_resmoothed", &snapshot_options());
+}
+
+/// Smoothing on phase and spectrum: the rig publishes scattered curves smoothed as the
+/// daemon does. The transfer scene draws the smoothed phase (wrapped, unwrapped and group
+/// delay all follow from it), and the spectrum axis says the level is smoothed.
+#[test]
+fn smoothed_phase_and_spectrum() {
+    if !have_gpu("smoothed_phase_and_spectrum") {
+        return;
+    }
+    let rig = common::Rig::start_smoothed();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    {
+        let st = &h.state().state;
+        let now = ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        };
+        let size = ac2_scene::primitives::Viewport {
+            width: 1000.0,
+            height: 450.0,
+        };
+        let theme = ac2_scene::theme::Theme::dark();
+        let s = ac2_ui::scenes::transfer(st, &theme, size, now);
+        let raw = common::raw_tf_frame(1, 0.0, 0.0, 2000.0);
+        let want = common::smoothed_tf_frame(&raw);
+        let t = &s.traces[0];
+        let diff = |a: f64, b: f64| {
+            let d = (a - b).rem_euclid(360.0);
+            d.min(360.0 - d)
+        };
+        let mut moved: f64 = 0.0;
+        for (i, p) in t.phase_wrapped_deg.iter().enumerate() {
+            assert!(
+                diff(*p, f64::from(want.phase[i])) < 1e-3,
+                "column {i}: drawn {p} vs smoothed {}",
+                want.phase[i]
+            );
+            moved = moved.max(diff(*p, f64::from(raw.phase[i])));
+        }
+        assert!(moved > 5.0, "the drawn phase is the raw one");
+        // Unwrapped phase steps (and so group delay) follow the smoothed phase.
+        for i in 1..want.phase.len() {
+            let step = t.phase_unwrapped_deg[i] - t.phase_unwrapped_deg[i - 1];
+            let want_step = f64::from(want.phase[i] - want.phase[i - 1]);
+            assert!(diff(step, want_step) < 1e-3, "column {i}");
+        }
+        assert_eq!(s.legend[0].text, "Main L · ref · 1/6 oct");
+
+        let sp = ac2_ui::scenes::spectrum(st, &theme, size, now);
+        assert_eq!(sp.unit, "dBFS (tone, 1/6 oct smoothed)");
+        assert_eq!(sp.caption, "Hann window");
+    }
+    h.snapshot_options("smoothed_phase_and_spectrum", &snapshot_options());
 }
 
 /// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):

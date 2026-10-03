@@ -2,10 +2,12 @@
 //!
 //! Units (decision 4b): a narrowband spectrum shows **tone level** (a sine reads its RMS
 //! level regardless of FFT length), an RTA shows **band power**; the axis says which, so
-//! the two are never read against each other by mistake.
+//! the two are never read against each other by mistake. A smoothed narrowband spectrum is
+//! a fractional-octave power average of tone levels — a sine reads lower by however many
+//! bins the kernel spreads it over — so its axis says that too.
 
 use ac2_proto::frame::{RtaFrame, SpecFrame, ValidityMask};
-use ac2_proto::model::{BandFraction, CalStatus, LevelScale, Weighting, Window};
+use ac2_proto::model::{BandFraction, CalStatus, LevelScale, SmoothingFraction, Weighting, Window};
 use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis};
@@ -26,11 +28,19 @@ use crate::view::{SpectrumStyle, ViewState};
 pub enum Quantity {
     /// Level of a sinusoid in the bin (narrowband spectrum).
     Tone,
+    /// Tone levels power-averaged over a fractional-octave kernel (smoothed spectrum).
+    SmoothedTone(SmoothingFraction),
     /// Power in the band (RTA).
     Band,
 }
 
-/// Axis unit: `dBFS (tone)`, `dBFS (band)`, `dB SPL (tone)`, `dB SPL (band)`.
+impl Quantity {
+    /// A narrowband spectrum's quantity under `smoothing`.
+    pub fn tone(smoothing: Option<SmoothingFraction>) -> Self {
+        smoothing.map_or(Quantity::Tone, Quantity::SmoothedTone)
+    }
+}
+
 /// Caption suffix for a calibrated trace (decisions 7a/7b): the calibration's age when it
 /// belongs to this device + input + mic, the mismatch warning when it belongs to another mic
 /// or input, and whether the mic curve was subtracted. Uncalibrated says nothing: the axis
@@ -52,13 +62,14 @@ pub fn cal_caption(cal: CalStatus, mic_curve: bool, captured: WallNs) -> String 
     s
 }
 
-pub fn level_unit(scale: LevelScale, q: Quantity) -> &'static str {
-    match (scale, q) {
-        (LevelScale::Dbfs, Quantity::Tone) => "dBFS (tone)",
-        (LevelScale::Dbfs, Quantity::Band) => "dBFS (band)",
-        (LevelScale::DbSpl, Quantity::Tone) => "dB SPL (tone)",
-        (LevelScale::DbSpl, Quantity::Band) => "dB SPL (band)",
-    }
+/// Axis unit: `dBFS (tone)`, `dB SPL (band)`, `dBFS (tone, 1/6 oct smoothed)`.
+pub fn level_unit(scale: LevelScale, q: Quantity) -> String {
+    let what = match q {
+        Quantity::Tone => "tone".to_string(),
+        Quantity::SmoothedTone(f) => format!("tone, {} smoothed", format::octave_fraction(f)),
+        Quantity::Band => "band".to_string(),
+    };
+    format!("{} ({what})", scale_unit(scale))
 }
 
 fn scale_unit(scale: LevelScale) -> &'static str {
@@ -165,7 +176,8 @@ impl<'a> SpectrumTrace<'a> {
             validity: Some(&frame.validity),
             peak: None,
             scale: frame.meta.scale,
-            quantity: Quantity::Tone,
+            quantity: Quantity::tone(frame.meta.smoothing),
+            // The axis unit says whether the level is smoothed (`level_unit`).
             caption: format!(
                 "{}{}",
                 window_label(frame.meta.window),
@@ -307,13 +319,13 @@ pub fn spectrum_scene(
     let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
     let plot = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
-    let units: Vec<&str> = traces
+    let units: Vec<String> = traces
         .iter()
         .map(|t| level_unit(t.scale, t.quantity))
         .collect();
     let unit = match units.first() {
         None => String::new(),
-        Some(u) if units.iter().all(|x| x == u) => (*u).to_string(),
+        Some(u) if units.iter().all(|x| x == u) => u.clone(),
         Some(_) => "mixed units".to_string(),
     };
     let caption = traces.first().map_or(String::new(), |t| t.caption.clone());
@@ -338,7 +350,7 @@ pub fn spectrum_scene(
         // share a pixel at the top of a log axis: drawn as bars, a single-bin tone becomes a
         // sub-pixel sliver. Tone traces are always the max-per-pixel line.
         let style = match t.quantity {
-            Quantity::Tone => SpectrumStyle::Line,
+            Quantity::Tone | Quantity::SmoothedTone(_) => SpectrumStyle::Line,
             Quantity::Band => view.spectrum.style,
         };
         match style {
@@ -610,6 +622,7 @@ mod tests {
                 scale: LevelScale::DbSpl,
                 cal,
                 mic_curve: false,
+                smoothing: None,
             },
             level: vec![],
             validity: vec![],
@@ -617,6 +630,20 @@ mod tests {
         let t =
             SpectrumTrace::spectrum(&spec, WallNs(25 * H), &[], &[], "FFT", Color::WHITE, fresh);
         assert_eq!(t.caption, "Hann window · cal 1 d ago");
+        assert_eq!(t.quantity, Quantity::Tone);
+        let mut smoothed = spec.clone();
+        smoothed.meta.smoothing = Some(SmoothingFraction::Sixth);
+        let t = SpectrumTrace::spectrum(
+            &smoothed,
+            WallNs(25 * H),
+            &[],
+            &[],
+            "FFT",
+            Color::WHITE,
+            fresh,
+        );
+        assert_eq!(t.caption, "Hann window · cal 1 d ago");
+        assert_eq!(t.quantity, Quantity::SmoothedTone(SmoothingFraction::Sixth));
     }
 
     #[test]
@@ -626,6 +653,20 @@ mod tests {
         assert_eq!(
             level_unit(LevelScale::DbSpl, Quantity::Band),
             "dB SPL (band)"
+        );
+        assert_eq!(
+            level_unit(
+                LevelScale::Dbfs,
+                Quantity::SmoothedTone(SmoothingFraction::Sixth)
+            ),
+            "dBFS (tone, 1/6 oct smoothed)"
+        );
+        assert_eq!(
+            level_unit(
+                LevelScale::DbSpl,
+                Quantity::tone(Some(SmoothingFraction::Third))
+            ),
+            "dB SPL (tone, 1/3 oct smoothed)"
         );
         assert_eq!(fraction_label(BandFraction::TwentyFourth), "1/24 oct");
         assert_eq!(window_label(Window::FlatTop), "flat-top window");

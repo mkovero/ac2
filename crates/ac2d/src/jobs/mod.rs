@@ -169,14 +169,18 @@ pub(crate) enum JobCmd {
     Freeze(bool),
     /// Clear averages.
     Reset,
-    /// New display smoothing (transfer); `rev` is the commit that set it. Averaging goes on.
-    Smoothing {
-        smoothing: Option<ac2_proto::model::Smoothing>,
-        rev: Rev,
-    },
+    /// New display smoothing; `rev` is the commit that set it. Averaging goes on.
+    Smoothing { change: SmoothingChange, rev: Rev },
     /// The input's calibration or mic curve changed (on the measurement input of a
     /// transfer function only the curve matters).
     Cal(Box<crate::calstore::InputCal>),
+}
+
+/// A measurement's new display smoothing, by kind.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SmoothingChange {
+    Transfer(Option<ac2_proto::model::Smoothing>),
+    Spectrum(Option<ac2_proto::model::SmoothingFraction>),
 }
 
 /// One analysis.

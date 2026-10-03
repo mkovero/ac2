@@ -196,6 +196,7 @@ async fn calibration_mic_curve_and_matching_end_to_end() {
                     fft_len: 8192,
                     window: Window::Hann,
                     averaging: SpecAveraging::Off,
+                    smoothing: None,
                 },
             },
         },

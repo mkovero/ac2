@@ -461,9 +461,13 @@ pub struct MeasNew {
     /// Points per octave of the tf grid.
     #[arg(long, default_value_t = ac2_proto::model::TransferConfig::DEFAULT_PPO)]
     pub ppo: u32,
-    /// tf live smoothing, 1/N octave.
+    /// Display smoothing, 1/N octave (tf: magnitude and phase; spectrum: power, and the
+    /// level then no longer reads as tone level).
     #[arg(long, value_enum)]
     pub smooth: Option<FractionArg>,
+    /// tf: smooth the magnitude only and keep the measured phase.
+    #[arg(long, requires = "smooth")]
+    pub smooth_magnitude_only: bool,
     /// tf averaging: FIFO blocks of the full-rate stage.
     #[arg(long, default_value_t = ac2_proto::model::TransferConfig::DEFAULT_BLOCKS)]
     pub blocks: u32,

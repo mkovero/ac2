@@ -86,10 +86,21 @@ impl SmoothingFraction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SmoothingMode {
-    /// Power-average magnitude; phase untouched.
-    Power,
-    /// Power-average magnitude and average unwrapped phase.
-    Complex,
+    /// Power-average magnitude; phase as measured.
+    Magnitude,
+    /// Power-average magnitude and average the phase, unwrapped within each run of valid
+    /// columns. What every front end sets.
+    MagnitudePhase,
+}
+
+impl Smoothing {
+    /// `fraction` in the mode front ends set: magnitude and phase.
+    pub fn of(fraction: SmoothingFraction) -> Self {
+        Self {
+            fraction,
+            mode: SmoothingMode::MagnitudePhase,
+        }
+    }
 }
 
 /// Smoothing applied to a transfer function.
@@ -537,6 +548,9 @@ pub struct SpectrumConfig {
     pub window: Window,
     /// Averaging.
     pub averaging: SpecAveraging,
+    /// Display smoothing (power, on a log-frequency kernel over the bins), if any. A
+    /// smoothed bin no longer reads as tone level; frames say so (`SpecMeta.smoothing`).
+    pub smoothing: Option<SmoothingFraction>,
 }
 
 /// Fractional-octave RTA.
@@ -661,6 +675,7 @@ impl SpectrumConfig {
             fft_len: Self::DEFAULT_FFT_LEN,
             window: Window::Hann,
             averaging: SpecAveraging::Off,
+            smoothing: None,
         }
     }
 }
@@ -1286,9 +1301,10 @@ pub struct TraceEdit {
     pub delay_nudge: Seconds,
     /// Slot 1…9 the trace occupies (Ctrl+1…9 in the UI); a slot holds at most one trace.
     pub slot: Option<u8>,
-    /// Display smoothing (transfer traces only): applied when the daemon serves the trace's
-    /// data. The stored columns stay unsmoothed, so it can be changed at any time; a capture
-    /// starts with the smoothing its measurement had.
+    /// Display smoothing (transfer and spectrum traces): applied when the daemon serves the
+    /// trace's data. The stored columns stay unsmoothed, so it can be changed at any time; a
+    /// capture starts with the smoothing its measurement had. A spectrum has no phase: its
+    /// power is smoothed in either mode.
     pub smoothing: Option<Smoothing>,
 }
 

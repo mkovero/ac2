@@ -16,7 +16,7 @@ use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
     BackendKind, BandFraction, CalStatus, DeviceId, LevelScale, PeakWeighting, Smoothing,
-    TimeWeighting, TimingState, TimingStatus, Weighting, Window,
+    SmoothingFraction, TimeWeighting, TimingState, TimingStatus, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -277,6 +277,9 @@ pub struct SpecMeta {
     pub cal: CalStatus,
     /// A mic curve was subtracted from `level`.
     pub mic_curve: bool,
+    /// Display smoothing applied to `level`: a smoothed bin is a fractional-octave power
+    /// average of tone levels, not the tone level of the bin.
+    pub smoothing: Option<SmoothingFraction>,
 }
 
 /// SPL meter readings; values in `scale`.

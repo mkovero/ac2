@@ -223,7 +223,11 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         .map(|f| {
                             smoothing(f).map(|fraction| Smoothing {
                                 fraction,
-                                mode: SmoothingMode::Power,
+                                mode: if n.smooth_magnitude_only {
+                                    SmoothingMode::Magnitude
+                                } else {
+                                    SmoothingMode::MagnitudePhase
+                                },
                             })
                         })
                         .transpose()?,
@@ -241,6 +245,23 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             refuse(n.reference, "ref")?;
             refuse(n.measurement, "meas")?;
             let input = need(n.input, "input")?;
+            if n.smooth_magnitude_only {
+                return Err(CliError::Usage(format!(
+                    "--smooth-magnitude-only applies to tf, not {:?}",
+                    n.kind
+                )));
+            }
+            if n.smooth.is_some() && k != MeasKindArg::Spectrum {
+                return Err(CliError::Usage(format!(
+                    "--smooth applies to tf and spectrum, not {:?}{}",
+                    n.kind,
+                    if k == MeasKindArg::Rta {
+                        " (RTA bands already are fractional-octave)"
+                    } else {
+                        ""
+                    }
+                )));
+            }
             match k {
                 MeasKindArg::Spectrum => {
                     let len = n.fft.0;
@@ -253,6 +274,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         config: SpectrumConfig {
                             fft_len: len as u32,
                             window: window(n.window),
+                            smoothing: n.smooth.map(smoothing).transpose()?,
                             ..SpectrumConfig::on_input(input)
                         },
                     }
@@ -612,5 +634,83 @@ pub(crate) async fn state_dump(
             let c = connect(cli, false).await?;
             dump(&c, out).await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::Cli;
+    use crate::args::{Cmd, MeasCmd};
+
+    fn config(args: &[&str]) -> Result<MeasConfig, CliError> {
+        let cli = Cli::try_parse_from(["ac2", "meas", "new"].iter().chain(args))
+            .map_err(|e| CliError::Usage(e.to_string()))?;
+        let Cmd::Meas {
+            cmd: MeasCmd::New(n),
+        } = cli.cmd
+        else {
+            unreachable!()
+        };
+        meas_config(&n)
+    }
+
+    #[test]
+    fn smoothing_flags() {
+        let tf = |extra: &[&str]| {
+            let mut a = vec!["tf", "--ref", "1", "--meas", "2", "--name", "x"];
+            a.extend_from_slice(extra);
+            match config(&a).map(|c| c.kind) {
+                Ok(MeasKind::Transfer { config }) => Ok(config.smoothing),
+                Ok(other) => panic!("{other:?}"),
+                Err(e) => Err(e),
+            }
+        };
+        // Phase is smoothed with the magnitude unless asked not to.
+        assert_eq!(
+            tf(&["--smooth", "6"]).ok(),
+            Some(Some(Smoothing {
+                fraction: SmoothingFraction::Sixth,
+                mode: SmoothingMode::MagnitudePhase
+            }))
+        );
+        assert_eq!(
+            tf(&["--smooth", "12", "--smooth-magnitude-only"]).ok(),
+            Some(Some(Smoothing {
+                fraction: SmoothingFraction::Twelfth,
+                mode: SmoothingMode::Magnitude
+            }))
+        );
+        assert!(tf(&["--smooth-magnitude-only"]).is_err(), "needs --smooth");
+        assert_eq!(tf(&[]).ok(), Some(None));
+
+        let spec = config(&["spectrum", "--input", "2", "--name", "s", "--smooth", "3"]);
+        match spec.map(|c| c.kind) {
+            Ok(MeasKind::Spectrum { config }) => {
+                assert_eq!(config.smoothing, Some(SmoothingFraction::Third));
+            }
+            other => panic!("{other:?}"),
+        }
+        let e = config(&["rta", "--input", "2", "--name", "r", "--smooth", "3"]);
+        assert!(
+            matches!(&e, Err(CliError::Usage(m)) if m.contains("already are fractional-octave")),
+            "{e:?}"
+        );
+        assert!(config(&["spl", "--input", "2", "--name", "s", "--smooth", "3"]).is_err());
+        assert!(
+            config(&[
+                "spectrum",
+                "--input",
+                "2",
+                "--name",
+                "s",
+                "--smooth",
+                "3",
+                "--smooth-magnitude-only"
+            ])
+            .is_err()
+        );
     }
 }

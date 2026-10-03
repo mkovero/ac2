@@ -541,7 +541,7 @@ fn spectrum_and_rta_math_across_grids_is_refused() {
 fn sixth() -> Smoothing {
     Smoothing {
         fraction: SmoothingFraction::Sixth,
-        mode: SmoothingMode::Power,
+        mode: SmoothingMode::Magnitude,
     }
 }
 
@@ -573,7 +573,7 @@ fn smoothing_is_applied_when_served_and_never_stored() {
     assert_eq!(t.columns.mag_db[i], 12.0);
     t.meta.edit.smoothing = Some(Smoothing {
         fraction: SmoothingFraction::FortyEighth,
-        mode: SmoothingMode::Power,
+        mode: SmoothingMode::Magnitude,
     });
     // At 1/48 octave on a 48 ppo grid the kernel is the identity.
     assert!((t.data().mag_db[i] - 12.0).abs() < 1e-4);
@@ -617,7 +617,7 @@ fn session_sample() -> Session {
     a.columns.mag_db[200] = 9.0;
     a.meta.edit.smoothing = Some(Smoothing {
         fraction: SmoothingFraction::Third,
-        mode: SmoothingMode::Complex,
+        mode: SmoothingMode::MagnitudePhase,
     });
     a.meta.edit.visible = false;
     let b = delayed(9, 2, 0.0100, 0.0100, 0.9);
@@ -702,18 +702,18 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (traces saved with their smoothing applied) is
-    // refused with its version named, never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 2", "\"version\": 1")).unwrap();
+    // A session of the previous format (other smoothing mode names, spectra without a
+    // smoothing setting) is refused with its version named, never read best-effort.
+    std::fs::write(&m, text.replace("\"version\": 3", "\"version\": 2")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 1
+            found: 2
         }
     );
-    assert!(e.to_string().contains("reads version 2 only"), "{e}");
+    assert!(e.to_string().contains("reads version 3 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

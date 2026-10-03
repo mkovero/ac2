@@ -1,13 +1,16 @@
 //! Narrowband spectrum job: tone level per FFT bin (`spec` frames) and input meters. A
-//! calibrated input reads dB SPL; its mic curve, when on, is subtracted per bin.
+//! calibrated input reads dB SPL; its mic curve, when on, is subtracted per bin. Display
+//! smoothing, when set, power-averages the bins over a fractional-octave kernel; the
+//! unsmoothed result is what a capture stores.
 
+use ac2_core::smoothing::LinearSmoother;
 use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig};
 use ac2_proto::frame::{FrameData, ProtectionFlags, SpecFrame, SpecMeta, ValidityMask};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{LevelScale, SpectrumConfig as WireConfig};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
-use super::{Analysis, Emitter, JobCmd, LevelsMeter, StampArgs, channel_f64};
+use super::{Analysis, Emitter, JobCmd, LevelsMeter, SmoothingChange, StampArgs, channel_f64};
 use crate::calstore::InputCal;
 use crate::conv;
 use crate::fanout::Block;
@@ -21,6 +24,8 @@ pub(crate) struct Spectrum {
     cal: InputCal,
     /// Mic-curve correction per bin (dB subtracted).
     corr: Option<Vec<f64>>,
+    /// Display smoothing kernel for `cfg.smoothing`, built for the spectrum's bin count.
+    smoother: Option<LinearSmoother>,
     frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
@@ -73,6 +78,9 @@ impl Spectrum {
             peak_hold: None,
         })
         .map_err(|e| e.to_string())?;
+        let smoother = cfg
+            .smoothing
+            .map(|f| LinearSmoother::new(n / 2 + 1, conv::smoothing_fraction(f)));
         Ok(Self {
             grid_id: grid(&cfg, sample_rate).id(),
             levels: LevelsMeter::new(vec![idx], vec![cfg.input], sample_rate),
@@ -81,6 +89,7 @@ impl Spectrum {
             idx,
             analyzer,
             corr: None,
+            smoother,
             cal: InputCal::none(),
             frozen,
             config_rev,
@@ -130,6 +139,18 @@ impl Analysis for Spectrum {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.analyzer.reset_average(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
+            JobCmd::Smoothing {
+                change: SmoothingChange::Spectrum(smoothing),
+                rev,
+            } => {
+                self.cfg.smoothing = smoothing;
+                let bins = self.cfg.fft_len as usize / 2 + 1;
+                self.smoother =
+                    smoothing.map(|f| LinearSmoother::new(bins, conv::smoothing_fraction(f)));
+                // Frames under the new rev carry the new setting from the next block on.
+                self.config_rev = rev;
+                self.applied_at = None;
+            }
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
@@ -156,37 +177,45 @@ impl Analysis for Spectrum {
         if let Some(ps) = self.analyzer.average() {
             let off = self.cal.sensitivity.unwrap_or(0.0);
             let corr = self.corr.as_deref();
-            let mut validity = Vec::with_capacity(ps.bins());
             let level: Vec<f32> = (0..ps.bins())
                 .map(|k| {
                     let c = corr.and_then(|c| c.get(k)).copied().unwrap_or(0.0);
-                    let v = ps.amplitude_dbfs(k) + off - c;
-                    validity.push(if v.is_finite() {
-                        ValidityMask::NONE
-                    } else {
-                        ValidityMask::BELOW_FLOOR
-                    });
-                    v as f32
+                    (ps.amplitude_dbfs(k) + off - c) as f32
                 })
                 .collect();
-            e.send(
-                stamp,
-                FrameData::Spec(SpecFrame {
-                    meas: self.meas,
-                    meta: SpecMeta {
-                        window: self.cfg.window,
-                        scale: if self.cal.sensitivity.is_some() {
-                            LevelScale::DbSpl
-                        } else {
-                            LevelScale::Dbfs
-                        },
-                        cal: self.cal.status,
-                        mic_curve: self.corr.is_some(),
-                    },
-                    level,
-                    validity,
-                }),
-            );
+            let meta = SpecMeta {
+                window: self.cfg.window,
+                scale: if self.cal.sensitivity.is_some() {
+                    LevelScale::DbSpl
+                } else {
+                    LevelScale::Dbfs
+                },
+                cal: self.cal.status,
+                mic_curve: self.corr.is_some(),
+                smoothing: self.cfg.smoothing,
+            };
+            let raw = SpecFrame {
+                meas: self.meas,
+                meta,
+                validity: validity(&level),
+                level,
+            };
+            match self
+                .smoother
+                .as_ref()
+                .filter(|s| s.bins() == raw.level.len())
+            {
+                None => e.send(stamp, FrameData::Spec(raw)),
+                Some(sm) => {
+                    let level = smooth_levels(sm, &raw.level);
+                    let shown = SpecFrame {
+                        validity: validity(&level),
+                        level,
+                        ..raw.clone()
+                    };
+                    e.send_with_capture(stamp, FrameData::Spec(shown), FrameData::Spec(raw));
+                }
+            }
         }
         if let Some(l) = self.levels.take(self.meas) {
             e.send(
@@ -198,6 +227,42 @@ impl Analysis for Spectrum {
             );
         }
     }
+}
+
+/// A bin without a finite level is below the analyser's floor.
+fn validity(level: &[f32]) -> Vec<ValidityMask> {
+    level
+        .iter()
+        .map(|v| {
+            if v.is_finite() {
+                ValidityMask::NONE
+            } else {
+                ValidityMask::BELOW_FLOOR
+            }
+        })
+        .collect()
+}
+
+/// Tone levels (dB) smoothed as power. Bins below the floor are gaps, as they are in a
+/// captured trace (whose columns hold them as NaN), so a capture re-smoothed at this
+/// setting reads the same as this frame.
+pub(crate) fn smooth_levels(sm: &LinearSmoother, level: &[f32]) -> Vec<f32> {
+    let power: Vec<f64> = level
+        .iter()
+        .map(|l| 10f64.powf(f64::from(*l) / 10.0))
+        .collect();
+    let valid: Vec<bool> = level.iter().map(|l| l.is_finite()).collect();
+    sm.smooth(&power, &valid)
+        .iter()
+        .zip(level)
+        .map(|(p, l)| {
+            if l.is_finite() {
+                (10.0 * p.log10()) as f32
+            } else {
+                *l
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

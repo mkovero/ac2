@@ -1,7 +1,9 @@
 //! A fake rig: the client crate's `FakeDaemon` with an open session, two transfer
 //! measurements, a spectrum and an SPL meter, and a thread publishing synthetic frames.
 //! The values are display test material only (shapes chosen to be recognisable), never a
-//! reference for any measurement.
+//! reference for any measurement. The smoothed rig ([`Rig::start_smoothed`]) adds
+//! measurement-like scatter to every curve and publishes it smoothed by `ac2-core`, as the
+//! daemon would.
 #![allow(dead_code, clippy::unwrap_used)]
 
 use std::sync::Arc;
@@ -71,7 +73,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
             frozen: false,
             smoothing: Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,
-                mode: SmoothingMode::Power,
+                mode: SmoothingMode::MagnitudePhase,
             }),
             mic_curve: false,
         },
@@ -81,6 +83,87 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         eff_avg: None,
         validity: vec![ValidityMask::NONE; freqs.len()],
     }
+}
+
+/// Deterministic scatter in [-1, 1] per index.
+fn scatter(i: usize, seed: u64) -> f64 {
+    let mut x = (i as u64 ^ seed.rotate_left(17)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    x ^= x >> 29;
+    x = x.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x ^= x >> 32;
+    (x % 20_001) as f64 / 10_000.0 - 1.0
+}
+
+/// A transfer frame with scatter on magnitude (±1.5 dB) and phase (±25°), unsmoothed.
+pub fn raw_tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
+    let mut f = tf_frame(meas, gain, tau, bump_hz);
+    for (i, (m, p)) in f.mag.iter_mut().zip(&mut f.phase).enumerate() {
+        *m += (1.5 * scatter(i, u64::from(meas))) as f32;
+        *p = wrap(f64::from(*p) + 25.0 * scatter(i, 100 + u64::from(meas))) as f32;
+    }
+    f.meta.smoothing = None;
+    f
+}
+
+/// `raw` smoothed at 1/6 octave, magnitude and phase, by ac2-core — what the daemon sends.
+pub fn smoothed_tf_frame(raw: &TfFrame) -> TfFrame {
+    use ac2_core::smoothing::{Smoother, SmoothingFraction as F, SmoothingMode as M, TfColumns};
+    let GridDef::Log { ppo, k_min, k_max } = TF_GRID else {
+        unreachable!()
+    };
+    let grid = ac2_core::grid::LogGrid { ppo, k_min, k_max };
+    let h: Vec<num_complex::Complex64> = raw
+        .mag
+        .iter()
+        .zip(&raw.phase)
+        .map(|(m, p)| {
+            num_complex::Complex64::from_polar(
+                10f64.powf(f64::from(*m) / 20.0),
+                f64::from(*p).to_radians(),
+            )
+        })
+        .collect();
+    let coh: Vec<f64> = raw.coh.iter().map(|c| f64::from(*c)).collect();
+    let valid = vec![true; h.len()];
+    let s = Smoother::new(grid, F::Sixth).smooth(
+        TfColumns {
+            h: &h,
+            coherence: &coh,
+            valid: &valid,
+        },
+        M::MagnitudePhase,
+    );
+    let mut f = raw.clone();
+    f.mag =
+        s.h.iter()
+            .map(|z| (20.0 * z.norm().log10()) as f32)
+            .collect();
+    f.phase = s.h.iter().map(|z| z.arg().to_degrees() as f32).collect();
+    f.meta.smoothing = Some(Smoothing {
+        fraction: SmoothingFraction::Sixth,
+        mode: SmoothingMode::MagnitudePhase,
+    });
+    f
+}
+
+/// The spectrum with ±6 dB scatter per bin, as a single FFT shows noise, smoothed at 1/6
+/// octave by ac2-core.
+pub fn smoothed_spec_frame(meas: u32) -> SpecFrame {
+    let mut f = spec_frame(meas);
+    let power: Vec<f64> = f
+        .level
+        .iter()
+        .enumerate()
+        .map(|(k, l)| 10f64.powf((f64::from(*l) + 6.0 * scatter(k, 7)) / 10.0))
+        .collect();
+    let s = ac2_core::smoothing::LinearSmoother::new(
+        power.len(),
+        ac2_core::smoothing::SmoothingFraction::Sixth,
+    )
+    .smooth(&power, &vec![true; power.len()]);
+    f.level = s.iter().map(|p| (10.0 * p.log10()) as f32).collect();
+    f.meta.smoothing = Some(SmoothingFraction::Sixth);
+    f
 }
 
 fn ir_frame(meas: u32) -> IrFrame {
@@ -127,6 +210,7 @@ fn spec_frame(meas: u32) -> SpecFrame {
             scale: LevelScale::Dbfs,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            smoothing: None,
         },
         level,
         validity: vec![ValidityMask::NONE; freqs.len()],
@@ -190,7 +274,7 @@ fn transfer(meas_in: u16) -> MeasKind {
             // As the frames say (`tf_frame`).
             smoothing: Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,
-                mode: SmoothingMode::Power,
+                mode: SmoothingMode::MagnitudePhase,
             }),
             depth: ac2_proto::model::DepthPolicy::EqualConfidence,
         },
@@ -199,6 +283,16 @@ fn transfer(meas_in: u16) -> MeasKind {
 
 impl Rig {
     pub fn start() -> Self {
+        Self::start_with(false)
+    }
+
+    /// Every curve with scatter, published smoothed at 1/6 octave (transfer: magnitude and
+    /// phase; spectrum: power), and the spectrum measurement set to smooth.
+    pub fn start_smoothed() -> Self {
+        Self::start_with(true)
+    }
+
+    fn start_with(smoothed: bool) -> Self {
         let fake = Arc::new(FakeDaemon::start(FakeOptions::default()).unwrap());
         {
             let mut s = fake.lock();
@@ -257,6 +351,7 @@ impl Rig {
                             fft_len: 4096,
                             window: Window::Hann,
                             averaging: SpecAveraging::Off,
+                            smoothing: smoothed.then_some(SmoothingFraction::Sixth),
                         },
                     },
                     None,
@@ -283,17 +378,26 @@ impl Rig {
         let stop = Arc::new(AtomicBool::new(false));
         let (f, st) = (fake.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
+            let tf = |meas, gain, tau, bump| {
+                if smoothed {
+                    smoothed_tf_frame(&raw_tf_frame(meas, gain, tau, bump))
+                } else {
+                    tf_frame(meas, gain, tau, bump)
+                }
+            };
+            let spec = if smoothed {
+                smoothed_spec_frame(3)
+            } else {
+                spec_frame(3)
+            };
             let frames = [
+                (FrameData::Tf(tf(1, 0.0, 0.0, 2000.0)), Some(TF_GRID.id())),
                 (
-                    FrameData::Tf(tf_frame(1, 0.0, 0.0, 2000.0)),
-                    Some(TF_GRID.id()),
-                ),
-                (
-                    FrameData::Tf(tf_frame(2, -4.0, 0.000_35, 900.0)),
+                    FrameData::Tf(tf(2, -4.0, 0.000_35, 900.0)),
                     Some(TF_GRID.id()),
                 ),
                 (FrameData::Ir(ir_frame(1)), None),
-                (FrameData::Spec(spec_frame(3)), Some(SPEC_GRID.id())),
+                (FrameData::Spec(spec), Some(SPEC_GRID.id())),
                 (FrameData::Spl(spl_frame(4)), None),
             ];
             let mut seq = 1;

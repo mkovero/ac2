@@ -121,22 +121,81 @@ pub const SMOOTHING_STEPS: [Option<SmoothingFraction>; 6] = [
     Some(SmoothingFraction::Third),
 ];
 
-/// What the smoothing keys change: the selected slot's trace, or the transfer pane's
-/// measurement.
+/// A spectrum's smoothing as a trace edit: power only (a spectrum has no phase).
+pub fn spectrum_smoothing(fraction: SmoothingFraction) -> Smoothing {
+    Smoothing {
+        fraction,
+        mode: SmoothingMode::Magnitude,
+    }
+}
+
+/// What the smoothing keys change: the selected slot's trace, or the focused pane's
+/// measurement (the spectrum pane's when it has focus, else the transfer pane's).
 #[derive(Clone, Debug, PartialEq)]
 pub enum SmoothTarget {
     Trace(TraceMeta),
     Meas(Measurement),
 }
 
+/// What smoothing does to a curve of some kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Smoothable {
+    /// A transfer function: magnitude, and phase unless the mode keeps it.
+    Transfer,
+    /// A narrowband spectrum: power over a fractional-octave kernel.
+    Spectrum,
+    /// RTA bands: already fractional-octave.
+    Rta,
+    /// Not smoothed (a target curve, a meter).
+    No,
+}
+
 impl SmoothTarget {
+    pub fn kind(&self) -> Smoothable {
+        match self {
+            SmoothTarget::Trace(t) => match t.kind {
+                TraceKind::Transfer => Smoothable::Transfer,
+                TraceKind::Spectrum { .. } => Smoothable::Spectrum,
+                TraceKind::Rta { .. } => Smoothable::Rta,
+                TraceKind::Target => Smoothable::No,
+            },
+            SmoothTarget::Meas(m) => match m.config.kind {
+                MeasKind::Transfer { .. } => Smoothable::Transfer,
+                MeasKind::Spectrum { .. } => Smoothable::Spectrum,
+                MeasKind::Rta { .. } => Smoothable::Rta,
+                MeasKind::Spl { .. } => Smoothable::No,
+            },
+        }
+    }
+
+    /// The pane its curve is drawn in.
+    pub fn pane(&self) -> PaneKind {
+        match self.kind() {
+            Smoothable::Spectrum | Smoothable::Rta => PaneKind::Spectrum,
+            Smoothable::Transfer | Smoothable::No => PaneKind::Transfer,
+        }
+    }
+
     pub fn smoothing(&self) -> Option<Smoothing> {
         match self {
             SmoothTarget::Trace(t) => t.edit.smoothing,
             SmoothTarget::Meas(m) => match &m.config.kind {
                 MeasKind::Transfer { config } => config.smoothing,
+                MeasKind::Spectrum { config } => config.smoothing.map(spectrum_smoothing),
                 _ => None,
             },
+        }
+    }
+
+    /// `smoothing 1/6 oct`, `smoothing off`; a transfer function kept at measured phase
+    /// says `mag only`, a spectrum (no phase) never does.
+    pub fn caption(&self) -> String {
+        let s = self.smoothing();
+        match (self.kind(), s) {
+            (Smoothable::Spectrum, Some(s)) => {
+                format!("smoothing {}", format::octave_fraction(s.fraction))
+            }
+            _ => ac2_scene::tf::smoothing_caption(s),
         }
     }
 
@@ -704,21 +763,36 @@ impl AppState {
         self.daemon()?.traces.iter().find(|t| t.id == id)
     }
 
-    /// What K / Shift+K change now.
+    /// What K / Shift+K change now: the selected slot, else the spectrum pane's
+    /// measurement when that pane has focus, else the transfer pane's.
     pub fn smooth_target(&self) -> Option<SmoothTarget> {
-        match self.selected_trace_meta() {
-            Some(t) => Some(SmoothTarget::Trace(t.clone())),
-            None => self
-                .pane_meas(PaneKind::Transfer)
-                .map(|m| SmoothTarget::Meas(m.clone())),
+        if let Some(t) = self.selected_trace_meta() {
+            return Some(SmoothTarget::Trace(t.clone()));
         }
+        let pane = match self.layout.focus {
+            PaneKind::Spectrum => PaneKind::Spectrum,
+            _ => PaneKind::Transfer,
+        };
+        self.pane_meas(pane).map(|m| SmoothTarget::Meas(m.clone()))
     }
 
-    /// The transfer pane's title caption: what the smoothing keys act on and its setting,
-    /// `smoothing 1/6 oct` (the pane's measurement) or `slot 3 (Main L S3): smoothing off`.
-    pub fn smoothing_caption(&self) -> Option<String> {
-        let t = self.smooth_target()?;
-        let c = ac2_scene::tf::smoothing_caption(t.smoothing());
+    /// A pane's title caption: the smoothing of the selected slot when its curve is drawn
+    /// there, else of the pane's measurement — `smoothing 1/6 oct`,
+    /// `slot 3 (Main L S3): smoothing off`. Nothing for curves smoothing does not apply to.
+    pub fn smoothing_caption(&self, pane: PaneKind) -> Option<String> {
+        if !matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) {
+            return None;
+        }
+        let t = match self.selected_trace_meta() {
+            Some(t) if SmoothTarget::Trace(t.clone()).pane() == pane => {
+                SmoothTarget::Trace(t.clone())
+            }
+            _ => SmoothTarget::Meas(self.pane_meas(pane)?.clone()),
+        };
+        if !matches!(t.kind(), Smoothable::Transfer | Smoothable::Spectrum) {
+            return None;
+        }
+        let c = t.caption();
         Some(match t {
             SmoothTarget::Trace(_) => format!("{}: {c}", t.label()),
             SmoothTarget::Meas(_) => c,
@@ -1573,9 +1647,26 @@ impl AppState {
     /// through [`SMOOTHING_STEPS`]; `to`: an explicit setting instead).
     fn smooth(&mut self, step: i32, to: Option<Option<SmoothingFraction>>, out: &mut Vec<Request>) {
         let Some(target) = self.smooth_target() else {
-            self.error("no transfer measurement to smooth");
+            self.error("no transfer or spectrum measurement to smooth");
             return;
         };
+        let label = target.label();
+        match target.kind() {
+            Smoothable::Transfer | Smoothable::Spectrum => {}
+            Smoothable::Rta => {
+                self.toast(format!(
+                    "{label}: RTA bands already are fractional-octave; smoothing applies to \
+                     spectra and transfer functions"
+                ));
+                return;
+            }
+            Smoothable::No => {
+                self.error(format!(
+                    "{label}: smoothing applies to transfer and spectrum curves only"
+                ));
+                return;
+            }
+        }
         let cur = target.smoothing();
         let want = match to {
             Some(f) => f,
@@ -1587,9 +1678,8 @@ impl AppState {
                 let j = (i + step).clamp(0, SMOOTHING_STEPS.len() as i32 - 1);
                 if i == j {
                     self.toast(format!(
-                        "{}: {} is the {}",
-                        target.label(),
-                        ac2_scene::tf::smoothing_caption(cur),
+                        "{label}: {} is the {}",
+                        target.caption(),
                         if step > 0 { "widest" } else { "finest" }
                     ));
                     return;
@@ -1597,38 +1687,35 @@ impl AppState {
                 SMOOTHING_STEPS[j as usize]
             }
         };
-        let new = want.map(|fraction| Smoothing {
-            fraction,
-            mode: cur.map_or(SmoothingMode::Power, |s| s.mode),
+        let new = want.map(|fraction| match target.kind() {
+            Smoothable::Spectrum => spectrum_smoothing(fraction),
+            // Phase is smoothed with the magnitude unless the curve was set to keep it.
+            _ => Smoothing {
+                fraction,
+                mode: cur.map_or(SmoothingMode::MagnitudePhase, |s| s.mode),
+            },
         });
-        let what = format!(
-            "{}: {}",
-            target.label(),
-            ac2_scene::tf::smoothing_caption(new)
-        );
         match target {
             SmoothTarget::Trace(t) => {
-                let label = SmoothTarget::Trace(t.clone()).label();
-                if !matches!(t.kind, TraceKind::Transfer) {
-                    self.error(format!(
-                        "{label}: smoothing applies to transfer traces only"
-                    ));
-                    return;
-                }
                 if t.edit.locked {
                     self.error(format!("{label} is locked"));
                     return;
                 }
-                let mut edit = t.edit.clone();
-                edit.smoothing = new;
-                self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
+                let mut t = t.clone();
+                t.edit.smoothing = new;
+                let what = format!("{label}: {}", SmoothTarget::Trace(t.clone()).caption());
+                let (trace, edit) = (t.id, t.edit);
+                self.call(out, Command::TraceUpdate { trace, edit }, what);
             }
-            SmoothTarget::Meas(m) => {
-                let mut config = m.config.clone();
-                if let MeasKind::Transfer { config: tf } = &mut config.kind {
-                    tf.smoothing = new;
+            SmoothTarget::Meas(mut m) => {
+                match &mut m.config.kind {
+                    MeasKind::Transfer { config } => config.smoothing = new,
+                    MeasKind::Spectrum { config } => config.smoothing = want,
+                    _ => {}
                 }
-                self.call(out, Command::MeasUpdate { meas: m.id, config }, what);
+                let what = format!("{label}: {}", SmoothTarget::Meas(m.clone()).caption());
+                let (meas, config) = (m.id, m.config);
+                self.call(out, Command::MeasUpdate { meas, config }, what);
             }
         }
     }
