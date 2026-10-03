@@ -546,6 +546,69 @@ fn stored_traces_and_target() {
     snapshot(&mut h, "transfer_stored_traces");
 }
 
+/// Two captures, the second spread +3 dB with Alt+Shift+↑: its curve sits 3 dB above the
+/// other's and its legend row says `+3.0 dB`, so the spread is never read as a level
+/// difference.
+#[test]
+fn trace_offset_spread() {
+    if !have_gpu("trace_offset_spread") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    step_until(&mut h, "both slots with data", |a| {
+        a.state.slots()[1].is_some() && a.state.traces.len() == 2
+    });
+    let id = h.state().state.slots()[1].map(|t| t.id).expect("slot 2");
+    h.key_press(Key::V);
+    h.key_press(Key::V);
+    step_until(&mut h, "slot 2 selected", |a| {
+        a.state.selected_trace == Some(id)
+    });
+    h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowUp);
+    step_until(&mut h, "slot 2 spread", |a| {
+        a.state
+            .traces
+            .get(&id)
+            .is_some_and(|(d, _)| d.meta.edit.offset.0 == 3.0)
+    });
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::transfer(
+            st,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let legend: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+        assert!(
+            legend
+                .iter()
+                .any(|l| l.starts_with("Main L S2") && l.contains("· +3.0 dB")),
+            "{legend:?}"
+        );
+        assert!(
+            legend
+                .iter()
+                .any(|l| l.starts_with("Main L S1") && !l.contains("dB")),
+            "{legend:?}"
+        );
+    }
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "trace_offset_spread");
+}
+
 /// The transfer pane's title chip names the measurement it shows; a click opens the list of
 /// transfer measurements and a pick switches the pane (and the selection) to it.
 #[test]

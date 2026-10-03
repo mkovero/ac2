@@ -23,10 +23,52 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         Overlay::Calibrations(_) => super::cal::calibrations(app, ctx, ch),
         Overlay::Leq(_) => super::leq::leq(app, ctx, ch),
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
+        Overlay::DeleteTrace(_) => delete_trace(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }
     toasts(app, ctx, ch);
+}
+
+/// The confirmation before a stored trace is deleted: which one, and that it is final.
+fn delete_trace(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    let Overlay::DeleteTrace(p) = &app.state.overlay else {
+        return;
+    };
+    let k = p.confirm.clone();
+    backdrop(ctx);
+    let mut msg = None;
+    egui::Area::new(egui::Id::new("ac2-delete-trace"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(480.0);
+                ui.label(RichText::new(&k.title).strong().size(16.0));
+                ui.add_space(6.0);
+                for (i, l) in k.lines.iter().enumerate() {
+                    let t = RichText::new(l);
+                    ui.label(if i == 0 {
+                        t.color(ch.dim)
+                    } else {
+                        t.color(ch.warn)
+                    });
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("Delete").strong()).clicked() {
+                        msg = Some(true);
+                    }
+                    if ui.button("Keep it").clicked() {
+                        msg = Some(false);
+                    }
+                });
+                ui.label(RichText::new(&k.hint).small().color(ch.dim));
+            });
+        });
+    if let Some(m) = msg {
+        app.dispatch(Msg::DeleteTrace(m));
+    }
 }
 
 pub(super) fn backdrop(ctx: &egui::Context) {
@@ -158,6 +200,20 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
                 }
                 continue;
             }
+            if let Some((a, _, title, keys)) = PAIRS
+                .iter()
+                .filter(|(a, b, _)| *a == *c || *b == *c)
+                .find_map(|(a, b, t)| pair_keys(keymap, scope, *a, *b).map(|k| (*a, *b, t, k)))
+            {
+                if a == *c {
+                    rows.push(HelpRow::Bind {
+                        keys,
+                        title: (*title).into(),
+                        live,
+                    });
+                }
+                continue;
+            }
             rows.push(HelpRow::Bind {
                 keys: chords
                     .iter()
@@ -170,6 +226,78 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
         }
     }
     rows
+}
+
+/// Opposite steps shown on one row (`↑/↓ Stimulus level +1 / −1 dB`) when both have one key
+/// with the same modifiers.
+const PAIRS: [(CommandId, CommandId, &str); 10] = [
+    (
+        CommandId::LevelUp,
+        CommandId::LevelDown,
+        "Stimulus level +1 / −1 dB",
+    ),
+    (
+        CommandId::LevelUpCoarse,
+        CommandId::LevelDownCoarse,
+        "Stimulus level +3 / −3 dB",
+    ),
+    (
+        CommandId::ZoomIn,
+        CommandId::ZoomOut,
+        "Zoom frequency in / out",
+    ),
+    (
+        CommandId::PanLeft,
+        CommandId::PanRight,
+        "Pan frequency down / up",
+    ),
+    (
+        CommandId::CursorLeft,
+        CommandId::CursorRight,
+        "Cursor 1/12 octave down / up",
+    ),
+    (
+        CommandId::NudgeEarlier,
+        CommandId::NudgeLater,
+        "Nudge selected trace 0.1 ms earlier / later",
+    ),
+    (
+        CommandId::OffsetUp,
+        CommandId::OffsetDown,
+        "Display offset +1 / −1 dB of the selected curve",
+    ),
+    (
+        CommandId::OffsetUpCoarse,
+        CommandId::OffsetDownCoarse,
+        "Display offset +3 / −3 dB of the selected curve",
+    ),
+    (
+        CommandId::LevelZoomIn,
+        CommandId::LevelZoomOut,
+        "Zoom level axis in / out (vertical)",
+    ),
+    (
+        CommandId::LevelPanUp,
+        CommandId::LevelPanDown,
+        "Pan level axis up / down",
+    ),
+];
+
+/// The widest key text the help's key column holds (`Alt+Shift+V`).
+const KEY_COLUMN_CHARS: usize = 11;
+
+/// `Shift+↑/↓` for a pair bound to one key each with the same modifiers in `scope`, short
+/// enough for the key column; else `None` and the two get a row each.
+fn pair_keys(keymap: &Keymap, scope: Scope, a: CommandId, b: CommandId) -> Option<String> {
+    let (ka, kb) = (keymap.chords(a, scope), keymap.chords(b, scope));
+    let ([x], [y]) = (ka.as_slice(), kb.as_slice()) else {
+        return None;
+    };
+    if (x.command, x.alt, x.shift) != (y.command, y.alt, y.shift) {
+        return None;
+    }
+    let text = format!("{}/{}", x.label(), crate::keys::Chord::key(y.key).label());
+    (text.chars().count() <= KEY_COLUMN_CHARS).then_some(text)
 }
 
 /// Splits rows into `n` columns of about equal length, never ending a column on a header.
@@ -629,7 +757,24 @@ mod tests {
             k.bindings().iter().map(|b| (b.command, b.scope)).collect();
         pairs.sort();
         pairs.dedup();
-        assert_eq!(binds, pairs.len() - 16);
+        // Opposite steps share a row where their keys fit the key column: all but the
+        // display offset's ±3 dB (Alt+Shift+↑/↓ is too wide).
+        assert_eq!(binds, pairs.len() - 16 - (PAIRS.len() - 1));
+        assert!(rows.contains(&HelpRow::Bind {
+            keys: "↑/↓".into(),
+            title: "Stimulus level +1 / −1 dB".into(),
+            live: true,
+        }));
+        let alt = crate::keys::Chord::alt(Key::ArrowUp).label();
+        assert!(rows.contains(&HelpRow::Bind {
+            keys: format!("{alt}/↓"),
+            title: "Display offset +1 / −1 dB of the selected curve".into(),
+            live: true,
+        }));
+        assert!(rows.iter().any(|r| matches!(
+            r,
+            HelpRow::Bind { title, .. } if title == CommandId::OffsetUpCoarse.title()
+        )));
         let one = crate::keys::Chord::command(Key::Num1).label();
         assert!(rows.contains(&HelpRow::Bind {
             keys: format!("{one}…9"),

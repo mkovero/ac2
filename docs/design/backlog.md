@@ -56,9 +56,12 @@ the commit when it lands.
 
 ## Stored traces in the app (left after the Traces list)
 
-- **No export or delete of the selected trace from the app**: `ac2 trace export` / `ac2
-  trace rm` do it by name; a palette entry (export to a typed path, delete twice) would close
-  it.
+- **No export of the selected trace from the app**: `ac2 trace export` does it by name; a
+  palette entry (export to a typed path) would close it.
+- **The level axis ranges are forgotten when the app quits**: kept per pane while it runs;
+  `ui.toml` could remember them (a fit made for one show is rarely right for the next).
+- **The spectrum pane has no legend**: only offset curves are named (a note in its corner);
+  the colours of several live spectra and captures are told apart by the list alone.
 - **A − B takes the two lowest shown slots**: an unslotted trace has to be moved to a slot
   first (**Move the selected trace to slot…**); "selected trace minus the next shown one"
   would not need it.
@@ -66,6 +69,24 @@ the commit when it lands.
   list highlights it; a thicker line or a marker in the legend would show it in the plot.
 
 ## Done
+
+Comparing curves (field, 2026-10-03: "offset/change gain of the selected
+trace/measurement/spectrum … spread traces a little … spectrum needs to focus on very low
+signals"; "remove the selected trace by selecting it and pressing Delete"; "in show-one-pane
+mode I would expect the panel to change if I click a different measurement"):
+- **No quick offset** → **Alt+↑/↓** ±1 dB, **Alt+Shift+↑/↓** ±3 dB, **Alt+Home** 0 dB on the
+  selected stored trace (any kind; `trace.update`, recorded with the trace) or the focused
+  pane's live measurement (display only); **J** types it in the spectrum pane too. The plot
+  names every offset curve (transfer legend tag, spectrum note and cursor).
+- **Fixed level axes** → per pane: **Ctrl+I/O** zoom, **Ctrl+↑/↓** pan, **Shift+Home** fits
+  the shown curves (low-percentile floor), **Ctrl+Home** resets; Ctrl+wheel / Shift+wheel
+  with the mouse. `ac2_scene::view::level`.
+- **No delete in the app** → **Delete** (palette: Delete selected trace…) asks, Delete or
+  Enter deletes (`trace.delete`), the selection moves to the next shown trace; locked traces
+  refuse; never a live measurement.
+- **Maximised pane ignored the list** → picking a measurement brings up the pane that shows
+  it (and focuses it in the split layout); a trace picked while maximised brings up its pane.
+  No wire change.
 
 Choosing between stored traces (field, 2026-10-03: "in transfer view where there are several
 sweep traces, should I be able to choose between them?"):

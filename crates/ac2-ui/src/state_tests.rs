@@ -479,12 +479,19 @@ fn transfer_commands() {
 #[test]
 fn transfer_commands_need_a_transfer_measurement() {
     let mut t = T::new();
-    // The spectrum picked in the list while the transfer pane has the keys.
+    // The spectrum picked in the list: the spectrum pane takes the keys, and a transfer
+    // command from the palette says what it needs.
     t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(2)));
+    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
     assert!(t.key("X").is_empty());
+    assert!(
+        t.st.update(Msg::Command(CommandId::InsertDelay), &t.keys)
+            .is_empty()
+    );
     assert!(t.last_toast().contains("transfer-function"));
     // N in the transfer pane only goes through transfer measurements.
+    t.st.layout.focus = PaneKind::Transfer;
     t.key("Shift+N");
     assert_eq!(t.st.selected, Some(MeasId(1)));
 }
@@ -4471,3 +4478,6 @@ fn pane_caption_shortens_to_the_selected_trace() {
             .any(|c| c.contains("t10"))
     );
 }
+
+#[path = "state_display_tests.rs"]
+mod display;

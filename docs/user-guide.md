@@ -164,8 +164,37 @@ transfer pane, spectra and RTAs in the spectrum pane. **Choose the measurement t
 pane shows…** in the palette opens the same list (**↑/↓**, **Enter**).
 
 A click inside a pane selects the measurement it shows, exactly as clicking it in the
-measurement list does; selecting one in the list makes its pane show it. Keys such as **F**,
-**R**, **S** and **X** act on the selected measurement.
+measurement list does; selecting one in the list makes its pane show it and gives that pane
+the focus (unless the focused pane draws it already: the IR pane keeps it for a transfer
+measurement). Keys such as **F**, **R**, **S** and **X** act on the selected measurement.
+
+**One pane only (W).** With the focused pane maximised, picking a measurement in the list
+switches the one pane to the pane that shows it — a transfer measurement to the transfer
+pane, a spectrum or RTA to the spectrum / RTA pane, an SPL meter to the SPL pane — and the
+layout stays maximised; **W** goes back to the split layout. A stored trace selected while
+maximised (a click in the Traces list, **V**) does the same: a transfer capture or target
+brings up the transfer pane, a spectrum capture the spectrum pane, a sweep the sweep pane
+(unless the transfer pane is up: it draws sweeps too). In the split layout every pane is on
+screen and selecting a trace leaves the focus where it is.
+
+### Zoom, pan and the level axis
+
+The frequency axis is shared by the panes: **I** / **O** zoom it, **←** / **→** pan it,
+**Home** resets it to 20 Hz – 20 kHz; the mouse wheel zooms about the pointer and a drag
+pans.
+
+Each pane's **level axis** (transfer magnitude, spectrum / RTA level, the sweep pane's
+distortion) is its own and is kept while the app runs:
+
+- **Ctrl+I** / **Ctrl+O** zoom the focused pane's level axis in / out about its middle;
+  **Ctrl+wheel** zooms it about the level under the pointer.
+- **Ctrl+↑** / **Ctrl+↓** pan it by a round step (about a tenth of the range: 10 dB of a
+  100 dB range); **Shift+wheel** pans it smoothly. Plain **↑/↓** stay the stimulus level.
+- **Shift+Home** fits it to what the pane shows (live and stored curves, display offsets
+  included, in the shown frequency range; a few empty bins far below do not stretch it):
+  the way to look at very low signals, e.g. a spectrum between −140 and −80 dBFS.
+  **Ctrl+Home** puts the pane's default range back (±30 dB, 0 … −100 dB).
+- The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
 ### Smoothing
 
@@ -260,11 +289,29 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
   gives it up; `none` frees its slot), so the digit keys reach it.
 - The trace keys act on the selected trace when its curve is on the transfer pane (else on
-  the live measurement): **U** inverts it, **J** types its offset, **,** / **.** nudge it,
-  **E** makes it the phase reference, **K** / **Shift+K** smooth it, and **Mic curve on the
-  selected trace…** corrects it. A target curve takes an offset only (it has no phase); a
+  the live measurement): **U** inverts it, **,** / **.** nudge it, **E** makes it the phase
+  reference, **K** / **Shift+K** smooth it, and **Mic curve on the selected trace…** corrects
+  it. The offset keys (**J**, **Alt+↑/↓**, below) act on a selected trace of any kind. A
+  target curve takes an offset only (it has no phase); a
   locked trace refuses. The pane's title names the selected trace (`Sweep 2: smoothing
   off`).
+- **Spreading curves apart (display offset).** **Alt+↑** / **Alt+↓** move the selected
+  curve up / down by 1 dB, **Alt+Shift+↑** / **Alt+Shift+↓** by 3 dB, **Alt+Home** puts it
+  back at 0 dB; **J** types a value. The selected curve is the selected stored trace (any
+  kind: transfer, target, spectrum / RTA capture, sweep), else the live measurement of the
+  focused pane (the spectrum pane's when it has the focus, else the transfer pane's). A
+  stored trace's offset is part of its record (shown in `ac2 trace list`, kept in sessions
+  and exports); a live measurement's is this app's display only. The toast names the curve
+  and its new offset, and the plot says it next to the curve — the transfer legend row
+  (`Main L S2 · Δt 0.00 ms · +3.0 dB`), a note in the spectrum pane's corner (`Main L S2 ·
+  offset +3.0 dB`), the spectrum cursor values — so a spread is never read as a level
+  difference. A locked trace keeps its offset.
+- **Delete** asks before the selected stored trace goes (naming it); **Delete** again or
+  **Enter** deletes it, **N** or **Esc** keeps it (Esc also stops the stimulus, as always).
+  The selection moves to the next shown trace in the list (else the one before it, else the
+  live measurement). A locked trace is not deleted, and Delete never deletes a live
+  measurement (that is **Delete selected measurement** in the palette). The palette has
+  **Delete selected trace…** too.
 - **One selection for the sweeps:** a sweep selected in the list or with V is the one the
   **Sweep / distortion** pane shows, and **N** / **Shift+N** on that pane select the sweep they
   step to, for the transfer pane and the trace keys too. A finished sweep is selected.
@@ -549,7 +596,8 @@ Everything in the app is reachable from the keyboard. **H** (or **F1**) shows th
 Keys are scoped: the focused pane's keys apply first, then the global ones. The defaults
 avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and other European
 layouts. The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** stop, **↑/↓**
-level (±1 dB, with Shift ±3 dB).
+level (±1 dB, with Shift ±3 dB). With **Alt** the arrows move the selected curve's display
+offset instead, with **Ctrl** they pan the focused pane's level axis.
 
 Change bindings in `keys.toml` in the ac2 config directory (`~/.config/ac2` on Linux,
 `~/Library/Application Support/ac2` on macOS, `%APPDATA%\ac2\config` on Windows):
@@ -618,6 +666,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `←` | Pan frequency down | `pan_left` |
 | `→` | Pan frequency up | `pan_right` |
 | `Home` | Reset zoom (20 Hz – 20 kHz) | `reset_view` |
+| `Ctrl+I` | Zoom level axis in (vertical) | `level_zoom_in` |
+| `Ctrl+O` | Zoom level axis out (vertical) | `level_zoom_out` |
+| `Ctrl+↑` | Pan level axis up (towards higher levels) | `level_pan_up` |
+| `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
+| `Shift+Home` | Fit level axis to the shown curves | `level_fit` |
+| `Ctrl+Home` | Level axis back to the pane's default | `level_reset` |
 | `C` | Comparison cursor on / off | `toggle_cursor` |
 | `Shift+←` | Cursor 1/12 octave down | `cursor_left` |
 | `Shift+→` | Cursor 1/12 octave up | `cursor_right` |
@@ -644,6 +698,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+V` | Select next trace incl. hidden (then live) | `next_any_trace` |
 | `Alt+Shift+V` | Select previous trace incl. hidden (then live) | `prev_any_trace` |
 | `A` | Show / hide the selected stored trace | `toggle_trace` |
+| `Delete` | Delete selected trace… (asks first) | `trace_delete` |
+| `Alt+↑` | Display offset +1 dB of the selected curve | `offset_up` |
+| `Alt+↓` | Display offset −1 dB of the selected curve | `offset_down` |
+| `Alt+Shift+↑` | Display offset +3 dB of the selected curve | `offset_up_coarse` |
+| `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
+| `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
 | `Shift+O` | Open audio session… | `session_open` |
 | `Shift+S` | Sweep measurement: response and harmonic distortion… | `sweep_new` |
 | `Shift+L` | Leq windows and limits of the SPL meter… | `leq_windows` |
@@ -681,6 +741,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `F` | Freeze / unfreeze selected measurement | `freeze` |
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
+| `J` | Type dB offset of selected trace… | `offset` |
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `B` | RTA: bars / line | `spectrum_style` |
@@ -762,8 +823,8 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `K` smoothing · `Shift+I` IR · `W` maximise · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `K` smoothing · `B` bars/line · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `K` smoothing · `Shift+I` IR · `W` maximise · `Alt+↑` offset · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `K` smoothing · `B` bars/line · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` linear/log/ETC · `Shift+I` IR/distortion · `W` maximise · `Shift+W` hide pane · `H` all keys |

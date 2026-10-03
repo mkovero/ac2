@@ -41,6 +41,10 @@ use crate::palette::Palette;
 use crate::prefs::UiPrefs;
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 
+#[path = "state_display.rs"]
+mod display;
+pub use display::{DeleteTracePrompt, LEVEL_ZOOM_FACTOR, level_range};
+
 /// The panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PaneKind {
@@ -641,6 +645,8 @@ pub enum Overlay {
     Leq(Box<LeqDialog>),
     /// The confirmation before a new SPL log.
     NewLog(Box<NewLogPrompt>),
+    /// The confirmation before a stored trace is deleted.
+    DeleteTrace(Box<DeleteTracePrompt>),
 }
 
 /// The confirmation before `spl.log_new`: which meter, and what it says.
@@ -729,6 +735,19 @@ pub enum Msg {
     Offer(bool),
     /// Mouse on the new SPL log confirmation: `true` starts it, `false` keeps the log.
     NewLog(bool),
+    /// Mouse on the delete confirmation: `true` deletes the trace, `false` keeps it.
+    DeleteTrace(bool),
+    /// Ctrl+wheel on a pane: its level axis zooms by `factor` (> 1 in) about `about_db`.
+    LevelZoom {
+        pane: PaneKind,
+        about_db: Option<f64>,
+        factor: f64,
+    },
+    /// Shift+wheel on a pane: its level axis pans by `db` (positive: higher levels).
+    LevelPan {
+        pane: PaneKind,
+        db: f64,
+    },
     /// Mouse on the Leq windows dialog.
     Leq(LeqMsg),
 }
@@ -1623,6 +1642,7 @@ impl AppState {
                     self.cal_view_key(Chord::key(eframe::egui::Key::Delete), None, out);
                 }
                 Overlay::Leq(d) => d.backspace(),
+                Overlay::DeleteTrace(_) => self.delete_trace(false, out),
                 Overlay::Prompt(p) => {
                     p.text.pop();
                     p.error = None;
@@ -1635,6 +1655,13 @@ impl AppState {
             Msg::Session(m) => self.session_msg(m, out),
             Msg::Offer(create) => self.offer(create, out),
             Msg::NewLog(go) => self.new_log(go, out),
+            Msg::DeleteTrace(go) => self.delete_trace(go, out),
+            Msg::LevelZoom {
+                pane,
+                about_db,
+                factor,
+            } => self.level_zoom(pane, about_db, factor),
+            Msg::LevelPan { pane, db } => self.level_pan(pane, db),
             Msg::Leq(m) => self.leq_msg(m, out),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
@@ -1643,10 +1670,14 @@ impl AppState {
                 let now = self.now_s;
                 self.toasts.retain(|t| t.until_s > now);
             }
-            Msg::SelectMeas(id) => self.select(id),
+            Msg::SelectMeas(id) => {
+                self.select(id);
+                self.reveal_meas(id);
+            }
             Msg::SelectTrace(id) => {
                 let id = (self.selected_trace != Some(id)).then_some(id);
                 self.select_trace(id);
+                self.reveal_trace();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),
             Msg::FocusPane(p) => {
@@ -1758,6 +1789,15 @@ impl AppState {
                     self.new_log(true, out);
                 } else if matches!(chord.key, Key::Backspace | Key::N) {
                     self.new_log(false, out);
+                }
+                return;
+            }
+            // Delete twice deletes, as in the calibrations view.
+            Overlay::DeleteTrace(_) => {
+                if matches!(chord.key, Key::Enter | Key::Delete) {
+                    self.delete_trace(true, out);
+                } else if matches!(chord.key, Key::Backspace | Key::N) {
+                    self.delete_trace(false, out);
                 }
                 return;
             }
@@ -1950,9 +1990,9 @@ impl AppState {
                 });
             }),
             PromptKind::FinderObservation => self.set_observation(&text),
-            PromptKind::Offset(id) => parse_number(&text, &["db"]).map(|v| {
-                self.edits.entry(id).or_default().offset_db = v;
-            }),
+            PromptKind::Offset(id) => {
+                parse_number(&text, &["db"]).map(|v| self.set_live_offset(id, v))
+            }
             PromptKind::TraceOffset(id) => parse_number(&text, &["db"]).and_then(|v| {
                 let t = self.trace_meta(id)?;
                 let mut edit = t.edit.clone();
@@ -2679,6 +2719,7 @@ impl AppState {
             0 => self.select_live(),
             k => {
                 self.select_trace(Some(ids[(k - 1) as usize]));
+                self.reveal_trace();
                 if let Some(t) = self.selected_trace_meta() {
                     let hidden = if t.edit.visible { "" } else { " (hidden)" };
                     let label = trace_label(t);
@@ -2853,6 +2894,7 @@ impl AppState {
                 None => self.error(SELECT_TRACE_FIRST),
             },
             C::SelectLive => self.select_live(),
+            C::DeleteTrace => self.ask_delete_trace(),
             C::SmoothCoarser => self.smooth(1, None, out),
             C::SmoothFiner => self.smooth(-1, None, out),
             C::SmoothOff => self.smooth(0, Some(None), out),
@@ -2892,6 +2934,12 @@ impl AppState {
                 self.nav.set_target(t);
             }
             C::ResetView => self.nav.set_target(FreqRange::default()),
+            C::LevelZoomIn
+            | C::LevelZoomOut
+            | C::LevelPanUp
+            | C::LevelPanDown
+            | C::LevelFit
+            | C::LevelReset => self.level_key(c),
             C::ToggleCursor => {
                 let t = self.nav.target;
                 self.view.cursor_hz = match self.view.cursor_hz {
@@ -3235,19 +3283,12 @@ impl AppState {
                     }
                 }
             },
-            C::Offset => match self.transfer_trace_for_edit() {
-                Err(()) => {}
-                Ok(Some(t)) => {
-                    let text = offset_text(t.edit.offset.0);
-                    self.prompt(PromptKind::TraceOffset(t.id), text);
-                }
-                Ok(None) => {
-                    if let Some(m) = self.need_tf() {
-                        let text = offset_text(self.edit(m.id).offset_db);
-                        self.prompt(PromptKind::Offset(m.id), text);
-                    }
-                }
-            },
+            C::Offset => self.offset_prompt(),
+            C::OffsetUp => self.step_offset(Some(1.0), out),
+            C::OffsetDown => self.step_offset(Some(-1.0), out),
+            C::OffsetUpCoarse => self.step_offset(Some(3.0), out),
+            C::OffsetDownCoarse => self.step_offset(Some(-3.0), out),
+            C::OffsetClear => self.step_offset(None, out),
             C::NudgeEarlier | C::NudgeLater => {
                 let d = if c == C::NudgeEarlier {
                     -NUDGE_S

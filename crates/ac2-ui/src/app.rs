@@ -65,6 +65,9 @@ pub(crate) struct CachedScene {
     pub scene: Arc<Scene>,
     /// The frequency axis mapping of the scene (TF / spectrum), for mouse navigation.
     pub x_axis: Option<ac2_scene::axis::Mapping>,
+    /// The level axis mapping in dB (transfer magnitude, spectrum, distortion in dB), for
+    /// zooming about the pointer.
+    pub y_level: Option<ac2_scene::axis::Mapping>,
 }
 
 pub struct App {
@@ -283,8 +286,11 @@ impl App {
                     }
                     // Auto-repeat only for navigation; never for stimulus or toggles, so a
                     // held key cannot ramp the level or flicker a mode.
+                    // Ctrl+↑/↓ move the level axis (never the stimulus level, which is ↑/↓
+                    // without Ctrl).
                     let nav = matches!(key, Key::ArrowLeft | Key::ArrowRight)
-                        || (overlay && matches!(key, Key::ArrowUp | Key::ArrowDown));
+                        || (matches!(key, Key::ArrowUp | Key::ArrowDown)
+                            && (overlay || (modifiers.command && !modifiers.alt)));
                     if repeat && !nav {
                         continue;
                     }

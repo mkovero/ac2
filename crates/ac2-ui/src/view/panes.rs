@@ -69,19 +69,30 @@ fn slot(p: PaneKind) -> PlotSlot {
     PlotSlot(p as u32)
 }
 
+/// The axes of a pane's scene the mouse navigates: frequency, and level in dB.
+#[derive(Clone, Copy, Debug, Default)]
+struct Axes {
+    x: Option<Mapping>,
+    y_level: Option<Mapping>,
+}
+
 /// Scene for `pane` at `size`, from the cache when nothing changed.
 fn scene_for(
     app: &mut App,
     pane: PaneKind,
     size: egui::Vec2,
     theme: &Theme,
-) -> Option<(Arc<ac2_plot::Scene>, Option<Mapping>)> {
+) -> Option<(Arc<ac2_plot::Scene>, Axes)> {
     if let Some(c) = app.scenes.get(&pane)
         && c.generation == app.generation
         && c.size == size
         && c.theme == app.state.theme
     {
-        return Some((c.scene.clone(), c.x_axis));
+        let axes = Axes {
+            x: c.x_axis,
+            y_level: c.y_level,
+        };
+        return Some((c.scene.clone(), axes));
     }
     let vp = Viewport {
         width: size.x,
@@ -89,22 +100,44 @@ fn scene_for(
     };
     let now = super::now();
     let st = &app.state;
-    let (scene, x_axis) = match pane {
+    let (scene, axes) = match pane {
         PaneKind::Transfer => {
             let s = scenes::transfer(st, theme, vp, now);
-            (s.scene, Some(s.x_axis.mapping))
+            let y = s
+                .panes
+                .iter()
+                .find(|p| p.kind == ac2_scene::tf::TfPaneKind::Magnitude)
+                .map(|p| p.y_axis.mapping);
+            (
+                s.scene,
+                Axes {
+                    x: Some(s.x_axis.mapping),
+                    y_level: y,
+                },
+            )
         }
         PaneKind::Spectrum => {
             let s = scenes::spectrum(st, theme, vp, now);
-            (s.scene, Some(s.x_axis.mapping))
+            (
+                s.scene,
+                Axes {
+                    x: Some(s.x_axis.mapping),
+                    y_level: Some(s.y_axis.mapping),
+                },
+            )
         }
-        PaneKind::Ir => (scenes::ir(st, theme, vp, now)?.scene, None),
-        PaneKind::Spl if st.view.spl.leq => (scenes::leq(st, theme, vp, now)?.scene, None),
-        PaneKind::Spl => (scenes::spl(st, theme, vp, now)?.scene, None),
+        PaneKind::Ir => (scenes::ir(st, theme, vp, now)?.scene, Axes::default()),
+        PaneKind::Spl if st.view.spl.leq => {
+            (scenes::leq(st, theme, vp, now)?.scene, Axes::default())
+        }
+        PaneKind::Spl => (scenes::spl(st, theme, vp, now)?.scene, Axes::default()),
         PaneKind::Distortion => {
             let s = scenes::sweep(st, theme, vp, now);
-            let x = s.x_axis();
-            (s.scene(), x)
+            let axes = Axes {
+                x: s.x_axis(),
+                y_level: s.y_level(st.view.distortion.unit),
+            };
+            (s.scene(), axes)
         }
     };
     let scene = Arc::new(scene);
@@ -115,10 +148,11 @@ fn scene_for(
             size,
             theme: app.state.theme,
             scene: scene.clone(),
-            x_axis,
+            x_axis: axes.x,
+            y_level: axes.y_level,
         },
     );
-    Some((scene, x_axis))
+    Some((scene, axes))
 }
 
 fn placeholder(pane: PaneKind, app: &App) -> &'static str {
@@ -268,7 +302,14 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
             }
         }
-        navigate(app, ui, &resp, pane, plot_rect, built.and_then(|b| b.1));
+        navigate(
+            app,
+            ui,
+            &resp,
+            pane,
+            plot_rect,
+            built.map(|b| b.1).unwrap_or_default(),
+        );
     }
     ui.allocate_rect(area, egui::Sense::hover());
 }
@@ -686,20 +727,63 @@ fn title_hint(ui: &egui::Ui, title: egui::Rect, left: f32, hint: &str, ch: &Chro
     painter.galley(pos, galley, ch.focus);
 }
 
-/// Click focuses (and on a frequency axis places the cursor); wheel zooms about the
-/// pointer; drag pans. Navigation only: values stay as received.
+/// Click focuses (and on a frequency axis places the cursor); wheel zooms the frequency
+/// axis about the pointer, Ctrl+wheel the level axis, Shift+wheel pans the level axis; drag
+/// pans the frequency axis. Navigation only: values stay as received.
 fn navigate(
     app: &mut App,
     ui: &egui::Ui,
     resp: &egui::Response,
     pane: PaneKind,
     plot_rect: egui::Rect,
-    x: Option<Mapping>,
+    axes: Axes,
 ) {
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(pane));
     }
-    let Some(m) = x else {
+    if resp.hovered()
+        && crate::state::level_range(&app.state.view, pane).is_some()
+        && !(pane == PaneKind::Distortion && app.state.view.distortion.show_ir)
+    {
+        // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
+        let (zoom, shift, dx, pos) = ui.input(|i| {
+            let zoom = if i.modifiers.command {
+                i.zoom_delta()
+            } else {
+                1.0
+            };
+            (
+                zoom,
+                i.modifiers.shift,
+                i.smooth_scroll_delta.x,
+                i.pointer.hover_pos(),
+            )
+        });
+        let about_db = axes
+            .y_level
+            .zip(pos)
+            .map(|(m, p)| m.from_px(p.y - plot_rect.min.y))
+            .filter(|v| v.is_finite());
+        if zoom != 1.0 {
+            app.dispatch(Msg::LevelZoom {
+                pane,
+                about_db,
+                factor: f64::from(zoom),
+            });
+        }
+        if shift
+            && dx != 0.0
+            && let Some(r) = crate::state::level_range(&app.state.view, pane)
+        {
+            // Wheel up (positive delta) shows higher levels; about a tenth of the span per
+            // notch (50 px of scroll).
+            app.dispatch(Msg::LevelPan {
+                pane,
+                db: f64::from(dx / 500.0) * r.span(),
+            });
+        }
+    }
+    let Some(m) = axes.x else {
         return;
     };
     let hz_at = |pos: egui::Pos2| m.from_px(pos.x - plot_rect.min.x);

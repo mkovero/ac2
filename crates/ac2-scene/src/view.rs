@@ -63,6 +63,96 @@ impl FreqRange {
     }
 }
 
+/// Lowest level a dB axis can pan to.
+pub const LEVEL_LIMIT_LO: f64 = -300.0;
+/// Highest level a dB axis can pan to.
+pub const LEVEL_LIMIT_HI: f64 = 300.0;
+/// Narrowest level span, dB: a tenth of a dB still gets its own label.
+pub const LEVEL_MIN_SPAN: f64 = 1.0;
+/// Narrowest span a fit frames: a flat trace still shows its ripple against a few dB.
+pub const LEVEL_FIT_MIN_SPAN: f64 = 6.0;
+
+/// Navigation of a vertical dB axis (transfer magnitude, spectrum level, distortion): zoom
+/// about a level, pan by dB, frame the shown data. The axis keeps its tick rules
+/// ([`crate::axis::linear_ticks`]), which label any range from a tenth of a dB to hundreds.
+pub mod level {
+    use super::{LEVEL_FIT_MIN_SPAN, LEVEL_LIMIT_HI, LEVEL_LIMIT_LO, LEVEL_MIN_SPAN};
+    use crate::axis::Range;
+
+    /// The range kept within the limits, its span between [`LEVEL_MIN_SPAN`] and the
+    /// limits' span; an invalid range is returned as it is.
+    pub fn clamp(r: Range) -> Range {
+        if !r.is_valid() {
+            return r;
+        }
+        let span = r
+            .span()
+            .clamp(LEVEL_MIN_SPAN, LEVEL_LIMIT_HI - LEVEL_LIMIT_LO);
+        let mid = (r.lo + r.hi) / 2.0;
+        let lo = (mid - span / 2.0).clamp(LEVEL_LIMIT_LO, LEVEL_LIMIT_HI - span);
+        Range::new(lo, lo + span)
+    }
+
+    /// Zoom by `factor` (> 1 zooms in) keeping `about` at the same height.
+    pub fn zoom(r: Range, about: f64, factor: f64) -> Range {
+        if !(factor > 0.0 && factor.is_finite() && about.is_finite() && r.is_valid()) {
+            return r;
+        }
+        let span = (r.span() / factor).clamp(LEVEL_MIN_SPAN, LEVEL_LIMIT_HI - LEVEL_LIMIT_LO);
+        let t = ((about - r.lo) / r.span()).clamp(0.0, 1.0);
+        let lo = about - t * span;
+        clamp(Range::new(lo, lo + span))
+    }
+
+    /// Pan by `db` (positive shows higher levels), keeping the span.
+    pub fn pan(r: Range, db: f64) -> Range {
+        if !(db.is_finite() && r.is_valid()) {
+            return r;
+        }
+        clamp(Range::new(r.lo + db, r.hi + db))
+    }
+
+    /// The 1-2-5 step one key press pans by: about a tenth of the span, so a few presses
+    /// move a trace across the pane and the grid lines stay on round values.
+    pub fn pan_step(r: Range) -> f64 {
+        nice(r.span() / 10.0)
+    }
+
+    /// The smallest 1, 2, 5 × 10ⁿ at least `x` (`x` > 0).
+    fn nice(x: f64) -> f64 {
+        if !(x > 0.0 && x.is_finite()) {
+            return 1.0;
+        }
+        let p = 10f64.powf(x.log10().floor());
+        [1.0, 2.0, 5.0, 10.0]
+            .into_iter()
+            .map(|m| m * p)
+            .find(|s| *s >= x * (1.0 - 1e-9))
+            .unwrap_or(10.0 * p)
+    }
+
+    /// A range that frames `values` (dB; NaN and ±∞ ignored): from the lowest percent of
+    /// them — a few empty bins or a deep null do not stretch it — to the highest, padded
+    /// and rounded out to the grid step, at least [`LEVEL_FIT_MIN_SPAN`] wide. `None`
+    /// without a finite value.
+    pub fn fit(values: impl IntoIterator<Item = f64>) -> Option<Range> {
+        let mut v: Vec<f64> = values.into_iter().filter(|x| x.is_finite()).collect();
+        if v.is_empty() {
+            return None;
+        }
+        v.sort_by(f64::total_cmp);
+        let lo = v[v.len() / 100];
+        let hi = v[v.len() - 1];
+        let mid = (lo + hi) / 2.0;
+        let span = (hi - lo).max(LEVEL_FIT_MIN_SPAN);
+        let pad = (span * 0.08).max(1.0);
+        let (lo, hi) = (mid - span / 2.0 - pad, mid + span / 2.0 + pad);
+        let step = nice((hi - lo) / 8.0);
+        let r = Range::new((lo / step).floor() * step, (hi / step).ceil() * step);
+        Some(clamp(r))
+    }
+}
+
 /// How the phase pane shows phase.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhaseView {
@@ -307,5 +397,85 @@ mod tests {
         assert!(close(r.hi / r.lo, 1000.0));
         let r = FreqRange::default().pan(1.0);
         assert!(close(r.lo, 40.0) && close(r.hi, 40_000.0));
+    }
+
+    #[test]
+    fn level_zoom_keeps_the_anchor_and_limits() {
+        let r = Range::new(-100.0, 0.0);
+        let z = level::zoom(r, -80.0, 2.0);
+        assert!(close(z.span(), 50.0));
+        // −80 dB stays a fifth of the way up.
+        assert!(close((-80.0 - z.lo) / z.span(), 0.2));
+        let back = level::zoom(z, -80.0, 0.5);
+        assert!(
+            close(back.lo, r.lo) && close(back.hi + 1.0, r.hi + 1.0),
+            "{back:?}"
+        );
+        // The narrowest span and the limits hold however far it goes.
+        let z = level::zoom(r, -50.0, 1e9);
+        assert!(close(z.span(), LEVEL_MIN_SPAN));
+        let z = level::zoom(r, -50.0, 1e-9);
+        assert_eq!(z, Range::new(LEVEL_LIMIT_LO, LEVEL_LIMIT_HI));
+        // Nonsense leaves it alone.
+        assert_eq!(level::zoom(r, f64::NAN, 2.0), r);
+        assert_eq!(level::zoom(r, -50.0, 0.0), r);
+    }
+
+    #[test]
+    fn level_pan_steps_on_round_values() {
+        let r = Range::new(-100.0, 0.0);
+        assert_eq!(level::pan_step(r), 10.0);
+        assert_eq!(level::pan_step(Range::new(-30.0, 30.0)), 10.0);
+        assert_eq!(level::pan_step(Range::new(-12.0, 0.0)), 2.0);
+        assert!(close(level::pan_step(Range::new(-1.0, 0.0)), 0.1));
+        assert_eq!(level::pan(r, -40.0), Range::new(-140.0, -40.0));
+        // Against a limit the span stays.
+        assert_eq!(level::pan(r, -1000.0), Range::new(-300.0, -200.0));
+        assert_eq!(level::pan(r, 1000.0), Range::new(200.0, 300.0));
+    }
+
+    #[test]
+    fn level_fit_frames_low_signals() {
+        // A spectrum of very low levels: noise near −135 dBFS, a tone at −82 dBFS, and a few
+        // empty bins far below that a fit must not stretch to.
+        let mut v: Vec<f64> = (0..2000).map(|i| -135.0 + f64::from(i % 7)).collect();
+        v.push(-82.0);
+        v.extend([-300.0, f64::NEG_INFINITY, f64::NAN, -280.0]);
+        let r = level::fit(v).expect("finite values");
+        assert!(r.lo <= -135.0 && r.lo >= -150.0, "{r:?}");
+        assert!(r.hi >= -82.0 && r.hi <= -70.0, "{r:?}");
+        // On the grid: whole multiples of the step it picked (5 dB here).
+        assert_eq!((r.lo % 5.0, r.hi % 5.0), (0.0, 0.0), "{r:?}");
+        // A flat trace still gets a few dB.
+        let r = level::fit([3.0; 10]).expect("finite");
+        assert!(
+            r.span() >= LEVEL_FIT_MIN_SPAN && r.lo < 3.0 && r.hi > 3.0,
+            "{r:?}"
+        );
+        assert_eq!(level::fit([f64::NAN]), None);
+        assert_eq!(level::fit(std::iter::empty()), None);
+    }
+
+    #[test]
+    fn level_ticks_are_readable_at_any_span() {
+        use crate::axis::{Steps, axis_with_density};
+        let labels = |r: Range| {
+            axis_with_density(r, 200.0, 0.0, "dB", Steps::Decimal, 200.0)
+                .labels()
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        // A 1 dB span: tenths, with a decimal.
+        let l = labels(Range::new(-1.0, 0.0));
+        assert!(l.contains(&"\u{2212}0.4".to_owned()), "{l:?}");
+        assert!((4..=9).contains(&l.len()), "{l:?}");
+        // Very low levels: whole dB at a round step.
+        let l = labels(Range::new(-145.0, -75.0));
+        assert!(l.contains(&"\u{2212}100".to_owned()), "{l:?}");
+        assert!(l.iter().all(|s| !s.contains('.')), "{l:?}");
+        // The whole limit span: a few labels, hundreds apart.
+        let l = labels(Range::new(LEVEL_LIMIT_LO, LEVEL_LIMIT_HI));
+        assert!(l.contains(&"0".to_owned()) && l.len() <= 8, "{l:?}");
     }
 }

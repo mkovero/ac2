@@ -122,6 +122,16 @@ pub struct SpectrumTrace<'a> {
     /// `1/3 oct · A-weighted`, `Hann window`.
     pub caption: String,
     pub freshness: Option<Freshness>,
+    /// Display offset, dB, added to the level and the peak hold: traces spread apart to
+    /// compare their shapes. The plot names every offset trace ([`offset_note`]), so a
+    /// spread is never read as a level difference.
+    pub offset_db: f64,
+}
+
+/// What the spectrum plot writes for a trace drawn with a display offset:
+/// `Main L S1 · offset +3.0 dB`.
+pub fn offset_note(name: &str, offset_db: f64) -> String {
+    format!("{name} · offset {}", format::db_readout(offset_db))
 }
 
 impl<'a> SpectrumTrace<'a> {
@@ -156,6 +166,7 @@ impl<'a> SpectrumTrace<'a> {
                 cal_caption(frame.meta.cal, curve, captured)
             ),
             freshness: Some(freshness),
+            offset_db: 0.0,
         }
     }
 
@@ -190,6 +201,7 @@ impl<'a> SpectrumTrace<'a> {
                 cal_caption(frame.meta.cal, curve, captured)
             ),
             freshness: Some(freshness),
+            offset_db: 0.0,
         }
     }
 
@@ -198,9 +210,15 @@ impl<'a> SpectrumTrace<'a> {
             .validity
             .is_none_or(|v| v.get(i).is_some_and(|m| *m == ValidityMask::NONE));
         match self.level.get(i) {
-            Some(l) if ok && l.is_finite() => f64::from(*l),
+            Some(l) if ok && l.is_finite() => f64::from(*l) + self.offset_db,
             _ => f64::NAN,
         }
+    }
+
+    /// Peak-hold value at column `i`, with the display offset.
+    fn peak_value(&self, i: usize) -> Option<f64> {
+        let p = self.peak?.get(i)?;
+        Some(f64::from(*p) + self.offset_db)
     }
 
     fn is_stale(&self) -> bool {
@@ -309,10 +327,16 @@ pub struct SpectrumScene {
     pub unit: String,
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
+    /// One line per trace drawn with a display offset ([`offset_note`]), top left of the
+    /// plot in the trace's colour.
+    pub offsets: Vec<String>,
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
 }
+
+/// Line pitch of the offset notes.
+const NOTE_ROW: f32 = 15.0;
 
 pub fn spectrum_scene(
     traces: &[SpectrumTrace<'_>],
@@ -346,6 +370,18 @@ pub fn spectrum_scene(
         theme.text_dim,
     ));
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
+    let mut offsets = Vec::new();
+    for t in traces.iter().filter(|t| t.offset_db != 0.0) {
+        let text = offset_note(&t.name, t.offset_db);
+        c.base.labels.push(label(
+            text.clone(),
+            [plot.x + 6.0, plot.y + 4.0 + NOTE_ROW * offsets.len() as f32],
+            anchor(HAlign::Left, VAlign::Top),
+            theme.small_font_size,
+            t.color,
+        ));
+        offsets.push(text);
+    }
 
     for t in traces {
         let dim = if t.is_stale() { theme.stale_alpha } else { 1.0 };
@@ -400,19 +436,17 @@ pub fn spectrum_scene(
                 }
             }
         }
-        if view.spectrum.peak_hold
-            && let Some(peak) = t.peak
-        {
+        if view.spectrum.peak_hold && t.peak.is_some() {
             let pc = color.with_alpha(theme.peak_alpha);
             let points = match style {
                 // A cap across each band.
                 SpectrumStyle::Bars => {
                     let mut pts = Vec::new();
                     for i in cols.clone() {
-                        let (Some(p), Some(&(e0, e1))) = (peak.get(i), t.edges.get(i)) else {
+                        let (Some(p), Some(&(e0, e1))) = (t.peak_value(i), t.edges.get(i)) else {
                             continue;
                         };
-                        let y = ym.to_px(f64::from(*p));
+                        let y = ym.to_px(p);
                         if !y.is_finite() {
                             continue;
                         }
@@ -428,7 +462,7 @@ pub fn spectrum_scene(
                     let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
                     let ys: Vec<f32> = cols
                         .clone()
-                        .map(|i| peak.get(i).map_or(f32::NAN, |p| ym.to_px(f64::from(*p))))
+                        .map(|i| t.peak_value(i).map_or(f32::NAN, |p| ym.to_px(p)))
                         .collect();
                     let (xs, ys) = max_per_pixel(&xs, &ys);
                     gapped(&xs, &ys, None, |_, _| false).0
@@ -468,7 +502,13 @@ pub fn spectrum_scene(
                 } else {
                     s
                 };
-                Some((t.name.clone(), s))
+                // An offset trace reads its displayed (offset) level, and says so.
+                let name = if t.offset_db != 0.0 {
+                    offset_note(&t.name, t.offset_db)
+                } else {
+                    t.name.clone()
+                };
+                Some((name, s))
             })
             .collect();
         Some(SpectrumCursor {
@@ -498,6 +538,7 @@ pub fn spectrum_scene(
         unit,
         caption,
         cursor,
+        offsets,
         strip: strip.rect,
         banners: strip.rows,
     }
@@ -550,6 +591,7 @@ mod tests {
                 weighting_label(Weighting::A)
             ),
             freshness: None,
+            offset_db: 0.0,
         }
     }
 
@@ -765,6 +807,60 @@ mod tests {
         assert_eq!(
             cur.rows,
             vec![("RTA".to_string(), "−40.0 dB SPL".to_string())]
+        );
+    }
+
+    /// A trace spread by a display offset is drawn that much higher, its peak hold too, and
+    /// the plot and the cursor name the offset; an unshifted trace adds no note.
+    #[test]
+    fn offset_traces_move_and_say_so() {
+        let g = third_octaves();
+        let (f, e) = (column_frequencies(&g), column_edges(&g));
+        let level = vec![-40.0f32; f.len()];
+        let peak = vec![-30.0f32; f.len()];
+        let a = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+        let mut b = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+        b.name = "Main L S1".into();
+        b.offset_db = 3.0;
+        b.peak = Some(&peak);
+        let view = ViewState {
+            spectrum: SpectrumView {
+                style: SpectrumStyle::Line,
+                level: Range::new(-60.0, 0.0),
+                peak_hold: true,
+            },
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        let s = spectrum_scene(&[a, b], &Status::default(), &view, &Theme::dark(), SIZE);
+        assert_eq!(s.offsets, ["Main L S1 · offset +3.0 dB"]);
+        let ym = s.y_axis.mapping;
+        let lines = &s.scene.layers[1].polylines;
+        let y_of = |l: &Polyline| l.points.iter().find(|p| p[1].is_finite()).map(|p| p[1]);
+        assert_eq!(y_of(&lines[0]), Some(ym.to_px(-40.0)));
+        assert_eq!(y_of(&lines[1]), Some(ym.to_px(-37.0)));
+        assert_eq!(
+            y_of(&lines[2]),
+            Some(ym.to_px(-27.0)),
+            "peak hold moves too"
+        );
+        let cur = s.cursor.expect("cursor");
+        assert_eq!(
+            cur.rows,
+            [
+                ("RTA".to_string(), "−40.0 dBFS".to_string()),
+                (
+                    "Main L S1 · offset +3.0 dB".to_string(),
+                    "−37.0 dBFS".to_string()
+                ),
+            ]
+        );
+        assert!(
+            s.scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.labels)
+                .any(|l| l.text == "Main L S1 · offset +3.0 dB")
         );
     }
 

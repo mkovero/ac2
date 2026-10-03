@@ -370,6 +370,12 @@ commands! {
     PanLeft => "pan_left", "Pan frequency down", [Global];
     PanRight => "pan_right", "Pan frequency up", [Global];
     ResetView => "reset_view", "Reset zoom (20 Hz – 20 kHz)", [Global];
+    LevelZoomIn => "level_zoom_in", "Zoom level axis in (vertical)", [Global];
+    LevelZoomOut => "level_zoom_out", "Zoom level axis out (vertical)", [Global];
+    LevelPanUp => "level_pan_up", "Pan level axis up (towards higher levels)", [Global];
+    LevelPanDown => "level_pan_down", "Pan level axis down (towards lower levels)", [Global];
+    LevelFit => "level_fit", "Fit level axis to the shown curves", [Global];
+    LevelReset => "level_reset", "Level axis back to the pane's default", [Global];
     ToggleCursor => "toggle_cursor", "Comparison cursor on / off", [Global];
     CursorLeft => "cursor_left", "Cursor 1/12 octave down", [Global];
     CursorRight => "cursor_right", "Cursor 1/12 octave up", [Global];
@@ -398,6 +404,12 @@ commands! {
     ToggleTrace => "toggle_trace", "Show / hide the selected stored trace", [Global];
     TraceSlot => "trace_slot", "Move the selected trace to slot… (1 … 9, none frees its slot)", [Global];
     SelectLive => "select_live", "Deselect the stored trace: keys act on the live measurement again", [Global];
+    DeleteTrace => "trace_delete", "Delete selected trace… (asks first)", [Global];
+    OffsetUp => "offset_up", "Display offset +1 dB of the selected curve", [Global];
+    OffsetDown => "offset_down", "Display offset −1 dB of the selected curve", [Global];
+    OffsetUpCoarse => "offset_up_coarse", "Display offset +3 dB of the selected curve", [Global];
+    OffsetDownCoarse => "offset_down_coarse", "Display offset −3 dB of the selected curve", [Global];
+    OffsetClear => "offset_clear", "Display offset of the selected curve back to 0", [Global];
     ImportTrace => "import_trace", "Import a trace file (CSV / analyzer text)…", [Global];
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
@@ -434,7 +446,7 @@ commands! {
     FinderCustom => "finder_custom", "Delay finder: custom band (Hz)…", [Transfer];
     FinderObservation => "finder_observation", "Delay finder: observation length (s)…", [Transfer];
     Invert => "invert", "Invert polarity of selected trace (display)", [Transfer];
-    Offset => "offset", "Type dB offset of selected trace…", [Transfer];
+    Offset => "offset", "Type dB offset of selected trace…", [Transfer, Spectrum];
     NudgeEarlier => "nudge_earlier", "Nudge selected trace 0.1 ms earlier", [Transfer];
     NudgeLater => "nudge_later", "Nudge selected trace 0.1 ms later", [Transfer];
     PhaseReference => "phase_reference", "Make selected trace the phase reference", [Transfer];
@@ -501,6 +513,10 @@ pub fn defaults() -> Vec<Binding> {
     let sh = Chord::shift;
     let cmd = Chord::command;
     let alt = Chord::alt;
+    let alt_sh = |key| Chord {
+        shift: true,
+        ..Chord::alt(key)
+    };
     let mut v: Vec<(C, S, Chord)> = vec![
         // H, not `/`: `/` is Shift+7 on Nordic and German layouts. Shift+H, one step
         // further, hides or shows the panes' key hints.
@@ -531,6 +547,25 @@ pub fn defaults() -> Vec<Binding> {
         (C::PanLeft, S::Global, k(K::ArrowLeft)),
         (C::PanRight, S::Global, k(K::ArrowRight)),
         (C::ResetView, S::Global, k(K::Home)),
+        // The level (vertical) axis of the focused pane, beside the frequency axis's keys:
+        // Ctrl+I / Ctrl+O zoom it as I / O zoom frequency, Ctrl on the arrows that move the
+        // stimulus level alone pans it (a plain ↑/↓ never pans by mistake), and Home with a
+        // modifier frames or resets it as plain Home resets frequency.
+        (C::LevelZoomIn, S::Global, cmd(K::I)),
+        (C::LevelZoomOut, S::Global, cmd(K::O)),
+        (C::LevelPanUp, S::Global, cmd(K::ArrowUp)),
+        (C::LevelPanDown, S::Global, cmd(K::ArrowDown)),
+        (C::LevelFit, S::Global, sh(K::Home)),
+        (C::LevelReset, S::Global, cmd(K::Home)),
+        // A display offset spreads traces apart: Alt on the level arrows, Shift for 3 dB as
+        // for the stimulus level; Alt+Home back to none.
+        (C::OffsetUp, S::Global, alt(K::ArrowUp)),
+        (C::OffsetDown, S::Global, alt(K::ArrowDown)),
+        (C::OffsetUpCoarse, S::Global, alt_sh(K::ArrowUp)),
+        (C::OffsetDownCoarse, S::Global, alt_sh(K::ArrowDown)),
+        (C::OffsetClear, S::Global, alt(K::Home)),
+        // Delete asks first (Delete again or Enter deletes).
+        (C::DeleteTrace, S::Global, k(K::Delete)),
         (C::ToggleCursor, S::Global, k(K::C)),
         (C::CursorLeft, S::Global, sh(K::ArrowLeft)),
         (C::CursorRight, S::Global, sh(K::ArrowRight)),
@@ -573,6 +608,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::TrackDelay, S::Transfer, k(K::Y)),
         (C::Invert, S::Transfer, k(K::U)),
         (C::Offset, S::Transfer, k(K::J)),
+        (C::Offset, S::Spectrum, k(K::J)),
         (C::NudgeEarlier, S::Transfer, k(K::Comma)),
         (C::NudgeLater, S::Transfer, k(K::Period)),
         (C::PhaseReference, S::Transfer, k(K::E)),
@@ -663,6 +699,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SmoothCoarser, "smoothing", 60),
                     hint(C::ToggleIr, "IR", 40),
                     hint(C::MaximizePane, "maximise", 50),
+                    hint(C::OffsetUp, "offset", 45),
                 ]
             }
         }
@@ -674,6 +711,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::PeakHold, "peak hold", 75),
                     hint(C::SmoothCoarser, "smoothing", 60),
                     hint(C::SpectrumStyle, "bars/line", 50),
+                    hint(C::LevelFit, "fit level", 55),
                     hint(C::Slot1, "capture", 85),
                     hint(C::MaximizePane, "maximise", 40),
                 ]
@@ -1073,6 +1111,47 @@ mod tests {
         assert_eq!(m.lookup(Scope::Spl, c("X")), None);
     }
 
+    /// Offsets, the level axis and Delete: modifiers on the stimulus arrows (which stay the
+    /// stimulus level's alone) and beside the frequency axis's I / O / Home.
+    #[test]
+    fn offset_level_and_delete_keys() {
+        let m = Keymap::default();
+        let c = |s: &str| Chord::parse(s).expect(s);
+        for scope in Scope::ALL {
+            assert_eq!(m.lookup(scope, c("Up")), Some(CommandId::LevelUp));
+            assert_eq!(
+                m.lookup(scope, c("Shift+Down")),
+                Some(CommandId::LevelDownCoarse)
+            );
+            assert_eq!(m.lookup(scope, c("Alt+Up")), Some(CommandId::OffsetUp));
+            assert_eq!(m.lookup(scope, c("Alt+Down")), Some(CommandId::OffsetDown));
+            assert_eq!(
+                m.lookup(scope, c("Alt+Shift+Up")),
+                Some(CommandId::OffsetUpCoarse)
+            );
+            assert_eq!(
+                m.lookup(scope, c("Alt+Shift+Down")),
+                Some(CommandId::OffsetDownCoarse)
+            );
+            assert_eq!(m.lookup(scope, c("Alt+Home")), Some(CommandId::OffsetClear));
+            assert_eq!(m.lookup(scope, c("Delete")), Some(CommandId::DeleteTrace));
+            assert_eq!(m.lookup(scope, c("Home")), Some(CommandId::ResetView));
+            for (k, cmd) in [
+                ("Ctrl+Up", CommandId::LevelPanUp),
+                ("Ctrl+Down", CommandId::LevelPanDown),
+                ("Ctrl+I", CommandId::LevelZoomIn),
+                ("Ctrl+O", CommandId::LevelZoomOut),
+                ("Shift+Home", CommandId::LevelFit),
+                ("Ctrl+Home", CommandId::LevelReset),
+                ("I", CommandId::ZoomIn),
+                ("O", CommandId::ZoomOut),
+            ] {
+                assert_eq!(m.lookup(scope, c(k)), Some(cmd), "{k} {scope:?}");
+            }
+        }
+        assert_eq!(m.lookup(Scope::Spectrum, c("J")), Some(CommandId::Offset));
+    }
+
     #[test]
     fn symbols_ignore_shift() {
         // `/` arrives as Shift+7 → Slash with Shift on Nordic layouts.
@@ -1228,7 +1307,7 @@ mod tests {
                 assert!(h.is_empty());
                 continue;
             }
-            assert!((4..=7).contains(&h.len()), "{scope:?}: {} hints", h.len());
+            assert!((4..=8).contains(&h.len()), "{scope:?}: {} hints", h.len());
             for x in h {
                 assert!(
                     x.command.scopes().contains(&scope)

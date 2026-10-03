@@ -1389,3 +1389,166 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon: two captures, one spread by +3 dB with the keys (its legend says
+/// so and its curve moves, the other stays), a spectrum whose level axis goes down to its
+/// low levels with the keys, a capture deleted with Delete and a confirmation, and a
+/// measurement picked from the list with the layout maximised brings up its pane.
+#[test]
+fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
+    use ac2_proto::units::TraceId;
+    use ac2_scene::trace::TraceKey;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+
+    // Two captures, their data fetched.
+    d.key("Ctrl+1");
+    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    d.key("Ctrl+2");
+    d.until("both captures with their data", |s| {
+        s.slots()[1].is_some() && s.traces.len() == 2
+    })?;
+    let id = |s: &AppState, slot: usize| s.slots()[slot].map(|t| t.id);
+    let (a, b) = (id(&d.st, 0).ok_or("slot 1")?, id(&d.st, 1).ok_or("slot 2")?);
+    let theme = Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 600.0,
+    };
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let curve = |s: &AppState, t: TraceId| {
+        let scene = ac2_ui::scenes::transfer(s, &theme, size, now());
+        let legend = scene
+            .legend
+            .iter()
+            .find(|e| e.key == TraceKey::Stored(t))
+            .map(|e| e.text.clone())
+            .unwrap_or_default();
+        let mag = scene
+            .traces
+            .iter()
+            .find(|x| x.key == TraceKey::Stored(t))
+            .map(|x| x.magnitude_db.clone())
+            .unwrap_or_default();
+        (legend, mag)
+    };
+    let (legend_b, before_b) = curve(&d.st, b);
+    let (_, before_a) = curve(&d.st, a);
+    assert!(!legend_b.contains("dB"), "{legend_b}");
+
+    // V to slot 2, Alt+Shift+↑: +3 dB, said in the legend.
+    d.key("V");
+    d.key("V");
+    assert_eq!(d.st.selected_trace, Some(b));
+    d.key("Alt+Shift+Up");
+    d.until("the offset held by the daemon", |s| {
+        s.traces
+            .get(&b)
+            .is_some_and(|(t, _)| t.meta.edit.offset.0 == 3.0)
+    })?;
+    let (legend_b, after_b) = curve(&d.st, b);
+    assert!(legend_b.contains("+3.0 dB"), "{legend_b}");
+    let moved: Vec<f64> = before_b
+        .iter()
+        .zip(&after_b)
+        .filter(|(x, y)| x.is_finite() && y.is_finite())
+        .map(|(x, y)| y - x)
+        .collect();
+    assert!(!moved.is_empty());
+    assert!(moved.iter().all(|m| (m - 3.0).abs() < 1e-9), "{moved:?}");
+    let after_a = curve(&d.st, a).1;
+    assert_eq!(after_a.len(), before_a.len());
+    assert!(
+        after_a
+            .iter()
+            .zip(&before_a)
+            .all(|(x, y)| x == y || (x.is_nan() && y.is_nan())),
+        "the other capture stays"
+    );
+
+    // A spectrum from the palette; its pane's level axis down to the low levels.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spectrum".into()));
+    d.key("Enter");
+    d.until(
+        "the spectrum dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
+    )?;
+    d.key("Enter");
+    d.until("the spectrum measurement", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+    })?;
+    let sp =
+        d.st.measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            .map(|m| m.id)
+            .ok_or("spectrum")?;
+    d.until("spectrum frames", |s| {
+        ac2_ui::scenes::frame(s, sp, Stream::Spec).is_some()
+    })?;
+    d.key("Alt+2");
+    let level = |s: &AppState| s.view.spectrum.level;
+    let start = level(&d.st);
+    for _ in 0..4 {
+        d.key("Ctrl+Down");
+    }
+    assert_eq!(level(&d.st), ac2_scene::axis::Range::new(-140.0, -40.0));
+    d.key("Ctrl+I");
+    let r = level(&d.st);
+    assert!(r.span() < start.span() && r.lo < -100.0, "{r:?}");
+    let labels: Vec<String> = ac2_ui::scenes::spectrum(&d.st, &theme, size, now())
+        .y_axis
+        .labels()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert!(labels.contains(&"\u{2212}120".to_owned()), "{labels:?}");
+    // Shift+Home frames what is shown; Ctrl+Home is the default again.
+    d.key("Shift+Home");
+    let fit = level(&d.st);
+    assert!(fit.is_valid() && fit != r, "{fit:?}");
+    assert!(
+        d.st.toasts
+            .iter()
+            .any(|t| t.text.starts_with("Spectrum / RTA: level"))
+    );
+    d.key("Ctrl+Home");
+    assert_eq!(level(&d.st), start);
+
+    // Delete slot 1: asked first, then gone; the selection moves to slot 2.
+    d.key("Alt+1");
+    d.key("V");
+    assert_eq!(d.st.selected_trace, Some(a));
+    d.key("Delete");
+    assert!(matches!(&d.st.overlay, Overlay::DeleteTrace(p) if p.trace == a));
+    d.key("Delete");
+    assert_eq!(d.st.selected_trace, Some(b));
+    d.until("slot 1 deleted", |s| {
+        s.daemon()
+            .is_some_and(|x| x.traces.iter().all(|t| t.id != a))
+    })?;
+    assert!(!d.st.traces.contains_key(&a));
+    assert_eq!(d.st.trace_rows().len(), 1);
+
+    // Maximised: a measurement picked in the list brings up its pane.
+    d.key("W");
+    assert!(d.st.layout.maximized);
+    d.send(Msg::SelectMeas(sp));
+    assert_eq!(d.st.layout.visible(), [PaneKind::Spectrum]);
+    assert_eq!(d.st.pane_meas(PaneKind::Spectrum).map(|m| m.id), Some(sp));
+    d.send(Msg::SelectMeas(tf));
+    assert_eq!(d.st.layout.visible(), [PaneKind::Transfer]);
+    assert!(d.st.layout.maximized);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

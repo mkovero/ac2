@@ -262,6 +262,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         if st.view.spectrum.peak_hold {
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
+        t.offset_db = st.edit(c.meas.id).offset_db;
         traces.push(t);
     }
     // Stored spectra / RTA bands, drawn under the live ones' axis rules.
@@ -323,6 +324,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
                 None => "stored".into(),
             },
             freshness: None,
+            offset_db: data.meta.edit.offset.0,
         });
     }
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
@@ -374,6 +376,20 @@ impl SweepPane {
         match self {
             SweepPane::Distortion(s) => Some(s.x_axis.mapping),
             SweepPane::Ir(_) => None,
+        }
+    }
+
+    /// The distortion axis in dB, for zooming about the pointer (the percent axis is a log
+    /// of the same ratios: no dB value under the pointer).
+    pub fn y_level(
+        &self,
+        unit: ac2_scene::view::DistortionUnit,
+    ) -> Option<ac2_scene::axis::Mapping> {
+        match self {
+            SweepPane::Distortion(s) if unit == ac2_scene::view::DistortionUnit::Db => {
+                Some(s.y_axis.mapping)
+            }
+            _ => None,
         }
     }
 }

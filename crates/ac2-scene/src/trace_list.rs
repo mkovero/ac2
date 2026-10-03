@@ -135,6 +135,32 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
         .collect()
 }
 
+/// The confirmation before a stored trace is deleted: which one, what goes with it, and the
+/// keys.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeleteConfirm {
+    /// `Delete Main L S1?`
+    pub title: String,
+    /// What it is (`capture · slot 1`), then what deleting means.
+    pub lines: Vec<String>,
+    pub hint: String,
+}
+
+/// What the confirmation says for `row`.
+pub fn delete_confirm(row: &TraceRow) -> DeleteConfirm {
+    DeleteConfirm {
+        title: format!("Delete {}?", row.name),
+        lines: vec![
+            row.details.first().cloned().unwrap_or_default(),
+            "The stored trace is removed from the daemon (and from sessions saved after this); \
+             it cannot be undone."
+                .to_owned(),
+        ],
+        hint: "Delete or Enter deletes it · N or Esc keeps it (Esc also stops the stimulus)"
+            .to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

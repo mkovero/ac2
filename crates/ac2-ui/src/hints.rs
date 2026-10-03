@@ -115,6 +115,7 @@ mod tests {
                 "K smoothing",
                 "Shift+I IR",
                 "W maximise",
+                "Alt+↑ offset",
                 "H all keys"
             ]
         );
@@ -126,6 +127,7 @@ mod tests {
                 "P peak hold",
                 "K smoothing",
                 "B bars/line",
+                "Shift+Home fit level",
                 "Ctrl+1 capture",
                 "W maximise",
                 "H all keys"
