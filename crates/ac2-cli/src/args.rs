@@ -1037,6 +1037,13 @@ pub enum TraceCmd {
         /// `on` or `off`.
         state: Shown,
     },
+    /// Rename a stored trace.
+    Rename {
+        /// Trace id or name.
+        trace: MeasRef,
+        /// The new name.
+        name: String,
+    },
     /// Put a trace in slot 1 … 9 (the trace holding it gives it up), or `none` to free its
     /// slot.
     Slot {

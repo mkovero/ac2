@@ -483,6 +483,7 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let mut clicked = None;
     let mut clicked_trace = None;
+    let mut renamed_trace = None;
     let mut toggled_trace = None;
     let tips = RowTips {
         meas: format!(
@@ -492,7 +493,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         ),
         eye: key_hint(app, CommandId::ToggleTrace),
         select: format!(
-            "Click selects it (again: deselects) · {} / {} step through the shown traces",
+            "Click selects it (again: deselects) · double click renames · {} / {} step through the shown traces",
             key_hint(app, CommandId::NextTrace),
             key_hint(app, CommandId::PrevTrace)
         ),
@@ -566,6 +567,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             match trace_row(ui, row, &tips, ch) {
                 Some(RowClick::Select) => clicked_trace = Some(row.id),
                 Some(RowClick::Eye) => toggled_trace = Some(row.id),
+                Some(RowClick::Rename) => renamed_trace = Some(row.id),
                 None => {}
             }
         }
@@ -578,6 +580,9 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     }
     if let Some(id) = toggled_trace {
         app.dispatch(Msg::ToggleShown(id));
+    }
+    if let Some(id) = renamed_trace {
+        app.dispatch(Msg::RenameTrace(id));
     }
 }
 
@@ -611,6 +616,8 @@ enum RowClick {
     Select,
     /// Its colour dot: show / hide.
     Eye,
+    /// A double click on the row: rename.
+    Rename,
 }
 
 /// Width of a row's colour dot, which is also its show / hide toggle.
@@ -685,7 +692,11 @@ fn trace_row(
         let r = ui
             .add(egui::Button::selectable(row.selected, job).wrap_mode(egui::TextWrapMode::Wrap))
             .on_hover_text(format!("{}\n{}", row.describe, tips.select));
-        if r.clicked() {
+        // A double click's second click also reads as a click: check it first, or it would
+        // deselect the row the first click selected.
+        if r.double_clicked() {
+            click = Some(RowClick::Rename);
+        } else if r.clicked() {
             click = Some(RowClick::Select);
         }
     });

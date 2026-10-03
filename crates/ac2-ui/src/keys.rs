@@ -403,6 +403,7 @@ commands! {
     PrevAnyTrace => "prev_any_trace", "Select previous trace incl. hidden (then live)", [Global];
     ToggleTrace => "toggle_trace", "Show / hide the selected stored trace", [Global];
     TraceSlot => "trace_slot", "Move the selected trace to slot… (1 … 9, none frees its slot)", [Global];
+    TraceRename => "trace_rename", "Rename the selected trace…", [Global];
     SelectLive => "select_live", "Deselect the stored trace: keys act on the live measurement again", [Global];
     DeleteTrace => "trace_delete", "Delete selected trace… (asks first)", [Global];
     OffsetUp => "offset_up", "Display offset +1 dB of the selected curve", [Global];
@@ -566,6 +567,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::OffsetClear, S::Global, alt(K::Home)),
         // Delete asks first (Delete again or Enter deletes).
         (C::DeleteTrace, S::Global, k(K::Delete)),
+        (C::TraceRename, S::Global, k(K::F2)),
         (C::ToggleCursor, S::Global, k(K::C)),
         (C::CursorLeft, S::Global, sh(K::ArrowLeft)),
         (C::CursorRight, S::Global, sh(K::ArrowRight)),
@@ -1028,6 +1030,7 @@ mod tests {
             CommandId::CalDelete,
             CommandId::TraceMicCurve,
             CommandId::TraceSlot,
+            CommandId::TraceRename,
             CommandId::FinderAuto,
             CommandId::FinderFull,
             CommandId::FinderMid,

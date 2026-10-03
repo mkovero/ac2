@@ -558,6 +558,8 @@ pub enum PromptKind {
     TraceOffset(TraceId),
     /// The slot a stored trace moves to (`none` frees it).
     TraceSlot(TraceId),
+    /// A stored trace's new name.
+    TraceRename(TraceId),
     /// Custom delay-finder band edges.
     FinderBand,
     /// Delay-finder observation.
@@ -574,6 +576,7 @@ impl PromptKind {
             PromptKind::TraceSlot(_) => {
                 "Slot for the selected trace: 1 … 9 (its holder gives it up), none frees it"
             }
+            PromptKind::TraceRename(_) => "New name for the selected trace",
             PromptKind::Delay(_) => "Delay (ms)",
             PromptKind::ImportFile(ImportRole::Target) => "Target curve file (path)",
             PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
@@ -709,6 +712,8 @@ pub enum Msg {
     SelectTrace(TraceId),
     /// A stored trace's eye in the list: shown / hidden.
     ToggleShown(TraceId),
+    /// A stored trace double-clicked in the list: selected, and its name asked for.
+    RenameTrace(TraceId),
     /// A click in a pane: focuses it and selects the measurement it shows.
     FocusPane(PaneKind),
     /// The pane title chip: opens (or closes) the pane's measurement list.
@@ -1680,6 +1685,15 @@ impl AppState {
                 self.reveal_trace();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),
+            Msg::RenameTrace(id) => {
+                if self.selected_trace != Some(id) {
+                    self.select_trace(Some(id));
+                    self.reveal_trace();
+                }
+                if let Ok(t) = self.trace_meta(id) {
+                    self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());
+                }
+            }
             Msg::FocusPane(p) => {
                 self.focus(p);
                 // A click in a pane is about what it shows live.
@@ -2004,6 +2018,22 @@ impl AppState {
                 });
                 Ok(())
             }),
+            PromptKind::TraceRename(id) => {
+                let name = text.trim();
+                if name.is_empty() {
+                    Err("type a name".to_string())
+                } else {
+                    self.trace_meta(id).map(|t| {
+                        let mut edit = t.edit.clone();
+                        edit.name = name.to_string();
+                        let what = format!("{} renamed to {name}", t.edit.name);
+                        out.push(Request::Call {
+                            cmd: Command::TraceUpdate { trace: id, edit },
+                            what,
+                        });
+                    })
+                }
+            }
             PromptKind::TraceSlot(id) => parse_slot(&text).and_then(|slot| {
                 let t = self.trace_meta(id)?;
                 let mut edit = t.edit.clone();
@@ -2891,6 +2921,10 @@ impl AppState {
                     let text = t.edit.slot.map(|n| n.to_string()).unwrap_or_default();
                     self.prompt(PromptKind::TraceSlot(t.id), text);
                 }
+                None => self.error(SELECT_TRACE_FIRST),
+            },
+            C::TraceRename => match self.selected_trace_meta().cloned() {
+                Some(t) => self.prompt(PromptKind::TraceRename(t.id), t.edit.name.clone()),
                 None => self.error(SELECT_TRACE_FIRST),
             },
             C::SelectLive => self.select_live(),

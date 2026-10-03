@@ -242,6 +242,19 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
         }
+        TraceCmd::Rename { trace, name } => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(CliError::Usage("a trace name cannot be empty".into()));
+            }
+            let s = state(&c).await?;
+            let t = find_trace(&s, trace)?.clone();
+            let mut edit = t.edit.clone();
+            edit.name = name.to_string();
+            let r = c.call(Command::TraceUpdate { trace: t.id, edit }).await?;
+            let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
+        }
         TraceCmd::Slot { trace, slot } => {
             let s = state(&c).await?;
             let t = find_trace(&s, trace)?.clone();

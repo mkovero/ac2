@@ -306,6 +306,9 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   (`Main L S2 · Δt 0.00 ms · +3.0 dB`), a note in the spectrum pane's corner (`Main L S2 ·
   offset +3.0 dB`), the spectrum cursor values — so a spread is never read as a level
   difference. A locked trace keeps its offset.
+- **F2** (or **Rename the selected trace…** in the palette) renames the selected stored
+  trace; a double click on a trace in the list selects it and asks for its name in one go.
+  `ac2 trace rename <trace> <name>` does the same from the command line.
 - **Delete** asks before the selected stored trace goes (naming it); **Delete** again or
   **Enter** deletes it, **N** or **Esc** keeps it (Esc also stops the stimulus, as always).
   The selection moves to the next shown trace in the list (else the one before it, else the
@@ -698,6 +701,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+V` | Select next trace incl. hidden (then live) | `next_any_trace` |
 | `Alt+Shift+V` | Select previous trace incl. hidden (then live) | `prev_any_trace` |
 | `A` | Show / hide the selected stored trace | `toggle_trace` |
+| `F2` | Rename the selected trace… | `trace_rename` |
 | `Delete` | Delete selected trace… (asks first) | `trace_delete` |
 | `Alt+↑` | Display offset +1 dB of the selected curve | `offset_up` |
 | `Alt+↓` | Display offset −1 dB of the selected curve | `offset_down` |

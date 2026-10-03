@@ -999,6 +999,44 @@ fn the_selected_trace_moves_to_a_slot() {
     assert!(parse_slot("0").is_err());
 }
 
+/// F2 (or the palette) renames the selected trace; a double click on a row in the list
+/// selects it and asks for the name in one go.
+#[test]
+fn the_selected_trace_is_renamed() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![
+        stored(10, Some(1), 2),
+        stored(13, None, 2),
+    ]));
+    t.st.update(Msg::Command(CommandId::TraceRename), &t.keys);
+    assert_eq!(t.st.overlay, Overlay::None, "nothing selected");
+    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.key("F2");
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::TraceRename(TraceId(13)) && p.text == "t13"
+    ));
+    let r = prompt_text(&mut t, CommandId::TraceRename, "  1083 on axis ");
+    let (id, edit, what) = trace_update(&r);
+    assert_eq!((id, edit.name.as_str()), (TraceId(13), "1083 on axis"));
+    assert_eq!(what, "t13 renamed to 1083 on axis");
+    // An empty name is refused in the prompt.
+    let r = prompt_text(&mut t, CommandId::TraceRename, "   ");
+    assert!(r.is_empty());
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.error.as_deref() == Some("type a name")
+    ));
+    t.key("Escape");
+    // Double click on another row: selected, and its name asked for.
+    t.st.update(Msg::RenameTrace(TraceId(10)), &t.keys);
+    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::TraceRename(TraceId(10)) && p.text == "t10"
+    ));
+}
+
 #[test]
 fn trace_keys_act_on_the_selected_trace() {
     let mut t = T::new();
