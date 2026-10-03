@@ -353,6 +353,19 @@ async fn status_reports_build_ids() -> R {
     assert_eq!(v["stale"], Value::Null);
     assert_eq!(v["daemon_incarnation"], "000000005eed0001");
     assert_eq!(v["session"], json!({ "epoch": 1, "open": null }));
+    assert_eq!(
+        v["autosave"],
+        json!({ "state": { "type": "off" }, "saved_at": null })
+    );
+    let s = ok_json(&f, &["session", "status", "--json"]).await?;
+    assert_eq!(
+        s,
+        json!({
+            "epoch": 1,
+            "open": null,
+            "autosave": { "state": { "type": "off" }, "saved_at": null },
+        })
+    );
     assert!(
         v["client_id"]
             .as_str()

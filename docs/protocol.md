@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 5`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 6`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -375,6 +375,8 @@ directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or 
   `not_found`; `invalid` (not a session, bad name, damaged files); `unsupported` with
   `detail: {type: session_version, found, supported}` for another format version.
 - `file.list`: the sessions in the session directory, by name.
+- The daemon also keeps an autosave of the same content (§7.3); its status is the
+  `autosave` entity.
 #### Calibration (`cal.*`, `session.inputs`)
 
 Design: `docs/design/q7-calibration.md`. A calibration entry is keyed by the open session's
@@ -455,14 +457,16 @@ math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `created_at`; `ki
 `key` {device, channel, mic}, `spl`: SplCal | nil, `mic_curve`: MicCurveRef | nil),
 `inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
-`drift`, `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run).
+`drift`, `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
+`autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
+nil`; see §7.3).
 
 ### 4.2 Snapshot and events
 
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `inputs`, `spl_log`, `timing`, `sweep`. `payload` is the entity's
+`generator`, `calibration`, `inputs`, `spl_log`, `timing`, `sweep`, `autosave`. `payload` is the entity's
 full new value (`inputs`: the whole list); for keyed entities (`measurement`, `trace`,
 `calibration`, `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -646,6 +650,28 @@ refused (no migration). Trace files hold the unsmoothed columns; each trace's di
 smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
 hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
 spectrum smoothing, version 3 had no sweep traces — are refused). A directory that holds other files is never written into.
+
+### 7.3 Autosave
+
+A daemon started with an autosave directory (`ac2d` by default: `autosave` in the data
+directory; `--autosave <dir>`, `--no-autosave`) writes the measurements and traces there in
+the §7.2 format whenever they change: after 1.5 s without further changes, at most 10 s
+after the first unwritten one, off the control thread, and once more at shutdown. A write
+that would not change what is on disk is skipped. Each write goes to `.<dir>.new` first;
+then `<dir>` becomes `<dir>.prev` and the new one `<dir>`, so a failed write never touches
+the last good autosave.
+
+At start the daemon loads `<dir>` (else `<dir>.prev`) exactly as `file.load` does — disarmed,
+no owner, a new session epoch, no audio session opened — and logs what it restored. An
+autosave of another session format version is renamed to `<dir>.v<N>`, an unreadable one to
+`<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.
+`--no-restore` starts empty and moves the autosave to `<dir>.unrestored`.
+
+The `autosave` entity: `off` (no autosave directory), `saved` (the disk holds the current
+state; `saved_at` nil until the first write), `pending` (a change is waiting or being
+written), `failed{reason}` (the last write failed; shown until a write succeeds, retried
+10 s later). `saved_at` is when the autosave on disk was written (after a restore, when the
+restored one was). Status changes are ordinary events, so they bump `rev`.
 
 ## 8. Cross-language fixtures
 

@@ -82,10 +82,10 @@ impl Control {
         }
     }
 
-    pub(super) fn file_save(&self, r: &SessionRef) -> Result<ReplyBody, ProtoError> {
-        let (name, dir) = self.session_path(r)?;
-        let st = self.store.state();
-        let measurements = st
+    /// The measurements as a session saves them.
+    pub(super) fn saved_measurements(&self) -> Vec<SavedMeasurement> {
+        self.store
+            .state()
             .measurements
             .iter()
             .map(|m| SavedMeasurement {
@@ -98,17 +98,28 @@ impl Control {
                     tracking: d.tracking,
                 }),
             })
-            .collect();
-        let traces = st
+            .collect()
+    }
+
+    /// Everything a session holds, as of now.
+    pub(super) fn session_data(&self) -> Result<SessionData, ProtoError> {
+        let traces = self
+            .store
+            .state()
             .traces
             .iter()
             .map(|t| self.stored(t.id))
             .collect::<Result<Vec<_>, _>>()?;
-        let data = SessionData {
+        Ok(SessionData {
             saved_at: WallNs(wall_ns()),
-            measurements,
+            measurements: self.saved_measurements(),
             traces,
-        };
+        })
+    }
+
+    pub(super) fn file_save(&self, r: &SessionRef) -> Result<ReplyBody, ProtoError> {
+        let (name, dir) = self.session_path(r)?;
+        let data = self.session_data()?;
         let m = session::save(&dir, &data).map_err(session_err)?;
         tracing::info!("session saved to {}", dir.display());
         Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
@@ -129,6 +140,22 @@ impl Control {
         let (name, dir) = self.session_path(r)?;
         let m = session::read_manifest(&dir).map_err(session_err)?;
         let data = session::load(&dir).map_err(session_err)?;
+        let epoch = self.replace_session(Some(client), data)?;
+        tracing::info!(
+            "session loaded from {} (epoch {}, disarmed)",
+            dir.display(),
+            epoch.0
+        );
+        Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
+    }
+
+    /// Replaces every measurement and trace with `data`, disarmed (module docs). Returns the
+    /// new session epoch.
+    pub(super) fn replace_session(
+        &mut self,
+        client: Option<&ClientId>,
+        data: SessionData,
+    ) -> Result<SessionEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state
         // as it was.
         for sm in &data.measurements {
@@ -164,7 +191,7 @@ impl Control {
             g.owner = None;
             g.armed = false;
             g.firing = false;
-            self.audit(&mut g, GenAction::Stop, Some(client));
+            self.audit(&mut g, GenAction::Stop, client);
             self.commit(Change::Generator(g));
         }
 
@@ -252,11 +279,6 @@ impl Control {
             self.traces.insert(t.meta.id, t.grid, t.columns, t.sweep);
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
-        tracing::info!(
-            "session loaded from {} (epoch {}, disarmed)",
-            dir.display(),
-            epoch.0
-        );
-        Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))
+        Ok(epoch)
     }
 }

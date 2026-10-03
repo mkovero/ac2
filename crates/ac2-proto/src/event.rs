@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    CalEntry, CalKey, Generator, InputSetup, Measurement, Session, SplLog, State, SweepRun,
-    TimingStatus, TraceMeta,
+    Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Session, SplLog, State,
+    SweepRun, TimingStatus, TraceMeta,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
 
@@ -52,6 +52,8 @@ pub enum Change {
     Timing(TimingStatus),
     /// The latest sweep run (never deleted; a new run replaces it).
     Sweep(SweepRun),
+    /// Autosave status (never deleted).
+    Autosave(Autosave),
 }
 
 /// One committed state change.
@@ -131,6 +133,13 @@ pub enum WireEvent {
         /// Payload.
         payload: SweepRun,
     },
+    /// [`Change::Autosave`].
+    Autosave {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Autosave,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -146,6 +155,7 @@ impl From<Event> for WireEvent {
             Change::SplLog(payload) => Self::SplLog { rev, payload },
             Change::Timing(payload) => Self::Timing { rev, payload },
             Change::Sweep(payload) => Self::Sweep { rev, payload },
+            Change::Autosave(payload) => Self::Autosave { rev, payload },
         }
     }
 }
@@ -162,6 +172,7 @@ impl From<WireEvent> for Event {
             WireEvent::SplLog { rev, payload } => (rev, Change::SplLog(payload)),
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
             WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
+            WireEvent::Autosave { rev, payload } => (rev, Change::Autosave(payload)),
         };
         Event { rev, change }
     }
@@ -180,6 +191,7 @@ impl Change {
             Self::SplLog(_) => "spl_log",
             Self::Timing(_) => "timing",
             Self::Sweep(_) => "sweep",
+            Self::Autosave(_) => "autosave",
         }
     }
 }

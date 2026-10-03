@@ -10,7 +10,7 @@
 //!
 //! Config holds what belongs to this machine and user: the calibration store (it describes
 //! the hardware, not a show), UI preferences, key bindings, the daemon's network keys. Data
-//! holds the operator's documents: saved sessions. `XDG_CONFIG_HOME` / `XDG_DATA_HOME` are
+//! holds the operator's documents: saved sessions and the daemon's autosave. `XDG_CONFIG_HOME` / `XDG_DATA_HOME` are
 //! honoured on Linux; `AC2_CONFIG_DIR` and `AC2_SESSION_DIR` override for tests and
 //! unusual setups.
 #![forbid(unsafe_code)]
@@ -54,6 +54,12 @@ pub fn cal_store() -> PathBuf {
 /// Saved sessions: `$AC2_SESSION_DIR`, else `<data>/sessions`.
 pub fn session_dir() -> PathBuf {
     env_dir("AC2_SESSION_DIR").unwrap_or_else(|| data_dir().join("sessions"))
+}
+
+/// The daemon's autosave of measurements and traces (a session directory; its backup
+/// `autosave.prev` beside it): `<data>/autosave`.
+pub fn autosave_dir() -> PathBuf {
+    data_dir().join("autosave")
 }
 
 /// A network-mode daemon's CURVE key pair: `<config>/server.key`.
@@ -135,6 +141,7 @@ mod tests {
         assert_eq!(cal_store(), c.join("calibrations.json"));
         assert_eq!(ui_prefs(), c.join("ui.toml"));
         assert_eq!(keymap(), c.join("keys.toml"));
+        assert_eq!(autosave_dir(), data_dir().join("autosave"));
         if std::env::var_os("AC2_SESSION_DIR").is_none() {
             assert_eq!(session_dir(), data_dir().join("sessions"));
         }

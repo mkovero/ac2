@@ -15,6 +15,7 @@
 //! [`spl::spl_readout`].
 #![forbid(unsafe_code)]
 
+pub mod autosave;
 pub mod axis;
 pub mod banner;
 mod canvas;

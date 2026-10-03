@@ -3045,3 +3045,46 @@ fn a_failed_sweep_says_why_and_disarms() {
     assert!(!t.st.stimulus_live());
     assert!(!t.st.layout.is_shown(PaneKind::Distortion));
 }
+
+/// The top bar's autosave indicator follows the daemon's `autosave` entity: nothing when the
+/// daemon does not autosave, its age once saved, `saving…` while a change waits, the
+/// failure as a warning.
+#[test]
+fn autosave_indicator_follows_the_daemon() {
+    use ac2_scene::autosave::AutosaveTone;
+    const S: u64 = 1_000_000_000;
+    let now = WallNs(1_000 * S);
+    assert_eq!(T::disconnected().st.autosave_label(now), None);
+    let mut t = T::new();
+    assert_eq!(
+        t.st.autosave_label(now),
+        None,
+        "the daemon does not autosave"
+    );
+
+    let mut st = daemon_state();
+    st.autosave = Autosave {
+        state: AutosaveState::Saved,
+        saved_at: Some(WallNs(1_000 * S - 3 * S)),
+    };
+    t.conn(mirror(st.clone()));
+    let l = t.st.autosave_label(now).expect("label");
+    assert_eq!(
+        (l.text.as_str(), l.tone),
+        ("autosaved just now", AutosaveTone::Quiet)
+    );
+
+    st.autosave.state = AutosaveState::Pending;
+    t.conn(mirror(st.clone()));
+    assert_eq!(t.st.autosave_label(now).expect("label").text, "saving…");
+
+    st.autosave.state = AutosaveState::Failed {
+        reason: "disk full".into(),
+    };
+    t.conn(mirror(st));
+    let l = t.st.autosave_label(now).expect("label");
+    assert_eq!(
+        (l.text.as_str(), l.tone),
+        ("autosave failed: disk full", AutosaveTone::Warning)
+    );
+}

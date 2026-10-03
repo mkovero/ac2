@@ -26,6 +26,7 @@
 //! path itself ([`stimulus`]).
 #![deny(unsafe_code)]
 
+mod autosave;
 mod backend;
 mod burst;
 mod calstore;
@@ -56,8 +57,8 @@ use ac2_proto::units::DaemonIncarnation;
 use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType};
 
 pub use config::{
-    Advertise, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError, NetworkSecurity,
-    ReplayLimits, pid_file, runtime_dir,
+    Advertise, AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError,
+    NetworkSecurity, ReplayLimits, pid_file, runtime_dir,
 };
 
 pub use backend::{BackendChoice, FAKE_RIG, FAKE_RIG_DISTORTION, backend, backends};
@@ -394,6 +395,7 @@ impl Daemon {
             session_dir: config.session_dir.clone(),
             network,
             cal_store: config.cal_store.clone(),
+            autosave: config.autosave.clone(),
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

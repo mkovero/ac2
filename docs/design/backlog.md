@@ -6,13 +6,12 @@ the commit when it lands.
 ## From the first sweep run on pupu (2026-10-03)
 
 - **Top bar: ARMED badge overlaps the session text** ("2ARMED…") at 1290 px width.
-- **Sweep results lost on daemon restart, and a CSV re-import cannot bring them back.** Stored
-  traces live in daemon memory; `trace import` of a sweep export keeps only its transfer
-  function (and delay 0), because `SweepData` needs the IR and analysis info that the CSV lacks
-  (the parsed distortion in `Imported::distortion` is dropped). Raising or lowering
-  `--max-level` needs a restart, so a ceiling change loses that session's sweeps. Options:
-  autosave traces in the daemon, export the IR + info so a sweep CSV round-trips, or make the
-  sweep pane draw a sweep without its IR.
+- **A sweep CSV re-import cannot bring a sweep back.** `trace import` of a sweep export keeps
+  only its transfer function (and delay 0), because `SweepData` needs the IR and analysis info
+  that the CSV lacks (the parsed distortion in `Imported::distortion` is dropped). Options:
+  export the IR + info so a sweep CSV round-trips, or make the sweep pane draw a sweep without
+  its IR. (Losing sweeps on a daemon restart, e.g. a `--max-level` change, is addressed: the
+  daemon autosaves and restores measurements and traces, sweep data included.)
 
 ## Flaky tests (seen on CI, passed on rerun)
 

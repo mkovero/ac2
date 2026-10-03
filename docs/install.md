@@ -127,7 +127,8 @@ There are three ways; pick one.
   with it. The command-line client cannot reach it; everything it would do is in the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
   (Linux), or `ac2 daemon start` on any OS (`ac2 daemon stop` stops it). The app connects to
-  it automatically.
+  it automatically. It autosaves measurements and traces and restores them when it restarts
+  (`--no-restore` starts empty; [user guide](user-guide.md#autosave)).
 - **A network daemon** on a stage or FOH machine, used from another computer. See
   [Remote use](#remote-use-foh--stage).
 

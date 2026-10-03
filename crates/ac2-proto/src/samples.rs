@@ -652,6 +652,10 @@ pub fn state() -> State {
         spl_logs: vec![spl_log()],
         timing: timing(),
         sweep: Some(sweep_run()),
+        autosave: Autosave {
+            state: AutosaveState::Saved,
+            saved_at: Some(WallNs(1_790_000_000_000_000_000)),
+        },
     }
 }
 
@@ -676,6 +680,15 @@ pub fn events() -> Vec<Event> {
         ev(54, Change::Timing(timing())),
         ev(55, Change::Sweep(sweep_run())),
         ev(56, Change::Trace(Patch::Set(sweep_meta()))),
+        ev(
+            57,
+            Change::Autosave(Autosave {
+                state: AutosaveState::Failed {
+                    reason: "No space left on device (os error 28)".into(),
+                },
+                saved_at: Some(WallNs(1_790_000_000_000_000_000)),
+            }),
+        ),
     ]
 }
 

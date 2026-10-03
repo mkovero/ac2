@@ -162,6 +162,10 @@ pub fn empty_state() -> State {
             internal_reference: false,
         },
         sweep: None,
+        autosave: Autosave {
+            state: AutosaveState::Off,
+            saved_at: None,
+        },
     }
 }
 
