@@ -119,8 +119,62 @@ pub fn spl_readout(frame: &SplFrame, cal: String, freshness: Option<Freshness>) 
     }
 }
 
+/// Between the parts of the footer when it wraps.
+const FOOTER_SEP: &str = " · ";
+
+/// `text` cut to `width` at `size` with a trailing `…` (whole characters).
+fn cut(text: &str, width: f32, size: f32) -> String {
+    if canvas::text_width(text, size) <= width {
+        return text.to_owned();
+    }
+    let mut out: String = text.to_owned();
+    while !out.is_empty() && canvas::text_width(&format!("{out}…"), size) > width {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
+}
+
+/// The footer's rows from the top, each `(text, align)` pieces: the interval left and the
+/// calibration right on one row when both fit, else every part (`over 6 min`, `MM1 34804`,
+/// `uncalibrated`, `mic curve: …`) packed into rows left to right, a part too wide for a row
+/// cut with `…`. At most `max_rows`; what does not fit goes into the last row, cut.
+fn footer_rows(
+    interval: &str,
+    cal: &str,
+    width: f32,
+    size: f32,
+    max_rows: usize,
+) -> Vec<Vec<(String, HAlign)>> {
+    let gap = 2.0 * size;
+    if canvas::text_width(interval, size) + gap + canvas::text_width(cal, size) <= width {
+        return vec![vec![
+            (interval.to_owned(), HAlign::Left),
+            (cal.to_owned(), HAlign::Right),
+        ]];
+    }
+    let parts = std::iter::once(interval).chain(cal.split(FOOTER_SEP));
+    let mut rows: Vec<String> = Vec::new();
+    for p in parts.filter(|p| !p.is_empty()) {
+        let full = rows.len() >= max_rows.max(1);
+        match rows.last_mut() {
+            Some(row)
+                if canvas::text_width(&format!("{row}{FOOTER_SEP}{p}"), size) <= width || full =>
+            {
+                row.push_str(FOOTER_SEP);
+                row.push_str(p);
+            }
+            _ => rows.push(p.to_owned()),
+        }
+    }
+    rows.into_iter()
+        .map(|r| vec![(cut(&r, width, size), HAlign::Left)])
+        .collect()
+}
+
 /// Lays the readout out in `size` below the banner strip: metric top-left, big number with
-/// its unit, a row of statistics, interval and calibration at the bottom.
+/// its unit, a row of statistics, interval and calibration at the bottom. Laid out from the
+/// bottom up, so on a small pane the footer wraps and the statistics and the number move up
+/// (the number shrinks if it must) rather than run into each other.
 pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport) -> SplScene {
     let mut c = Canvas::new(size, theme);
     let pad = 12.0;
@@ -153,22 +207,19 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
             theme.banner_warning.background,
         ));
     }
-    let base = area.y + area.h * 0.62;
-    let split = area.x + area.w * 0.66;
-    c.overlay.labels.push(label(
-        r.value.clone(),
-        [split, base],
-        anchor(HAlign::Right, VAlign::Baseline),
-        theme.big_font_size,
-        main,
-    ));
-    c.overlay.labels.push(label(
-        r.unit.clone(),
-        [split + 8.0, base],
-        anchor(HAlign::Left, VAlign::Baseline),
-        theme.font_size * 1.6,
-        main,
-    ));
+    // Bottom up: the footer, the statistics above it, the number above them.
+    let small = theme.small_font_size;
+    let fs = theme.font_size;
+    // A short pane spends fewer rows on the footer (cut instead) to keep the number large.
+    let max_rows = match area.h {
+        h if h >= 200.0 => 3,
+        h if h >= 160.0 => 2,
+        _ => 1,
+    };
+    let footer = footer_rows(&r.interval, &r.cal, area.w, small, max_rows);
+    let line_h = 1.25 * small;
+    let footer_top = area.bottom() - footer.len() as f32 * line_h;
+    let gap = 6.0;
     // One row of statistics when every cell fits its share of the width, else two rows.
     let texts: Vec<String> = r
         .stats
@@ -184,7 +235,37 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
     } else {
         texts.len().div_ceil(2).max(1)
     };
-    let row = area.y + area.h * 0.78;
+    let stat_rows = texts.len().div_ceil(per_row);
+    // Row centres 1.4 em apart; a row's text is 1.25 em tall.
+    let stats_span = (stat_rows.saturating_sub(1)) as f32 * 1.4 * fs;
+    let row = (area.y + area.h * 0.78).min(footer_top - gap - 0.625 * fs - stats_span);
+    let stats_top = row - 0.625 * fs;
+    // The number sits on its baseline with 0.3 em below it and 0.95 em above; it shrinks
+    // when the room between the metric name and the statistics is less than its size.
+    let metric_bottom = area.y + 1.25 * 1.4 * fs;
+    let room = stats_top - gap - (metric_bottom + gap);
+    let split = area.x + area.w * 0.66;
+    // Nor wider than the room left of the unit.
+    let per_em = canvas::text_width(&r.value, 1.0).max(1.0);
+    let big = (room / 1.25)
+        .min((split - area.x) / per_em)
+        .min(theme.big_font_size)
+        .max(1.6 * fs);
+    let base = (area.y + area.h * 0.62).min(stats_top - gap - 0.3 * big);
+    c.overlay.labels.push(label(
+        r.value.clone(),
+        [split, base],
+        anchor(HAlign::Right, VAlign::Baseline),
+        big,
+        main,
+    ));
+    c.overlay.labels.push(label(
+        r.unit.clone(),
+        [split + 8.0, base],
+        anchor(HAlign::Left, VAlign::Baseline),
+        fs * 1.6,
+        main,
+    ));
     for (i, t) in texts.into_iter().enumerate() {
         let (r_i, c_i) = (i / per_row, i % per_row);
         c.overlay.labels.push(label(
@@ -198,20 +279,22 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
             theme.text,
         ));
     }
-    c.overlay.labels.push(label(
-        r.interval.clone(),
-        [area.x, area.bottom()],
-        anchor(HAlign::Left, VAlign::Bottom),
-        theme.small_font_size,
-        theme.text_dim,
-    ));
-    c.overlay.labels.push(label(
-        r.cal.clone(),
-        [area.right(), area.bottom()],
-        anchor(HAlign::Right, VAlign::Bottom),
-        theme.small_font_size,
-        theme.text_dim,
-    ));
+    for (i, pieces) in footer.into_iter().enumerate() {
+        let y = footer_top + (i + 1) as f32 * line_h;
+        for (text, h) in pieces {
+            let x = match h {
+                HAlign::Right => area.right(),
+                _ => area.x,
+            };
+            c.overlay.labels.push(label(
+                text,
+                [x, y],
+                anchor(h, VAlign::Bottom),
+                small,
+                theme.text_dim,
+            ));
+        }
+    }
     SplScene {
         scene: c.into_scene(size),
         area,
@@ -402,6 +485,83 @@ mod tests {
         assert_eq!(s.area.y, s.strip.bottom() + 12.0);
         assert_eq!(s.area.bottom(), 288.0);
         crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.area]);
+    }
+
+    /// On the small panes of a grid the footer (`over 6 min · MM1 34804 · uncalibrated · mic
+    /// curve: …`) wraps or is cut and everything above it moves up: no two labels overlap and
+    /// all stay inside the readout area, at every size from a narrow bottom-row pane up.
+    #[test]
+    fn small_meter_never_overlaps_its_footer() {
+        use crate::canvas::tests::{intersects, label_box};
+        let mut f = frame(LevelScale::DbSpl);
+        f.meta.weighting = Weighting::Z;
+        f.meta.duration = Seconds(360.0);
+        let cal = "MM1 34804 · uncalibrated · mic curve: MM1 34804 90°";
+        let r = spl_readout(&f, cal.into(), Some(Freshness::from_age(9.0)));
+        for w in (220..=900).step_by(20) {
+            for h in (150..=420).step_by(15) {
+                let size = Viewport {
+                    width: w as f32,
+                    height: h as f32,
+                };
+                let s = spl_scene(&r, &Status::default(), &Theme::dark(), size);
+                let labels = &s.scene.layers[2].labels;
+                // The unit beside the number may leave a very narrow pane; the rest may not.
+                let boxes: Vec<(&str, Rect)> = labels
+                    .iter()
+                    .filter(|l| l.text != r.unit)
+                    .map(|l| (l.text.as_str(), label_box(l)))
+                    .collect();
+                for (t, b) in &boxes {
+                    assert!(
+                        b.x >= s.area.x - 0.5
+                            && b.right() <= s.area.right() + 0.5
+                            && b.bottom() <= s.area.bottom() + 0.5
+                            && b.y >= s.area.y - 0.5,
+                        "{w}×{h}: {t:?} {b:?} outside {:?}",
+                        s.area
+                    );
+                }
+                for (i, (a, ab)) in boxes.iter().enumerate() {
+                    for (b, bb) in &boxes[i + 1..] {
+                        assert!(!intersects(*ab, *bb), "{w}×{h}: {a:?} overlaps {b:?}");
+                    }
+                }
+                let texts: Vec<&str> = boxes.iter().map(|(t, _)| *t).collect();
+                assert!(texts.contains(&"LZeq 92.1"), "{w}×{h}: {texts:?}");
+                assert!(
+                    texts.iter().any(|t| t.contains("over 6 min")),
+                    "{w}×{h}: {texts:?}"
+                );
+                // Wide enough, the footer is one row: the interval left, the calibration right.
+                if w >= 600 {
+                    assert!(texts.contains(&cal), "{w}×{h}: {texts:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn footer_rows_wrap_at_the_parts() {
+        let cal = "MM1 34804 · uncalibrated · mic curve: MM1 34804 90°";
+        let one = footer_rows("over 6 min", cal, 600.0, 10.0, 3);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].len(), 2);
+        let rows = footer_rows("over 6 min", cal, 200.0, 10.0, 3);
+        let text: Vec<&str> = rows.iter().map(|r| r[0].0.as_str()).collect();
+        assert_eq!(
+            text,
+            [
+                "over 6 min · MM1 34804",
+                "uncalibrated",
+                "mic curve: MM1 34804 90°"
+            ]
+        );
+        // Two rows at most: the rest is cut.
+        let rows = footer_rows("over 6 min", cal, 160.0, 10.0, 2);
+        assert_eq!(rows.len(), 2);
+        assert!(rows[1][0].0.ends_with('…'), "{rows:?}");
+        assert!(canvas::text_width(&rows[1][0].0, 10.0) <= 160.0);
     }
 
     #[test]
