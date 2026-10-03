@@ -1,8 +1,10 @@
 //! Input meters and channel labels of the session and measurement dialogs: how full a bar
 //! is, what it reads and which state colours it, and what an input or output is called.
 //!
-//! Scale: −60 … 0 dBFS, linear in dB. Below −60 dBFS a bar is empty and reads `—` (an
-//! unpatched input reads the same as a silent one: nothing to see). RMS is the bar, the
+//! Scale: −60 … 0 dBFS, linear in dB. Below −60 dBFS a bar is empty, but the readout keeps
+//! the number down to −120 dBFS: a measurement mic's room noise (−70 … −90 dBFS) is the
+//! floor every later measurement sits on, so it is worth reading before a sweep. Only digital
+//! silence (or less than −120 dBFS) reads `—`. RMS is the bar, the
 //! sample peak a tick on it, so a noise stimulus (crest ≈ 12 dB) shows both its body and
 //! its headroom.
 
@@ -10,6 +12,8 @@ use crate::format::{self, NO_VALUE};
 
 /// Lowest level shown, dBFS.
 pub const FLOOR_DBFS: f64 = -60.0;
+/// Lowest level the readout prints, dBFS; below it (or digital silence) it reads `—`.
+pub const READOUT_FLOOR_DBFS: f64 = -120.0;
 /// RMS below this reads as no signal.
 pub const SIGNAL_DBFS: f64 = -50.0;
 /// Peak above this is close to clipping.
@@ -37,7 +41,7 @@ pub struct MeterReading {
     pub rms_fill: f32,
     /// Peak tick position, 0 … 1.
     pub peak_fill: f32,
-    /// RMS readout: `−12.3`, or `—` below the floor.
+    /// RMS readout: `−12.3`, or `—` for digital silence (below [`READOUT_FLOOR_DBFS`]).
     pub text: String,
     pub state: MeterState,
 }
@@ -74,7 +78,7 @@ impl MeterReading {
         } else {
             MeterState::Silent
         };
-        let text = if rms.is_finite() && rms >= FLOOR_DBFS {
+        let text = if rms.is_finite() && rms >= READOUT_FLOOR_DBFS {
             format::fixed(rms, 1)
         } else {
             NO_VALUE.into()
@@ -205,8 +209,9 @@ mod tests {
         );
         let quiet = MeterReading::new(-58.0, -70.0, false);
         assert_eq!(quiet.state, MeterState::Silent);
-        assert_eq!(quiet.text, NO_VALUE);
+        assert_eq!(quiet.text, "\u{2212}70.0");
         assert_eq!(quiet.rms_fill, 0.0);
+        assert_eq!(MeterReading::new(-120.0, -130.0, false).text, NO_VALUE);
         let silent = MeterReading::new(f32::NEG_INFINITY, f32::NEG_INFINITY, false);
         assert_eq!(silent.state, MeterState::Silent);
         assert_eq!(silent.with_unit(), NO_VALUE);
