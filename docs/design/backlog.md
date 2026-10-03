@@ -36,14 +36,6 @@ Open:
   --smoothing`), so smoothed pictures and exports don't need the keyboard.
 - **"No audio session" hint covers stored traces** in the transfer pane; it should yield (or move
   to the banner strip) when the pane has data to show.
-- **Finder reports "AMBIGUOUS · merged arrivals" while listing a single candidate.** Either the
-  ambiguity is real and the second candidate must be listed, or the outcome should be accepted.
-- **Clearer refusal messages.** An unpaired CLI fails locally with a bare
-  "client.key: No such file" (should say "not paired: run `ac2 auth pair <host>`"). A paired but
-  unauthorized client only sees "daemon … is not responding" (CURVE refusal looks like silence):
-  add "or this client is not authorized on the daemon (fingerprint …)" to that message, and have
-  the daemon log every refused key's fingerprint and address (rate-limited) — the rig's log had
-  no line for a refused client.
 
 ## Done
 
@@ -51,6 +43,18 @@ Open:
   fitted before it is drawn: lower-priority texts (key help, next-key hint, autosave, the
   device name) shorten or go first, the state badge and level always stay; `top_bar_never_overlaps`
   checks 640–1600 px.
+
+From the first rig session on pupu (2026-10-03):
+- **Finder said "AMBIGUOUS · merged arrivals" with a single candidate.** The ambiguity is real.
+  A crossover inside the full band (LR4 sum = allpass) smears the one peak, so its centre is
+  more than 1 sample after the onset. Two arrivals inside one pulse width do the same. The finder
+  lists the peak and never invents a second arrival. The text now says "arrivals merged into one
+  peak", explains the single row, offers only pick 1, and points to another band (q1 §8).
+- **Clearer refusal messages.** An unpaired client says "not paired with <host>: … run `ac2
+  auth pair <host> --server-key …`" (CLI and app). "Not responding" from a CURVE client adds
+  "or this client is not authorized on it (this client's fingerprint: …)" and where to
+  authorize it. ac2d logs each refused key's fingerprint, key and address, once per key and
+  address per 10 s, with the count it suppressed.
 
 Sweep findings from pupu (2026-10-03), fixed on the sweep-fixes branch:
 - **Generator re-armed after a sweep** (every run). Not a restore of the pre-sweep state:

@@ -214,12 +214,47 @@ impl KeyDir {
     }
 
     /// CURVE client configuration for `host`: this client's keypair and the pinned key.
+    /// [`ClientError::NotPaired`] when either is missing.
     pub fn curve_client(&self, host: &str) -> Result<CurveClient, ClientError> {
-        Ok(CurveClient {
-            keys: self.client_keypair()?,
-            server_key: self.server_key(host)?,
-        })
+        let not_paired = |missing: String| ClientError::NotPaired {
+            host: host.to_owned(),
+            missing,
+        };
+        if !self.secret_path().exists() {
+            return Err(not_paired(format!(
+                "this client has no key pair yet (no {})",
+                self.secret_path().display()
+            )));
+        }
+        let keys = self.client_keypair()?;
+        let Some(server_key) = self
+            .known_servers()?
+            .into_iter()
+            .find(|(h, _)| h == host)
+            .map(|(_, k)| k)
+        else {
+            return Err(not_paired(format!(
+                "no daemon key pinned for it in {}",
+                self.known_path().display()
+            )));
+        };
+        Ok(CurveClient { keys, server_key })
     }
+}
+
+/// The part of a "not responding" message for a CURVE client: a daemon refuses an
+/// unauthorized key by dropping the handshake, which the client cannot tell from silence.
+/// Names this client's fingerprint (what the daemon logs for a refused key) and where to
+/// authorize it.
+pub fn unauthorized_hint(curve: &CurveClient) -> String {
+    format!(
+        "or this client is not authorized on it (this client's fingerprint: {}; the daemon \
+         logs refused fingerprints. Authorize it on the daemon host by adding the line \
+         `<name> {}` to authorized_clients in the ac2 config directory, e.g. \
+         ~/.config/ac2/authorized_clients, then restart ac2d)",
+        curve.keys.public.fingerprint(),
+        curve.keys.public.to_z85()
+    )
 }
 
 fn write_file(path: &Path, text: &str, secret: bool) -> Result<(), ClientError> {
@@ -302,6 +337,72 @@ mod tests {
         assert_eq!(
             kd.pin_status(&b.fingerprint(), &["other"])?,
             PinStatus::Unpaired
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unpaired_host_is_named_with_the_pair_command() -> Result<(), ClientError> {
+        let tmp = tempfile::tempdir().map_err(|e| ClientError::Keys(e.to_string()))?;
+        let kd = KeyDir::new(tmp.path().join("keys"));
+        let e = kd.curve_client("pupu").err().map(|e| e.to_string());
+        let e = e.unwrap_or_default();
+        assert!(
+            e.starts_with("not paired with pupu: this client has no key pair yet (no "),
+            "{e}"
+        );
+        assert!(
+            e.contains("client.key") && e.contains("run `ac2 auth pair pupu --server-key"),
+            "{e}"
+        );
+        // A key pair but no pin for this host.
+        kd.ensure_client_keypair()?;
+        kd.pin_server("other", KeyPair::generate()?.public)?;
+        let e = kd.curve_client("pupu").err().map(|e| e.to_string());
+        let e = e.unwrap_or_default();
+        assert!(
+            e.starts_with("not paired with pupu: no daemon key pinned for it in "),
+            "{e}"
+        );
+        assert!(e.contains("ac2 auth pair pupu"), "{e}");
+        Ok(())
+    }
+
+    #[test]
+    fn not_responding_names_the_fingerprint_for_curve_clients() -> Result<(), ClientError> {
+        use crate::{ClientConfig, Endpoints, RemoteAddr};
+        let r: RemoteAddr = "10.0.0.20".parse().map_err(ClientError::Invalid)?;
+        let mut cfg = ClientConfig::new(Endpoints::remote(&r), "test");
+        // Without CURVE (plain endpoints) only the firewall hint applies.
+        let plain = cfg.not_responding_hints();
+        assert!(
+            plain.starts_with("; if the daemon is running, a firewall"),
+            "{plain}"
+        );
+        let keys = KeyPair::generate()?;
+        let fp = keys.public.fingerprint();
+        cfg.curve = Some(CurveClient {
+            server_key: KeyPair::generate()?.public,
+            keys: keys.clone(),
+        });
+        let h = cfg.not_responding_hints();
+        assert!(
+            h.starts_with(&format!(
+                " — or this client is not authorized on it (this client's fingerprint: {fp};"
+            )),
+            "{h}"
+        );
+        assert!(
+            h.contains(&format!("`<name> {}`", keys.public.to_z85()))
+                && h.contains("authorized_clients")
+                && h.contains("restart ac2d"),
+            "{h}"
+        );
+        assert!(h.contains("a firewall on its host"), "{h}");
+        // A local daemon: nothing to add.
+        assert_eq!(
+            ClientConfig::local("test").not_responding_hints(),
+            String::new()
         );
         Ok(())
     }

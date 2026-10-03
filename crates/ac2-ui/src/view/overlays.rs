@@ -538,8 +538,12 @@ fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
                         .small()
                         .color(ch.armed),
                 );
+                if let Some(note) = ac2_scene::finding::ambiguity_note(&c.finding.outcome) {
+                    ui.label(RichText::new(note).small().color(ch.text));
+                }
                 ui.add_space(6.0);
-                for r in c.rows() {
+                let rows = c.rows();
+                for r in &rows {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&r.key).monospace().strong().color(ch.focus));
                         ui.label(RichText::new(&r.text).monospace().color(ch.text));
@@ -556,9 +560,10 @@ fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
                     .color(ch.dim),
                 );
                 ui.label(
-                    RichText::new(
-                        "1–3 inserts · Shift+X strongest · Esc closes (and stops stimulus)",
-                    )
+                    RichText::new(format!(
+                        "{} inserts · Shift+X strongest · Esc closes (and stops stimulus)",
+                        ac2_scene::finding::pick_keys(rows.len())
+                    ))
                     .small()
                     .color(ch.dim),
                 );

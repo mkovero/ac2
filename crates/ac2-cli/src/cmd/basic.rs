@@ -433,10 +433,18 @@ fn finding_text(f: &DelayFinding, rate: Option<u32>) -> String {
         DelayOutcome::Ambiguous {
             ranked, strongest, ..
         } => {
+            let keys: Vec<String> = (1..=ranked.len().min(3)).map(|i| i.to_string()).collect();
             out.push_str(&format!(
-                "strongest      {}{}\npick one: ac2 delay insert <meas> --pick 1|2|3 (1 = the rule's pick)\n",
+                "strongest      {}{}\n",
                 output::ms(strongest.delay.0),
                 smp(strongest)
+            ));
+            if let Some(note) = sf::ambiguity_note(&f.outcome) {
+                out.push_str(&format!("{note}\n"));
+            }
+            out.push_str(&format!(
+                "pick one: ac2 delay insert <meas> --pick {} (1 = the rule's pick)\n",
+                keys.join("|")
             ));
             let mut t = output::table(&["#", "delay", "level", "phase", "σ"]);
             for (i, a) in ranked.iter().enumerate() {
@@ -662,6 +670,49 @@ mod tests {
             unreachable!()
         };
         meas_config(&n)
+    }
+
+    /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.
+    #[test]
+    fn merged_lobe_finding_offers_one_pick() {
+        use ac2_proto::units::{Db, Degrees, Seconds, WallNs};
+        let peak = DelayArrival {
+            delay: Seconds(3.346e-3),
+            delay_samples: 160.6,
+            level: Db(0.0),
+            phase: Degrees(160.0),
+            uncertainty_samples: 0.1,
+            misfit: 0.17,
+            refined: true,
+        };
+        let f = DelayFinding {
+            outcome: DelayOutcome::Ambiguous {
+                reasons: vec![AmbiguityReason::MergedLobe],
+                ranked: vec![peak],
+                strongest: peak,
+            },
+            confidence: DelayConfidence {
+                psr_db: None,
+                psr_acq_db: None,
+                band_snr_db: None,
+                excited_fraction: None,
+                uncertainty_samples: None,
+                pulse_width_samples: None,
+                period: None,
+            },
+            band: DelayBand::Full,
+            observation: Seconds(0.25),
+            candidates: vec![peak],
+            found_at: WallNs(0),
+        };
+        let t = finding_text(&f, Some(48_000));
+        assert!(
+            t.starts_with("AMBIGUOUS · arrivals merged into one peak\n"),
+            "{t}"
+        );
+        assert!(t.contains("One peak only: two arrivals"), "{t}");
+        assert!(t.contains("--pick 1 (1 = the rule's pick)"), "{t}");
+        assert!(!t.contains("1|2"), "{t}");
     }
 
     #[test]

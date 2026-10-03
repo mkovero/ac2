@@ -72,6 +72,23 @@ impl ClientConfig {
             mirror: true,
         }
     }
+
+    /// What follows "… is not responding" when the daemon does not answer (empty for a
+    /// local daemon): with CURVE, a refused key looks exactly like silence, so this names
+    /// the client's fingerprint and where to authorize it; for another host, the firewall
+    /// hint follows.
+    pub fn not_responding_hints(&self) -> String {
+        let mut s = String::new();
+        if let Some(c) = &self.curve {
+            s.push_str(" — ");
+            s.push_str(&crate::keys::unauthorized_hint(c));
+        }
+        if let Some(h) = self.endpoints.firewall_hint() {
+            s.push_str("; ");
+            s.push_str(&h);
+        }
+        s
+    }
 }
 
 /// The request half: ids, encoding, retry. Shared with the sync and lease tasks.

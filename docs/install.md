@@ -257,6 +257,17 @@ the daemon host's `authorized_clients` file and restart the daemon. Then
 `ac2 --remote 10.0.0.20 status`, or open the app's connect dialog (`ac2-ui --connect`): paired
 rigs are selectable there, and an unpaired rig offers the same pairing steps.
 
+A client that is not authorized gets no answer, because CURVE refuses it silently. Its
+"not responding" message therefore also names its own fingerprint. The daemon logs every
+refused key, once per key and address every 10 s:
+
+```
+refused client key fingerprint 1a2b-3c4d-5e6f-7a8b-9c0d from 10.0.0.31: not in …/authorized_clients; …
+```
+
+If that fingerprint matches what the client shows, add the key from that line to
+`authorized_clients` and restart the daemon.
+
 Where the keys live (the ac2 config directory, shared by every ac2 program on a machine):
 
 | file | Linux | macOS | Windows |

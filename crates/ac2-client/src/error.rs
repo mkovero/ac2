@@ -55,6 +55,19 @@ pub enum ClientError {
     /// The client's I/O thread has stopped.
     #[error("client is closed")]
     Closed,
+    /// Remote mode without a pairing for the host: no client key pair yet, or no pinned
+    /// daemon key for it.
+    #[error(
+        "not paired with {host}: {missing}; run `ac2 auth pair {host} --server-key <the key \
+         ac2d logs at startup>` (or pair in the app's connect dialog), then authorize this \
+         client on the daemon host"
+    )]
+    NotPaired {
+        /// The host as given.
+        host: String,
+        /// What is missing, with its file.
+        missing: String,
+    },
     /// Key material is missing or malformed.
     #[error("keys: {0}")]
     Keys(String),

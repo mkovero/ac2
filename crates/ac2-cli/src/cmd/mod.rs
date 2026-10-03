@@ -95,13 +95,10 @@ pub(crate) async fn connect(cli: &Cli, mirror: bool) -> Result<Client, CliError>
             )));
         }
     }
-    let hint = cfg.endpoints.firewall_hint();
+    let silent = format!("{what} is not responding{}", cfg.not_responding_hints());
     match Client::connect(cfg).await {
         Ok(c) => Ok(c),
-        Err(ClientError::Timeout { .. }) => Err(CliError::NotRunning(match hint {
-            Some(h) => format!("{what} is not responding; {h}"),
-            None => format!("{what} is not responding"),
-        })),
+        Err(ClientError::Timeout { .. }) => Err(CliError::NotRunning(silent)),
         Err(e) => Err(e.into()),
     }
 }
