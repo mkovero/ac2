@@ -415,7 +415,14 @@ fn spl_cal(
                 o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
             }),
     );
-    let cal = cal_text(cal, mic_curve, now.wall, offset);
+    // The daemon decided which calibration applies (verified / other mic or input) and
+    // whether the mic curve ran; the readout names the input's mic next to it, and which
+    // curve (or why none).
+    let cal = cal_text(cal, false, now.wall, offset);
+    let cal = match st.curve_note(input, mic_curve) {
+        Some(n) => format!("{cal} · {n}"),
+        None => cal,
+    };
     match st
         .daemon()
         .and_then(|d| d.inputs.iter().find(|i| i.channel == input))
@@ -480,32 +487,8 @@ pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Spl
     let MeasKind::Spl { config } = &m.config.kind else {
         return None;
     };
-    let daemon = st.daemon()?;
-    let offset = ClockOffset(
-        st.mirror
-            .as_ref()
-            .and_then(|v| v.clock_offset_ns)
-            .map_or(0, |o| {
-                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
-            }),
-    );
-    // The daemon decided which calibration applies (verified / other mic or input) and
-    // whether the mic curve ran; the readout names the input's mic next to it, and which
-    // curve (or why none).
-    let cal = cal_text(f.meta.cal, false, now.wall, offset);
-    let cal = match st.curve_note(config.input, f.meta.mic_curve) {
-        Some(n) => format!("{cal} · {n}"),
-        None => cal,
-    };
-    let cal = match daemon
-        .inputs
-        .iter()
-        .find(|i| i.channel == config.input)
-        .and_then(|i| i.mic.as_deref())
-    {
-        Some(mic) => format!("{mic} · {cal}"),
-        None => cal,
-    };
+    st.daemon()?;
+    let cal = spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now);
     let r = spl_readout(f, cal, Some(freshness(tf)));
     let status = status(st, &[tf], None, now);
     Some(spl_scene(&r, &status, theme, size))

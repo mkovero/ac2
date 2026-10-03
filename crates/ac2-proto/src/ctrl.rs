@@ -15,8 +15,8 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat,
     ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement, Mic,
-    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLogPage,
-    SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
+    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLogPage, SweepRequest,
+    SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
