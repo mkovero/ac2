@@ -155,14 +155,34 @@
    {
     "channel": 1,
     "mic": "M30 #1234",
-    "mic_curve": true
+    "curve": {
+     "type": "curve",
+     "label": "0\u00b0"
+    }
    },
    {
     "channel": 2,
     "mic": null,
-    "mic_curve": false
+    "curve": {
+     "type": "not_chosen"
+    }
+   },
+   {
+    "channel": 3,
+    "mic": "ECM",
+    "curve": {
+     "type": "off"
+    }
    }
   ]
+ },
+ {
+  "kind": "mic",
+  "rev": 58,
+  "payload": {
+   "type": "deleted",
+   "value": "ECM"
+  }
  },
  {
   "kind": "timing",

@@ -230,16 +230,46 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::trace_meta(&t))?;
         }
-        TraceCmd::Mic { trace, mic } => {
+        TraceCmd::Mic { trace, mic, label } => {
             let s = state(&c).await?;
             let id = find_trace(&s, trace)?.id;
-            let mic = (!mic.trim().eq_ignore_ascii_case("none")).then(|| mic.clone());
-            let r = c.call(Command::TraceMicCurve { trace: id, mic }).await?;
+            let curve = if mic.trim().eq_ignore_ascii_case("none") {
+                None
+            } else {
+                Some(curve_of(&s, mic, label.as_deref())?)
+            };
+            let r = c.call(Command::TraceMicCurve { trace: id, curve }).await?;
             let t = expect_body!("trace.mic_curve", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::trace_meta(&t))?;
         }
     }
     Ok(())
+}
+
+/// The curve `label` of `mic`; without a label, the mic's only curve.
+fn curve_of(
+    s: &ac2_proto::model::State,
+    mic: &str,
+    label: Option<&str>,
+) -> Result<ac2_proto::model::MicCurveId, CliError> {
+    let id = |label: &str| ac2_proto::model::MicCurveId {
+        mic: mic.to_owned(),
+        label: label.to_owned(),
+    };
+    if let Some(l) = label {
+        return Ok(id(l));
+    }
+    match ac2_proto::cal::mic(&s.mics, mic).map(|m| m.curves.as_slice()) {
+        Some([only]) => Ok(id(&only.label)),
+        Some(many) if !many.is_empty() => Err(CliError::Usage(format!(
+            "{mic} has {} curves ({}): choose one with --label",
+            many.len(),
+            ac2_scene::cal::labels(many)
+        ))),
+        _ => Err(CliError::Usage(format!(
+            "no curve of {mic:?} in the mic library (import one with `ac2 cal curve import`)"
+        ))),
+    }
 }
 
 /// A session argument: a plain name, or a path (anything with a separator, `.`/`~` start,

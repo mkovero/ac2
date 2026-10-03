@@ -194,7 +194,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert!(e.msg.contains("arm"), "{}", e.msg);
 
     let data = match c.ok(Command::TraceGet { trace }) {
-        ReplyBody::TraceData(t) => t,
+        ReplyBody::TraceData(t) => *t,
         other => panic!("{other:?}"),
     };
     assert_eq!(data.meta.kind, TraceKind::Sweep);
@@ -266,7 +266,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert!((back.delay.0 - data.meta.delay.0).abs() < 1e-12);
     assert!(matches!(&back.source, TraceSource::Imported { notes, .. } if notes.is_empty()));
     let again = match c.ok(Command::TraceGet { trace: back.id }) {
-        ReplyBody::TraceData(t) => t,
+        ReplyBody::TraceData(t) => *t,
         other => panic!("{other:?}"),
     };
     let s2 = again.sweep.expect("sweep data after import");

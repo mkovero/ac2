@@ -712,18 +712,18 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (sweep sidecars, no mic curves on traces) is refused
+    // A session of the previous format (a capture's curve named without label and hash) is refused
     // with its version named, never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 5", "\"version\": 4")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 6", "\"version\": 5")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 4
+            found: 5
         }
     );
-    assert!(e.to_string().contains("reads version 5 only"), "{e}");
+    assert!(e.to_string().contains("reads version 6 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -926,19 +926,24 @@ fn curve_points() -> Vec<[f64; 2]> {
     vec![[50.0, -2.0], [1000.0, 0.0], [10_000.0, 3.0]]
 }
 
+fn curve_ref() -> MicCurveRef {
+    MicCurveRef {
+        label: "90°".into(),
+        file_name: "MM1-34804.txt".into(),
+        content_hash: "0123456789abcdef".into(),
+        points: 3,
+        f_lo: Hz(50.0),
+        f_hi: Hz(10_000.0),
+        imported_at: WallNs(1),
+        stated_sensitivity: Some(15.0),
+    }
+}
+
 fn with_curve(mut t: StoredTrace) -> StoredTrace {
     t.mic_curve = Some(ac2_traces::mic::correction(&curve_points(), 1000.0).unwrap());
     t.meta.mic_curve = Some(Box::new(TraceMicCurve {
         mic: "MM1 34804".into(),
-        curve: MicCurveRef {
-            name: "MM1-34804".into(),
-            file_name: "MM1-34804.txt".into(),
-            content_hash: "0123456789abcdef".into(),
-            points: 3,
-            f_lo: Hz(50.0),
-            f_hi: Hz(10_000.0),
-            imported_at: WallNs(1),
-        },
+        curve: curve_ref(),
         f_norm: Hz(1000.0),
     }));
     t
@@ -969,7 +974,7 @@ fn mic_curve_on_a_stored_trace_is_a_display_edit() {
     let csv = export_csv(&t);
     assert!(
         csv.contains(
-            "# mic: MM1 34804 (curve: MM1-34804, applied after capture as a display edit, \
+            "# mic: MM1 34804 (curve: 90°, applied after capture as a display edit, \
              not in the columns; 0 dB at 1000 Hz"
         ),
         "{}",
@@ -1009,7 +1014,7 @@ fn mic_curve_on_a_stored_trace_is_a_display_edit() {
     );
     // ... and say which curve their columns carry.
     let baked = ac2_traces::mic::bake(&t);
-    assert_eq!(baked.meta.mic.unwrap().curve.as_deref(), Some("MM1-34804"));
+    assert_eq!(baked.meta.mic.unwrap().curve, Some(curve_ref()));
     assert!(baked.meta.mic_curve.is_none());
 }
 
@@ -1021,7 +1026,7 @@ fn mic_curve_refusals() {
     assert_eq!(check(&t), Ok(()));
     t.mic = Some(MicState {
         name: "MM1".into(),
-        curve: Some("MM1-34804".into()),
+        curve: Some(curve_ref()),
     });
     let e = check(&t).unwrap_err();
     assert!(matches!(e, MicCurveError::InColumns { .. }));

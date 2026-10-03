@@ -40,7 +40,7 @@ fn state(c: &mut Client) -> State {
 
 fn trace_data(c: &mut Client, id: TraceId) -> TraceData {
     match c.ok(Command::TraceGet { trace: id }) {
-        ReplyBody::TraceData(d) => d,
+        ReplyBody::TraceData(d) => *d,
         other => panic!("{other:?}"),
     }
 }

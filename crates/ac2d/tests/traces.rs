@@ -38,7 +38,7 @@ fn trace(r: ReplyBody) -> TraceMeta {
 
 fn data(c: &mut Client, id: TraceId) -> TraceData {
     match c.ok(Command::TraceGet { trace: id }) {
-        ReplyBody::TraceData(d) => d,
+        ReplyBody::TraceData(d) => *d,
         other => panic!("{other:?}"),
     }
 }
@@ -870,7 +870,7 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 5", "\"version\": 7")).unwrap();
+    std::fs::write(&manifest, text.replace("\"version\": 6", "\"version\": 7")).unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -883,7 +883,7 @@ fn session_save_load_round_trip() {
         e.detail,
         Some(ErrorDetail::SessionVersion {
             found: 7,
-            supported: 5
+            supported: 6
         })
     );
     assert_eq!(traces(c).len(), n);
@@ -936,27 +936,32 @@ fn mic_curve_on_a_stored_trace() {
     assert_eq!(raw.mic, None);
     let raw_data = data(c, raw.id);
     // No curve for that mic yet.
+    let m30 = || {
+        Some(ac2_proto::model::MicCurveId {
+            mic: "M30".into(),
+            label: "M30".into(),
+        })
+    };
     let e = c
         .call(Command::TraceMicCurve {
             trace: raw.id,
-            mic: Some("M30".into()),
+            curve: m30(),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
-    c.ok(Command::CalMicCurve {
-        input: 1,
+    c.ok(Command::CalCurveImport {
         mic: "M30".into(),
-        action: MicCurveAction::Import {
-            file_name: "M30.frd".into(),
-            content: Blob(CURVE.as_bytes().to_vec()),
-        },
+        label: None,
+        file_name: "M30.frd".into(),
+        content: Blob(CURVE.as_bytes().to_vec()),
+        input: Some(1),
     });
     let t = trace(c.ok(Command::TraceMicCurve {
         trace: raw.id,
-        mic: Some("M30".into()),
+        curve: m30(),
     }));
     let mc = t.mic_curve.clone().unwrap();
-    assert_eq!((mc.mic.as_str(), mc.curve.name.as_str()), ("M30", "M30"));
+    assert_eq!((mc.mic.as_str(), mc.curve.label.as_str()), ("M30", "M30"));
     assert_eq!(mc.f_norm, Hz(1000.0));
     let d = data(c, raw.id);
     for i in 0..480 {
@@ -997,11 +1002,17 @@ fn mic_curve_on_a_stored_trace() {
         name: "after cal".into(),
         slot: None,
     }));
-    assert_eq!(with.mic.as_ref().unwrap().curve.as_deref(), Some("M30"));
+    assert_eq!(
+        with.mic
+            .as_ref()
+            .and_then(|m| m.curve.as_ref())
+            .map(|c| c.label.as_str()),
+        Some("M30")
+    );
     let e = c
         .call(Command::TraceMicCurve {
             trace: with.id,
-            mic: Some("M30".into()),
+            curve: m30(),
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
@@ -1022,7 +1033,7 @@ fn mic_curve_on_a_stored_trace() {
     // Removed: the served data is the measured one again.
     let off = trace(c.ok(Command::TraceMicCurve {
         trace: raw.id,
-        mic: None,
+        curve: None,
     }));
     assert!(off.mic_curve.is_none());
     assert_eq!(
@@ -1032,7 +1043,7 @@ fn mic_curve_on_a_stored_trace() {
     let e = c
         .call(Command::TraceMicCurve {
             trace: raw.id,
-            mic: None,
+            curve: None,
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);

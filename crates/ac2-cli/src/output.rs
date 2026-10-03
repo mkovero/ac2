@@ -5,8 +5,8 @@ use std::io::{self, Write};
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    DelayReference, DepthPolicy, InputSetup, LevelScale, MeasKind, Measurement, PeakWeighting,
-    Polarity, Session, SessionFile, SmoothingFraction, SmoothingMode, TimeWeighting, TimingState,
+    DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic, PeakWeighting, Polarity,
+    Session, SessionFile, SmoothingFraction, SmoothingMode, State, TimeWeighting, TimingState,
     TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource, Weighting,
 };
 use ac2_proto::units::WallNs;
@@ -503,7 +503,7 @@ pub fn utc(ns: u64) -> String {
     )
 }
 
-/// Calibrations table.
+/// Sensitivity calibrations table.
 pub fn calibrations(c: &[CalEntry]) -> String {
     let mut t = table(&[
         "device",
@@ -512,54 +512,94 @@ pub fn calibrations(c: &[CalEntry]) -> String {
         "sensitivity",
         "calibrator",
         "measured",
-        "mic curve",
+        "calibrated (UTC)",
     ]);
     for e in c {
-        let none = || format::NO_VALUE.to_owned();
-        let (sens, calib, measured) = match &e.spl {
-            Some(s) => (
-                format::db_readout(s.sensitivity.0),
-                format!(
-                    "{} dB SPL @ {}",
-                    format::level(s.calibrator_level.0),
-                    format::freq_readout(s.calibrator_freq.0)
-                ),
-                dbfs(s.measured.0),
-            ),
-            None => (none(), none(), none()),
-        };
         t.add_row(vec![
             e.key.device.0.clone(),
             (u32::from(e.key.channel) + 1).to_string(),
             e.key.mic.clone(),
-            sens,
-            calib,
-            measured,
-            e.mic_curve.as_ref().map_or_else(none, |c| {
-                format!(
-                    "{} ({} points, {} – {})",
-                    c.file_name,
-                    c.points,
-                    format::freq_readout(c.f_lo.0),
-                    format::freq_readout(c.f_hi.0)
-                )
-            }),
+            format::db_readout(e.spl.sensitivity.0),
+            ac2_scene::cal::calibrator(e),
+            dbfs(e.spl.measured.0),
+            utc(e.spl.calibrated_at.0),
         ]);
     }
     t.to_string()
 }
 
-/// Input setup table (mic names, mic-curve switches).
-pub fn inputs(i: &[InputSetup]) -> String {
-    let mut t = table(&["in", "mic", "mic curve"]);
-    for r in i {
+/// The mic library: one row per curve.
+pub fn mics(m: &[Mic]) -> String {
+    let mut t = table(&["mic", "curve", "file", "points", "range", "data sheet"]);
+    for mic in m {
+        for c in &mic.curves {
+            t.add_row(vec![
+                mic.name.clone(),
+                c.label.clone(),
+                c.file_name.clone(),
+                c.points.to_string(),
+                format!(
+                    "{} – {}",
+                    format::freq_readout(c.f_lo.0),
+                    format::freq_readout(c.f_hi.0)
+                ),
+                c.stated_sensitivity.map_or_else(
+                    || format::NO_VALUE.to_owned(),
+                    ac2_scene::cal::stated_sensitivity,
+                ),
+            ]);
+        }
+    }
+    t.to_string()
+}
+
+/// The channels the input table lists: every input with a setup row, and every input the
+/// open session captures.
+fn input_channels(s: &State) -> Vec<u16> {
+    let mut ch: Vec<u16> = s.inputs.iter().map(|i| i.channel).collect();
+    if let Some(o) = &s.session.open {
+        ch.extend(o.config.input_channels.iter().copied());
+    }
+    ch.sort_unstable();
+    ch.dedup();
+    ch
+}
+
+/// What each input uses: its mic, its mic curve (or why none applies) and its sensitivity
+/// calibration, in the app's words (`ac2_scene::cal`). The age is on this machine's clock.
+pub fn inputs(s: &State, now: WallNs) -> String {
+    let mut t = table(&["in", "mic", "mic curve", "sensitivity"]);
+    for ch in input_channels(s) {
+        let u = ac2_proto::cal::state_input_use(s, ch);
         t.add_row(vec![
-            (u32::from(r.channel) + 1).to_string(),
-            r.mic.clone().unwrap_or_else(|| format::NO_VALUE.to_owned()),
-            if r.mic_curve { "on" } else { "off" }.to_owned(),
+            (u32::from(ch) + 1).to_string(),
+            u.mic.unwrap_or(format::NO_VALUE).to_owned(),
+            ac2_scene::cal::curve_state(&u.curve),
+            ac2_scene::cal::sensitivity_state(&u.sensitivity, now, ac2_scene::time::ClockOffset(0)),
         ]);
     }
     t.to_string()
+}
+
+/// [`inputs`] as JSON rows.
+pub fn inputs_json(s: &State) -> serde_json::Value {
+    let rows: Vec<serde_json::Value> = input_channels(s)
+        .into_iter()
+        .map(|ch| {
+            let row = ac2_proto::cal::input_setup(&s.inputs, ch);
+            let u = ac2_proto::cal::state_input_use(s, ch);
+            serde_json::json!({
+                "input": u32::from(ch) + 1,
+                "mic": row.mic,
+                "curve": row.curve,
+                "curve_text": ac2_scene::cal::curve_state(&u.curve),
+                "curve_applied": u.curve.applied(),
+                "sensitivity": u.sensitivity.entry(),
+                "cal": u.sensitivity.status(),
+            })
+        })
+        .collect();
+    serde_json::Value::Array(rows)
 }
 
 /// Calibration state of a calibrated readout, in words (`ac2-scene` wording); `offset` is

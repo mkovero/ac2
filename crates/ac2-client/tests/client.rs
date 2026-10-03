@@ -670,7 +670,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
     })
     .await?;
     let d = match c.call(Command::TraceGet { trace: a.id }).await? {
-        ReplyBody::TraceData(d) => d,
+        ReplyBody::TraceData(d) => *d,
         other => return Err(format!("{other:?}").into()),
     };
     assert_eq!(d.mag_db.len(), 240);

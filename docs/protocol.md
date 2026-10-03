@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 7`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 8`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -101,11 +101,13 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.math` | `a`, `b`, `op: magnitude_difference \| complex_division`, `name` | `trace` | |
 | `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| auto`, `role: trace \| target`, `content: bin` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
-| `trace.mic_curve` | `trace`, `mic: string \| nil` (nil removes) | `trace` | |
+| `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
-| `cal.mic_curve` | `input`, `mic`, `action: import{file_name, content: bin} \| clear` | `calibration` (`import`), `ack` (`clear`) | |
-| `cal.list` | — | `calibrations` | |
-| `cal.delete` | `key: CalKey`, `part: sensitivity \| mic_curve \| all` | `ack` | |
+| `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `input: u16 \| nil` | `mic` | |
+| `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
+| `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
+| `cal.list` | — | `calibrations` (`calibrations`, `mics`) | |
+| `cal.delete` | `key: CalKey` | `ack` | |
 | `spl.log_start` | `meas`, `interval: Seconds` | `spl_log` | |
 | `spl.log_stop` | `meas` | `spl_log` | |
 | `ir.capture` | `lease_token`, `request: SweepRequest`, `name` | `sweep` (the run as started) | L (held for the capture), armed |
@@ -273,24 +275,22 @@ display edits and are never applied to the stored data.
   CSV header), and `trace.average` / `trace.math` combine unsmoothed columns. A capture
   starts with the smoothing its measurement had; an average or A − B starts with the
   smoothing its inputs share (nil when they differ).
-- **Mic curve after capture.** `trace.mic_curve {trace, mic}` puts the mic curve the
-  calibration store holds for mic name `mic` on a stored trace — the entry on the trace's
-  calibrated device + input when it has one, else the newest curve imported for that mic
-  (the §Calibration curve rule) — or removes the applied one (`mic: nil`; `not_found` when
-  there is none). It is recorded as `TraceMeta.mic_curve` (`TraceMicCurve`: `mic`, `curve:
+- **Mic curve after capture.** `trace.mic_curve {trace, curve}` puts the named curve of the
+  mic library (`MicCurveId` {`mic`, `label`}) on a stored trace, or removes the applied one
+  (`curve: nil`; `not_found` when there is none). It is recorded as `TraceMeta.mic_curve` (`TraceMicCurve`: `mic`, `curve:
   MicCurveRef`, `f_norm: Hz`) and is a display edit: `trace.get` subtracts the curve,
   normalised to 0 dB at `f_norm`, from the magnitude after the smoothing — per column on
   log and linear grids, as the band power average on IEC bands, phase and coherence never —
   and corrects a sweep's distortion (order n at f by c(f) − c(n·f), floors alike, THD
   re-summed from the corrected orders; the impulse response untouched). `f_norm` is the
-  calibrator frequency of the trace's sensitivity calibration, else of the curve entry's,
-  else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
+  calibrator frequency of the trace's sensitivity calibration, else of the newest
+  sensitivity calibration of the mic, else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
   calibration store does not change it. `trace.export` writes the uncorrected columns and
   names the curve in its `# mic:` line; `trace.average` / `trace.math` combine corrected
   columns, and the result's `mic.curve` names the curve its columns now carry. Refused:
   a trace whose `mic.curve` is set (captured with the curve in its columns: a second
   correction would count it twice) and a locked trace (`refused`), a target (`invalid`),
-  a mic without a curve in the store (`not_found`).
+  a curve not in the mic library (`not_found`).
 
 - `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
   what clients were shown, for a `tf` or `spec` frame before its display smoothing — with
@@ -303,7 +303,8 @@ display edits and are never applied to the stored data.
   `cal` (spectrum / RTA: the calibration the measurement used, picked by the calibration
   matching rules below — its `key` names another mic or input when it was not this mic's;
   transfer functions are ratios and always `uncalibrated`), `mic` (the input setup's mic
-  name and the mic curve applied to the captured columns, nil without a mic name; a sweep
+  name and the mic curve applied to the captured columns as its full `MicCurveRef` — label,
+  file, content hash —, nil without a mic name; a sweep
   names no curve, its analysis works on the raw recordings), `mic_curve` (nil: see
   *Mic curve after capture*), `created_at`.
 - **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
@@ -409,44 +410,56 @@ directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or 
   `autosave` entity.
 #### Calibration (`cal.*`, `session.inputs`)
 
-Design: `docs/design/q7-calibration.md`. A calibration entry is keyed by the open session's
-capture device, the input channel and the mic name (`CalKey`), so `cal.spl` and
-`cal.mic_curve` need an open session.
+Design: `docs/design/q7-calibration.md`. Two stores: **sensitivity calibrations**, keyed by
+the open session's capture device, the input channel and the mic name (`CalKey`), so
+`cal.spl` needs an open session; and the **mic library**: named curves per mic (`Mic`
+{`name`, `curves: [MicCurveRef]`}), which follow the mic name across inputs and devices.
+Each input chooses which of its mic's curves applies (`InputSetup.curve`).
 
-- `cal.spl` reads the input's broadband RMS (uncorrected, τ = 1 s) and stores `spl: SplCal`
-  {`sensitivity`: Db (dB SPL of 0 dBFS), `calibrator_level`, `calibrator_freq`,
-  `measured`: Dbfs, `calibrated_at`} on the entry, keeping its mic curve. It is `refused`
-  below −80 dBFS and while the level is not steady (0.2 s and 1 s readings differ by more
-  than 0.05 dB).
-- `cal.mic_curve` `import` parses a magnitude file (frequency, gain dB, further columns
-  ignored; text lines skipped; whitespace / comma or semicolon + decimal-comma separated)
-  and stores `mic_curve: MicCurveRef` {`name`, `file_name`, `content_hash` (FNV-1a 64 hex),
-  `points`, `f_lo`, `f_hi`, `imported_at`} on the entry; the points stay in the daemon. A
-  refused file is `invalid` with `detail: {type: mic_curve_file, line: u32 | nil, reason}`,
-  `reason` one of `too_few_points`, `too_many_points`, `bad_number`, `missing_gain`,
-  `non_positive_frequency`, `non_finite`, `gain_out_of_range` (|gain| > 40 dB),
-  `not_ascending`. `clear` removes the curve; an entry holding neither a calibration nor a
-  curve is deleted.
-- Both set the input's mic name to `mic` (the name is typed once, at calibration time).
-- `cal.delete` removes from the entry `key` (any device; no open session needed) its
-  sensitivity calibration (`sensitivity`), its curve (`mic_curve`) or both (`all`); an entry
-  left with neither is deleted (`calibration` event `deleted`). `not_found` when there is no
-  such entry or it does not hold the part named. The input setup is not changed.
-- `InputSetup` = {`channel`, `mic`: string | nil, `mic_curve`: bool (on/off of the curve,
-  decision 7c)}. Mic names are 1–64 characters.
+- `cal.spl` reads the input's broadband RMS (uncorrected, τ = 1 s) and stores `CalEntry`
+  {`key`, `spl: SplCal` {`sensitivity`: Db (dB SPL of 0 dBFS), `calibrator_level`,
+  `calibrator_freq`, `measured`: Dbfs, `calibrated_at`}}. It is `refused` below −80 dBFS
+  and while the level is not steady (0.2 s and 1 s readings differ by more than 0.05 dB).
+  It sets the input's mic name to `mic` (the name is typed once, at calibration time).
+- `cal.curve_import` parses a magnitude file (frequency, gain dB, further columns ignored;
+  text lines skipped; whitespace / comma or semicolon + decimal-comma separated) and stores
+  it as `mic`'s curve `label` — by default the incidence angle the file's header or name
+  states (`90-degree-curve`, `_90Grad`, `0deg` → `90°`, `0°`), else the file stem; a curve
+  of that label is replaced. `MicCurveRef` = {`label`, `file_name`, `content_hash` (FNV-1a
+  64 hex), `points`, `f_lo`, `f_hi`, `imported_at`, `stated_sensitivity`: f64 mV/Pa | nil
+  (as the header states it; information only, never a calibration)}; the points stay in the
+  daemon. With `input`, that input's mic name becomes `mic`, and the curve becomes its
+  active one when it is the mic's only curve. A refused file is `invalid` with `detail:
+  {type: mic_curve_file, line: u32 | nil, reason}`, `reason` one of `too_few_points`,
+  `too_many_points`, `bad_number`, `missing_gain`, `non_positive_frequency`, `non_finite`,
+  `gain_out_of_range` (|gain| > 40 dB), `not_ascending`. Labels are 1–32 characters, not
+  `off` / `none`.
+- `cal.curve_rename` relabels a curve (`invalid` when the mic has the new label already);
+  inputs that chose it follow. `cal.curve_delete` removes it (a mic left without curves is
+  deleted, event `mic` `deleted`); inputs that chose it keep the label and show it as not
+  stored. `not_found` for an unknown mic or label. Neither needs an open session.
+- `cal.delete` removes the sensitivity calibration `key` (any device; no open session
+  needed); `not_found` when there is none. The input setup is not changed.
+- `InputSetup` = {`channel`, `mic`: string | nil, `curve: CurveChoice`}; `CurveChoice` is
+  tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `session.inputs` refuses
+  (`invalid`) a row whose chosen label is not stored for its mic, unless the row is
+  unchanged. The daemon chooses a mic's only curve on a row where none is chosen (on every
+  change of the setup or the library); with several, the row stays `not_chosen` and no
+  curve applies until the operator chooses. A new mic name on a row starts `not_chosen`.
+  Mic names are 1–64 characters.
 - When the daemon's calibration store file cannot be read it is never written: `cal.spl`,
-  `cal.mic_curve`, `cal.delete`, `cal.list` and `session.inputs` are `refused` with
-  `detail: {type: cal_store, path, reason}`.
+  `cal.curve_*`, `cal.delete`, `cal.list` and `session.inputs` are `refused` with `detail:
+  {type: cal_store, path, reason}`.
 
 Which calibration a measurement uses (shown as `CalStatus` in `spl`, `rta` and `spec`
 frames): the entry of device + input + the input's mic → `verified`; else the newest one
 on the same device + input (another mic, or no mic name set), else the newest one for the
 same mic elsewhere → `other_mic_or_input`; else `uncalibrated` (dBFS). `CalStatus` is
 tagged by `type`: `uncalibrated` | `verified` {`calibrated_at`} | `other_mic_or_input`
-{`calibrated_at`}; the age is `capture_wall_ns − calibrated_at`. The mic curve follows the
-mic name (that entry's curve, else the newest curve for the same mic) and applies while
-the input's `mic_curve` is on; it is normalised to 0 dB at the calibrator frequency in use
-(1 kHz uncalibrated).
+{`calibrated_at`}; the age is `capture_wall_ns − calibrated_at`. The mic curve is the
+input's chosen curve of its mic — only that one; none when not chosen, off, or not stored —
+normalised to 0 dB at the calibrator frequency in use (1 kHz uncalibrated). The rules are
+the pure functions of `ac2_proto::cal`, which clients use to word what is in use.
 
 #### Averaging depth
 
@@ -459,7 +472,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `inputs`, `spl_log`, `snapshot`, `events`,
+`export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log`, `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `sweep`.
 
 ### 3.4 Errors
@@ -485,8 +498,8 @@ math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `cre
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
-`key` {device, channel, mic}, `spl`: SplCal | nil, `mic_curve`: MicCurveRef | nil),
-`inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
+`key` {device, channel, mic}, `spl`: SplCal), `mics` (`Mic`: `name`, `curves`
+[MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
 `drift`, `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
@@ -497,9 +510,9 @@ nil`; see §7.3).
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `inputs`, `spl_log`, `timing`, `sweep`, `autosave`. `payload` is the entity's
+`generator`, `calibration`, `mic`, `inputs`, `spl_log`, `timing`, `sweep`, `autosave`. `payload` is the entity's
 full new value (`inputs`: the whole list); for keyed entities (`measurement`, `trace`,
-`calibration`, `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
+`calibration`, `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB.
 
@@ -643,8 +656,9 @@ columns) = `0x79ec3d16ae0e94d0`.
 `# ac2 trace export v2` (`v1` is read too; another version is `bad_header`); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
-applied), `depth`, `cal`, `mic` (`name (curve: …)`: in the columns for a capture with a
-curve, or applied after capture as a display edit, not in the columns), `mic_curve` (the
+applied), `depth`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
+columns for a capture with a curve, or applied after capture as a display edit, not in the
+columns), `mic_curve` (the
 JSON `TraceMicCurve`, only when one is applied after capture), `created_ns`, `note`, `grid`
 as the JSON `GridDef`); a sweep trace adds `sweep_info` (the JSON `SweepInfo`) and
 `sweep_ir` (JSON `{t0, dt, points}`). Then the header
@@ -675,7 +689,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace (a sweep's whole data included)
 ```
 
-`session.json`: `{format: "ac2-session", version: 5, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 6, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
 [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz, dB]] | null}]}` (JSON,
 field names as in this document; `mic_curve_points` are the points of `meta.mic_curve`, a
@@ -687,7 +701,8 @@ refused (no migration). Trace files hold the unsmoothed columns; each trace's di
 smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
 hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
 spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impulse response
-in a `*.sweep.json` sidecar and had no mic curves on traces — are refused). A directory that holds other files is never written into.
+in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a capture's
+curve by name only, without its label, file and content hash — are refused). A directory that holds other files is never written into.
 
 ### 7.3 Autosave
 

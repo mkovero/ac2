@@ -624,3 +624,120 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     drop(daemon);
     Ok(())
 }
+
+fn mic_curve_file(name: &str) -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/mic_curves")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The sidebar label of input `channel`.
+fn meter_label(s: &AppState, channel: u16) -> String {
+    s.session_inputs()
+        .into_iter()
+        .find(|r| r.channel == channel)
+        .map(|r| r.label)
+        .unwrap_or_default()
+}
+
+/// A mic's two curves (beyerdynamic MM1, 0° and 90°) from an empty daemon, with the app
+/// alone: name the mic in the session dialog, open, import both curves in the input setup
+/// view, switch 0° ↔ 90° ↔ off there; the sidebar label and the transfer pane's caption
+/// always say which curve is in use.
+#[test]
+fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
+    use ac2_proto::model::CurveChoice;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    d.synced()?;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until(
+        "the device list",
+        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
+    )?;
+    // The rig's mic is on input 2 (the dialog's fourth row): N names it.
+    for _ in 0..3 {
+        d.key("ArrowDown");
+    }
+    d.key("N");
+    d.send(Msg::Text("n".into()));
+    d.send(Msg::Text("MM1 34804".into()));
+    d.key("Enter");
+    d.key("Enter");
+    d.until("the session", |s| s.open_session().is_some())?;
+    d.until("the measurement offer", |s| {
+        matches!(s.overlay, Overlay::Offer(_))
+    })?;
+    d.key("Enter");
+    d.until("the measurement, running and selected", |s| {
+        s.selected_meas().is_some_and(|m| m.running)
+    })?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
+    assert_eq!(m.config.name, "Reference \u{2192} MM1 34804");
+    // No curve stored yet: the label and the caption say so instead of nothing.
+    d.until("the input labelled", |s| {
+        meter_label(s, 1) == "MM1 34804 · no curve stored · mic (in 2)"
+    })?;
+    d.fire()?;
+    d.tf_frames(m.id, 240)?;
+    d.until("the caption without a curve", |s| {
+        s.pane_caption(PaneKind::Transfer)
+            .is_some_and(|c| c.contains("no mic curve stored for MM1 34804"))
+    })?;
+
+    // The input setup view opens on the selected measurement's input.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("input setup".into()));
+    d.key("Enter");
+    assert!(
+        matches!(&d.st.overlay, Overlay::Calibrations(_)),
+        "{:?}",
+        d.st.overlay
+    );
+    let import = |d: &mut Driver, file: &str| {
+        d.key("I");
+        d.send(Msg::Text("i".into()));
+        d.send(Msg::Text(mic_curve_file(file)));
+        d.key("Enter");
+    };
+    import(&mut d, "449350_34804_0Grad.txt");
+    let curve_of = |s: &AppState| {
+        s.daemon()
+            .and_then(|x| x.inputs.iter().find(|i| i.channel == 1))
+            .map(|i| i.curve.clone())
+    };
+    let label = |l: &str| CurveChoice::Curve { label: l.into() };
+    d.until("0° imported and chosen (the mic's only curve)", |s| {
+        curve_of(s) == Some(label("0°"))
+    })?;
+    import(&mut d, "449350_34804_90Grad.txt");
+    d.until("90° imported, 0° still chosen", |s| {
+        s.daemon()
+            .is_some_and(|x| x.mics.first().is_some_and(|m| m.curves.len() == 2))
+    })?;
+    assert_eq!(curve_of(&d.st), Some(label("0°")));
+    let shows = |d: &mut Driver, what: &str, label_part: &str, caption: &str| {
+        let (lp, cap) = (label_part.to_owned(), caption.to_owned());
+        d.until(what, move |s| {
+            meter_label(s, 1) == format!("MM1 34804 · {lp} · mic (in 2)")
+                && s.pane_caption(PaneKind::Transfer)
+                    .is_some_and(|c| c.contains(cap.as_str()))
+        })
+    };
+    shows(&mut d, "0° in use", "0°", "mic curve: MM1 34804 0°")?;
+    // → 90°, ← back to 0°, ← off: one key each, applied at once.
+    d.key("ArrowRight");
+    shows(&mut d, "90° in use", "90°", "mic curve: MM1 34804 90°")?;
+    d.key("ArrowLeft");
+    shows(&mut d, "0° again", "0°", "mic curve: MM1 34804 0°")?;
+    d.key("ArrowLeft");
+    shows(&mut d, "no curve", "curve off", "mic curve off")?;
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

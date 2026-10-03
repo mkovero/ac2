@@ -3,3 +3,5 @@ fixtures/golden/*.json -text
 fixtures/golden/*.bin binary
 # The wire lock is compared as text written on Linux; never convert line endings.
 fixtures/protocol/WIRE_LOCK -text
+# Mic-curve files as the manufacturer ships them (CRLF, tabs): parsed byte for byte.
+fixtures/mic_curves/* -text

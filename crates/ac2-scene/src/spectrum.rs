@@ -43,10 +43,11 @@ impl Quantity {
 
 /// Caption suffix for a calibrated trace (decisions 7a/7b): the calibration's age when it
 /// belongs to this device + input + mic, the mismatch warning when it belongs to another mic
-/// or input, and whether the mic curve was subtracted. Uncalibrated says nothing: the axis
-/// unit is dBFS. The age is `captured − calibrated_at`, both on the daemon clock
+/// or input, and the mic-curve note ([`crate::cal::curve_note`]: which curve was
+/// subtracted, or why none was). Uncalibrated says nothing: the axis unit is dBFS. The age
+/// is `captured − calibrated_at`, both on the daemon clock
 /// (`docs/design/q7-calibration.md` §3), so no client clock offset enters it.
-pub fn cal_caption(cal: CalStatus, mic_curve: bool, captured: WallNs) -> String {
+pub fn cal_caption(cal: CalStatus, curve: Option<&str>, captured: WallNs) -> String {
     let mut s = String::new();
     match cal {
         CalStatus::Uncalibrated => {}
@@ -56,8 +57,9 @@ pub fn cal_caption(cal: CalStatus, mic_curve: bool, captured: WallNs) -> String 
             s.push_str(&format!(" · cal {}", format::ago(age)));
         }
     }
-    if mic_curve {
-        s.push_str(" · mic curve");
+    if let Some(c) = curve {
+        s.push_str(" · ");
+        s.push_str(c);
     }
     s
 }
@@ -123,11 +125,13 @@ pub struct SpectrumTrace<'a> {
 }
 
 impl<'a> SpectrumTrace<'a> {
-    /// A live RTA trace; `captured` is the frame's capture time (for the calibration age).
+    /// A live RTA trace; `captured` is the frame's capture time (for the calibration age),
+    /// `curve` the mic-curve note of its input.
     #[allow(clippy::too_many_arguments)]
     pub fn rta(
         frame: &'a RtaFrame,
         captured: WallNs,
+        curve: Option<&str>,
         freqs: &'a [f64],
         edges: &'a [(f64, f64)],
         name: impl Into<String>,
@@ -149,17 +153,19 @@ impl<'a> SpectrumTrace<'a> {
                 "{} · {}{}",
                 fraction_label(frame.meta.fraction),
                 weighting_label(frame.meta.weighting),
-                cal_caption(frame.meta.cal, frame.meta.mic_curve, captured)
+                cal_caption(frame.meta.cal, curve, captured)
             ),
             freshness: Some(freshness),
         }
     }
 
-    /// A live narrowband spectrum; `captured` is the frame's capture time.
+    /// A live narrowband spectrum; `captured` is the frame's capture time, `curve` the
+    /// mic-curve note of its input.
     #[allow(clippy::too_many_arguments)]
     pub fn spectrum(
         frame: &'a SpecFrame,
         captured: WallNs,
+        curve: Option<&str>,
         freqs: &'a [f64],
         edges: &'a [(f64, f64)],
         name: impl Into<String>,
@@ -181,7 +187,7 @@ impl<'a> SpectrumTrace<'a> {
             caption: format!(
                 "{}{}",
                 window_label(frame.meta.window),
-                cal_caption(frame.meta.cal, frame.meta.mic_curve, captured)
+                cal_caption(frame.meta.cal, curve, captured)
             ),
             freshness: Some(freshness),
         }
@@ -551,26 +557,30 @@ mod tests {
     fn calibration_captions() {
         const H: u64 = 3_600_000_000_000;
         let now = WallNs(100 * H);
-        assert_eq!(cal_caption(CalStatus::Uncalibrated, false, now), "");
+        assert_eq!(cal_caption(CalStatus::Uncalibrated, None, now), "");
         assert_eq!(
-            cal_caption(CalStatus::Uncalibrated, true, now),
-            " · mic curve"
+            cal_caption(CalStatus::Uncalibrated, Some("mic curve: MM1 90°"), now),
+            " · mic curve: MM1 90°"
         );
         let at = WallNs(97 * H - 59_000_000_000);
         assert_eq!(
-            cal_caption(CalStatus::Verified { calibrated_at: at }, false, now),
+            cal_caption(CalStatus::Verified { calibrated_at: at }, None, now),
             " · cal 3 h ago"
         );
         assert_eq!(
-            cal_caption(CalStatus::Verified { calibrated_at: at }, true, now),
-            " · cal 3 h ago · mic curve"
+            cal_caption(
+                CalStatus::Verified { calibrated_at: at },
+                Some("mic curve off"),
+                now
+            ),
+            " · cal 3 h ago · mic curve off"
         );
         assert_eq!(
             cal_caption(
                 CalStatus::Verified {
                     calibrated_at: WallNs(100 * H - 600_000_000_000)
                 },
-                false,
+                None,
                 now
             ),
             " · cal 10 min ago"
@@ -581,15 +591,19 @@ mod tests {
                 CalStatus::Verified {
                     calibrated_at: WallNs(101 * H)
                 },
-                false,
+                None,
                 now
             ),
             " · cal just now"
         );
         // The mismatch says so instead of an age: the age would be another mic's.
         assert_eq!(
-            cal_caption(CalStatus::OtherMicOrInput { calibrated_at: at }, true, now),
-            " · cal from other mic / input · mic curve"
+            cal_caption(
+                CalStatus::OtherMicOrInput { calibrated_at: at },
+                Some("mic curve: MM1 0°"),
+                now
+            ),
+            " · cal from other mic / input · mic curve: MM1 0°"
         );
     }
 
@@ -613,8 +627,20 @@ mod tests {
             validity: vec![],
         };
         let fresh = Freshness::from_age(0.0);
-        let t = SpectrumTrace::rta(&rta, WallNs(3 * H), &[], &[], "RTA", Color::WHITE, fresh);
-        assert_eq!(t.caption, "1/3 oct · A-weighted · cal 2 h ago · mic curve");
+        let t = SpectrumTrace::rta(
+            &rta,
+            WallNs(3 * H),
+            Some("mic curve: MM1 90°"),
+            &[],
+            &[],
+            "RTA",
+            Color::WHITE,
+            fresh,
+        );
+        assert_eq!(
+            t.caption,
+            "1/3 oct · A-weighted · cal 2 h ago · mic curve: MM1 90°"
+        );
         let spec = SpecFrame {
             meas: MeasId(2),
             meta: SpecMeta {
@@ -627,8 +653,16 @@ mod tests {
             level: vec![],
             validity: vec![],
         };
-        let t =
-            SpectrumTrace::spectrum(&spec, WallNs(25 * H), &[], &[], "FFT", Color::WHITE, fresh);
+        let t = SpectrumTrace::spectrum(
+            &spec,
+            WallNs(25 * H),
+            None,
+            &[],
+            &[],
+            "FFT",
+            Color::WHITE,
+            fresh,
+        );
         assert_eq!(t.caption, "Hann window · cal 1 d ago");
         assert_eq!(t.quantity, Quantity::Tone);
         let mut smoothed = spec.clone();
@@ -636,6 +670,7 @@ mod tests {
         let t = SpectrumTrace::spectrum(
             &smoothed,
             WallNs(25 * H),
+            None,
             &[],
             &[],
             "FFT",

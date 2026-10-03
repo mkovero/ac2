@@ -2,6 +2,7 @@
 //! (clicks, wheel, drags) through [`App::dispatch`]; never computes a measurement value.
 
 mod autosave;
+mod cal;
 mod chrome;
 mod overlays;
 mod panes;

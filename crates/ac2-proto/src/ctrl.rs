@@ -12,10 +12,10 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
-    AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, CalPart, DelayFinding, DelayPick,
+    AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat,
-    ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement,
-    MicCurveAction, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLog, SweepRequest,
+    ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement, Mic,
+    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLog, SweepRequest,
     SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
@@ -110,7 +110,8 @@ pub enum Command {
     /// Current session.
     #[serde(rename = "session.status")]
     SessionStatus,
-    /// Set the mic name and mic-curve switch of the listed inputs (others unchanged).
+    /// Set the mic name and active mic curve of the listed inputs (others unchanged). A
+    /// chosen curve must be stored for the row's mic (unless the row is unchanged).
     #[serde(rename = "session.inputs")]
     SessionInputs {
         /// Rows to upsert, one per channel.
@@ -303,16 +304,16 @@ pub enum Command {
         /// File content.
         content: Blob,
     },
-    /// Apply a mic curve from the calibration store to a stored trace, or remove the one
-    /// applied (`mic: None`). A display edit: the stored columns stay as measured
+    /// Apply a curve of the mic library to a stored trace, or remove the one applied
+    /// (`curve: None`). A display edit: the stored columns stay as measured
     /// ([`TraceMeta::mic_curve`]). Refused for a trace whose columns already carry a curve
     /// (captured with one) and for targets.
     #[serde(rename = "trace.mic_curve")]
     TraceMicCurve {
         /// Trace.
         trace: TraceId,
-        /// Mic name whose curve applies (as the calibration store keys it); `None` removes.
-        mic: Option<String>,
+        /// The curve to apply; `None` removes.
+        curve: Option<MicCurveId>,
     },
     /// Export a trace.
     #[serde(rename = "trace.export")]
@@ -336,27 +337,45 @@ pub enum Command {
         /// Calibrator frequency.
         calibrator_freq: Hz,
     },
-    /// Import or clear the mic curve of the open session's device + `input` + `mic`.
-    #[serde(rename = "cal.mic_curve")]
-    CalMicCurve {
-        /// Input channel.
-        input: u16,
+    /// Import a mic curve file into the mic library as `mic`'s curve `label` (default:
+    /// the angle the file names, `90°`, else its file stem); a curve with that label is
+    /// replaced. With `input`, that input's mic name is set to `mic`, and the curve becomes
+    /// its active one when it is the mic's only curve.
+    #[serde(rename = "cal.curve_import")]
+    CalCurveImport {
         /// Mic name.
         mic: String,
-        /// Action.
-        action: MicCurveAction,
+        /// Label; `None` = from the file.
+        label: Option<String>,
+        /// Original file name.
+        file_name: String,
+        /// File content (`.frd`, `.txt`, CSV); the daemon parses and validates it.
+        content: Blob,
+        /// Input whose mic name is set.
+        input: Option<u16>,
     },
-    /// List calibrations.
+    /// Rename a curve; inputs that chose it follow.
+    #[serde(rename = "cal.curve_rename")]
+    CalCurveRename {
+        /// The curve.
+        curve: MicCurveId,
+        /// New label.
+        label: String,
+    },
+    /// Delete a curve. Inputs that chose it keep the label and say it is not stored.
+    #[serde(rename = "cal.curve_delete")]
+    CalCurveDelete {
+        /// The curve.
+        curve: MicCurveId,
+    },
+    /// List sensitivity calibrations and the mic library.
     #[serde(rename = "cal.list")]
     CalList,
-    /// Delete the sensitivity calibration and/or the mic curve of an entry, on any device
-    /// (no open session needed).
+    /// Delete a sensitivity calibration, on any device (no open session needed).
     #[serde(rename = "cal.delete")]
     CalDelete {
         /// Entry.
         key: CalKey,
-        /// What to remove; an entry left with neither is deleted.
-        part: CalPart,
     },
 
     // -- spl ----------------------------------------------------------------------------
@@ -464,7 +483,9 @@ impl Command {
             Self::TraceMicCurve { .. } => "trace.mic_curve",
             Self::TraceExport { .. } => "trace.export",
             Self::CalSpl { .. } => "cal.spl",
-            Self::CalMicCurve { .. } => "cal.mic_curve",
+            Self::CalCurveImport { .. } => "cal.curve_import",
+            Self::CalCurveRename { .. } => "cal.curve_rename",
+            Self::CalCurveDelete { .. } => "cal.curve_delete",
             Self::CalList => "cal.list",
             Self::CalDelete { .. } => "cal.delete",
             Self::SplLogStart { .. } => "spl.log_start",
@@ -570,7 +591,7 @@ pub enum ReplyBody {
     /// `trace.list`.
     Traces(Vec<TraceMeta>),
     /// `trace.get`.
-    TraceData(TraceData),
+    TraceData(Box<TraceData>),
     /// `trace.export`.
     Export {
         /// Suggested file name.
@@ -578,10 +599,17 @@ pub enum ReplyBody {
         /// Content.
         content: Blob,
     },
-    /// `cal.spl`, `cal.mic_curve` import.
+    /// `cal.spl`.
     Calibration(CalEntry),
+    /// `cal.curve_import`, `cal.curve_rename`: the mic with its curves.
+    Mic(Mic),
     /// `cal.list`.
-    Calibrations(Vec<CalEntry>),
+    Calibrations {
+        /// Sensitivity calibrations.
+        calibrations: Vec<CalEntry>,
+        /// Mic library.
+        mics: Vec<Mic>,
+    },
     /// `session.inputs`: the whole input setup.
     Inputs(Vec<InputSetup>),
     /// `spl.log_*`.
@@ -664,7 +692,7 @@ pub enum ErrorDetail {
         /// The one version this build reads.
         supported: u32,
     },
-    /// `invalid` from `cal.mic_curve`: why the file was refused.
+    /// `invalid` from `cal.curve_import`: why the file was refused.
     MicCurveFile {
         /// 1-based line, where one applies.
         line: Option<u32>,

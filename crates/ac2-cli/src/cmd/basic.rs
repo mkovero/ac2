@@ -118,7 +118,11 @@ pub(crate) async fn session(
             };
             out.emit(&s, || match &inputs {
                 None => output::session(&s),
-                Some(i) => format!("{}\n{}", output::session(&s), output::inputs(i)),
+                Some(i) => format!(
+                    "{}\n{}",
+                    output::session(&s),
+                    output::inputs(i, crate::watch::now_wall())
+                ),
             })?;
         }
         SessionCmd::Close => {

@@ -20,6 +20,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         Overlay::Form(_) => form(app, ctx, ch),
         Overlay::Session(_) => super::session::session(app, ctx, ch),
         Overlay::Offer(_) => super::session::offer(app, ctx, ch),
+        Overlay::Calibrations(_) => super::cal::calibrations(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }

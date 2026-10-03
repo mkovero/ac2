@@ -18,6 +18,7 @@
 pub mod autosave;
 pub mod axis;
 pub mod banner;
+pub mod cal;
 mod canvas;
 pub mod distortion;
 pub mod finding;

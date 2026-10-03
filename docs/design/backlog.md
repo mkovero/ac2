@@ -11,19 +11,6 @@ the commit when it lands.
   (WARP, llvmpipe, lavapipe), lower the redraw rate and skip costly effects (MSAA, blur), and
   say so once ("software rendering: reduced frame rate"); measure frame time before and after.
 
-## Calibration visibility (2026-10-03)
-
-- **No calibration view in the app.** The palette can delete a sensitivity / mic curve but
-  nothing lists them. Add a Calibrations view (palette + from the session dialog's input rows):
-  every stored entry (device, input, mic name, sensitivity with calibrator level/frequency and
-  age, mic curve file/points/range), which entry each open input uses and its state (verified /
-  other mic or input / uncalibrated), and actions (calibrate here, import curve, delete).
-- **"mic curve: on" with no curve stored is misleading.** `cal list`'s input table (and the
-  app) showed `on` for MM1 34804 on pupu while no curve existed anywhere, so nothing was
-  corrected. Show "on — no curve stored for MM1 34804" (and in captions of corrected panes).
-- Rig note: the MM1 90° curve was only imported on pupu on 2026-10-03 (after all of the day's
-  sweeps); earlier ac2 traces are uncorrected (`ac2 trace mic` fixes them).
-
 ## Flaky tests
 
 - **ac2d `traces::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
@@ -44,6 +31,23 @@ the commit when it lands.
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## Done
+
+Calibration visibility (field, 2026-10-03; `docs/design/q7-calibration.md` §10):
+- **No calibration view in the app** → the Calibrations view (palette **Calibrations…**,
+  **Input setup…** on the selected measurement's input): what each input uses (mic, curve,
+  sensitivity with calibrator and age), every mic with its curves, every sensitivity
+  calibration; ←/→ choose an input's curve, N names the mic, I imports a curve, R renames,
+  Delete (twice) deletes. The session dialog's mic rows say the same and ←/→ choose there too.
+- **"mic curve: on" with no curve stored was misleading** → there is no on/off any more: an
+  input chooses one of its mic's curves (or off), and says why none applies — `no curve
+  stored for MM1 34804`, `choose: 0°, 90°`, `90° — not stored for MM1 34804` — in the input
+  setup, `ac2 cal list` / `ac2 status`, the sidebar label and the pane captions.
+- Several curves per mic (MM1 0° / 90°), labels from the files, the curve in use recorded
+  with captured traces (label + hash). Protocol 8, calibration store version 2 (version 1 is
+  set aside), session format 6.
+- Rig note kept: the MM1 90° curve was only imported on pupu on 2026-10-03 (after all of the
+  day's sweeps); earlier ac2 traces are uncorrected (`ac2 trace mic` fixes them). After the
+  update the store is set aside: re-import both MM1 files and calibrate again.
 
 Flaky tests (seen on CI and under load, 2026-10-03), by cause:
 - **A capture could return the result before the one a client was shown** (ac2d

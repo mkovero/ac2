@@ -23,16 +23,15 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalKey, CalPart, CalState,
-    DelayOutcome, DelayState, FinderBand, GenAction, GenAudit, Generator, GeneratorDesired,
-    GeneratorSettings, InputSetup, Lease as WireLease, LoopbackDetection, MeasConfig, MeasKind,
-    Measurement, MicCurveAction, MicCurveRef, MicState, Session, SessionConfig, SplCal,
-    SweepFailure, SweepInputs, SweepRequest, SweepRun, SweepStatus, TimingStatus, TraceKind,
-    TraceMeta, TraceSource,
+    Autosave, AutosaveState, Availability, BackendInfo, CalState, DelayOutcome, DelayState,
+    FinderBand, GenAction, GenAudit, Generator, GeneratorDesired, GeneratorSettings, InputSetup,
+    Lease as WireLease, LoopbackDetection, MeasConfig, MeasKind, Measurement, MicState, Session,
+    SessionConfig, SweepFailure, SweepInputs, SweepRequest, SweepRun, SweepStatus, TimingStatus,
+    TraceKind, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{
-    ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
-    SampleIndex, Samples, Seconds, SessionEpoch, SweepId, WallNs,
+    ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, SampleIndex, Samples,
+    Seconds, SessionEpoch, SweepId, WallNs,
 };
 use ac2_proto::{
     Command, ErrorCode, ErrorDetail, PROTO_VERSION, ProtoError, Reply, ReplyBody, Welcome,
@@ -56,6 +55,7 @@ use crate::sweep::Recording;
 use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
 
 mod autosave;
+mod cal;
 mod files;
 mod sweeps;
 mod traces;
@@ -393,9 +393,9 @@ fn static_grid(kind: &MeasKind) -> Option<GridDef> {
 
 impl Control {
     pub(crate) fn new(s: Setup) -> Self {
-        let (cal, entries, inputs) = match &s.cal_store {
+        let (cal, contents) = match &s.cal_store {
             Some(p) => CalStore::open(p),
-            None => (CalStore::memory(), Vec::new(), Vec::new()),
+            None => (CalStore::memory(), calstore::Contents::default()),
         };
         let (autosave, status) = match &s.autosave {
             None => (None, AutosaveState::Off),
@@ -414,7 +414,7 @@ impl Control {
         };
         let restore = s.autosave.as_ref().is_some_and(|c| c.restore);
         let store = Store::new(Dbfs(s.ceiling_dbfs), s.replay)
-            .with_calibrations(entries, inputs)
+            .with_calibrations(contents)
             .with_autosave(Autosave {
                 state: status,
                 saved_at: None,
@@ -977,7 +977,7 @@ impl Control {
                 content,
             } => self.trace_import(file_name, format, role, &content.0),
             Command::TraceExport { trace, format } => self.trace_export(trace, format),
-            Command::TraceMicCurve { trace, mic } => self.trace_mic_curve(trace, mic),
+            Command::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve),
 
             Command::CalSpl {
                 input,
@@ -985,14 +985,17 @@ impl Control {
                 calibrator_level,
                 calibrator_freq,
             } => self.cal_spl(input, mic, calibrator_level, calibrator_freq),
-            Command::CalMicCurve { input, mic, action } => self.cal_mic_curve(input, mic, action),
-            Command::CalList => {
-                self.cal.check()?;
-                Ok(ReplyBody::Calibrations(
-                    self.store.state().calibrations.clone(),
-                ))
-            }
-            Command::CalDelete { key, part } => self.cal_delete(&key, part),
+            Command::CalCurveImport {
+                mic,
+                label,
+                file_name,
+                content,
+                input,
+            } => self.cal_curve_import(mic, label, file_name, content, input),
+            Command::CalCurveRename { curve, label } => self.cal_curve_rename(curve, label),
+            Command::CalCurveDelete { curve } => self.cal_curve_delete(curve),
+            Command::CalList => self.cal_list(),
+            Command::CalDelete { key } => self.cal_delete(&key),
             Command::SessionInputs { inputs } => self.session_inputs(inputs),
 
             Command::SplLogStart { .. } => Err(unsupported("spl.log_start")),
@@ -1411,14 +1414,7 @@ impl Control {
 
     /// The calibration and mic curve a job on `input` of the open session uses (Q7 §3).
     fn input_cal(&self, rt: &Runtime, input: u16) -> InputCal {
-        let st = self.store.state();
-        calstore::resolve(
-            &st.calibrations,
-            &st.inputs,
-            &self.cal,
-            &rt.open.input_device,
-            input,
-        )
+        calstore::resolve(self.store.state(), &self.cal, &rt.open.input_device, input)
     }
 
     /// Hands every running job its input's current calibration and mic curve.
@@ -1762,291 +1758,6 @@ impl Control {
         {
             tracing::warn!("tracked delay not applied: {}", e.msg);
         }
-    }
-
-    /// The open session, its capture device and the block index of `input`.
-    fn cal_target(&self, input: u16) -> Result<ac2_proto::model::DeviceId, ProtoError> {
-        let Some(rt) = self.session.as_ref() else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "no open session: a calibration is tied to the session's capture device",
-            ));
-        };
-        block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
-        Ok(rt.open.input_device.clone())
-    }
-
-    /// Persists and commits a new entry (or its deletion) and the input setup, then hands
-    /// the running jobs their new calibrations. Nothing is committed if the write fails.
-    fn commit_cal(
-        &mut self,
-        key: &CalKey,
-        entry: Option<CalEntry>,
-        inputs: Vec<InputSetup>,
-        curves: std::collections::HashMap<CalKey, Arc<ac2_core::mic_curve::MicCurve>>,
-    ) -> Result<Rev, ProtoError> {
-        let mut entries = self.store.state().calibrations.clone();
-        entries.retain(|e| e.key != *key);
-        if let Some(e) = &entry {
-            entries.push(e.clone());
-        }
-        self.cal.persist(&entries, &inputs, curves)?;
-        let mut rev = self.commit(Change::Calibration(match entry {
-            Some(e) => Patch::Set(e),
-            None => Patch::Deleted(key.clone()),
-        }));
-        if inputs != self.store.state().inputs {
-            rev = self.commit(Change::Inputs(inputs));
-        }
-        self.refresh_cal();
-        Ok(rev)
-    }
-
-    /// The input setup with `channel`'s mic name set to `mic`.
-    fn inputs_with_mic(&self, channel: u16, mic: &str) -> Vec<InputSetup> {
-        let mut row = calstore::input_setup(&self.store.state().inputs, channel);
-        row.mic = Some(mic.to_owned());
-        upsert_inputs(&self.store.state().inputs, vec![row])
-    }
-
-    fn cal_spl(
-        &mut self,
-        input: u16,
-        mic: String,
-        calibrator_level: DbSpl,
-        calibrator_freq: Hz,
-    ) -> Result<ReplyBody, ProtoError> {
-        self.cal.check()?;
-        calstore::check_mic_name(&mic)?;
-        if !(calibrator_level.0.is_finite()
-            && calibrator_freq.0.is_finite()
-            && calibrator_freq.0 > 0.0)
-        {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "calibrator level and frequency must be finite, the frequency above 0 Hz",
-            ));
-        }
-        let device = self.cal_target(input)?;
-        let Some(rt) = self.session.as_ref() else {
-            return Err(perr(ErrorCode::Invalid, "no open session"));
-        };
-        let idx = block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
-        // Broadband and uncorrected: the mic curve is 0 dB at the calibrator frequency, so
-        // the corrected paths read the calibrator the same (Q7 §3).
-        let (ms, fast) = rt.fanout.meters.mean_square(idx).unwrap_or((0.0, 0.0));
-        let measured = ac2_core::spectrum::rms_dbfs(ms.sqrt());
-        if !(measured.is_finite() && measured > -80.0) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("no calibrator signal on input {input} ({measured:.1} dBFS)"),
-            ));
-        }
-        // The 1 s mean square is within 0.05 dB of a steady level once the 0.2 s one agrees
-        // with it that closely (about 5 s after the calibrator went on).
-        let unsettled = 10.0 * (fast / ms).log10();
-        if unsettled.is_nan() || unsettled.abs() > MAX_CAL_UNSETTLED_DB {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "the calibrator level on input {input} is not steady yet ({unsettled:+.2} dB \
-                     over the last second); keep it on and retry in a few seconds"
-                ),
-            ));
-        }
-        let key = CalKey {
-            device,
-            channel: input,
-            mic: mic.clone(),
-        };
-        let prev = self
-            .store
-            .state()
-            .calibrations
-            .iter()
-            .find(|e| e.key == key)
-            .cloned();
-        let entry = CalEntry {
-            key: key.clone(),
-            spl: Some(SplCal {
-                sensitivity: Db(calibrator_level.0 - measured),
-                calibrator_level,
-                calibrator_freq,
-                measured: Dbfs(measured),
-                calibrated_at: WallNs(wall_ns()),
-            }),
-            mic_curve: prev.and_then(|p| p.mic_curve),
-        };
-        let inputs = self.inputs_with_mic(input, &mic);
-        let curves = self.cal.curves();
-        self.commit_cal(&key, Some(entry.clone()), inputs, curves)?;
-        tracing::info!(
-            "input {input} ({mic}) calibrated: {measured:.2} dBFS at {:.1} dB SPL",
-            calibrator_level.0
-        );
-        Ok(ReplyBody::Calibration(entry))
-    }
-
-    fn cal_mic_curve(
-        &mut self,
-        input: u16,
-        mic: String,
-        action: MicCurveAction,
-    ) -> Result<ReplyBody, ProtoError> {
-        self.cal.check()?;
-        calstore::check_mic_name(&mic)?;
-        let device = self.cal_target(input)?;
-        let key = CalKey {
-            device,
-            channel: input,
-            mic: mic.clone(),
-        };
-        let prev = self
-            .store
-            .state()
-            .calibrations
-            .iter()
-            .find(|e| e.key == key)
-            .cloned();
-        let mut curves = self.cal.curves();
-        match action {
-            MicCurveAction::Import { file_name, content } => {
-                let base = file_name
-                    .rsplit(['/', '\\'])
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned();
-                if base.is_empty() || base.chars().count() > 255 {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        "file name must be 1 … 255 characters",
-                    ));
-                }
-                let curve = ac2_core::mic_curve::MicCurve::parse(&content.0)
-                    .map_err(calstore::curve_error)?;
-                let name = std::path::Path::new(&base)
-                    .file_stem()
-                    .map_or_else(|| base.clone(), |s| s.to_string_lossy().into_owned());
-                let reference = MicCurveRef {
-                    name,
-                    file_name: base,
-                    content_hash: calstore::content_hash(&content.0),
-                    points: u32::try_from(curve.len()).unwrap_or(u32::MAX),
-                    f_lo: Hz(curve.f_lo()),
-                    f_hi: Hz(curve.f_hi()),
-                    imported_at: WallNs(wall_ns()),
-                };
-                curves.insert(key.clone(), Arc::new(curve));
-                let entry = CalEntry {
-                    key: key.clone(),
-                    spl: prev.and_then(|p| p.spl),
-                    mic_curve: Some(reference),
-                };
-                let inputs = self.inputs_with_mic(input, &mic);
-                self.commit_cal(&key, Some(entry.clone()), inputs, curves)?;
-                tracing::info!("input {input} ({mic}): mic curve imported");
-                Ok(ReplyBody::Calibration(entry))
-            }
-            MicCurveAction::Clear => {
-                let Some(prev) = prev.filter(|p| p.mic_curve.is_some()) else {
-                    return Err(perr(
-                        ErrorCode::NotFound,
-                        format!("no mic curve for {mic} on input {input} of this device"),
-                    ));
-                };
-                curves.remove(&key);
-                let entry = prev.spl.is_some().then_some(CalEntry {
-                    mic_curve: None,
-                    ..prev
-                });
-                let inputs = self.store.state().inputs.clone();
-                let rev = self.commit_cal(&key, entry, inputs, curves)?;
-                Ok(ReplyBody::Ack { rev })
-            }
-        }
-    }
-
-    /// Removes `part` from the entry `key`, on any device: housekeeping of calibrations that
-    /// no longer describe the hardware (a mic sold, a device retired) needs no open session.
-    fn cal_delete(&mut self, key: &CalKey, part: CalPart) -> Result<ReplyBody, ProtoError> {
-        self.cal.check()?;
-        let missing = |what: &str| {
-            perr(
-                ErrorCode::NotFound,
-                format!(
-                    "no {what} for {} on input {} of {}",
-                    key.mic, key.channel, key.device.0
-                ),
-            )
-        };
-        let Some(prev) = self
-            .store
-            .state()
-            .calibrations
-            .iter()
-            .find(|e| e.key == *key)
-            .cloned()
-        else {
-            return Err(missing("calibration"));
-        };
-        let mut curves = self.cal.curves();
-        let entry = match part {
-            CalPart::All => None,
-            CalPart::Sensitivity => {
-                if prev.spl.is_none() {
-                    return Err(missing("sensitivity calibration"));
-                }
-                Some(CalEntry { spl: None, ..prev })
-            }
-            CalPart::MicCurve => {
-                if prev.mic_curve.is_none() {
-                    return Err(missing("mic curve"));
-                }
-                Some(CalEntry {
-                    mic_curve: None,
-                    ..prev
-                })
-            }
-        }
-        .filter(|e| e.spl.is_some() || e.mic_curve.is_some());
-        if entry.as_ref().is_none_or(|e| e.mic_curve.is_none()) {
-            curves.remove(key);
-        }
-        let inputs = self.store.state().inputs.clone();
-        let rev = self.commit_cal(key, entry, inputs, curves)?;
-        tracing::info!(
-            "calibration of {} on input {} of {}: {part:?} deleted",
-            key.mic,
-            key.channel,
-            key.device.0
-        );
-        Ok(ReplyBody::Ack { rev })
-    }
-
-    fn session_inputs(&mut self, rows: Vec<InputSetup>) -> Result<ReplyBody, ProtoError> {
-        self.cal.check()?;
-        for (i, r) in rows.iter().enumerate() {
-            if rows[..i].iter().any(|o| o.channel == r.channel) {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("input {} listed twice", r.channel),
-                ));
-            }
-            if let Some(m) = &r.mic {
-                calstore::check_mic_name(m)?;
-            }
-        }
-        let inputs = upsert_inputs(&self.store.state().inputs, rows);
-        if inputs != self.store.state().inputs {
-            let entries = self.store.state().calibrations.clone();
-            let curves = self.cal.curves();
-            self.cal.persist(&entries, &inputs, curves)?;
-            self.commit(Change::Inputs(inputs.clone()));
-            self.refresh_cal();
-        }
-        Ok(ReplyBody::Inputs(inputs))
     }
 
     // -- generator (Q6) --------------------------------------------------------------------

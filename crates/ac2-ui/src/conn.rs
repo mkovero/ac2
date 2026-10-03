@@ -154,6 +154,13 @@ pub enum Request {
         path: std::path::PathBuf,
         role: ImportRole,
     },
+    /// Read a local mic-curve file and `cal.curve_import` it as a curve of `mic` (the label
+    /// from the file), setting `input`'s mic name when given.
+    ImportCurve {
+        path: std::path::PathBuf,
+        mic: String,
+        input: Option<u16>,
+    },
     /// `session.devices`, for the session dialog.
     Devices,
     /// `session.open`, then `session.inputs` with the mic names; [`ConnEvent::SessionOpened`]
@@ -434,6 +441,7 @@ fn request_name(r: &Request) -> String {
         Request::Sweep { name, .. } => format!("sweep {name}"),
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
         Request::Import { path, .. } => format!("import {}", path.display()),
+        Request::ImportCurve { path, .. } => format!("import curve {}", path.display()),
         Request::FindDelay { .. } => "delay find".into(),
         Request::Devices => "list devices".into(),
         Request::OpenSession { what, .. } => what.clone(),
@@ -625,6 +633,22 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 }
             });
         }
+        Request::ImportCurve { path, mic, input } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let what = format!("import curve {}", path.display());
+                let result = import_curve(&c, &path, &mic, input).await;
+                o.send(ConnEvent::Reply {
+                    what: match &result {
+                        Ok(label) => {
+                            format!("curve {} imported", ac2_scene::cal::curve_name(&mic, label))
+                        }
+                        Err(_) => what,
+                    },
+                    result: result.map(|_| ()),
+                });
+            });
+        }
         Request::Import { path, role } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
@@ -778,9 +802,47 @@ async fn import(c: &Client, path: &std::path::Path, role: ImportRole) -> Result<
     expect_body!("trace.import", r, ReplyBody::Trace(t) => t).map_err(|e| e.to_string())
 }
 
+/// Reads `path` and imports it into the mic library; returns the curve's label.
+async fn import_curve(
+    c: &Client,
+    path: &std::path::Path,
+    mic: &str,
+    input: Option<u16>,
+) -> Result<String, String> {
+    let content = tokio::task::spawn_blocking({
+        let p = path.to_owned();
+        move || std::fs::read(&p)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("cannot read: {e}"))?;
+    let file_name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let r = c
+        .call(Command::CalCurveImport {
+            mic: mic.to_owned(),
+            label: None,
+            file_name,
+            content: ac2_proto::units::Blob(content),
+            input,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    let m =
+        expect_body!("cal.curve_import", r, ReplyBody::Mic(m) => m).map_err(|e| e.to_string())?;
+    // The curve just imported is the newest of the mic's.
+    Ok(m.curves
+        .iter()
+        .max_by_key(|c| c.imported_at)
+        .map(|c| c.label.clone())
+        .unwrap_or_default())
+}
+
 async fn fetch_trace(c: Client, id: TraceId, grid: GridId, out: Out) {
     let data = match c.call(Command::TraceGet { trace: id }).await {
-        Ok(ReplyBody::TraceData(d)) => d,
+        Ok(ReplyBody::TraceData(d)) => *d,
         // Not every daemon build serves trace data yet; the trace stays listed without a
         // curve.
         _ => return,

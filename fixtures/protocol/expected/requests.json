@@ -1,6 +1,6 @@
 [
  {
-  "v": 7,
+  "v": 8,
   "id": 0,
   "cmd": {
    "op": "hello",
@@ -11,7 +11,7 @@
   "expect_rev": null
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 2,
   "cmd": {
    "op": "session.open",
@@ -43,7 +43,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -76,7 +76,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
@@ -84,7 +84,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 10,
   "cmd": {
    "op": "meas.create",
@@ -121,7 +121,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 17,
   "cmd": {
    "op": "delay.find",
@@ -136,7 +136,7 @@
   "expect_rev": null
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 18,
   "cmd": {
    "op": "delay.insert",
@@ -151,7 +151,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 28,
   "cmd": {
    "op": "trace.import",
@@ -167,26 +167,24 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 31,
   "cmd": {
-   "op": "cal.mic_curve",
+   "op": "cal.curve_import",
    "args": {
-    "input": 1,
     "mic": "M30 #1234",
-    "action": {
-     "type": "import",
-     "file_name": "M30-1234.frd",
-     "content": {
-      "$bin": "3230202d302e350a323030303020312e350a"
-     }
-    }
+    "label": "0\u00b0",
+    "file_name": "M30-1234.frd",
+    "content": {
+     "$bin": "3230202d302e350a323030303020312e350a"
+    },
+    "input": 1
    }
   },
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 35,
   "cmd": {
    "op": "ir.capture",
@@ -221,7 +219,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 42,
   "cmd": {
    "op": "session.inputs",
@@ -230,12 +228,24 @@
      {
       "channel": 1,
       "mic": "M30 #1234",
-      "mic_curve": true
+      "curve": {
+       "type": "curve",
+       "label": "0\u00b0"
+      }
      },
      {
       "channel": 2,
       "mic": null,
-      "mic_curve": false
+      "curve": {
+       "type": "not_chosen"
+      }
+     },
+     {
+      "channel": 3,
+      "mic": "ECM",
+      "curve": {
+       "type": "off"
+      }
      }
     ]
    }
@@ -243,7 +253,7 @@
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 43,
   "cmd": {
    "op": "cal.delete",
@@ -252,14 +262,13 @@
      "device": "hw:UMC1820",
      "channel": 1,
      "mic": "M30 #1234"
-    },
-    "part": "sensitivity"
+    }
    }
   },
   "expect_rev": 41
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 44,
   "cmd": {
    "op": "session.preview",
@@ -271,7 +280,7 @@
   "expect_rev": null
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 45,
   "cmd": {
    "op": "session.preview_stop"
@@ -279,7 +288,7 @@
   "expect_rev": null
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 46,
   "cmd": {
    "op": "session.detect_loopback",
@@ -296,13 +305,30 @@
   "expect_rev": null
  },
  {
-  "v": 7,
+  "v": 8,
   "id": 47,
   "cmd": {
    "op": "trace.mic_curve",
    "args": {
     "trace": 8,
-    "mic": "M30 #1234"
+    "curve": {
+     "mic": "M30 #1234",
+     "label": "0\u00b0"
+    }
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 8,
+  "id": 49,
+  "cmd": {
+   "op": "cal.curve_delete",
+   "args": {
+    "curve": {
+     "mic": "M30 #1234",
+     "label": "0\u00b0"
+    }
    }
   },
   "expect_rev": 41

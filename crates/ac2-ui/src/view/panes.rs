@@ -257,7 +257,7 @@ fn title_chip(
         ch.dim,
         egui::Stroke::NONE,
     ));
-    if let Some(c) = st.smoothing_caption(pane) {
+    if let Some(c) = st.pane_caption(pane) {
         painter.text(
             r.right_center() + egui::vec2(10.0, 0.0),
             egui::Align2::LEFT_CENTER,

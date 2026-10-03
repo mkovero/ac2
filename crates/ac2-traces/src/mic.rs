@@ -50,8 +50,10 @@ pub fn check(meta: &TraceMeta) -> Result<(), MicCurveError> {
     if meta.kind == TraceKind::Target {
         return Err(MicCurveError::Target);
     }
-    if let Some(curve) = meta.mic.as_ref().and_then(|m| m.curve.clone()) {
-        return Err(MicCurveError::InColumns { curve });
+    if let Some(curve) = meta.mic.as_ref().and_then(|m| m.curve.as_ref()) {
+        return Err(MicCurveError::InColumns {
+            curve: curve.label.clone(),
+        });
     }
     if meta.edit.locked {
         return Err(MicCurveError::Locked);
@@ -168,7 +170,7 @@ pub fn bake(t: &StoredTrace) -> StoredTrace {
     b.sweep = t.display_sweep();
     b.meta.mic = Some(MicState {
         name: mc.mic.clone(),
-        curve: Some(mc.curve.name.clone()),
+        curve: Some(mc.curve.clone()),
     });
     b.meta.mic_curve = None;
     b.mic_curve = None;

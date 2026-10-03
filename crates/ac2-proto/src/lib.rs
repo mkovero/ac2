@@ -5,6 +5,7 @@
 //! named fields; data frames are `[topic][msgpack header][little-endian 4-byte arrays…]`.
 #![forbid(unsafe_code)]
 
+pub mod cal;
 pub mod ctrl;
 pub mod event;
 pub mod frame;
@@ -16,7 +17,7 @@ pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 7;
+pub const PROTO_VERSION: u16 = 8;
 
 pub use ctrl::{
     Command, CtrlError, Envelope, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason,

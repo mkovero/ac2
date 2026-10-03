@@ -22,6 +22,9 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
+mod info;
+pub use info::{CurveFileInfo, file_info};
+
 /// Most points accepted from a curve file.
 pub const MAX_POINTS: usize = 10_000;
 /// Largest |gain| accepted. Measurement-mic deviations are a few dB; tens of dB means a
