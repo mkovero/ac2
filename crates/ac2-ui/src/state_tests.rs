@@ -2991,6 +2991,16 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Db);
     t.key("U");
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Percent);
+    // The pane's dB | % toggle: a click on either sets that unit (again: stays).
+    for unit in [
+        DistortionUnit::Db,
+        DistortionUnit::Db,
+        DistortionUnit::Percent,
+    ] {
+        let r = t.st.update(Msg::DistortionUnit(unit), &t.keys);
+        assert!(r.is_empty(), "display only: {r:?}");
+        assert_eq!(t.st.view.distortion.unit, unit);
+    }
     t.key("H");
     assert!(t.st.view.distortion.show_ir);
     t.key("G");

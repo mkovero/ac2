@@ -587,6 +587,8 @@ pub enum Msg {
         octaves: f64,
     },
     CursorAt(Option<f64>),
+    /// The dB | % toggle of the distortion pane.
+    DistortionUnit(DistortionUnit),
     /// Mouse on an open dialog.
     Form(FormMsg),
     /// Mouse on the session dialog.
@@ -1158,6 +1160,7 @@ impl AppState {
                 self.view.freq = t;
             }
             Msg::CursorAt(hz) => self.view.cursor_hz = hz,
+            Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
         }
     }
 

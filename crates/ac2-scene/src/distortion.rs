@@ -1,6 +1,7 @@
 //! Sweep results: the fundamental's response over the harmonic distortion of each order and
-//! the total (THD), in dB re the fundamental or in percent, with the noise floor shaded
-//! (`docs/design/sweep-distortion.md`); the readouts the CLI prints come from here too.
+//! the total (THD), in dB re the fundamental or in percent, each order drawn at its own noise
+//! floor where it is within the noise (`docs/design/sweep-distortion.md`, "Display"); the
+//! readouts the CLI prints come from here too.
 //!
 //! A distortion value is shown only where the daemon's analysis says it is one: measured and
 //! at least `info.floor_margin` above the noise in its window ([`DistortionCurve::valid`]).
@@ -15,7 +16,7 @@ use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, visi
 use crate::format;
 use crate::grid::nearest_column;
 use crate::primitives::{
-    Band, BandPoint, Color, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
+    Band, BandPoint, Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
 use crate::view::{DistortionUnit, ViewState};
@@ -142,6 +143,29 @@ pub struct SweepView<'a> {
     pub freqs: &'a [f64],
 }
 
+/// How a legend entry shows what it names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegendMark {
+    /// The name in the curve's colour.
+    Name,
+    /// A dashed sample: an order within the noise, drawn at its floor in its own colour.
+    Dashed,
+    /// A shaded sample: under the lowest order's floor.
+    Shade,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LegendEntry {
+    pub name: String,
+    pub color: Color,
+    pub mark: LegendMark,
+}
+
+/// Legend name of the dashed floor lines.
+pub const BELOW_FLOOR: &str = "< floor";
+/// Legend name of the shading under every order's floor.
+pub const NOISE: &str = "noise";
+
 /// Cursor readout of the distortion view.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DistortionCursor {
@@ -161,17 +185,22 @@ pub struct DistortionScene {
     pub x_axis: Axis,
     pub y_fundamental: Axis,
     pub y_axis: Axis,
-    /// `(name, colour)` of each drawn curve, in drawing order (orders, then THD, then the
-    /// floor).
-    pub legend: Vec<(String, Color)>,
+    /// The orders (each name in its colour), THD, then the two floor marks.
+    pub legend: Vec<LegendEntry>,
     /// `Main L sweep · arrival 3.32 ms · 2 × 3.10 s · window 8 + 87 ms`.
     pub info: String,
+    /// The part of [`Self::info`] that fits beside the fundamental's axis title (empty when
+    /// nothing does).
+    pub caption: String,
     pub cursor: Option<DistortionCursor>,
     /// Why nothing is drawn, when that is the case.
     pub note: Option<String>,
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
 }
+
+/// Axis title of the fundamental's response.
+const FUNDAMENTAL_TITLE: &str = "Fundamental dB";
 
 /// Colour of harmonic order `k` (and THD as order 0).
 pub fn order_color(theme: &Theme, order: u8) -> Color {
@@ -190,21 +219,161 @@ fn y_value(db: f64, unit: DistortionUnit) -> f64 {
     }
 }
 
-fn info_line(d: &TraceData, s: &SweepData) -> String {
+/// The sweep's caption, longest first: then without the name, without the repeats, the
+/// arrival alone. CLIPPED stays on every one (and alone last): it says the result is wrong.
+fn info_lines(d: &TraceData, s: &SweepData) -> Vec<String> {
     let i = &s.info;
-    let mut t = format!(
-        "{} · arrival {} · {} × {} s · window {} + {}",
-        d.meta.edit.name,
-        format::ms(i.arrival.0, 2),
-        i.repeats,
-        format::fixed(i.duration.0, 2),
+    let arrival = format!("arrival {}", format::ms(i.arrival.0, 2));
+    let runs = format!("{} × {} s", i.repeats, format::fixed(i.duration.0, 2));
+    let window = format!(
+        "window {} + {}",
         format::ms(i.window_pre.0, 0),
-        format::ms(i.window_post.0, 0),
+        format::ms(i.window_post.0, 0)
     );
+    let clipped = if i.clipped { " · CLIPPED" } else { "" };
+    let mut out: Vec<String> = [
+        format!("{} · {arrival} · {runs} · {window}", d.meta.edit.name),
+        format!("{arrival} · {runs} · {window}"),
+        format!("{arrival} · {window}"),
+        arrival,
+    ]
+    .into_iter()
+    .map(|t| format!("{t}{clipped}"))
+    .collect();
     if i.clipped {
-        t.push_str(" · CLIPPED");
+        out.push("CLIPPED".to_string());
     }
-    t
+    out
+}
+
+/// The first of `lines` no wider than `width` at `size`, else nothing.
+fn fitting(lines: &[String], width: f32, size: f32) -> String {
+    lines
+        .iter()
+        .find(|t| canvas::text_width(t, size) <= width)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Height of one legend row.
+fn legend_row_h(theme: &Theme) -> f32 {
+    theme.small_font_size * 1.25 + 2.0
+}
+
+/// Width of a legend entry's sample (before its name).
+const SAMPLE_W: f32 = 14.0;
+
+/// Draws `legend` in rows: the first from `x0` (beside the axis title), the next ones from
+/// `left`, wrapping before `right`. Returns the bottom of the last row.
+fn draw_legend(
+    c: &mut Canvas,
+    legend: &[LegendEntry],
+    x0: f32,
+    left: f32,
+    right: f32,
+    top: f32,
+    theme: &Theme,
+) -> f32 {
+    let size = theme.small_font_size;
+    let row_h = legend_row_h(theme);
+    let (mut x, mut y) = (x0, top);
+    for e in legend {
+        let sample = if e.mark == LegendMark::Name {
+            0.0
+        } else {
+            SAMPLE_W + 4.0
+        };
+        let w = sample + canvas::text_width(&e.name, size);
+        if x + w > right && x > left {
+            x = left;
+            y += row_h;
+        }
+        let mid = y + size * 0.62;
+        match e.mark {
+            LegendMark::Name => {}
+            LegendMark::Dashed => c.overlay.polylines.push(Polyline {
+                points: vec![[x, mid], [x + SAMPLE_W, mid]],
+                alpha: vec![],
+                stroke: floor_stroke(e.color, theme),
+                clip: None,
+            }),
+            LegendMark::Shade => c.overlay.rects.push(FillRect {
+                rect: Rect::new(x, mid - 4.0, SAMPLE_W, 8.0),
+                color: noise_color(theme),
+                clip: None,
+            }),
+        }
+        c.overlay.labels.push(label(
+            e.name.clone(),
+            [x + sample, y],
+            anchor(HAlign::Left, VAlign::Top),
+            size,
+            e.color.with_alpha(1.0),
+        ));
+        x += w + 12.0;
+    }
+    y + row_h
+}
+
+/// An order within the noise, drawn at its floor: thin, dashed, its colour faded.
+fn floor_stroke(color: Color, theme: &Theme) -> Stroke {
+    Stroke {
+        color: color.with_alpha(0.6),
+        width: theme.trace_width * 0.75,
+        dash: Some(Dash {
+            on: 4.0,
+            off: 3.0,
+            offset: 0.0,
+        }),
+    }
+}
+
+/// Shading under the lowest order's floor.
+fn noise_color(theme: &Theme) -> Color {
+    theme.text_dim.with_alpha(0.25)
+}
+
+/// Polyline through the runs of finite `ys`, broken between runs. A run of one column is
+/// drawn across that column's cell (half-way to each neighbour): the value stands for the
+/// band around the column, and a lone point would otherwise be a dot in a small pane.
+fn runs(xs: &[f32], ys: &[f32]) -> Vec<[f32; 2]> {
+    let n = xs.len().min(ys.len());
+    let ok = |i: usize| xs[i].is_finite() && ys[i].is_finite();
+    let mut out: Vec<[f32; 2]> = Vec::new();
+    let mut i = 0;
+    while i < n {
+        if !ok(i) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < n && ok(i) {
+            i += 1;
+        }
+        if !out.is_empty() {
+            out.push([f32::NAN, f32::NAN]);
+        }
+        if i - start == 1 {
+            let x = xs[start];
+            let left = (start > 0).then(|| (x - xs[start - 1]) / 2.0);
+            let right = (start + 1 < xs.len()).then(|| (xs[start + 1] - x) / 2.0);
+            let (l, r) = match (left, right) {
+                (Some(l), Some(r)) => (l, r),
+                (Some(l), None) => (l, l),
+                (None, Some(r)) => (r, r),
+                (None, None) => (1.0, 1.0),
+            };
+            let (l, r) = (
+                if l.is_finite() { l } else { 1.0 },
+                if r.is_finite() { r } else { 1.0 },
+            );
+            out.push([x - l, ys[start]]);
+            out.push([x + r, ys[start]]);
+        } else {
+            out.extend((start..i).map(|k| [xs[k], ys[k]]));
+        }
+    }
+    out
 }
 
 /// The distortion view of `t`: the fundamental's magnitude above, the distortion below.
@@ -256,85 +425,79 @@ pub fn distortion_scene(
         &fund_x,
         &y_fundamental,
         false,
-        "Fundamental dB",
+        FUNDAMENTAL_TITLE,
         theme,
     );
 
     let margin = sweep.map_or(6.0, |(_, s)| s.info.floor_margin.0);
-    let y_range = match unit {
-        DistortionUnit::Db => view.distortion.range_db,
-        DistortionUnit::Percent => {
-            // Up to the largest valid value (at least 1 %), from zero.
-            let top = sweep.map_or(1.0, |(t, s)| {
-                s.harmonics
-                    .iter()
-                    .map(|h| &h.curve)
-                    .chain(std::iter::once(&s.thd))
-                    .flat_map(|c| {
-                        (0..t.freqs.len()).filter_map(move |i| match reading(c, i, margin) {
-                            Reading::Level(v) => Some(percent(v)),
-                            _ => None,
-                        })
-                    })
-                    .fold(1.0f64, f64::max)
-            });
-            Range::new(0.0, top * 1.1)
-        }
-    };
+    // Percent on a log axis over the same ratios as the dB view: equal ratios keep equal
+    // distances, so 0.01 % and 10 % are both readable and the picture does not change shape
+    // when the unit does.
     let title = match unit {
         DistortionUnit::Db => "dB re fundamental",
         DistortionUnit::Percent => "% of fundamental",
     };
-    let y_unit = match unit {
-        DistortionUnit::Db => "dB",
-        DistortionUnit::Percent => "%",
+    let range_db = view.distortion.range_db;
+    let y_axis = match unit {
+        DistortionUnit::Db => axis::linear_axis(range_db, plot.bottom(), plot.y, "dB"),
+        DistortionUnit::Percent => axis::percent_axis(
+            Range::new(percent(range_db.lo), percent(range_db.hi)),
+            plot.bottom(),
+            plot.y,
+            "%",
+        ),
     };
-    let y_axis = axis::linear_axis(y_range, plot.bottom(), plot.y, y_unit);
     canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, title, theme);
     let ym = y_axis.mapping;
 
     let mut legend = Vec::new();
     let mut info = String::new();
+    let mut caption = String::new();
     let note = match sweep {
         None => Some("no sweep result".to_string()),
         Some(_) => None,
     };
     if let Some((t, s)) = sweep {
-        info = info_line(t.data, s);
+        let lines = info_lines(t.data, s);
+        info = lines[0].clone();
+        // Right of the axis title, with a gap; never over it.
+        let room = fundamental.w
+            - 12.0
+            - canvas::text_width(FUNDAMENTAL_TITLE, theme.small_font_size)
+            - 18.0;
+        caption = fitting(&lines, room, theme.small_font_size);
         let cols = visible_columns(t.freqs, xm.range.lo, xm.range.hi);
         let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
 
-        // The noise floor of the lowest order, shaded from the bottom of the plot up: any
-        // curve under it is within the noise.
-        if let Some(h) = s.harmonics.first() {
-            let floor_color = theme.text_dim.with_alpha(0.25);
-            let points: Vec<BandPoint> = cols
-                .clone()
-                .zip(&xs)
-                .map(|(i, x)| {
-                    let f = h.curve.floor_db.get(i).map_or(f64::NAN, |v| f64::from(*v));
-                    let y = ym.to_px(y_value(f, unit)).clamp(plot.y, plot.bottom());
-                    BandPoint {
-                        x: *x,
-                        y0: if f.is_finite() {
-                            plot.bottom()
-                        } else {
-                            f32::NAN
-                        },
-                        y1: y,
-                    }
-                })
-                .collect();
-            c.data.bands.push(Band {
-                points,
-                color: floor_color,
-                clip: Some(plot),
-            });
-            legend.push((
-                format!("noise floor ({})", order_name(h.order)),
-                theme.text_dim,
-            ));
-        }
+        // Under the lowest order's floor every order is within the noise: shaded from the
+        // bottom of the plot up.
+        let points: Vec<BandPoint> = cols
+            .clone()
+            .zip(&xs)
+            .map(|(i, x)| {
+                let f = s
+                    .harmonics
+                    .iter()
+                    .filter_map(|h| h.curve.floor_db.get(i).map(|v| f64::from(*v)))
+                    .filter(|v| v.is_finite())
+                    .fold(f64::NAN, f64::min);
+                let y = ym.to_px(y_value(f, unit)).clamp(plot.y, plot.bottom());
+                BandPoint {
+                    x: *x,
+                    y0: if f.is_finite() {
+                        plot.bottom()
+                    } else {
+                        f32::NAN
+                    },
+                    y1: y,
+                }
+            })
+            .collect();
+        c.data.bands.push(Band {
+            points,
+            color: noise_color(theme),
+            clip: Some(plot),
+        });
         let curves: Vec<(String, u8, &DistortionCurve)> = s
             .harmonics
             .iter()
@@ -343,14 +506,33 @@ pub fn distortion_scene(
             .collect();
         for (name, order, curve) in &curves {
             let color = order_color(theme, *order);
-            let ys: Vec<f32> = cols
-                .clone()
-                .map(|i| match reading(curve, i, margin) {
-                    Reading::Level(v) => ym.to_px(y_value(v, unit)),
+            let readings: Vec<Reading> = cols.clone().map(|i| reading(curve, i, margin)).collect();
+            // Where the order is within the noise, its floor (what the readout says it is
+            // under), dashed; where it is valid, its level, solid.
+            let floor_ys: Vec<f32> = readings
+                .iter()
+                .map(|r| match r {
+                    Reading::BelowFloor(f) => ym.to_px(y_value(*f, unit)),
                     _ => f32::NAN,
                 })
                 .collect();
-            let (points, _) = gapped(&xs, &ys, None, |_, _| false);
+            let points = runs(&xs, &floor_ys);
+            if !points.is_empty() {
+                c.data.polylines.push(Polyline {
+                    points,
+                    alpha: vec![],
+                    stroke: floor_stroke(color, theme),
+                    clip: Some(plot),
+                });
+            }
+            let ys: Vec<f32> = readings
+                .iter()
+                .map(|r| match r {
+                    Reading::Level(v) => ym.to_px(y_value(*v, unit)),
+                    _ => f32::NAN,
+                })
+                .collect();
+            let points = runs(&xs, &ys);
             if !points.is_empty() {
                 c.data.polylines.push(Polyline {
                     points,
@@ -366,8 +548,22 @@ pub fn distortion_scene(
                     clip: Some(plot),
                 });
             }
-            legend.push((name.clone(), color));
+            legend.push(LegendEntry {
+                name: name.clone(),
+                color,
+                mark: LegendMark::Name,
+            });
         }
+        legend.push(LegendEntry {
+            name: BELOW_FLOOR.to_string(),
+            color: theme.text_dim,
+            mark: LegendMark::Dashed,
+        });
+        legend.push(LegendEntry {
+            name: NOISE.to_string(),
+            color: theme.text_dim,
+            mark: LegendMark::Shade,
+        });
         // Fundamental magnitude.
         let fm = y_fundamental.mapping;
         let ys: Vec<f32> = cols
@@ -394,21 +590,20 @@ pub fn distortion_scene(
         }
     }
 
-    // Legend: one coloured name per curve, along the top of the distortion plot.
-    let mut x = plot.x + 6.0 + canvas::text_width(title, theme.small_font_size) + 18.0;
-    for (name, color) in &legend {
+    // Legend along the top of the distortion plot, beside its axis title, wrapping under it
+    // in a narrow pane.
+    let legend_bottom = draw_legend(
+        &mut c,
+        &legend,
+        plot.x + 6.0 + canvas::text_width(title, theme.small_font_size) + 18.0,
+        plot.x + 6.0,
+        plot.right() - 6.0,
+        plot.y + 4.0,
+        theme,
+    );
+    if !caption.is_empty() {
         c.overlay.labels.push(label(
-            name.clone(),
-            [x, plot.y + 4.0],
-            anchor(HAlign::Left, VAlign::Top),
-            theme.small_font_size,
-            color.with_alpha(1.0),
-        ));
-        x += canvas::text_width(name, theme.small_font_size) + 12.0;
-    }
-    if !info.is_empty() {
-        c.overlay.labels.push(label(
-            info.clone(),
+            caption.clone(),
             [fundamental.right() - 6.0, fundamental.y + 4.0],
             anchor(HAlign::Right, VAlign::Top),
             theme.small_font_size,
@@ -447,7 +642,7 @@ pub fn distortion_scene(
         lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
         c.overlay.labels.push(label(
             lines.join("\n"),
-            [plot.right() - 8.0, plot.y + 22.0],
+            [plot.right() - 8.0, legend_bottom + 4.0],
             anchor(HAlign::Right, VAlign::Top),
             theme.small_font_size,
             theme.text,
@@ -471,6 +666,7 @@ pub fn distortion_scene(
         y_axis,
         legend,
         info,
+        caption,
         cursor,
         note,
         strip: strip.rect,

@@ -6,10 +6,6 @@ the commit when it lands.
 ## From the first sweep run on pupu (2026-10-03)
 
 - **Top bar: ARMED badge overlaps the session text** ("2ARMED…") at 1290 px width.
-- **Sweep pane caption overlaps** ("arrival … window …" collides with the axis title) when the pane
-  is small; fine when maximised.
-- **Distortion pane shades only the H2 noise floor**; each harmonic has its own floor in the data —
-  show the relevant one (or the lowest) and label it.
 - **Sweep results lost on daemon restart, and a CSV re-import cannot bring them back.** Stored
   traces live in daemon memory; `trace import` of a sweep export keeps only its transfer
   function (and delay 0), because `SweepData` needs the IR and analysis info that the CSV lacks
@@ -72,6 +68,16 @@ Sweep findings from pupu (2026-10-03), fixed on the sweep-fixes branch:
   peaks exactly at the range ends (0 and 96 000, also ±64 while tracking). The capture window
   is now tapered: those windows are no measurement (Lost) instead of a false jump.
   Reproduced in `ac2-core` (`a_slow_sweep_start_never_reads_as_a_range_edge`).
+
+Sweep / distortion pane (from the first sweep run on pupu):
+- **Caption overlapped the axis title** in a small pane: the caption now shortens to fit
+  (CLIPPED always kept), the legend wraps and the cursor readout starts below it; tested at
+  300 … 1290 px.
+- **Only the H2 floor was shaded**: each order within the noise is drawn dashed at its own
+  floor in its colour, the shading is under the lowest order's floor (legend `< floor`,
+  `noise`). Lone valid points are drawn across their cell, no longer as dots.
+- **dB / % had no visible control**: a `dB | %` toggle in the pane's title (tooltip names U);
+  percent is a log axis (0.001 … 100 %, decade labels).
 
 Rig findings fixed on `fix/rig-findings`:
 - **Remote generator played silence on JACK.** Arming reopened the stream to change the

@@ -101,6 +101,35 @@ capped) and per 3 dB more level; for white noise of variance σ² at the mic and
 amplitude A there, `floor(F) ≈ 4·W·F·σ² / (fs·A²·L)` (for the noise test: −44.8 dB predicted,
 −44.2 dB measured).
 
+## Display (Sweep / distortion pane)
+
+`ac2_scene::distortion` draws the fundamental's response above the distortion of each order
+and THD, and every number the pane shows comes from there.
+
+- **Valid points** are solid lines in the order's colour. A valid column whose neighbours are
+  both within the noise is drawn across its own cell (half-way to each neighbour) at its level:
+  the value stands for the band around the column, and a lone point would be a dot, or nothing,
+  in a small pane where columns are closer than pixels.
+- **Within the noise**, an order is drawn at its own floor (the value its readout gives as
+  `< …`): a thin dashed line in the order's colour, faded. Each harmonic has its own floor
+  (`N(k·f)/P_1(f)`), so one shared floor would be wrong for every order but one; drawing each
+  where it applies shows which order is limited by noise, and where, without stacking five
+  translucent bands into an unreadable grey. Where an order is valid its floor is not drawn:
+  the curve already says it is above it.
+- **Shading** fills the plot from the bottom up to the lowest order's floor at each frequency:
+  below it every order is within the noise. Legend: the order names in their colours, THD, a
+  dashed sample `< floor`, a shaded sample `noise`.
+- **dB / %**: the toggle in the pane's title (`dB | %`, key **U**) switches the axis and every
+  readout, including `< floor` values. Percent is drawn on a log axis over the same ratios as
+  the dB view (−100…0 dB = 0.001…100 %), labelled per decade (1-2-5 when tall enough, every
+  second decade when very short): equal ratios keep equal distances, so a curve does not
+  change shape when the unit does, and 0.01 % stays as readable as 10 %. The fundamental's
+  response stays in dB.
+- **Caption** (`name · arrival · repeats × duration · window`) goes right of the fundamental's
+  axis title and is shortened to fit (without the name, without the repeats, the arrival
+  alone, nothing); `CLIPPED` is kept on every form. The legend wraps under the distortion
+  axis title in a narrow pane, and the cursor readout starts below the legend.
+
 ## Linear response gating
 
 The linear IR is windowed from `d − 0.1·L·ln 2` (just after H2's window) to `d + gate`:

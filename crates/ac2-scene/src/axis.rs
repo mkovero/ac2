@@ -207,26 +207,33 @@ pub fn log_freq_ticks(m: &Mapping, min_label_px: f32, min_minor_px: f32) -> Vec<
     if !(m.range.lo > 0.0 && m.range.hi > m.range.lo && m.range.hi.is_finite()) {
         return Vec::new();
     }
-    let chosen = (0..DECADE_SETS.len()).rev().find_map(|level| {
-        let v = decade_values(m, DECADE_SETS[level]);
-        (v.len() >= 3 && min_gap_px(m, &v) >= min_label_px).then_some((level, v))
-    });
     // Over less than about a decade, linear steps can label more of the axis than the
     // per-decade sets (900 Hz–2.1 kHz: 1k, 1.2k, … instead of 900, 1k, 2k); use whichever
     // labels more.
-    let fallback = || log_axis_linear_fallback(m, min_label_px, min_minor_px);
-    let Some((level, majors)) = chosen else {
-        return fallback();
-    };
-    let linear = fallback();
-    let linear_labels = linear.iter().filter(|t| t.label.is_some()).count();
-    if linear_labels > majors.len() {
-        return linear;
+    let linear = log_axis_linear_fallback(m, min_label_px, min_minor_px);
+    match decade_ticks(m, min_label_px, min_minor_px, format::freq_tick) {
+        Some(t) if labelled(&t) >= labelled(&linear) => t,
+        _ => linear,
     }
-    let mut ticks: Vec<Tick> = majors
-        .iter()
-        .map(|&v| Tick::major(m, v, format::freq_tick(v)))
-        .collect();
+}
+
+fn labelled(ticks: &[Tick]) -> usize {
+    ticks.iter().filter(|t| t.label.is_some()).count()
+}
+
+/// Labelled ticks from the finest per-decade set that keeps labels `min_label_px` apart and
+/// puts at least three in range, minors from the next finer one; `None` when no set does.
+fn decade_ticks(
+    m: &Mapping,
+    min_label_px: f32,
+    min_minor_px: f32,
+    fmt: impl Fn(f64) -> String,
+) -> Option<Vec<Tick>> {
+    let (level, majors) = (0..DECADE_SETS.len()).rev().find_map(|level| {
+        let v = decade_values(m, DECADE_SETS[level]);
+        (v.len() >= 3 && min_gap_px(m, &v) >= min_label_px).then_some((level, v))
+    })?;
+    let mut ticks: Vec<Tick> = majors.iter().map(|&v| Tick::major(m, v, fmt(v))).collect();
     // Minor ticks: the finest finer set whose spacing stays readable; for the finest set a
     // half-step subdivision.
     let finer: Vec<Vec<f64>> = if level + 1 < DECADE_SETS.len() {
@@ -249,6 +256,50 @@ pub fn log_freq_ticks(m: &Mapping, min_label_px: f32, min_minor_px: f32) -> Vec<
                 .map(|v| Tick::minor(m, v)),
         );
     }
+    sort_ticks(&mut ticks);
+    Some(ticks)
+}
+
+/// Ticks of a log value axis spanning several decades (distortion in percent): the
+/// per-decade sets as for frequency, and on an axis too short for a label per decade every
+/// second (third, …) decade labelled, the others minor.
+pub fn log_ticks(
+    m: &Mapping,
+    min_label_px: f32,
+    min_minor_px: f32,
+    fmt: impl Fn(f64) -> String,
+) -> Vec<Tick> {
+    if !(m.range.lo > 0.0 && m.range.hi > m.range.lo && m.range.hi.is_finite()) {
+        return Vec::new();
+    }
+    if let Some(t) = decade_ticks(m, min_label_px, min_minor_px, &fmt) {
+        return t;
+    }
+    let decades = decade_values(m, DECADE_SETS[0]);
+    let exp = |v: f64| v.log10().round() as i64;
+    let every = |s: i64| -> Vec<f64> {
+        decades
+            .iter()
+            .copied()
+            .filter(|v| exp(*v).rem_euclid(s) == 0)
+            .collect()
+    };
+    let stride = (2..=decades.len().max(2) as i64)
+        .find(|s| {
+            let v = every(*s);
+            v.len() < 2 || min_gap_px(m, &v) >= min_label_px
+        })
+        .unwrap_or(2);
+    let mut ticks: Vec<Tick> = decades
+        .iter()
+        .map(|&v| {
+            if exp(v).rem_euclid(stride) == 0 {
+                Tick::major(m, v, fmt(v))
+            } else {
+                Tick::minor(m, v)
+            }
+        })
+        .collect();
     sort_ticks(&mut ticks);
     ticks
 }
@@ -450,6 +501,29 @@ pub fn phase_axis(range: Range, px_lo: f32, px_hi: f32) -> Axis {
     }
 }
 
+/// `0.01`, `0.1`, `1`, `10`, `100`, `0.005`: as many decimals as the value's decade needs.
+pub fn percent_label(v: f64) -> String {
+    // Slack for decades that log10 puts a hair under the integer.
+    let decimals = (-(v.log10() + 1e-9).floor()).max(0.0) as usize;
+    format::fixed(v, decimals)
+}
+
+/// Log axis of a ratio in percent (distortion): decade labels `0.01` … `100`, the unit in
+/// the title. Equal ratios get equal distances, as on the dB axis it stands in for.
+pub fn percent_axis(range: Range, px_lo: f32, px_hi: f32, title: &str) -> Axis {
+    let mapping = Mapping::new(range, Scale::Log, px_lo, px_hi);
+    Axis {
+        ticks: log_ticks(
+            &mapping,
+            linear_label_px(px_lo, px_hi),
+            MIN_MINOR_PX,
+            percent_label,
+        ),
+        mapping,
+        title: title.to_string(),
+    }
+}
+
 /// Like [`linear_axis`] / [`phase_axis`] (`steps` picks which), but the tick step is chosen
 /// as if the axis were `density_px` long. Panes that change height between layouts keep
 /// the same steps, so switching a layout never relabels an axis whose range did not change.
@@ -628,6 +702,42 @@ mod tests {
         );
         let a = phase_axis(Range::new(-1440.0, 360.0), 200.0, 0.0);
         assert_eq!(a.labels(), ["−1440", "−1080", "−720", "−360", "0", "360"]);
+    }
+
+    #[test]
+    fn percent_axis_is_log_with_decade_labels() {
+        let r = Range::new(0.001, 100.0);
+        // Tall: 1-2-5 per decade.
+        let a = percent_axis(r, 600.0, 0.0, "%");
+        assert_eq!(a.mapping.scale, Scale::Log);
+        assert_eq!(a.labels()[..4], ["0.001", "0.002", "0.005", "0.01"]);
+        assert_eq!(*a.labels().last().expect("labels"), "100");
+        // A 1/4 pane: one label per decade.
+        let a = percent_axis(r, 200.0, 0.0, "%");
+        assert_eq!(a.labels(), ["0.001", "0.01", "0.1", "1", "10", "100"]);
+        // Equal ratios, equal distances: 1 % sits 2/5 of the way down from 100 %.
+        let p1 = a.ticks.iter().find(|t| t.value == 1.0).expect("1 %").pos;
+        assert!((p1 - 80.0).abs() < 1e-3, "{p1}");
+        // Too short for every decade: every second one labelled, the rest minor.
+        let a = percent_axis(r, 90.0, 0.0, "%");
+        assert_eq!(a.labels(), ["0.01", "1", "100"]);
+        assert_eq!(
+            a.ticks.iter().filter(|t| t.kind == TickKind::Minor).count(),
+            3
+        );
+        for h in [60.0f32, 90.0, 200.0, 400.0, 800.0] {
+            let a = percent_axis(r, h, 0.0, "%");
+            let pos: Vec<f32> = a
+                .ticks
+                .iter()
+                .filter(|t| t.label.is_some())
+                .map(|t| t.pos)
+                .collect();
+            assert!(!pos.is_empty(), "{h}");
+            for p in pos.windows(2) {
+                assert!((p[0] - p[1]).abs() >= MIN_LABEL_PX_VERTICAL - 1e-3, "{h}");
+            }
+        }
     }
 
     #[test]

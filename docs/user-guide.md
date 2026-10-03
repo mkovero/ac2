@@ -247,7 +247,10 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
   the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed, and
   **Shift+S** sets up the next sweep. The result opens the
   **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
-  below with the noise floor shaded. **U** switches dB re fundamental / percent, **H** shows the
+  below. Where an order is within the noise it is drawn dashed at its own floor; the shading
+  is the noise under every order's floor. The **dB | %** toggle in the pane's title (or
+  **U**) switches the distortion between dB re fundamental and percent (a log axis: 0.01 %,
+  0.1 %, 1 %, …), readouts included. **H** shows the
   sweep's impulse response with the harmonics' impulses marked (**G**: linear / log / ETC),
   **N** steps through stored sweeps, **Shift+H** hides the pane. The sweep is also a stored
   trace, drawn in the transfer pane like any capture.
@@ -259,8 +262,8 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
   `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
   floor, THD).
 - A distortion value is only shown where it is at least 6 dB above the noise in its window;
-  elsewhere it reads `< −72.0 dB` (the floor). Lower the floor with repeats or a longer sweep,
-  not with more level than the speaker should take.
+  elsewhere it reads `< −72.0 dB` (`< 0.0251 %`: the floor). Lower the floor with repeats or
+  a longer sweep, not with more level than the speaker should take.
 
 ## Sessions
 
