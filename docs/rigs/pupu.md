@@ -60,3 +60,29 @@ region**. So the dip is not accompanied by measurable distortion at this (quiet)
 intermittent fault from the `ac` profile was not visible. Floor is set by room noise and the low
 drive: more repeats (8×: about −6 dB) or a louder drive (needs the operator to lift the −50 dBFS
 speaker ceiling) would be needed to see distortion. Data: `/home/mui/ac2-1083-sweep*`.
+
+## Mic moved: 94 cm height, re-centred on axis, 1 m (2026-10-03, ac2 c062151, from the app)
+
+Same daemon and session, 12 s sweeps at −50 dBFS: `1083 94cm` (2×) and `1083 94cm 8x` (8×).
+Arrival 3.45 ms (+0.11 ms, ≈ 4 cm longer path than at 102 cm).
+
+- **The 2–6 kHz dip did not move.** Third-octave levels re the 200 Hz–1 kHz mean, 102 cm → 94 cm:
+  2 k −7.8 → −8.7, 2.5 k −5.0 → −3.8, 3.15 k −6.7 → −7.0, 4 k −7.9 → −7.3, 5 k −5.0 → −4.6,
+  6.3 k −3.9 → −3.1; band mean −6.1 → −5.9 dB. 100 Hz–1.6 kHz and 6.3–16 kHz also agree
+  within ±1.3 dB. An 8 cm height change shifts floor-bounce and other path-difference notches
+  noticeably, so the dip is not a mic-geometry comb: it is the speaker on this axis (or the
+  room as a broad feature). Next checks: rear-panel tone/room switch settings, a near-field
+  look at each driver, and the response 20–30° off axis.
+- **Distortion (8×: floor ≈ 5–6 dB lower than 2×).** THD at or within 1–3 dB of the floor
+  everywhere: < −36 dB 60–120 Hz, < −48 dB 120–300 Hz, < −57 dB 300 Hz–2 kHz, < −55 dB
+  2–6 kHz. Clusters 6–10 dB over the floor in the 2× run (H2 at 130–140 Hz around −32 dB,
+  H4 near 160 Hz) fell to the floor at 8×: room noise during that run, not the speaker.
+  One stable feature: **H3 of 510–680 Hz excitation (harmonic at 1.5–2 kHz), −53…−58 dB re
+  fundamental (≈ 0.15 %), 8–11 dB over its floor**, seen at the same level in all three
+  sweeps. Part of that ratio is the fundamental sitting in a 3–4 dB response dip at 530–570 Hz.
+  Small and not a fault indication at this drive. The intermittent fault from the `ac`
+  profile was not seen.
+- Recount of the first run over all H2–H5 points with the same ≥ 6 dB-over-floor test: 11 of
+  1540 points, isolated. The "0 of 420" figure above used a narrower selection.
+
+Data: `/home/mui/ac2-1083-sweep2-94cm.csv`, `/home/mui/ac2-1083-sweep3-94cm-8x.csv`.

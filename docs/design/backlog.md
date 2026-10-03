@@ -15,6 +15,11 @@ the commit when it lands.
   show the relevant one (or the lowest) and label it.
 - **Sweep dialog defaults** picked capture_1 as Reference until the session declared its loopback;
   without a loopback mapping, ask for the reference explicitly instead of guessing by order.
+- **Sweep dialog duration stepper is unsorted and wraps** (3 s, 1 s, 6 s, 12 s): → from 3 s
+  gives 1 s, ← from 3 s wraps to 12 s, so 6 s takes three presses from the default. Sort the
+  choices and stop at the ends.
+- **Name field: Ctrl+A does not select** the default name; typing appends to it.
+- Re-arm after a sweep reproduced on both later runs (2×, 8×).
 
 ## Flaky tests (seen on CI, passed on rerun)
 
@@ -24,9 +29,10 @@ the commit when it lands.
 
 ## Parked
 
-- **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Distortion
-  measurement exists now (`ac2 ir capture`, `docs/design/sweep-distortion.md`): check mic
-  height/aim vs the speaker's reference axis, ±10 cm at 1 m, then 2 m; listen during a burst;
+- **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Mic at 102 cm
+  and 94 cm (re-centred) gives the same dip within ±1.2 dB, and no distortion above 0.15 % goes
+  with it, so mic geometry is ruled out. Left: rear-panel settings, near-field per driver,
+  off-axis, 2 m; listen during a burst;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## From the first rig session on pupu (2026-10-03)
