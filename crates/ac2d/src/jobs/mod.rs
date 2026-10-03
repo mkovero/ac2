@@ -30,6 +30,7 @@ pub(crate) mod meters;
 pub(crate) mod rta;
 pub(crate) mod spectrum;
 pub(crate) mod spl;
+pub(crate) mod sweep;
 pub(crate) mod timing;
 pub(crate) mod transfer;
 

@@ -44,6 +44,7 @@ mod preview;
 mod session;
 mod state;
 mod stimulus;
+mod sweep;
 mod util;
 
 use std::fmt;
@@ -59,7 +60,7 @@ pub use config::{
     ReplayLimits, pid_file, runtime_dir,
 };
 
-pub use backend::{BackendChoice, FAKE_RIG, backend, backends};
+pub use backend::{BackendChoice, FAKE_RIG, FAKE_RIG_DISTORTION, backend, backends};
 use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};
 use outbox::Outbox;

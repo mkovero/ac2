@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    DelayState, GenAction, MeasKind, Measurement, Session, SessionFile, SessionRef, TraceSource,
+    DelayState, GenAction, MeasKind, Measurement, Session, SessionFile, SessionRef, SweepFailure,
+    TraceSource,
 };
 use ac2_proto::units::{ClientId, MeasId, Rev, Samples, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
@@ -154,7 +155,8 @@ impl Control {
             }
         }
 
-        // Disarmed, no owner.
+        // Disarmed, no owner; a sweep run in progress is discarded.
+        self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
         self.stop_output();
         self.lease = None;
         let mut g = self.store.state().generator.clone();
@@ -247,7 +249,7 @@ impl Control {
         }
         for t in data.traces {
             self.register_grid(t.grid.clone());
-            self.traces.insert(t.meta.id, t.grid, t.columns);
+            self.traces.insert(t.meta.id, t.grid, t.columns, t.sweep);
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
         tracing::info!(

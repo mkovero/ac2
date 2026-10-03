@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use ac2_audio::{LevelError, MaxLevel, SignalSource};
-use ac2_core::generator::{FILTERED_NOISE_CREST, Generator, LevelControl, dbfs_to_rms};
+use ac2_core::generator::{FILTERED_NOISE_CREST, Generator, dbfs_to_rms};
 
 /// Shared lease deadline.
 #[derive(Debug)]
@@ -75,20 +75,95 @@ enum Phase {
     Expired,
 }
 
-/// A generator that fades itself out for good once the lease deadline passes while it
-/// plays.
+/// What a [`LeasedSource`] plays: a generator, or a train of sweeps. Both are built off
+/// the audio thread; `fill` runs on it (no allocation, locks or syscalls) and `fade_out` is
+/// an atomic store.
+pub(crate) trait Stimulus: Send {
+    fn fill(&mut self, out: &mut [f32]);
+    /// Ramps to silence over the generator ramp, for good.
+    fn fade_out(&self);
+}
+
+impl Stimulus for Generator {
+    fn fill(&mut self, out: &mut [f32]) {
+        Generator::fill(self, out);
+    }
+
+    fn fade_out(&self) {
+        Generator::fade_out(self);
+    }
+}
+
+/// `count` synchronised sweeps, each followed by `gap` samples of silence: one generator
+/// per sweep (a sweep generator plays once), all built before the train is handed to the
+/// audio thread.
+pub(crate) struct SweepTrain {
+    sweeps: Vec<Generator>,
+    sweep_len: usize,
+    gap: usize,
+    /// Sweep playing (or whose gap is playing).
+    index: usize,
+    /// Samples into the current sweep + gap.
+    pos: usize,
+}
+
+impl SweepTrain {
+    pub(crate) fn new(sweeps: Vec<Generator>, sweep_len: usize, gap: usize) -> Self {
+        Self {
+            sweeps,
+            sweep_len,
+            gap,
+            index: 0,
+            pos: 0,
+        }
+    }
+}
+
+impl Stimulus for SweepTrain {
+    fn fill(&mut self, out: &mut [f32]) {
+        let mut done = 0;
+        while done < out.len() {
+            let Some(g) = self.sweeps.get_mut(self.index) else {
+                out[done..].fill(0.0);
+                return;
+            };
+            let rest = out.len() - done;
+            let n = if self.pos < self.sweep_len {
+                let n = rest.min(self.sweep_len - self.pos);
+                g.fill(&mut out[done..done + n]);
+                n
+            } else {
+                let n = rest.min(self.sweep_len + self.gap - self.pos);
+                out[done..done + n].fill(0.0);
+                n
+            };
+            done += n;
+            self.pos += n;
+            if self.pos >= self.sweep_len + self.gap {
+                self.index += 1;
+                self.pos = 0;
+            }
+        }
+    }
+
+    fn fade_out(&self) {
+        for g in &self.sweeps {
+            g.fade_out();
+        }
+    }
+}
+
+/// A stimulus that fades itself out for good once the lease deadline passes while it plays.
 pub(crate) struct LeasedSource {
-    generator: Generator,
-    level: LevelControl,
+    source: Box<dyn Stimulus>,
     gate: Arc<LeaseGate>,
     phase: Phase,
 }
 
 impl LeasedSource {
-    pub(crate) fn new(generator: Generator, gate: Arc<LeaseGate>) -> Self {
+    pub(crate) fn new(source: Box<dyn Stimulus>, gate: Arc<LeaseGate>) -> Self {
         Self {
-            level: generator.level_control(),
-            generator,
+            source,
             gate,
             phase: Phase::Waiting,
         }
@@ -107,7 +182,7 @@ impl SignalSource for LeasedSource {
             (Phase::Playing, true) => {
                 self.phase = Phase::Expired;
                 // An atomic store: the generator ramps to zero over its 20 ms ramp.
-                self.level.fade_out();
+                self.source.fade_out();
                 // A closed gate is the control side's own stop; only a deadline that
                 // passed on its own is news to it.
                 if self.gate.deadline_ns.load(Ordering::Acquire) != 0 {
@@ -116,7 +191,7 @@ impl SignalSource for LeasedSource {
             }
             (Phase::Playing, false) | (Phase::Expired, _) => {}
         }
-        self.generator.fill(out);
+        self.source.fill(out);
     }
 }
 
@@ -148,7 +223,46 @@ mod tests {
             ceiling_dbfs: -10.0,
         })
         .expect("generator");
-        LeasedSource::new(g, gate)
+        LeasedSource::new(Box::new(g), gate)
+    }
+
+    #[test]
+    fn a_sweep_train_plays_each_sweep_after_its_gap() {
+        use ac2_core::generator::EssConfig;
+        let fs = 48_000.0;
+        let ess = EssConfig {
+            start_hz: 100.0,
+            end_hz: 1000.0,
+            duration_s: 0.1,
+            fade_in_s: 0.005,
+            fade_out_s: 0.005,
+        };
+        let plan = ac2_core::generator::EssPlan::new(&ess, fs).expect("plan");
+        let make = || {
+            Generator::new(&GeneratorConfig {
+                signal: Signal::Ess(ess),
+                sample_rate: fs,
+                seed: 1,
+                band: BandLimit::NONE,
+                level_dbfs: -20.0,
+                ceiling_dbfs: -10.0,
+            })
+            .expect("sweep")
+        };
+        let gap = 1000;
+        let mut t = SweepTrain::new(vec![make(), make()], plan.len, gap);
+        let mut out = vec![1.0f32; 2 * (plan.len + gap) + 500];
+        // Odd block sizes: the train does not depend on how the stream is cut.
+        for c in out.chunks_mut(97) {
+            Stimulus::fill(&mut t, c);
+        }
+        let mut one = vec![0.0f32; plan.len];
+        Stimulus::fill(&mut make(), &mut one);
+        let second = plan.len + gap;
+        assert_eq!(&out[..plan.len], &one[..]);
+        assert!(out[plan.len..second].iter().all(|v| *v == 0.0));
+        assert_eq!(&out[second..second + plan.len], &one[..]);
+        assert!(out[second + plan.len..].iter().all(|v| *v == 0.0));
     }
 
     #[test]

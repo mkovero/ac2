@@ -246,7 +246,7 @@ fn memoryless_polynomial_harmonics_and_thd() {
                 r.phase_deg[i]
             );
         }
-        if f < 50.0 || f > 6000.0 {
+        if !(50.0..=6000.0).contains(&f) {
             assert!(r.magnitude_db[i].is_nan());
         }
     }

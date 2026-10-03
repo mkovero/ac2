@@ -15,20 +15,23 @@ use std::time::{Duration, Instant};
 use ac2_audio::{Backend, Gain, MaxLevel};
 use ac2_core::delay::FinderResult;
 use ac2_core::generator::{
-    Generator as CoreGenerator, GeneratorConfig, GeneratorError, LevelControl, dbfs_to_rms,
+    BandLimit as CoreBandLimit, Generator as CoreGenerator, GeneratorConfig, GeneratorError,
+    LevelControl, Signal as CoreSignal, dbfs_to_rms,
 };
+use ac2_core::sweep::{SweepAnalysis, SweepError, SweepSpec};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    Availability, BackendInfo, CalEntry, CalKey, CalPart, DelayOutcome, DelayState, FinderBand,
-    GenAction, GenAudit, Generator, GeneratorDesired, InputSetup, Lease as WireLease,
-    LoopbackDetection, MeasConfig, MeasKind, Measurement, MicCurveAction, MicCurveRef, Session,
-    SessionConfig, SplCal, TimingStatus,
+    Availability, BackendInfo, CalEntry, CalKey, CalPart, CalState, DelayOutcome, DelayState,
+    FinderBand, GenAction, GenAudit, Generator, GeneratorDesired, GeneratorSettings, InputSetup,
+    Lease as WireLease, LoopbackDetection, MeasConfig, MeasKind, Measurement, MicCurveAction,
+    MicCurveRef, MicState, Session, SessionConfig, SplCal, SweepFailure, SweepInputs, SweepRequest,
+    SweepRun, SweepStatus, TimingStatus, TraceKind, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
-    SampleIndex, Samples, Seconds, SessionEpoch, WallNs,
+    SampleIndex, Samples, Seconds, SessionEpoch, SweepId, WallNs,
 };
 use ac2_proto::{
     Command, ErrorCode, ErrorDetail, PROTO_VERSION, ProtoError, Reply, ReplyBody, Welcome,
@@ -46,10 +49,12 @@ use crate::outbox::Outbox;
 use crate::preview::Preview;
 use crate::session::{self, Runtime};
 use crate::state::Store;
-use crate::stimulus::{LeaseGate, LeasedSource};
+use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
+use crate::sweep::Recording;
 use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
 
 mod files;
+mod sweeps;
 mod traces;
 
 /// Everything that reaches the control thread.
@@ -82,6 +87,18 @@ pub(crate) enum ControlMsg {
     LoopbackDetected {
         token: u64,
         result: Box<Result<LoopbackDetection, ProtoError>>,
+    },
+    /// Sweep `id` started playing repeat `repeat` (1-based).
+    SweepProgress { id: SweepId, repeat: u8 },
+    /// Sweep `id` has its whole recording, or lost audio while recording.
+    SweepRecorded {
+        id: SweepId,
+        result: Box<Result<Recording, String>>,
+    },
+    /// The analysis of sweep `id` finished.
+    SweepAnalysed {
+        id: SweepId,
+        result: Box<Result<SweepAnalysis, SweepError>>,
     },
     /// The network sockets are gone (ZAP handler exited); shut down.
     Fatal(String),
@@ -153,6 +170,16 @@ struct SourceKey {
     band: Option<ac2_proto::model::BandLimit>,
 }
 
+/// The `ir.capture` run in progress.
+struct ActiveSweep {
+    run: SweepRun,
+    spec: SweepSpec,
+    /// The recorder; gone once the recording is in.
+    job: Option<JobHandle>,
+    epoch: SessionEpoch,
+    mic: Option<MicState>,
+}
+
 pub(crate) struct Control {
     s: Setup,
     store: Store,
@@ -180,6 +207,8 @@ pub(crate) struct Control {
     next_token: u64,
     next_ka: Instant,
     traces: traces::TraceStore,
+    sweep: Option<ActiveSweep>,
+    next_sweep: u32,
 }
 
 const MAX_DELAY_S: f64 = 10.0;
@@ -383,6 +412,8 @@ impl Control {
             next_token: 1,
             next_ka: Instant::now(),
             traces: traces::TraceStore::default(),
+            sweep: None,
+            next_sweep: 1,
             s,
         }
     }
@@ -449,6 +480,9 @@ impl Control {
                     epoch,
                     samples,
                 }) => self.tracked(meas, epoch, samples),
+                Ok(ControlMsg::SweepProgress { id, repeat }) => self.sweep_progress(id, repeat),
+                Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
+                Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, *result),
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;
@@ -462,6 +496,7 @@ impl Control {
 
     fn shutdown(&mut self) {
         tracing::info!("shutting down");
+        self.abort_sweep(SweepFailure::Stopped, "the daemon is shutting down");
         self.close_preview();
         self.stop_output();
         self.stop_all_jobs();
@@ -697,6 +732,7 @@ impl Control {
             }
             Command::GenRelease { lease_token } => {
                 self.lease_check(client, lease_token)?;
+                self.abort_sweep(SweepFailure::Stopped, "the stimulus lease was released");
                 self.stop_output();
                 self.lease = None;
                 let mut g = self.store.state().generator.clone();
@@ -707,6 +743,7 @@ impl Control {
                 ack(self.commit(Change::Generator(g)))
             }
             Command::GenStop => {
+                self.abort_sweep(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();
                 let mut g = self.store.state().generator.clone();
                 g.armed = false;
@@ -909,10 +946,11 @@ impl Control {
             Command::SplLogStart { .. } => Err(unsupported("spl.log_start")),
             Command::SplLogStop { .. } => Err(unsupported("spl.log_stop")),
 
-            Command::IrCapture { lease_token, .. } => {
-                self.lease_check(client, lease_token)?;
-                Err(unsupported("ir.capture"))
-            }
+            Command::IrCapture {
+                lease_token,
+                request,
+                name,
+            } => self.ir_capture(client, lease_token, request, name),
 
             Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
                 self.store.snapshot(self.s.incarnation),
@@ -1042,6 +1080,7 @@ impl Control {
     }
 
     fn session_close(&mut self, client: &ClientId) {
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio session closed");
         self.stop_all_jobs();
         let g = self.store.state().generator.clone();
         if g.armed || g.firing {
@@ -1078,6 +1117,7 @@ impl Control {
         };
         let config = rt.open.config.clone();
         let backend = self.backend_for(Some(rt.open.backend))?;
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio session reopened");
         self.stop_all_jobs();
         self.level = None;
         self.source = None;
@@ -2005,6 +2045,7 @@ impl Control {
                 "stimulus lease of {} expired: output muted",
                 owner.as_ref().map_or("?", |o| o.0.as_str())
             );
+            self.abort_sweep(SweepFailure::LeaseExpired, "the stimulus lease expired");
             self.stop_output();
             let mut g = self.store.state().generator.clone();
             g.owner = None;
@@ -2027,6 +2068,7 @@ impl Control {
             "stimulus lease of {} expired: output muted",
             owner.as_ref().map_or("?", |o| o.0.as_str())
         );
+        self.abort_sweep(SweepFailure::LeaseExpired, "the stimulus lease expired");
         self.stop_output();
         let mut g = self.store.state().generator.clone();
         g.owner = None;
@@ -2051,6 +2093,10 @@ impl Control {
                     ));
                 }
                 // Takeover stops and disarms first; the new owner arms and fires explicitly.
+                self.abort_sweep(
+                    SweepFailure::Stopped,
+                    "another client took the stimulus over",
+                );
                 self.stop_output();
                 g.armed = false;
                 g.firing = false;
@@ -2124,6 +2170,16 @@ impl Control {
                 "a loopback detection is playing its burst; fire once it is done",
             ));
         }
+        if self
+            .sweep
+            .as_ref()
+            .is_some_and(|s| matches!(s.run.status, SweepStatus::Playing { .. }))
+        {
+            return Err(perr(
+                ErrorCode::Refused,
+                "a sweep is playing: stop it (gen.stop) or let it finish",
+            ));
+        }
 
         let deadline = Instant::now() + self.s.lease_expiry;
         if let Some(l) = &mut self.lease {
@@ -2170,7 +2226,10 @@ impl Control {
                 // A fresh gate state for the new source; the old one fades on its own.
                 self.gate.open_until(deadline);
                 rt.gen_handle
-                    .set_source(Box::new(LeasedSource::new(g, Arc::clone(&self.gate))))
+                    .set_source(Box::new(LeasedSource::new(
+                        Box::new(g),
+                        Arc::clone(&self.gate),
+                    )))
                     .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
                 self.level = Some(lc);
                 self.source = Some(key);

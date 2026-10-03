@@ -67,9 +67,16 @@ impl FromStr for BackendChoice {
 /// What the fake backend simulates, in real time: output 1 → input 1 through a loopback
 /// cable (32 samples) and output 1 → input 2 through an "acoustic" path (5 ms, −6 dB, a
 /// little noise), so a transfer measurement with reference 1 and measurement 2 shows a
-/// real delay and magnitude once a stimulus plays.
-pub const FAKE_RIG: &str =
-    "fake rig: out 1 → in 1 loopback (32 samples), out 1 → in 2 acoustic (5 ms, −6 dB)";
+/// real delay and magnitude once a stimulus plays. The acoustic path's driver distorts
+/// ([`FAKE_RIG_DISTORTION`]): a sweep measurement shows known H2 and H3.
+pub const FAKE_RIG: &str = "fake rig: out 1 → in 1 loopback (32 samples), out 1 → in 2 \
+                            acoustic (5 ms, −6 dB; H2 −40 dB, H3 −50 dB at −20 dBFS)";
+
+/// The fake rig's acoustic path is `y = x + c2·x² + c3·x³` before the room: at a sweep of
+/// −20 dBFS (peak 0.1) the second harmonic is `c2·0.1/2` = −40 dB and the third
+/// `c3·0.01/4` ≈ −50 dB re the fundamental; each harmonic falls with the level (H2 10 dB, H3
+/// 20 dB per 10 dB less).
+pub const FAKE_RIG_DISTORTION: [f64; 2] = [0.2, 1.265];
 
 fn fake_config() -> FakeConfig {
     const LOOP: u32 = 32;
@@ -78,7 +85,8 @@ fn fake_config() -> FakeConfig {
         drive: FakeDrive::Thread(Pace::Realtime),
         paths: vec![
             FakePath::loopback(0, 0, LOOP),
-            FakePath::acoustic(0, 1, LOOP + 240, vec![0.5], 1e-4),
+            FakePath::acoustic(0, 1, LOOP + 240, vec![0.5], 1e-4)
+                .distorting(FAKE_RIG_DISTORTION.to_vec()),
         ],
         input_names: names(&["Loop return", "Room mic", "Line 3", "Line 4"]),
         output_names: names(&["Out 1 (speaker + loop)", "Out 2"]),

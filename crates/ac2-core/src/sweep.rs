@@ -341,7 +341,7 @@ fn locate(
                 (0, 0.0f64),
                 |(bi, bv), (i, v)| if *v > bv { (i, *v) } else { (bi, bv) },
             );
-        if !(v > 0.0) {
+        if v.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             break;
         }
         peaks.push((i, v));
@@ -490,7 +490,7 @@ pub fn analyse_recording(
         let v = at(i).abs();
         if v > bv { (i, v) } else { (bi, bv) }
     });
-    if !(peak > 0.0) {
+    if peak.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return Err(SweepError::NoSignal);
     }
 
@@ -532,7 +532,7 @@ pub fn analyse_recording(
             continue;
         }
         let p1 = band_power(&spectra[0], bin_w, f, DISTORTION_BAND_OCT, min_hz);
-        if !(p1 > 0.0) {
+        if p1.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             continue;
         }
         let (mut sum, mut floor_sum, mut any) = (0.0, 0.0, false);

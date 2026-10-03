@@ -9,7 +9,7 @@
 //! renderer ──► output faults (drop / repeat frames) ──► DAC ring (per output channel)
 //!                                                           │  clock drift (resampling)
 //!                                                           ▼
-//! ADC input i = base content + noise + Σ paths (delay, FIR, noise) from DAC channels
+//! ADC input i = base content + noise + Σ paths (delay, nonlinearity, FIR, noise) from DAC channels
 //! ```
 //!
 //! Time is simulated: header and tick timestamps are device time derived from the frame
@@ -83,9 +83,11 @@ pub fn signature(device_channel: u16, sample: u64) -> f32 {
     (f32::from(device_channel) + 1.0) * 1000.0 + (sample % 1000) as f32
 }
 
-/// An analog path from a device output to a device input: delay, then a short FIR, plus
-/// independent Gaussian noise. A cable loopback is `fir = [1.0]`, noise 0; an acoustic
-/// measurement path is a room/speaker impulse response plus ambient noise.
+/// An analog path from a device output to a device input: delay, an optional memoryless
+/// nonlinearity, then a short FIR, plus independent Gaussian noise. A cable loopback is
+/// `fir = [1.0]`, noise 0; an acoustic measurement path is a room/speaker impulse response
+/// plus ambient noise, and a distorting driver in front of it is the nonlinearity (a
+/// Hammerstein model, whose harmonic levels are known analytically).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FakePath {
     /// Device output channel.
@@ -98,6 +100,10 @@ pub struct FakePath {
     pub fir: Vec<f32>,
     /// RMS of noise added to the input by this path.
     pub noise_rms: f32,
+    /// Coefficients `[c2, c3, …]` of `y = x + c2·x² + c3·x³ + …`, applied to each output
+    /// sample before the FIR; empty = linear. A sine of peak `A` then has a second harmonic of
+    /// `c2·A²/2` and a third of `c3·A³/4` (with `¾·c3·A³` added to the fundamental).
+    pub nonlinearity: Vec<f64>,
 }
 
 impl FakePath {
@@ -109,6 +115,7 @@ impl FakePath {
             delay_frames,
             fir: vec![1.0],
             noise_rms: 0.0,
+            nonlinearity: Vec::new(),
         }
     }
 
@@ -126,7 +133,15 @@ impl FakePath {
             delay_frames,
             fir,
             noise_rms,
+            nonlinearity: Vec::new(),
         }
+    }
+
+    /// This path with the memoryless nonlinearity `[c2, c3, …]` (see
+    /// [`FakePath::nonlinearity`]).
+    pub fn distorting(mut self, coefficients: Vec<f64>) -> Self {
+        self.nonlinearity = coefficients;
+        self
     }
 }
 
@@ -313,7 +328,10 @@ impl FakeConfig {
             if p.fir.is_empty() {
                 return Err(FakeConfigError::EmptyFir(i));
             }
-            if !ok(f64::from(p.noise_rms)) || p.fir.iter().any(|c| !c.is_finite()) {
+            if !ok(f64::from(p.noise_rms))
+                || p.fir.iter().any(|c| !c.is_finite())
+                || p.nonlinearity.iter().any(|c| !c.is_finite())
+            {
                 return Err(FakeConfigError::BadNumber("path noise_rms / fir"));
             }
         }
@@ -700,7 +718,22 @@ struct PathRt {
     delay: f64,
     fir: Box<[f32]>,
     noise_rms: f64,
+    /// `[c2, c3, …]`; empty = linear.
+    poly: Box<[f64]>,
     rng: Rng,
+}
+
+/// `x + c2·x² + c3·x³ + …` by Horner's rule.
+fn shape(poly: &[f64], x: f32) -> f32 {
+    if poly.is_empty() {
+        return x;
+    }
+    let x = f64::from(x);
+    let mut acc = 0.0;
+    for c in poly.iter().rev() {
+        acc = acc * x + c;
+    }
+    (x + acc * x * x) as f32
 }
 
 struct Sim {
@@ -777,6 +810,7 @@ impl Sim {
                 delay: f64::from(p.delay_frames),
                 fir: p.fir.clone().into_boxed_slice(),
                 noise_rms: f64::from(p.noise_rms),
+                poly: p.nonlinearity.clone().into_boxed_slice(),
                 rng: Rng::new(seeds.next_u64()),
             })
             .collect();
@@ -1021,14 +1055,16 @@ impl Sim {
                 let pos = n as i64 - delay as i64;
                 for t in 0..fir_len {
                     let coef = self.paths[p].fir[t];
-                    acc += coef * self.dac_at(output, pos - t as i64);
+                    let x = self.dac_at(output, pos - t as i64);
+                    acc += coef * shape(&self.paths[p].poly, x);
                 }
             }
             Some(ratio) => {
                 let pos = n as f64 * ratio - delay;
                 for t in 0..fir_len {
                     let coef = self.paths[p].fir[t];
-                    acc += coef * self.dac_interp(output, pos - t as f64);
+                    let x = self.dac_interp(output, pos - t as f64);
+                    acc += coef * shape(&self.paths[p].poly, x);
                 }
             }
         }

@@ -870,7 +870,7 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 3", "\"version\": 7")).unwrap();
+    std::fs::write(&manifest, text.replace("\"version\": 4", "\"version\": 7")).unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -883,7 +883,7 @@ fn session_save_load_round_trip() {
         e.detail,
         Some(ErrorDetail::SessionVersion {
             found: 7,
-            supported: 3
+            supported: 4
         })
     );
     assert_eq!(traces(c).len(), n);

@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathOp,
-    MeasKind, MicState, Smoothing, SmoothingMode, TraceEdit, TraceKind, TraceMeta, TraceSource,
+    MeasKind, MicState, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta,
+    TraceSource,
 };
 use ac2_proto::units::{MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -25,6 +26,8 @@ use crate::util::{perr, perr_detail, wall_ns};
 #[derive(Debug, Default)]
 pub(crate) struct TraceStore {
     data: BTreeMap<TraceId, (GridDef, Columns)>,
+    /// Distortion and IR of sweep traces.
+    sweeps: BTreeMap<TraceId, SweepData>,
     next_id: u32,
 }
 
@@ -36,17 +39,33 @@ impl TraceStore {
         id
     }
 
-    pub(crate) fn insert(&mut self, id: TraceId, grid: GridDef, columns: Columns) {
+    pub(crate) fn insert(
+        &mut self,
+        id: TraceId,
+        grid: GridDef,
+        columns: Columns,
+        sweep: Option<SweepData>,
+    ) {
         self.next_id = self.next_id.max(id.0.saturating_add(1));
         self.data.insert(id, (grid, columns));
+        match sweep {
+            Some(s) => {
+                self.sweeps.insert(id, s);
+            }
+            None => {
+                self.sweeps.remove(&id);
+            }
+        }
     }
 
     pub(crate) fn remove(&mut self, id: TraceId) {
         self.data.remove(&id);
+        self.sweeps.remove(&id);
     }
 
     pub(crate) fn clear(&mut self) {
         self.data.clear();
+        self.sweeps.clear();
     }
 
     pub(crate) fn get(&self, id: TraceId) -> Option<&(GridDef, Columns)> {
@@ -104,18 +123,24 @@ impl Control {
             meta,
             grid,
             columns,
-            sweep: None,
+            sweep: self.traces.sweeps.get(&id).cloned(),
         })
     }
 
     /// Commits a new trace (taking its slot from any other trace) and stores its data.
-    fn add_trace(&mut self, meta: TraceMeta, grid: GridDef, columns: Columns) -> ReplyBody {
+    pub(super) fn add_trace(
+        &mut self,
+        meta: TraceMeta,
+        grid: GridDef,
+        columns: Columns,
+        sweep: Option<SweepData>,
+    ) -> ReplyBody {
         let gid = self.register_grid(grid.clone());
         debug_assert_eq!(gid, meta.grid_id);
         for other in meta::take_slot(&self.store.state().traces, meta.id, meta.edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
-        self.traces.insert(meta.id, grid, columns);
+        self.traces.insert(meta.id, grid, columns, sweep);
         self.commit(Change::Trace(Patch::Set(meta.clone())));
         ReplyBody::Trace(meta)
     }
@@ -124,7 +149,7 @@ impl Control {
     /// input setup's mic name with the curve applied to it, and the sensitivity calibration
     /// the matching rules pick. A calibration of another mic or input keeps its own key, so
     /// the trace shows that it was not this mic's.
-    fn cal_and_mic(&self, input: u16) -> (CalState, Option<MicState>) {
+    pub(super) fn cal_and_mic(&self, input: u16) -> (CalState, Option<MicState>) {
         let Some(rt) = self.session.as_ref() else {
             return (CalState::Uncalibrated, None);
         };
@@ -238,7 +263,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} captured from measurement {meas}");
-        Ok(self.add_trace(t, grid, columns))
+        Ok(self.add_trace(t, grid, columns, None))
     }
 
     pub(super) fn trace_get(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
@@ -319,7 +344,7 @@ impl Control {
             mic,
             created_at: WallNs(wall_ns()),
         };
-        Ok(self.add_trace(t, d.grid, d.columns))
+        Ok(self.add_trace(t, d.grid, d.columns, None))
     }
 
     pub(super) fn trace_average(
@@ -393,7 +418,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
-        Ok(self.add_trace(t, imp.grid, imp.columns))
+        Ok(self.add_trace(t, imp.grid, imp.columns, None))
     }
 
     pub(super) fn trace_export(
