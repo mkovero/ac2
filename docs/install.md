@@ -228,6 +228,10 @@ network mode: 0 authorized client(s); server key rq:A1…(40 characters) (finger
 
 and advertises itself on the local network over mDNS (`--no-mdns` turns that off). Open
 TCP ports 47820 and 47821 in its firewall.
+With ufw, add one rule per port and limit them to your network, e.g.
+`sudo ufw allow from 192.168.1.0/24 to any port 47820 proto tcp` (and 47821, and `5353/udp` for
+discovery). A port *range* rule (`47820:47821`) needs the kernel's iptables `multiport` module;
+without it (some real-time kernels) ufw lists the rule but does not enforce it.
 
 On the client:
 

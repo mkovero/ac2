@@ -25,6 +25,15 @@ Open:
   to the banner strip) when the pane has data to show.
 - **Finder reports "AMBIGUOUS · merged arrivals" while listing a single candidate.** Either the
   ambiguity is real and the second candidate must be listed, or the outcome should be accepted.
+- **Clearer refusal messages.** An unpaired CLI fails locally with a bare
+  "client.key: No such file" (should say "not paired: run `ac2 auth pair <host>`"). A paired but
+  unauthorized client only sees "daemon … is not responding" (CURVE refusal looks like silence):
+  add "or this client is not authorized on the daemon (fingerprint …)" to that message, and have
+  the daemon log every refused key's fingerprint and address (rate-limited) — the rig's log had
+  no line for a refused client.
+- **mDNS discovery** (being fixed on `fix/rig-findings`): the daemon logs "advertising" but holds
+  no UDP socket and answers nothing; on a client with two interfaces in one subnet the query
+  leaves via the wrong one.
 - **Daemon network ports vs host firewall.** On a host with ufw active, network mode is silently
   unreachable. `ac2d --listen` should warn when an active firewall (ufw/firewalld/nftables drop
   policy) is detected and say which ports to open; `ac2 --remote` "not responding" should hint at
