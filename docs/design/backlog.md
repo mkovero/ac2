@@ -3,6 +3,19 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## Calibration visibility (2026-10-03)
+
+- **No calibration view in the app.** The palette can delete a sensitivity / mic curve but
+  nothing lists them. Add a Calibrations view (palette + from the session dialog's input rows):
+  every stored entry (device, input, mic name, sensitivity with calibrator level/frequency and
+  age, mic curve file/points/range), which entry each open input uses and its state (verified /
+  other mic or input / uncalibrated), and actions (calibrate here, import curve, delete).
+- **"mic curve: on" with no curve stored is misleading.** `cal list`'s input table (and the
+  app) showed `on` for MM1 34804 on pupu while no curve existed anywhere, so nothing was
+  corrected. Show "on — no curve stored for MM1 34804" (and in captions of corrected panes).
+- Rig note: the MM1 90° curve was only imported on pupu on 2026-10-03 (after all of the day's
+  sweeps); earlier ac2 traces are uncorrected (`ac2 trace mic` fixes them).
+
 ## Flaky tests
 
 - **ac2d `traces::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
