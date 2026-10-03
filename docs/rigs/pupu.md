@@ -109,3 +109,14 @@ geometry), then restarted with `--max-level -50` again. Data:
   (Explained: false timing peaks at the search-range ends during the sweep's low part; see
   the backlog's Done list.)
 
+
+## New-build check (2026-10-03, ac2 ac82dab, −50 dBFS, from the app)
+
+Daemon and app updated (protocol 7, session format 5; the v4 autosave was set aside as
+`autosave.v4`). Sweep `1083 94cm 50 v2`, 12 s × 2 at −50 dBFS: progress strip ("sweep 2 of 2",
+time left, Stop), REF/MEAS-marked input meters (room noise on the MM1 reads ≈ −65 dBFS), STIM OFF
+after the sweep, "autosaved just now", dB | % toggle with the log % axis. The export is CSV v2
+(sweep info + IR) and re-imports as a sweep: `/home/mui/ac2-1083-sweep5-94cm-50-v2.csv`.
+Arrival 3.62 ms, 0.17 ms (≈ 6 cm) later than the morning's 94 cm runs: the mic or the speaker
+moved slightly in between. The four morning sweeps were re-imported from their v1 CSVs as
+transfer traces (delay kept, distortion not recoverable from v1).
