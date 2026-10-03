@@ -257,7 +257,11 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         .filter(|(t, _)| t.meta.edit.visible)
         .filter_map(|(t, g)| {
             let (scale, q) = match t.meta.kind {
-                TraceKind::Spectrum { scale } => (scale, Quantity::Tone),
+                TraceKind::Spectrum { scale } => (
+                    scale,
+                    // Served smoothed at its setting (`ac2_traces::smooth`).
+                    Quantity::tone(t.meta.edit.smoothing.map(|s| s.fraction)),
+                ),
                 TraceKind::Rta { scale } => (scale, Quantity::Band),
                 _ => return None,
             };

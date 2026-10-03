@@ -24,7 +24,7 @@
        },
        "smoothing": {
         "fraction": "sixth",
-        "mode": "power"
+        "mode": "magnitude"
        },
        "depth": {
         "type": "fast_lf",

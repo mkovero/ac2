@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 3`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 4`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -125,11 +125,25 @@ owner whose lease expired).
 #### Measurements (`meas.*`)
 
 `meas.update` replaces the configuration and restarts a running job (averages start over),
-except when a transfer measurement's configuration differs only in `smoothing` (and the
-name): display smoothing then changes in place, averaging goes on, and the first `tf` frame
-with the new `config_rev` carries it (`TfMeta.smoothing`). Smoothing (`Smoothing`:
-`fraction` `third` \| `sixth` \| `twelfth` \| `twenty_fourth` \| `forty_eighth`, `mode`
-`power` \| `complex`) is fractional-octave and applies to transfer functions only.
+except when a transfer or spectrum measurement's configuration differs only in `smoothing`
+(and the name): display smoothing then changes in place, averaging goes on, and the first
+`tf` / `spec` frame with the new `config_rev` carries it (`TfMeta.smoothing`,
+`SpecMeta.smoothing`). Smoothing is fractional-octave (`SmoothingFraction`: `third` \|
+`sixth` \| `twelfth` \| `twenty_fourth` \| `forty_eighth`; Hann kernel in log frequency, 1.5×
+the nominal width so its noise bandwidth is the nominal one) and applies to transfer
+functions and narrowband spectra; RTA bands already are fractional-octave.
+
+- **Transfer** (`TransferConfig.smoothing`: `Smoothing` \| nil; `Smoothing`: `fraction`,
+  `mode` `magnitude` \| `magnitude_phase`). Magnitude is power-averaged on the log grid;
+  `magnitude_phase` (what the front ends set) also averages the phase, unwrapped within each
+  run of valid columns. Unwrapping follows the smaller step between neighbouring columns, so
+  a residual delay `τ` with `τ·Δf > ½` between columns (48 ppo: `τ·f > 34`, e.g. 3.4 ms at
+  10 kHz) cannot be followed: set the delay first. `magnitude` keeps the measured phase.
+- **Spectrum** (`SpectrumConfig.smoothing`: `SmoothingFraction` \| nil). Bin power is
+  averaged over the kernel on the linear FFT bins, each bin weighted by its width in log
+  frequency (`1/f`); DC and bins narrower than the kernel pass through, and bins below the
+  floor (non-finite level) are gaps the kernel never crosses. A smoothed bin is no longer
+  the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients label it.
 
 #### Devices, preview and loopback detection (`session.*`)
 
@@ -238,16 +252,18 @@ through `trace.get` (`TraceData`: `meta`, `mag_db`, `phase_deg` (nil = magnitude
 and `file.save`. Columns are stored as measured: offset, polarity, nudge and smoothing are
 display edits and are never applied to the stored data.
 
-- **Smoothing.** `TraceEdit.smoothing` (`Smoothing` \| nil; transfer traces only — any
-  other kind is `invalid`) is applied by the daemon when it serves `trace.get`, with the
-  live transfer job's kernel; coherence is never smoothed. `trace.export` and `file.save`
-  write the unsmoothed columns (the setting is listed in the CSV header), and
-  `trace.average` / `trace.math` combine unsmoothed columns. A capture starts with the
-  smoothing its measurement had; an average or A − B starts with the smoothing its inputs
-  share (nil when they differ).
+- **Smoothing.** `TraceEdit.smoothing` (`Smoothing` \| nil; transfer and spectrum traces
+  only — any other kind is `invalid`) is applied by the daemon when it serves `trace.get`,
+  with the live job's kernel (a spectrum has no phase: its power is smoothed in either
+  `mode`; a spectrum capture starts with `magnitude`); coherence is never smoothed.
+  `trace.export` and `file.save` write the unsmoothed columns (the setting is listed in the
+  CSV header), and `trace.average` / `trace.math` combine unsmoothed columns. A capture
+  starts with the smoothing its measurement had; an average or A − B starts with the
+  smoothing its inputs share (nil when they differ).
 
 - `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
-  what clients were shown, for a `tf` frame before its display smoothing — with columns
+  what clients were shown, for a `tf` or `spec` frame before its display smoothing — with
+  columns
   whose validity mask is set stored as NaN.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
@@ -473,7 +489,7 @@ bitmask array says why.
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `eff_avg`: count (optional — presence = listed), `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve` |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
-| `spec` | `level`: dbfs or db_spl (tone level), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve` |
+| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
@@ -562,15 +578,16 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace
 ```
 
-`session.json`: `{format: "ac2-session", version: 2, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 3, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
 [{meta: TraceMeta, grid: GridDef, file}]}` (JSON, field names as in this document). A save
 writes the trace files of a new generation first, then replaces `session.json` atomically
 (temporary file + rename), then removes older generations: a reader sees the old session
 or the new one, never a mix. `format` and `version` are read first; any other version is
 refused (no migration). Trace files hold the unsmoothed columns; each trace's display
-smoothing is its `meta.edit.smoothing` (version 1 files, whose transfer captures could hold
-smoothed columns, are refused). A directory that holds other files is never written into.
+smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
+hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
+spectrum smoothing — are refused). A directory that holds other files is never written into.
 
 ## 8. Cross-language fixtures
 

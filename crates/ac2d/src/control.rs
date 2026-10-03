@@ -41,7 +41,7 @@ use crate::config::{DedupLimits, ReplayLimits};
 use crate::conv;
 use crate::dedup::Dedup;
 use crate::io::Interest;
-use crate::jobs::{self, Analysis, JobCmd, JobEnv, JobHandle, Seqs, block_index};
+use crate::jobs::{self, Analysis, JobCmd, JobEnv, JobHandle, Seqs, SmoothingChange, block_index};
 use crate::outbox::Outbox;
 use crate::preview::Preview;
 use crate::session::{self, Runtime};
@@ -316,8 +316,9 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
 }
 
 /// The new smoothing when `new` is `old` with only the display smoothing changed (a
-/// transfer measurement); such an update is applied in place instead of restarting the job.
-fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<Option<ac2_proto::model::Smoothing>> {
+/// transfer or spectrum measurement); such an update is applied in place instead of
+/// restarting the job.
+fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<SmoothingChange> {
     match (old, new) {
         (MeasKind::Transfer { config: a }, MeasKind::Transfer { config: b })
             if ac2_proto::model::TransferConfig {
@@ -325,7 +326,15 @@ fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<Option<ac2_proto::mo
                 ..a.clone()
             } == *b =>
         {
-            Some(b.smoothing)
+            Some(SmoothingChange::Transfer(b.smoothing))
+        }
+        (MeasKind::Spectrum { config: a }, MeasKind::Spectrum { config: b })
+            if ac2_proto::model::SpectrumConfig {
+                smoothing: b.smoothing,
+                ..a.clone()
+            } == *b =>
+        {
+            Some(SmoothingChange::Spectrum(b.smoothing))
         }
         _ => None,
     }
@@ -732,14 +741,14 @@ impl Control {
             Command::MeasUpdate { meas, config } => {
                 validate_meas(&config)?;
                 let mut m = self.meas(meas)?.clone();
-                if let Some(smoothing) = smoothing_only(&m.config.kind, &config.kind) {
+                if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
                     // Display smoothing changes in place: averaging goes on, and the next
                     // frame carries the new setting under the new rev.
                     m.config = config;
                     m.config_rev = Rev(self.store.rev().0 + 1);
                     if let Some(j) = self.jobs.get(&meas) {
                         j.send(JobCmd::Smoothing {
-                            smoothing,
+                            change,
                             rev: m.config_rev,
                         });
                     }

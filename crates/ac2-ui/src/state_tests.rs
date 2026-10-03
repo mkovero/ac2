@@ -62,6 +62,7 @@ fn spectrum() -> MeasKind {
             fft_len: 8192,
             window: Window::Hann,
             averaging: SpecAveraging::Off,
+            smoothing: None,
         },
     }
 }
@@ -615,6 +616,13 @@ fn smoothing_set(r: &[Request]) -> (String, Option<Smoothing>) {
             },
         ] => match &config.kind {
             MeasKind::Transfer { config } => (format!("m{}", meas.0), config.smoothing),
+            MeasKind::Spectrum { config } => (
+                format!("m{}", meas.0),
+                config.smoothing.map(|fraction| Smoothing {
+                    fraction,
+                    mode: SmoothingMode::Magnitude,
+                }),
+            ),
             other => panic!("{other:?}"),
         },
         [
@@ -630,14 +638,21 @@ fn smoothing_set(r: &[Request]) -> (String, Option<Smoothing>) {
 #[test]
 fn smoothing_keys_step_the_pane_measurement() {
     let mut t = T::new();
-    assert_eq!(t.st.smoothing_caption().as_deref(), Some("smoothing off"));
-    // K coarser: off → 1/48 (power), with the measurement's config otherwise unchanged.
+    assert_eq!(
+        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        Some("smoothing off")
+    );
+    // K coarser: off → 1/48 of magnitude and phase, with the measurement's config
+    // otherwise unchanged.
     let r = t.key("K");
     assert_eq!(
         smoothing_set(&r),
         (
             "m1".into(),
-            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Power)
+            smoothing(
+                SmoothingFraction::FortyEighth,
+                SmoothingMode::MagnitudePhase
+            )
         )
     );
     match r.as_slice() {
@@ -663,26 +678,27 @@ fn smoothing_keys_step_the_pane_measurement() {
     assert!(t.key("Shift+K").is_empty());
     assert!(t.last_toast().contains("finest"), "{}", t.last_toast());
 
-    // The mirror says 1/6 complex: K → 1/3 (mode kept), Shift+K → 1/12, at 1/3 K stops.
+    // The mirror says 1/6 magnitude only (set by a script): K → 1/3 (mode kept),
+    // Shift+K → 1/12, at 1/3 K stops.
     let mut s = daemon_state();
     if let MeasKind::Transfer { config } = &mut s.measurements[1].config.kind {
-        config.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Complex);
+        config.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Magnitude);
     }
     t.conn(mirror(s.clone()));
     assert_eq!(
-        t.st.smoothing_caption().as_deref(),
-        Some("smoothing 1/6 oct complex")
+        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        Some("smoothing 1/6 oct mag only")
     );
     assert_eq!(
         smoothing_set(&t.key("K")).1,
-        smoothing(SmoothingFraction::Third, SmoothingMode::Complex)
+        smoothing(SmoothingFraction::Third, SmoothingMode::Magnitude)
     );
     assert_eq!(
         smoothing_set(&t.key("Shift+K")).1,
-        smoothing(SmoothingFraction::Twelfth, SmoothingMode::Complex)
+        smoothing(SmoothingFraction::Twelfth, SmoothingMode::Magnitude)
     );
     if let MeasKind::Transfer { config } = &mut s.measurements[1].config.kind {
-        config.smoothing = smoothing(SmoothingFraction::Third, SmoothingMode::Power);
+        config.smoothing = smoothing(SmoothingFraction::Third, SmoothingMode::Magnitude);
     }
     t.conn(mirror(s));
     assert!(t.key("K").is_empty());
@@ -693,11 +709,51 @@ fn smoothing_keys_step_the_pane_measurement() {
     let r = t.st.update(Msg::Command(CommandId::Smooth24), &t.keys);
     assert_eq!(
         smoothing_set(&r).1,
-        smoothing(SmoothingFraction::TwentyFourth, SmoothingMode::Power)
+        smoothing(SmoothingFraction::TwentyFourth, SmoothingMode::Magnitude)
     );
-    // K is a transfer-pane key.
+    // In the spectrum pane K acts on its spectrum: power smoothing, no phase to name.
     t.key("Alt+2");
+    assert_eq!(
+        t.st.smoothing_caption(PaneKind::Spectrum).as_deref(),
+        Some("smoothing off")
+    );
+    let r = t.key("K");
+    assert_eq!(
+        smoothing_set(&r),
+        (
+            "m2".into(),
+            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Magnitude)
+        )
+    );
+    match r.as_slice() {
+        [Request::Call { what, .. }] => assert_eq!(what, "Sub: smoothing 1/48 oct"),
+        other => panic!("{other:?}"),
+    }
+    // The transfer pane's caption still speaks of its own measurement.
+    assert_eq!(
+        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        Some("smoothing 1/3 oct mag only")
+    );
+}
+
+/// RTA bands are fractional-octave already: K in the spectrum pane on an RTA says so and
+/// sends nothing.
+#[test]
+fn smoothing_keys_explain_rta() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements[0].config.kind = MeasKind::Rta {
+        config: ac2_proto::model::RtaConfig::on_input(1, ac2_proto::model::BandFraction::Third),
+    };
+    t.conn(mirror(s));
+    t.key("Alt+2");
+    assert_eq!(t.st.smoothing_caption(PaneKind::Spectrum), None);
     assert!(t.key("K").is_empty());
+    assert!(
+        t.last_toast().contains("already are fractional-octave"),
+        "{}",
+        t.last_toast()
+    );
 }
 
 #[test]
@@ -714,7 +770,7 @@ fn smoothing_keys_change_a_selected_slot() {
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
     assert_eq!(
-        t.st.smoothing_caption().as_deref(),
+        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
         Some("slot 3 (t10): smoothing off")
     );
     let r = t.key("K");
@@ -722,7 +778,10 @@ fn smoothing_keys_change_a_selected_slot() {
         smoothing_set(&r),
         (
             "t10".into(),
-            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Power)
+            smoothing(
+                SmoothingFraction::FortyEighth,
+                SmoothingMode::MagnitudePhase
+            )
         )
     );
     match r.as_slice() {
@@ -740,10 +799,24 @@ fn smoothing_keys_change_a_selected_slot() {
         }
         other => panic!("{other:?}"),
     }
-    // Spectra cannot be smoothed; a locked slot says so; neither sends anything.
+    // A spectrum slot is power-smoothed; its caption goes to the spectrum pane.
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
-    assert!(t.key("K").is_empty());
-    assert!(t.last_toast().contains("transfer traces only"));
+    assert_eq!(
+        t.st.smoothing_caption(PaneKind::Spectrum).as_deref(),
+        Some("slot 4 (t11): smoothing off")
+    );
+    assert_eq!(
+        t.st.smoothing_caption(PaneKind::Transfer).as_deref(),
+        Some("smoothing off")
+    );
+    assert_eq!(
+        smoothing_set(&t.key("K")),
+        (
+            "t11".into(),
+            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Magnitude)
+        )
+    );
+    // A locked slot says so and sends nothing.
     t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("K").is_empty());
     assert!(t.last_toast().contains("locked"));
@@ -852,7 +925,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
     // The mirror says 1/6 now; the columns held were served unsmoothed, so the drawn
     // trace keeps saying so (other edits follow at once) until the new data arrives.
     let mut m2 = meta.clone();
-    m2.edit.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Power);
+    m2.edit.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Magnitude);
     m2.edit.name = "renamed".into();
     t.conn(with_traces(vec![m2.clone()]));
     let held = &t.st.traces[&TraceId(10)].0.meta;

@@ -105,7 +105,7 @@ def tf_frame():
         {
             "delay": 0.0125,
             "frozen": False,
-            "smoothing": {"fraction": "sixth", "mode": "power"},
+            "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
         },
         [
@@ -165,7 +165,13 @@ def frames():
             "d/5/spec",
             "spec",
             LIN_GRID,
-            {"window": "hann", "scale": "dbfs", "cal": {"type": "uncalibrated"}, "mic_curve": False},
+            {
+                "window": "hann",
+                "scale": "dbfs",
+                "cal": {"type": "uncalibrated"},
+                "mic_curve": False,
+                "smoothing": "sixth",
+            },
             [
                 (arr("level", "dbfs"), [-120.0, -20.0, INF, -INF]),
                 (arr("validity", "bitmask", "u32"), [0, 0, 0, 0]),
@@ -277,7 +283,7 @@ MEAS_CONFIG = {
             "measurement_input": 1,
             "averaging": {"type": "fifo", "blocks": 8},
             "grid": {"ppo": 48, "k_min": -240, "k_max": 239},
-            "smoothing": {"fraction": "sixth", "mode": "power"},
+            "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "depth": {"type": "fast_lf", "max_settle_s": 1.0},
         },
     },

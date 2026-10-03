@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathOp,
-    MeasKind, MicState, Smoothing, TraceEdit, TraceKind, TraceMeta, TraceSource,
+    MeasKind, MicState, Smoothing, SmoothingMode, TraceEdit, TraceKind, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -191,7 +191,15 @@ impl Control {
                     Some(config.depth),
                     config.measurement_input,
                 ),
-                (_, MeasKind::Spectrum { config }) => (Seconds(0.0), None, None, config.input),
+                (FrameData::Spec(f), MeasKind::Spectrum { config }) => (
+                    Seconds(0.0),
+                    f.meta.smoothing.map(|fraction| Smoothing {
+                        fraction,
+                        mode: SmoothingMode::Magnitude,
+                    }),
+                    None,
+                    config.input,
+                ),
                 (_, MeasKind::Rta { config }) => (Seconds(0.0), None, None, config.input),
                 _ => {
                     return Err(perr(
@@ -246,7 +254,7 @@ impl Control {
         if edit.smoothing.is_some() && !ac2_traces::smooth::smoothable(t.kind) {
             return Err(perr(
                 ErrorCode::Invalid,
-                "smoothing applies to transfer traces only",
+                "smoothing applies to transfer and spectrum traces only",
             ));
         }
         if !meta::lock_allows(&t.edit, &edit) {

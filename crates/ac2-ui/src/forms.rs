@@ -8,8 +8,8 @@
 
 use ac2_proto::model::{
     BandFraction, DepthPolicy, MeasConfig, MeasKind, Measurement, OpenSession, RtaConfig,
-    Smoothing, SmoothingFraction, SmoothingMode, SpectrumConfig, SplConfig, TimeWeighting,
-    TransferConfig, Weighting,
+    Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, TimeWeighting, TransferConfig,
+    Weighting,
 };
 use ac2_proto::units::Seconds;
 
@@ -150,8 +150,8 @@ pub struct Form {
     pub error: Option<String>,
 }
 
-/// Smoothing choices of the transfer dialog (index 0: none, as `ac2 meas new` without
-/// `--smooth`).
+/// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
+/// without `--smooth`).
 const SMOOTHING: [(&str, Option<SmoothingFraction>); 6] = [
     ("off", None),
     ("1/3 octave", Some(SmoothingFraction::Third)),
@@ -281,7 +281,11 @@ impl Form {
                 Field::choice(FieldId::Smoothing, "Smoothing", &SMOOTHING.map(|s| s.0), 0),
                 Field::choice(FieldId::Depth, "Depth", &DEPTH, 0),
             ],
-            FormKind::Spectrum => vec![input_field, name("Spectrum")],
+            FormKind::Spectrum => vec![
+                input_field,
+                name("Spectrum"),
+                Field::choice(FieldId::Smoothing, "Smoothing", &SMOOTHING.map(|s| s.0), 0),
+            ],
             FormKind::Rta => vec![
                 input_field,
                 name("RTA"),
@@ -422,6 +426,7 @@ impl Form {
             }
         };
         let pick = |id: FieldId| self.choice_index(id).unwrap_or(0);
+        let smoothing = SMOOTHING[pick(FieldId::Smoothing).min(SMOOTHING.len() - 1)].1;
         let kind = match self.kind {
             FormKind::Transfer => {
                 let r = input(FieldId::Reference, "reference input")?;
@@ -434,12 +439,7 @@ impl Form {
                     );
                 }
                 let mut config = TransferConfig::with_inputs(r, m);
-                config.smoothing = SMOOTHING[pick(FieldId::Smoothing).min(SMOOTHING.len() - 1)]
-                    .1
-                    .map(|fraction| Smoothing {
-                        fraction,
-                        mode: SmoothingMode::Power,
-                    });
+                config.smoothing = smoothing.map(Smoothing::of);
                 if pick(FieldId::Depth) == 1 {
                     config.depth = DepthPolicy::FastLf {
                         max_settle_s: Seconds(DepthPolicy::DEFAULT_FAST_LF_S),
@@ -448,7 +448,10 @@ impl Form {
                 MeasKind::Transfer { config }
             }
             FormKind::Spectrum => MeasKind::Spectrum {
-                config: SpectrumConfig::on_input(input(FieldId::Input, "input")?),
+                config: SpectrumConfig {
+                    smoothing,
+                    ..SpectrumConfig::on_input(input(FieldId::Input, "input")?)
+                },
             },
             FormKind::Rta => MeasKind::Rta {
                 config: RtaConfig::on_input(
@@ -494,6 +497,7 @@ mod tests {
     use ac2_proto::units::{Hz, WallNs};
 
     use super::*;
+    use ac2_proto::model::SmoothingMode;
 
     fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
         OpenSession {
@@ -577,9 +581,21 @@ mod tests {
                     fft_len: 65_536,
                     window: Window::Hann,
                     averaging: SpecAveraging::Off,
+                    smoothing: None,
                 }
             }
         );
+        let mut f = Form::measurement(FormKind::Spectrum, Some(&o), &[], &names(&o), &[]);
+        f.focus = f
+            .fields
+            .iter()
+            .position(|x| x.id == FieldId::Smoothing)
+            .expect("smoothing field");
+        f.cycle(2);
+        let MeasKind::Spectrum { config } = f.meas_config(Some(&o)).expect("spectrum").kind else {
+            panic!("kind");
+        };
+        assert_eq!(config.smoothing, Some(SmoothingFraction::Sixth));
         let c = Form::measurement(FormKind::Rta, Some(&o), &[], &names(&o), &[])
             .meas_config(Some(&o))
             .expect("rta");
@@ -658,9 +674,13 @@ mod tests {
         let MeasKind::Transfer { config } = c.kind else {
             panic!("kind");
         };
+        // Phase is smoothed with the magnitude.
         assert_eq!(
-            config.smoothing.map(|s| s.fraction),
-            Some(SmoothingFraction::Sixth)
+            config.smoothing,
+            Some(Smoothing {
+                fraction: SmoothingFraction::Sixth,
+                mode: SmoothingMode::MagnitudePhase
+            })
         );
         assert_eq!(
             config.depth,

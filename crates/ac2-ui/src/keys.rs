@@ -433,14 +433,14 @@ commands! {
     MathDifference => "math_difference", "A − B: dB difference of the two lowest shown slots", [Transfer];
     MathDivide => "math_divide", "A / B: complex division of the two lowest shown slots", [Transfer];
     PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
-    SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected slot or pane's measurement)", [Transfer];
-    SmoothFiner => "smooth_finer", "Smoothing finer (selected slot or pane's measurement)", [Transfer];
-    SmoothOff => "smooth_off", "Smoothing: off", [Transfer];
-    Smooth48 => "smooth_48", "Smoothing: 1/48 oct", [Transfer];
-    Smooth24 => "smooth_24", "Smoothing: 1/24 oct", [Transfer];
-    Smooth12 => "smooth_12", "Smoothing: 1/12 oct", [Transfer];
-    Smooth6 => "smooth_6", "Smoothing: 1/6 oct", [Transfer];
-    Smooth3 => "smooth_3", "Smoothing: 1/3 oct", [Transfer];
+    SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected slot or pane's measurement)", [Transfer, Spectrum];
+    SmoothFiner => "smooth_finer", "Smoothing finer (selected slot or pane's measurement)", [Transfer, Spectrum];
+    SmoothOff => "smooth_off", "Smoothing: off", [Transfer, Spectrum];
+    Smooth48 => "smooth_48", "Smoothing: 1/48 oct", [Transfer, Spectrum];
+    Smooth24 => "smooth_24", "Smoothing: 1/24 oct", [Transfer, Spectrum];
+    Smooth12 => "smooth_12", "Smoothing: 1/12 oct", [Transfer, Spectrum];
+    Smooth6 => "smooth_6", "Smoothing: 1/6 oct", [Transfer, Spectrum];
+    Smooth3 => "smooth_3", "Smoothing: 1/3 oct", [Transfer, Spectrum];
     GroupDelay => "group_delay", "Phase / group delay", [Transfer];
 
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
@@ -544,6 +544,8 @@ pub fn defaults() -> Vec<Binding> {
         // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
         (C::SmoothCoarser, S::Transfer, k(K::K)),
         (C::SmoothFiner, S::Transfer, sh(K::K)),
+        (C::SmoothCoarser, S::Spectrum, k(K::K)),
+        (C::SmoothFiner, S::Spectrum, sh(K::K)),
         (C::GroupDelay, S::Transfer, sh(K::P)),
         (C::Freeze, S::Transfer, k(K::F)),
         (C::Freeze, S::Spectrum, k(K::F)),

@@ -104,7 +104,7 @@ fn meas_config() -> MeasConfig {
                 },
                 smoothing: Some(Smoothing {
                     fraction: SmoothingFraction::Sixth,
-                    mode: SmoothingMode::Power,
+                    mode: SmoothingMode::Magnitude,
                 }),
                 depth: DepthPolicy::FastLf {
                     max_settle_s: Seconds(1.0),
@@ -139,7 +139,7 @@ fn edit() -> TraceEdit {
         slot: Some(3),
         smoothing: Some(Smoothing {
             fraction: SmoothingFraction::Twelfth,
-            mode: SmoothingMode::Complex,
+            mode: SmoothingMode::MagnitudePhase,
         }),
     }
 }
@@ -795,7 +795,7 @@ pub fn tf_frame(eff_avg: bool) -> Frame {
                 frozen: false,
                 smoothing: Some(Smoothing {
                     fraction: SmoothingFraction::Sixth,
-                    mode: SmoothingMode::Power,
+                    mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
             },
@@ -871,6 +871,7 @@ pub fn frames() -> Vec<Frame> {
                     scale: LevelScale::Dbfs,
                     cal: CalStatus::Uncalibrated,
                     mic_curve: false,
+                    smoothing: Some(SmoothingFraction::Sixth),
                 },
                 level: vec![-120.0, -20.0, f32::INFINITY, f32::NEG_INFINITY],
                 validity: vec![ValidityMask::NONE; 4],

@@ -705,16 +705,19 @@ mod tests {
         let s = |fraction, mode| Some(Smoothing { fraction, mode });
         assert_eq!(smoothing_caption(None), "smoothing off");
         assert_eq!(
-            smoothing_caption(s(SmoothingFraction::Third, SmoothingMode::Power)),
+            smoothing_caption(s(SmoothingFraction::Third, SmoothingMode::MagnitudePhase)),
             "smoothing 1/3 oct"
         );
         assert_eq!(
-            smoothing_caption(s(SmoothingFraction::FortyEighth, SmoothingMode::Power)),
+            smoothing_caption(s(
+                SmoothingFraction::FortyEighth,
+                SmoothingMode::MagnitudePhase
+            )),
             "smoothing 1/48 oct"
         );
         assert_eq!(
-            smoothing_caption(s(SmoothingFraction::Twelfth, SmoothingMode::Complex)),
-            "smoothing 1/12 oct complex"
+            smoothing_caption(s(SmoothingFraction::Twelfth, SmoothingMode::Magnitude)),
+            "smoothing 1/12 oct mag only"
         );
     }
 
@@ -726,7 +729,7 @@ mod tests {
         ta.name = "Main L".into();
         ta.smoothing = Some(Smoothing {
             fraction: SmoothingFraction::Sixth,
-            mode: SmoothingMode::Power,
+            mode: SmoothingMode::MagnitudePhase,
         });
         let mut tb = trace(&b, TraceKey::Live(MeasId(2)), 0.0115);
         tb.name = "Delay tower".into();
@@ -740,7 +743,7 @@ mod tests {
         ti.nudge = Seconds(0.00025);
         ti.smoothing = Some(Smoothing {
             fraction: SmoothingFraction::TwentyFourth,
-            mode: SmoothingMode::Complex,
+            mode: SmoothingMode::Magnitude,
         });
         let view = ViewState {
             cursor_hz: Some(1000.0),
@@ -757,7 +760,7 @@ mod tests {
             [
                 "Main L · ref · 1/6 oct",
                 "Delay tower · Δt +1.50 ms · inv · +3.0 dB · STALE 3.2 s",
-                "imported · indep. · nudge +0.25 ms · 1/24 oct complex"
+                "imported · indep. · nudge +0.25 ms · 1/24 oct mag only"
             ]
         );
         assert_eq!(
@@ -837,7 +840,7 @@ mod tests {
         ta.name = "Main L".into();
         ta.smoothing = Some(Smoothing {
             fraction: SmoothingFraction::Sixth,
-            mode: SmoothingMode::Power,
+            mode: SmoothingMode::MagnitudePhase,
         });
         let mut tb = trace(&a, TraceKey::Live(MeasId(2)), 0.0115);
         tb.name = "Delay tower".into();

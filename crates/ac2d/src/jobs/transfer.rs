@@ -23,7 +23,7 @@ use std::sync::mpsc::Sender;
 use ac2_proto::units::SessionEpoch;
 
 use super::finder::Finder;
-use super::{Analysis, Emitter, JobCmd, LevelsMeter, StampArgs};
+use super::{Analysis, Emitter, JobCmd, LevelsMeter, SmoothingChange, StampArgs};
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Block;
@@ -339,12 +339,16 @@ impl Analysis for Transfer {
             }
             JobCmd::Reset => self.mtw.reset_averages(),
             JobCmd::Cal(cal) => self.set_correction(cal.correction.as_deref()),
-            JobCmd::Smoothing { smoothing, rev } => {
+            JobCmd::Smoothing {
+                change: SmoothingChange::Transfer(smoothing),
+                rev,
+            } => {
                 self.cfg.smoothing = smoothing;
                 self.smoother = smoother(self.grid, smoothing);
                 self.config_rev = rev;
                 self.apply_pending = true;
             }
+            JobCmd::Smoothing { .. } => {}
         }
     }
 

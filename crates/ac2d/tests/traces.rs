@@ -384,8 +384,59 @@ fn capture_average_math_export_import() {
 fn sixth() -> Smoothing {
     Smoothing {
         fraction: SmoothingFraction::Sixth,
-        mode: SmoothingMode::Power,
+        mode: SmoothingMode::MagnitudePhase,
     }
+}
+
+/// `raw` (as captured: unsmoothed, NaN gaps) smoothed by ac2-core directly: magnitude dB and
+/// phase degrees.
+fn core_smoothed(raw: &TraceData, s: Smoothing) -> (Vec<f64>, Vec<f64>) {
+    use ac2_core::smoothing as sm;
+    let grid = ac2_core::grid::LogGrid {
+        ppo: 48,
+        k_min: -240,
+        k_max: 239,
+    };
+    let phase = raw.phase_deg.as_ref().unwrap();
+    let h: Vec<num_complex::Complex64> = raw
+        .mag_db
+        .iter()
+        .zip(phase)
+        .map(|(m, p)| {
+            num_complex::Complex64::from_polar(
+                10f64.powf(f64::from(*m) / 20.0),
+                f64::from(*p).to_radians(),
+            )
+        })
+        .collect();
+    let valid: Vec<bool> = h.iter().map(|z| z.re.is_finite()).collect();
+    let coh = vec![1.0; h.len()];
+    let fraction = match s.fraction {
+        SmoothingFraction::Sixth => sm::SmoothingFraction::Sixth,
+        other => unimplemented!("{other:?}"),
+    };
+    let mode = match s.mode {
+        SmoothingMode::Magnitude => sm::SmoothingMode::Magnitude,
+        SmoothingMode::MagnitudePhase => sm::SmoothingMode::MagnitudePhase,
+    };
+    let out = sm::Smoother::new(grid, fraction).smooth(
+        sm::TfColumns {
+            h: &h,
+            coherence: &coh,
+            valid: &valid,
+        },
+        mode,
+    );
+    out.h
+        .iter()
+        .map(|z| (20.0 * z.norm().log10(), z.arg().to_degrees()))
+        .unzip()
+}
+
+/// Smallest difference between two angles in degrees.
+fn deg_diff(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(360.0);
+    d.min(360.0 - d)
 }
 
 /// Mean squared second difference over the band: how rough a curve is.
@@ -482,6 +533,31 @@ fn live_smoothing_and_resmoothed_captures() {
     // …but holds it unsmoothed: switched off, the curve is rougher; switched back, the same.
     let a = set_smoothing(c, &a, None);
     let raw = data(c, a.id);
+    // The live frame's magnitude and phase are the raw columns smoothed by ac2-core: phase
+    // is smoothed by default, and the capture holds exactly what the frame was made from.
+    let (want_mag, want_phase) = core_smoothed(&raw, sixth());
+    let mut moved: f64 = 0.0;
+    let mut compared = 0;
+    for i in 0..raw.mag_db.len() {
+        if !(shown.phase[i].is_finite() && raw.phase_deg.as_ref().unwrap()[i].is_finite()) {
+            continue;
+        }
+        compared += 1;
+        let p = f64::from(shown.phase[i]);
+        assert!(
+            deg_diff(p, want_phase[i]) < 0.05,
+            "{} Hz: live phase {p} vs ac2-core {}",
+            grid_freq(i),
+            want_phase[i]
+        );
+        assert!((f64::from(shown.mag[i]) - want_mag[i]).abs() < 1e-3);
+        moved = moved.max(deg_diff(p, f64::from(raw.phase_deg.as_ref().unwrap()[i])));
+    }
+    assert!(compared > 300, "{compared} columns compared");
+    assert!(
+        moved > 1.0,
+        "phase was not smoothed: at most {moved}° from raw"
+    );
     assert!(
         roughness(&raw.mag_db) > 2.0 * roughness(&smoothed.mag_db),
         "{} vs {}",
@@ -558,6 +634,105 @@ fn live_smoothing_and_resmoothed_captures() {
     r.h.shutdown();
 }
 
+/// A narrowband spectrum's smoothing changes live; frames say it is applied; a capture
+/// holds the unsmoothed bins, starts with the measurement's smoothing and is served as the
+/// live frame showed it; the live frame is the ac2-core linear-bin smoother of the raw bins.
+#[test]
+fn spectrum_smoothing_live_and_captured() {
+    let mut r = rig("spec-smoothing");
+    let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
+    let spec = |smoothing| MeasConfig {
+        name: "fft".into(),
+        kind: MeasKind::Spectrum {
+            config: SpectrumConfig {
+                fft_len: 4096,
+                smoothing,
+                ..SpectrumConfig::on_input(1)
+            },
+        },
+    };
+    c2.ok(Command::MeasCreate { config: spec(None) });
+    c2.ok(Command::MeasStart { meas: MeasId(2) });
+    run(&mut r.d, 0.5);
+    let m = match c2.ok(Command::MeasUpdate {
+        meas: MeasId(2),
+        config: spec(Some(SmoothingFraction::Sixth)),
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert!(m.running);
+    for _ in 0..3 {
+        run(&mut r.d, 0.3);
+        r.c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let end = end_sample(&r.d);
+    let f = sub
+        .frame(T, |f| {
+            matches!(f.data, FrameData::Spec(_))
+                && f.stamp.config_rev.0 >= m.config_rev.0
+                && f.stamp.audio_sample.0 + 1 >= end
+        })
+        .expect("smoothed spec frame");
+    let FrameData::Spec(live) = f.data else {
+        unreachable!()
+    };
+    assert_eq!(live.meta.smoothing, Some(SmoothingFraction::Sixth));
+
+    let t = trace(c2.ok(Command::TraceCapture {
+        meas: MeasId(2),
+        name: "fft".into(),
+        slot: None,
+    }));
+    let power = Smoothing {
+        fraction: SmoothingFraction::Sixth,
+        mode: SmoothingMode::Magnitude,
+    };
+    assert_eq!(t.edit.smoothing, Some(power));
+    let served = data(&mut c2, t.id);
+    let t = set_smoothing(&mut c2, &t, None);
+    let raw = data(&mut c2, t.id);
+    let p: Vec<f64> = raw
+        .mag_db
+        .iter()
+        .map(|l| 10f64.powf(f64::from(*l) / 10.0))
+        .collect();
+    let valid: Vec<bool> = raw.mag_db.iter().map(|l| l.is_finite()).collect();
+    let want = ac2_core::smoothing::LinearSmoother::new(
+        raw.mag_db.len(),
+        ac2_core::smoothing::SmoothingFraction::Sixth,
+    )
+    .smooth(&p, &valid);
+    let (mut rough_raw, mut rough_live) = (0.0, 0.0);
+    for k in 1..raw.mag_db.len() {
+        if !valid[k] {
+            continue;
+        }
+        let w = 10.0 * want[k].log10();
+        assert!(
+            (f64::from(live.level[k]) - w).abs() < 1e-3,
+            "bin {k}: live {} vs ac2-core {w}",
+            live.level[k]
+        );
+        assert!((served.mag_db[k] - live.level[k]).abs() < 1e-3, "bin {k}");
+        if k > 100 && valid[k - 1] {
+            rough_raw += f64::from(raw.mag_db[k] - raw.mag_db[k - 1]).powi(2);
+            rough_live += f64::from(live.level[k] - live.level[k - 1]).powi(2);
+        }
+    }
+    assert!(rough_live * 10.0 < rough_raw, "{rough_live} vs {rough_raw}");
+
+    // Re-smoothed at another width; either mode, as a spectrum has no phase.
+    let third = Smoothing {
+        fraction: SmoothingFraction::Third,
+        mode: SmoothingMode::MagnitudePhase,
+    };
+    let t = set_smoothing(&mut c2, &t, Some(third));
+    assert_ne!(data(&mut c2, t.id).mag_db, served.mag_db);
+    drop(r.backend);
+    r.h.shutdown();
+}
+
 #[test]
 fn session_save_load_round_trip() {
     let mut r = rig("sessions");
@@ -571,7 +746,7 @@ fn session_save_load_round_trip() {
     let mut ae = a.edit.clone();
     ae.smoothing = Some(Smoothing {
         fraction: SmoothingFraction::Third,
-        mode: SmoothingMode::Complex,
+        mode: SmoothingMode::MagnitudePhase,
     });
     c.ok(Command::TraceUpdate {
         trace: a.id,
@@ -695,7 +870,7 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 2", "\"version\": 7")).unwrap();
+    std::fs::write(&manifest, text.replace("\"version\": 3", "\"version\": 7")).unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -708,7 +883,7 @@ fn session_save_load_round_trip() {
         e.detail,
         Some(ErrorDetail::SessionVersion {
             found: 7,
-            supported: 2
+            supported: 3
         })
     );
     assert_eq!(traces(c).len(), n);

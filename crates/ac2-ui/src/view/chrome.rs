@@ -1,6 +1,6 @@
 //! Top bar (link, session, stimulus) and the measurement list.
 
-use ac2_proto::model::MeasKind;
+use ac2_proto::model::{MeasKind, TraceKind};
 use ac2_scene::format;
 use eframe::egui::{self, Color32, RichText};
 
@@ -171,10 +171,16 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                     text.push_str(" · tracking");
                 }
             }
-            if let MeasKind::Transfer { config } = &m.config.kind
-                && config.smoothing.is_some()
-            {
-                text.push_str(&format!(" · {}", format::smoothing(config.smoothing)));
+            match &m.config.kind {
+                MeasKind::Transfer { config } if config.smoothing.is_some() => {
+                    text.push_str(&format!(" · {}", format::smoothing(config.smoothing)));
+                }
+                MeasKind::Spectrum { config } => {
+                    if let Some(f) = config.smoothing {
+                        text.push_str(&format!(" · smoothed {}", format::octave_fraction(f)));
+                    }
+                }
+                _ => {}
             }
             let e = st.edit(m.id);
             if e.inverted {
@@ -205,7 +211,13 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             let smooth = t
                 .edit
                 .smoothing
-                .map(|s| format!(" · {}", format::smoothing(Some(s))))
+                .map(|s| match t.kind {
+                    // A spectrum has no phase: its smoothing has no mode to name.
+                    TraceKind::Spectrum { .. } => {
+                        format!(" · smoothed {}", format::octave_fraction(s.fraction))
+                    }
+                    _ => format!(" · {}", format::smoothing(Some(s))),
+                })
                 .unwrap_or_default();
             let text = format!("{}  {}{data}{lock}{smooth}", i + 1, t.edit.name);
             let c = t.edit.color;

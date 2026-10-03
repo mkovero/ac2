@@ -42,5 +42,9 @@ toml = "0.8"
 
 [dev-dependencies]
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
+# Test oracle only: the rig publishes curves smoothed as the daemon would. The app itself
+# never links the DSP (tests/no_dsp.rs checks the normal and build edges).
+ac2-core = { path = "../ac2-core" }
+num-complex = "0.4"
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 tempfile = "3"

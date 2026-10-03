@@ -150,24 +150,40 @@ measurement list does; selecting one in the list makes its pane show it. Keys su
 ### Smoothing
 
 **K** makes the smoothing coarser and **Shift+K** finer, through off, 1/48, 1/24, 1/12, 1/6
-and 1/3 octave; the palette also sets a step directly (**Smoothing: 1/6 oct**, …). The
-transfer pane's title says what the keys act on and its setting (`smoothing 1/6 oct`), and
-every legend row shows the smoothing of its curve.
+and 1/3 octave; the palette also sets a step directly (**Smoothing: 1/6 oct**, …). The keys
+work in the transfer pane and in the spectrum pane. Each pane's title says the smoothing of
+what it shows (`smoothing 1/6 oct`), and every transfer legend row shows the smoothing of its
+curve.
 
-- On a **live measurement** the keys act on the measurement the transfer pane shows. The
-  change applies at once and the averages carry on — nothing restarts.
+- **Transfer functions** smooth the magnitude (power-averaged) **and the phase**, so the
+  phase pane, unwrapped phase and group delay all read the smoothed curve. The phase is
+  unwrapped within each run of valid columns before it is averaged, so a wrap never drags
+  the average towards 0°. That needs the delay set first: a residual delay of more than about
+  34 periods at a frequency (3.4 ms at 10 kHz, 34 ms at 1 kHz) turns the phase by more than
+  half a turn between neighbouring columns, where unwrapping cannot follow it. Find or set
+  the delay (**X**, **D**) before reading smoothed phase at high frequencies. A curve set to
+  smooth the magnitude only (`ac2 meas new tf … --smooth 6 --smooth-magnitude-only`) says
+  `mag only` and keeps the measured phase.
+- **Spectra** (narrowband FFT) are smoothed as power over a fractional-octave window on the
+  FFT bins. A smoothed spectrum no longer reads as the tone level of a bin — a sine is spread
+  over the window and reads lower — so the level axis says so: `dBFS (tone, 1/6 oct
+  smoothed)`. Spectra start unsmoothed (the New spectrum dialog and `ac2 meas new spectrum
+  --smooth 6` can set it). At the lowest bins the window is narrower than one bin and the
+  bins pass through unchanged.
+- **RTA** bands already are fractional-octave: **K** in an RTA says so and changes nothing.
+- On a **live measurement** the keys act on the measurement of the focused pane (the
+  spectrum pane's when it has focus, else the transfer pane's). The change applies at once
+  and the averages carry on — nothing restarts.
 - On a **stored trace**: select its slot — **V** steps through the shown slots in slot
   order and **Shift+V** backwards, or click it in the list. The slot is highlighted and the
-  title says `slot 3 (…): smoothing …`; then **K** / **Shift+K**. To go back to the live
-  measurement press **Esc** (it also stops the stimulus, as always; with a dialog open the
-  first Esc only closes it), step past the last slot with **V**, click the slot again, or
-  select a measurement (**N**, **Alt+1 … Alt+4**, a click).
+  title of the pane it is drawn in says `slot 3 (…): smoothing …`; then **K** / **Shift+K**.
+  To go back to the live measurement press **Esc** (it also stops the stimulus, as always;
+  with a dialog open the first Esc only closes it), step past the last slot with **V**,
+  click the slot again, or select a measurement (**N**, **Alt+1 … Alt+4**, a click).
 
 Smoothing never changes stored data. A capture keeps the unsmoothed curve and starts with
 the smoothing its measurement had, so a trace can be re-smoothed at any time; averages and
-A − B combine the unsmoothed curves and start with the smoothing their inputs share. Spectra
-and RTA bands are not smoothed (RTA bands already are fractional-octave; a smoothed
-narrowband spectrum would no longer read as tone level).
+A − B combine the unsmoothed curves and start with the smoothing their inputs share.
 
 The banners say what is wrong rather than showing a misleading curve: **NO REFERENCE**, **NO
 SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (no fresh frame; the age is shown), **NO
@@ -352,6 +368,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `F` | Freeze / unfreeze selected measurement | `freeze` |
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
+| `K` | Smoothing coarser (selected slot or pane's measurement) | `smooth_coarser` |
+| `Shift+K` | Smoothing finer (selected slot or pane's measurement) | `smooth_finer` |
 | `B` | RTA: bars / line | `spectrum_style` |
 | `H` | Peak hold on / off | `peak_hold` |
 

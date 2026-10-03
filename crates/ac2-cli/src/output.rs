@@ -343,8 +343,8 @@ pub fn trace_meta(t: &TraceMeta) -> String {
                 SmoothingFraction::FortyEighth => 48,
             };
             let m = match s.mode {
-                SmoothingMode::Power => "power",
-                SmoothingMode::Complex => "complex",
+                SmoothingMode::Magnitude => "magnitude",
+                SmoothingMode::MagnitudePhase => "magnitude and phase",
             };
             format!("1/{f} octave, {m}")
         }

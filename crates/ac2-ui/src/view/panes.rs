@@ -185,7 +185,8 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
 }
 
 /// The chip in a pane's title naming the measurement the pane shows (a click opens the list
-/// of measurements it can show), and on the transfer pane what the smoothing keys act on.
+/// of measurements it can show), and on the transfer and spectrum panes the smoothing of
+/// what is drawn there.
 fn title_chip(
     app: &mut App,
     ui: &egui::Ui,
@@ -242,9 +243,7 @@ fn title_chip(
         ch.dim,
         egui::Stroke::NONE,
     ));
-    if pane == PaneKind::Transfer
-        && let Some(c) = st.smoothing_caption()
-    {
+    if let Some(c) = st.smoothing_caption(pane) {
         painter.text(
             r.right_center() + egui::vec2(10.0, 0.0),
             egui::Align2::LEFT_CENTER,

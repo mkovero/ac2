@@ -126,17 +126,23 @@ pub fn ms(seconds: f64, decimals: usize) -> String {
     with_unit(fixed(seconds * 1000.0, decimals), " ms")
 }
 
-/// Fractional-octave smoothing: `1/6 oct`, `1/12 oct complex`, `off`.
+/// Fractional-octave smoothing: `1/6 oct` (magnitude and phase, what front ends set),
+/// `1/12 oct mag only` (phase as measured), `off`.
 pub fn smoothing(s: Option<ac2_proto::model::Smoothing>) -> String {
     match s {
         None => "off".into(),
         Some(s) => match s.mode {
-            ac2_proto::model::SmoothingMode::Power => format!("1/{} oct", s.fraction.b()),
-            ac2_proto::model::SmoothingMode::Complex => {
-                format!("1/{} oct complex", s.fraction.b())
+            ac2_proto::model::SmoothingMode::MagnitudePhase => octave_fraction(s.fraction),
+            ac2_proto::model::SmoothingMode::Magnitude => {
+                format!("{} mag only", octave_fraction(s.fraction))
             }
         },
     }
+}
+
+/// `1/6 oct`.
+pub fn octave_fraction(f: ac2_proto::model::SmoothingFraction) -> String {
+    format!("1/{} oct", f.b())
 }
 
 /// Absolute level with one decimal: `94.0`, `−23.5`.

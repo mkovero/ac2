@@ -39,22 +39,45 @@
 //!
 //! # Modes
 //!
-//! - [`SmoothingMode::Power`]: magnitude only. `|H|` becomes `sqrt(Σ w|H|² / Σ w)`; the
+//! - [`SmoothingMode::Magnitude`]: magnitude only. `|H|` becomes `sqrt(Σ w|H|² / Σ w)`; the
 //!   phase of each column is left as measured.
-//! - [`SmoothingMode::Complex`]: magnitude as in `Power`, and phase smoothed too. Phase is
-//!   unwrapped along each valid run first — a mean taken across a ±π wrap lands near 0, a
-//!   value the measurement never contained — then averaged with the same weights.
+//! - [`SmoothingMode::MagnitudePhase`]: magnitude as in `Magnitude`, and phase smoothed too.
+//!   Phase is unwrapped along each valid run first — a mean taken across a ±π wrap lands
+//!   near 0, a value the measurement never contained — then averaged with the same weights.
 //!
 //! A vector mean `Σ wH / Σ w` is deliberately not offered: wherever a residual delay rotates
 //! the phase across the kernel, the vectors cancel and the magnitude drops, which would draw
 //! a delay error as a response loss.
 //!
-//! On a pure delay `τ` the complex mode returns magnitude 1 and phase `-2πτ·f̄`, where `f̄`
-//! is the kernel-weighted mean of the column frequencies. Because `f` is convex in
+//! On a pure delay `τ` the magnitude-and-phase mode returns magnitude 1 and phase `-2πτ·f̄`,
+//! where `f̄` is the kernel-weighted mean of the column frequencies. Because `f` is convex in
 //! `log f`, `f̄` sits slightly above the column centre (≈ 0.3 % at 1/3 octave), so the
 //! smoothed phase of a delay is slightly steeper than the unsmoothed one. Unwrapping follows
 //! the smaller step between adjacent columns, so a residual delay with `τ·Δf > ½` between
 //! columns (at 48 ppo: `τ·f > 34`) cannot be followed; set the delay first.
+//!
+//! # Linear-bin power spectra
+//!
+//! [`LinearSmoother`] applies the same kernel to a narrowband power spectrum on its FFT bins
+//! (`f_k = k·fs/n`), which are uniform in frequency, not in log frequency. The weight of bin
+//! `j` in the average at bin `k` is the Hann of `log2(f_j/f_k)` (full width `1.5/b` octaves,
+//! as above) times `1/f_j`: a bin spans `Δf/(f·ln 2)` octaves, so weighting by `1/f` makes
+//! the sum an integral over log frequency — on a fine grid it converges to what [`Smoother`]
+//! computes on the log grid (tested), and the `1/b`-octave label means the same thing.
+//!
+//! - Only bins inside the kernel count, so where the kernel is narrower than one bin (the
+//!   lowest bins) a bin is its own average and passes through unchanged.
+//! - DC has no log frequency: bin 0 is never averaged into another bin and passes through.
+//! - Runs of valid bins and the spectrum's ends truncate the kernel as on the log grid.
+//! - Power is averaged (a level in dB is converted to power by the caller); zero power is a
+//!   valid value (a bin below the analyser's floor), only non-finite bins are gaps.
+//!
+//! The kernel spans up to `0.35·k` bins at bin `k` (1/3 octave), far too many to sum per bin
+//! for a 64 k-point FFT at a display rate. The Hann separates:
+//! `cos(θ_j − θ_k) = cos θ_j cos θ_k + sin θ_j sin θ_k` with `θ = π·log2 f / H`, so each output
+//! needs three windowed sums of per-bin terms, read from a segment tree in `O(log n)`.
+//! Prefix sums would be `O(1)` but subtract running totals that contain every louder bin
+//! below: a tone 150 dB above the noise floor would leave nothing of the floor's digits.
 
 use std::f64::consts::{PI, TAU};
 
@@ -116,9 +139,9 @@ pub const HANN_ENBW_WIDENING: f64 = 1.5;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SmoothingMode {
     /// Power-average magnitude; phase untouched.
-    Power,
+    Magnitude,
     /// Power-average magnitude and average unwrapped phase.
-    Complex,
+    MagnitudePhase,
 }
 
 /// Columns of one transfer function on a [`LogGrid`], as produced by the MTW stage.
@@ -240,12 +263,12 @@ impl Smoother {
         let power: Vec<f64> = input.iter().map(|z| z.norm_sqr()).collect();
         let smoothed_power = self.apply(&power);
         match mode {
-            SmoothingMode::Power => {
+            SmoothingMode::Magnitude => {
                 for ((o, z), p) in out.iter_mut().zip(input).zip(&smoothed_power) {
                     *o = Complex64::from_polar(p.sqrt(), z.arg());
                 }
             }
-            SmoothingMode::Complex => {
+            SmoothingMode::MagnitudePhase => {
                 let phase = unwrap(input.iter().map(|z| z.arg()));
                 let smoothed_phase = self.apply(&phase);
                 for ((o, p), ph) in out.iter_mut().zip(&smoothed_power).zip(&smoothed_phase) {
@@ -270,6 +293,175 @@ impl Smoother {
                 num / den
             })
             .collect()
+    }
+}
+
+/// Fractional-octave power smoothing of a narrowband spectrum on its linear FFT bins
+/// (module docs, "Linear-bin power spectra").
+///
+/// Bin `k` is at `k·fs/n`; only ratios of bin frequencies enter the kernel, so the weights
+/// depend on the bin count and the fraction, not on `fs`. Build once per (bin count,
+/// fraction) and reuse.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinearSmoother {
+    fraction: SmoothingFraction,
+    /// Kernel half-width, octaves.
+    half_oct: f64,
+    /// Per bin: the half-open range of bins inside its kernel (`(0, 0)` for DC).
+    window: Vec<(u32, u32)>,
+    /// `cos θ_k`, `sin θ_k` with `θ_k = π·log2(k)/half_oct` (0 for DC).
+    phase: Vec<(f64, f64)>,
+}
+
+/// Per-bin terms summed over a kernel: `[u, u·cos θ, u·sin θ, u·P, u·P·cos θ, u·P·sin θ]`.
+type Terms = [f64; 6];
+
+impl LinearSmoother {
+    /// Kernel for `fraction` on a spectrum of `bins` bins (`n/2 + 1` for an `n`-point FFT).
+    pub fn new(bins: usize, fraction: SmoothingFraction) -> Self {
+        let half_oct = 0.5 * fraction.kernel_width_octaves();
+        let up = half_oct.exp2();
+        let mut window = Vec::with_capacity(bins);
+        let mut phase = Vec::with_capacity(bins);
+        for k in 0..bins {
+            if k == 0 {
+                window.push((0, 0));
+                phase.push((0.0, 0.0));
+                continue;
+            }
+            let kf = k as f64;
+            // Bins with |log2(j/k)| < H; the edge bins carry zero weight either way.
+            let lo = ((kf / up).floor() as usize + 1).clamp(1, k);
+            let hi = ((kf * up).ceil() as usize).clamp(k + 1, bins);
+            window.push((lo as u32, hi as u32));
+            let th = PI * kf.log2() / half_oct;
+            phase.push((th.cos(), th.sin()));
+        }
+        Self {
+            fraction,
+            half_oct,
+            window,
+            phase,
+        }
+    }
+
+    /// Number of bins.
+    pub fn bins(&self) -> usize {
+        self.window.len()
+    }
+
+    /// Bandwidth.
+    pub fn fraction(&self) -> SmoothingFraction {
+        self.fraction
+    }
+
+    /// Kernel weight of bin `j` in the average at bin `k` (both ≥ 1), before the `1/f_j`
+    /// log-measure factor.
+    pub fn hann(&self, k: usize, j: usize) -> f64 {
+        let d = (j as f64 / k as f64).log2();
+        if d.abs() >= self.half_oct {
+            0.0
+        } else {
+            0.5 * (1.0 + (PI * d / self.half_oct).cos())
+        }
+    }
+
+    /// Smooth `power` (linear power per bin, not dB). Bins where `valid` is false or the
+    /// power is not finite are gaps: they pass through unchanged and no kernel crosses them.
+    ///
+    /// # Panics
+    /// If the slices are not `bins()` long.
+    pub fn smooth(&self, power: &[f64], valid: &[bool]) -> Vec<f64> {
+        let n = self.bins();
+        assert!(
+            power.len() == n && valid.len() == n,
+            "power and validity must be {n} bins long"
+        );
+        let ok: Vec<bool> = valid
+            .iter()
+            .zip(power)
+            .map(|(v, p)| *v && p.is_finite())
+            .collect();
+        // Run bounds per valid bin.
+        let mut run = vec![(0usize, 0usize); n];
+        for (a, b) in valid_runs(&ok) {
+            run[a..b].fill((a, b));
+        }
+        let tree = SumTree::new(
+            (0..n)
+                .map(|j| {
+                    if j == 0 || !ok[j] {
+                        return [0.0; 6];
+                    }
+                    let u = 1.0 / j as f64;
+                    let (c, s) = self.phase[j];
+                    let p = power[j];
+                    [u, u * c, u * s, u * p, u * p * c, u * p * s]
+                })
+                .collect(),
+        );
+        (0..n)
+            .map(|k| {
+                if k == 0 || !ok[k] {
+                    return power[k];
+                }
+                let (lo, hi) = self.window[k];
+                let (a, b) = run[k];
+                let t = tree.sum((lo as usize).max(a), (hi as usize).min(b));
+                let (c, s) = self.phase[k];
+                // Σ u·w·(·) with w = ½(1 + cos θ_j cos θ_k + sin θ_j sin θ_k).
+                let den = t[0] + c * t[1] + s * t[2];
+                let num = t[3] + c * t[4] + s * t[5];
+                // Rounding can leave a hair below zero where every weighted bin is silent.
+                (num / den).max(0.0)
+            })
+            .collect()
+    }
+}
+
+/// `power` smoothed by `fraction` on its linear bins ([`LinearSmoother`]); every finite bin
+/// valid. Builds the kernel each call: keep a [`LinearSmoother`] to smooth repeatedly.
+pub fn smooth_linear_bins(power: &[f64], fraction: SmoothingFraction) -> Vec<f64> {
+    LinearSmoother::new(power.len(), fraction).smooth(power, &vec![true; power.len()])
+}
+
+/// Range sums over per-bin terms. A query adds only nodes inside the range, so a sum never
+/// contains — and never loses digits to — values outside it.
+struct SumTree {
+    n: usize,
+    node: Vec<Terms>,
+}
+
+impl SumTree {
+    fn new(leaves: Vec<Terms>) -> Self {
+        let n = leaves.len();
+        let mut node = vec![[0.0; 6]; n];
+        node.extend(leaves);
+        for i in (1..n).rev() {
+            let (a, b) = (node[2 * i], node[2 * i + 1]);
+            node[i] = std::array::from_fn(|t| a[t] + b[t]);
+        }
+        Self { n, node }
+    }
+
+    /// Sum over leaves `[lo, hi)`.
+    fn sum(&self, lo: usize, hi: usize) -> Terms {
+        let mut acc = [0.0; 6];
+        let add = |acc: &mut Terms, x: &Terms| acc.iter_mut().zip(x).for_each(|(a, v)| *a += v);
+        let (mut l, mut r) = (lo + self.n, hi + self.n);
+        while l < r {
+            if l & 1 == 1 {
+                add(&mut acc, &self.node[l]);
+                l += 1;
+            }
+            if r & 1 == 1 {
+                r -= 1;
+                add(&mut acc, &self.node[r]);
+            }
+            l >>= 1;
+            r >>= 1;
+        }
+        acc
     }
 }
 
@@ -346,7 +538,7 @@ mod tests {
         let valid = all_valid(n);
         for fr in SmoothingFraction::ALL {
             let s = Smoother::new(g, fr);
-            for mode in [SmoothingMode::Power, SmoothingMode::Complex] {
+            for mode in [SmoothingMode::Magnitude, SmoothingMode::MagnitudePhase] {
                 let out = s.smooth(
                     TfColumns {
                         h: &h,
@@ -381,7 +573,7 @@ mod tests {
                 coherence: &coh,
                 valid: &valid,
             },
-            SmoothingMode::Power,
+            SmoothingMode::Magnitude,
         );
         let p: Vec<f64> = out.h.iter().map(|z| z.norm_sqr() - 1.0).collect();
         assert!((p[c] - excess / 12.0).abs() < 1e-9, "peak excess {}", p[c]);
@@ -415,7 +607,7 @@ mod tests {
                 coherence: &coh,
                 valid: &valid,
             },
-            SmoothingMode::Complex,
+            SmoothingMode::MagnitudePhase,
         );
         assert!(!out.valid[201], "non-finite column must be invalid");
         for i in gap.clone() {
@@ -446,7 +638,7 @@ mod tests {
                 coherence: &coh,
                 valid: &valid,
             },
-            SmoothingMode::Complex,
+            SmoothingMode::MagnitudePhase,
         );
         assert_eq!(out.coherence, coh);
     }
@@ -471,8 +663,8 @@ mod tests {
             coherence: &coh,
             valid: &valid,
         };
-        let pow = s.smooth(tf, SmoothingMode::Power);
-        let cpx = s.smooth(tf, SmoothingMode::Complex);
+        let pow = s.smooth(tf, SmoothingMode::Magnitude);
+        let cpx = s.smooth(tf, SmoothingMode::MagnitudePhase);
         let reach = s.taps().len() - 1;
         for i in 0..n {
             assert!((pow.h[i].norm() - 1.0).abs() < 1e-12);
@@ -498,6 +690,150 @@ mod tests {
         let lag = cpx.h[mid].arg() - h[mid].arg();
         let lag = lag - TAU * (lag / TAU).round();
         assert!(lag < 0.0, "smoothed phase leads the column phase: {lag}");
+    }
+
+    /// Direct evaluation of the linear-bin kernel: Σ hann·(1/j)·P over the run, normalised.
+    fn linear_brute(s: &LinearSmoother, p: &[f64], valid: &[bool]) -> Vec<f64> {
+        let ok: Vec<bool> = valid
+            .iter()
+            .zip(p)
+            .map(|(v, x)| *v && x.is_finite())
+            .collect();
+        let mut out = p.to_vec();
+        for (a, b) in valid_runs(&ok) {
+            let a = a.max(1);
+            for (k, o) in out.iter_mut().enumerate().take(b).skip(a) {
+                let (num, den) = (a..b).fold((0.0, 0.0), |(num, den), j| {
+                    let w = s.hann(k, j) / j as f64;
+                    (num + w * p[j], den + w)
+                });
+                *o = num / den;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn linear_bins_match_direct_evaluation() {
+        let n = 4097;
+        // Deterministic pseudo-random levels over 160 dB, a few gaps and silent bins.
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        let mut p: Vec<f64> = (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                10f64.powf(-16.0 * (x % 10_000) as f64 / 10_000.0)
+            })
+            .collect();
+        p[700] = 0.0;
+        p[1500] = f64::NAN;
+        let mut valid = vec![true; n];
+        valid[2000..2010].fill(false);
+        for fr in SmoothingFraction::ALL {
+            let s = LinearSmoother::new(n, fr);
+            let fast = s.smooth(&p, &valid);
+            let slow = linear_brute(&s, &p, &valid);
+            for k in 0..n {
+                if p[k].is_nan() {
+                    assert!(fast[k].is_nan());
+                    continue;
+                }
+                assert!(
+                    (fast[k] - slow[k]).abs() <= 1e-9 * slow[k].abs(),
+                    "{fr:?} bin {k}: {} vs {}",
+                    fast[k],
+                    slow[k]
+                );
+            }
+            for k in 2000..2010 {
+                assert_eq!(fast[k].to_bits(), p[k].to_bits(), "gap passes through");
+            }
+        }
+    }
+
+    /// A full-scale tone low in the band must not wipe out a floor 150 dB down elsewhere.
+    #[test]
+    fn linear_bins_keep_a_quiet_floor_beside_a_loud_tone() {
+        let n = 32_769;
+        let mut p = vec![1e-15; n];
+        p[50] = 1.0;
+        let out = LinearSmoother::new(n, SmoothingFraction::Third).smooth(&p, &vec![true; n]);
+        for (k, v) in out.iter().enumerate().skip(100) {
+            assert!((v / 1e-15 - 1.0).abs() < 1e-6, "bin {k}: {v:e}");
+        }
+        assert!(out[50] < 0.5 && out[50] > 1e-3, "tone spread: {}", out[50]);
+    }
+
+    #[test]
+    fn linear_bins_flat_stays_flat_and_low_bins_pass_through() {
+        let n = 1025;
+        let mut p = vec![0.25; n];
+        p[0] = 7.0;
+        p[1] = 3.0;
+        p[2] = 0.5;
+        for fr in SmoothingFraction::ALL {
+            let s = LinearSmoother::new(n, fr);
+            let out = s.smooth(&p, &vec![true; n]);
+            assert_eq!(out[0], 7.0, "DC passes through");
+            // At 1/3 octave the kernel at bin 1 spans 0.84 … 1.19: only bin 1 itself.
+            assert_eq!(out[1], 3.0, "{fr:?}: bin 1 is narrower than the kernel");
+            for (k, v) in out.iter().enumerate().skip(12) {
+                assert!((v - 0.25).abs() < 1e-12, "{fr:?} bin {k}: {v}");
+            }
+        }
+        assert_eq!(smooth_linear_bins(&p, SmoothingFraction::Sixth)[0], 7.0);
+    }
+
+    /// On a fine linear grid the log-measure weighting makes the linear-bin smoother agree
+    /// with the log-grid smoother on the same curve: the `1/b` label means the same thing.
+    #[test]
+    fn linear_bins_agree_with_the_log_grid() {
+        let fs = 48_000.0;
+        let n_fft = 1usize << 20;
+        let bins = n_fft / 2 + 1;
+        let df = fs / n_fft as f64;
+        // Power ripple of ±50 % with a 0.6-octave period: smoothing changes it visibly.
+        let curve = |f: f64| 1.0 + 0.5 * (TAU * (f / 1000.0).log2() / 0.6).sin();
+        let p: Vec<f64> = (0..bins).map(|k| curve(k as f64 * df)).collect();
+        let g = LogGrid::covering(48, 20.0, 20_000.0);
+        let f = g.frequencies();
+        let h: Vec<Complex64> = f
+            .iter()
+            .map(|f| Complex64::new(curve(*f).sqrt(), 0.0))
+            .collect();
+        let coh = vec![1.0; h.len()];
+        let valid = vec![true; h.len()];
+        for fr in [SmoothingFraction::Third, SmoothingFraction::Twelfth] {
+            let lin = LinearSmoother::new(bins, fr).smooth(&p, &vec![true; bins]);
+            let log = Smoother::new(g, fr).smooth(
+                TfColumns {
+                    h: &h,
+                    coherence: &coh,
+                    valid: &valid,
+                },
+                SmoothingMode::Magnitude,
+            );
+            let mut worst: f64 = 0.0;
+            let (mut lo, mut hi) = (f64::INFINITY, 0.0f64);
+            for (i, fc) in f
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| **f > 200.0 && **f < 10_000.0)
+            {
+                // Linear interpolation between the bins either side of the column.
+                let x = fc / df;
+                let k = x.floor() as usize;
+                let t = x - k as f64;
+                let a = lin[k] * (1.0 - t) + lin[k + 1] * t;
+                let b = log.h[i].norm_sqr();
+                worst = worst.max((10.0 * (a / b).log10()).abs());
+                (lo, hi) = (lo.min(a), hi.max(a));
+            }
+            assert!(worst < 0.005, "{fr:?}: {worst} dB apart");
+            // The curve really was smoothed: the 3:1 power ripple shrank.
+            assert!(hi / lo < 2.9, "{fr:?}: ripple {hi}/{lo}");
+        }
     }
 
     #[test]
@@ -527,10 +863,11 @@ mod tests {
             coherence: &coh,
             valid: &valid,
         };
-        let third = Smoother::new(g, SmoothingFraction::Third).smooth(tf, SmoothingMode::Power);
+        let third = Smoother::new(g, SmoothingFraction::Third).smooth(tf, SmoothingMode::Magnitude);
         let mag: Vec<f64> = third.h.iter().map(|z| z.norm()).collect();
         gs.assert_f64("power_third_mag", &mag);
-        let sixth = Smoother::new(g, SmoothingFraction::Sixth).smooth(tf, SmoothingMode::Complex);
+        let sixth =
+            Smoother::new(g, SmoothingFraction::Sixth).smooth(tf, SmoothingMode::MagnitudePhase);
         gs.assert_c128("complex_sixth", &sixth.h);
     }
 }
