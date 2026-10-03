@@ -3,6 +3,19 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## From the first sweep run on pupu (2026-10-03)
+
+- **Generator re-armed after a sweep.** After the sweep finished the daemon logged "generator Set
+  by daemon" and the app showed ARMED again (restored pre-sweep state). A finished or aborted sweep
+  must leave the generator disarmed.
+- **Top bar: ARMED badge overlaps the session text** ("2ARMED…") at 1290 px width.
+- **Sweep pane caption overlaps** ("arrival … window …" collides with the axis title) when the pane
+  is small; fine when maximised.
+- **Distortion pane shades only the H2 noise floor**; each harmonic has its own floor in the data —
+  show the relevant one (or the lowest) and label it.
+- **Sweep dialog defaults** picked capture_1 as Reference until the session declared its loopback;
+  without a loopback mapping, ask for the reference explicitly instead of guessing by order.
+
 ## Flaky tests (seen on CI, passed on rerun)
 
 - Pink-noise level check on Linux and a spectrum-smoothing check on Windows failed once each

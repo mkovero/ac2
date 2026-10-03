@@ -48,3 +48,15 @@ Also verified: rantu over the VPN (100.100.44.45) via a further firewall.
 
 Remote measurement (ketunkolo CLI, −50 dBFS pink, f7991d9): delay 3.32 ms (identical), response
 repeats the local measurement within 0.7 dB from 100 Hz to 16 kHz.
+
+## First sweep / distortion run (2026-10-03, ac2 c062151, from the app on ketunkolo)
+
+Daemon `--max-level -50` (hard ceiling). ESS 20 Hz–20 kHz, 6 s × 2 at −50 dBFS on out 1 + out 2,
+mic (in 1) re loopback (in 2): arrival 3.33 ms (same as the noise measurements); response matches
+the transfer measurement. **No harmonic measurably above its floor anywhere** (0 of 420 points
+≥ 6 dB over floor). Upper bounds on THD at this drive: < −28 dB (4 %) 60–120 Hz, < −41 dB (0.9 %)
+120–300 Hz, < −49…−52 dB (0.25–0.35 %) 300 Hz–2 kHz, **< −46 dB (0.5 %) in the 2–6 kHz dip
+region**. So the dip is not accompanied by measurable distortion at this (quiet) level; the
+intermittent fault from the `ac` profile was not visible. Floor is set by room noise and the low
+drive: more repeats (8×: about −6 dB) or a louder drive (needs the operator to lift the −50 dBFS
+speaker ceiling) would be needed to see distortion. Data: `/home/mui/ac2-1083-sweep*`.
