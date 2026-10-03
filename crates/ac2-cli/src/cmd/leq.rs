@@ -133,6 +133,18 @@ fn preset(p: PresetArg) -> LeqPreset {
         PresetArg::Swiss96 => LeqPreset::Swiss96,
         PresetArg::Swiss100 => LeqPreset::Swiss100,
         PresetArg::Who => LeqPreset::Who,
+        PresetArg::France => LeqPreset::France,
+        PresetArg::FranceChildren => LeqPreset::FranceChildren,
+        PresetArg::Flanders85 => LeqPreset::Flanders85,
+        PresetArg::Flanders95 => LeqPreset::Flanders95,
+        PresetArg::Flanders100 => LeqPreset::Flanders100,
+        PresetArg::Brussels85 => LeqPreset::Brussels85,
+        PresetArg::Brussels95 => LeqPreset::Brussels95,
+        PresetArg::Brussels100 => LeqPreset::Brussels100,
+        PresetArg::NlCovenant => LeqPreset::NetherlandsCovenant,
+        PresetArg::NlCovenant16To17 => LeqPreset::NetherlandsCovenant16To17,
+        PresetArg::NlCovenant14To15 => LeqPreset::NetherlandsCovenant14To15,
+        PresetArg::NlCovenantTo13 => LeqPreset::NetherlandsCovenantTo13,
     }
 }
 
@@ -158,7 +170,9 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
             .collect();
     }
     for p in &s.preset {
-        preset(*p).apply(&mut cfg.windows);
+        preset(*p)
+            .apply(&mut cfg.windows)
+            .map_err(CliError::Usage)?;
     }
     for l in &s.limits {
         let d = Seconds(f64::from(l.window.seconds));
@@ -239,13 +253,10 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
         .iter()
         .map(|p| {
             let p = preset(*p);
-            let w = p.window();
             format!(
-                "{}: {} ≤ {} dB — {} (informational, not legal advice)",
-                p.name(),
-                ac2_scene::leq::window_name(&w),
-                ac2_scene::format::level(w.limit.map_or(f64::NAN, |l| l.0)),
-                p.source()
+                "{} — {}",
+                ac2_scene::leq_preset::summary(p),
+                ac2_scene::leq_preset::source(p)
             )
         })
         .collect();
@@ -404,8 +415,72 @@ mod tests {
         let e = apply(&cur, &s).expect("valid");
         assert_eq!(e.windows.len(), 6);
         assert_eq!(e.windows[3].duration, Seconds(900.0));
+        // France sets two windows, A and C, added in order of length.
+        let s = set_args(&["--preset", "france"]);
+        let f = apply(&cur, &s).expect("valid");
+        let names: Vec<String> = f.windows.iter().map(ac2_scene::leq::window_name).collect();
+        assert_eq!(
+            names,
+            [
+                "LAeq 1 min",
+                "LAeq 5 min",
+                "LAeq 10 min",
+                "LAeq 15 min",
+                "LCeq 15 min",
+                "LAeq 30 min",
+                "LAeq 60 min"
+            ]
+        );
+        assert_eq!(f.windows[3].limit.map(|l| l.0), Some(102.0));
+        assert_eq!(f.windows[4].limit.map(|l| l.0), Some(118.0));
+        // A window the meter lacks and that would pass the most windows: refused, named.
+        let s = set_args(&["--preset", "france", "--preset", "brussels-100"]);
+        let g = apply(&cur, &s).expect("eight windows");
+        assert_eq!(g.windows.len(), LeqConfig::MAX_WINDOWS);
+        let s = set_args(&[
+            "--preset",
+            "who",
+            "--windows",
+            "5s,10s,30s,1min,5min,10min,30min",
+        ]);
+        let full = apply(&cur, &s).expect("eight windows");
+        let s = set_args(&["--preset", "france"]);
+        assert!(
+            matches!(apply(&full, &s), Err(CliError::Usage(m)) if m.contains("France R1336-1 needs 1 more window")),
+        );
         // A limit on a window the meter does not have.
         let s = set_args(&["--limit", "15min=100db"]);
         assert!(matches!(apply(&cur, &s), Err(CliError::Usage(m)) if m.contains("no LAeq 15 min")));
+    }
+
+    /// Every preset has a `--preset` name, in the app's order.
+    #[test]
+    fn every_preset_parses() {
+        use clap::ValueEnum;
+        let names = [
+            "din15905",
+            "swiss93",
+            "swiss96",
+            "swiss100",
+            "who",
+            "france",
+            "france-children",
+            "flanders-85",
+            "flanders-95",
+            "flanders-100",
+            "brussels-85",
+            "brussels-95",
+            "brussels-100",
+            "nl-covenant",
+            "nl-covenant-16-17",
+            "nl-covenant-14-15",
+            "nl-covenant-13",
+        ];
+        let parsed: Vec<LeqPreset> = names
+            .iter()
+            .map(|n| preset(set_args(&["--preset", n]).preset[0]))
+            .collect();
+        assert_eq!(parsed, LeqPreset::ALL);
+        assert_eq!(PresetArg::value_variants().len(), LeqPreset::ALL.len());
     }
 }

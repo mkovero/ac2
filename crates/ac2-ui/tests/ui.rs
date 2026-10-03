@@ -1338,6 +1338,41 @@ fn leq_tiles_from_an_empty_daemon() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "leq_dialog");
+    // ↑↑ to the preset row, → to the French preset for children (two windows, the
+    // longest name and source), then ← back to DIN over the same windows.
+    let din_rows = match &h.state().state.overlay {
+        Overlay::Leq(d) => d.rows.clone(),
+        _ => panic!("the Leq dialog"),
+    };
+    let to = ac2_proto::model::LeqPreset::ALL
+        .iter()
+        .position(|p| *p == ac2_proto::model::LeqPreset::FranceChildren)
+        .expect("listed");
+    h.key_press(Key::ArrowUp);
+    h.key_press(Key::ArrowUp);
+    for _ in 0..to {
+        h.key_press(Key::ArrowRight);
+    }
+    step_until(
+        &mut h,
+        "two windows from one preset",
+        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(to) && d.rows.len() == 7),
+    );
+    snapshot(&mut h, "leq_dialog_two_window_preset");
+    for _ in 0..to {
+        h.key_press(Key::ArrowLeft);
+    }
+    step_until(
+        &mut h,
+        "back to DIN",
+        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(0) && d.rows == din_rows),
+    );
+    // egui walks its own widget focus on arrow keys too; the app's keys never need it.
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
     h.key_press(Key::Enter);
     step_until(&mut h, "the windows set", |a| {
         a.state.overlay == Overlay::None

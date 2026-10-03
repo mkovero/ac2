@@ -110,7 +110,7 @@ pub(super) fn leq(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                         ui.end_row();
                         if let Some(s) = d.preset_source() {
                             ui.label("");
-                            ui.label(RichText::new(s).small().color(ch.dim));
+                            ui.add(egui::Label::new(RichText::new(s).small().color(ch.dim)).wrap());
                             ui.end_row();
                         }
                         let f = d.focus == Focus::Horizon;

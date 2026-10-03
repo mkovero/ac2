@@ -628,8 +628,9 @@ pub enum LeqJudgement {
     Over,
 }
 
-/// Informational presets of a limit on one window. Not legal advice: each regulation has
-/// more to it (peak limits, measuring position, duties); `docs/design/leq.md`.
+/// Informational presets of published limits, each on one or more windows. Not legal
+/// advice: each rule has more to it (peak limits, measuring position, duties);
+/// `docs/design/leq.md` lists the sources and what is not covered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LeqPreset {
     /// DIN 15905-5: LAeq 30 min ≤ 99 dB.
@@ -642,6 +643,32 @@ pub enum LeqPreset {
     Swiss100,
     /// WHO safe listening venues and events (2022): LAeq 15 min ≤ 100 dB.
     Who,
+    /// France, Code de la santé publique art. R1336-1: LAeq 15 min ≤ 102 dB and
+    /// LCeq 15 min ≤ 118 dB.
+    France,
+    /// France, art. R1336-1, events for children up to six: LAeq 15 min ≤ 94 dB and
+    /// LCeq 15 min ≤ 104 dB.
+    FranceChildren,
+    /// Flanders, VLAREM II art. 6.7.3: LAeq 15 min ≤ 85 dB.
+    Flanders85,
+    /// Flanders, VLAREM II art. 5.32.2.2bis § 1: LAeq 15 min ≤ 95 dB.
+    Flanders95,
+    /// Flanders, VLAREM II art. 5.32.2.2bis § 2: LAeq 60 min ≤ 100 dB, LAeq 15 min shown.
+    Flanders100,
+    /// Brussels-Capital, son amplifié art. 3: LAeq 15 min ≤ 85 dB.
+    Brussels85,
+    /// Brussels-Capital, son amplifié art. 4: LAeq 15 min ≤ 95 dB and LCeq 15 min ≤ 110 dB.
+    Brussels95,
+    /// Brussels-Capital, son amplifié art. 5: LAeq 60 min ≤ 100 dB and LCeq 60 min ≤ 115 dB.
+    Brussels100,
+    /// Netherlands, fourth covenant (voluntary), art. 3.1.2: LAeq 15 min ≤ 103 dB.
+    NetherlandsCovenant,
+    /// Netherlands covenant art. 3.1.3 c, audiences of 16 and 17: LAeq 15 min ≤ 100 dB.
+    NetherlandsCovenant16To17,
+    /// Netherlands covenant art. 3.1.3 b, audiences of 14 and 15: LAeq 15 min ≤ 96 dB.
+    NetherlandsCovenant14To15,
+    /// Netherlands covenant art. 3.1.3 a, audiences up to 13: LAeq 15 min ≤ 91 dB.
+    NetherlandsCovenantTo13,
 }
 
 /// What a measurement computes.
@@ -850,13 +877,25 @@ impl LeqConfig {
 }
 
 impl LeqPreset {
-    /// Every preset.
-    pub const ALL: [LeqPreset; 5] = [
+    /// Every preset, in the order the app offers them.
+    pub const ALL: [LeqPreset; 17] = [
         LeqPreset::Din15905,
         LeqPreset::Swiss93,
         LeqPreset::Swiss96,
         LeqPreset::Swiss100,
         LeqPreset::Who,
+        LeqPreset::France,
+        LeqPreset::FranceChildren,
+        LeqPreset::Flanders85,
+        LeqPreset::Flanders95,
+        LeqPreset::Flanders100,
+        LeqPreset::Brussels85,
+        LeqPreset::Brussels95,
+        LeqPreset::Brussels100,
+        LeqPreset::NetherlandsCovenant,
+        LeqPreset::NetherlandsCovenant16To17,
+        LeqPreset::NetherlandsCovenant14To15,
+        LeqPreset::NetherlandsCovenantTo13,
     ];
 
     /// Display name.
@@ -867,10 +906,22 @@ impl LeqPreset {
             LeqPreset::Swiss96 => "Swiss V-NISSG 96 dB",
             LeqPreset::Swiss100 => "Swiss V-NISSG 100 dB",
             LeqPreset::Who => "WHO safe listening",
+            LeqPreset::France => "France R1336-1",
+            LeqPreset::FranceChildren => "France R1336-1, children up to 6",
+            LeqPreset::Flanders85 => "Flanders VLAREM 85 dB",
+            LeqPreset::Flanders95 => "Flanders VLAREM 95 dB",
+            LeqPreset::Flanders100 => "Flanders VLAREM 100 dB",
+            LeqPreset::Brussels85 => "Brussels 85 dB",
+            LeqPreset::Brussels95 => "Brussels 95 dB",
+            LeqPreset::Brussels100 => "Brussels 100 dB",
+            LeqPreset::NetherlandsCovenant => "NL covenant 103 dB",
+            LeqPreset::NetherlandsCovenant16To17 => "NL covenant, ages 16–17",
+            LeqPreset::NetherlandsCovenant14To15 => "NL covenant, ages 14–15",
+            LeqPreset::NetherlandsCovenantTo13 => "NL covenant, ages up to 13",
         }
     }
 
-    /// Where the figure comes from.
+    /// Where the figures come from.
     pub fn source(self) -> &'static str {
         match self {
             LeqPreset::Din15905 => "DIN 15905-5:2007, loudest audience position",
@@ -878,40 +929,118 @@ impl LeqPreset {
                 "V-NISSG (SR 814.711), by event category"
             }
             LeqPreset::Who => "WHO Global standard for safe listening venues and events (2022)",
+            LeqPreset::France => {
+                "Code de la santé publique art. R1336-1 II 1° (décret n° 2017-1244), anywhere \
+                 the public can be"
+            }
+            LeqPreset::FranceChildren => {
+                "Code de la santé publique art. R1336-1 II 1° (décret n° 2017-1244), events \
+                 aimed at children up to six"
+            }
+            LeqPreset::Flanders85 => {
+                "VLAREM II art. 6.7.3 § 1: music in tents, open air and other public places"
+            }
+            LeqPreset::Flanders95 => {
+                "VLAREM II art. 5.32.2.2bis § 1 (and 5.32.3.10): at the measuring position"
+            }
+            LeqPreset::Flanders100 => {
+                "VLAREM II art. 5.32.2.2bis § 2: at the measuring position, LAeq 15 min shown"
+            }
+            LeqPreset::Brussels85 => {
+                "Brussels-Capital arrêté du 26 janvier 2017 (son amplifié) art. 3"
+            }
+            LeqPreset::Brussels95 => {
+                "Brussels-Capital arrêté du 26 janvier 2017 (son amplifié) art. 4"
+            }
+            LeqPreset::Brussels100 => {
+                "Brussels-Capital arrêté du 26 janvier 2017 (son amplifié) art. 5"
+            }
+            LeqPreset::NetherlandsCovenant => {
+                "Vierde convenant preventie gehoorschade versterkte muziek (Stcrt. 2024, 3787) \
+                 art. 3.1.2, voluntary"
+            }
+            LeqPreset::NetherlandsCovenant16To17
+            | LeqPreset::NetherlandsCovenant14To15
+            | LeqPreset::NetherlandsCovenantTo13 => {
+                "Vierde convenant preventie gehoorschade versterkte muziek (Stcrt. 2024, 3787) \
+                 art. 3.1.3, voluntary"
+            }
         }
     }
 
-    /// The window the preset limits, with its limit.
-    pub fn window(self) -> LeqWindow {
-        let (minutes, limit) = match self {
-            LeqPreset::Din15905 => (30, 99.0),
-            LeqPreset::Swiss93 => (60, 93.0),
-            LeqPreset::Swiss96 => (60, 96.0),
-            LeqPreset::Swiss100 => (60, 100.0),
-            LeqPreset::Who => (15, 100.0),
-        };
-        LeqWindow {
-            limit: Some(DbSpl(limit)),
+    /// The windows the preset sets, in order of length. A window with a limit gets that
+    /// limit; one without is a window the rule wants shown, added if missing and otherwise
+    /// left as it is.
+    pub fn windows(self) -> Vec<LeqWindow> {
+        use Weighting::{A, C};
+        let w = |minutes: u32, weighting: Weighting, limit: Option<f64>| LeqWindow {
+            weighting,
+            limit: limit.map(DbSpl),
             ..LeqWindow::minutes(minutes)
+        };
+        match self {
+            LeqPreset::Din15905 => vec![w(30, A, Some(99.0))],
+            LeqPreset::Swiss93 => vec![w(60, A, Some(93.0))],
+            LeqPreset::Swiss96 => vec![w(60, A, Some(96.0))],
+            LeqPreset::Swiss100 => vec![w(60, A, Some(100.0))],
+            LeqPreset::Who => vec![w(15, A, Some(100.0))],
+            LeqPreset::France => vec![w(15, A, Some(102.0)), w(15, C, Some(118.0))],
+            LeqPreset::FranceChildren => vec![w(15, A, Some(94.0)), w(15, C, Some(104.0))],
+            LeqPreset::Flanders85 => vec![w(15, A, Some(85.0))],
+            LeqPreset::Flanders95 => vec![w(15, A, Some(95.0))],
+            LeqPreset::Flanders100 => vec![w(15, A, None), w(60, A, Some(100.0))],
+            LeqPreset::Brussels85 => vec![w(15, A, Some(85.0))],
+            LeqPreset::Brussels95 => vec![w(15, A, Some(95.0)), w(15, C, Some(110.0))],
+            LeqPreset::Brussels100 => vec![w(60, A, Some(100.0)), w(60, C, Some(115.0))],
+            LeqPreset::NetherlandsCovenant => vec![w(15, A, Some(103.0))],
+            LeqPreset::NetherlandsCovenant16To17 => vec![w(15, A, Some(100.0))],
+            LeqPreset::NetherlandsCovenant14To15 => vec![w(15, A, Some(96.0))],
+            LeqPreset::NetherlandsCovenantTo13 => vec![w(15, A, Some(91.0))],
         }
     }
 
-    /// Sets the preset's limit on its window in `windows`, adding the window (in order of
-    /// length) when there is none of that length and weighting. Other windows are kept.
-    pub fn apply(self, windows: &mut Vec<LeqWindow>) {
-        let p = self.window();
-        if let Some(w) = windows
-            .iter_mut()
-            .find(|w| w.duration == p.duration && w.weighting == p.weighting)
-        {
-            w.limit = p.limit;
-            return;
-        }
-        let at = windows
+    /// How many of the preset's windows `windows` lacks.
+    pub fn missing(self, windows: &[LeqWindow]) -> usize {
+        self.windows()
             .iter()
-            .position(|w| w.duration.0 > p.duration.0)
-            .unwrap_or(windows.len());
-        windows.insert(at, p);
+            .filter(|p| {
+                !windows
+                    .iter()
+                    .any(|w| w.duration == p.duration && w.weighting == p.weighting)
+            })
+            .count()
+    }
+
+    /// Sets the preset's limits on its windows in `windows`, adding each window it lacks
+    /// before the first longer one. Other windows are kept. Refused, with `windows`
+    /// unchanged, when the added windows would pass [`LeqConfig::MAX_WINDOWS`].
+    pub fn apply(self, windows: &mut Vec<LeqWindow>) -> Result<(), String> {
+        let add = self.missing(windows);
+        if windows.len() + add > LeqConfig::MAX_WINDOWS {
+            return Err(format!(
+                "{} needs {add} more window{}: at most {} per meter, remove one first",
+                self.name(),
+                if add == 1 { "" } else { "s" },
+                LeqConfig::MAX_WINDOWS
+            ));
+        }
+        for p in self.windows() {
+            if let Some(w) = windows
+                .iter_mut()
+                .find(|w| w.duration == p.duration && w.weighting == p.weighting)
+            {
+                if p.limit.is_some() {
+                    w.limit = p.limit;
+                }
+                continue;
+            }
+            let at = windows
+                .iter()
+                .position(|w| w.duration.0 > p.duration.0)
+                .unwrap_or(windows.len());
+            windows.insert(at, p);
+        }
+        Ok(())
     }
 }
 

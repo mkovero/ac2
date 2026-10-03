@@ -26,6 +26,7 @@ pub mod format;
 pub mod grid;
 pub mod ir;
 pub mod leq;
+pub mod leq_preset;
 pub mod meter;
 pub mod primitives;
 pub mod progress;

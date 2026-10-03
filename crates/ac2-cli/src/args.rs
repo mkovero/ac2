@@ -720,6 +720,44 @@ pub enum PresetArg {
     Swiss100,
     /// WHO safe listening (2022): LAeq 15 min ≤ 100 dB.
     Who,
+    /// France, Code de la santé publique art. R1336-1: LAeq 15 min ≤ 102 dB, LCeq 15 min
+    /// ≤ 118 dB.
+    #[value(name = "france")]
+    France,
+    /// France, art. R1336-1, events for children up to six: LAeq 15 min ≤ 94 dB, LCeq
+    /// 15 min ≤ 104 dB.
+    #[value(name = "france-children")]
+    FranceChildren,
+    /// Flanders, VLAREM II art. 6.7.3: LAeq 15 min ≤ 85 dB.
+    #[value(name = "flanders-85")]
+    Flanders85,
+    /// Flanders, VLAREM II art. 5.32.2.2bis § 1: LAeq 15 min ≤ 95 dB.
+    #[value(name = "flanders-95")]
+    Flanders95,
+    /// Flanders, VLAREM II art. 5.32.2.2bis § 2: LAeq 60 min ≤ 100 dB, LAeq 15 min shown.
+    #[value(name = "flanders-100")]
+    Flanders100,
+    /// Brussels-Capital, arrêté of 26 January 2017 art. 3: LAeq 15 min ≤ 85 dB.
+    #[value(name = "brussels-85")]
+    Brussels85,
+    /// Brussels-Capital, art. 4: LAeq 15 min ≤ 95 dB, LCeq 15 min ≤ 110 dB.
+    #[value(name = "brussels-95")]
+    Brussels95,
+    /// Brussels-Capital, art. 5: LAeq 60 min ≤ 100 dB, LCeq 60 min ≤ 115 dB.
+    #[value(name = "brussels-100")]
+    Brussels100,
+    /// Netherlands, fourth covenant (voluntary) art. 3.1.2: LAeq 15 min ≤ 103 dB.
+    #[value(name = "nl-covenant")]
+    NlCovenant,
+    /// Netherlands covenant art. 3.1.3, audiences of 16–17: LAeq 15 min ≤ 100 dB.
+    #[value(name = "nl-covenant-16-17")]
+    NlCovenant16To17,
+    /// Netherlands covenant art. 3.1.3, audiences of 14–15: LAeq 15 min ≤ 96 dB.
+    #[value(name = "nl-covenant-14-15")]
+    NlCovenant14To15,
+    /// Netherlands covenant art. 3.1.3, audiences up to 13: LAeq 15 min ≤ 91 dB.
+    #[value(name = "nl-covenant-13")]
+    NlCovenantTo13,
 }
 
 /// `spl leq set`.
@@ -731,7 +769,8 @@ pub struct LeqSet {
     /// `c:30s` for C). Windows kept keep their limits.
     #[arg(long, value_delimiter = ',', value_name = "WINDOWS")]
     pub windows: Option<Vec<LeqWindowArg>>,
-    /// A preset's limit on its window (added if missing); repeatable.
+    /// A preset's limits on its windows (each added if missing, other windows kept);
+    /// repeatable. Informational, not legal advice.
     #[arg(long, value_enum)]
     pub preset: Vec<PresetArg>,
     /// A window's limit: `30min=99db`, `30min=none` removes it; repeatable.

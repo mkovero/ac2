@@ -131,15 +131,129 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
 
 ## Presets (informational, not legal advice)
 
-| preset | window | limit | source |
-|---|---|---|---|
-| DIN 15905-5 | LAeq 30 min | 99 dB | DIN 15905-5:2007, loudest audience position |
-| Swiss V-NISSG 93 / 96 / 100 | LAeq 60 min | 93 / 96 / 100 dB | V-NISSG (SR 814.711), by event category |
-| WHO safe listening | LAeq 15 min | 100 dB | WHO Global standard for safe listening venues and events (2022) |
+A preset sets the limits of one published rule on its windows, adding each window the
+meter lacks before the first longer one; other windows and their limits are kept. A
+preset window without a limit is one the rule wants shown (added if missing, left as it
+is otherwise). When the added windows would pass `LeqConfig::MAX_WINDOWS` (8) the preset
+is refused and nothing changes; the defaults (5 windows) leave room for any preset. In the
+app, ←/→ on the preset row shows each preset over the windows as they were before the
+row was first changed, so presets do not pile up; an edit to a window keeps what the
+preset set. `ac2 spl leq set --preset` applies each given preset in turn.
 
-A preset sets the limit on its window (adding it if missing) and leaves the others. Each
-regulation has more to it (LCpeak / LAFmax limits, where to measure, position corrections,
-notification and documentation duties); the operator owns that.
+Every preset is a starting point for the operator, who owns the rest of the rule:
+ac2 judges only the Leq windows below, with no position correction, and is not a
+type-approved instrument (see the last section). Retrieved 2026-10-03.
+
+| preset (`--preset`) | windows | source |
+|---|---|---|
+| DIN 15905-5 (`din15905`) | LAeq 30 min ≤ 99 dB | DIN 15905-5:2007, loudest audience position |
+| Swiss V-NISSG 93 / 96 / 100 (`swiss93` …) | LAeq 60 min ≤ 93 / 96 / 100 dB | V-NISSG (SR 814.711), by event category |
+| WHO safe listening (`who`) | LAeq 15 min ≤ 100 dB | WHO Global standard for safe listening venues and events (2022) |
+| France R1336-1 (`france`) | LAeq 15 min ≤ 102 dB **and** LCeq 15 min ≤ 118 dB | [1] art. R1336-1 II 1° |
+| France R1336-1, children up to 6 (`france-children`) | LAeq 15 min ≤ 94 dB **and** LCeq 15 min ≤ 104 dB | [1] art. R1336-1 II 1°, second sentence |
+| Flanders VLAREM 85 dB (`flanders-85`) | LAeq 15 min ≤ 85 dB | [2] art. 6.7.3 § 1 |
+| Flanders VLAREM 95 dB (`flanders-95`) | LAeq 15 min ≤ 95 dB | [2] art. 5.32.2.2bis § 1, 1° (and art. 5.32.3.10 § 1) |
+| Flanders VLAREM 100 dB (`flanders-100`) | LAeq 60 min ≤ 100 dB; LAeq 15 min shown | [2] art. 5.32.2.2bis § 2, 1° and 3° |
+| Brussels 85 dB (`brussels-85`) | LAeq 15 min ≤ 85 dB | [3] art. 3 § 1 |
+| Brussels 95 dB (`brussels-95`) | LAeq 15 min ≤ 95 dB **and** LCeq 15 min ≤ 110 dB | [3] art. 4 § 1 |
+| Brussels 100 dB (`brussels-100`) | LAeq 60 min ≤ 100 dB **and** LCeq 60 min ≤ 115 dB | [3] art. 5 § 1 |
+| NL covenant 103 dB (`nl-covenant`) | LAeq 15 min ≤ 103 dB | [4] art. 3.1.2 |
+| NL covenant, ages 16–17 (`nl-covenant-16-17`) | LAeq 15 min ≤ 100 dB | [4] art. 3.1.3 c |
+| NL covenant, ages 14–15 (`nl-covenant-14-15`) | LAeq 15 min ≤ 96 dB | [4] art. 3.1.3 b |
+| NL covenant, ages up to 13 (`nl-covenant-13`) | LAeq 15 min ≤ 91 dB | [4] art. 3.1.3 a |
+
+ac2's windows slide in one-second steps, which is how Brussels defines its windows
+(art. 1 § 1, 4°–7°); the other texts say "over 15 minutes" without fixing the step.
+
+### Sources and what ac2 does not check
+
+**[1] France** — Code de la santé publique, art. R1336-1, as modified by décret
+n° 2017-1244 du 7 août 2017 (art. 1), version in force since 10 August 2017.
+<https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000035425898>. Applies to places
+open to or receiving the public, closed or open, that diffuse amplified sound above the
+equal-energy rule of 80 dB(A) over 8 h. II 1°: "Ne dépasser, à aucun moment et en aucun
+endroit accessible au public, les niveaux de pression acoustique continus équivalents 102
+décibels pondérés A sur 15 minutes et 118 décibels pondérés C sur 15 minutes"; for
+activities "spécifiquement destinées aux enfants jusqu'à l'âge de six ans révolus", 94 dB(A)
+and 104 dB(C) over 15 minutes. Not checked by ac2: the limit holds at any place accessible
+to the public (ac2 measures where its mic is); continuous recording of the A and C levels
+and keeping the recordings (2°, venues over 300 people and all discothèques); showing the
+levels continuously near the sound control position (3°); informing the public of the
+risks (4°); free hearing protection (5°); rest zones or periods at or below the
+80 dB(A) / 8 h rule (6°); the étude de l'impact des nuisances sonores; the exemptions
+(cinemas, art schools; 2°–6° only for places diffusing amplified sound regularly, except
+festivals). Measuring and recording details are in the arrêté du 17 avril 2023 taken under
+art. R1336-1 to R1336-16 (not used for any figure here).
+
+**[2] Flanders** — VLAREM II (Besluit van de Vlaamse Regering van 1 juni 1995 houdende
+algemene en sectorale bepalingen inzake milieuhygiëne), consolidated text on Codex
+Vlaanderen: <https://codex.vlaanderen.be/Portals/Codex/documenten/1003794.html>.
+Art. 5.32.2.2bis (version from 1 October 2019), art. 5.32.3.10 (1 October 2019), art. 6.7.3
+(4 October 2014).
+- 85 dB (art. 6.7.3 § 1): music in tents, in the open air and in public places other than
+  those under rubriek 32.1 / 32.2: LAeq,15min ≤ 85 dB(A) anywhere the public normally is
+  (§ 2); deemed met when LAmax,slow ≤ 92 dB(A). Louder only with the municipality's
+  permission (§ 3: at most LAeq,60min 100 dB(A), a special occasion, and for halls at most 12
+  occasions a year, 2 a month, 24 calendar days), then under art. 5.32.2.2bis.
+- 95 dB (art. 5.32.2.2bis § 1, also 5.32.3.10 § 1 for rubriek 32.2.2°): music activities over
+  85 and up to 95 dB(A) LAeq,15min: LAeq,15min ≤ 95 dB(A), deemed met when LAmax,slow
+  ≤ 102 dB(A), music and ambient sound both counted.
+- 100 dB (art. 5.32.2.2bis § 2): music activities over 95 dB(A) LAeq,15min: LAeq,60min ≤ 100
+  dB(A), deemed met when LAeq,15min ≤ 102 dB(A); LAeq,60min and LAeq,15min measured
+  continuously, LAeq,15min continuously visible, LAeq,60min registered. § 3: over 100 dB(A)
+  LAeq,60min is forbidden.
+
+Not checked by ac2: the measuring position (meetplaats, bijlage 5.32.2.2bis art. 1) and the
+meter requirements (bijlage 5.32.2.2bis art. 2); the "deemed met" LAmax,slow alternatives;
+keeping the registered LAeq,60min for at least a month; posting the maximum level at the
+entrance and the mixing desk; acting at once on an overshoot; a sound limiter in place of
+measuring; free single-use hearing protection and a geluidsplan by an accredited expert
+(100 dB); the municipal permission and its count limits; which category an activity falls
+in (venue class, rubriek 32).
+
+**[3] Brussels-Capital** — Arrêté du Gouvernement de la Région de Bruxelles-Capitale du 26
+janvier 2017 fixant les conditions de diffusion du son amplifié dans les établissements
+ouverts au public, Moniteur belge 21 February 2017 (no. 2017010520, p. 27008), in force
+21 February 2018, erratum MB 31 January 2019.
+<https://www.ejustice.just.fgov.be/cgi_loi/change_lg.pl?language=fr&la=F&cn=2017012632&table_name=loi>;
+summary by Bruxelles Environnement:
+<https://environnement.brussels/thematiques/bruit/son-amplifie-electroniquement>.
+Art. 3: LAeq,15min ≤ 85 dB(A). Art. 4 (derogation): LAeq,15min ≤ 95 dB(A) and LCeq,15min
+≤ 110 dB(C). Art. 5 (derogation): LAeq,60min ≤ 100 dB(A) and LCeq,60min ≤ 115 dB(C).
+Not checked by ac2: the pictogram informing the public (art. 4, 5); a level display per
+room or stage, with recording for establishments under rubrique 135C (after midnight) and
+always for art. 5; the display microphone between the public and the main loudspeakers,
+1.20–5 m high, calibrated yearly, with a correction when it cannot be there (art. 4 § 1
+b); earplugs, a rest zone (≤ 85 dB(A) LAeq,15min, about 10 % of the floor) and a trained
+reference person (art. 5); the declaration or permit (art. 7); control measurements
+anywhere the public normally is, 1.20–1.50 m high (art. 6). The annex form pairs the
+levels differently from art. 3–5; the presets follow the articles.
+
+**[4] Netherlands** — Vierde convenant preventie gehoorschade versterkte muziek, signed by
+the Ministry of VWS and sector organisations, term to 6 December 2027 (art. 6), published
+in Staatscourant 2024, 3787 (8 February 2024).
+<https://zoek.officielebekendmakingen.nl/stcrt-2024-3787.html>. A voluntary covenant, not
+statute: it binds its parties' members, and any party may leave with three months'
+notice. Art. 3.1.2: "maximaal Leq=103 dB(A), gemeten over 15 minuten"; art. 3.1.3: up to
+13 years 91 dB(A), 14 and 15 years 96 dB(A), 16 and 17 years 100 dB(A), each over 15
+minutes. Not checked by ac2: the measuring protocol (Meetprotocol convenant geluid
+Nederland 2019, bijlage 2: 2 m above the floor in the middle of the audience area, a
+correction when measured elsewhere, a meter to IEC 61672-1 calibrated at least every two
+years); sharing the results with the registering party (art. 3.2.6); facilitating hearing
+protection from 88 dB(A) for minors and 92.5 dB(A) for adults (art. 3.3); visitor
+information (art. 3.4); the lower levels in the parties' own appendices (e.g. cinemas).
+
+**Not added**
+- Wallonia: no preset. The arrêté du Gouvernement wallon du 13 décembre 2018 fixant les
+  conditions de diffusion du son amplifié électroniquement dans les établissements ouverts
+  au public has not entered into force (Service public de Wallonie,
+  <https://environnement.wallonie.be/home/gestion-environnementale/risques-continus-et-pollutions/nuisances-sonores/sources-specifiques/musique-amplifiee-electroniquement.html>);
+  the same page says the arrêté royal du 24 février 1977 applies to music, whose art. 2
+  (original text, <https://wallex.wallonie.be/eli/arrete/1977/02/24/1977022408/1977/05/01>)
+  sets a maximum level of 90 dB(A) rather than an equivalent level over a window, which a
+  rolling Leq cannot stand for.
+- Netherlands, statute: no statutory audience limit was found; the covenant is the only
+  figure.
 
 ## What is and isn't claimed
 

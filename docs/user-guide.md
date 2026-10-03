@@ -470,16 +470,35 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
   **preset** row and the headroom horizon. ↑/↓ moves between rows, Tab between cells,
   **Insert** adds a window, **Delete** removes one, Enter applies.
-- Presets set a published limit on its window, informational only (each regulation also
-  has peak limits, a measuring position and duties of its own): DIN 15905-5, LAeq 30 min ≤
-  99 dB; Swiss V-NISSG, LAeq 60 min ≤ 93, 96 or 100 dB; WHO safe listening (2022), LAeq
-  15 min ≤ 100 dB. No measuring-position correction is applied: a mic at FOH reading for the
-  loudest audience position needs the difference added to the limit by hand.
+- Presets set a published rule's limits on its windows (adding the windows the meter
+  lacks), informational only — not legal advice: each rule also has peak limits, a
+  measuring position and duties of its own (`docs/design/leq.md` lists them). ←/→ on the
+  preset row shows each preset over the windows as they were; editing a window keeps it.
+  A preset that would need more than 8 windows is refused: remove one first.
+
+  | preset (`--preset`) | windows and limits |
+  |---|---|
+  | DIN 15905-5 (`din15905`) | LAeq 30 min ≤ 99 dB |
+  | Swiss V-NISSG (`swiss93`, `swiss96`, `swiss100`) | LAeq 60 min ≤ 93 / 96 / 100 dB |
+  | WHO safe listening, 2022 (`who`) | LAeq 15 min ≤ 100 dB |
+  | France R1336-1 (`france`) | LAeq 15 min ≤ 102 dB, LCeq 15 min ≤ 118 dB |
+  | France R1336-1, children up to 6 (`france-children`) | LAeq 15 min ≤ 94 dB, LCeq 15 min ≤ 104 dB |
+  | Flanders VLAREM II (`flanders-85`, `flanders-95`) | LAeq 15 min ≤ 85 / 95 dB |
+  | Flanders VLAREM II (`flanders-100`) | LAeq 60 min ≤ 100 dB, LAeq 15 min shown |
+  | Brussels (`brussels-85`) | LAeq 15 min ≤ 85 dB |
+  | Brussels (`brussels-95`) | LAeq 15 min ≤ 95 dB, LCeq 15 min ≤ 110 dB |
+  | Brussels (`brussels-100`) | LAeq 60 min ≤ 100 dB, LCeq 60 min ≤ 115 dB |
+  | NL covenant, voluntary (`nl-covenant`) | LAeq 15 min ≤ 103 dB |
+  | NL covenant, ages 16–17 / 14–15 / up to 13 (`nl-covenant-16-17`, `nl-covenant-14-15`, `nl-covenant-13`) | LAeq 15 min ≤ 100 / 96 / 91 dB |
+
+  Wallonia has no preset: its 2018 rule is not in force. No measuring-position correction
+  is applied: a mic at FOH reading for the loudest audience position (or for the rule's
+  measuring position) needs the difference added to the limit by hand.
 - Limits are judged only on a calibrated input (dB SPL, see above); an uncalibrated meter
   shows its windows in dBFS, marked "not calibrated".
 
 In the terminal: `ac2 spl leq watch` (big numbers; `--json` for one line per second),
-`ac2 spl leq set --preset din15905 --limit 1min=102db` (also `--windows 1min,5min,c:30s`,
+`ac2 spl leq set --preset france --limit 1min=102db` (also `--windows 1min,5min,c:30s`,
 `--warn 3db`, `--horizon 1min`), `ac2 spl leq export -o show.csv` (the per-second log as
 CSV, for the record). Each takes `--meas` or `--input` when there is more than one meter.
 How it is computed: `docs/design/leq.md`.
