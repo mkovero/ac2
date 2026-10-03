@@ -407,10 +407,14 @@ impl Analysis for Spl {
                 self.config_rev = rev;
                 self.cfg.leq = config.clone();
                 self.leq.set_config(config, self.fs);
-                let at = WallNs(self.wall);
-                // The new windows are judged on the next second; the entity learns their
-                // starting point now.
-                self.report(at, Vec::new());
+                // The rebuilt windows are judged at once: a new limit below the level is
+                // an alarm now, not a second later, and the next frame carries the state.
+                let at = if self.wall > 0 {
+                    self.wall
+                } else {
+                    crate::util::wall_ns()
+                };
+                self.judge(WallNs(at));
             }
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }

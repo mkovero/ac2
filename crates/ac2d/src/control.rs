@@ -924,8 +924,10 @@ impl Control {
                 }
                 m.grid_id = static_grid(&m.config.kind).map(|g| self.register_grid(g));
                 // The log and the entity follow the new configuration before the job
-                // starts, so a restarted meter reports against its new windows.
+                // starts, so a restarted meter reports against its new windows; the
+                // measurement's own commit comes after, under the rev it names.
                 self.ensure_spl_log(&m, old_leq.as_ref());
+                m.config_rev = Rev(self.store.rev().0 + 1);
                 if m.running && self.session.is_some() {
                     self.stop_job(meas);
                     if let Some(g) = self.start_job(&m)? {

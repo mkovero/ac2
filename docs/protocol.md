@@ -166,8 +166,8 @@ Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8
 display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60)}. `LeqWindow` =
 {`duration`: Seconds (1 s … 24 h, whole seconds), `weighting`: `a` \| `c` \| `z`, `limit`:
 DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3)}. Front ends create meters with LAeq over
-1, 5, 10, 30 and 60 min and no limits. Anything else is `invalid` at `meas.create` /
-`meas.update`.
+1, 5, 10, 30 and 60 min and no limits. A configuration outside these bounds is `invalid`
+at `meas.create` / `meas.update`.
 
 Every running SPL meter integrates its input (after the mic curve, when on) into one-second
 blocks of A-, C- and Z-weighted energy on a grid of whole seconds from its first sample;

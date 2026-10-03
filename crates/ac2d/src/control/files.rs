@@ -271,6 +271,7 @@ impl Control {
                 grid_id,
             };
             self.ensure_spl_log(&meas, None);
+            meas.config_rev = Rev(self.store.rev().0 + 1);
             if meas.running && self.session.is_some() {
                 match self.start_job(&meas) {
                     Ok(Some(g)) => meas.grid_id = Some(self.register_grid(g)),
