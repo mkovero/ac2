@@ -12,14 +12,14 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 8
+PROTO_VERSION = 9
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
 MAX_FRAME_BYTES = 2 << 20
 MAX_TOPIC_BYTES = 32
 
-STREAMS = ("tf", "ir", "rta", "spec", "spl", "levels")
+STREAMS = ("tf", "ir", "rta", "spec", "spl", "leq", "levels")
 _DATA_TOPIC = re.compile(r"^d/(0|[1-9][0-9]*)/(" + "|".join(STREAMS) + r")$")
 
 

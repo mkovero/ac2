@@ -15,6 +15,7 @@ pub mod mic;
 pub mod ops;
 pub mod session;
 pub mod smooth;
+pub mod spl_log;
 pub mod text;
 
 pub use columns::{Columns, StoredTrace, frequencies, resample};

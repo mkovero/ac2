@@ -377,6 +377,7 @@ impl Rig {
                             weighting: Weighting::A,
                             time_weighting: TimeWeighting::Fast,
                             peak_weighting: PeakWeighting::C,
+                            leq: LeqConfig::default_windows(),
                         },
                     },
                     None,

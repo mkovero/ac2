@@ -307,3 +307,62 @@ fn no_restore_starts_empty() {
     drop(c);
     h.shutdown();
 }
+
+fn log_page(c: &mut Client, meas: MeasId) -> SplLogPage {
+    match c.ok(Command::SplLogGet {
+        meas,
+        from: 0,
+        max: 1000,
+    }) {
+        ReplyBody::SplLogPage(p) => p,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// An SPL meter's per-second log is in the autosave: after a restart the meter, its Leq
+/// windows and every logged second are back.
+#[test]
+fn spl_log_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, backend) = start("autosave-spl", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    c.ok(Command::MeasCreate {
+        config: spl("meter", 1),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let mut d = driver(&backend);
+    run(&mut d, 3.5);
+    let deadline = Instant::now() + T;
+    let logged = loop {
+        let p = log_page(&mut c, MeasId(1));
+        if p.total >= 3 {
+            break p;
+        }
+        assert!(Instant::now() < deadline, "seconds never logged");
+        run(&mut d, 0.1);
+    };
+    assert!(logged.rows.iter().all(|r| r.measured == Seconds(1.0)));
+    drop(c);
+    h.shutdown();
+
+    let (h, _backend) = start("autosave-spl-2", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    let st = state(&mut c);
+    assert_eq!(st.measurements.len(), 1);
+    assert_eq!(st.spl_logs.len(), 1);
+    assert_eq!(st.spl_logs[0].windows.len(), 5);
+    let back = log_page(&mut c, MeasId(1));
+    assert!(back.total >= logged.total);
+    for (a, b) in back.rows.iter().zip(&logged.rows) {
+        assert_eq!(
+            (a.start, a.measured, a.sensitivity),
+            (b.start, b.measured, b.sensitivity)
+        );
+        assert!((a.laeq.0 - b.laeq.0).abs() < 1e-3 || a.laeq.0 == b.laeq.0);
+    }
+    drop(c);
+    h.shutdown();
+}

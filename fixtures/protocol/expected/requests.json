@@ -1,6 +1,6 @@
 [
  {
-  "v": 8,
+  "v": 9,
   "id": 0,
   "cmd": {
    "op": "hello",
@@ -11,7 +11,7 @@
   "expect_rev": null
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 2,
   "cmd": {
    "op": "session.open",
@@ -43,7 +43,7 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -76,7 +76,7 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
@@ -84,7 +84,7 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 10,
   "cmd": {
    "op": "meas.create",
@@ -121,7 +121,7 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 17,
   "cmd": {
    "op": "delay.find",
@@ -136,7 +136,7 @@
   "expect_rev": null
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 18,
   "cmd": {
    "op": "delay.insert",
@@ -151,7 +151,7 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 28,
   "cmd": {
    "op": "trace.import",
@@ -167,7 +167,7 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
+  "v": 9,
   "id": 31,
   "cmd": {
    "op": "cal.curve_import",
@@ -184,8 +184,21 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
-  "id": 35,
+  "v": 9,
+  "id": 33,
+  "cmd": {
+   "op": "spl.log_get",
+   "args": {
+    "meas": 4,
+    "from": 120,
+    "max": 3600
+   }
+  },
+  "expect_rev": null
+ },
+ {
+  "v": 9,
+  "id": 34,
   "cmd": {
    "op": "ir.capture",
    "args": {
@@ -219,8 +232,8 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
-  "id": 42,
+  "v": 9,
+  "id": 41,
   "cmd": {
    "op": "session.inputs",
    "args": {
@@ -253,8 +266,8 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
-  "id": 43,
+  "v": 9,
+  "id": 42,
   "cmd": {
    "op": "cal.delete",
    "args": {
@@ -268,8 +281,8 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
-  "id": 44,
+  "v": 9,
+  "id": 43,
   "cmd": {
    "op": "session.preview",
    "args": {
@@ -280,16 +293,16 @@
   "expect_rev": null
  },
  {
-  "v": 8,
-  "id": 45,
+  "v": 9,
+  "id": 44,
   "cmd": {
    "op": "session.preview_stop"
   },
   "expect_rev": null
  },
  {
-  "v": 8,
-  "id": 46,
+  "v": 9,
+  "id": 45,
   "cmd": {
    "op": "session.detect_loopback",
    "args": {
@@ -305,8 +318,8 @@
   "expect_rev": null
  },
  {
-  "v": 8,
-  "id": 47,
+  "v": 9,
+  "id": 46,
   "cmd": {
    "op": "trace.mic_curve",
    "args": {
@@ -320,8 +333,8 @@
   "expect_rev": 41
  },
  {
-  "v": 8,
-  "id": 49,
+  "v": 9,
+  "id": 48,
   "cmd": {
    "op": "cal.curve_delete",
    "args": {

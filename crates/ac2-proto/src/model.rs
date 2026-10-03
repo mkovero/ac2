@@ -572,7 +572,7 @@ pub struct RtaConfig {
 }
 
 /// Sound level meter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplConfig {
     /// Input channel.
@@ -583,6 +583,65 @@ pub struct SplConfig {
     pub time_weighting: TimeWeighting,
     /// Peak weighting.
     pub peak_weighting: PeakWeighting,
+    /// Rolling Leq windows (`docs/design/leq.md`).
+    pub leq: LeqConfig,
+}
+
+/// One rolling Leq window of an SPL meter.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqWindow {
+    /// Length: whole seconds, 1 s … [`LeqWindow::MAX_SECONDS`].
+    pub duration: Seconds,
+    /// Frequency weighting.
+    pub weighting: Weighting,
+    /// Limit; judged only while the meter reads dB SPL (calibrated).
+    pub limit: Option<DbSpl>,
+    /// The window is "near" within this much below the limit (≥ 0).
+    pub warn_margin: Db,
+}
+
+/// The Leq windows of an SPL meter and the horizon of their headroom figure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqConfig {
+    /// Windows, in display order (at most [`LeqConfig::MAX_WINDOWS`]).
+    pub windows: Vec<LeqWindow>,
+    /// Headroom horizon: the steady level allowed over this much of the future
+    /// (whole seconds, 1 s … 1 h).
+    pub horizon: Seconds,
+}
+
+/// Judgement of a rolling Leq window against its limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeqJudgement {
+    /// The window has no limit.
+    NoLimit,
+    /// A limit is set but the meter reads dBFS: nothing is judged.
+    NotCalibrated,
+    /// More than the warn margin below the limit (or nothing measured yet).
+    Ok,
+    /// Within the warn margin below the limit, or at it.
+    Near,
+    /// Above the limit.
+    Over,
+}
+
+/// Informational presets of a limit on one window. Not legal advice: each regulation has
+/// more to it (peak limits, measuring position, duties); `docs/design/leq.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LeqPreset {
+    /// DIN 15905-5: LAeq 30 min ≤ 99 dB.
+    Din15905,
+    /// Swiss V-NISSG, first category: LAeq 60 min ≤ 93 dB.
+    Swiss93,
+    /// Swiss V-NISSG, second category: LAeq 60 min ≤ 96 dB.
+    Swiss96,
+    /// Swiss V-NISSG, third category: LAeq 60 min ≤ 100 dB.
+    Swiss100,
+    /// WHO safe listening venues and events (2022): LAeq 15 min ≤ 100 dB.
+    Who,
 }
 
 /// What a measurement computes.
@@ -700,14 +759,159 @@ impl RtaConfig {
 }
 
 impl SplConfig {
-    /// `input` with the given weightings and a C-weighted peak.
+    /// `input` with the given weightings, a C-weighted peak and the default Leq windows.
     pub fn on_input(input: u16, weighting: Weighting, time_weighting: TimeWeighting) -> Self {
         Self {
             input,
             weighting,
             time_weighting,
             peak_weighting: PeakWeighting::C,
+            leq: LeqConfig::default_windows(),
         }
+    }
+}
+
+impl LeqWindow {
+    /// Longest window, s (one day).
+    pub const MAX_SECONDS: u32 = 86_400;
+    /// Default warn margin, dB.
+    pub const DEFAULT_WARN_MARGIN_DB: f64 = 3.0;
+
+    /// A-weighted, `minutes` long, no limit.
+    pub fn minutes(minutes: u32) -> Self {
+        Self {
+            duration: Seconds(f64::from(minutes) * 60.0),
+            weighting: Weighting::A,
+            limit: None,
+            warn_margin: Db(Self::DEFAULT_WARN_MARGIN_DB),
+        }
+    }
+
+    /// Length in whole seconds, when it is one in range.
+    pub fn seconds(&self) -> Option<u32> {
+        let s = self.duration.0;
+        (s.is_finite() && s >= 1.0 && s <= f64::from(Self::MAX_SECONDS) && s.fract() == 0.0)
+            .then_some(s as u32)
+    }
+
+    /// Whether the window is well formed: whole seconds in range, a finite limit and a
+    /// finite margin ≥ 0.
+    pub fn is_valid(&self) -> bool {
+        self.seconds().is_some()
+            && self.limit.is_none_or(|l| l.0.is_finite())
+            && self.warn_margin.0.is_finite()
+            && self.warn_margin.0 >= 0.0
+    }
+}
+
+impl LeqConfig {
+    /// Most windows per meter.
+    pub const MAX_WINDOWS: usize = 8;
+    /// Default headroom horizon, s.
+    pub const DEFAULT_HORIZON_S: f64 = 60.0;
+    /// Longest headroom horizon, s.
+    pub const MAX_HORIZON_S: f64 = 3600.0;
+
+    /// LAeq over 1, 5, 10, 30 and 60 min, no limits, a one-minute horizon.
+    pub fn default_windows() -> Self {
+        Self {
+            windows: [1, 5, 10, 30, 60].map(LeqWindow::minutes).to_vec(),
+            horizon: Seconds(Self::DEFAULT_HORIZON_S),
+        }
+    }
+
+    /// Horizon in whole seconds, when it is one in range.
+    pub fn horizon_seconds(&self) -> Option<u32> {
+        let h = self.horizon.0;
+        (h.is_finite() && (1.0..=Self::MAX_HORIZON_S).contains(&h) && h.fract() == 0.0)
+            .then_some(h as u32)
+    }
+
+    /// Why the configuration cannot run, if it cannot.
+    pub fn check(&self) -> Result<(), String> {
+        if self.windows.len() > Self::MAX_WINDOWS {
+            return Err(format!(
+                "at most {} Leq windows per meter",
+                Self::MAX_WINDOWS
+            ));
+        }
+        if let Some(w) = self.windows.iter().find(|w| !w.is_valid()) {
+            return Err(format!(
+                "Leq window of {} s: a window is 1 s … 24 h in whole seconds, with a finite \
+                 limit and a warn margin of 0 dB or more",
+                w.duration.0
+            ));
+        }
+        if self.horizon_seconds().is_none() {
+            return Err("the headroom horizon is 1 s … 1 h in whole seconds".into());
+        }
+        Ok(())
+    }
+}
+
+impl LeqPreset {
+    /// Every preset.
+    pub const ALL: [LeqPreset; 5] = [
+        LeqPreset::Din15905,
+        LeqPreset::Swiss93,
+        LeqPreset::Swiss96,
+        LeqPreset::Swiss100,
+        LeqPreset::Who,
+    ];
+
+    /// Display name.
+    pub fn name(self) -> &'static str {
+        match self {
+            LeqPreset::Din15905 => "DIN 15905-5",
+            LeqPreset::Swiss93 => "Swiss V-NISSG 93 dB",
+            LeqPreset::Swiss96 => "Swiss V-NISSG 96 dB",
+            LeqPreset::Swiss100 => "Swiss V-NISSG 100 dB",
+            LeqPreset::Who => "WHO safe listening",
+        }
+    }
+
+    /// Where the figure comes from.
+    pub fn source(self) -> &'static str {
+        match self {
+            LeqPreset::Din15905 => "DIN 15905-5:2007, loudest audience position",
+            LeqPreset::Swiss93 | LeqPreset::Swiss96 | LeqPreset::Swiss100 => {
+                "V-NISSG (SR 814.711), by event category"
+            }
+            LeqPreset::Who => "WHO Global standard for safe listening venues and events (2022)",
+        }
+    }
+
+    /// The window the preset limits, with its limit.
+    pub fn window(self) -> LeqWindow {
+        let (minutes, limit) = match self {
+            LeqPreset::Din15905 => (30, 99.0),
+            LeqPreset::Swiss93 => (60, 93.0),
+            LeqPreset::Swiss96 => (60, 96.0),
+            LeqPreset::Swiss100 => (60, 100.0),
+            LeqPreset::Who => (15, 100.0),
+        };
+        LeqWindow {
+            limit: Some(DbSpl(limit)),
+            ..LeqWindow::minutes(minutes)
+        }
+    }
+
+    /// Sets the preset's limit on its window in `windows`, adding the window (in order of
+    /// length) when there is none of that length and weighting. Other windows are kept.
+    pub fn apply(self, windows: &mut Vec<LeqWindow>) {
+        let p = self.window();
+        if let Some(w) = windows
+            .iter_mut()
+            .find(|w| w.duration == p.duration && w.weighting == p.weighting)
+        {
+            w.limit = p.limit;
+            return;
+        }
+        let at = windows
+            .iter()
+            .position(|w| w.duration.0 > p.duration.0)
+            .unwrap_or(windows.len());
+        windows.insert(at, p);
     }
 }
 
@@ -1830,18 +2034,107 @@ pub enum CalStatus {
 // ---------------------------------------------------------------------------------------
 // SPL log, timing
 
-/// SPL log state of one SPL measurement.
+/// The per-second log of an SPL meter and the state of its Leq windows
+/// (`docs/design/leq.md`). Changes only when a window's judgement changes, the windows
+/// change or the log starts; values arrive in `leq` frames.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplLog {
-    /// Measurement logged.
+    /// SPL measurement.
     pub meas: MeasId,
-    /// Logging.
-    pub running: bool,
-    /// Interval between log rows.
-    pub interval: Seconds,
-    /// When the log started.
+    /// Wall time of the oldest second held; `None` before the first.
     pub started_at: Option<WallNs>,
+    /// Each configured window's state, in configuration order.
+    pub windows: Vec<LeqWindowState>,
+    /// Over and recovered events, oldest first (the newest [`SplLog::MAX_ALARMS`]).
+    pub alarms: Vec<LeqAlarm>,
+}
+
+impl SplLog {
+    /// Alarms kept.
+    pub const MAX_ALARMS: usize = 100;
+}
+
+/// State of one Leq window.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqWindowState {
+    /// Window length.
+    pub duration: Seconds,
+    /// Window weighting.
+    pub weighting: Weighting,
+    /// Current judgement.
+    pub judgement: LeqJudgement,
+    /// When the judgement began.
+    pub since: WallNs,
+}
+
+/// What happened to a window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LeqAlarmKind {
+    /// The window went over its limit.
+    Over,
+    /// The window came back to or below its limit.
+    Recovered,
+}
+
+/// A window going over its limit, or recovering.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqAlarm {
+    /// When (wall time of the end of the second that decided it).
+    pub at: WallNs,
+    /// Window length.
+    pub duration: Seconds,
+    /// Window weighting.
+    pub weighting: Weighting,
+    /// Over or recovered.
+    pub kind: LeqAlarmKind,
+    /// The window's Leq then.
+    pub leq: DbSpl,
+    /// Its limit.
+    pub limit: DbSpl,
+}
+
+/// One second of an SPL meter's log.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplLogRow {
+    /// Wall time of the second's first sample.
+    pub start: WallNs,
+    /// Time measured within the second (< 1 s next to a capture gap).
+    pub measured: Seconds,
+    /// LAeq over the measured time.
+    pub laeq: Dbfs,
+    /// LCeq over the measured time.
+    pub lceq: Dbfs,
+    /// LZeq over the measured time.
+    pub lzeq: Dbfs,
+    /// Sensitivity in force (dB SPL of 0 dBFS); `None` uncalibrated.
+    pub sensitivity: Option<Db>,
+}
+
+/// Rows of an SPL meter's log (`spl.log_get`). Rows are numbered from the first second the
+/// meter logged; the oldest are dropped after [`SplLogPage::RETAINED_ROWS`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplLogPage {
+    /// SPL measurement.
+    pub meas: MeasId,
+    /// Number of the first row returned.
+    pub from: u64,
+    /// Rows logged so far (one past the newest row's number).
+    pub total: u64,
+    /// The rows.
+    pub rows: Vec<SplLogRow>,
+}
+
+impl SplLogPage {
+    /// Rows a meter keeps: 48 h.
+    pub const RETAINED_ROWS: usize = 48 * 3600;
+    /// Most rows one reply carries.
+    pub const MAX_ROWS: u32 = 20_000;
 }
 
 /// Loopback timing monitor state (Q3).

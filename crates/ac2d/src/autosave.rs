@@ -26,6 +26,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::TraceMeta;
+use ac2_proto::units::MeasId;
 use ac2_traces::session::{self, SavedMeasurement, Session as SessionData, SessionError};
 
 use crate::control::ControlMsg;
@@ -38,9 +39,10 @@ pub(crate) const MAX_WAIT: Duration = Duration::from_secs(10);
 /// Wait before writing again after a failed write.
 pub(crate) const RETRY: Duration = Duration::from_secs(10);
 
-/// What a write would put on disk, minus the trace data: trace data never changes without
-/// its metadata being committed again, so equal fingerprints mean equal autosaves.
-pub(crate) type Fingerprint = (Vec<SavedMeasurement>, Vec<TraceMeta>);
+/// What a write would put on disk, minus the trace data and the SPL log rows: trace data
+/// never changes without its metadata being committed again, and a log only grows, so
+/// equal fingerprints (with each log's row count) mean equal autosaves.
+pub(crate) type Fingerprint = (Vec<SavedMeasurement>, Vec<TraceMeta>, Vec<(MeasId, u64)>);
 
 /// `<dir><suffix>` beside `dir`.
 fn sibling(dir: &Path, prefix: &str, suffix: &str) -> PathBuf {
@@ -324,6 +326,7 @@ mod tests {
         SessionData {
             saved_at: WallNs(at),
             measurements: Vec::new(),
+            spl_logs: Vec::new(),
             traces: Vec::new(),
         }
     }
@@ -415,7 +418,7 @@ mod tests {
         let w = Writer::spawn(root.path().join("a"), tx).expect("writer");
         let mut a = Autosaver::new(root.path().join("a"), w);
         let t0 = Instant::now();
-        let fp: Fingerprint = (Vec::new(), Vec::new());
+        let fp: Fingerprint = (Vec::new(), Vec::new(), Vec::new());
         assert!(a.due().is_none());
         assert!(a.changed(&fp, t0));
         assert_eq!(a.due(), Some(t0 + DEBOUNCE));
@@ -443,6 +446,7 @@ mod tests {
                             weighting: Weighting::A,
                             time_weighting: TimeWeighting::Fast,
                             peak_weighting: PeakWeighting::C,
+                            leq: ac2_proto::model::LeqConfig::default_windows(),
                         },
                     },
                 },
@@ -450,6 +454,7 @@ mod tests {
                 frozen: false,
                 delay: None,
             }],
+            Vec::new(),
             Vec::new(),
         );
         assert!(a.changed(&other, t9));

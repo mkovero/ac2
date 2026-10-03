@@ -30,18 +30,21 @@ pub enum Stream {
     Spec,
     /// SPL meter.
     Spl,
+    /// Rolling Leq windows of an SPL meter (once a second).
+    Leq,
     /// Input meters.
     Levels,
 }
 
 impl Stream {
     /// All streams.
-    pub const ALL: [Stream; 6] = [
+    pub const ALL: [Stream; 7] = [
         Self::Tf,
         Self::Ir,
         Self::Rta,
         Self::Spec,
         Self::Spl,
+        Self::Leq,
         Self::Levels,
     ];
 
@@ -53,6 +56,7 @@ impl Stream {
             Self::Rta => "rta",
             Self::Spec => "spec",
             Self::Spl => "spl",
+            Self::Leq => "leq",
             Self::Levels => "levels",
         }
     }

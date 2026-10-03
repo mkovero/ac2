@@ -185,6 +185,85 @@
   }
  },
  {
+  "kind": "measurement",
+  "rev": 59,
+  "payload": {
+   "type": "set",
+   "value": {
+    "id": 4,
+    "config": {
+     "name": "FOH SPL",
+     "kind": {
+      "type": "spl",
+      "config": {
+       "input": 1,
+       "weighting": "a",
+       "time_weighting": "fast",
+       "peak_weighting": "c",
+       "leq": {
+        "windows": [
+         {
+          "duration": 60.0,
+          "weighting": "a",
+          "limit": null,
+          "warn_margin": 3.0
+         },
+         {
+          "duration": 1800.0,
+          "weighting": "a",
+          "limit": 99.0,
+          "warn_margin": 3.0
+         }
+        ],
+        "horizon": 60.0
+       }
+      }
+     }
+    },
+    "config_rev": 40,
+    "running": true,
+    "frozen": false,
+    "delay": null,
+    "grid_id": null
+   }
+  }
+ },
+ {
+  "kind": "spl_log",
+  "rev": 52,
+  "payload": {
+   "type": "set",
+   "value": {
+    "meas": 4,
+    "started_at": 1790000000000000000,
+    "windows": [
+     {
+      "duration": 60.0,
+      "weighting": "a",
+      "judgement": "no_limit",
+      "since": 1790000000000000000
+     },
+     {
+      "duration": 1800.0,
+      "weighting": "a",
+      "judgement": "over",
+      "since": 1790000600000000000
+     }
+    ],
+    "alarms": [
+     {
+      "at": 1790000600000000000,
+      "duration": 1800.0,
+      "weighting": "a",
+      "kind": "over",
+      "leq": 99.25,
+      "limit": 99.0
+     }
+    ]
+   }
+  }
+ },
+ {
   "kind": "timing",
   "rev": 54,
   "payload": {

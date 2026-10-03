@@ -1,0 +1,87 @@
+{
+ "topic": "d/4/leq",
+ "header": {
+  "v": 9,
+  "kind": "leq",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 8,
+  "n": 2,
+  "arrays": [
+   {
+    "name": "leq",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "elapsed",
+    "unit": "seconds",
+    "elem": "f32"
+   },
+   {
+    "name": "measured",
+    "unit": "seconds",
+    "elem": "f32"
+   },
+   {
+    "name": "allowed",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "recover",
+    "unit": "seconds",
+    "elem": "f32"
+   },
+   {
+    "name": "leq_flags",
+    "unit": "bitmask",
+    "elem": "u32"
+   }
+  ],
+  "meta": {
+   "leq": {
+    "scale": "db_spl",
+    "cal": {
+     "type": "verified",
+     "calibrated_at": 1789000000000000000
+    },
+    "mic_curve": false,
+    "horizon": 60.0,
+    "logged": 1800
+   }
+  }
+ },
+ "arrays": {
+  "leq": [
+   96.5,
+   99.25
+  ],
+  "elapsed": [
+   60.0,
+   1800.0
+  ],
+  "measured": [
+   60.0,
+   1790.0
+  ],
+  "allowed": [
+   NaN,
+   NaN
+  ],
+  "recover": [
+   NaN,
+   412.0
+  ],
+  "leq_flags": [
+   0,
+   59
+  ]
+ }
+}

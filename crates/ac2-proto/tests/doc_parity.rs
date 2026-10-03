@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use ac2_proto::event::WireEvent;
 use ac2_proto::frame::{
-    ArrayName, ClipFlags, FrameHeader, FrameKind, ProtectionFlags, Unit, ValidityMask,
+    ArrayName, ClipFlags, FrameHeader, FrameKind, LeqFlags, ProtectionFlags, Unit, ValidityMask,
 };
 use ac2_proto::*;
 use serde::de::DeserializeOwned;
@@ -172,6 +172,34 @@ fn protocol_doc_names_everything() {
         &mut missing,
     );
     check(
+        "leq judgement",
+        &names_of::<model::LeqJudgement, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "leq alarm kind",
+        &names_of::<model::LeqAlarmKind, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    for (group, fields) in [
+        (
+            "leq window field",
+            names_of::<model::LeqWindow, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "spl log row field",
+            names_of::<model::SplLogRow, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "leq meta field",
+            names_of::<frame::LeqMeta, _>(&Bogus { bogus_field: 0 }),
+        ),
+    ] {
+        check(group, &fields, &doc, &mut missing);
+    }
+    check(
         "depth policy",
         &names_of::<model::DepthPolicy, _>(&Tagged { t: "no_such" }),
         &doc,
@@ -198,6 +226,7 @@ fn protocol_doc_names_everything() {
         ("validity bit", ValidityMask::NAMED),
         ("protection bit", ProtectionFlags::NAMED),
         ("clip bit", ClipFlags::NAMED),
+        ("leq flag", LeqFlags::NAMED),
     ] {
         for (name, bit) in flags {
             if !doc.contains(&format!("`{name}` {bit}")) {

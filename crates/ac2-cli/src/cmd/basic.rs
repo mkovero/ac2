@@ -583,12 +583,8 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
                     // Always a meter of its own: another one on the same input (the UI's, or
                     // one a killed watch left behind) integrates over a span this command
                     // knows nothing of, and its Leq would not describe what it watched.
-                    let want = SplConfig {
-                        input: input.0,
-                        weighting: weighting(w.weight),
-                        time_weighting: time_weighting(w.time),
-                        peak_weighting: PeakWeighting::C,
-                    };
+                    let want =
+                        SplConfig::on_input(input.0, weighting(w.weight), time_weighting(w.time));
                     let m = meas_call(
                         &c,
                         Command::MeasCreate {

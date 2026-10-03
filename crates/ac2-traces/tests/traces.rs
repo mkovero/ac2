@@ -9,7 +9,8 @@ use ac2_proto::units::*;
 use ac2_proto::{GridDef, ImportProblem};
 use ac2_traces::columns::{Columns, StoredTrace, frequencies};
 use ac2_traces::ops::{OpError, average, math};
-use ac2_traces::session::{self, SavedDelay, SavedMeasurement, Session, SessionError};
+use ac2_traces::session::{self, SavedDelay, SavedMeasurement, SavedSplLog, Session, SessionError};
+use ac2_traces::spl_log::SplLogInfo;
 use ac2_traces::text::{export_csv, import};
 
 fn fixture(name: &str) -> Vec<u8> {
@@ -633,31 +634,63 @@ fn session_sample() -> Session {
     let b = delayed(9, 2, 0.0100, 0.0100, 0.9);
     Session {
         saved_at: WallNs(1_790_000_000_123_456_789),
-        measurements: vec![SavedMeasurement {
-            id: MeasId(1),
-            config: MeasConfig {
-                name: "main".into(),
-                kind: MeasKind::Transfer {
-                    config: TransferConfig {
-                        reference_input: 0,
-                        measurement_input: 1,
-                        averaging: TfAveraging::Fifo { blocks: 8 },
-                        grid: LogGridSpec {
-                            ppo: 48,
-                            k_min: -240,
-                            k_max: 239,
+        measurements: vec![
+            SavedMeasurement {
+                id: MeasId(1),
+                config: MeasConfig {
+                    name: "main".into(),
+                    kind: MeasKind::Transfer {
+                        config: TransferConfig {
+                            reference_input: 0,
+                            measurement_input: 1,
+                            averaging: TfAveraging::Fifo { blocks: 8 },
+                            grid: LogGridSpec {
+                                ppo: 48,
+                                k_min: -240,
+                                k_max: 239,
+                            },
+                            smoothing: None,
+                            depth: DepthPolicy::EqualConfidence,
                         },
-                        smoothing: None,
-                        depth: DepthPolicy::EqualConfidence,
                     },
                 },
+                running: true,
+                frozen: false,
+                delay: Some(SavedDelay {
+                    applied: Seconds(0.0125),
+                    tracking: false,
+                }),
             },
-            running: true,
-            frozen: false,
-            delay: Some(SavedDelay {
-                applied: Seconds(0.0125),
-                tracking: false,
-            }),
+            SavedMeasurement {
+                id: MeasId(2),
+                config: MeasConfig {
+                    name: "FOH SPL".into(),
+                    kind: MeasKind::Spl {
+                        config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),
+                    },
+                },
+                running: true,
+                frozen: false,
+                delay: None,
+            },
+        ],
+        spl_logs: vec![SavedSplLog {
+            info: SplLogInfo {
+                meas: MeasId(2),
+                name: "FOH SPL".into(),
+                input: 1,
+                mic: None,
+            },
+            rows: (0..3)
+                .map(|k| SplLogRow {
+                    start: WallNs(1_790_000_000_000_000_000 + k * 1_000_000_000),
+                    measured: Seconds(1.0),
+                    laeq: Dbfs(-25.5 + k as f64),
+                    lceq: Dbfs(-23.25),
+                    lzeq: Dbfs(-22.0),
+                    sensitivity: Some(Db(120.0)),
+                })
+                .collect(),
         }],
         traces: vec![a, b],
     }
@@ -672,6 +705,16 @@ fn session_round_trip_and_generations() {
     let back = session::load(&dir).unwrap();
     assert_eq!(back.saved_at, s.saved_at);
     assert_eq!(back.measurements, s.measurements);
+    assert_eq!(back.spl_logs.len(), 1);
+    assert_eq!(back.spl_logs[0].info, s.spl_logs[0].info);
+    assert_eq!(back.spl_logs[0].rows.len(), 3);
+    for (x, y) in back.spl_logs[0].rows.iter().zip(&s.spl_logs[0].rows) {
+        assert_eq!(
+            (x.start, x.measured, x.sensitivity),
+            (y.start, y.measured, y.sensitivity)
+        );
+        assert!((x.laeq.0 - y.laeq.0).abs() < 1e-9);
+    }
     assert_eq!(back.traces.len(), 2);
     // Columns come back unsmoothed (bit for bit) with the smoothing as an edit.
     assert_eq!(
@@ -699,6 +742,11 @@ fn session_round_trip_and_generations() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(files, vec![format!("{}-4.csv", s2.saved_at.0)]);
+    let logs: Vec<_> = std::fs::read_dir(dir.join("spl"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(logs, vec![format!("{}-2.csv", s2.saved_at.0)]);
     assert_eq!(session::load(&dir).unwrap().traces.len(), 1);
     let listed = session::list(tmp.path()).unwrap();
     assert_eq!(listed.len(), 1);
@@ -712,18 +760,18 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (a capture's curve named without label and hash) is refused
-    // with its version named, never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 6", "\"version\": 5")).unwrap();
+    // A session of the previous format (no Leq windows, no SPL logs) is refused with its
+    // version named, never read best-effort.
+    std::fs::write(&m, text.replace("\"version\": 7", "\"version\": 6")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 5
+            found: 6
         }
     );
-    assert!(e.to_string().contains("reads version 6 only"), "{e}");
+    assert!(e.to_string().contains("reads version 7 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -851,6 +899,7 @@ fn sweep_csv_and_session_round_trip() {
     let sess = Session {
         saved_at: WallNs(1_790_000_000_000_000_001),
         measurements: vec![],
+        spl_logs: vec![],
         traces: vec![t.clone()],
     };
     session::save(&dir, &sess).unwrap();
@@ -991,6 +1040,7 @@ fn mic_curve_on_a_stored_trace_is_a_display_edit() {
         &Session {
             saved_at: WallNs(5),
             measurements: vec![],
+            spl_logs: vec![],
             traces: vec![t.clone()],
         },
     )

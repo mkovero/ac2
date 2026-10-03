@@ -226,7 +226,7 @@ proptest! {
             Command::GenRefresh { lease_token: LeaseToken(token) },
             Command::GenAcquire { force: flag },
             Command::Hello { client: name.clone() },
-            Command::SplLogStart { meas: m, interval: Seconds(delay) },
+            Command::SplLogGet { meas: m, from: u64::from(idx), max: u32::from(idx) },
         ];
         for cmd in cmds {
             let mut req = Request::new(RequestId(u64::from(meas)), cmd);

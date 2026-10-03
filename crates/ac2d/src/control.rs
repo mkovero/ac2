@@ -57,6 +57,7 @@ use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
 mod autosave;
 mod cal;
 mod files;
+mod leq;
 mod sweeps;
 mod traces;
 
@@ -105,6 +106,15 @@ pub(crate) enum ControlMsg {
     },
     /// The autosave write finished: the time it was written, or why it failed.
     Autosaved { result: Box<Result<WallNs, String>> },
+    /// An SPL meter's job judged its Leq windows after a second (configuration
+    /// `config_rev`): a judgement changed, the windows changed or the log began.
+    Leq {
+        meas: MeasId,
+        config_rev: Rev,
+        at: WallNs,
+        judgements: Vec<ac2_proto::model::LeqJudgement>,
+        alarms: Vec<ac2_proto::model::LeqAlarm>,
+    },
     /// The network sockets are gone (ZAP handler exited); shut down.
     Fatal(String),
     /// Orderly shutdown.
@@ -219,7 +229,14 @@ pub(crate) struct Control {
     autosave: Option<Autosaver>,
     /// Load the autosave when the control thread starts.
     restore: bool,
+    /// Per-second log of each SPL measurement, shared with its job.
+    spl_logs: HashMap<MeasId, crate::leq_log::SharedLog>,
+    /// When growing SPL logs next count as a change for the autosave.
+    next_log_save: Instant,
 }
+
+/// How often a growing SPL log is a change the autosave writes.
+const LOG_SAVE_EVERY: Duration = Duration::from_secs(60);
 
 const MAX_DELAY_S: f64 = 10.0;
 /// Largest difference between the fast and slow input mean squares `cal.spl` accepts, dB.
@@ -283,13 +300,6 @@ fn not_found(meas: MeasId) -> ProtoError {
     perr(ErrorCode::NotFound, format!("no measurement {}", meas.0))
 }
 
-fn unsupported(what: &str) -> ProtoError {
-    perr(
-        ErrorCode::Unsupported,
-        format!("{what} is not supported by this daemon yet"),
-    )
-}
-
 fn lease_required() -> ProtoError {
     perr(
         ErrorCode::LeaseRequired,
@@ -349,9 +359,30 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
                 return inv("invalid averaging");
             }
         }
-        MeasKind::Spl { .. } => {}
+        MeasKind::Spl { config } => {
+            config
+                .leq
+                .check()
+                .map_err(|m| perr(ErrorCode::Invalid, m))?;
+        }
     }
     Ok(())
+}
+
+/// The new Leq windows when `new` is `old` with only them changed (an SPL meter); such an
+/// update is applied in place: the meter, its log and its windows carry on.
+fn leq_only(old: &MeasKind, new: &MeasKind) -> Option<ac2_proto::model::LeqConfig> {
+    match (old, new) {
+        (MeasKind::Spl { config: a }, MeasKind::Spl { config: b })
+            if ac2_proto::model::SplConfig {
+                leq: b.leq.clone(),
+                ..a.clone()
+            } == *b =>
+        {
+            Some(b.leq.clone())
+        }
+        _ => None,
+    }
 }
 
 /// The new smoothing when `new` is `old` with only the display smoothing changed (a
@@ -447,6 +478,8 @@ impl Control {
             next_sweep: 1,
             autosave,
             restore,
+            spl_logs: HashMap::new(),
+            next_log_save: Instant::now() + LOG_SAVE_EVERY,
             s,
         }
     }
@@ -483,6 +516,11 @@ impl Control {
             if let Some(d) = self.autosave.as_ref().and_then(Autosaver::due) {
                 wake = wake.min(d);
             }
+            if now >= self.next_log_save {
+                self.next_log_save = now + LOG_SAVE_EVERY;
+                self.autosave_changed();
+            }
+            wake = wake.min(self.next_log_save);
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
                 Ok(ControlMsg::Request {
                     routing_id,
@@ -529,6 +567,13 @@ impl Control {
                 Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
                 Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, *result),
                 Ok(ControlMsg::Autosaved { result }) => self.autosaved(*result),
+                Ok(ControlMsg::Leq {
+                    meas,
+                    config_rev,
+                    at,
+                    judgements,
+                    alarms,
+                }) => self.leq_reported(meas, config_rev, at, &judgements, alarms),
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;
@@ -825,11 +870,29 @@ impl Control {
                     grid_id,
                 };
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
+                self.ensure_spl_log(&m, None);
                 Ok(ReplyBody::Measurement(m))
             }
             Command::MeasUpdate { meas, config } => {
                 validate_meas(&config)?;
                 let mut m = self.meas(meas)?.clone();
+                let old_leq = match &m.config.kind {
+                    MeasKind::Spl { config } => Some(config.leq.clone()),
+                    _ => None,
+                };
+                if let Some(leq) = leq_only(&m.config.kind, &config.kind) {
+                    m.config = config;
+                    m.config_rev = Rev(self.store.rev().0 + 1);
+                    if let Some(j) = self.jobs.get(&meas) {
+                        j.send(JobCmd::Leq {
+                            config: leq,
+                            rev: m.config_rev,
+                        });
+                    }
+                    self.commit(Change::Measurement(Patch::Set(m.clone())));
+                    self.ensure_spl_log(&m, old_leq.as_ref());
+                    return Ok(ReplyBody::Measurement(m));
+                }
                 if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
                     // Display smoothing changes in place: averaging goes on, and the next
                     // frame carries the new setting under the new rev.
@@ -860,6 +923,9 @@ impl Control {
                     });
                 }
                 m.grid_id = static_grid(&m.config.kind).map(|g| self.register_grid(g));
+                // The log and the entity follow the new configuration before the job
+                // starts, so a restarted meter reports against its new windows.
+                self.ensure_spl_log(&m, old_leq.as_ref());
                 if m.running && self.session.is_some() {
                     self.stop_job(meas);
                     if let Some(g) = self.start_job(&m)? {
@@ -875,6 +941,7 @@ impl Control {
                 self.s
                     .outbox
                     .clear(&ac2_proto::Subscription::Meas(meas).prefix());
+                self.drop_spl_log(meas);
                 ack(self.commit(Change::Measurement(Patch::Deleted(meas))))
             }
             Command::MeasStart { meas } => {
@@ -998,8 +1065,7 @@ impl Control {
             Command::CalDelete { key } => self.cal_delete(&key),
             Command::SessionInputs { inputs } => self.session_inputs(inputs),
 
-            Command::SplLogStart { .. } => Err(unsupported("spl.log_start")),
-            Command::SplLogStop { .. } => Err(unsupported("spl.log_stop")),
+            Command::SplLogGet { meas, from, max } => self.spl_log_get(meas, from, max),
 
             Command::IrCapture {
                 lease_token,
@@ -1438,6 +1504,10 @@ impl Control {
 
     /// Starts the job of `m` on the open session; returns its grid when it has one.
     fn start_job(&mut self, m: &Measurement) -> Result<Option<GridDef>, ProtoError> {
+        if self.session.is_none() {
+            return Ok(None);
+        }
+        let mut leq = matches!(m.config.kind, MeasKind::Spl { .. }).then(|| self.leq_setup(m.id));
         let Some(rt) = self.session.as_ref() else {
             return Ok(None);
         };
@@ -1510,16 +1580,14 @@ impl Control {
                 (Box::new(a), Some(g))
             }
             MeasKind::Spl { config } => {
-                let a = jobs::spl::Spl::new(
-                    m.id,
-                    *config,
-                    fs,
-                    idx(config.input)?,
-                    self.input_cal(rt, config.input),
-                    m.frozen,
-                    m.config_rev,
-                )
-                .map_err(inv)?;
+                let (input, cal) = (idx(config.input)?, self.input_cal(rt, config.input));
+                let config = config.clone();
+                let leq = leq
+                    .take()
+                    .ok_or_else(|| perr(ErrorCode::Internal, "SPL meter without its log"))?;
+                let a =
+                    jobs::spl::Spl::new(m.id, config, fs, input, cal, m.frozen, m.config_rev, leq)
+                        .map_err(inv)?;
                 (Box::new(a), None)
             }
         };

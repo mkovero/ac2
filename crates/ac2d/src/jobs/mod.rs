@@ -174,6 +174,12 @@ pub(crate) enum JobCmd {
     Reset,
     /// New display smoothing; `rev` is the commit that set it. Averaging goes on.
     Smoothing { change: SmoothingChange, rev: Rev },
+    /// New Leq windows of an SPL meter; `rev` is the commit that set them. The meter, its
+    /// log and its windows carry on.
+    Leq {
+        config: ac2_proto::model::LeqConfig,
+        rev: Rev,
+    },
     /// The input's calibration or mic curve changed (on the measurement input of a
     /// transfer function only the curve matters).
     Cal(Box<crate::calstore::InputCal>),

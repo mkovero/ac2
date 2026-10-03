@@ -113,6 +113,7 @@ impl Control {
         Ok(SessionData {
             saved_at: WallNs(wall_ns()),
             measurements: self.saved_measurements(),
+            spl_logs: self.saved_spl_logs(),
             traces,
         })
     }
@@ -205,6 +206,7 @@ impl Control {
             .collect();
         for id in old_meas {
             self.stop_job(id);
+            self.drop_spl_log(id);
             self.commit(Change::Measurement(Patch::Deleted(id)));
         }
         let old_traces: Vec<_> = self.store.state().traces.iter().map(|t| t.id).collect();
@@ -237,7 +239,10 @@ impl Control {
             self.commit(Change::Session(Session { epoch, open: None }));
         }
 
-        // In with the new.
+        // In with the new: the SPL logs first, so a meter's job carries on from its log.
+        for l in data.spl_logs {
+            self.set_spl_log(l.info.meas, crate::leq_log::LeqLog::from_rows(l.rows));
+        }
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
         for sm in data.measurements {
             self.next_meas = self.next_meas.max(sm.id.0.saturating_add(1));
@@ -265,6 +270,7 @@ impl Control {
                 delay,
                 grid_id,
             };
+            self.ensure_spl_log(&meas, None);
             if meas.running && self.session.is_some() {
                 match self.start_job(&meas) {
                     Ok(Some(g)) => meas.grid_id = Some(self.register_grid(g)),

@@ -12,7 +12,11 @@ use crate::autosave::{self, Fingerprint};
 
 impl Control {
     fn fingerprint(&self) -> Fingerprint {
-        (self.saved_measurements(), self.store.state().traces.clone())
+        (
+            self.saved_measurements(),
+            self.store.state().traces.clone(),
+            self.spl_log_totals(),
+        )
     }
 
     /// Commits the autosave status if it changed.

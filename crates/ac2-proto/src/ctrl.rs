@@ -15,8 +15,8 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat,
     ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement, Mic,
-    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLog, SweepRequest,
-    SweepRun, TraceData, TraceEdit, TraceMeta,
+    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLogPage,
+    SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -379,19 +379,17 @@ pub enum Command {
     },
 
     // -- spl ----------------------------------------------------------------------------
-    /// Start logging an SPL measurement.
-    #[serde(rename = "spl.log_start")]
-    SplLogStart {
+    /// Rows of an SPL meter's per-second log, from row number `from` (rows already dropped
+    /// are skipped: the reply says where it starts), at most `max` (capped at
+    /// [`crate::model::SplLogPage::MAX_ROWS`]).
+    #[serde(rename = "spl.log_get")]
+    SplLogGet {
         /// SPL measurement.
         meas: MeasId,
-        /// Row interval.
-        interval: Seconds,
-    },
-    /// Stop logging.
-    #[serde(rename = "spl.log_stop")]
-    SplLogStop {
-        /// SPL measurement.
-        meas: MeasId,
+        /// First row wanted.
+        from: u64,
+        /// Most rows wanted.
+        max: u32,
     },
 
     // -- ir -----------------------------------------------------------------------------
@@ -488,8 +486,7 @@ impl Command {
             Self::CalCurveDelete { .. } => "cal.curve_delete",
             Self::CalList => "cal.list",
             Self::CalDelete { .. } => "cal.delete",
-            Self::SplLogStart { .. } => "spl.log_start",
-            Self::SplLogStop { .. } => "spl.log_stop",
+            Self::SplLogGet { .. } => "spl.log_get",
             Self::IrCapture { .. } => "ir.capture",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
@@ -519,6 +516,7 @@ impl Command {
                 | Self::GridGet { .. }
                 | Self::DelayFind { .. }
                 | Self::FileSave { .. }
+                | Self::SplLogGet { .. }
                 | Self::FileList
         )
     }
@@ -612,8 +610,8 @@ pub enum ReplyBody {
     },
     /// `session.inputs`: the whole input setup.
     Inputs(Vec<InputSetup>),
-    /// `spl.log_*`.
-    SplLog(SplLog),
+    /// `spl.log_get`.
+    SplLogPage(SplLogPage),
     /// `state.snapshot`.
     Snapshot(Box<StateSnapshot>),
     /// `state.since`.

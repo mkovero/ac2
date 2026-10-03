@@ -178,7 +178,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Mic(_) => "mic",
         ReplyBody::Calibrations { .. } => "calibrations",
         ReplyBody::Inputs(_) => "inputs",
-        ReplyBody::SplLog(_) => "spl_log",
+        ReplyBody::SplLogPage(_) => "spl_log_page",
         ReplyBody::Snapshot(_) => "snapshot",
         ReplyBody::Events(_) => "events",
         ReplyBody::Grid(_) => "grid",

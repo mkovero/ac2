@@ -170,7 +170,8 @@ impl Analysis for Rta {
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
-            | JobCmd::Smoothing { .. } => {}
+            | JobCmd::Smoothing { .. }
+            | JobCmd::Leq { .. } => {}
         }
     }
 

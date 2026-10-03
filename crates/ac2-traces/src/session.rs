@@ -3,6 +3,7 @@
 //! ```text
 //! <dir>/session.json                 manifest (format, version, measurements, trace metadata)
 //! <dir>/traces/<generation>-<id>.csv one ac2 CSV per trace (columns; header repeats metadata)
+//! <dir>/spl/<generation>-<meas>.csv  one per-second log per SPL meter ([`crate::spl_log`])
 //! ```
 //!
 //! A sweep trace's CSV holds all of it: distortion curves as columns, analysis facts in its
@@ -20,7 +21,9 @@
 //! refused with that version named — there is no migration and no best-effort read.
 //!
 //! What a session holds: measurement configurations (with their applied delay, tracking,
-//! running and frozen flags) and stored traces with all metadata, display edits and slots.
+//! running and frozen flags), each SPL meter's per-second log (so its Leq windows carry on
+//! after a load or a daemon restart) and stored traces with all metadata, display edits
+//! and slots.
 //! Trace columns are saved unsmoothed and uncorrected; a trace's display smoothing
 //! (`edit.smoothing`) and applied mic curve (`mic_curve`) are applied again when the loaded
 //! trace is served.
@@ -32,21 +35,23 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
-use ac2_proto::model::{ImportFormat, ImportRole, MeasConfig, TraceKind, TraceMeta};
+use ac2_proto::model::{ImportFormat, ImportRole, MeasConfig, SplLogRow, TraceKind, TraceMeta};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::columns::StoredTrace;
+use crate::spl_log::{self, SplLogInfo};
 use crate::text::{export_csv, import};
 
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 const TRACE_DIR: &str = "traces";
+const SPL_DIR: &str = "spl";
 
 /// A measurement as saved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +93,16 @@ pub struct SavedTrace {
     pub mic_curve_points: Option<Vec<[f64; 2]>>,
 }
 
+/// An SPL log entry of the manifest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSplLogFile {
+    /// SPL measurement.
+    pub meas: MeasId,
+    /// Log file, relative to the session directory.
+    pub file: String,
+}
+
 /// The manifest.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -100,8 +115,19 @@ pub struct Manifest {
     pub saved_at: WallNs,
     /// Measurements.
     pub measurements: Vec<SavedMeasurement>,
+    /// Per-second logs of the SPL meters.
+    pub spl_logs: Vec<SavedSplLogFile>,
     /// Traces.
     pub traces: Vec<SavedTrace>,
+}
+
+/// One SPL meter's log in memory.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SavedSplLog {
+    /// Measurement, name, input, mic (the file's header).
+    pub info: SplLogInfo,
+    /// Rows, oldest first.
+    pub rows: Vec<SplLogRow>,
 }
 
 /// A whole session in memory.
@@ -111,6 +137,8 @@ pub struct Session {
     pub saved_at: WallNs,
     /// Measurements.
     pub measurements: Vec<SavedMeasurement>,
+    /// SPL logs (of measurements in `measurements`).
+    pub spl_logs: Vec<SavedSplLog>,
     /// Traces with data.
     pub traces: Vec<StoredTrace>,
 }
@@ -215,7 +243,21 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     }
     let traces_dir = dir.join(TRACE_DIR);
     fs::create_dir_all(&traces_dir).map_err(io(&traces_dir))?;
+    let spl_dir = dir.join(SPL_DIR);
+    fs::create_dir_all(&spl_dir).map_err(io(&spl_dir))?;
     let generation = s.saved_at.0;
+    let mut logs = Vec::with_capacity(s.spl_logs.len());
+    for l in &s.spl_logs {
+        let file = format!("{SPL_DIR}/{generation}-{}.csv", l.info.meas.0);
+        write_atomic(
+            &dir.join(&file),
+            spl_log::export_csv(&l.info, &l.rows).as_bytes(),
+        )?;
+        logs.push(SavedSplLogFile {
+            meas: l.info.meas,
+            file,
+        });
+    }
     let mut saved = Vec::with_capacity(s.traces.len());
     for t in &s.traces {
         let file = format!("{TRACE_DIR}/{generation}-{}.csv", t.meta.id.0);
@@ -232,6 +274,7 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
         version: VERSION,
         saved_at: s.saved_at,
         measurements: s.measurements.clone(),
+        spl_logs: logs,
         traces: saved,
     };
     let json = serde_json::to_vec_pretty(&m).map_err(|e| SessionError::Corrupt {
@@ -240,12 +283,19 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     })?;
     write_atomic(&dir.join(MANIFEST), &json)?;
     // Older generations are unreferenced now.
-    let keep: Vec<String> = m.traces.iter().map(|t| t.file.clone()).collect();
-    if let Ok(rd) = fs::read_dir(&traces_dir) {
-        for e in rd.flatten() {
-            let rel = format!("{TRACE_DIR}/{}", e.file_name().to_string_lossy());
-            if !keep.contains(&rel) {
-                let _ = fs::remove_file(e.path());
+    let keep: Vec<String> = m
+        .traces
+        .iter()
+        .map(|t| t.file.clone())
+        .chain(m.spl_logs.iter().map(|l| l.file.clone()))
+        .collect();
+    for (sub, d) in [(TRACE_DIR, &traces_dir), (SPL_DIR, &spl_dir)] {
+        if let Ok(rd) = fs::read_dir(d) {
+            for e in rd.flatten() {
+                let rel = format!("{sub}/{}", e.file_name().to_string_lossy());
+                if !keep.contains(&rel) {
+                    let _ = fs::remove_file(e.path());
+                }
             }
         }
     }
@@ -344,9 +394,53 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
             mic_curve,
         });
     }
+    let mut spl_logs = Vec::with_capacity(m.spl_logs.len());
+    for l in &m.spl_logs {
+        let f = &l.file;
+        if f.contains("..") || Path::new(f).is_absolute() {
+            return Err(SessionError::Corrupt {
+                path: dir.join(MANIFEST),
+                msg: format!("SPL log file {f:?} is outside the session"),
+            });
+        }
+        let Some(sm) = m.measurements.iter().find(|sm| sm.id == l.meas) else {
+            return Err(SessionError::Corrupt {
+                path: dir.join(MANIFEST),
+                msg: format!(
+                    "SPL log of measurement {} which is not in the session",
+                    l.meas
+                ),
+            });
+        };
+        let ac2_proto::model::MeasKind::Spl { config } = &sm.config.kind else {
+            return Err(SessionError::Corrupt {
+                path: dir.join(MANIFEST),
+                msg: format!(
+                    "SPL log of measurement {}, which is not an SPL meter",
+                    l.meas
+                ),
+            });
+        };
+        let p = dir.join(f);
+        let bytes = fs::read(&p).map_err(io(&p))?;
+        let rows = spl_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
+            path: p.clone(),
+            msg: e.to_string(),
+        })?;
+        spl_logs.push(SavedSplLog {
+            info: SplLogInfo {
+                meas: l.meas,
+                name: sm.config.name.clone(),
+                input: config.input,
+                mic: None,
+            },
+            rows,
+        });
+    }
     Ok(Session {
         saved_at: m.saved_at,
         measurements: m.measurements,
+        spl_logs,
         traces,
     })
 }

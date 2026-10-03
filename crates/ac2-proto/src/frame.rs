@@ -15,8 +15,8 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
-    BackendKind, BandFraction, CalStatus, DeviceId, LevelScale, PeakWeighting, Smoothing,
-    SmoothingFraction, TimeWeighting, TimingState, TimingStatus, Weighting, Window,
+    BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, PeakWeighting,
+    Smoothing, SmoothingFraction, TimeWeighting, TimingState, TimingStatus, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -111,6 +111,43 @@ bitmask!(
 );
 
 bitmask!(
+    /// State of a rolling Leq window. Its judgement ([`LeqFlags::judgement`]) is "no
+    /// limit" without `LIMIT`, "not calibrated" with `LIMIT` but without `JUDGED`, else
+    /// over, near or ok.
+    LeqFlags {
+        /// The window has a limit.
+        LIMIT = 1 << 0;
+        /// The limit is judged (the meter reads dB SPL).
+        JUDGED = 1 << 1;
+        /// Within the warn margin below the limit, or at it.
+        NEAR = 1 << 2;
+        /// Above the limit.
+        OVER = 1 << 3;
+        /// No steady level over the horizon brings the window to its limit.
+        CANNOT_RECOVER = 1 << 4;
+        /// Part of the window was not measured (capture gaps, the meter stopped).
+        INCOMPLETE = 1 << 5;
+    }
+);
+
+impl LeqFlags {
+    /// The judgement the flags carry.
+    pub fn judgement(self) -> LeqJudgement {
+        if !self.contains(Self::LIMIT) {
+            LeqJudgement::NoLimit
+        } else if !self.contains(Self::JUDGED) {
+            LeqJudgement::NotCalibrated
+        } else if self.contains(Self::OVER) {
+            LeqJudgement::Over
+        } else if self.contains(Self::NEAR) {
+            LeqJudgement::Near
+        } else {
+            LeqJudgement::Ok
+        }
+    }
+}
+
+bitmask!(
     /// Per-channel clip state.
     ClipFlags {
         /// Clipped in this frame's interval.
@@ -134,6 +171,8 @@ pub enum FrameKind {
     Spec,
     /// SPL meter.
     Spl,
+    /// Rolling Leq windows of an SPL meter.
+    Leq,
     /// Input meters.
     Levels,
     /// Input meters of the open session.
@@ -172,6 +211,19 @@ pub enum ArrayName {
     Rms,
     /// Input clip flags.
     Clip,
+    /// Leq of each window.
+    Leq,
+    /// Seconds of each window elapsed.
+    Elapsed,
+    /// Seconds of each window measured.
+    Measured,
+    /// Headroom: steady level allowed over the horizon (NaN: none).
+    Allowed,
+    /// Seconds to recover at the limit (NaN unless the window cannot recover within the
+    /// horizon).
+    Recover,
+    /// Leq window state.
+    LeqFlags,
 }
 
 /// Array unit.
@@ -192,6 +244,8 @@ pub enum Unit {
     Count,
     /// Linear, full scale = 1.
     FullScale,
+    /// Seconds.
+    Seconds,
     /// Bitmask (u32 elements).
     Bitmask,
 }
@@ -312,6 +366,23 @@ pub struct SplMeta {
     pub mic_curve: bool,
 }
 
+/// Rolling Leq metadata; the arrays hold one column per window of the meter's
+/// configuration (`config_rev` in the header says which), in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqMeta {
+    /// Unit of `leq` and `allowed`.
+    pub scale: LevelScale,
+    /// Calibration applied (`uncalibrated` with dBFS).
+    pub cal: CalStatus,
+    /// The mic-curve correction filter ran before frequency weighting.
+    pub mic_curve: bool,
+    /// Headroom horizon.
+    pub horizon: Seconds,
+    /// Rows the meter's log has logged so far (`spl.log_get`).
+    pub logged: u64,
+}
+
 /// Input meters metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -399,6 +470,8 @@ pub enum FrameMeta {
     Spec(SpecMeta),
     /// SPL.
     Spl(SplMeta),
+    /// Leq windows.
+    Leq(LeqMeta),
     /// Levels.
     Levels(LevelsMeta),
     /// Session levels.
@@ -419,6 +492,7 @@ impl FrameMeta {
             Self::Rta(_) => FrameKind::Rta,
             Self::Spec(_) => FrameKind::Spec,
             Self::Spl(_) => FrameKind::Spl,
+            Self::Leq(_) => FrameKind::Leq,
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
@@ -555,6 +629,29 @@ pub struct SplFrame {
     pub meta: SplMeta,
 }
 
+/// Rolling Leq windows of an SPL meter, one column per window, published once a second.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeqFrame {
+    /// Measurement.
+    pub meas: MeasId,
+    /// Unit, calibration, horizon.
+    pub meta: LeqMeta,
+    /// Leq over the window (over the measured time; NaN before anything was measured).
+    pub leq: Vec<f32>,
+    /// Seconds of the window elapsed (less than its length while it fills).
+    pub elapsed: Vec<f32>,
+    /// Seconds of those measured.
+    pub measured: Vec<f32>,
+    /// Steady level allowed over the horizon to stay at the limit; NaN without a judged
+    /// limit or when the window cannot recover within the horizon.
+    pub allowed: Vec<f32>,
+    /// Seconds to recover playing at the limit, when it cannot within the horizon; else
+    /// NaN.
+    pub recover: Vec<f32>,
+    /// State.
+    pub flags: Vec<LeqFlags>,
+}
+
 /// Input meters frame.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LevelsFrame {
@@ -609,6 +706,8 @@ pub enum FrameData {
     Spec(SpecFrame),
     /// `d/<meas>/spl`.
     Spl(SplFrame),
+    /// `d/<meas>/leq`.
+    Leq(LeqFrame),
     /// `d/<meas>/levels`.
     Levels(LevelsFrame),
     /// `session/levels`.
@@ -639,6 +738,7 @@ impl FrameData {
             Self::Rta(_) => FrameKind::Rta,
             Self::Spec(_) => FrameKind::Spec,
             Self::Spl(_) => FrameKind::Spl,
+            Self::Leq(_) => FrameKind::Leq,
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
@@ -656,6 +756,7 @@ impl FrameData {
             Self::Rta(f) => data(f.meas, Stream::Rta),
             Self::Spec(f) => data(f.meas, Stream::Spec),
             Self::Spl(f) => data(f.meas, Stream::Spl),
+            Self::Leq(f) => data(f.meas, Stream::Leq),
             Self::Levels(f) => data(f.meas, Stream::Levels),
             Self::SessionLevels(_) => Topic::SessionLevels,
             Self::PreviewLevels(_) => Topic::PreviewLevels,
@@ -893,6 +994,22 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             FrameMeta::Spec(f.meta)
         }
         FrameData::Spl(f) => FrameMeta::Spl(f.meta),
+        FrameData::Leq(f) => {
+            let unit = level_unit(f.meta.scale);
+            cols.push((desc(ArrayName::Leq, unit), Col::F(&f.leq)));
+            cols.push((desc(ArrayName::Elapsed, Unit::Seconds), Col::F(&f.elapsed)));
+            cols.push((
+                desc(ArrayName::Measured, Unit::Seconds),
+                Col::F(&f.measured),
+            ));
+            cols.push((desc(ArrayName::Allowed, unit), Col::F(&f.allowed)));
+            cols.push((desc(ArrayName::Recover, Unit::Seconds), Col::F(&f.recover)));
+            cols.push((
+                desc(ArrayName::LeqFlags, Unit::Bitmask),
+                Col::U(mask_slice(&f.flags)),
+            ));
+            FrameMeta::Leq(f.meta)
+        }
         FrameData::Levels(f) => {
             cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
             cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
@@ -1082,6 +1199,7 @@ fn stream_kind(s: Stream) -> FrameKind {
         Stream::Rta => FrameKind::Rta,
         Stream::Spec => FrameKind::Spec,
         Stream::Spl => FrameKind::Spl,
+        Stream::Leq => FrameKind::Leq,
         Stream::Levels => FrameKind::Levels,
     }
 }
@@ -1180,6 +1298,19 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             validity: a.mask(ArrayName::Validity)?,
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
+        FrameMeta::Leq(meta) => {
+            let unit = level_unit(meta.scale);
+            FrameData::Leq(LeqFrame {
+                meas,
+                meta,
+                leq: a.f32(ArrayName::Leq, unit)?,
+                elapsed: a.f32(ArrayName::Elapsed, Unit::Seconds)?,
+                measured: a.f32(ArrayName::Measured, Unit::Seconds)?,
+                allowed: a.f32(ArrayName::Allowed, unit)?,
+                recover: a.f32(ArrayName::Recover, Unit::Seconds)?,
+                flags: a.mask(ArrayName::LeqFlags)?,
+            })
+        }
         FrameMeta::Levels(meta) => {
             if meta.channels.len() != h.n as usize {
                 return Err(DecodeError::Schema("levels: channels.len() != n".into()));
@@ -1253,3 +1384,4 @@ pub fn decode_data_message(parts: &[&[u8]]) -> Result<DataMessage, DecodeError> 
 
 mask_bits!(ValidityMask);
 mask_bits!(ClipFlags);
+mask_bits!(LeqFlags);

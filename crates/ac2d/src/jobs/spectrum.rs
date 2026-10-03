@@ -154,7 +154,8 @@ impl Analysis for Spectrum {
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
-            | JobCmd::Smoothing { .. } => {}
+            | JobCmd::Smoothing { .. }
+            | JobCmd::Leq { .. } => {}
         }
     }
 

@@ -41,6 +41,7 @@ mod firewall;
 mod io;
 mod jobs;
 pub mod keys;
+mod leq_log;
 mod outbox;
 mod preview;
 mod session;

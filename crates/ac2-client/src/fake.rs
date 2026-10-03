@@ -124,6 +124,8 @@ pub struct Shared {
     pub finding: FakeFinding,
     /// Band and observation of the last `delay.find`.
     pub last_find: Option<(FinderBand, Option<Seconds>)>,
+    /// Per-second log rows `spl.log_get` serves, per SPL meter (a test fills them).
+    pub spl_rows: HashMap<MeasId, Vec<SplLogRow>>,
     traces: traces::FakeTraces,
     lease: Option<LeaseSlot>,
     dedup: HashMap<(Vec<u8>, u64), Vec<u8>>,
@@ -284,6 +286,7 @@ impl Shared {
             expiries: 0,
             finding: FakeFinding::default(),
             last_find: None,
+            spl_rows: HashMap::new(),
             traces: traces::FakeTraces::default(),
             lease: None,
             dedup: HashMap::new(),
@@ -496,7 +499,57 @@ impl Shared {
 
     fn put_meas(&mut self, m: Measurement) -> ReplyBody {
         self.commit(Change::Measurement(Patch::Set(m.clone())));
+        self.spl_log_for(&m);
         ReplyBody::Measurement(m)
+    }
+
+    /// The `spl_log` entity of an SPL meter follows its windows, as the daemon's does: a
+    /// window configured as before keeps its state; others start unjudged (the fake has no
+    /// calibration path for SPL, so a limit reads "not calibrated" until a test commits
+    /// states of its own).
+    fn spl_log_for(&mut self, m: &Measurement) {
+        let MeasKind::Spl { config } = &m.config.kind else {
+            if self.state.spl_logs.iter().any(|l| l.meas == m.id) {
+                self.commit(Change::SplLog(Patch::Deleted(m.id)));
+            }
+            return;
+        };
+        let prev = self.state.spl_logs.iter().find(|l| l.meas == m.id).cloned();
+        let now = WallNs(self.now_ns());
+        let windows = config
+            .leq
+            .windows
+            .iter()
+            .map(|w| {
+                prev.as_ref()
+                    .and_then(|p| {
+                        p.windows
+                            .iter()
+                            .find(|s| s.duration == w.duration && s.weighting == w.weighting)
+                    })
+                    .copied()
+                    .filter(|s| (s.judgement == LeqJudgement::NoLimit) == w.limit.is_none())
+                    .unwrap_or(LeqWindowState {
+                        duration: w.duration,
+                        weighting: w.weighting,
+                        judgement: if w.limit.is_some() {
+                            LeqJudgement::NotCalibrated
+                        } else {
+                            LeqJudgement::NoLimit
+                        },
+                        since: now,
+                    })
+            })
+            .collect();
+        let l = SplLog {
+            meas: m.id,
+            started_at: prev.as_ref().and_then(|p| p.started_at),
+            windows,
+            alarms: prev.map(|p| p.alarms).unwrap_or_default(),
+        };
+        if self.state.spl_logs.iter().find(|x| x.meas == m.id) != Some(&l) {
+            self.commit(Change::SplLog(Patch::Set(l)));
+        }
     }
 
     fn execute(&mut self, client: &ClientId, cmd: Command) -> Result<ReplyBody, ProtoError> {
@@ -719,6 +772,9 @@ impl Shared {
             }
             C::MeasDelete { meas } => {
                 self.meas(meas)?;
+                if self.state.spl_logs.iter().any(|l| l.meas == meas) {
+                    self.commit(Change::SplLog(Patch::Deleted(meas)));
+                }
                 let rev = self.commit(Change::Measurement(Patch::Deleted(meas)));
                 ReplyBody::Ack { rev }
             }
@@ -943,15 +999,25 @@ impl Shared {
                 self.set_inputs(all);
                 ReplyBody::Inputs(self.state.inputs.clone())
             }
-            C::SplLogStart { meas, interval } => {
-                let l = SplLog {
+            C::SplLogGet { meas, from, max } => {
+                let m = self.meas(meas)?;
+                if !matches!(m.config.kind, MeasKind::Spl { .. }) {
+                    return Err(ProtoError {
+                        code: ErrorCode::Invalid,
+                        msg: format!("measurement {meas} is not an SPL meter"),
+                        detail: None,
+                    });
+                }
+                let rows = self.spl_rows.get(&meas).cloned().unwrap_or_default();
+                let total = rows.len() as u64;
+                let from = from.min(total);
+                let n = max.min(SplLogPage::MAX_ROWS) as usize;
+                ReplyBody::SplLogPage(SplLogPage {
                     meas,
-                    running: true,
-                    interval,
-                    started_at: Some(WallNs(self.now_ns())),
-                };
-                self.commit(Change::SplLog(Patch::Set(l.clone())));
-                ReplyBody::SplLog(l)
+                    from,
+                    total,
+                    rows: rows.into_iter().skip(from as usize).take(n).collect(),
+                })
             }
             C::StateSnapshot => ReplyBody::Snapshot(Box::new(StateSnapshot {
                 state: self.state.clone(),
@@ -983,12 +1049,6 @@ impl Shared {
                     .cloned()
                     .ok_or_else(|| err(ErrorCode::NotFound, format!("no grid {grid_id}")))?,
             ),
-            other => {
-                return Err(err(
-                    ErrorCode::Unsupported,
-                    format!("{} is not faked", other.name()),
-                ));
-            }
         })
     }
 }

@@ -515,6 +515,23 @@ impl Shared {
                     }),
                 })
                 .collect(),
+            spl_logs: self
+                .state
+                .measurements
+                .iter()
+                .filter_map(|m| match &m.config.kind {
+                    MeasKind::Spl { config } => Some(session::SavedSplLog {
+                        info: ac2_traces::spl_log::SplLogInfo {
+                            meas: m.id,
+                            name: m.config.name.clone(),
+                            input: config.input,
+                            mic: None,
+                        },
+                        rows: self.spl_rows.get(&m.id).cloned().unwrap_or_default(),
+                    }),
+                    _ => None,
+                })
+                .collect(),
             traces,
         };
         let m = session::save(&dir, &s).map_err(session_err)?;
@@ -541,7 +558,14 @@ impl Shared {
             .map(|m| m.id)
             .collect::<Vec<_>>()
         {
+            if self.state.spl_logs.iter().any(|l| l.meas == id) {
+                self.commit(Change::SplLog(Patch::Deleted(id)));
+            }
             self.commit(Change::Measurement(Patch::Deleted(id)));
+        }
+        self.spl_rows.clear();
+        for l in s.spl_logs {
+            self.spl_rows.insert(l.info.meas, l.rows);
         }
         for id in self.state.traces.iter().map(|t| t.id).collect::<Vec<_>>() {
             self.commit(Change::Trace(Patch::Deleted(id)));
@@ -594,7 +618,7 @@ impl Shared {
                 delay,
                 grid_id,
             };
-            self.commit(Change::Measurement(Patch::Set(meas)));
+            self.put_meas(meas);
         }
         for t in s.traces {
             self.next_id = self.next_id.max(t.meta.id.0 + 1);

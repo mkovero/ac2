@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 8`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 9`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -108,8 +108,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
 | `cal.list` | — | `calibrations` (`calibrations`, `mics`) | |
 | `cal.delete` | `key: CalKey` | `ack` | |
-| `spl.log_start` | `meas`, `interval: Seconds` | `spl_log` | |
-| `spl.log_stop` | `meas` | `spl_log` | |
+| `spl.log_get` | `meas`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `ir.capture` | `lease_token`, `request: SweepRequest`, `name` | `sweep` (the run as started) | L (held for the capture), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
@@ -158,6 +157,49 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   frequency (`1/f`); DC and bins narrower than the kernel pass through, and bins below the
   floor (non-finite level) are gaps the kernel never crosses. A smoothed bin is no longer
   the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients label it.
+- **SPL** (`SplConfig.leq: LeqConfig`): a change to the Leq windows alone (and the name)
+  applies in place; the meter, its log and its windows go on (§3.2, SPL log).
+
+#### SPL log and Leq windows (`spl.log_get`, `leq` frames)
+
+Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8, in
+display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60)}. `LeqWindow` =
+{`duration`: Seconds (1 s … 24 h, whole seconds), `weighting`: `a` \| `c` \| `z`, `limit`:
+DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3)}. Front ends create meters with LAeq over
+1, 5, 10, 30 and 60 min and no limits. Anything else is `invalid` at `meas.create` /
+`meas.update`.
+
+Every running SPL meter integrates its input (after the mic curve, when on) into one-second
+blocks of A-, C- and Z-weighted energy on a grid of whole seconds from its first sample;
+lost samples (a capture discontinuity) move the grid on without energy or measured time.
+Each second is a log row, `SplLogRow` = {`start`: WallNs, `measured`: Seconds (< 1 next to
+a gap), `laeq`, `lceq`, `lzeq`: Dbfs over the measured time, `sensitivity`: Db \| nil (dB
+SPL of 0 dBFS in force)}. The log belongs to the meter: it survives stopping and starting,
+device reopens, config changes and daemon restarts (session files and the autosave carry
+it, §7.2), keeps the newest 48 h, and is kept while frozen or after `meas.reset` (those
+are display operations). `spl.log_get` returns `SplLogPage` {`meas`, `from`, `total`,
+`rows`}: rows are numbered from the meter's first logged second; `from` says where the
+returned rows start (later than asked when older rows were dropped), `total` is one past
+the newest row, at most 20000 rows per reply. `invalid` for a measurement that is not an
+SPL meter.
+
+A window of N seconds covers the newest N seconds of time, measured or not; its Leq is over
+the measured time in it (never extrapolated; `elapsed` < N while it fills after the log's
+first second, `measured` < `elapsed` flags it incomplete). Windows rebuild from the log by
+wall time when the meter's job restarts. A limit is judged only while the meter reads dB SPL
+(a sensitivity calibration applies), at 0.1 dB resolution: over when the rounded Leq is
+above the limit, near when within `warn_margin` below it or at it. Headroom: with `K = N −
+horizon` newest seconds staying in the window, energy `E_K`, measured time `M_K` and the
+limit as a mean square `P`, the steady level allowed for the horizon is `(P·(M_K + h) −
+E_K) / h` (`h` = horizon; the limit itself when `K ≤ 0`), floored to 0.1 dB by clients;
+when it is ≤ 0 the window cannot recover within the horizon and `recover` gives the time
+to recover playing at the limit.
+
+The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
+`LeqWindowState` {`duration`, `weighting`, `judgement`, `since`}; `LeqJudgement`: `no_limit`
+\| `not_calibrated` \| `ok` \| `near` \| `over`), when the windows change and when the log
+starts (`started_at`). Going over and recovering append a `LeqAlarm` {`at`, `duration`,
+`weighting`, `kind`: `over` \| `recovered`, `leq`, `limit`} to `alarms` (the newest 100).
 
 #### Devices, preview and loopback detection (`session.*`)
 
@@ -472,7 +514,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log`, `snapshot`, `events`,
+`export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log_page`, `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `sweep`.
 
 ### 3.4 Errors
@@ -499,7 +541,8 @@ math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `cre
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal), `mics` (`Mic`: `name`, `curves`
-[MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
+[MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `spl_logs` (`SplLog` per SPL
+meter: `meas`, `started_at`, `windows`, `alarms`; §3.2), `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
 `drift`, `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
@@ -538,6 +581,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `d/<meas>/rta` | fractional-octave RTA |
 | `d/<meas>/spec` | narrowband spectrum |
 | `d/<meas>/spl` | SPL meter |
+| `d/<meas>/leq` | rolling Leq windows of an SPL meter, once a second |
 | `d/<meas>/levels` | input meters of the measurement's channels |
 | `session/levels` | input meters of every input of the open session |
 | `session/preview` | input meters of every input of the previewed device |
@@ -566,7 +610,7 @@ bitmask array says why.
 | field | type | meaning |
 |---|---|---|
 | `v` | u16 | protocol version |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `levels`, `session_levels`, `preview_levels`, `timing`, `ka`; equals the topic and the `meta` key |
+| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `levels`, `session_levels`, `preview_levels`, `timing`, `ka`; equals the topic and the `meta` key |
 | `seq` | u64 | per topic per incarnation; clients keep the max per topic when draining |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
@@ -581,7 +625,8 @@ bitmask array says why.
 | `meta` | {kind: {…}} | per-kind metadata (§5.4) |
 
 `elem` is `f32` or `u32`. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
-(γ², 0…1), `count`, `full_scale` (linear, full scale = 1), `bitmask` (always `u32`).
+(γ², 0…1), `count`, `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
+`u32`).
 
 ### 5.4 Kinds
 
@@ -592,6 +637,7 @@ bitmask array says why.
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
+| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far) |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
@@ -620,6 +666,11 @@ and measurement identical or near-perfectly correlated at zero lag, or reference
 the measurement has signal: the inputs look mis-patched).
 
 `clip`: `CLIP` 1 (clipped in this interval), `HELD` 2 (indicator held).
+
+`leq_flags`: `LIMIT` 1 (the window has a limit), `JUDGED` 2 (and it is judged: dB SPL),
+`NEAR` 4, `OVER` 8, `CANNOT_RECOVER` 16, `INCOMPLETE` 32 (part of the window not
+measured). The judgement is `no_limit` without `LIMIT`, `not_calibrated` with `LIMIT` but
+not `JUDGED`, else `over`, `near` or `ok`.
 
 ### 5.6 Bounds (checked before decoding)
 
@@ -687,13 +738,14 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 ```
 <dir>/session.json                  manifest
 <dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace (a sweep's whole data included)
+<dir>/spl/<generation>-<meas>.csv   one SPL log per SPL meter (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 6, saved_at, measurements:
-[{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
-[{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz, dB]] | null}]}` (JSON,
-field names as in this document; `mic_curve_points` are the points of `meta.mic_curve`, a
-curve applied after capture). A save
+`session.json`: `{format: "ac2-session", version: 7, saved_at, measurements:
+[{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], spl_logs:
+[{meas, file}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
+dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
+`meta.mic_curve`, a curve applied after capture). A save
 writes the trace files of a new generation first, then replaces `session.json` atomically
 (temporary file + rename), then removes older generations: a reader sees the old session
 or the new one, never a mix. `format` and `version` are read first; any other version is
@@ -702,14 +754,16 @@ smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer ca
 hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
 spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impulse response
 in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a capture's
-curve by name only, without its label, file and content hash — are refused). A directory that holds other files is never written into.
+curve by name only, without its label, file and content hash, version 6 had no Leq windows
+and no SPL logs — are refused). A directory that holds other files is never written into.
 
 ### 7.3 Autosave
 
 A daemon started with an autosave directory (`ac2d` by default: `autosave` in the data
 directory; `--autosave <dir>`, `--no-autosave`) writes the measurements and traces there in
 the §7.2 format whenever they change: after 1.5 s without further changes, at most 10 s
-after the first unwritten one, off the control thread, and once more at shutdown. A write
+after the first unwritten one, off the control thread, and once more at shutdown. A
+growing SPL log is a change at most once a minute. A write
 that would not change what is on disk is skipped. Each write goes to `.<dir>.new` first;
 then `<dir>` becomes `<dir>.prev` and the new one `<dir>`, so a failed write never touches
 the last good autosave.
@@ -725,6 +779,16 @@ state; `saved_at` nil until the first write), `pending` (a change is waiting or 
 written), `failed{reason}` (the last write failed; shown until a write succeeds, retried
 10 s later). `saved_at` is when the autosave on disk was written (after a restore, when the
 restored one was). Status changes are ordinary events, so they bump `rev`.
+
+### 7.4 SPL log (CSV)
+
+What sessions store and `ac2 spl leq export` writes: the first line is exactly
+`# ac2 spl log v1`, then `# key: value` lines (`meas`, `name`, `input`, `mic`), then the
+header `start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,sensitivity_db` and one
+row per logged second: ISO 8601 UTC time of the second's start, the same in Unix ns, the
+measured time, `dB SPL` or `dBFS`, the three levels in that unit (4 decimals; `-inf` for
+digital silence) and the sensitivity (empty uncalibrated). Reading it back takes
+`start_ns`, `measured_s`, the levels and the sensitivity.
 
 ## 8. Cross-language fixtures
 

@@ -49,6 +49,7 @@ LIN_GRID = {"type": "linear", "fs": 48000.0, "n": 65536}
 WEAK_REFERENCE = 1 << 3
 THINNED, OUT_OF_BAND, INSUFFICIENT_RESOLUTION = 1 << 0, 1 << 1, 1 << 7
 CLIP, HELD = 1 << 0, 1 << 1
+LIMIT, JUDGED, NEAR, OVER, CANNOT_RECOVER, INCOMPLETE = (1 << i for i in range(6))
 
 
 def stamp(grid, protection=WEAK_REFERENCE):
@@ -198,6 +199,29 @@ def frames():
             },
             [],
         ),
+        "leq": frame(
+            "d/4/leq",
+            "leq",
+            None,
+            {
+                "scale": "db_spl",
+                "cal": {"type": "verified", "calibrated_at": CAL_AT},
+                "mic_curve": False,
+                "horizon": 60.0,
+                "logged": 1800,
+            },
+            [
+                (arr("leq", "db_spl"), [96.5, 99.25]),
+                (arr("elapsed", "seconds"), [60.0, 1800.0]),
+                (arr("measured", "seconds"), [60.0, 1790.0]),
+                (arr("allowed", "db_spl"), [NAN, NAN]),
+                (arr("recover", "seconds"), [NAN, 412.0]),
+                (
+                    arr("leq_flags", "bitmask", "u32"),
+                    [0, LIMIT | JUDGED | OVER | CANNOT_RECOVER | INCOMPLETE],
+                ),
+            ],
+        ),
         "levels": frame(
             "d/1/levels",
             "levels",
@@ -288,6 +312,64 @@ MEAS_CONFIG = {
             "depth": {"type": "fast_lf", "max_settle_s": 1.0},
         },
     },
+}
+
+
+SPL_MEASUREMENT = {
+    "id": 4,
+    "config": {
+        "name": "FOH SPL",
+        "kind": {
+            "type": "spl",
+            "config": {
+                "input": 1,
+                "weighting": "a",
+                "time_weighting": "fast",
+                "peak_weighting": "c",
+                "leq": {
+                    "windows": [
+                        {"duration": 60.0, "weighting": "a", "limit": None, "warn_margin": 3.0},
+                        {"duration": 1800.0, "weighting": "a", "limit": 99.0, "warn_margin": 3.0},
+                    ],
+                    "horizon": 60.0,
+                },
+            },
+        },
+    },
+    "config_rev": 40,
+    "running": True,
+    "frozen": False,
+    "delay": None,
+    "grid_id": None,
+}
+
+SPL_LOG = {
+    "meas": 4,
+    "started_at": 1790000000000000000,
+    "windows": [
+        {
+            "duration": 60.0,
+            "weighting": "a",
+            "judgement": "no_limit",
+            "since": 1790000000000000000,
+        },
+        {
+            "duration": 1800.0,
+            "weighting": "a",
+            "judgement": "over",
+            "since": 1790000600000000000,
+        },
+    ],
+    "alarms": [
+        {
+            "at": 1790000600000000000,
+            "duration": 1800.0,
+            "weighting": "a",
+            "kind": "over",
+            "leq": 99.25,
+            "limit": 99.0,
+        }
+    ],
 }
 
 
@@ -416,8 +498,9 @@ def requests():
                 "input": 1,
             },
         ),
+        req(33, "spl.log_get", {"meas": 4, "from": 120, "max": 3600}, mutation=False),
         req(
-            35,
+            34,
             "ir.capture",
             {
                 "lease_token": TOKEN,
@@ -432,16 +515,16 @@ def requests():
                 "name": "1083 sweep",
             },
         ),
-        req(42, "session.inputs", {"inputs": INPUTS}),
+        req(41, "session.inputs", {"inputs": INPUTS}),
         req(
-            43,
+            42,
             "cal.delete",
             {"key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"}},
         ),
-        req(44, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
-        req(45, "session.preview_stop", mutation=False),
+        req(43, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
+        req(44, "session.preview_stop", mutation=False),
         req(
-            46,
+            45,
             "session.detect_loopback",
             {
                 "lease_token": TOKEN,
@@ -452,8 +535,8 @@ def requests():
             },
             mutation=False,
         ),
-        req(47, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
-        req(49, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(46, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(48, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
     ]
 
 
@@ -473,6 +556,12 @@ def events():
         },
         {"kind": "inputs", "rev": 50, "payload": INPUTS},
         {"kind": "mic", "rev": 58, "payload": {"type": "deleted", "value": "ECM"}},
+        {
+            "kind": "measurement",
+            "rev": 59,
+            "payload": {"type": "set", "value": SPL_MEASUREMENT},
+        },
+        {"kind": "spl_log", "rev": 52, "payload": {"type": "set", "value": SPL_LOG}},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},
         {
             "kind": "sweep",

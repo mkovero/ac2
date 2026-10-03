@@ -40,6 +40,15 @@ fn apply(state: &mut State, e: &Event) {
         Change::Generator(g) => state.generator = g.clone(),
         Change::Session(s) => state.session = s.clone(),
         Change::Timing(t) => state.timing = *t,
+        Change::SplLog(ac2_proto::Patch::Set(l)) => {
+            match state.spl_logs.iter().position(|x| x.meas == l.meas) {
+                Some(i) => state.spl_logs[i] = l.clone(),
+                None => state.spl_logs.push(l.clone()),
+            }
+        }
+        Change::SplLog(ac2_proto::Patch::Deleted(id)) => {
+            state.spl_logs.retain(|x| x.meas != *id);
+        }
         other => panic!("unexpected change in this test: {other:?}"),
     }
 }
@@ -149,17 +158,19 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
     });
     b.ok(Command::MeasDelete { meas: MeasId(1) });
     let target = snapshot(&mut b);
-    assert_eq!(target.1, Rev(r0.0 + 5));
+    // Three creates, the update (the meter's `spl_log` entity, then the measurement), the
+    // delete.
+    assert_eq!(target.1, Rev(r0.0 + 6));
 
     // Apply live events, but lose the final one.
     let mut last = r0;
     let mut events = Vec::new();
-    while events.len() < 5 {
+    while events.len() < 6 {
         if let Some(DataMessage::Event(e)) = sub.next(T) {
             events.push(e);
         }
     }
-    for e in &events[..4] {
+    for e in &events[..5] {
         assert_eq!(e.rev, Rev(last.0 + 1), "events arrive in rev order");
         apply(&mut mirror, e);
         last = e.rev;

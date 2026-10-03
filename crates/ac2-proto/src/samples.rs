@@ -9,10 +9,10 @@ use crate::ctrl::{
 };
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
-    ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LevelsFrame,
-    LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta,
-    SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
-    TimingWindow, ValidityMask,
+    ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags,
+    LeqFrame, LeqMeta, LevelsFrame, LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta,
+    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta,
+    TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -266,11 +266,11 @@ pub fn commands() -> Vec<Command> {
             input: Some(1),
         },
         Command::CalList,
-        Command::SplLogStart {
+        Command::SplLogGet {
             meas: MeasId(4),
-            interval: Seconds(1.0),
+            from: 120,
+            max: 3600,
         },
-        Command::SplLogStop { meas: MeasId(4) },
         Command::IrCapture {
             lease_token: token(),
             request: SweepRequest {
@@ -694,12 +694,98 @@ fn timing() -> TimingStatus {
     }
 }
 
+/// An SPL meter with two Leq windows, one limited.
+pub fn spl_config() -> SplConfig {
+    SplConfig {
+        input: 1,
+        weighting: Weighting::A,
+        time_weighting: TimeWeighting::Fast,
+        peak_weighting: PeakWeighting::C,
+        leq: LeqConfig {
+            windows: vec![
+                LeqWindow::minutes(1),
+                LeqWindow {
+                    duration: Seconds(1800.0),
+                    weighting: Weighting::A,
+                    limit: Some(DbSpl(99.0)),
+                    warn_margin: Db(3.0),
+                },
+            ],
+            horizon: Seconds(60.0),
+        },
+    }
+}
+
+/// A running SPL meter.
+pub fn spl_measurement() -> Measurement {
+    Measurement {
+        id: MeasId(4),
+        config: MeasConfig {
+            name: "FOH SPL".into(),
+            kind: MeasKind::Spl {
+                config: spl_config(),
+            },
+        },
+        config_rev: Rev(40),
+        running: true,
+        frozen: false,
+        delay: None,
+        grid_id: None,
+    }
+}
+
 fn spl_log() -> SplLog {
     SplLog {
         meas: MeasId(4),
-        running: true,
-        interval: Seconds(1.0),
         started_at: Some(WallNs(1_790_000_000_000_000_000)),
+        windows: vec![
+            LeqWindowState {
+                duration: Seconds(60.0),
+                weighting: Weighting::A,
+                judgement: LeqJudgement::NoLimit,
+                since: WallNs(1_790_000_000_000_000_000),
+            },
+            LeqWindowState {
+                duration: Seconds(1800.0),
+                weighting: Weighting::A,
+                judgement: LeqJudgement::Over,
+                since: WallNs(1_790_000_600_000_000_000),
+            },
+        ],
+        alarms: vec![LeqAlarm {
+            at: WallNs(1_790_000_600_000_000_000),
+            duration: Seconds(1800.0),
+            weighting: Weighting::A,
+            kind: LeqAlarmKind::Over,
+            leq: DbSpl(99.25),
+            limit: DbSpl(99.0),
+        }],
+    }
+}
+
+fn spl_log_page() -> SplLogPage {
+    SplLogPage {
+        meas: MeasId(4),
+        from: 120,
+        total: 122,
+        rows: vec![
+            SplLogRow {
+                start: WallNs(1_790_000_120_000_000_000),
+                measured: Seconds(1.0),
+                laeq: Dbfs(-26.5),
+                lceq: Dbfs(-24.25),
+                lzeq: Dbfs(-23.0),
+                sensitivity: Some(Db(120.0)),
+            },
+            SplLogRow {
+                start: WallNs(1_790_000_121_000_000_000),
+                measured: Seconds(0.5),
+                laeq: Dbfs(f64::NEG_INFINITY),
+                lceq: Dbfs(-90.0),
+                lzeq: Dbfs(-80.0),
+                sensitivity: None,
+            },
+        ],
     }
 }
 
@@ -755,6 +841,7 @@ pub fn events() -> Vec<Event> {
             }),
         ),
         ev(58, Change::Mic(Patch::Deleted("ECM".into()))),
+        ev(59, Change::Measurement(Patch::Set(spl_measurement()))),
     ]
 }
 
@@ -877,7 +964,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         }),
         Ok(ReplyBody::Inputs(inputs())),
         Ok(ReplyBody::Mic(mic())),
-        Ok(ReplyBody::SplLog(spl_log())),
+        Ok(ReplyBody::SplLogPage(spl_log_page())),
         Ok(ReplyBody::Snapshot(Box::new(StateSnapshot {
             state: state(),
             rev: Rev(42),
@@ -1077,6 +1164,34 @@ pub fn frames() -> Vec<Frame> {
                     },
                     mic_curve: true,
                 },
+            }),
+        },
+        Frame {
+            stamp: stamp(None),
+            data: FrameData::Leq(LeqFrame {
+                meas: MeasId(4),
+                meta: LeqMeta {
+                    scale: LevelScale::DbSpl,
+                    cal: CalStatus::Verified {
+                        calibrated_at: WallNs(1_789_000_000_000_000_000),
+                    },
+                    mic_curve: false,
+                    horizon: Seconds(60.0),
+                    logged: 1800,
+                },
+                leq: vec![96.5, 99.25],
+                elapsed: vec![60.0, 1800.0],
+                measured: vec![60.0, 1790.0],
+                allowed: vec![f32::NAN, f32::NAN],
+                recover: vec![f32::NAN, 412.0],
+                flags: vec![
+                    LeqFlags::NONE,
+                    LeqFlags::LIMIT
+                        .with(LeqFlags::JUDGED)
+                        .with(LeqFlags::OVER)
+                        .with(LeqFlags::CANNOT_RECOVER)
+                        .with(LeqFlags::INCOMPLETE),
+                ],
             }),
         },
         Frame {

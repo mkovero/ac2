@@ -901,6 +901,7 @@ mod tests {
                     weighting: Weighting::Z,
                     time_weighting: TimeWeighting::Fast,
                     peak_weighting: PeakWeighting::C,
+                    leq: ac2_proto::model::LeqConfig::default_windows(),
                 }
             }
         );
