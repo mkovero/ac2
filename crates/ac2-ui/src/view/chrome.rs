@@ -224,20 +224,25 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     ];
 
     // Right side, from the edge inwards.
-    let mut right = vec![
-        Item::new(
-            10,
-            vec![
-                dim(format!(
-                    "{} keys · {} commands",
-                    key_hint(app, CommandId::Help),
-                    key_hint(app, CommandId::Palette)
-                )),
-                dim(format!("{} keys", key_hint(app, CommandId::Help))),
-            ],
-        )
-        .sep(),
-    ];
+    let mut keys = Item::new(
+        10,
+        vec![
+            dim(format!(
+                "{} keys · {} commands",
+                key_hint(app, CommandId::Help),
+                key_hint(app, CommandId::Palette)
+            )),
+            dim(format!("{} keys", key_hint(app, CommandId::Help))),
+        ],
+    )
+    .sep();
+    keys.hover = Some(format!(
+        "{} shows every key · {} finds every command by name · {} hides or shows the panes' key hints",
+        key_hint(app, CommandId::Help),
+        key_hint(app, CommandId::Palette),
+        key_hint(app, CommandId::KeyHints)
+    ));
+    let mut right = vec![keys];
     if let Some(l) = st.autosave_label(super::now().wall) {
         let color = match l.tone {
             AutosaveTone::Quiet | AutosaveTone::Busy => ch.dim,
@@ -403,7 +408,9 @@ pub(super) fn progress(
             .min_size(egui::vec2(96.0, 22.0));
             if ui
                 .add(b)
-                .on_hover_text("Fades the output out, disarms and discards this run")
+                .on_hover_text(format!(
+                    "Fades the output out, disarms and discards this run · {stop_key}"
+                ))
                 .clicked()
             {
                 stop = true;
@@ -477,6 +484,19 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let mut clicked = None;
     let mut clicked_trace = None;
     let mut toggled_trace = None;
+    let tips = RowTips {
+        meas: format!(
+            "Click selects it · {} / {} step through the focused pane's measurements",
+            key_hint(app, CommandId::NextMeasurement),
+            key_hint(app, CommandId::PrevMeasurement)
+        ),
+        eye: key_hint(app, CommandId::ToggleTrace),
+        select: format!(
+            "Click selects it (again: deselects) · {} / {} step through the shown traces",
+            key_hint(app, CommandId::NextTrace),
+            key_hint(app, CommandId::PrevTrace)
+        ),
+    };
     inputs(app, ui, ch);
     {
         let st = &app.state;
@@ -523,7 +543,8 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 text.push_str(&format!(" · {}", format::db_readout(e.offset_db)));
             }
             let r = ui
-                .add(egui::Button::selectable(selected, text).wrap_mode(egui::TextWrapMode::Wrap));
+                .add(egui::Button::selectable(selected, text).wrap_mode(egui::TextWrapMode::Wrap))
+                .on_hover_text(&tips.meas);
             if r.clicked() {
                 clicked = Some(m.id);
             }
@@ -542,7 +563,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             );
         }
         for row in &rows {
-            match trace_row(ui, row, ch) {
+            match trace_row(ui, row, &tips, ch) {
                 Some(RowClick::Select) => clicked_trace = Some(row.id),
                 Some(RowClick::Eye) => toggled_trace = Some(row.id),
                 None => {}
@@ -576,6 +597,14 @@ fn traces_header(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
     });
 }
 
+/// The tooltips of the list's rows, with the keys that do the same.
+struct RowTips {
+    meas: String,
+    /// The key that shows / hides the selected trace.
+    eye: String,
+    select: String,
+}
+
 /// What a click on a trace row did.
 enum RowClick {
     /// The row: select (again: deselect).
@@ -592,6 +621,7 @@ const EYE_W: f32 = 18.0;
 fn trace_row(
     ui: &mut egui::Ui,
     row: &ac2_scene::trace_list::TraceRow,
+    tips: &RowTips,
     ch: &Chrome,
 ) -> Option<RowClick> {
     let c = row.color;
@@ -619,7 +649,11 @@ fn trace_row(
             ui.painter()
                 .circle_stroke(centre, 8.0, egui::Stroke::new(1.0, ch.border));
         }
-        if eye.on_hover_text(format!("{what} this trace")).clicked() {
+        let tip = format!(
+            "{what} this trace · {} shows / hides the selected one",
+            tips.eye
+        );
+        if eye.on_hover_text(tip).clicked() {
             click = Some(RowClick::Eye);
         }
         // The longest detail line that fits beside the dot, measured as drawn.
@@ -650,7 +684,7 @@ fn trace_row(
         job.wrap.max_width = room;
         let r = ui
             .add(egui::Button::selectable(row.selected, job).wrap_mode(egui::TextWrapMode::Wrap))
-            .on_hover_text(&row.describe);
+            .on_hover_text(format!("{}\n{}", row.describe, tips.select));
         if r.clicked() {
             click = Some(RowClick::Select);
         }

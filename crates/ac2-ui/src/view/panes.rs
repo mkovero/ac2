@@ -11,6 +11,7 @@ use eframe::egui;
 use ac2_scene::view::DistortionUnit;
 
 use crate::app::{App, CachedScene};
+use crate::hints::{self, KeyHint};
 use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
@@ -22,6 +23,12 @@ use ac2_proto::units::MeasId;
 const TF_SHARE: f32 = 0.62;
 const GAP: f32 = 6.0;
 const TITLE_H: f32 = 20.0;
+/// The focused pane's key-hint line, under its plot.
+pub(crate) const HINT_H: f32 = 18.0;
+/// Text size of the hint line.
+const HINT_FONT: f32 = 11.5;
+/// Left and right inset of the hint line's text.
+const HINT_PAD: f32 = 8.0;
 
 /// Pane rectangles inside `area` for the visible panes.
 pub(crate) fn layout(visible: &[PaneKind], area: egui::Rect) -> Vec<(PaneKind, egui::Rect)> {
@@ -171,20 +178,61 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             egui::FontId::proportional(12.0),
             if focused { ch.text } else { ch.dim },
         );
+        let style = crate::keys::label_style();
+        let line = app.state.key_hint_line(&app.keymap, pane, style);
+        // The hint line takes its strip off the plot's bottom: it never covers a curve.
+        let bottom = rect.max.y - 2.0 - if line.is_some() { HINT_H } else { 0.0 };
         let plot_rect = egui::Rect::from_min_max(
             egui::pos2(rect.min.x + 2.0, rect.min.y + TITLE_H),
-            egui::pos2(rect.max.x - 2.0, rect.max.y - 2.0),
+            egui::pos2(rect.max.x - 2.0, bottom),
         );
         let resp = ui.interact(
             rect,
             ui.id().with(("pane", pane as u32)),
             egui::Sense::click_and_drag(),
         );
-        // After the pane's own response, so a click on the chip is the chip's.
-        title_chip(app, ui, pane, title, label.right() + 10.0, ch);
-        if pane == PaneKind::Distortion && !app.state.view.distortion.show_ir {
-            unit_toggle(app, ui, title, label.right() + 10.0, ch);
+        // After the pane's own response, so a hover or click there is theirs.
+        let all = app.state.pane_hints(&app.keymap, pane, style);
+        let name_rect =
+            egui::Rect::from_min_max(title.min, egui::pos2(label.right() + 4.0, title.max.y));
+        let name = ui.interact(
+            name_rect,
+            ui.id().with(("pane-title", pane as u32)),
+            egui::Sense::hover(),
+        );
+        name.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Label,
+                true,
+                format!("{n}  {}", pane.title()),
+            )
+        });
+        name.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
+        if let Some(items) = &line {
+            let strip = egui::Rect::from_min_max(
+                egui::pos2(rect.min.x + 2.0, bottom),
+                egui::pos2(rect.max.x - 2.0, rect.max.y - 2.0),
+            );
+            hint_line(ui, strip, items, ch);
+            ui.interact(
+                strip,
+                ui.id().with(("pane-hints", pane as u32)),
+                egui::Sense::hover(),
+            )
+            .on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
         }
+        let mut x = label.right() + 10.0;
+        if let Some(chip) = title_chip(app, ui, pane, title, x, ch) {
+            x = chip.right() + 10.0;
+        }
+        let mut right = title.right() - 8.0;
+        if pane == PaneKind::Distortion
+            && !app.state.view.distortion.show_ir
+            && let Some(left) = unit_toggle(app, ui, title, x, ch)
+        {
+            right = left - 10.0;
+        }
+        let caption_end = caption(app, ui, pane, title, x, right, ch);
         if plot_rect.width() < 8.0 || plot_rect.height() < 8.0 {
             continue;
         }
@@ -217,7 +265,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         {
             match hint.place {
                 HintPlace::Centre => empty_hint(ui, plot_rect, &hint.text, ch),
-                HintPlace::Title => title_hint(ui, title, label.right() + 16.0, &hint.text, ch),
+                HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
             }
         }
         navigate(app, ui, &resp, pane, plot_rect, built.and_then(|b| b.1));
@@ -226,8 +274,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
 }
 
 /// The chip in a pane's title naming the measurement the pane shows (a click opens the list
-/// of measurements it can show), and on the transfer and spectrum panes the smoothing of
-/// what is drawn there.
+/// of measurements it can show); where it was drawn.
 fn title_chip(
     app: &mut App,
     ui: &egui::Ui,
@@ -235,11 +282,9 @@ fn title_chip(
     title: egui::Rect,
     x: f32,
     ch: &Chrome,
-) {
+) -> Option<egui::Rect> {
     let st = &app.state;
-    let Some(m) = st.pane_meas(pane) else {
-        return;
-    };
+    let m = st.pane_meas(pane)?;
     let font = egui::FontId::proportional(12.0);
     let painter = ui.painter();
     let galley = painter.layout_no_wrap(m.config.name.clone(), font.clone(), ch.text);
@@ -254,6 +299,14 @@ fn title_chip(
     );
     let name = m.config.name.clone();
     chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+    let next = app
+        .keymap
+        .first_chord(CommandId::NextMeasurement, pane.scope())
+        .map(|c| c.label());
+    let chip = chip.on_hover_text(match next {
+        Some(k) => format!("{name}: click to choose what this pane shows · {k} the next one"),
+        None => format!("{name}: click to choose what this pane shows"),
+    });
     let open = matches!(st.overlay, Overlay::PaneMenu(pm) if pm.pane == pane);
     let fill = if open || chip.hovered() {
         ch.focus.gamma_multiply(0.35)
@@ -284,15 +337,6 @@ fn title_chip(
         ch.dim,
         egui::Stroke::NONE,
     ));
-    if let Some(c) = st.pane_caption(pane) {
-        painter.text(
-            r.right_center() + egui::vec2(10.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            c,
-            font,
-            ch.dim,
-        );
-    }
     if chip.clicked() {
         app.dispatch(Msg::PaneMenu(pane));
     }
@@ -304,12 +348,165 @@ fn title_chip(
         &chip,
         ch,
     );
+    Some(r)
+}
+
+/// The pane's caption (the selected stored trace, smoothing, mic curve) between `left` and
+/// `right` of its title: the longest variant that fits, else the shortest cut with `…`, so
+/// the title always names the trace the keys act on. Returns where the caption ends.
+fn caption(
+    app: &App,
+    ui: &egui::Ui,
+    pane: PaneKind,
+    title: egui::Rect,
+    left: f32,
+    right: f32,
+    ch: &Chrome,
+) -> f32 {
+    let variants = app.state.pane_caption_variants(pane);
+    let room = right - left;
+    if variants.is_empty() || room < 24.0 {
+        return left;
+    }
+    let font = egui::FontId::proportional(12.0);
+    let painter = ui.painter();
+    let fits = variants
+        .iter()
+        .map(|v| painter.layout_no_wrap(v.clone(), font.clone(), ch.dim))
+        .find(|g| g.size().x <= room);
+    let galley = fits.unwrap_or_else(|| {
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            variants.last().cloned().unwrap_or_default(),
+            font,
+            ch.dim,
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+        painter.layout_job(job)
+    });
+    let w = galley.size().x;
+    painter.galley(
+        egui::pos2(left, title.center().y - galley.size().y / 2.0),
+        galley,
+        ch.dim,
+    );
+    left + w
+}
+
+/// The key-hint line in `strip`: `key name` pairs, the keys in the accent colour, as many as
+/// fit (the least used go first; the help key stays).
+fn hint_line(ui: &egui::Ui, strip: egui::Rect, items: &[KeyHint], ch: &Chrome) {
+    let painter = ui.painter_at(strip);
+    painter.line_segment(
+        [strip.left_top(), strip.right_top()],
+        egui::Stroke::new(1.0, ch.border),
+    );
+    let (galleys, sep) = hint_galleys(ui.ctx(), items, ch);
+    let widths: Vec<(u8, f32)> = items
+        .iter()
+        .zip(&galleys)
+        .map(|(h, g)| (h.priority, g.size().x))
+        .collect();
+    let placed = place_hints(&widths, sep.size().x, strip.min.x, strip.width());
+    for (n, (i, x)) in placed.into_iter().enumerate() {
+        let g = galleys[i].clone();
+        let y = strip.center().y - g.size().y / 2.0;
+        if n > 0 {
+            painter.galley(egui::pos2(x - sep.size().x, y), sep.clone(), ch.dim);
+        }
+        painter.galley(egui::pos2(x, y), g, ch.dim);
+    }
+}
+
+/// Where each kept hint of `widths` (priority, width) starts in a strip from `left`,
+/// `width` wide: `(index, x)`, left to right, a separator before each but the first.
+fn place_hints(widths: &[(u8, f32)], sep: f32, left: f32, width: f32) -> Vec<(usize, f32)> {
+    let keep = hints::fit(widths, sep, width - 2.0 * HINT_PAD);
+    let mut x = left + HINT_PAD;
+    let mut out = Vec::new();
+    for (i, ((_, w), k)) in widths.iter().zip(keep).enumerate() {
+        if !k {
+            continue;
+        }
+        if !out.is_empty() {
+            x += sep;
+        }
+        out.push((i, x));
+        x += w;
+    }
+    out
+}
+
+/// Each hint laid out as drawn (key in the accent colour, name dimmed), and the separator.
+pub(crate) fn hint_galleys(
+    ctx: &egui::Context,
+    items: &[KeyHint],
+    ch: &Chrome,
+) -> (
+    Vec<std::sync::Arc<egui::Galley>>,
+    std::sync::Arc<egui::Galley>,
+) {
+    let font = egui::FontId::proportional(HINT_FONT);
+    let fmt = |color| egui::TextFormat::simple(font.clone(), color);
+    ctx.fonts_mut(|f| {
+        let galleys = items
+            .iter()
+            .map(|h| {
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&h.keys, 0.0, fmt(ch.focus));
+                job.append(&format!(" {}", h.name), 0.0, fmt(ch.dim));
+                f.layout_job(job)
+            })
+            .collect();
+        let sep = f.layout_no_wrap(hints::SEP.to_owned(), font.clone(), ch.border);
+        (galleys, sep)
+    })
+}
+
+/// The tooltip of a pane's title and hint line: every hint with the command's full title,
+/// and how to hide the line.
+fn hints_tooltip(
+    ui: &mut egui::Ui,
+    keymap: &crate::keys::Keymap,
+    pane: PaneKind,
+    all: &[KeyHint],
+    ch: &Chrome,
+) {
+    ui.label(egui::RichText::new(format!("{} — most used keys", pane.title())).strong());
+    egui::Grid::new(("hints-tip", pane as u32))
+        .num_columns(2)
+        .spacing(egui::vec2(12.0, 3.0))
+        .show(ui, |ui| {
+            for h in all {
+                ui.label(egui::RichText::new(&h.keys).monospace().color(ch.focus));
+                let title = if h.command == CommandId::Help {
+                    "Every key, in every pane"
+                } else {
+                    h.title()
+                };
+                ui.label(title);
+                ui.end_row();
+            }
+        });
+    if let Some(k) = keymap.first_chord(CommandId::KeyHints, Scope::Global) {
+        ui.label(
+            egui::RichText::new(format!("{} hides or shows the hint line", k.label()))
+                .small()
+                .color(ch.dim),
+        );
+    }
 }
 
 /// The distortion pane's unit, `dB | %`, at the right end of its title: the shown one
 /// highlighted, a click shows the other (as the key does, which the tooltip names). Left
 /// out when the title is too narrow to hold it beside the pane's name (from `min_x`).
-fn unit_toggle(app: &mut App, ui: &egui::Ui, title: egui::Rect, min_x: f32, ch: &Chrome) {
+/// Returns its left edge when drawn.
+fn unit_toggle(
+    app: &mut App,
+    ui: &egui::Ui,
+    title: egui::Rect,
+    min_x: f32,
+    ch: &Chrome,
+) -> Option<f32> {
     let current = app.state.view.distortion.unit;
     let tip = match app
         .keymap
@@ -336,8 +533,9 @@ fn unit_toggle(app: &mut App, ui: &egui::Ui, title: egui::Rect, min_x: f32, ch: 
     let total: f32 = items.iter().map(|(_, _, g)| g.size().x + 2.0 * pad).sum();
     let mut x = title.max.x - 6.0 - total;
     if x < min_x {
-        return;
+        return None;
     }
+    let left = x;
     let (y, h) = (title.min.y + 2.0, TITLE_H - 3.0);
     let mut picked = None;
     for (unit, text, galley) in items {
@@ -382,6 +580,7 @@ fn unit_toggle(app: &mut App, ui: &egui::Ui, title: egui::Rect, min_x: f32, ch: 
     if let Some(u) = picked {
         app.dispatch(Msg::DistortionUnit(u));
     }
+    Some(left)
 }
 
 /// The open measurement list of `pane`, under its chip.
@@ -534,6 +733,55 @@ fn navigate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keys::{Keymap, LabelStyle};
+
+    /// Every pane's line at every width from 300 to 1920 px, measured with egui's fonts:
+    /// nothing drawn past the strip, no two hints overlapping, the help key always there,
+    /// and the whole line once the pane is wide enough.
+    #[test]
+    fn hint_lines_fit_every_width() {
+        let ctx = egui::Context::default();
+        crate::app::install_fonts(&ctx);
+        let ch = crate::theme::chrome(&Theme::dark());
+        let keymap = Keymap::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let ctx = ui.ctx();
+            for scope in Scope::ALL {
+                for style in [LabelStyle::Pc, LabelStyle::Mac] {
+                    let items = hints::line(&keymap, scope, style, |_| false);
+                    let (galleys, sep) = hint_galleys(ctx, &items, &ch);
+                    let widths: Vec<(u8, f32)> = items
+                        .iter()
+                        .zip(&galleys)
+                        .map(|(h, g)| (h.priority, g.size().x))
+                        .collect();
+                    let sep = sep.size().x;
+                    let mut shown_before = 0;
+                    for w in (300..=1920).step_by(10) {
+                        let w = w as f32;
+                        let placed = place_hints(&widths, sep, 0.0, w);
+                        let help = items.len() - 1;
+                        assert_eq!(placed.last().map(|p| p.0), Some(help), "{scope:?} {w}");
+                        for pair in placed.windows(2) {
+                            let ((i, x), (_, next)) = (pair[0], pair[1]);
+                            assert!(x + widths[i].1 + sep <= next + 0.01, "{scope:?} {w}");
+                        }
+                        let (i, x) = placed[placed.len() - 1];
+                        assert!(x + widths[i].1 <= w - HINT_PAD + 0.01, "{scope:?} {w}");
+                        // Wider never shows fewer.
+                        assert!(placed.len() >= shown_before, "{scope:?} {w}");
+                        shown_before = placed.len();
+                    }
+                    assert_eq!(shown_before, items.len(), "{scope:?}: all at 1920 px");
+                    // At the narrowest the most used still shows beside the help key.
+                    let narrow = place_hints(&widths, sep, 0.0, 300.0);
+                    let want = if scope == Scope::Global { 1 } else { 3 };
+                    assert!(narrow.len() >= want, "{scope:?} {style:?}: {narrow:?}");
+                }
+            }
+        });
+        out.textures_delta.clear();
+    }
 
     #[test]
     fn layout_tf_on_top() {

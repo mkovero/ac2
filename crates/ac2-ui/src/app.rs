@@ -309,7 +309,7 @@ fn dialog_error(d: &mut Option<ConnectDialog>, msg: String) {
 
 /// Chrome text in the plots' bundled font (Inter), so panels and plots share one typeface and
 /// arrows, minus signs and γ² render the same everywhere; egui's fonts stay as fallback.
-fn install_fonts(ctx: &egui::Context) {
+pub(crate) fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "inter".into(),

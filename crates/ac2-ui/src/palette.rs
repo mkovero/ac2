@@ -217,6 +217,7 @@ mod tests {
             ("leq history", CommandId::SplLeqHistory),
             ("new log", CommandId::SplNewLog),
             ("full screen", CommandId::Fullscreen),
+            ("key hints", CommandId::KeyHints),
         ] {
             let r = search(q, &k, Scope::Transfer);
             assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");
@@ -229,7 +230,7 @@ mod tests {
         let r = search("", &k, Scope::Spectrum);
         assert_eq!(r.len(), CommandId::ALL.len());
         let row = |c| r.iter().find(|e| e.command == c).expect("row");
-        assert_eq!(row(CommandId::PeakHold).key.as_deref(), Some("H"));
+        assert_eq!(row(CommandId::PeakHold).key.as_deref(), Some("P"));
         assert_eq!(
             row(CommandId::InsertDelay).key.as_deref(),
             Some("X (transfer)")

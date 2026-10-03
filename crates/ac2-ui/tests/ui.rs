@@ -228,11 +228,11 @@ fn help_overlay() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    h.key_press(Key::Slash);
+    h.key_press(Key::H);
     step_until(&mut h, "help", |a| a.state.overlay == Overlay::Help);
     snapshot(&mut h, "help_overlay");
-    // `/` closes it again.
-    h.key_press(Key::Slash);
+    // H closes it again.
+    h.key_press(Key::H);
     step_until(&mut h, "help closed", |a| a.state.overlay == Overlay::None);
 }
 
@@ -999,7 +999,7 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_percent");
-    h.key_press(Key::H);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::I);
     step_until(&mut h, "sweep IR", |a| a.state.view.distortion.show_ir);
     // G: the log view, where the harmonics' impulses read at their level.
     h.key_press(Key::G);
@@ -1523,9 +1523,9 @@ fn leq_tiles_from_an_empty_daemon() {
         }
     };
     snapshot_when(&mut h, "leq_columns_over", pin, first_is(true));
-    // B: tiles, H: the history strip under them.
+    // B: tiles, Shift+B: the history strip under them.
     h.key_press(Key::B);
-    h.key_press(Key::H);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::B);
     step_until(&mut h, "tiles with history", |a| {
         a.state.view.spl.layout
             == ac2_scene::view::LeqLayout {
@@ -1562,7 +1562,7 @@ fn leq_tiles_from_an_empty_daemon() {
     snapshot_when(&mut h, "leq_tiles_recovered", pin, first_is(false));
     // Back to columns without the strip.
     h.key_press(Key::B);
-    h.key_press(Key::H);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::B);
     step_until(&mut h, "columns again", |a| {
         a.state.view.spl.layout == ac2_scene::view::LeqLayout::default()
     });
@@ -1634,4 +1634,87 @@ fn traces_list() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "traces_list");
+}
+
+/// The key hints on a crowded grid: the sweep pane shown beside the others (four narrow
+/// panes under the transfer pane at 1280 px), the SPL meter focused with its hint line cut
+/// to what fits, its footer naming the mic and its curve without running into the readouts,
+/// and the transfer title naming the selected stored trace, shortened. Then the SPL title's
+/// tooltip: the pane's hints in full.
+#[test]
+fn key_hints() {
+    use ac2_proto::model::{CurveChoice, InputSetup, Mic, MicCurveRef};
+    use ac2_proto::units::{Hz, WallNs};
+    use ac2_proto::{Change, Patch};
+    if !have_gpu("key_hints") {
+        return;
+    }
+    let rig = common::Rig::start();
+    {
+        let curve = |label: &str| MicCurveRef {
+            label: label.into(),
+            file_name: format!("34804_{label}.txt"),
+            content_hash: "0123456789abcdef".into(),
+            points: 100,
+            f_lo: Hz(50.0),
+            f_hi: Hz(20_000.0),
+            imported_at: WallNs(0),
+            stated_sensitivity: None,
+        };
+        let mut f = rig.fake.lock();
+        f.commit(Change::Mic(Patch::Set(Mic {
+            name: "MM1 34804".into(),
+            curves: vec![curve("0°"), curve("90°")],
+        })));
+        f.commit(Change::Inputs(vec![InputSetup {
+            channel: 1,
+            mic: Some("MM1 34804".into()),
+            curve: CurveChoice::Curve {
+                label: "90°".into(),
+            },
+        }]));
+    }
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames with the mic", |a| {
+        live(a) && a.state.daemon().is_some_and(|s| !s.mics.is_empty())
+    });
+    // A capture of the transfer measurement.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    // The sweep pane shown (focused by Alt+5), then the SPL meter focused.
+    h.key_press_modifiers(Modifiers::ALT, Key::Num5);
+    h.key_press_modifiers(Modifiers::ALT, Key::Num4);
+    step_until(&mut h, "five panes, SPL focused", |a| {
+        a.state.layout.visible().len() == 5 && a.state.layout.focus == PaneKind::Spl
+    });
+    // The capture selected (the focus stays): the transfer title names it.
+    h.key_press(Key::V);
+    step_until(&mut h, "slot 1 selected", |a| {
+        a.state.selected_trace_meta().is_some() && a.state.layout.focus == PaneKind::Spl
+    });
+    let names = |a: &App| a.state.pane_caption_variants(PaneKind::Transfer);
+    assert!(
+        names(h.state())
+            .last()
+            .is_some_and(|n| n.starts_with("slot 1 (")),
+        "{:?}",
+        names(h.state())
+    );
+    let style = ac2_ui::keys::LabelStyle::Pc;
+    assert!(
+        h.state()
+            .state
+            .key_hint_line(&h.state().keymap, PaneKind::Spl, style)
+            .is_some()
+    );
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "key_hints");
+    // The SPL title's tooltip.
+    h.get_by_label("4  SPL").hover();
+    for _ in 0..6 {
+        h.step();
+    }
+    snapshot(&mut h, "key_hints_tooltip");
 }

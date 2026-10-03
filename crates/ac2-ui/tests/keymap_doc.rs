@@ -59,6 +59,21 @@ fn render() -> String {
             out.push_str(&format!("| {} | `{}` |\n", cell(c.title()), c.name()));
         }
     }
+    // The panes' hint lines (`ac2_ui::hints`), each closed by the help key.
+    out.push_str(
+        "\n#### Key hint lines (`Shift+H` on / off)\n\n\
+         The least used go first on a narrow pane; the sweep pane shows `U` while it shows \
+         distortion and `G` while it shows the impulse response.\n\n\
+         | Pane | Hint line |\n|---|---|\n",
+    );
+    for scope in Scope::ALL.into_iter().filter(|s| *s != Scope::Global) {
+        let line = ac2_ui::hints::line(&km, scope, LabelStyle::Pc, |_| false)
+            .iter()
+            .map(|h| format!("`{}` {}", cell(&h.keys), cell(h.name)))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        out.push_str(&format!("| {} | {line} |\n", scope.title()));
+    }
     out
 }
 

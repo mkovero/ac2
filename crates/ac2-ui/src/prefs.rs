@@ -1,9 +1,11 @@
 //! UI preferences kept between runs (`ui.toml` in the ac2 config directory): the stimulus
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
-//! names — and the Leq view's layout.
+//! names — the Leq view's layout and whether the panes show their key hints.
 //!
 //! ```toml
+//! key_hints = false
+//!
 //! [stimulus_outputs]
 //! "hw:UMC1820" = [1, 2]
 //!
@@ -48,7 +50,7 @@ pub struct DeviceRoles {
 }
 
 /// What the UI remembers.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiPrefs {
     /// Zero-based stimulus outputs per output device id.
     pub outputs: BTreeMap<String, Vec<u16>>,
@@ -56,11 +58,27 @@ pub struct UiPrefs {
     pub sessions: BTreeMap<String, DeviceRoles>,
     /// How the SPL pane lays the Leq windows out.
     pub leq: LeqLayout,
+    /// The focused pane's line of its most used keys (on until the operator turns it off).
+    pub key_hints: bool,
+}
+
+impl Default for UiPrefs {
+    fn default() -> Self {
+        Self {
+            outputs: BTreeMap::new(),
+            sessions: BTreeMap::new(),
+            leq: LeqLayout::default(),
+            key_hints: true,
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
+    /// Written only when off (the default is on). First: plain values precede tables.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key_hints: Option<bool>,
     /// One-based channels per device id.
     #[serde(default)]
     stimulus_outputs: BTreeMap<String, Vec<u32>>,
@@ -203,12 +221,14 @@ impl UiPrefs {
             outputs,
             sessions,
             leq,
+            key_hints: f.key_hints.unwrap_or(true),
         })
     }
 
     /// The file text.
     pub fn to_toml(&self) -> String {
         let f = File {
+            key_hints: (!self.key_hints).then_some(false),
             stimulus_outputs: self
                 .outputs
                 .iter()
@@ -313,6 +333,25 @@ mod tests {
         assert_eq!(q.leq.style, LeqStyle::Columns);
         assert!(q.leq.history);
         assert!(UiPrefs::from_toml("[leq]\nstyle = \"bars\"\n").is_err());
+    }
+
+    #[test]
+    fn key_hints_round_trip() {
+        let mut p = UiPrefs::default();
+        assert!(p.key_hints);
+        // On is the default and is not written.
+        assert!(!p.to_toml().contains("key_hints"));
+        p.key_hints = false;
+        p.outputs.insert("fake:loop".into(), vec![0]);
+        let text = p.to_toml();
+        assert!(text.contains("key_hints = false"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+        assert!(
+            UiPrefs::from_toml("key_hints = true\n")
+                .expect("parse")
+                .key_hints
+        );
+        assert!(UiPrefs::from_toml("key_hints = \"no\"\n").is_err());
     }
 
     #[test]

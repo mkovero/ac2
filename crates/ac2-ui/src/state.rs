@@ -1074,11 +1074,37 @@ impl AppState {
     /// The pane's title caption: smoothing and mic curve, `smoothing 1/6 oct · mic curve:
     /// MM1 34804 90°`.
     pub fn pane_caption(&self, pane: PaneKind) -> Option<String> {
-        let parts: Vec<String> = [self.smoothing_caption(pane), self.mic_curve_caption(pane)]
-            .into_iter()
-            .flatten()
-            .collect();
-        (!parts.is_empty()).then(|| parts.join(" · "))
+        self.pane_caption_variants(pane).into_iter().next()
+    }
+
+    /// The pane's title caption from the longest to the shortest, for a narrow title: all
+    /// of it, then without the mic curve, then the selected stored trace's name alone (the
+    /// one thing the title must keep: which curve the keys act on).
+    pub fn pane_caption_variants(&self, pane: PaneKind) -> Vec<String> {
+        let smoothing = self.smoothing_caption(pane);
+        let curve = self.mic_curve_caption(pane);
+        let trace = self
+            .selected_trace_meta()
+            .filter(|t| {
+                matches!(pane, PaneKind::Transfer | PaneKind::Spectrum)
+                    && SmoothTarget::Trace((*t).clone()).pane() == pane
+            })
+            .map(trace_label);
+        let mut v: Vec<String> = Vec::new();
+        let parts: Vec<&String> = [&smoothing, &curve].into_iter().flatten().collect();
+        if !parts.is_empty() {
+            v.push(
+                parts
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+            );
+        }
+        v.extend(smoothing);
+        v.extend(trace);
+        v.dedup();
+        v
     }
 
     pub fn edit(&self, id: MeasId) -> LiveEdit {
@@ -1314,6 +1340,46 @@ impl AppState {
             && self.stimulus.phase == StimPhase::Idle
             && !self.daemon().is_some_and(|d| d.generator.firing)
             && self.operation().is_none()
+    }
+
+    /// Whether the panes show key hints now: on in the preferences, and never in the stage
+    /// view (the audience sees the windows alone).
+    pub fn key_hints_shown(&self) -> bool {
+        self.prefs.key_hints && !self.stage_view()
+    }
+
+    /// The hint line of `pane`: its most used keys as bound in `keymap`, written in `style`,
+    /// then the help key. Only the focused pane has one, and only while hints are shown.
+    /// Commands that do nothing in the pane's present view are left out (the sweep pane's
+    /// dB / % while it shows the IR, its IR mode while it shows distortion).
+    pub fn key_hint_line(
+        &self,
+        keymap: &Keymap,
+        pane: PaneKind,
+        style: crate::keys::LabelStyle,
+    ) -> Option<Vec<crate::hints::KeyHint>> {
+        if !self.key_hints_shown() || self.layout.focus != pane {
+            return None;
+        }
+        Some(self.pane_hints(keymap, pane, style))
+    }
+
+    /// Every hint of `pane` (the title's tooltip lists them whether or not the line shows).
+    pub fn pane_hints(
+        &self,
+        keymap: &Keymap,
+        pane: PaneKind,
+        style: crate::keys::LabelStyle,
+    ) -> Vec<crate::hints::KeyHint> {
+        let ir = self.view.distortion.show_ir;
+        crate::hints::line(keymap, pane.scope(), style, |c| {
+            pane == PaneKind::Distortion
+                && match c {
+                    CommandId::DistortionUnit => ir,
+                    CommandId::IrMode => !ir,
+                    _ => false,
+                }
+        })
     }
 
     /// The multi-step operation running on the daemon (a set of sweeps), as the progress
@@ -2688,6 +2754,17 @@ impl AppState {
             }
             C::Quit => self.quit = true,
             C::Fullscreen => self.fullscreen = !self.fullscreen,
+            C::KeyHints => {
+                self.prefs.key_hints = !self.prefs.key_hints;
+                self.prefs_dirty = true;
+                // Off, the line is gone: say how it comes back.
+                if !self.prefs.key_hints {
+                    let key = keymap
+                        .first_chord(CommandId::KeyHints, Scope::Global)
+                        .map_or_else(|| "the palette".to_owned(), |c| c.label());
+                    self.toast(format!("key hints off · {key} shows them again"));
+                }
+            }
 
             C::StimulusArm => self.arm(false, keymap, out),
             C::StimulusTakeOver => self.arm(true, keymap, out),

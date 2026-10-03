@@ -314,7 +314,7 @@ fn escape_always_stops_and_closes() {
     assert!(matches!(r.as_slice(), [Request::StimStop]));
     // Nothing live: Esc only closes overlays.
     let mut t = T::new();
-    t.key("/");
+    t.key("H");
     assert_eq!(t.st.overlay, Overlay::Help);
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
@@ -365,14 +365,14 @@ fn opening_key_is_not_typed_into_the_prompt() {
 fn keys_follow_the_focused_pane() {
     let mut t = T::new();
     assert!(t.st.layout.is_shown(PaneKind::Ir));
-    // Transfer pane: H hides the IR pane.
-    t.key("H");
+    // Transfer pane: Shift+I hides the IR pane.
+    t.key("Shift+I");
     assert!(!t.st.layout.is_shown(PaneKind::Ir));
-    t.key("H");
-    // Spectrum pane: H is peak hold.
+    t.key("Shift+I");
+    // Spectrum pane: P is peak hold.
     t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
-    t.key("H");
+    t.key("P");
     assert!(t.st.view.spectrum.peak_hold);
     assert!(t.st.layout.is_shown(PaneKind::Ir));
     // X means nothing there.
@@ -896,7 +896,7 @@ fn traces_are_selected_from_the_keyboard() {
     // Esc with a dialog open only closes it (and stops); with nothing open it also hands
     // the keys back to the live measurement.
     t.key("V");
-    t.key("/");
+    t.key("H");
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
@@ -3555,13 +3555,13 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         assert!(r.is_empty(), "display only: {r:?}");
         assert_eq!(t.st.view.distortion.unit, unit);
     }
-    t.key("H");
+    t.key("Shift+I");
     assert!(t.st.view.distortion.show_ir);
     t.key("G");
     assert_eq!(t.st.view.ir.mode, IrMode::Log);
 
-    // Shift+H hides the pane again.
-    t.key("Shift+H");
+    // Shift+W hides the pane again.
+    t.key("Shift+W");
     assert!(!t.st.layout.is_shown(PaneKind::Distortion));
     assert_eq!(t.st.layout.focus, PaneKind::Transfer);
 }
@@ -4206,7 +4206,7 @@ fn leq_layout_keys_and_prefs() {
     assert!(t.st.prefs_dirty);
     assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
     t.st.prefs_dirty = false;
-    t.key("H");
+    t.key("Shift+B");
     assert!(t.st.view.spl.layout.history);
     assert!(t.st.prefs_dirty);
     assert_eq!(
@@ -4222,12 +4222,13 @@ fn leq_layout_keys_and_prefs() {
     t.key("G");
     assert_eq!(t.st.prefs.leq.style, LeqStyle::Tiles);
     t.key("B");
-    t.key("H");
+    t.key("Shift+B");
     assert_eq!(t.st.view.spl.layout, LeqLayout::default());
-    // Elsewhere B and H keep their meanings (the RTA's bars, the transfer pane's IR).
+    // Elsewhere B keeps its meaning (the RTA's bars / line), Shift+B means nothing.
     t.key("Alt+2");
-    t.key("H");
-    assert!(t.st.view.spectrum.peak_hold);
+    t.key("B");
+    assert!(t.key("Shift+B").is_empty());
+    t.key("B");
     assert_eq!(t.st.view.spl.layout, LeqLayout::default());
     // The next start takes the remembered layout.
     let prefs = crate::prefs::UiPrefs {
@@ -4334,5 +4335,139 @@ fn leq_history_and_alarm_toasts() {
     assert_eq!(
         t.last_toast(),
         "FOH SPL: LAeq 30 min back within its limit — 98.9 dB"
+    );
+}
+
+fn hint_texts(t: &T, pane: PaneKind) -> Option<Vec<String>> {
+    t.st.key_hint_line(&t.keys, pane, crate::keys::LabelStyle::Pc)
+        .map(|v| v.iter().map(crate::hints::KeyHint::text).collect())
+}
+
+/// The focused pane, and only it, has a hint line; its hints are the pane's own and follow
+/// what the pane shows now; Shift+H turns the lines off and on and the choice is kept.
+#[test]
+fn key_hints_follow_the_focused_pane() {
+    let mut t = T::new();
+    assert!(t.st.prefs.key_hints);
+    let tf = hint_texts(&t, PaneKind::Transfer).expect("transfer focused");
+    assert_eq!(tf.first().map(String::as_str), Some("V select trace"));
+    assert_eq!(tf.last().map(String::as_str), Some("H all keys"));
+    for p in [PaneKind::Spectrum, PaneKind::Ir, PaneKind::Spl] {
+        assert_eq!(hint_texts(&t, p), None, "{p:?} is not focused");
+    }
+    t.key("Alt+2");
+    assert_eq!(hint_texts(&t, PaneKind::Transfer), None);
+    let sp = hint_texts(&t, PaneKind::Spectrum).expect("spectrum focused");
+    assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
+    t.key("Alt+3");
+    let ir = hint_texts(&t, PaneKind::Ir).expect("IR focused");
+    assert!(ir.contains(&"G linear/log/ETC".to_owned()), "{ir:?}");
+    t.key("Alt+4");
+    let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
+    assert_eq!(
+        spl[..3],
+        ["G meter/Leq", "B columns/tiles", "Shift+B history"]
+    );
+    // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR.
+    t.key("Alt+5");
+    let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
+    assert!(d.contains(&"U dB/%".to_owned()), "{d:?}");
+    assert!(!d.contains(&"G linear/log/ETC".to_owned()), "{d:?}");
+    t.key("Shift+I");
+    let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
+    assert!(!d.contains(&"U dB/%".to_owned()), "{d:?}");
+    assert!(d.contains(&"G linear/log/ETC".to_owned()), "{d:?}");
+    // Mac labels.
+    let mac: Vec<String> =
+        t.st.key_hint_line(&t.keys, PaneKind::Distortion, crate::keys::LabelStyle::Mac)
+            .expect("line")
+            .iter()
+            .map(crate::hints::KeyHint::text)
+            .collect();
+    assert_eq!(mac.first().map(String::as_str), Some("⇧S new sweep"));
+
+    // Off: no line anywhere, remembered, and the toast says how to bring it back.
+    t.st.prefs_dirty = false;
+    t.key("Shift+H");
+    assert!(!t.st.prefs.key_hints);
+    assert!(t.st.prefs_dirty);
+    assert!(t.last_toast().contains("Shift+H"), "{}", t.last_toast());
+    for p in PaneKind::ALL {
+        assert_eq!(hint_texts(&t, p), None);
+    }
+    // The title's tooltip still lists the pane's hints.
+    assert!(
+        !t.st
+            .pane_hints(&t.keys, PaneKind::Spl, crate::keys::LabelStyle::Pc)
+            .is_empty()
+    );
+    // The palette entry turns them back on.
+    t.st.update(Msg::Command(CommandId::KeyHints), &t.keys);
+    assert!(t.st.prefs.key_hints);
+    assert!(hint_texts(&t, PaneKind::Distortion).is_some());
+    // The next start takes the remembered choice.
+    let mut u = T::new();
+    u.st.set_prefs(crate::prefs::UiPrefs {
+        key_hints: false,
+        ..Default::default()
+    });
+    assert_eq!(hint_texts(&u, PaneKind::Transfer), None);
+}
+
+/// A remapped key shows its new chord on the line; the stage view has no line.
+#[test]
+fn key_hints_use_the_live_keymap_and_never_show_on_stage() {
+    let mut t = T::new();
+    t.keys = Keymap::from_toml("[global]\nnext_trace = \"Alt+T\"\nhelp = \"F1\"\n").expect("valid");
+    let tf = hint_texts(&t, PaneKind::Transfer).expect("line");
+    assert_eq!(tf.first().map(String::as_str), Some("Alt+T select trace"));
+    assert_eq!(tf.last().map(String::as_str), Some("F1 all keys"));
+    // The stage view: full screen, the SPL pane maximised on its Leq windows.
+    t.key("Alt+4");
+    t.key("G");
+    t.key("W");
+    t.key("F11");
+    assert!(t.st.stage_view());
+    assert!(t.st.prefs.key_hints);
+    assert!(!t.st.key_hints_shown());
+    assert_eq!(hint_texts(&t, PaneKind::Spl), None);
+    // Out of it (back to the meter), the line is back.
+    t.key("G");
+    assert!(!t.st.stage_view());
+    assert!(hint_texts(&t, PaneKind::Spl).is_some());
+}
+
+/// A narrow title keeps the selected stored trace's name: the caption's variants shorten
+/// from everything to the name alone.
+#[test]
+fn pane_caption_shortens_to_the_selected_trace() {
+    let mut t = T::new();
+    let mut a = stored(10, Some(3), 2);
+    a.mic = Some(MicState {
+        name: "MM1 34804".into(),
+        curve: Some(curve_ref("90°")),
+    });
+    t.conn(with_traces(vec![a]));
+    // Nothing selected: the measurement's smoothing.
+    let v = t.st.pane_caption_variants(PaneKind::Transfer);
+    assert_eq!(v.first(), t.st.pane_caption(PaneKind::Transfer).as_ref());
+    assert!(!v.iter().any(|c| c.contains("t10")), "{v:?}");
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    let v = t.st.pane_caption_variants(PaneKind::Transfer);
+    assert_eq!(
+        v,
+        [
+            "slot 3 (t10): smoothing off · mic curve: MM1 34804 90°",
+            "slot 3 (t10): smoothing off",
+            "slot 3 (t10)",
+        ]
+    );
+    assert_eq!(t.st.pane_caption(PaneKind::Transfer).as_ref(), v.first());
+    // A transfer trace is not the spectrum pane's.
+    assert!(
+        !t.st
+            .pane_caption_variants(PaneKind::Spectrum)
+            .iter()
+            .any(|c| c.contains("t10"))
     );
 }

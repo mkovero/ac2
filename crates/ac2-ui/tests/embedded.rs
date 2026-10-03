@@ -1306,3 +1306,85 @@ fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// The hint line of the focused pane, as the app draws it (PC labels).
+fn hint_line(s: &AppState) -> Vec<String> {
+    use ac2_ui::state::PaneKind;
+    let focus = s.layout.focus;
+    let keys = Keymap::default();
+    let style = ac2_ui::keys::LabelStyle::Pc;
+    // Only the focused pane has one.
+    for p in PaneKind::ALL.into_iter().filter(|p| *p != focus) {
+        assert_eq!(s.key_hint_line(&keys, p, style), None);
+    }
+    s.key_hint_line(&keys, focus, style)
+        .map(|v| v.iter().map(ac2_ui::hints::KeyHint::text).collect())
+        .unwrap_or_default()
+}
+
+/// From an empty daemon: the hint line follows the focused pane as the operator moves
+/// around, H opens and closes every key, Shift+H turns the hints off and the palette turns
+/// them on again.
+#[test]
+fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    d.synced()?;
+    // Nothing set up yet: the transfer pane has the focus and its hints.
+    let tf = hint_line(&d.st);
+    assert_eq!(tf.first().map(String::as_str), Some("V select trace"));
+    assert_eq!(tf.last().map(String::as_str), Some("H all keys"));
+    // A session and its transfer measurement, from the app.
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until(
+        "the device list",
+        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
+    )?;
+    d.key("Enter");
+    d.until("the measurement offer", |s| {
+        matches!(s.overlay, Overlay::Offer(_))
+    })?;
+    d.key("Enter");
+    d.until("the measurement", |s| s.selected_meas().is_some())?;
+    assert_eq!(hint_line(&d.st), tf);
+    // Each pane its own line.
+    d.key("Alt+2");
+    let sp = hint_line(&d.st);
+    assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
+    d.key("Alt+3");
+    let ir = hint_line(&d.st);
+    assert_eq!(ir.first().map(String::as_str), Some("G linear/log/ETC"));
+    d.key("Alt+4");
+    let spl = hint_line(&d.st);
+    assert_eq!(spl.first().map(String::as_str), Some("G meter/Leq"));
+    d.key("Alt+5");
+    let sw = hint_line(&d.st);
+    assert_eq!(sw.first().map(String::as_str), Some("Shift+S new sweep"));
+    // Shift+I shows the sweep's IR: dB / % gives way to the IR mode.
+    assert!(sw.contains(&"U dB/%".to_owned()), "{sw:?}");
+    d.key("Shift+I");
+    let sw = hint_line(&d.st);
+    assert!(sw.contains(&"G linear/log/ETC".to_owned()), "{sw:?}");
+    // H: every key, and closed again.
+    d.key("H");
+    assert_eq!(d.st.overlay, Overlay::Help);
+    d.key("H");
+    assert_eq!(d.st.overlay, Overlay::None);
+    // Shift+H: no line anywhere, remembered.
+    d.key("Shift+H");
+    assert!(!d.st.prefs.key_hints);
+    assert!(d.st.prefs_dirty);
+    assert!(hint_line(&d.st).is_empty());
+    d.key("Alt+1");
+    assert!(hint_line(&d.st).is_empty());
+    // The palette brings it back.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("key hints".into()));
+    d.key("Enter");
+    assert!(d.st.prefs.key_hints);
+    assert_eq!(hint_line(&d.st), tf);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

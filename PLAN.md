@@ -505,9 +505,9 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
 ### 8.2 Keyboard
 - One binding table, scoped (global / transfer / spectrum / SPL / IR), test-enforced: no dead keys, no conflicts.
 - Layout-safe defaults: no `[ ] + -` (unreachable on Nordic layouts). Bindings user-configurable in TOML.
-- `/` help overlay; `Ctrl/Cmd+K` command palette (fuzzy, shows key per command).
+- `H` (or `F1`) help overlay (`/` is Shift+7 on Nordic layouts); `Ctrl/Cmd+K` command palette (fuzzy, shows key per command); the focused pane's most used keys on a hint line (`Shift+H` on / off).
 - Stimulus cluster reserved: `Space` arm, `Enter` fire, `Esc` stop/cancel, `↑/↓` level.
-- Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `H` IR, `B` coherence mask, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change.
+- Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `B` coherence mask, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change (`H` IR became `Shift+I` when `H` became help).
 
 ### 8.3 Lightweight targets
 - First frame < 300 ms, RSS < 120 MB with 8 live TFs, binary < 25 MB.

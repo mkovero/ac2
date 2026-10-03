@@ -340,6 +340,7 @@ commands! {
     Palette => "palette", "Command palette", [Global];
     Quit => "quit", "Quit", [Global];
     Fullscreen => "fullscreen", "Full screen on / off", [Global];
+    KeyHints => "key_hints", "Key hints on / off", [Global];
 
     StimulusArm => "stimulus_arm", "Stimulus: arm (needs a typed level)", [Global];
     StimulusFire => "stimulus_fire", "Stimulus: fire (when armed)", [Global];
@@ -501,8 +502,11 @@ pub fn defaults() -> Vec<Binding> {
     let cmd = Chord::command;
     let alt = Chord::alt;
     let mut v: Vec<(C, S, Chord)> = vec![
-        (C::Help, S::Global, k(K::Slash)),
+        // H, not `/`: `/` is Shift+7 on Nordic and German layouts. Shift+H, one step
+        // further, hides or shows the panes' key hints.
+        (C::Help, S::Global, k(K::H)),
         (C::Help, S::Global, k(K::F1)),
+        (C::KeyHints, S::Global, sh(K::H)),
         (C::Palette, S::Global, cmd(K::K)),
         (C::Quit, S::Global, cmd(K::Q)),
         (C::Fullscreen, S::Global, k(K::F11)),
@@ -573,8 +577,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::NudgeLater, S::Transfer, k(K::Period)),
         (C::PhaseReference, S::Transfer, k(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
-        (C::ToggleIr, S::Transfer, k(K::H)),
-        (C::ToggleIr, S::Ir, k(K::H)),
+        // Shift+I shows or hides the impulse response wherever there is one (plain I zooms).
+        (C::ToggleIr, S::Transfer, sh(K::I)),
+        (C::ToggleIr, S::Ir, sh(K::I)),
         (C::CoherenceMask, S::Transfer, k(K::B)),
         (C::CoherencePlacement, S::Transfer, sh(K::C)),
         (C::Average, S::Transfer, k(K::M)),
@@ -594,13 +599,13 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spl, k(K::S)),
         (C::SpectrumStyle, S::Spectrum, k(K::B)),
         (C::StartStop, S::Spectrum, k(K::S)),
-        (C::PeakHold, S::Spectrum, k(K::H)),
+        (C::PeakHold, S::Spectrum, k(K::P)),
         (C::IrMode, S::Ir, k(K::G)),
         (C::SplLeqView, S::Spl, k(K::G)),
-        // B as the RTA's bars / line (C is the global cursor), H as the other panes' "show
-        // the other thing".
+        // B as the RTA's bars / line (C is the global cursor); Shift+B the other change of
+        // the Leq windows' layout.
         (C::SplLeqStyle, S::Spl, k(K::B)),
-        (C::SplLeqHistory, S::Spl, k(K::H)),
+        (C::SplLeqHistory, S::Spl, sh(K::B)),
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
         // confirmation: it discards show data).
         (C::SplNewLog, S::Spl, sh(K::R)),
@@ -608,8 +613,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::LeqWindows, S::Global, sh(K::L)),
         (C::IrMode, S::Distortion, k(K::G)),
         (C::DistortionUnit, S::Distortion, k(K::U)),
-        (C::SweepIr, S::Distortion, k(K::H)),
-        (C::HideDistortion, S::Distortion, sh(K::H)),
+        (C::SweepIr, S::Distortion, sh(K::I)),
+        // W is the layout key: maximise, and with Shift this pane away.
+        (C::HideDistortion, S::Distortion, sh(K::W)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -619,6 +625,96 @@ pub fn defaults() -> Vec<Binding> {
             chord,
         })
         .collect()
+}
+
+/// One entry of a pane's key-hint line: a command operators reach for most in that pane,
+/// its short name on the line, and how long it stays as the line narrows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hint {
+    pub command: CommandId,
+    /// `select trace`, `dB/%`: a few words, the line has little room.
+    pub name: &'static str,
+    /// Higher stays longer: the lowest goes first when the line does not fit.
+    pub priority: u8,
+}
+
+const fn hint(command: CommandId, name: &'static str, priority: u8) -> Hint {
+    Hint {
+        command,
+        name,
+        priority,
+    }
+}
+
+/// The most used commands of each pane, in the order its hint line shows them (curated, not
+/// counted: everything else is in the help overlay and the palette). Global commands appear
+/// where they are what the pane is used for.
+pub fn hints(scope: Scope) -> &'static [Hint] {
+    use CommandId as C;
+    match scope {
+        Scope::Global => &[],
+        Scope::Transfer => {
+            const {
+                &[
+                    hint(C::NextTrace, "select trace", 90),
+                    hint(C::ToggleTrace, "show/hide", 80),
+                    hint(C::Slot1, "capture", 85),
+                    hint(C::InsertDelay, "find delay", 70),
+                    hint(C::SmoothCoarser, "smoothing", 60),
+                    hint(C::ToggleIr, "IR", 40),
+                    hint(C::MaximizePane, "maximise", 50),
+                ]
+            }
+        }
+        Scope::Spectrum => {
+            const {
+                &[
+                    hint(C::StartStop, "start/stop", 70),
+                    hint(C::Freeze, "freeze", 80),
+                    hint(C::PeakHold, "peak hold", 75),
+                    hint(C::SmoothCoarser, "smoothing", 60),
+                    hint(C::SpectrumStyle, "bars/line", 50),
+                    hint(C::Slot1, "capture", 85),
+                    hint(C::MaximizePane, "maximise", 40),
+                ]
+            }
+        }
+        Scope::Ir => {
+            const {
+                &[
+                    hint(C::IrMode, "linear/log/ETC", 90),
+                    hint(C::NextMeasurement, "next measurement", 60),
+                    hint(C::ToggleIr, "hide pane", 70),
+                    hint(C::MaximizePane, "maximise", 50),
+                ]
+            }
+        }
+        Scope::Spl => {
+            const {
+                &[
+                    hint(C::SplLeqView, "meter/Leq", 90),
+                    hint(C::SplLeqStyle, "columns/tiles", 70),
+                    hint(C::SplLeqHistory, "history", 60),
+                    hint(C::LeqWindows, "windows", 80),
+                    hint(C::SplNewLog, "new log", 50),
+                    hint(C::MaximizePane, "maximise", 40),
+                ]
+            }
+        }
+        Scope::Distortion => {
+            const {
+                &[
+                    hint(C::SweepNew, "new sweep", 90),
+                    hint(C::NextMeasurement, "next sweep", 80),
+                    hint(C::DistortionUnit, "dB/%", 70),
+                    hint(C::IrMode, "linear/log/ETC", 70),
+                    hint(C::SweepIr, "IR/distortion", 60),
+                    hint(C::MaximizePane, "maximise", 50),
+                    hint(C::HideDistortion, "hide pane", 40),
+                ]
+            }
+        }
+    }
 }
 
 /// The effective binding table.
@@ -789,6 +885,14 @@ impl Keymap {
             .collect()
     }
 
+    /// The first chord that runs `command` with `scope` active: the scope's own, else the
+    /// global one.
+    pub fn first_chord(&self, command: CommandId, scope: Scope) -> Option<Chord> {
+        [scope, Scope::Global]
+            .into_iter()
+            .find_map(|s| self.chords(command, s).first().copied())
+    }
+
     /// Key text for the palette: the chord in `active` scope (or global), else the chord in
     /// the command's own scope with that scope named.
     pub fn key_hint(&self, command: CommandId, active: Scope) -> Option<String> {
@@ -920,7 +1024,7 @@ mod tests {
             ("U", CommandId::Invert),
             ("J", CommandId::Offset),
             ("Z", CommandId::Target),
-            ("H", CommandId::ToggleIr),
+            ("Shift+I", CommandId::ToggleIr),
             ("B", CommandId::CoherenceMask),
             ("M", CommandId::Average),
             ("Shift+P", CommandId::GroupDelay),
@@ -934,7 +1038,9 @@ mod tests {
             ("Esc", CommandId::StimulusStop),
             ("Up", CommandId::LevelUp),
             ("Down", CommandId::LevelDown),
-            ("/", CommandId::Help),
+            ("H", CommandId::Help),
+            ("F1", CommandId::Help),
+            ("Shift+H", CommandId::KeyHints),
             ("Ctrl+K", CommandId::Palette),
             ("Shift+O", CommandId::OpenSession),
             ("O", CommandId::ZoomOut),
@@ -948,8 +1054,22 @@ mod tests {
         ] {
             assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
         }
-        // Scoped lookup: H means peak hold in the spectrum pane, IR in the transfer pane.
-        assert_eq!(m.lookup(Scope::Spectrum, c("H")), Some(CommandId::PeakHold));
+        // Scoped lookup: P means peak hold in the spectrum pane, phase in the transfer pane.
+        assert_eq!(m.lookup(Scope::Spectrum, c("P")), Some(CommandId::PeakHold));
+        assert_eq!(
+            m.lookup(Scope::Transfer, c("P")),
+            Some(CommandId::PhaseUnwrap)
+        );
+        // H is help in every pane; Shift+I is the impulse response wherever there is one.
+        for scope in Scope::ALL {
+            assert_eq!(m.lookup(scope, c("H")), Some(CommandId::Help), "{scope:?}");
+        }
+        assert_eq!(m.lookup(Scope::Ir, c("Shift+I")), Some(CommandId::ToggleIr));
+        assert_eq!(
+            m.lookup(Scope::Distortion, c("Shift+I")),
+            Some(CommandId::SweepIr)
+        );
+        assert_eq!(m.lookup(Scope::Global, c("/")), None);
         assert_eq!(m.lookup(Scope::Spl, c("X")), None);
     }
 
@@ -961,10 +1081,9 @@ mod tests {
             ..Modifiers::NONE
         };
         let ch = Chord::from_event(Key::Slash, shifted);
-        assert_eq!(
-            Keymap::default().lookup(Scope::Global, ch),
-            Some(CommandId::Help)
-        );
+        // Bound in keys.toml, `/` matches however the layout produces it.
+        let m = Keymap::from_toml("[global]\nhelp = [\"H\", \"/\"]").expect("valid");
+        assert_eq!(m.lookup(Scope::Global, ch), Some(CommandId::Help));
         assert!(Chord::parse("Shift+/").is_err());
         // Letters keep Shift.
         assert!(Chord::from_event(Key::P, shifted).shift);
@@ -1012,10 +1131,10 @@ mod tests {
             invert = ["U", "I"]
 
             [global]
-            zoom_in = "Shift+I"
+            zoom_in = "Alt+I"
             "#,
         );
-        // I is zoom_in globally by default... but zoom_in moved to Shift+I, so I is free.
+        // I is zoom_in globally by default... but zoom_in moved to Alt+I, so I is free.
         let m = m.expect("valid");
         let c = |s: &str| Chord::parse(s).expect(s);
         assert_eq!(
@@ -1025,7 +1144,7 @@ mod tests {
         assert_eq!(m.lookup(Scope::Transfer, c("X")), None);
         assert_eq!(m.lookup(Scope::Transfer, c("I")), Some(CommandId::Invert));
         assert_eq!(
-            m.lookup(Scope::Spectrum, c("Shift+I")),
+            m.lookup(Scope::Spectrum, c("Alt+I")),
             Some(CommandId::ZoomIn)
         );
         // Unbinding with an empty list.
@@ -1044,6 +1163,8 @@ mod tests {
             ("[global]\nfly = \"Q\"", "unknown command"),
             ("[global]\nhelp = \"Ctrl+Nope\"", "unknown key"),
             ("[global]\nhelp = 3", "keys.toml"),
+            // H is help in every pane: a pane's command on H conflicts with it there.
+            ("[spectrum]\npeak_hold = \"H\"", "bound to both"),
         ];
         for (src, want) in bad {
             let e = Keymap::from_toml(src).expect_err(src);
@@ -1085,7 +1206,47 @@ mod tests {
         assert_eq!(m.key_hint(CommandId::Reconnect, Scope::Global), None);
         assert_eq!(
             m.key_hint(CommandId::Help, Scope::Ir).as_deref(),
-            Some("/ · F1")
+            Some("H · F1")
         );
+        assert_eq!(
+            m.first_chord(CommandId::ToggleIr, Scope::Ir),
+            Chord::parse("Shift+I").ok()
+        );
+        assert_eq!(
+            m.first_chord(CommandId::MaximizePane, Scope::Spl),
+            Chord::parse("W").ok()
+        );
+        assert_eq!(m.first_chord(CommandId::ToggleIr, Scope::Spl), None);
+    }
+
+    #[test]
+    fn pane_hints_are_bound_where_they_are_shown() {
+        let m = Keymap::default();
+        for scope in Scope::ALL {
+            let h = hints(scope);
+            if scope == Scope::Global {
+                assert!(h.is_empty());
+                continue;
+            }
+            assert!((4..=7).contains(&h.len()), "{scope:?}: {} hints", h.len());
+            for x in h {
+                assert!(
+                    x.command.scopes().contains(&scope)
+                        || x.command.scopes().contains(&Scope::Global),
+                    "{:?} does nothing in {scope:?}",
+                    x.command
+                );
+                assert!(
+                    m.first_chord(x.command, scope).is_some(),
+                    "{:?} has no key in {scope:?}",
+                    x.command
+                );
+                assert!(x.priority < u8::MAX, "the help hint keeps the top priority");
+            }
+            let mut cmds: Vec<_> = h.iter().map(|x| x.command).collect();
+            cmds.sort();
+            cmds.dedup();
+            assert_eq!(cmds.len(), h.len(), "{scope:?} lists a command twice");
+        }
     }
 }

@@ -2,8 +2,8 @@
 //! from `ac2-scene`, the daemon through `ac2-client`.
 //!
 //! - [`state`]: the pure reducer (keys, commands, link events → state + requests).
-//! - [`keys`]: the one scoped binding table, `keys.toml` overrides; [`palette`]: fuzzy
-//!   command search.
+//! - [`keys`]: the one scoped binding table, `keys.toml` overrides; [`hints`]: the panes'
+//!   key-hint lines; [`palette`]: fuzzy command search.
 //! - [`conn`]: the link thread (client, data drain, stimulus lease).
 //! - [`scenes`]: frames + state → `ac2-scene` builders; [`plot`]: scene → pixels inside
 //!   egui's pass.
@@ -19,6 +19,7 @@ pub mod conn;
 pub mod connect;
 pub mod embedded;
 pub mod forms;
+pub mod hints;
 pub mod keys;
 pub mod leq_dialog;
 pub mod palette;
