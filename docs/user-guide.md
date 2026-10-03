@@ -68,7 +68,9 @@ Nothing in the dialog is a channel number to type. From the top:
   tapping it. While a session is open on that device the dialog shows the session's own
   meters instead.
 - **Roles**: **R** Reference (the loopback return, one input), **M** measurement mic (any
-  number; **N** names one — the name is the mic's identity for calibrations), **S** Stimulus
+  number; **N** names one — the name is the mic's identity for calibrations; a named mic's
+  row says which curve and calibration it uses, and **←/→** on it choose the curve: off, 0°,
+  90° …), **S** Stimulus
   (the output feeding the system and the loopback). **Space** puts a row in or out of the
   session. The mouse works too: the boxes, the R / M / S chips, a double click on a name.
 - **Detect loopback…** (**D**): asks for a level (no default; the stimulus level you typed
@@ -96,7 +98,9 @@ Each row is named, not numbered: the mic's name, else the backend's channel name
 port), else *Input N*; then its role — *reference* (the loopback input, or the reference of
 a transfer measurement) or *mic* (a named mic, or the measured input of a transfer
 measurement) — and the input number when the name does not already say it:
-*MM1 34804 · mic (in 1)*, *loopback · reference (in 2)*, *capture_4 (in 4)*. A **REF** /
+*MM1 34804 · 90° · mic (in 1)*, *loopback · reference (in 2)*, *capture_4 (in 4)*. A
+named mic's row also says which mic curve is in use — its label (*90°*), or why none is:
+*curve off*, *curve not chosen*, *no curve stored*, *90° not stored*. A **REF** /
 **MEAS** mark shows what the running sweep uses, or, with nothing running, the selected
 measurement.
 
@@ -268,15 +272,15 @@ dropped and the import says why (`note:` in the CLI output, and in `ac2 trace sh
 
 ### Mic curve on a stored trace
 
-A trace captured before the mic was calibrated — or with no mic name, or with the input's
-mic curve switched off — can be corrected afterwards: `ac2 trace mic <trace> "MM1 34804"`
-applies the curve the calibration store holds for that mic (imported with `ac2 cal
-mic-curve`), and `ac2 trace mic <trace> none` takes it off again. In the app: select the
-trace's slot, then **Mic curve on the selected trace…** in the palette (`Ctrl+K`), prefilled
-with the trace's mic. Like smoothing it is a display setting: the stored curve stays as
-measured, the correction (0 dB at the calibrator frequency, else 1 kHz) is applied when the
-trace is shown, and `ac2 trace show` reads `mic  MM1 34804 (curve MM1-34804 applied after
-capture, 0 dB at 1000 Hz)`. The curve's points are kept with the trace, so deleting or
+A trace captured before the mic had a curve — or with no mic name, or with the input's
+mic curve off — can be corrected afterwards: `ac2 trace mic <trace> "MM1 34804" --label 90°`
+applies that curve of the mic library (the label may be left out when the mic has one
+curve), and `ac2 trace mic <trace> none` takes it off again. In the app: select the trace's
+slot, then **Mic curve on the selected trace…** in the palette (`Ctrl+K`), prefilled with the
+trace's mic; type the curve's label after it (*MM1 34804 90°*). Like smoothing it is a
+display setting: the stored curve stays as measured, the correction (0 dB at the calibrator
+frequency, else 1 kHz) is applied when the trace is shown, and `ac2 trace show` reads `mic
+MM1 34804 (curve 90° applied after capture, 0 dB at 1000 Hz, file …)`. The curve's points are kept with the trace, so deleting or
 replacing the curve in the store later does not change the trace. A sweep's distortion is
 corrected too (each harmonic is picked up at its own frequency). A trace captured **with**
 the curve already applied (`mic … (curve … in the columns)`) refuses a second one — it would
@@ -370,19 +374,53 @@ per directory), `--no-autosave` keeps everything in memory only.
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (**N** on the input in the session dialog,
-`ac2 session open … --mic 3=M30`, or **Input setup** in the palette). Calibrations are stored per device, input channel and mic, so moving a mic to
-another input, or plugging in another mic, is noticed:
+Inputs carry a **mic name** (**N** on the input in the session dialog or in the input setup
+view, `ac2 session open … --mic 3=M30`). Two things are stored, in the calibration store of
+the daemon's machine:
 
-- **Sensitivity**: put a 94 dB (or 114 dB) acoustic calibrator on the mic and run
-  `ac2 cal spl --input 3 --ref 94db`. SPL is then computed from the raw input level with that
-  sensitivity.
-- **Mic curve**: `ac2 cal mic-curve --input 3 <file.frd>` imports the mic's magnitude
-  response, which is then corrected on that input (switchable per measurement with the mic
-  curve command). Traces captured before can be corrected afterwards with `ac2 trace mic`
-  (*Traces and slots*).
-- A calibration from another mic or input is shown as such; otherwise its age is shown.
-  `ac2 cal list` lists everything.
+- **Sensitivity** — per device, input and mic: put a 94 dB (or 114 dB) acoustic calibrator
+  on the mic and run `ac2 cal spl --input 3 --ref 94db`. SPL is then computed from the raw
+  input level with that sensitivity. It calibrates the whole chain, preamp gain included, so
+  it belongs to that input: a calibration from another mic or input is used but shown as
+  such (*from M30 on in 2*); otherwise its age is shown (*verified · 94.0 dB SPL at 1.00 kHz
+  · 3 h ago*).
+- **Mic curves** — per mic, any number, each with a short **label**: a measurement mic often
+  comes with one file per incidence angle (0° for pointing at the source, 90° for grazing
+  incidence), and using the wrong one is a few dB of error at high frequencies.
+  `ac2 cal curve import 449350_34804_90Grad.txt --input 3` imports a file into the mic
+  library as a curve of input 3's mic (`--mic NAME` instead names the mic directly). The
+  label comes from the file — the angle its header or name states (*90-degree-curve*,
+  `_90Grad`, `0deg` → *90°*, *0°*), else the file name — or from `--label`;
+  `ac2 cal curve rename --mic "MM1 34804" 0° "on axis"` renames it later. A sensitivity the
+  file states (*15.0 mV/Pa = −36.5 dBV*) is shown as the data sheet value, never used as a
+  calibration. Curves follow the mic name to any input and device.
+
+**Which curve is in use** is chosen per input, explicitly: `ac2 cal use 3 90°` (or `off`); in
+the app **←/→** on the input's row in the session dialog or in the **Input setup** view
+(palette), **Mic curve on input N…** (*3=90°*), or **Mic curve: next curve on the selected
+measurement's input**. Importing a mic's first curve on an input chooses it; with several
+curves and none chosen, none applies and the input says *choose: 0°, 90°* — ac2 never
+guesses. The change applies to the running measurements at once (it is a display correction
+of the magnitude, so averages need no reset). Wherever a corrected readout is shown it says
+which curve is in it — the input's label in the sidebar (*MM1 34804 · 90° · mic (in 1)*), the
+transfer, spectrum, RTA and SPL captions (*mic curve: MM1 34804 90°*), `ac2 cal list` and
+`ac2 status` — or why there is none (*mic curve off*, *no mic curve stored for MM1 34804*,
+*mic curve 90° not stored for MM1 34804* after the curve was deleted). Captured traces keep
+exactly which curve their columns carry (label, file and content hash; the export header
+says it).
+
+The **Calibrations** view (palette; **Input setup…** opens it on the selected measurement's
+input) lists what each input uses, every mic with its curves (file, points, range, data
+sheet sensitivity, which inputs use it) and every sensitivity calibration (device, input,
+mic, calibrator level and frequency, reading, age). **↑/↓** move; **←/→** choose an input's
+curve; **N** names the mic on an input; **I** imports a curve file for the focused mic (type
+the path); **R** renames a curve; **Delete** (twice) deletes a curve or a sensitivity
+calibration. On the command line: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`,
+`ac2 cal rm --input 3` (a sensitivity calibration).
+
+A calibration store written by an older ac2 is set aside (renamed to
+`calibrations.json.v1`, never deleted) and the daemon starts with an empty store: calibrate
+again and import the curves again; the old file shows the mic and file names.
 
 The **SPL meter** shows Fast / Slow / Impulse levels with A, C or Z weighting, Leq, LAeq,
 LCeq, LCpeak, Lmax and Lmin, as a big-number display in the SPL pane or in the terminal:
@@ -551,12 +589,13 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
 | Delete selected measurement | `meas_delete` |
+| Input setup: mic, mic curve and calibration of each input… | `input_setup` |
+| Calibrations: mics, curves and sensitivity calibrations… | `calibrations` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
-| Mic curve on / off for the selected measurement's input | `mic_curve` |
-| Calibration: delete sensitivity and mic curve (input=mic)… | `cal_delete` |
-| Calibration: delete sensitivity only (input=mic)… | `cal_delete_sensitivity` |
-| Calibration: delete mic curve only (input=mic)… | `cal_delete_curve` |
-| Mic curve on the selected trace (mic name; none removes)… | `trace_mic_curve` |
+| Mic curve: next curve on the selected measurement's input (off → 0° → 90° …) | `mic_curve` |
+| Mic curve on input N… (e.g. 2=90°, 2=off) | `mic_curve_input` |
+| Calibration: delete a sensitivity calibration (input=mic)… | `cal_delete` |
+| Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)… | `trace_mic_curve` |
 | Delay finder: auto band (full → mid → sub) | `finder_auto` |
 | Delay finder: full band (2–16 kHz) | `finder_full` |
 | Delay finder: mid band (300 Hz – 3 kHz) | `finder_mid` |

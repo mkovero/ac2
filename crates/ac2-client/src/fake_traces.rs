@@ -26,8 +26,8 @@ pub(super) struct FakeTraces {
     pub(super) next_sweep: u32,
     /// Mic curves applied to traces after capture.
     pub(super) mic_curves: HashMap<TraceId, ac2_traces::mic::Correction>,
-    /// Points (Hz, dB) of the imported mic curves, by calibration entry.
-    pub(super) curve_points: HashMap<CalKey, Vec<[f64; 2]>>,
+    /// Points (Hz, dB) of the imported mic curves.
+    pub(super) curve_points: HashMap<MicCurveId, Vec<[f64; 2]>>,
 }
 
 fn session_err(e: SessionError) -> ProtoError {
@@ -262,7 +262,7 @@ impl Shared {
     }
 
     pub(super) fn trace_get(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
-        Ok(ReplyBody::TraceData(self.trace(id)?.data()))
+        Ok(ReplyBody::TraceData(Box::new(self.trace(id)?.data())))
     }
 
     pub(super) fn trace_update(
@@ -384,12 +384,12 @@ impl Shared {
         Ok(self.add_trace(t, imp.grid, imp.columns))
     }
 
-    /// `trace.mic_curve`, as the daemon: the newest curve imported for the mic, normalised
-    /// at its entry's calibrator frequency (1 kHz without one).
+    /// `trace.mic_curve`, as the daemon: the named curve of the mic library, normalised at
+    /// the trace's calibrator frequency (1 kHz without one).
     pub(super) fn trace_mic_curve(
         &mut self,
         id: TraceId,
-        mic: Option<String>,
+        curve: Option<MicCurveId>,
     ) -> Result<ReplyBody, ProtoError> {
         let mut t = self.trace(id)?.meta;
         ac2_traces::mic::check(&t).map_err(|e| {
@@ -399,7 +399,7 @@ impl Shared {
             };
             err(code, format!("trace {id}: {e}"))
         })?;
-        match mic {
+        match curve {
             None => {
                 if t.mic_curve.take().is_none() {
                     return Err(err(
@@ -410,34 +410,38 @@ impl Shared {
                 self.traces.mic_curves.remove(&id);
             }
             Some(m) => {
-                let e = self
-                    .state
-                    .calibrations
-                    .iter()
-                    .filter(|e| e.key.mic == m && e.mic_curve.is_some())
-                    .max_by_key(|e| e.mic_curve.as_ref().map(|c| c.imported_at))
+                let r = ac2_proto::cal::curve(&self.state.mics, &m.mic, &m.label)
                     .cloned()
                     .ok_or_else(|| {
                         err(
                             ErrorCode::NotFound,
-                            format!("no mic curve for mic {m:?} in the calibration store"),
+                            format!(
+                                "no mic curve {:?} of {:?} in the mic library",
+                                m.label, m.mic
+                            ),
                         )
                     })?;
-                let points = self.traces.curve_points.get(&e.key).ok_or_else(|| {
+                let points = self.traces.curve_points.get(&m).ok_or_else(|| {
                     err(
                         ErrorCode::Internal,
-                        format!("the mic curve of {m:?} has no points"),
+                        format!("the mic curve {m:?} has no points"),
                     )
                 })?;
-                let f_norm = e.spl.map_or(1000.0, |s| s.calibrator_freq.0);
+                let f_norm = match &t.cal {
+                    CalState::Calibrated { key, .. } => self
+                        .state
+                        .calibrations
+                        .iter()
+                        .find(|e| e.key == *key)
+                        .map(|e| e.spl.calibrator_freq.0),
+                    CalState::Uncalibrated => None,
+                }
+                .unwrap_or(1000.0);
                 let k = ac2_traces::mic::correction(points, f_norm)
                     .map_err(|x| err(ErrorCode::Internal, x))?;
                 t.mic_curve = Some(Box::new(TraceMicCurve {
-                    mic: m,
-                    curve: e
-                        .mic_curve
-                        .clone()
-                        .ok_or_else(|| err(ErrorCode::Internal, "no curve"))?,
+                    mic: m.mic,
+                    curve: r,
                     f_norm: Hz(f_norm),
                 }));
                 self.traces.mic_curves.insert(id, k);

@@ -175,12 +175,22 @@ pub struct InputRow {
 }
 
 /// A session input's label: its name ([`input_name`]), its role, and the one-based input
-/// number when the name does not already say it: `MM1 34804 · mic (in 1)`,
+/// number when the name does not already say it, with the mic curve in use
+/// ([`crate::cal::curve_short`]) after a mic's name: `MM1 34804 · 90° · mic (in 1)`,
 /// `loopback · reference (in 2)`, `Input 3 · mic`, `capture_4 (in 4)`.
-pub fn input_label(channel: u16, name: &str, role: Option<InputRole>) -> String {
+pub fn input_label(
+    channel: u16,
+    name: &str,
+    curve: Option<&str>,
+    role: Option<InputRole>,
+) -> String {
     let n = u32::from(channel) + 1;
     let generic = name == format!("Input {n}");
     let mut s = name.to_owned();
+    if let Some(c) = curve {
+        s.push_str(" · ");
+        s.push_str(c);
+    }
     if let Some(r) = role {
         s.push_str(" · ");
         s.push_str(r.name());
@@ -237,19 +247,23 @@ mod tests {
     #[test]
     fn input_labels_name_the_role_and_the_input() {
         assert_eq!(
-            input_label(0, "MM1 34804", Some(InputRole::Mic)),
+            input_label(0, "MM1 34804", None, Some(InputRole::Mic)),
             "MM1 34804 · mic (in 1)"
         );
         assert_eq!(
-            input_label(1, "loopback", Some(InputRole::Reference)),
+            input_label(0, "MM1 34804", Some("90°"), Some(InputRole::Mic)),
+            "MM1 34804 · 90° · mic (in 1)"
+        );
+        assert_eq!(
+            input_label(1, "loopback", None, Some(InputRole::Reference)),
             "loopback · reference (in 2)"
         );
         assert_eq!(
-            input_label(2, "Input 3", Some(InputRole::Mic)),
+            input_label(2, "Input 3", None, Some(InputRole::Mic)),
             "Input 3 · mic"
         );
-        assert_eq!(input_label(3, "capture_4", None), "capture_4 (in 4)");
-        assert_eq!(input_label(3, "Input 4", None), "Input 4");
+        assert_eq!(input_label(3, "capture_4", None, None), "capture_4 (in 4)");
+        assert_eq!(input_label(3, "Input 4", None, None), "Input 4");
         assert_eq!(InputUse::Reference.tag(), "REF");
         assert_eq!(InputUse::Measurement.tag(), "MEAS");
     }

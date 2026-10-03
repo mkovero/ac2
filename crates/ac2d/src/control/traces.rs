@@ -10,8 +10,8 @@ use ac2_core::mic_curve::Correction;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathOp,
-    MeasKind, MicState, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta,
-    TraceMicCurve, TraceSource,
+    MeasKind, MicCurveId, MicState, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceKind,
+    TraceMeta, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -175,18 +175,18 @@ impl Control {
         };
         let c = self.input_cal(rt, input);
         let cal = match c.spl_entry {
-            Some((key, s)) => CalState::Calibrated {
-                key,
-                sensitivity: s.sensitivity,
-                calibrated_at: s.calibrated_at,
+            Some(e) => CalState::Calibrated {
+                key: e.key,
+                sensitivity: e.spl.sensitivity,
+                calibrated_at: e.spl.calibrated_at,
             },
             None => CalState::Uncalibrated,
         };
-        let mic = crate::calstore::input_setup(&self.store.state().inputs, input)
+        let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, input)
             .mic
             .map(|name| MicState {
                 name,
-                curve: c.curve_name,
+                curve: c.curve,
             });
         (cal, mic)
     }
@@ -288,7 +288,7 @@ impl Control {
     }
 
     pub(super) fn trace_get(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
-        Ok(ReplyBody::TraceData(self.stored(id)?.data()))
+        Ok(ReplyBody::TraceData(Box::new(self.stored(id)?.data())))
     }
 
     pub(super) fn trace_update(
@@ -452,7 +452,7 @@ impl Control {
     pub(super) fn trace_mic_curve(
         &mut self,
         id: TraceId,
-        mic_name: Option<String>,
+        curve: Option<MicCurveId>,
     ) -> Result<ReplyBody, ProtoError> {
         let mut t = self.trace_meta(id)?.clone();
         mic::check(&t).map_err(|e| {
@@ -462,7 +462,7 @@ impl Control {
             };
             perr(code, format!("trace {id}: {e}"))
         })?;
-        let Some(m) = mic_name else {
+        let Some(m) = curve else {
             if t.mic_curve.is_none() {
                 return Err(perr(
                     ErrorCode::NotFound,
@@ -475,49 +475,50 @@ impl Control {
             tracing::info!("trace {id}: mic curve removed");
             return Ok(ReplyBody::Trace(t));
         };
-        crate::calstore::check_mic_name(&m)?;
         let st = self.store.state();
-        // The capture's input, when the trace knows it from its calibration.
-        let at = match &t.cal {
-            CalState::Calibrated { key, .. } => Some((&key.device, key.channel)),
-            CalState::Uncalibrated => None,
-        };
-        let entry = crate::calstore::curve_entry(&st.calibrations, &m, at)
+        let curve_ref = ac2_proto::cal::curve(&st.mics, &m.mic, &m.label)
             .ok_or_else(|| {
+                let stored = ac2_proto::cal::mic(&st.mics, &m.mic).map_or_else(
+                    || "none".to_owned(),
+                    |x| {
+                        x.curves
+                            .iter()
+                            .map(|c| c.label.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    },
+                );
                 perr(
                     ErrorCode::NotFound,
                     format!(
-                        "no mic curve for mic {m:?} in the calibration store \
-                         (import one with `ac2 cal mic-curve`)"
+                        "no mic curve {:?} for mic {:?} in the mic library (stored: {stored}; \
+                         import one with `ac2 cal curve import`)",
+                        m.label, m.mic
                     ),
                 )
             })?
             .clone();
-        let (Some(curve_ref), Some(points)) =
-            (entry.mic_curve.clone(), self.cal.curve(&entry.key).cloned())
-        else {
+        let Some(points) = self.cal.curve(&m.mic, &m.label).cloned() else {
             return Err(perr(
                 ErrorCode::Internal,
-                format!("the mic curve of {m:?} has no points"),
+                format!("the mic curve {:?} of {:?} has no points", m.label, m.mic),
             ));
         };
         // Normalised where the trace's level calibration was read (the calibrator tone was
-        // read uncorrected, so 0 dB there counts nothing twice), else at the curve entry's
-        // own calibrator frequency, else 1 kHz — the live rule (Q7 §3).
-        let spl_of = |key: &ac2_proto::model::CalKey| {
+        // read uncorrected, so 0 dB there counts nothing twice), else where the mic's newest
+        // calibration was, else at 1 kHz — the live rule (Q7 §3).
+        let trace_cal = match &t.cal {
+            CalState::Calibrated { key, .. } => st.calibrations.iter().find(|e| e.key == *key),
+            CalState::Uncalibrated => None,
+        };
+        let f_norm = crate::calstore::f_norm(trace_cal.or_else(|| {
             st.calibrations
                 .iter()
-                .find(|e| e.key == *key)
-                .and_then(|e| e.spl)
-        };
-        let f_norm = match &t.cal {
-            CalState::Calibrated { key, .. } => spl_of(key),
-            CalState::Uncalibrated => None,
-        }
-        .or(entry.spl)
-        .map_or(crate::calstore::DEFAULT_F_NORM, |s| s.calibrator_freq.0);
+                .filter(|e| e.key.mic == m.mic)
+                .max_by_key(|e| e.spl.calibrated_at)
+        }));
         t.mic_curve = Some(Box::new(TraceMicCurve {
-            mic: m.clone(),
+            mic: m.mic.clone(),
             curve: curve_ref,
             f_norm: Hz(f_norm),
         }));

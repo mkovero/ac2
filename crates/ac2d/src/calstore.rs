@@ -1,10 +1,13 @@
-//! Calibration store (`docs/design/q7-calibration.md`): entries keyed by device + input
-//! channel + mic name, mic-curve points, the input setup; the JSON file behind them; and
-//! the matching rules that decide which calibration and curve a job on an input uses.
+//! Calibration store (`docs/design/q7-calibration.md`): sensitivity calibrations keyed by
+//! device + input channel + mic name, the mic library (named curves per mic, with their
+//! points), the input setup; the JSON file behind them; and the matching that decides what a
+//! job on an input uses.
 //!
 //! The file is read once at start. One that cannot be read is never written: the store
 //! comes up empty and read-only and every calibration command is refused with the reason,
-//! so an operator's calibrations are never replaced by an empty set.
+//! so an operator's calibrations are never replaced by an empty set. A store of another
+//! format version is set aside (renamed, never deleted) and the daemon starts with an empty
+//! store: there is no migration.
 
 use std::collections::HashMap;
 use std::io;
@@ -12,16 +15,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ac2_core::mic_curve::{Correction, MicCurve, MicCurveFileError};
-use ac2_proto::model::{CalEntry, CalKey, CalStatus, DeviceId, InputSetup, MicCurveRef, SplCal};
+use ac2_proto::cal::{self, InputUse};
+use ac2_proto::model::{
+    CalEntry, CalStatus, DeviceId, InputSetup, Mic, MicCurveId, MicCurveRef, State,
+};
 use ac2_proto::{ErrorCode, ErrorDetail, MicCurveFileReason, ProtoError};
 use serde::{Deserialize, Serialize};
 
 use crate::util::{perr, perr_detail};
 
 const FORMAT: &str = "ac2-calibrations";
-const VERSION: u32 = 1;
-/// Longest mic name, characters.
-pub(crate) const MAX_MIC_NAME: usize = 64;
+const VERSION: u32 = 2;
 /// Normalisation frequency when no sensitivity calibration applies.
 pub(crate) const DEFAULT_F_NORM: f64 = 1000.0;
 
@@ -35,10 +39,9 @@ struct FileCurve {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FileEntry {
-    key: CalKey,
-    spl: Option<SplCal>,
-    mic_curve: Option<FileCurve>,
+struct FileMic {
+    name: String,
+    curves: Vec<FileCurve>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -46,9 +49,28 @@ struct FileEntry {
 struct StoreFile {
     format: String,
     version: u32,
-    entries: Vec<FileEntry>,
+    sensitivities: Vec<CalEntry>,
+    mics: Vec<FileMic>,
     inputs: Vec<InputSetup>,
 }
+
+/// Just enough of any store file to tell its version.
+#[derive(Debug, Deserialize)]
+struct Header {
+    format: String,
+    version: u32,
+}
+
+/// What the store holds, as mirrored.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct Contents {
+    pub(crate) calibrations: Vec<CalEntry>,
+    pub(crate) mics: Vec<Mic>,
+    pub(crate) inputs: Vec<InputSetup>,
+}
+
+/// The curves' points, by mic and label.
+pub(crate) type Curves = HashMap<MicCurveId, Arc<MicCurve>>;
 
 /// What a job on one input uses.
 #[derive(Debug, Clone)]
@@ -56,12 +78,12 @@ pub(crate) struct InputCal {
     pub(crate) status: CalStatus,
     /// dB SPL of 0 dBFS.
     pub(crate) sensitivity: Option<f64>,
-    /// Mic curve normalised at the calibrator frequency, when one applies and is on.
+    /// Mic curve normalised at the calibrator frequency, when one is chosen and stored.
     pub(crate) correction: Option<Arc<Correction>>,
     /// The entry whose sensitivity calibration is applied.
-    pub(crate) spl_entry: Option<(CalKey, SplCal)>,
-    /// Name of the applied mic curve.
-    pub(crate) curve_name: Option<String>,
+    pub(crate) spl_entry: Option<CalEntry>,
+    /// The applied mic curve.
+    pub(crate) curve: Option<MicCurveRef>,
 }
 
 impl InputCal {
@@ -71,7 +93,7 @@ impl InputCal {
             sensitivity: None,
             correction: None,
             spl_entry: None,
-            curve_name: None,
+            curve: None,
         }
     }
 }
@@ -82,24 +104,17 @@ pub(crate) struct CalStore {
     path: Option<PathBuf>,
     /// Why the file could not be read; the store is then read-only.
     unreadable: Option<String>,
-    curves: HashMap<CalKey, Arc<MicCurve>>,
+    curves: Curves,
 }
 
 /// Validates a mic name: 1 … 64 characters, no control characters, no surrounding space.
 pub(crate) fn check_mic_name(m: &str) -> Result<(), ProtoError> {
-    let inv = |msg: String| Err(perr(ErrorCode::Invalid, msg));
-    if m.is_empty() {
-        return inv("mic name is required".into());
-    }
-    if m.chars().count() > MAX_MIC_NAME {
-        return inv(format!("mic name longer than {MAX_MIC_NAME} characters"));
-    }
-    if m.trim() != m || m.chars().any(char::is_control) {
-        return inv(format!(
-            "mic name {m:?} has surrounding spaces or control characters"
-        ));
-    }
-    Ok(())
+    cal::check_mic_name(m).map_err(|e| perr(ErrorCode::Invalid, e))
+}
+
+/// Validates a curve label.
+pub(crate) fn check_label(l: &str) -> Result<(), ProtoError> {
+    cal::check_label(l).map_err(|e| perr(ErrorCode::Invalid, e))
 }
 
 /// The protocol error for a refused mic-curve file.
@@ -132,6 +147,19 @@ pub(crate) fn content_hash(b: &[u8]) -> String {
     format!("{h:016x}")
 }
 
+/// Renames `p` to `<p>.<tag>` (the time appended if that exists). Returns where it went.
+fn set_aside(p: &Path, tag: &str) -> Option<PathBuf> {
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let mut to = p.with_file_name(format!("{name}.{tag}"));
+    if to.exists() {
+        to = p.with_file_name(format!(
+            "{name}.{tag}-{}",
+            crate::util::wall_ns() / 1_000_000_000
+        ));
+    }
+    std::fs::rename(p, &to).ok().map(|()| to)
+}
+
 impl CalStore {
     /// A store without a file (tests, in-process daemons without a config directory).
     pub(crate) fn memory() -> Self {
@@ -142,9 +170,9 @@ impl CalStore {
         }
     }
 
-    /// Reads `path`. Missing → empty. Unreadable → empty and read-only, never written.
-    /// Returns the store, its entries and the input setup.
-    pub(crate) fn open(path: &Path) -> (Self, Vec<CalEntry>, Vec<InputSetup>) {
+    /// Reads `path`. Missing → empty. Another format version → set aside, empty.
+    /// Unreadable → empty and read-only, never written.
+    pub(crate) fn open(path: &Path) -> (Self, Contents) {
         let mut store = Self {
             path: Some(path.to_owned()),
             unreadable: None,
@@ -153,26 +181,54 @@ impl CalStore {
         let text = match std::fs::read(path) {
             Ok(t) => t,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                return (store, Vec::new(), Vec::new());
+                return (store, Contents::default());
             }
             Err(e) => {
                 store.refuse(format!("cannot read it: {e}"));
-                return (store, Vec::new(), Vec::new());
+                return (store, Contents::default());
             }
         };
+        if let Ok(h) = serde_json::from_slice::<Header>(&text)
+            && h.format == FORMAT
+            && h.version != VERSION
+        {
+            match set_aside(path, &format!("v{}", h.version)) {
+                Some(to) => {
+                    tracing::warn!(
+                        "calibration store {} is format version {} (this ac2d reads {VERSION}); \
+                         set aside as {} and starting with an empty store — calibrate again \
+                         (`ac2 cal spl`) and import the mic curves again (`ac2 cal curve import \
+                         FILE --mic NAME`); the old file shows the mic names and file names",
+                        path.display(),
+                        h.version,
+                        to.display()
+                    );
+                    return (store, Contents::default());
+                }
+                None => {
+                    store.refuse(format!(
+                        "format version {} (this ac2d reads {VERSION}) and it cannot be renamed \
+                         out of the way",
+                        h.version
+                    ));
+                    return (store, Contents::default());
+                }
+            }
+        }
         match parse(&text) {
-            Ok((entries, curves, inputs)) => {
+            Ok((contents, curves)) => {
                 store.curves = curves;
                 tracing::info!(
-                    "calibration store {}: {} entries",
+                    "calibration store {}: {} sensitivity calibrations, {} mics",
                     path.display(),
-                    entries.len()
+                    contents.calibrations.len(),
+                    contents.mics.len()
                 );
-                (store, entries, inputs)
+                (store, contents)
             }
             Err(reason) => {
                 store.refuse(reason);
-                (store, Vec::new(), Vec::new())
+                (store, Contents::default())
             }
         }
     }
@@ -207,43 +263,50 @@ impl CalStore {
         }
     }
 
-    /// The points of the curve on `key`.
-    pub(crate) fn curve(&self, key: &CalKey) -> Option<&Arc<MicCurve>> {
-        self.curves.get(key)
+    /// The points of a curve.
+    pub(crate) fn curve(&self, mic: &str, label: &str) -> Option<&Arc<MicCurve>> {
+        self.curves.get(&MicCurveId {
+            mic: mic.to_owned(),
+            label: label.to_owned(),
+        })
     }
 
-    /// Writes `entries` and `inputs` with `curves` (the full new curve set) atomically, then
-    /// adopts `curves`. Nothing changes when the write fails.
-    pub(crate) fn persist(
-        &mut self,
-        entries: &[CalEntry],
-        inputs: &[InputSetup],
-        curves: HashMap<CalKey, Arc<MicCurve>>,
-    ) -> Result<(), ProtoError> {
+    /// Writes `c` with `curves` (the full new curve set) atomically, then adopts `curves`.
+    /// Nothing changes when the write fails.
+    pub(crate) fn persist(&mut self, c: &Contents, curves: Curves) -> Result<(), ProtoError> {
         self.check()?;
         if let Some(path) = &self.path {
             let file = StoreFile {
                 format: FORMAT.into(),
                 version: VERSION,
-                entries: entries
+                sensitivities: c.calibrations.clone(),
+                mics: c
+                    .mics
                     .iter()
-                    .map(|e| FileEntry {
-                        key: e.key.clone(),
-                        spl: e.spl,
-                        mic_curve: e.mic_curve.as_ref().and_then(|r| {
-                            curves.get(&e.key).map(|c| FileCurve {
-                                reference: r.clone(),
-                                points: c
-                                    .freqs()
-                                    .iter()
-                                    .zip(c.gains())
-                                    .map(|(f, g)| [*f, *g])
-                                    .collect(),
+                    .map(|m| FileMic {
+                        name: m.name.clone(),
+                        curves: m
+                            .curves
+                            .iter()
+                            .filter_map(|r| {
+                                let id = MicCurveId {
+                                    mic: m.name.clone(),
+                                    label: r.label.clone(),
+                                };
+                                curves.get(&id).map(|p| FileCurve {
+                                    reference: r.clone(),
+                                    points: p
+                                        .freqs()
+                                        .iter()
+                                        .zip(p.gains())
+                                        .map(|(f, g)| [*f, *g])
+                                        .collect(),
+                                })
                             })
-                        }),
+                            .collect(),
                     })
                     .collect(),
-                inputs: inputs.to_vec(),
+                inputs: c.inputs.clone(),
             };
             let text = serde_json::to_vec_pretty(&file)
                 .map_err(|e| perr(ErrorCode::Internal, format!("calibration store: {e}")))?;
@@ -259,18 +322,12 @@ impl CalStore {
     }
 
     /// A copy of the curve set to modify before [`CalStore::persist`].
-    pub(crate) fn curves(&self) -> HashMap<CalKey, Arc<MicCurve>> {
+    pub(crate) fn curves(&self) -> Curves {
         self.curves.clone()
     }
 }
 
-type Parsed = (
-    Vec<CalEntry>,
-    HashMap<CalKey, Arc<MicCurve>>,
-    Vec<InputSetup>,
-);
-
-fn parse(text: &[u8]) -> Result<Parsed, String> {
+fn parse(text: &[u8]) -> Result<(Contents, Curves), String> {
     let f: StoreFile = serde_json::from_slice(text).map_err(|e| e.to_string())?;
     if f.format != FORMAT || f.version != VERSION {
         return Err(format!(
@@ -278,32 +335,51 @@ fn parse(text: &[u8]) -> Result<Parsed, String> {
             f.format, f.version
         ));
     }
-    let mut entries: Vec<CalEntry> = Vec::new();
+    let mut calibrations: Vec<CalEntry> = Vec::new();
+    for e in f.sensitivities {
+        if calibrations.iter().any(|x| x.key == e.key) {
+            return Err(format!("duplicate calibration {:?}", e.key));
+        }
+        cal::check_mic_name(&e.key.mic)?;
+        calibrations.push(e);
+    }
+    let mut mics: Vec<Mic> = Vec::new();
     let mut curves = HashMap::new();
-    for e in f.entries {
-        if entries.iter().any(|x| x.key == e.key) {
-            return Err(format!("duplicate entry {:?}", e.key));
+    for m in f.mics {
+        cal::check_mic_name(&m.name)?;
+        if mics.iter().any(|x| x.name == m.name) {
+            return Err(format!("mic {:?} listed twice", m.name));
         }
-        check_mic_name(&e.key.mic).map_err(|p| p.msg)?;
-        let reference = match e.mic_curve {
-            None => None,
-            Some(c) => {
-                let pts: Vec<(f64, f64)> = c.points.iter().map(|p| (p[0], p[1])).collect();
-                let curve = MicCurve::from_points(&pts)
-                    .map_err(|err| format!("mic curve of {:?}: {err}", e.key))?;
-                curves.insert(e.key.clone(), Arc::new(curve));
-                Some(c.reference)
+        if m.curves.is_empty() {
+            return Err(format!("mic {:?} holds no curve", m.name));
+        }
+        let mut refs: Vec<MicCurveRef> = Vec::new();
+        for c in m.curves {
+            cal::check_label(&c.reference.label).map_err(|e| format!("mic {:?}: {e}", m.name))?;
+            if refs.iter().any(|r| r.label == c.reference.label) {
+                return Err(format!(
+                    "mic {:?}: curve {:?} listed twice",
+                    m.name, c.reference.label
+                ));
             }
-        };
-        if e.spl.is_none() && reference.is_none() {
-            return Err(format!("entry {:?} holds nothing", e.key));
+            let pts: Vec<(f64, f64)> = c.points.iter().map(|p| (p[0], p[1])).collect();
+            let curve = MicCurve::from_points(&pts)
+                .map_err(|err| format!("curve {:?} of {:?}: {err}", c.reference.label, m.name))?;
+            curves.insert(
+                MicCurveId {
+                    mic: m.name.clone(),
+                    label: c.reference.label.clone(),
+                },
+                Arc::new(curve),
+            );
+            refs.push(c.reference);
         }
-        entries.push(CalEntry {
-            key: e.key,
-            spl: e.spl,
-            mic_curve: reference,
+        mics.push(Mic {
+            name: m.name,
+            curves: refs,
         });
     }
+    mics.sort_by(|a, b| a.name.cmp(&b.name));
     let mut inputs = f.inputs;
     inputs.sort_by_key(|i| i.channel);
     if inputs.windows(2).any(|w| w[0].channel == w[1].channel) {
@@ -311,99 +387,48 @@ fn parse(text: &[u8]) -> Result<Parsed, String> {
     }
     for i in &inputs {
         if let Some(m) = &i.mic {
-            check_mic_name(m).map_err(|p| p.msg)?;
+            cal::check_mic_name(m)?;
         }
     }
-    Ok((entries, curves, inputs))
+    Ok((
+        Contents {
+            calibrations,
+            mics,
+            inputs,
+        },
+        curves,
+    ))
 }
 
-/// The input setup row of `channel` (defaults: no mic name, curve on).
-pub(crate) fn input_setup(inputs: &[InputSetup], channel: u16) -> InputSetup {
-    inputs
-        .iter()
-        .find(|i| i.channel == channel)
-        .cloned()
-        .unwrap_or(InputSetup {
-            channel,
-            mic: None,
-            mic_curve: true,
-        })
+/// The normalisation frequency of a sensitivity calibration in use: its calibrator
+/// frequency (the tone was read uncorrected, so 0 dB there counts nothing twice).
+pub(crate) fn f_norm(spl: Option<&CalEntry>) -> f64 {
+    spl.map_or(DEFAULT_F_NORM, |e| e.spl.calibrator_freq.0)
 }
 
-/// The entry whose mic curve applies to mic `mic` (Q7 §3): a curve is a property of the
-/// capsule, so it follows the mic name — the entry on `at` (device, input) when it holds
-/// one, else the newest curve imported for that mic anywhere.
-pub(crate) fn curve_entry<'a>(
-    entries: &'a [CalEntry],
-    mic: &str,
-    at: Option<(&DeviceId, u16)>,
-) -> Option<&'a CalEntry> {
-    let with_curve = || {
-        entries
-            .iter()
-            .filter(move |e| e.key.mic == mic && e.mic_curve.is_some())
-    };
-    at.and_then(|(d, c)| with_curve().find(|e| e.key.device == *d && e.key.channel == c))
-        .or_else(|| with_curve().max_by_key(|e| e.mic_curve.as_ref().map(|c| c.imported_at)))
-}
-
-/// Which calibration and mic curve a job on `channel` of `device` uses (Q7 §3).
-pub(crate) fn resolve(
-    entries: &[CalEntry],
-    inputs: &[InputSetup],
-    store: &CalStore,
-    device: &DeviceId,
-    channel: u16,
-) -> InputCal {
-    let setup = input_setup(inputs, channel);
-    let mic = setup.mic.as_deref();
-    let here = |e: &&CalEntry| e.key.device == *device && e.key.channel == channel;
-    let with_spl = || entries.iter().filter(|e| e.spl.is_some());
-    let newest = |it: Vec<&CalEntry>| {
-        it.into_iter()
-            .max_by_key(|e| e.spl.map(|s| s.calibrated_at))
-            .and_then(|e| e.spl.map(|s| (e.key.clone(), s)))
-    };
-    let exact = mic.and_then(|m| {
-        with_spl()
-            .find(|e| here(e) && e.key.mic == m)
-            .and_then(|e| e.spl.map(|s| (e.key.clone(), s)))
-    });
-    let (status, spl_entry) = if let Some((k, s)) = exact {
-        (
-            CalStatus::Verified {
-                calibrated_at: s.calibrated_at,
-            },
-            Some((k, s)),
-        )
-    } else if let Some((k, s)) = newest(with_spl().filter(here).collect())
-        .or_else(|| mic.and_then(|m| newest(with_spl().filter(|e| e.key.mic == m).collect())))
-    {
-        (
-            CalStatus::OtherMicOrInput {
-                calibrated_at: s.calibrated_at,
-            },
-            Some((k, s)),
-        )
-    } else {
-        (CalStatus::Uncalibrated, None)
-    };
-    let spl = spl_entry.as_ref().map(|(_, s)| *s);
-
-    let curve = match (mic, setup.mic_curve) {
-        (Some(m), true) => curve_entry(entries, m, Some((device, channel))).and_then(|e| {
-            let name = e.mic_curve.as_ref().map(|r| r.name.clone())?;
-            store.curve(&e.key).map(|c| (name, c))
-        }),
+/// What a job on `channel` of `device` uses (Q7 §3, `ac2_proto::cal::input_use`).
+pub(crate) fn resolve(st: &State, store: &CalStore, device: &DeviceId, channel: u16) -> InputCal {
+    let u: InputUse<'_> = cal::input_use(
+        &st.calibrations,
+        &st.mics,
+        &st.inputs,
+        Some(device),
+        channel,
+    );
+    let spl = u.sensitivity.entry();
+    let applied = match u.curve {
+        cal::CurveUse::Applied { mic, curve } => {
+            store.curve(mic, &curve.label).map(|p| (curve.clone(), p))
+        }
         _ => None,
     };
-    let f_norm = spl.map_or(DEFAULT_F_NORM, |s| s.calibrator_freq.0);
+    let f = f_norm(spl);
     InputCal {
-        status,
-        sensitivity: spl.map(|s| s.sensitivity.0),
-        correction: curve.as_ref().map(|(_, c)| Arc::new(c.normalised(f_norm))),
-        spl_entry,
-        curve_name: curve.map(|(n, _)| n),
+        status: u.sensitivity.status(),
+        sensitivity: spl.map(|e| e.spl.sensitivity.0),
+        correction: applied.as_ref().map(|(_, p)| Arc::new(p.normalised(f))),
+        spl_entry: spl.cloned(),
+        curve: applied.map(|(r, _)| r),
     }
 }
 

@@ -1102,12 +1102,15 @@ fn mic_text(mic: Option<&MicState>, applied: Option<&TraceMicCurve>) -> String {
             format!(
                 "{} (curve: {}, applied after capture as a display edit, not in the columns; \
                  0 dB at {} Hz; file {:?}, hash {}{captured})",
-                a.mic, a.curve.name, a.f_norm.0, a.curve.file_name, a.curve.content_hash
+                a.mic, a.curve.label, a.f_norm.0, a.curve.file_name, a.curve.content_hash
             )
         }
         (None, None) => "none".into(),
         (Some(m), None) => match &m.curve {
-            Some(c) => format!("{} (curve: {c}, in the columns)", m.name),
+            Some(c) => format!(
+                "{} (curve: {}, in the columns; file {:?}, hash {})",
+                m.name, c.label, c.file_name, c.content_hash
+            ),
             None => format!("{} (curve: none)", m.name),
         },
     }

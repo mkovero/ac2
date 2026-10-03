@@ -403,12 +403,13 @@ commands! {
     NewRta => "meas_new_rta", "New RTA…", [Global];
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
     DeleteMeasurement => "meas_delete", "Delete selected measurement", [Global];
+    InputSetup => "input_setup", "Input setup: mic, mic curve and calibration of each input…", [Global];
+    Calibrations => "calibrations", "Calibrations: mics, curves and sensitivity calibrations…", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
-    MicCurve => "mic_curve", "Mic curve on / off for the selected measurement's input", [Global];
-    CalDelete => "cal_delete", "Calibration: delete sensitivity and mic curve (input=mic)…", [Global];
-    CalDeleteSensitivity => "cal_delete_sensitivity", "Calibration: delete sensitivity only (input=mic)…", [Global];
-    CalDeleteCurve => "cal_delete_curve", "Calibration: delete mic curve only (input=mic)…", [Global];
-    TraceMicCurve => "trace_mic_curve", "Mic curve on the selected trace (mic name; none removes)…", [Global];
+    MicCurve => "mic_curve", "Mic curve: next curve on the selected measurement's input (off → 0° → 90° …)", [Global];
+    MicCurveInput => "mic_curve_input", "Mic curve on input N… (e.g. 2=90°, 2=off)", [Global];
+    CalDelete => "cal_delete", "Calibration: delete a sensitivity calibration (input=mic)…", [Global];
+    TraceMicCurve => "trace_mic_curve", "Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)…", [Global];
     SweepNew => "sweep_new", "Sweep measurement: response and harmonic distortion…", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
@@ -843,11 +844,12 @@ mod tests {
             CommandId::ImportTrace,
             CommandId::SessionSave,
             CommandId::SessionLoad,
+            CommandId::InputSetup,
+            CommandId::Calibrations,
             CommandId::InputMics,
             CommandId::MicCurve,
+            CommandId::MicCurveInput,
             CommandId::CalDelete,
-            CommandId::CalDeleteSensitivity,
-            CommandId::CalDeleteCurve,
             CommandId::TraceMicCurve,
             CommandId::FinderAuto,
             CommandId::FinderFull,

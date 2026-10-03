@@ -437,21 +437,41 @@ pub fn import_note(n: ImportNote) -> &'static str {
     }
 }
 
-/// A trace's mic and curve, e.g. `MM1 (curve MM1-34804 in the columns)`,
-/// `MM1 (curve MM1-34804 applied after capture, 0 dB at 1000 Hz)`, `—`.
+/// A trace's mic and curve, e.g. `MM1 34804 (curve 90° in the columns, file …)`,
+/// `MM1 34804 (curve 90° applied after capture, 0 dB at 1000 Hz, file …)`, `—`.
 pub fn mic_text(mic: Option<&MicState>, applied: Option<&TraceMicCurve>) -> String {
     match (mic, applied) {
         (_, Some(a)) => format!(
-            "{} (curve {} applied after capture, 0 dB at {} Hz)",
+            "{} (curve {} applied after capture, 0 dB at {} Hz, file {})",
             a.mic,
-            a.curve.name,
-            crate::format::fixed(a.f_norm.0, 0)
+            a.curve.label,
+            crate::format::fixed(a.f_norm.0, 0),
+            a.curve.file_name
         ),
         (Some(m), None) => match &m.curve {
-            Some(c) => format!("{} (curve {c} in the columns)", m.name),
+            Some(c) => format!(
+                "{} (curve {} in the columns, file {})",
+                m.name, c.label, c.file_name
+            ),
             None => format!("{} (no curve)", m.name),
         },
         (None, None) => "—".into(),
+    }
+}
+
+/// The mic-curve note of a stored trace's caption: `mic curve: MM1 34804 90°` whether the
+/// curve is in its columns or applied afterwards; nothing without one.
+pub fn curve_note(mic: Option<&MicState>, applied: Option<&TraceMicCurve>) -> Option<String> {
+    match (mic, applied) {
+        (_, Some(a)) => Some(format!(
+            "mic curve: {}",
+            crate::cal::curve_name(&a.mic, &a.curve.label)
+        )),
+        (Some(m), None) => m
+            .curve
+            .as_ref()
+            .map(|c| format!("mic curve: {}", crate::cal::curve_name(&m.name, &c.label))),
+        (None, None) => None,
     }
 }
 
@@ -463,32 +483,47 @@ mod tests {
     fn mic_wording() {
         use ac2_proto::model::MicCurveRef;
         use ac2_proto::units::{Hz, WallNs};
+        let c = MicCurveRef {
+            label: "90°".into(),
+            file_name: "449350_34804_90Grad.txt".into(),
+            content_hash: "0".into(),
+            points: 2,
+            f_lo: Hz(20.0),
+            f_hi: Hz(20_000.0),
+            imported_at: WallNs(0),
+            stated_sensitivity: None,
+        };
         let m = MicState {
-            name: "MM1".into(),
-            curve: Some("MM1-34804".into()),
+            name: "MM1 34804".into(),
+            curve: Some(c.clone()),
         };
         assert_eq!(
             mic_text(Some(&m), None),
-            "MM1 (curve MM1-34804 in the columns)"
+            "MM1 34804 (curve 90° in the columns, file 449350_34804_90Grad.txt)"
+        );
+        assert_eq!(
+            curve_note(Some(&m), None).as_deref(),
+            Some("mic curve: MM1 34804 90°")
         );
         let a = TraceMicCurve {
-            mic: "MM1".into(),
+            mic: "MM1 34804".into(),
             curve: MicCurveRef {
-                name: "MM1-34804".into(),
-                file_name: "MM1-34804.txt".into(),
-                content_hash: "0".into(),
-                points: 2,
-                f_lo: Hz(20.0),
-                f_hi: Hz(20_000.0),
-                imported_at: WallNs(0),
+                label: "0°".into(),
+                ..c
             },
             f_norm: Hz(1000.0),
         };
         assert_eq!(
             mic_text(None, Some(&a)),
-            "MM1 (curve MM1-34804 applied after capture, 0 dB at 1000 Hz)"
+            "MM1 34804 (curve 0° applied after capture, 0 dB at 1000 Hz, file \
+             449350_34804_90Grad.txt)"
+        );
+        assert_eq!(
+            curve_note(None, Some(&a)).as_deref(),
+            Some("mic curve: MM1 34804 0°")
         );
         assert_eq!(mic_text(None, None), "—");
+        assert_eq!(curve_note(None, None), None);
     }
 
     const EPOCH: SessionEpoch = SessionEpoch(3);

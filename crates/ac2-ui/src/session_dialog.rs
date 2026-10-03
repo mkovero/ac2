@@ -4,7 +4,8 @@
 //!
 //! Roles say what a channel is for, so nobody types channel numbers:
 //! - **R — Reference**: the input the stimulus returns on through a loopback cable (one).
-//! - **M — Measurement mic**: an input with a mic (any number; each can be named).
+//! - **M — Measurement mic**: an input with a mic (any number; each can be named, and
+//!   ←/→ on its row choose which of the mic's curves applies: off, 0°, 90° …).
 //! - **S — Stimulus**: an output that feeds the speakers and the loopback.
 //!
 //! The session's inputs, outputs and loopback follow from the roles (and the rows put in
@@ -13,9 +14,9 @@
 use std::collections::BTreeMap;
 
 use ac2_proto::model::{
-    Availability, BackendInfo, BackendKind, DeviceId, DeviceInfo, DeviceSelector, InputSetup,
-    LoopbackDetection, LoopbackRoute, MeasConfig, MeasKind, OpenSession, SessionConfig,
-    TransferConfig,
+    Availability, BackendInfo, BackendKind, CurveChoice, DeviceId, DeviceInfo, DeviceSelector,
+    InputSetup, LoopbackDetection, LoopbackRoute, MeasConfig, MeasKind, Mic, OpenSession,
+    SessionConfig, TransferConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
@@ -55,6 +56,8 @@ pub struct InputRow {
     pub role: InputRole,
     /// Mic name (K8); empty = none.
     pub mic: String,
+    /// Which of the mic's curves applies.
+    pub curve: CurveChoice,
 }
 
 impl InputRow {
@@ -330,6 +333,7 @@ impl SessionDialog {
                 in_session: false,
                 role: InputRole::None,
                 mic: String::new(),
+                curve: CurveChoice::NotChosen,
             })
             .collect();
         self.outputs = (0..n_out)
@@ -392,6 +396,14 @@ impl SessionDialog {
                 InputRole::None
             };
             row.mic = r.mic_names.get(&c).cloned().unwrap_or_default();
+        }
+        let curves: Vec<CurveChoice> = self
+            .inputs
+            .iter()
+            .map(|r| self.setup_curve(r.channel, &r.mic))
+            .collect();
+        for (row, c) in self.inputs.iter_mut().zip(curves) {
+            row.curve = c;
         }
         let n_out = self.outputs.len() as u16;
         let top_stim = r.stimulus.iter().map(|s| s + 1).max().unwrap_or(0);
@@ -566,13 +578,113 @@ impl SessionDialog {
         true
     }
 
-    /// Ends a mic-name edit (Enter, ↑/↓, Tab).
+    /// Ends a mic-name edit (Enter, ↑/↓, Tab). Another mic name starts with no curve
+    /// chosen: the choice belonged to the other capsule.
     pub fn finish_edit(&mut self) {
         if let Some(Edit::Mic(i)) = self.edit
-            && let Some(r) = self.inputs.get_mut(i)
+            && let Some(r) = self.inputs.get(i)
         {
-            r.mic = r.mic.trim().to_owned();
+            let mic = r.mic.trim().to_owned();
+            let curve = self.setup_curve(r.channel, &mic);
+            let r = &mut self.inputs[i];
+            r.mic = mic;
+            r.curve = curve;
             self.edit = None;
+        }
+    }
+
+    /// The daemon's curve choice of `channel` while its mic is still `mic`, else none.
+    fn setup_curve(&self, channel: u16, mic: &str) -> CurveChoice {
+        self.setup
+            .iter()
+            .find(|s| s.channel == channel && s.mic.as_deref() == Some(mic) && !mic.is_empty())
+            .map_or(CurveChoice::NotChosen, |s| s.curve.clone())
+    }
+
+    /// The input setup row `i` would send: its mic (a mic row's name) and curve.
+    pub fn row_setup(&self, i: usize) -> Option<InputSetup> {
+        let r = self.inputs.get(i)?;
+        let mic =
+            (r.role == InputRole::Mic && !r.mic.trim().is_empty()).then(|| r.mic.trim().to_owned());
+        Some(InputSetup {
+            channel: r.channel,
+            curve: if mic.is_some() {
+                r.curve.clone()
+            } else {
+                CurveChoice::NotChosen
+            },
+            mic,
+        })
+    }
+
+    /// What input row `i`'s mic uses, in words: `curve 90° · verified · 94.0 dB SPL at
+    /// 1.00 kHz · 3 h ago`; `true` when it needs a look (a chosen curve not stored, none
+    /// chosen among several). `None` for a row without a mic name.
+    pub fn row_cal_text(
+        &self,
+        i: usize,
+        st: &ac2_proto::model::State,
+        now: ac2_proto::units::WallNs,
+        offset: ac2_scene::time::ClockOffset,
+    ) -> Option<(String, bool)> {
+        use ac2_proto::cal::{CurveUse, input_use, settle};
+        let mut row = self.row_setup(i)?;
+        row.mic.as_ref()?;
+        settle(&mut row, &st.mics);
+        let channel = row.channel;
+        let rows = [row];
+        let device = self.device_info().map(|d| &d.id);
+        let u = input_use(&st.calibrations, &st.mics, &rows, device, channel);
+        Some((
+            format!(
+                "{} · {}",
+                ac2_scene::cal::curve_row(&u.curve),
+                ac2_scene::cal::sensitivity_state(&u.sensitivity, now, offset)
+            ),
+            matches!(
+                u.curve,
+                CurveUse::Missing { .. } | CurveUse::NotChosen { .. }
+            ),
+        ))
+    }
+
+    /// ←/→ on a mic's input row: the next of its curves (off, then the library's curves of
+    /// the mic in import order). Returns the row to send now when the open session captures
+    /// this input with this mic already (`live` is the daemon's input setup): the change then
+    /// applies to the running measurements without reopening anything.
+    pub fn step_curve(
+        &mut self,
+        forward: bool,
+        mics: &[Mic],
+        live: &[InputSetup],
+    ) -> Option<InputSetup> {
+        self.notice = None;
+        let Row::Input(i) = self.focus else {
+            return None;
+        };
+        let mut row = self.row_setup(i)?;
+        let Some(mic) = row.mic.clone() else {
+            self.notice = Some("←/→ choose the mic curve of a named mic (N names it)".into());
+            return None;
+        };
+        ac2_proto::cal::settle(&mut row, mics);
+        row.curve = ac2_proto::cal::step(&row.curve, ac2_proto::cal::mic(mics, &mic), forward);
+        self.inputs[i].curve = row.curve.clone();
+        let captured = self
+            .open
+            .as_ref()
+            .is_some_and(|o| o.config.input_channels.contains(&row.channel));
+        let same_mic = live
+            .iter()
+            .any(|s| s.channel == row.channel && s.mic.as_deref() == Some(mic.as_str()));
+        if self.is_open_device() && captured && same_mic {
+            if let Some(s) = self.setup.iter_mut().find(|s| s.channel == row.channel) {
+                s.curve = row.curve.clone();
+            }
+            Some(row)
+        } else {
+            self.notice = Some("the mic curve applies when the session opens (Enter)".into());
+            None
         }
     }
 
@@ -925,21 +1037,12 @@ impl SessionDialog {
             buffer_frames: buffer,
             loopback,
         };
-        let mic_curve = |c: u16| {
-            self.setup
-                .iter()
-                .find(|s| s.channel == c)
-                .is_none_or(|s| s.mic_curve)
-        };
         let setup: Vec<InputSetup> = self
             .inputs
             .iter()
-            .filter(|r| r.in_session)
-            .map(|r| InputSetup {
-                channel: r.channel,
-                mic: (r.role == InputRole::Mic && !r.mic.is_empty()).then(|| r.mic.clone()),
-                mic_curve: mic_curve(r.channel),
-            })
+            .enumerate()
+            .filter(|(_, r)| r.in_session)
+            .filter_map(|(i, _)| self.row_setup(i))
             .collect();
         let transfers = match reference {
             Some(r) if !stimulus.is_empty() => mics

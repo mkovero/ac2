@@ -14,6 +14,7 @@
 
 pub mod anim;
 pub mod app;
+pub mod cal_view;
 pub mod conn;
 pub mod connect;
 pub mod embedded;

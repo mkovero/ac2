@@ -243,7 +243,11 @@ impl App {
     fn input(&mut self, ctx: &egui::Context) {
         let text_overlay = matches!(
             self.state.overlay,
-            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Session(_)
+            Overlay::Palette(_)
+                | Overlay::Prompt(_)
+                | Overlay::Form(_)
+                | Overlay::Session(_)
+                | Overlay::Calibrations(_)
         );
         let events = ctx.input_mut(|i| {
             let (mine, rest): (Vec<Event>, Vec<Event>) =

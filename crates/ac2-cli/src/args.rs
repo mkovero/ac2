@@ -166,7 +166,7 @@ pub enum SessionCmd {
     },
     /// Saved sessions in the daemon's session directory.
     List,
-    /// Input setup: the mic on each input and its mic-curve switch (shown without options).
+    /// Input setup: the mic on each input and its active mic curve (shown without options).
     Inputs(SessionInputs),
 }
 
@@ -194,27 +194,49 @@ impl FromStr for MicAssign {
     }
 }
 
-/// `IN=on|off`: a 1-based input's mic-curve switch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CurveSwitch {
-    /// Input.
-    pub input: Channel,
-    /// Apply the mic curve.
-    pub on: bool,
-}
+/// A curve choice: a label of the mic's curves, or `off` / `none`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurveArg(pub ac2_proto::model::CurveChoice);
 
-impl FromStr for CurveSwitch {
+impl FromStr for CurveArg {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, String> {
-        let bad = || format!("{s:?}: expected IN=on or IN=off, e.g. 3=off");
+        use ac2_proto::model::CurveChoice;
+        let v = s.trim();
+        if v.is_empty() {
+            return Err("expected a curve label (e.g. 90°) or off".into());
+        }
+        Ok(Self(
+            if v.eq_ignore_ascii_case("off") || v.eq_ignore_ascii_case("none") {
+                CurveChoice::Off
+            } else {
+                CurveChoice::Curve {
+                    label: v.to_owned(),
+                }
+            },
+        ))
+    }
+}
+
+/// `IN=LABEL|off`: the active mic curve of a 1-based input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurveAssign {
+    /// Input.
+    pub input: Channel,
+    /// The curve.
+    pub curve: CurveArg,
+}
+
+impl FromStr for CurveAssign {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let bad = || format!("{s:?}: expected IN=LABEL or IN=off, e.g. 3=90°");
         let (ch, v) = s.split_once('=').ok_or_else(bad)?;
         let input: Channel = ch.parse().map_err(|e: crate::units::UnitError| e.0)?;
-        let on = match v.trim().to_lowercase().as_str() {
-            "on" => true,
-            "off" => false,
-            _ => return Err(bad()),
-        };
-        Ok(Self { input, on })
+        Ok(Self {
+            input,
+            curve: v.parse()?,
+        })
     }
 }
 
@@ -224,9 +246,9 @@ pub struct SessionInputs {
     /// Mic on an input, e.g. `3=M30` (repeatable; `3=` clears the name).
     #[arg(long = "mic", value_name = "IN=NAME")]
     pub mics: Vec<MicAssign>,
-    /// Mic-curve switch of an input, e.g. `3=off` (repeatable).
-    #[arg(long = "curve", value_name = "IN=on|off")]
-    pub curves: Vec<CurveSwitch>,
+    /// Active mic curve of an input, e.g. `3=90°` or `3=off` (repeatable).
+    #[arg(long = "curve", value_name = "IN=LABEL|off")]
+    pub curves: Vec<CurveAssign>,
 }
 
 /// `session open`.
@@ -665,12 +687,63 @@ pub struct SplWatch {
 pub enum CalCmd {
     /// Calibrate an input against an acoustic calibrator.
     Spl(CalSpl),
-    /// Import a mic's magnitude curve (.frd / .txt / CSV) for an input, or clear it.
-    MicCurve(CalMicCurve),
-    /// List calibrations and the input setup.
+    /// The mic library: import, rename and delete a mic's curves.
+    #[command(subcommand)]
+    Curve(CalCurveCmd),
+    /// Choose the mic curve an input applies: a label of its mic's curves, or `off`.
+    Use {
+        /// Input channel.
+        input: Channel,
+        /// Curve label (e.g. 90°), or `off`.
+        curve: CurveArg,
+    },
+    /// List sensitivity calibrations, the mic library and what each input uses.
     List,
-    /// Delete a calibration: its sensitivity, its mic curve, or both (the default).
+    /// Delete a sensitivity calibration.
     Rm(CalRm),
+}
+
+/// `cal curve …`.
+#[derive(Debug, Subcommand)]
+pub enum CalCurveCmd {
+    /// Import a mic's magnitude curve (.frd / .txt / CSV) into the mic library. The label
+    /// defaults to the angle the file names (`90°`), else its file name. With `--input`, the
+    /// mic becomes that input's mic, and its only curve its active one.
+    Import(CalCurveImport),
+    /// Rename a curve (inputs that use it follow).
+    Rename {
+        /// Mic name.
+        #[arg(long)]
+        mic: String,
+        /// Current label.
+        label: String,
+        /// New label.
+        new_label: String,
+    },
+    /// Delete a curve from the mic library.
+    Rm {
+        /// Mic name.
+        #[arg(long)]
+        mic: String,
+        /// Label.
+        label: String,
+    },
+}
+
+/// `cal curve import`.
+#[derive(Debug, Args)]
+pub struct CalCurveImport {
+    /// Curve file: frequency and dB per line (further columns ignored).
+    pub file: PathBuf,
+    /// Mic name (default: the mic on `--input`).
+    #[arg(long, required_unless_present = "input")]
+    pub mic: Option<String>,
+    /// Label among the mic's curves, e.g. `90°` (default: from the file).
+    #[arg(long)]
+    pub label: Option<String>,
+    /// Input the mic is on: sets its mic name.
+    #[arg(long)]
+    pub input: Option<Channel>,
 }
 
 /// `cal rm`.
@@ -687,29 +760,6 @@ pub struct CalRm {
     /// the one device holding a calibration for this input and mic).
     #[arg(long, value_name = "ID")]
     pub device: Option<String>,
-    /// Delete only the sensitivity calibration (keep the mic curve).
-    #[arg(long, conflicts_with = "curve")]
-    pub sensitivity: bool,
-    /// Delete only the mic curve (keep the sensitivity calibration).
-    #[arg(long)]
-    pub curve: bool,
-}
-
-/// `cal mic-curve`.
-#[derive(Debug, Args)]
-pub struct CalMicCurve {
-    /// Curve file: frequency and dB per line (further columns ignored).
-    #[arg(required_unless_present = "clear", conflicts_with = "clear")]
-    pub file: Option<PathBuf>,
-    /// Input channel the mic is on.
-    #[arg(long)]
-    pub input: Channel,
-    /// Mic name (default: the input's mic name in the session's input setup).
-    #[arg(long)]
-    pub mic: Option<String>,
-    /// Remove the curve instead.
-    #[arg(long)]
-    pub clear: bool,
 }
 
 /// `cal spl`.
@@ -828,14 +878,17 @@ pub enum TraceCmd {
         #[arg(long)]
         magnitude_only: bool,
     },
-    /// Apply the mic curve the calibration store holds for a mic to a stored trace (a
-    /// display edit: the columns stay as measured), or `none` to remove it. Refused for a
-    /// trace captured with a curve already in its columns.
+    /// Apply a curve of the mic library to a stored trace (a display edit: the columns stay
+    /// as measured), or `none` to remove it. Refused for a trace captured with a curve
+    /// already in its columns.
     Mic {
         /// Trace id or name.
         trace: MeasRef,
-        /// Mic name, as calibrated (e.g. "MM1 34804"), or `none`.
+        /// Mic name (e.g. "MM1 34804"), or `none`.
         mic: String,
+        /// Which of the mic's curves (e.g. 90°); may be left out when it has only one.
+        #[arg(long)]
+        label: Option<String>,
     },
 }
 

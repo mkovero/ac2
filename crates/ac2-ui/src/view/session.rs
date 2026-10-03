@@ -118,6 +118,23 @@ pub(super) fn session(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     };
     let d: SessionDialog = (**d).clone();
     let meters = app.state.input_meters();
+    let now = super::now();
+    let offset = ac2_scene::time::ClockOffset(
+        app.state
+            .mirror
+            .as_ref()
+            .and_then(|m| m.clock_offset_ns)
+            .map_or(0, |o| {
+                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            }),
+    );
+    let cal: Vec<Option<(String, bool)>> = (0..d.inputs.len())
+        .map(|i| {
+            app.state
+                .daemon()
+                .and_then(|st| d.row_cal_text(i, st, now.wall, offset))
+        })
+        .collect();
     backdrop(ctx);
     let mut msg = None;
     let screen = ctx.content_rect();
@@ -136,7 +153,7 @@ pub(super) fn session(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 egui::ScrollArea::vertical()
                     .max_height(grid_h)
                     .auto_shrink([false, true])
-                    .show(ui, |ui| channel_grid(ui, &d, &meters, ch, &mut msg));
+                    .show(ui, |ui| channel_grid(ui, &d, &meters, &cal, ch, &mut msg));
                 ui.separator();
                 rate_rows(ui, &d, ch, &mut msg);
                 detect_panel(ui, &d, ch, &mut msg);
@@ -165,9 +182,10 @@ pub(super) fn session(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(
-                        "↑↓ move · ←→ backend / device · Space in session · R reference · \
-                         M mic · S stimulus · N names the mic · D detects the loopback · \
-                         Enter opens · Esc closes (and stops the stimulus)",
+                        "↑↓ move · ←→ backend / device, a mic's curve (off / 0° / 90° …) · \
+                         Space in session · R reference · M mic · S stimulus · N names the \
+                         mic · D detects the loopback · Enter opens · Esc closes (and stops \
+                         the stimulus)",
                     )
                     .small()
                     .color(ch.dim),
@@ -256,6 +274,7 @@ fn channel_grid(
     ui: &mut egui::Ui,
     d: &SessionDialog,
     meters: &std::collections::BTreeMap<u16, MeterReading>,
+    cal: &[Option<(String, bool)>],
     ch: &Chrome,
     msg: &mut Option<SessionMsg>,
 ) {
@@ -346,7 +365,19 @@ fn channel_grid(
                     InputRole::None if r.in_session => "in session",
                     InputRole::None => "",
                 };
-                ui.label(RichText::new(role).small().color(ch.dim));
+                // A named mic says which curve and calibration it uses instead.
+                match cal.get(i).and_then(Option::as_ref) {
+                    Some((t, warn)) => {
+                        ui.label(RichText::new(t).small().color(if *warn {
+                            ch.armed
+                        } else {
+                            ch.dim
+                        }));
+                    }
+                    None => {
+                        ui.label(RichText::new(role).small().color(ch.dim));
+                    }
+                }
                 ui.end_row();
             }
             ui.label(RichText::new("Outputs").strong().color(ch.text));

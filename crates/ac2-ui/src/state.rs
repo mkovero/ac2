@@ -15,10 +15,10 @@ use ac2_client::MirrorView;
 use ac2_proto::Command;
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    AverageMethod, CalKey, CalPart, DelayFinding, DelayOutcome, DelayPick, DelayReference,
+    AverageMethod, CalKey, CurveChoice, DelayFinding, DelayOutcome, DelayPick, DelayReference,
     FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind,
-    Measurement, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode, State,
-    SweepStatus, TraceData, TraceKind, TraceMeta,
+    Measurement, MicCurveId, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode,
+    State, SweepStatus, TraceData, TraceKind, TraceMeta,
 };
 use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 use ac2_scene::spectrum::PeakHold;
@@ -30,6 +30,7 @@ use ac2_scene::view::{
 use ac2_scene::{axis::Range, format};
 
 use crate::anim::FreqNav;
+use crate::cal_view::{CalAction, CalView};
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
 use crate::forms::{Form, FormKind, SweepPlan};
 use crate::keys::{Chord, CommandId, Keymap, Scope};
@@ -429,20 +430,106 @@ pub fn outputs_text(o: &[u16]) -> String {
         .join(", ")
 }
 
-/// The `trace.mic_curve` request of the trace mic-curve prompt: a mic name, or `none`.
-fn trace_mic_request(id: TraceId, text: &str) -> Result<Request, String> {
+/// The curve `text` names in the mic library: `MM1 34804 90°` (a mic name, then one of its
+/// labels), or just the mic name when it has one curve.
+pub fn parse_curve(mics: &[ac2_proto::model::Mic], text: &str) -> Result<MicCurveId, String> {
+    let t = text.trim();
+    // The longest mic name the text starts with: names may contain spaces, and one name may
+    // begin another.
+    let m = mics
+        .iter()
+        .filter(|m| t.starts_with(m.name.as_str()))
+        .max_by_key(|m| m.name.len())
+        .ok_or_else(|| {
+            let names: Vec<&str> = mics.iter().map(|m| m.name.as_str()).collect();
+            if names.is_empty() {
+                "the mic library is empty: import a curve first (palette: Calibrations…)".into()
+            } else {
+                format!(
+                    "no mic of the library starts {t:?} (mics: {})",
+                    names.join(", ")
+                )
+            }
+        })?;
+    let rest = t[m.name.len()..].trim();
+    let label = match (rest, m.curves.as_slice()) {
+        ("", [only]) => only.label.clone(),
+        ("", _) => {
+            return Err(format!(
+                "{} has several curves: add the label ({})",
+                m.name,
+                ac2_scene::cal::labels(&m.curves)
+            ));
+        }
+        (l, curves) if curves.iter().any(|c| c.label == l) => l.to_owned(),
+        (l, _) => {
+            return Err(format!(
+                "{} has no curve {l:?} (stored: {})",
+                m.name,
+                ac2_scene::cal::labels(&m.curves)
+            ));
+        }
+    };
+    Ok(MicCurveId {
+        mic: m.name.clone(),
+        label,
+    })
+}
+
+/// The `trace.mic_curve` request of the trace mic-curve prompt: a curve of the mic library
+/// (`MM1 34804 90°`), or `none`.
+fn trace_mic_request(
+    mics: &[ac2_proto::model::Mic],
+    id: TraceId,
+    text: &str,
+) -> Result<Request, String> {
     let t = text.trim();
     if t.is_empty() {
-        return Err("type the mic name (none removes the curve)".into());
+        return Err("type the mic and curve, e.g. MM1 34804 90° (none removes the curve)".into());
     }
-    let mic = (!t.eq_ignore_ascii_case("none")).then(|| t.to_owned());
+    let curve = if t.eq_ignore_ascii_case("none") {
+        None
+    } else {
+        Some(parse_curve(mics, t)?)
+    };
     Ok(Request::Call {
-        what: match &mic {
-            Some(m) => format!("trace {id}: mic curve of {m} applied"),
+        what: match &curve {
+            Some(c) => format!(
+                "trace {id}: mic curve {} applied",
+                ac2_scene::cal::curve_name(&c.mic, &c.label)
+            ),
             None => format!("trace {id}: mic curve removed"),
         },
-        cmd: Command::TraceMicCurve { trace: id, mic },
+        cmd: Command::TraceMicCurve { trace: id, curve },
     })
+}
+
+/// `2=90°`, `2=off` (1-based input): an input and the curve it applies.
+pub fn parse_input_curve(text: &str) -> Result<(u16, CurveChoice), String> {
+    let (ch, label) = text.split_once('=').ok_or_else(|| {
+        format!(
+            "{:?}: expected input=curve, e.g. 2=90° or 2=off",
+            text.trim()
+        )
+    })?;
+    let n: u16 = ch
+        .trim()
+        .parse()
+        .map_err(|_| format!("not an input number: {:?}", ch.trim()))?;
+    if n == 0 {
+        return Err("inputs count from 1".into());
+    }
+    let l = label.trim();
+    let choice = if l.eq_ignore_ascii_case("off") || l.eq_ignore_ascii_case("none") {
+        CurveChoice::Off
+    } else if l.is_empty() {
+        return Err("type the curve label after = (or off)".into());
+    } else {
+        CurveChoice::Curve {
+            label: l.to_owned(),
+        }
+    };
+    Ok((n - 1, choice))
 }
 
 /// What a text prompt sets.
@@ -457,8 +544,10 @@ pub enum PromptKind {
     SessionSave,
     SessionLoad,
     InputMics,
-    /// `input=mic` of a calibration on the session's capture device to delete from.
-    CalDelete(CalPart),
+    /// `input=curve` of the input setup.
+    MicCurveInput,
+    /// `input=mic` of a sensitivity calibration on the session's capture device to delete.
+    CalDelete,
     /// Mic whose curve goes on a stored trace (`none` removes the applied one).
     TraceMicCurve(TraceId),
     /// Custom delay-finder band edges.
@@ -479,17 +568,14 @@ impl PromptKind {
             PromptKind::SessionSave => "Save session as (name or path)",
             PromptKind::SessionLoad => "Load session, disarmed (name or path)",
             PromptKind::InputMics => "Mic per input (1-based, e.g. 3=M30, 4=ECM; 3= clears)",
-            PromptKind::CalDelete(CalPart::All) => {
-                "Delete calibration and mic curve of input=mic on this device (e.g. 3=M30)"
+            PromptKind::MicCurveInput => {
+                "Mic curve on input N: input=curve (1-based, e.g. 2=90°; 2=off)"
             }
-            PromptKind::CalDelete(CalPart::Sensitivity) => {
+            PromptKind::CalDelete => {
                 "Delete sensitivity calibration of input=mic on this device (e.g. 3=M30)"
             }
-            PromptKind::CalDelete(CalPart::MicCurve) => {
-                "Delete mic curve of input=mic on this device (e.g. 3=M30)"
-            }
             PromptKind::TraceMicCurve(_) => {
-                "Mic curve for the selected trace: mic name as calibrated (none removes)"
+                "Mic curve for the selected trace: mic and curve, e.g. MM1 34804 90° (none removes)"
             }
             PromptKind::FinderBand => "Delay finder band edges (Hz, e.g. 80-800)",
             PromptKind::FinderObservation => {
@@ -541,6 +627,8 @@ pub enum Overlay {
     /// After a session opened with a reference and mics on a daemon without measurements:
     /// one key creates a transfer measurement per mic.
     Offer(Box<Offer>),
+    /// The calibrations and input setup view.
+    Calibrations(Box<CalView>),
 }
 
 /// Transfer measurements offered after the session dialog opened a session.
@@ -867,6 +955,62 @@ impl AppState {
         })
     }
 
+    /// The mic-curve note of a readout on `input` whose frame says the daemon applied a
+    /// curve (`applied`) or not: `mic curve: MM1 34804 90°`, `mic curve off`,
+    /// `no mic curve stored for MM1 34804` … (`ac2_scene::cal::curve_note`).
+    pub fn curve_note(&self, input: u16, applied: bool) -> Option<String> {
+        let s = self.daemon()?;
+        ac2_scene::cal::curve_note(applied, &ac2_proto::cal::state_input_use(s, input).curve)
+    }
+
+    /// The mic-curve part of pane `pane`'s title caption: the selected stored trace's curve
+    /// when the pane draws it, else the shown measurement's (from its newest frame), else
+    /// the shown sweep's.
+    pub fn mic_curve_caption(&self, pane: PaneKind) -> Option<String> {
+        use ac2_proto::topic::{Stream, Topic};
+        let stored =
+            |t: &TraceMeta| ac2_scene::trace::curve_note(t.mic.as_ref(), t.mic_curve.as_deref());
+        match pane {
+            PaneKind::Transfer | PaneKind::Spectrum => {
+                if let Some(t) = self.selected_trace_meta()
+                    && SmoothTarget::Trace(t.clone()).pane() == pane
+                {
+                    return stored(t);
+                }
+                let m = self.pane_meas(pane)?;
+                let stream = match m.config.kind {
+                    MeasKind::Transfer { .. } => Stream::Tf,
+                    MeasKind::Spectrum { .. } => Stream::Spec,
+                    MeasKind::Rta { .. } => Stream::Rta,
+                    MeasKind::Spl { .. } => Stream::Spl,
+                };
+                let applied = self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.latest.get(&Topic::Data { meas: m.id, stream }))
+                    .is_some_and(|f| match &f.frame.data {
+                        ac2_proto::FrameData::Tf(x) => x.meta.mic_curve,
+                        ac2_proto::FrameData::Spec(x) => x.meta.mic_curve,
+                        ac2_proto::FrameData::Rta(x) => x.meta.mic_curve,
+                        _ => false,
+                    });
+                self.curve_note(meas_input(&m.config.kind), applied)
+            }
+            PaneKind::Distortion => self.shown_sweep().and_then(|(d, _)| stored(&d.meta)),
+            PaneKind::Ir | PaneKind::Spl => None,
+        }
+    }
+
+    /// The pane's title caption: smoothing and mic curve, `smoothing 1/6 oct · mic curve:
+    /// MM1 34804 90°`.
+    pub fn pane_caption(&self, pane: PaneKind) -> Option<String> {
+        let parts: Vec<String> = [self.smoothing_caption(pane), self.mic_curve_caption(pane)]
+            .into_iter()
+            .flatten()
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
     pub fn edit(&self, id: MeasId) -> LiveEdit {
         self.edits.get(&id).copied().unwrap_or_default()
     }
@@ -1144,9 +1288,12 @@ impl AppState {
                 } else {
                     None
                 };
+                let curve = self.daemon().and_then(|s| {
+                    ac2_scene::cal::curve_short(&ac2_proto::cal::state_input_use(s, c).curve)
+                });
                 InputRow {
                     channel: c,
-                    label: input_label(c, &name, role),
+                    label: input_label(c, &name, curve.as_deref(), role),
                     used: uses.iter().find(|(i, _)| *i == c).map(|(_, u)| *u),
                     reading: meters.get(&c).cloned().unwrap_or_else(MeterReading::none),
                 }
@@ -1293,6 +1440,11 @@ impl AppState {
                 Overlay::Palette(p) => p.backspace(),
                 Overlay::Form(f) => f.backspace(),
                 Overlay::Session(d) => d.backspace(),
+                Overlay::Calibrations(v) if v.edit.is_some() => v.backspace(),
+                // Not typing: Backspace deletes, as Delete does.
+                Overlay::Calibrations(_) => {
+                    self.cal_view_key(Chord::key(eframe::egui::Key::Delete), None, out);
+                }
                 Overlay::Prompt(p) => {
                     p.text.pop();
                     p.error = None;
@@ -1405,6 +1557,10 @@ impl AppState {
                 self.session_key(chord, swallow, out);
                 return;
             }
+            Overlay::Calibrations(_) => {
+                self.cal_view_key(chord, swallow, out);
+                return;
+            }
             Overlay::Offer(_) => {
                 if chord.key == Key::Enter {
                     self.offer(true, out);
@@ -1506,6 +1662,7 @@ impl AppState {
             Overlay::Palette(p) => p.type_text(&t),
             Overlay::Form(f) => f.type_text(&t),
             Overlay::Session(d) => d.type_text(&t),
+            Overlay::Calibrations(v) => v.type_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;
@@ -1538,8 +1695,38 @@ impl AppState {
                 self.stimulus.outputs = o;
                 self.resend_stimulus(out);
             }),
-            PromptKind::CalDelete(part) => self.cal_delete(&text, part, out),
-            PromptKind::TraceMicCurve(id) => trace_mic_request(id, &text).map(|r| out.push(r)),
+            PromptKind::CalDelete => self.cal_delete(&text, out),
+            PromptKind::TraceMicCurve(id) => {
+                let mics = self.daemon().map(|s| s.mics.clone()).unwrap_or_default();
+                trace_mic_request(&mics, id, &text).map(|r| out.push(r))
+            }
+            PromptKind::MicCurveInput => parse_input_curve(&text).and_then(|(channel, curve)| {
+                let mut row = self.input_setup(channel);
+                let Some(mic) = row.mic.clone() else {
+                    return Err(format!(
+                        "input {} has no mic name: name it first (palette: Input setup…)",
+                        u32::from(channel) + 1
+                    ));
+                };
+                if let CurveChoice::Curve { label } = &curve
+                    && self
+                        .daemon()
+                        .is_none_or(|s| ac2_proto::cal::curve(&s.mics, &mic, label).is_none())
+                {
+                    let stored = self
+                        .daemon()
+                        .and_then(|s| ac2_proto::cal::mic(&s.mics, &mic))
+                        .map_or_else(|| "none".to_owned(), |m| ac2_scene::cal::labels(&m.curves));
+                    return Err(format!("{mic} has no curve {label:?} (stored: {stored})"));
+                }
+                row.curve = curve;
+                let what = curve_what(&row);
+                out.push(Request::Call {
+                    what,
+                    cmd: Command::SessionInputs { inputs: vec![row] },
+                });
+                Ok(())
+            }),
             PromptKind::FinderBand => parse_band(&text).map(|(lo, hi)| {
                 self.set_finder(FinderChoice {
                     band: FinderBand::Custom {
@@ -1591,7 +1778,11 @@ impl AppState {
                     .into_iter()
                     .map(|(channel, mic)| {
                         let mut row = self.input_setup(channel);
-                        row.mic = mic;
+                        if row.mic != mic {
+                            row.mic = mic;
+                            // Another capsule: its own curves, chosen again.
+                            row.curve = CurveChoice::NotChosen;
+                        }
                         row
                     })
                     .collect();
@@ -1944,12 +2135,7 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    fn cal_delete(
-        &mut self,
-        text: &str,
-        part: CalPart,
-        out: &mut Vec<Request>,
-    ) -> Result<(), String> {
+    fn cal_delete(&mut self, text: &str, out: &mut Vec<Request>) -> Result<(), String> {
         let (channel, mic) = match parse_mics(text)?.as_slice() {
             [(c, Some(m))] => (*c, m.clone()),
             [(c, None)] => {
@@ -1967,14 +2153,9 @@ impl AppState {
                     .into(),
             );
         };
-        let what = match part {
-            CalPart::All => "calibration",
-            CalPart::Sensitivity => "sensitivity calibration",
-            CalPart::MicCurve => "mic curve",
-        };
         out.push(Request::Call {
             what: format!(
-                "{what} of {mic} on input {} deleted",
+                "sensitivity calibration of {mic} on input {} deleted",
                 u32::from(channel) + 1
             ),
             cmd: Command::CalDelete {
@@ -1983,7 +2164,6 @@ impl AppState {
                     channel,
                     mic,
                 },
-                part,
             },
         });
         Ok(())
@@ -2020,15 +2200,14 @@ impl AppState {
         }
     }
 
-    /// The daemon's input setup row of `channel` (default: no mic name, curve on).
+    /// The daemon's input setup row of `channel` (default: no mic name, no curve chosen).
     fn input_setup(&self, channel: u16) -> InputSetup {
-        self.daemon()
-            .and_then(|s| s.inputs.iter().find(|i| i.channel == channel).cloned())
-            .unwrap_or(InputSetup {
-                channel,
-                mic: None,
-                mic_curve: true,
-            })
+        ac2_proto::cal::input_setup(
+            self.daemon()
+                .map(|s| s.inputs.as_slice())
+                .unwrap_or_default(),
+            channel,
+        )
     }
 
     fn need_tf(&mut self) -> Option<Measurement> {
@@ -2519,26 +2698,39 @@ impl AppState {
             }
             C::TraceMicCurve => match self.selected_trace_meta().cloned() {
                 Some(t) => {
-                    // Start from what the trace knows: the applied curve's mic, else the
-                    // mic it was captured with.
+                    // Start from what the trace knows: the applied curve, else the mic it
+                    // was captured with.
                     let text = t
                         .mic_curve
                         .as_ref()
-                        .map(|m| m.mic.clone())
-                        .or_else(|| t.mic.as_ref().map(|m| m.name.clone()))
+                        .map(|m| ac2_scene::cal::curve_name(&m.mic, &m.curve.label))
+                        .or_else(|| t.mic.as_ref().map(|m| format!("{} ", m.name)))
                         .unwrap_or_default();
                     self.prompt(PromptKind::TraceMicCurve(t.id), text);
                 }
                 None => self.error("select a stored trace first (V, or click it in the list)"),
             },
-            C::CalDelete | C::CalDeleteSensitivity | C::CalDeleteCurve => {
-                let part = match c {
-                    C::CalDeleteSensitivity => CalPart::Sensitivity,
-                    C::CalDeleteCurve => CalPart::MicCurve,
-                    _ => CalPart::All,
-                };
+            C::CalDelete => {
                 let text = self.cal_delete_text();
-                self.prompt(PromptKind::CalDelete(part), text);
+                self.prompt(PromptKind::CalDelete, text);
+            }
+            C::InputSetup | C::Calibrations => match self.daemon() {
+                Some(s) => {
+                    // Input setup starts on the input the selected measurement listens on.
+                    let on = (c == C::InputSetup)
+                        .then(|| self.selected_meas().map(|m| meas_input(&m.config.kind)))
+                        .flatten();
+                    let v = CalView::new(s, on);
+                    self.overlay = Overlay::Calibrations(Box::new(v));
+                }
+                None => self.error("not connected to a daemon"),
+            },
+            C::MicCurveInput => {
+                let text = self
+                    .selected_meas()
+                    .map(|m| format!("{}=", u32::from(meas_input(&m.config.kind)) + 1))
+                    .unwrap_or_default();
+                self.prompt(PromptKind::MicCurveInput, text);
             }
             C::FinderAuto | C::FinderFull | C::FinderMid | C::FinderSub => {
                 let band = match c {
@@ -2582,18 +2774,18 @@ impl AppState {
                 ) {
                     let input = meas_input(&m.config.kind);
                     let mut row = self.input_setup(input);
-                    row.mic_curve = !row.mic_curve;
-                    let what = format!(
-                        "mic curve {} on input {}",
-                        if row.mic_curve { "on" } else { "off" },
-                        u32::from(input) + 1
-                    );
-                    if row.mic.is_none() {
-                        self.toast(format!(
-                            "input {} has no mic name: a curve applies once one is set",
+                    let Some(mic) = row.mic.clone() else {
+                        self.error(format!(
+                            "input {} has no mic name: name it first (palette: Input setup…)",
                             u32::from(input) + 1
                         ));
-                    }
+                        return;
+                    };
+                    let mics = self.daemon().map(|s| s.mics.clone()).unwrap_or_default();
+                    ac2_proto::cal::settle(&mut row, &mics);
+                    row.curve =
+                        ac2_proto::cal::step(&row.curve, ac2_proto::cal::mic(&mics, &mic), true);
+                    let what = curve_what(&row);
                     self.call(out, Command::SessionInputs { inputs: vec![row] }, what);
                 }
             }
@@ -3025,8 +3217,22 @@ impl AppState {
                 d.move_focus(1);
             }
             Key::ArrowLeft | Key::ArrowRight if d.edit.is_none() => {
-                let step = if chord.key == Key::ArrowLeft { -1 } else { 1 };
-                d.cycle(step, &self.prefs);
+                let forward = chord.key == Key::ArrowRight;
+                if matches!(d.focus, Row::Input(_)) {
+                    let st = self.mirror.as_ref().and_then(|m| m.state.clone());
+                    let mics = st.as_ref().map(|s| s.mics.as_slice()).unwrap_or_default();
+                    let live = st.as_ref().map(|s| s.inputs.as_slice()).unwrap_or_default();
+                    if let Some(row) = d.step_curve(forward, mics, live) {
+                        // The session already captures this mic: the choice applies now.
+                        let what = curve_what(&row);
+                        out.push(Request::Call {
+                            what,
+                            cmd: Command::SessionInputs { inputs: vec![row] },
+                        });
+                    }
+                } else {
+                    d.cycle(if forward { 1 } else { -1 }, &self.prefs);
+                }
             }
             // Everything below types text while a text row or edit has the keyboard.
             _ if d.text_focus() => self.swallow_text = swallow,
@@ -3049,6 +3255,106 @@ impl AppState {
                 }
             }
             _ => self.swallow_text = swallow,
+        }
+    }
+
+    /// Keys of the calibrations view.
+    fn cal_view_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
+        use eframe::egui::Key;
+        let Some(st) = self.mirror.as_ref().and_then(|m| m.state.clone()) else {
+            self.overlay = Overlay::None;
+            return;
+        };
+        let Overlay::Calibrations(v) = &mut self.overlay else {
+            return;
+        };
+        let plain = !(chord.command || chord.alt);
+        let action = match chord.key {
+            Key::Enter if v.edit.is_some() => v.finish(&st),
+            Key::Enter => {
+                self.overlay = Overlay::None;
+                None
+            }
+            Key::ArrowUp => {
+                v.move_focus(&st, -1);
+                None
+            }
+            Key::Tab if chord.shift => {
+                v.move_focus(&st, -1);
+                None
+            }
+            Key::ArrowDown | Key::Tab => {
+                v.move_focus(&st, 1);
+                None
+            }
+            Key::ArrowLeft | Key::ArrowRight if v.edit.is_none() => {
+                v.step_curve(&st, chord.key == Key::ArrowRight)
+            }
+            _ if v.edit.is_some() => {
+                self.swallow_text = swallow;
+                None
+            }
+            Key::N | Key::F2 if plain => {
+                if v.start_mic_name(&st) {
+                    self.swallow_text = typed_char(&chord);
+                }
+                None
+            }
+            Key::I if plain => {
+                if v.start_import(&st) {
+                    self.swallow_text = typed_char(&chord);
+                }
+                None
+            }
+            Key::R if plain => {
+                if v.start_rename(&st) {
+                    self.swallow_text = typed_char(&chord);
+                }
+                None
+            }
+            Key::Delete | Key::Backspace => v.delete(&st),
+            _ => {
+                self.swallow_text = swallow;
+                None
+            }
+        };
+        if let Some(a) = action {
+            self.cal_action(a, out);
+        }
+    }
+
+    /// A calibrations-view action as requests.
+    fn cal_action(&mut self, a: CalAction, out: &mut Vec<Request>) {
+        match a {
+            CalAction::Inputs(row, what) => out.push(Request::Call {
+                what,
+                cmd: Command::SessionInputs { inputs: vec![row] },
+            }),
+            CalAction::Import { path, mic, input } => {
+                out.push(Request::ImportCurve { path, mic, input })
+            }
+            CalAction::Rename(id, label) => out.push(Request::Call {
+                what: format!(
+                    "curve {} renamed {label}",
+                    ac2_scene::cal::curve_name(&id.mic, &id.label)
+                ),
+                cmd: Command::CalCurveRename { curve: id, label },
+            }),
+            CalAction::DeleteCurve(id) => out.push(Request::Call {
+                what: format!(
+                    "curve {} deleted",
+                    ac2_scene::cal::curve_name(&id.mic, &id.label)
+                ),
+                cmd: Command::CalCurveDelete { curve: id },
+            }),
+            CalAction::DeleteSensitivity(key) => out.push(Request::Call {
+                what: format!(
+                    "sensitivity calibration of {} on input {} deleted",
+                    key.mic,
+                    u32::from(key.channel) + 1
+                ),
+                cmd: Command::CalDelete { key },
+            }),
         }
     }
 
@@ -3498,6 +3804,21 @@ pub fn meas_input(k: &MeasKind) -> u16 {
         MeasKind::Spectrum { config } => config.input,
         MeasKind::Rta { config } => config.input,
         MeasKind::Spl { config } => config.input,
+    }
+}
+
+/// The toast of a curve choice: `input 2: mic curve MM1 34804 90°`, `input 2: mic curve off`.
+pub fn curve_what(row: &InputSetup) -> String {
+    let n = u32::from(row.channel) + 1;
+    match (&row.mic, &row.curve) {
+        (Some(m), CurveChoice::Curve { label }) => {
+            format!(
+                "input {n}: mic curve {}",
+                ac2_scene::cal::curve_name(m, label)
+            )
+        }
+        (_, CurveChoice::NotChosen) => format!("input {n}: no mic curve chosen"),
+        _ => format!("input {n}: mic curve off"),
     }
 }
 

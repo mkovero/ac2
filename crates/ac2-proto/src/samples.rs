@@ -258,13 +258,12 @@ pub fn commands() -> Vec<Command> {
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),
         },
-        Command::CalMicCurve {
-            input: 1,
+        Command::CalCurveImport {
             mic: "M30 #1234".into(),
-            action: MicCurveAction::Import {
-                file_name: "M30-1234.frd".into(),
-                content: Blob(b"20 -0.5\n20000 1.5\n".to_vec()),
-            },
+            label: Some("0°".into()),
+            file_name: "M30-1234.frd".into(),
+            content: Blob(b"20 -0.5\n20000 1.5\n".to_vec()),
+            input: Some(1),
         },
         Command::CalList,
         Command::SplLogStart {
@@ -304,10 +303,7 @@ pub fn commands() -> Vec<Command> {
         },
         Command::FileList,
         Command::SessionInputs { inputs: inputs() },
-        Command::CalDelete {
-            key: cal_key(),
-            part: CalPart::Sensitivity,
-        },
+        Command::CalDelete { key: cal_key() },
         Command::SessionPreview {
             backend: BackendKind::Jack,
             device: DeviceId("jack".into()),
@@ -322,8 +318,13 @@ pub fn commands() -> Vec<Command> {
         },
         Command::TraceMicCurve {
             trace: TraceId(8),
-            mic: Some("M30 #1234".into()),
+            curve: Some(curve_id()),
         },
+        Command::CalCurveRename {
+            curve: curve_id(),
+            label: "on axis".into(),
+        },
+        Command::CalCurveDelete { curve: curve_id() },
     ]
 }
 
@@ -452,7 +453,7 @@ fn trace_meta() -> TraceMeta {
         },
         mic: Some(MicState {
             name: "M30 #1234".into(),
-            curve: Some("M30-1234".into()),
+            curve: Some(mic_curve_ref()),
         }),
         mic_curve: None,
         created_at: WallNs(1_790_000_000_000_000_000),
@@ -588,26 +589,49 @@ fn generator() -> Generator {
 fn cal_entry() -> CalEntry {
     CalEntry {
         key: cal_key(),
-        spl: Some(SplCal {
+        spl: SplCal {
             sensitivity: Db(120.5),
             calibrator_level: DbSpl(94.0),
             calibrator_freq: Hz(1000.0),
             measured: Dbfs(-26.5),
             calibrated_at: WallNs(1_789_000_000_000_000_000),
-        }),
-        mic_curve: Some(mic_curve_ref()),
+        },
+    }
+}
+
+fn curve_id() -> MicCurveId {
+    MicCurveId {
+        mic: "M30 #1234".into(),
+        label: "0°".into(),
+    }
+}
+
+fn mic() -> Mic {
+    Mic {
+        name: "M30 #1234".into(),
+        curves: vec![
+            mic_curve_ref(),
+            MicCurveRef {
+                label: "90°".into(),
+                file_name: "M30-1234-90.frd".into(),
+                content_hash: "0123456789abcdef".into(),
+                stated_sensitivity: Some(15.0),
+                ..mic_curve_ref()
+            },
+        ],
     }
 }
 
 fn mic_curve_ref() -> MicCurveRef {
     MicCurveRef {
-        name: "M30-1234".into(),
+        label: "0°".into(),
         file_name: "M30-1234.frd".into(),
         content_hash: "af63bd4c8601b7df".into(),
         points: 2,
         f_lo: Hz(20.0),
         f_hi: Hz(20_000.0),
         imported_at: WallNs(1_788_000_000_000_000_000),
+        stated_sensitivity: None,
     }
 }
 
@@ -616,12 +640,19 @@ fn inputs() -> Vec<InputSetup> {
         InputSetup {
             channel: 1,
             mic: Some("M30 #1234".into()),
-            mic_curve: true,
+            curve: CurveChoice::Curve {
+                label: "0°".into()
+            },
         },
         InputSetup {
             channel: 2,
             mic: None,
-            mic_curve: false,
+            curve: CurveChoice::NotChosen,
+        },
+        InputSetup {
+            channel: 3,
+            mic: Some("ECM".into()),
+            curve: CurveChoice::Off,
         },
     ]
 }
@@ -680,6 +711,7 @@ pub fn state() -> State {
         traces: vec![trace_meta()],
         generator: generator(),
         calibrations: vec![cal_entry()],
+        mics: vec![mic()],
         inputs: inputs(),
         spl_logs: vec![spl_log()],
         timing: timing(),
@@ -707,6 +739,7 @@ pub fn events() -> Vec<Event> {
         ev(48, Change::Calibration(Patch::Set(cal_entry()))),
         ev(49, Change::Calibration(Patch::Deleted(cal_key()))),
         ev(50, Change::Inputs(inputs())),
+        ev(51, Change::Mic(Patch::Set(mic()))),
         ev(52, Change::SplLog(Patch::Set(spl_log()))),
         ev(53, Change::SplLog(Patch::Deleted(MeasId(4)))),
         ev(54, Change::Timing(timing())),
@@ -721,6 +754,7 @@ pub fn events() -> Vec<Event> {
                 saved_at: Some(WallNs(1_790_000_000_000_000_000)),
             }),
         ),
+        ev(58, Change::Mic(Patch::Deleted("ECM".into()))),
     ]
 }
 
@@ -814,20 +848,20 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::DelayFinding(refused_finding())),
         Ok(ReplyBody::Trace(trace_meta())),
         Ok(ReplyBody::Traces(vec![trace_meta(), imported_trace_meta()])),
-        Ok(ReplyBody::TraceData(TraceData {
+        Ok(ReplyBody::TraceData(Box::new(TraceData {
             meta: trace_meta(),
             mag_db: vec![0.0, -3.0, f32::NAN],
             phase_deg: Some(vec![0.0, 45.0, f32::NAN]),
             coherence: None,
             sweep: None,
-        })),
-        Ok(ReplyBody::TraceData(TraceData {
+        }))),
+        Ok(ReplyBody::TraceData(Box::new(TraceData {
             meta: sweep_meta(),
             mag_db: vec![-6.0, -6.5, f32::NAN],
             phase_deg: Some(vec![10.0, -20.0, f32::NAN]),
             coherence: None,
             sweep: Some(sweep_data()),
-        })),
+        }))),
         Ok(ReplyBody::Sweep(SweepRun {
             status: SweepStatus::Playing { repeat: 1 },
             ..sweep_run()
@@ -837,13 +871,12 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             content: Blob(b"freq_hz,mag_db\n1000,0\n".to_vec()),
         }),
         Ok(ReplyBody::Calibration(cal_entry())),
-        Ok(ReplyBody::Calibrations(vec![cal_entry()])),
+        Ok(ReplyBody::Calibrations {
+            calibrations: vec![cal_entry()],
+            mics: vec![mic()],
+        }),
         Ok(ReplyBody::Inputs(inputs())),
-        Ok(ReplyBody::Calibration(CalEntry {
-            key: cal_key(),
-            spl: None,
-            mic_curve: None,
-        })),
+        Ok(ReplyBody::Mic(mic())),
         Ok(ReplyBody::SplLog(spl_log())),
         Ok(ReplyBody::Snapshot(Box::new(StateSnapshot {
             state: state(),

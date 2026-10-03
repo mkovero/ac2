@@ -260,6 +260,81 @@ fn command_palette() {
     });
 }
 
+/// The calibrations view over a rig whose mic has two curves (0° chosen on its input), a
+/// sensitivity calibration taken 3 h ago and the 90° curve also stored: what each input uses,
+/// the library and the calibrations, with the sidebar naming the curve in use.
+#[test]
+fn calibrations_view() {
+    use ac2_proto::model::{
+        CalEntry, CalKey, CurveChoice, DeviceId, InputSetup, Mic, MicCurveRef, SplCal,
+    };
+    use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, WallNs};
+    use ac2_proto::{Change, Patch};
+    if !have_gpu("calibrations_view") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let curve = |label: &str, file: &str| MicCurveRef {
+        label: label.into(),
+        file_name: file.into(),
+        content_hash: "0123456789abcdef".into(),
+        points: 100,
+        f_lo: Hz(50.0),
+        f_hi: Hz(20_000.0),
+        imported_at: WallNs(now),
+        stated_sensitivity: Some(15.0),
+    };
+    {
+        let mut f = rig.fake.lock();
+        f.commit(Change::Mic(Patch::Set(Mic {
+            name: "MM1 34804".into(),
+            curves: vec![
+                curve("0°", "449350_34804_0Grad.txt"),
+                curve("90°", "449350_34804_90Grad.txt"),
+            ],
+        })));
+        f.commit(Change::Calibration(Patch::Set(CalEntry {
+            key: CalKey {
+                device: DeviceId("fake:loop".into()),
+                channel: 1,
+                mic: "MM1 34804".into(),
+            },
+            spl: SplCal {
+                sensitivity: Db(130.5),
+                calibrator_level: DbSpl(94.0),
+                calibrator_freq: Hz(1000.0),
+                measured: Dbfs(-36.5),
+                calibrated_at: WallNs(now - 3 * 3_600_000_000_000 - 60_000_000_000),
+            },
+        })));
+        f.commit(Change::Inputs(vec![InputSetup {
+            channel: 1,
+            mic: Some("MM1 34804".into()),
+            curve: CurveChoice::Curve {
+                label: "0°".into()
+            },
+        }]));
+    }
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", |a| {
+        live(a) && a.state.daemon().is_some_and(|s| !s.mics.is_empty())
+    });
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    step_until(&mut h, "palette", |a| {
+        matches!(a.state.overlay, Overlay::Palette(_))
+    });
+    h.event(Event::Text("calibrations".into()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "calibrations view", |a| {
+        matches!(a.state.overlay, Overlay::Calibrations(_))
+    });
+    h.state_mut().state.toasts.clear();
+    snapshot(&mut h, "calibrations_view");
+}
+
 /// X on an ambiguous finding: the candidate list over the transfer pane (decision 1c), the
 /// banner saying tracking waits for the pick, and a key inserting a candidate.
 #[test]

@@ -417,9 +417,39 @@ async fn gen_refusals_never_touch_the_lease() -> R {
     Ok(())
 }
 
+/// The row of 1-based input `n` in an inputs JSON table.
+fn input_row(v: &Value, n: u64) -> Value {
+    v.as_array()
+        .and_then(|a| a.iter().find(|r| r["input"] == n))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn mic_curve_file(name: &str) -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/mic_curves")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn input_setup_mic_curve_and_cal_flow() -> R {
     let f = fake()?;
+    // A session: a calibration of this device's input is verified, not just matched by mic.
+    ok_json(
+        &f,
+        &[
+            "session",
+            "open",
+            "--backend",
+            "fake",
+            "--in",
+            "1-4",
+            "--json",
+        ],
+    )
+    .await?;
     // No mic name on input 2 yet: cal commands ask for one instead of guessing.
     let r = ac2(
         &f,
@@ -440,7 +470,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
             "session",
             "inputs",
             "--mic",
-            "2=UMIK 7001",
+            "2=MM1 34804",
             "--mic",
             "3=M30",
             "--curve",
@@ -449,20 +479,20 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         ],
     )
     .await?;
-    assert_eq!(
-        i,
-        json!([
-            { "channel": 1, "mic": "UMIK 7001", "mic_curve": true },
-            { "channel": 2, "mic": "M30", "mic_curve": false },
-        ])
-    );
+    let two = input_row(&i, 2);
+    assert_eq!(two["mic"], "MM1 34804");
+    assert_eq!(two["curve"], json!({ "type": "not_chosen" }));
+    // Nothing stored for the mic: said so, never just "on".
+    assert_eq!(two["curve_text"], "no curve stored for MM1 34804");
+    assert_eq!(input_row(&i, 3)["curve"], json!({ "type": "off" }));
+    // A curve the mic does not have is refused.
+    let r = ac2(&f, &["cal", "use", "3", "90°", "--json"]).await?;
+    assert_ne!(r.code, 0);
+    assert_eq!(r.json()?["error"]["code"], "invalid");
     // Only the named rows change; `IN=` clears a name.
     let i = ok_json(&f, &["session", "inputs", "--mic", "3=", "--json"]).await?;
-    assert_eq!(
-        i[1],
-        json!({ "channel": 2, "mic": null, "mic_curve": false })
-    );
-    assert_eq!(i[0]["mic"], "UMIK 7001");
+    assert_eq!(input_row(&i, 3)["mic"], Value::Null);
+    assert_eq!(input_row(&i, 2)["mic"], "MM1 34804");
 
     // The input's mic name is the default for --mic.
     let c = ok_json(
@@ -470,49 +500,110 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         &["cal", "spl", "--input", "2", "--ref", "114db", "--json"],
     )
     .await?;
-    assert_eq!(c["key"]["mic"], "UMIK 7001");
+    assert_eq!(c["key"]["mic"], "MM1 34804");
 
-    let dir = tempfile::tempdir()?;
-    let file = dir.path().join("UMIK 7001.txt");
-    std::fs::write(&file, "\"Sens Factor =-1.3dB\"\n20 -1.5\n1000 0\n20000 2\n")?;
-    let path = file.to_string_lossy().into_owned();
-    let e = ok_json(&f, &["cal", "mic-curve", &path, "--input", "2", "--json"]).await?;
-    assert_eq!(e["mic_curve"]["file_name"], "UMIK 7001.txt");
-    assert_eq!(e["mic_curve"]["name"], "UMIK 7001");
-    assert_eq!(e["mic_curve"]["points"], 3);
+    // Both curves of the capsule: labels from the files, the first one chosen (the mic's
+    // only curve then), the second one not.
+    let zero = mic_curve_file("449350_34804_0Grad.txt");
+    let ninety = mic_curve_file("449350_34804_90Grad.txt");
+    let m = ok_json(
+        &f,
+        &["cal", "curve", "import", &zero, "--input", "2", "--json"],
+    )
+    .await?;
+    assert_eq!(m["curves"][0]["label"], "0°");
+    assert_eq!(m["curves"][0]["file_name"], "449350_34804_0Grad.txt");
+    assert_eq!(m["curves"][0]["stated_sensitivity"], 15.0);
+    let m = ok_json(
+        &f,
+        &["cal", "curve", "import", &ninety, "--input", "2", "--json"],
+    )
+    .await?;
+    assert_eq!(m["curves"][1]["label"], "90°");
+    let l = ok_json(&f, &["cal", "list", "--json"]).await?;
+    assert_eq!(l["mics"][0]["name"], "MM1 34804");
+    assert_eq!(l["mics"][0]["curves"].as_array().map(Vec::len), Some(2));
     assert_eq!(
-        e["spl"]["calibrator_level"], 114.0,
-        "the calibration is kept"
+        input_row(&l["inputs"], 2)["curve"],
+        json!({ "type": "curve", "label": "0°" })
     );
+    assert_eq!(input_row(&l["inputs"], 2)["cal"]["type"], "verified");
+    // The text lists the curves per mic and what each input uses.
+    let text = ac2(&f, &["cal", "list"]).await?;
+    for want in [
+        "MM1 34804",
+        "449350_34804_90Grad.txt",
+        "15.0 mV/Pa",
+        "verified · 114.0 dB SPL at 1.00 kHz",
+    ] {
+        assert!(text.stdout.contains(want), "{want:?} in\n{}", text.stdout);
+    }
+
+    // Switching: one command, the input table says what is in use.
+    let i = ok_json(&f, &["cal", "use", "2", "90°", "--json"]).await?;
+    assert_eq!(input_row(&i, 2)["curve_text"], "90°");
+    assert_eq!(input_row(&i, 2)["curve_applied"]["label"], "90°");
+    let i = ok_json(&f, &["cal", "use", "2", "off", "--json"]).await?;
+    assert_eq!(input_row(&i, 2)["curve_text"], "off");
+    assert_eq!(input_row(&i, 2)["curve_applied"], Value::Null);
+    let r = ac2(&f, &["cal", "use", "2", "45°", "--json"]).await?;
+    assert_ne!(r.code, 0);
+    ok_json(&f, &["cal", "use", "2", "90°", "--json"]).await?;
+    // `ac2 status` shows it too.
+    let st = ac2(&f, &["status"]).await?;
+    assert!(st.stdout.contains("MM1 34804"), "{}", st.stdout);
+
+    // Deleting the chosen curve: the input says the curve is not stored.
+    ok_json(
+        &f,
+        &["cal", "curve", "rm", "--mic", "MM1 34804", "90°", "--json"],
+    )
+    .await?;
+    let l = ok_json(&f, &["cal", "list", "--json"]).await?;
+    assert_eq!(l["mics"][0]["curves"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        input_row(&l["inputs"], 2)["curve_text"],
+        "90° — not stored for MM1 34804"
+    );
+    // Renaming: the inputs that use the curve follow.
+    ok_json(&f, &["cal", "use", "2", "0°", "--json"]).await?;
+    ok_json(
+        &f,
+        &[
+            "cal",
+            "curve",
+            "rename",
+            "--mic",
+            "MM1 34804",
+            "0°",
+            "on axis",
+            "--json",
+        ],
+    )
+    .await?;
+    let l = ok_json(&f, &["cal", "list", "--json"]).await?;
+    assert_eq!(input_row(&l["inputs"], 2)["curve_text"], "on axis");
 
     // A refused file: typed error, nothing stored.
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("bad.txt");
     std::fs::write(&file, "only text\n")?;
-    let r = ac2(&f, &["cal", "mic-curve", &path, "--input", "2", "--json"]).await?;
+    let path = file.to_string_lossy().into_owned();
+    let r = ac2(
+        &f,
+        &["cal", "curve", "import", &path, "--input", "2", "--json"],
+    )
+    .await?;
     assert_ne!(r.code, 0);
     let err = r.json()?;
     assert_eq!(err["error"]["code"], "invalid", "{err}");
 
-    let cleared = ok_json(
-        &f,
-        &["cal", "mic-curve", "--clear", "--input", "2", "--json"],
-    )
-    .await?;
-    assert_eq!(cleared["cleared"], true);
-    let l = ok_json(&f, &["cal", "list", "--json"]).await?;
-    assert_eq!(l["calibrations"][0]["mic_curve"], Value::Null);
-    let text = ac2(&f, &["cal", "list"]).await?;
-    assert!(text.stdout.contains("UMIK 7001"), "{}", text.stdout);
-
-    // `cal rm`: the entry of the session's device, the input's mic by default. The curve is
-    // gone already, so only the sensitivity can go; then nothing is left.
-    let r = ac2(&f, &["cal", "rm", "--input", "2", "--curve", "--json"]).await?;
-    assert_ne!(r.code, 0);
-    assert_eq!(r.json()?["error"]["code"], "not_found");
+    // `cal rm`: the sensitivity calibration of the session's device, the input's mic by
+    // default.
     let d = ok_json(&f, &["cal", "rm", "--input", "2", "--json"]).await?;
-    assert_eq!(d["deleted"], "all");
     assert_eq!(
         d["key"],
-        json!({ "device": "fake:loop", "channel": 1, "mic": "UMIK 7001" })
+        json!({ "device": "fake:loop", "channel": 1, "mic": "MM1 34804" })
     );
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["calibrations"], json!([]));
@@ -540,9 +631,10 @@ async fn cal_and_unreachable_daemon() -> R {
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["calibrations"].as_array().map(Vec::len), Some(1));
     // Calibrating bound the input's mic name.
+    assert_eq!(input_row(&l["inputs"], 3)["mic"], "M30");
     assert_eq!(
-        l["inputs"],
-        json!([{ "channel": 2, "mic": "M30", "mic_curve": true }])
+        input_row(&l["inputs"], 3)["curve"],
+        json!({ "type": "not_chosen" })
     );
 
     f.lock().mute = true;
@@ -726,9 +818,9 @@ async fn trace_commands_json() -> R {
         human.stdout
     );
 
-    // A mic curve on a stored trace: none in the store yet, then the imported one.
+    // A mic curve on a stored trace: none in the mic library yet, then the imported one.
     let r = ac2(&f, &["trace", "mic", "a", "M30", "--json"]).await?;
-    assert_eq!(r.json()?["error"]["code"], "not_found");
+    assert_eq!(r.json()?["error"]["code"], "usage");
     let curve = dir.path().join("M30.txt");
     std::fs::write(
         &curve,
@@ -741,10 +833,9 @@ async fn trace_commands_json() -> R {
         &f,
         &[
             "cal",
-            "mic-curve",
+            "curve",
+            "import",
             &curve.to_string_lossy(),
-            "--input",
-            "2",
             "--mic",
             "M30",
             "--json",
@@ -753,13 +844,13 @@ async fn trace_commands_json() -> R {
     .await?;
     let mc = ok_json(&f, &["trace", "mic", "a", "M30", "--json"]).await?;
     assert_eq!(mc["mic_curve"]["mic"], "M30");
-    assert_eq!(mc["mic_curve"]["curve"]["name"], "M30");
+    assert_eq!(mc["mic_curve"]["curve"]["label"], "M30");
     assert_eq!(mc["mic_curve"]["f_norm"], 1000.0);
     let human = ac2(&f, &["trace", "show", "a"]).await?;
     assert!(
         human
             .stdout
-            .contains("M30 (curve M30 applied after capture, 0 dB at 1000 Hz)"),
+            .contains("M30 (curve M30 applied after capture, 0 dB at 1000 Hz, file M30.txt)"),
         "{}",
         human.stdout
     );

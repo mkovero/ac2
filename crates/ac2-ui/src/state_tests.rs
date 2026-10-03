@@ -975,6 +975,27 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
     }
 }
 
+fn curve_ref(label: &str) -> MicCurveRef {
+    MicCurveRef {
+        label: label.into(),
+        file_name: format!("{label}.txt"),
+        content_hash: "0".into(),
+        points: 2,
+        f_lo: Hz(20.0),
+        f_hi: Hz(20_000.0),
+        imported_at: WallNs(0),
+        stated_sensitivity: Some(15.0),
+    }
+}
+
+/// MM1 34804 with its 0° and 90° curves.
+fn mm1() -> Mic {
+    Mic {
+        name: "MM1 34804".into(),
+        curves: vec![curve_ref("0°"), curve_ref("90°")],
+    }
+}
+
 #[test]
 fn mic_curve_goes_on_the_selected_trace_from_the_palette() {
     let mut t = T::new();
@@ -983,7 +1004,10 @@ fn mic_curve_goes_on_the_selected_trace_from_the_palette() {
         name: "MM1 34804".into(),
         curve: None,
     });
-    t.conn(with_traces(vec![a]));
+    let mut s = daemon_state();
+    s.traces = vec![a];
+    s.mics = vec![mm1()];
+    t.conn(mirror(s));
     // Nothing selected: refused with the way to select.
     t.st.update(Msg::Command(CommandId::TraceMicCurve), &t.keys);
     assert!(!matches!(&t.st.overlay, Overlay::Prompt(_)));
@@ -993,19 +1017,38 @@ fn mic_curve_goes_on_the_selected_trace_from_the_palette() {
     assert!(matches!(
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::TraceMicCurve(TraceId(10))
-            && p.text == "MM1 34804"
+            && p.text == "MM1 34804 "
     ));
     let call = |r: &[Request]| {
         r.iter().find_map(|r| match r {
             Request::Call {
-                cmd: Command::TraceMicCurve { trace, mic },
+                cmd: Command::TraceMicCurve { trace, curve },
                 ..
-            } => Some((*trace, mic.clone())),
+            } => Some((*trace, curve.clone())),
             _ => None,
         })
     };
+    // Two curves: the label is required, and the prompt says which there are.
     let r = t.key("Enter");
-    assert_eq!(call(&r), Some((TraceId(10), Some("MM1 34804".into()))));
+    assert!(call(&r).is_none());
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.error.as_deref().is_some_and(|e| e.contains("0°, 90°"))
+    ));
+    t.text("90°");
+    let r = t.key("Enter");
+    assert_eq!(
+        call(&r),
+        Some((
+            TraceId(10),
+            Some(MicCurveId {
+                mic: "MM1 34804".into(),
+                label: "90°".into()
+            })
+        ))
+    );
+    let r = prompt_text(&mut t, CommandId::TraceMicCurve, "MM1 34804 45°");
+    assert!(call(&r).is_none());
     let r = prompt_text(&mut t, CommandId::TraceMicCurve, "none");
     assert_eq!(call(&r), Some((TraceId(10), None)));
     let r = prompt_text(&mut t, CommandId::TraceMicCurve, " ");
@@ -1611,7 +1654,7 @@ fn input_mics_prompt_sets_the_input_setup() {
     s.inputs = vec![InputSetup {
         channel: 1,
         mic: Some("M30".into()),
-        mic_curve: false,
+        curve: CurveChoice::Off,
     }];
     t.conn(mirror(s));
     let r = t.st.update(Msg::Command(CommandId::InputMics), &t.keys);
@@ -1631,15 +1674,16 @@ fn input_mics_prompt_sets_the_input_setup() {
     assert_eq!(
         inputs_call(&r),
         Some(vec![
+            // Another mic (here none): the old choice is dropped.
             InputSetup {
                 channel: 1,
                 mic: None,
-                mic_curve: false,
+                curve: CurveChoice::NotChosen,
             },
             InputSetup {
                 channel: 2,
                 mic: Some("ECM 8000".into()),
-                mic_curve: true,
+                curve: CurveChoice::NotChosen,
             },
         ]),
         "{r:?}"
@@ -1656,35 +1700,44 @@ fn input_mics_prompt_sets_the_input_setup() {
 }
 
 #[test]
-fn mic_curve_toggles_the_selected_measurements_input() {
+fn mic_curve_steps_through_the_selected_measurements_input() {
     let mut t = T::new();
-    // Main L (transfer): its measurement input is 1 (shown as 2); curve on by default.
+    // Main L (transfer): its measurement input is 1 (shown as 2). No mic name: nothing to
+    // choose from.
     let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
-    assert_eq!(
-        inputs_call(&r),
-        Some(vec![InputSetup {
-            channel: 1,
-            mic: None,
-            mic_curve: false,
-        }])
-    );
+    assert_eq!(inputs_call(&r), None);
     assert!(t.last_toast().contains("no mic name"), "{}", t.last_toast());
     let mut s = daemon_state();
-    s.inputs = vec![InputSetup {
+    s.mics = vec![mm1()];
+    let row = |curve: CurveChoice| InputSetup {
         channel: 1,
-        mic: Some("M30".into()),
-        mic_curve: false,
-    }];
-    t.conn(mirror(s));
-    let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
-    assert_eq!(
-        inputs_call(&r),
-        Some(vec![InputSetup {
-            channel: 1,
-            mic: Some("M30".into()),
-            mic_curve: true,
-        }])
-    );
+        mic: Some("MM1 34804".into()),
+        curve,
+    };
+    let label = |l: &str| CurveChoice::Curve { label: l.into() };
+    // off → 0° → 90° → off, each from what the daemon holds.
+    for (from, to) in [
+        (CurveChoice::Off, label("0°")),
+        (label("0°"), label("90°")),
+        (label("90°"), CurveChoice::Off),
+        (CurveChoice::NotChosen, label("0°")),
+    ] {
+        s.inputs = vec![row(from.clone())];
+        t.conn(mirror(s.clone()));
+        let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
+        assert_eq!(inputs_call(&r), Some(vec![row(to.clone())]), "{from:?}");
+    }
+    // The palette's "Mic curve on input N…": a label of the mic, or off.
+    let r = prompt_text(&mut t, CommandId::MicCurveInput, "2=90°");
+    assert_eq!(inputs_call(&r), Some(vec![row(label("90°"))]));
+    let r = prompt_text(&mut t, CommandId::MicCurveInput, "2=off");
+    assert_eq!(inputs_call(&r), Some(vec![row(CurveChoice::Off)]));
+    let r = prompt_text(&mut t, CommandId::MicCurveInput, "2=45°");
+    assert_eq!(inputs_call(&r), None);
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.error.as_deref().is_some_and(|e| e.contains("stored: 0°, 90°"))
+    ));
 }
 
 #[test]
@@ -1693,12 +1746,12 @@ fn mic_text_round_trips() {
         InputSetup {
             channel: 0,
             mic: Some("M30 #1".into()),
-            mic_curve: true,
+            curve: CurveChoice::NotChosen,
         },
         InputSetup {
             channel: 3,
             mic: Some("ECM".into()),
-            mic_curve: false,
+            curve: CurveChoice::Off,
         },
     ];
     assert_eq!(mics_text(&rows), "1=M30 #1, 4=ECM");
@@ -1774,12 +1827,12 @@ fn outputs_never_change_under_a_held_stimulus() {
     assert_eq!(t.st.stimulus.outputs, vec![3]);
 }
 
-fn cal_delete(r: &[Request]) -> Option<(CalKey, CalPart)> {
+fn cal_delete(r: &[Request]) -> Option<CalKey> {
     r.iter().find_map(|r| match r {
         Request::Call {
-            cmd: Command::CalDelete { key, part },
+            cmd: Command::CalDelete { key },
             ..
-        } => Some((key.clone(), *part)),
+        } => Some(key.clone()),
         _ => None,
     })
 }
@@ -1791,14 +1844,14 @@ fn calibrations_are_deleted_from_the_palette() {
     s.inputs = vec![InputSetup {
         channel: 1,
         mic: Some("M30".into()),
-        mic_curve: true,
+        curve: CurveChoice::NotChosen,
     }];
     t.conn(mirror(s));
     // Prefilled with the selected measurement's input and its mic.
-    t.st.update(Msg::Command(CommandId::CalDeleteCurve), &t.keys);
+    t.st.update(Msg::Command(CommandId::CalDelete), &t.keys);
     assert!(matches!(
         &t.st.overlay,
-        Overlay::Prompt(p) if p.kind == PromptKind::CalDelete(CalPart::MicCurve) && p.text == "2=M30"
+        Overlay::Prompt(p) if p.kind == PromptKind::CalDelete && p.text == "2=M30"
     ));
     let r = t.key("Enter");
     let key = CalKey {
@@ -1806,20 +1859,15 @@ fn calibrations_are_deleted_from_the_palette() {
         channel: 1,
         mic: "M30".into(),
     };
-    assert_eq!(cal_delete(&r), Some((key.clone(), CalPart::MicCurve)));
-    let r = prompt_text(&mut t, CommandId::CalDelete, "2=M30");
-    assert_eq!(cal_delete(&r), Some((key.clone(), CalPart::All)));
-    let r = prompt_text(&mut t, CommandId::CalDeleteSensitivity, "4=ECM 8000");
+    assert_eq!(cal_delete(&r), Some(key.clone()));
+    let r = prompt_text(&mut t, CommandId::CalDelete, "4=ECM 8000");
     assert_eq!(
         cal_delete(&r),
-        Some((
-            CalKey {
-                channel: 3,
-                mic: "ECM 8000".into(),
-                ..key
-            },
-            CalPart::Sensitivity
-        ))
+        Some(CalKey {
+            channel: 3,
+            mic: "ECM 8000".into(),
+            ..key
+        })
     );
     // A mic name is required; the prompt stays with the reason.
     let r = prompt_text(&mut t, CommandId::CalDelete, "2=");
@@ -2225,12 +2273,12 @@ fn session_dialog_opens_a_session_from_roles() {
             InputSetup {
                 channel: 0,
                 mic: None,
-                mic_curve: true
+                curve: CurveChoice::NotChosen,
             },
             InputSetup {
                 channel: 1,
                 mic: Some("M30 FOH".into()),
-                mic_curve: true
+                curve: CurveChoice::NotChosen,
             },
         ]
     );
@@ -2733,8 +2781,11 @@ fn sidebar_meters_name_every_session_input_by_role() {
     s.inputs = vec![InputSetup {
         channel: 1,
         mic: Some("MM1 34804".into()),
-        mic_curve: true,
+        curve: CurveChoice::Curve {
+            label: "90°".into(),
+        },
     }];
+    s.mics = vec![mm1()];
     t.conn(mirror(s.clone()));
     let labels = |t: &T| -> Vec<(String, Option<InputUse>)> {
         t.st.session_inputs()
@@ -2747,7 +2798,10 @@ fn sidebar_meters_name_every_session_input_by_role() {
         labels(&t),
         vec![
             ("Input 1 · reference".into(), Some(InputUse::Reference)),
-            ("MM1 34804 · mic (in 2)".into(), Some(InputUse::Measurement)),
+            (
+                "MM1 34804 · 90° · mic (in 2)".into(),
+                Some(InputUse::Measurement)
+            ),
             ("Input 3".into(), None),
         ]
     );
@@ -2760,7 +2814,10 @@ fn sidebar_meters_name_every_session_input_by_role() {
                 "Loop return · reference (in 1)".into(),
                 Some(InputUse::Reference)
             ),
-            ("MM1 34804 · mic (in 2)".into(), Some(InputUse::Measurement)),
+            (
+                "MM1 34804 · 90° · mic (in 2)".into(),
+                Some(InputUse::Measurement)
+            ),
             ("Line 3 (in 3)".into(), None),
         ]
     );
@@ -3399,4 +3456,261 @@ fn autosave_indicator_follows_the_daemon() {
         (l.text.as_str(), l.tone),
         ("autosave failed: disk full", AutosaveTone::Warning)
     );
+}
+
+/// The daemon state with MM1 34804 (0° / 90°) on input 2 choosing `curve`, a sensitivity
+/// calibration of it, the session on the simulated rig.
+fn mm1_state(curve: CurveChoice) -> State {
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.backend = BackendKind::Fake;
+    }
+    s.mics = vec![mm1()];
+    s.inputs = vec![InputSetup {
+        channel: 1,
+        mic: Some("MM1 34804".into()),
+        curve,
+    }];
+    s.calibrations = vec![CalEntry {
+        key: CalKey {
+            device: DeviceId("fake:loop".into()),
+            channel: 1,
+            mic: "MM1 34804".into(),
+        },
+        spl: SplCal {
+            sensitivity: Db(130.0),
+            calibrator_level: DbSpl(94.0),
+            calibrator_freq: Hz(1000.0),
+            measured: Dbfs(-36.0),
+            calibrated_at: WallNs(0),
+        },
+    }];
+    s
+}
+
+fn cal_view(t: &T) -> &crate::cal_view::CalView {
+    match &t.st.overlay {
+        Overlay::Calibrations(v) => v,
+        other => panic!("no calibrations view: {other:?}"),
+    }
+}
+
+fn calls(r: &[Request]) -> Vec<&Command> {
+    r.iter()
+        .filter_map(|r| match r {
+            Request::Call { cmd, .. } => Some(cmd),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn input_setup_view_steps_curves_and_manages_the_library() {
+    use crate::cal_view::{CalLine, lines};
+    let label = |l: &str| CurveChoice::Curve { label: l.into() };
+    let mut t = T::new();
+    t.conn(mirror(mm1_state(label("0°"))));
+    // Main L (transfer, measuring input 2) is selected: Input setup opens on its input.
+    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    let st = t.st.daemon().cloned().expect("state");
+    assert_eq!(
+        cal_view(&t).focused(&st),
+        Some(CalLine::Input(1)),
+        "{:?}",
+        lines(&st)
+    );
+    // The lines: inputs 1 and 2, the two curves, the calibration.
+    assert_eq!(lines(&st).len(), 5);
+    let rows = crate::cal_view::line_texts(&st, WallNs(3 * 3_600_000_000_000), Default::default());
+    assert_eq!(rows[1].title, "in 2 · MM1 34804");
+    assert_eq!(rows[1].detail, "curve 0°");
+    assert_eq!(
+        rows[1].extra,
+        "verified · 94.0 dB SPL at 1.00 kHz · 3 h ago"
+    );
+    assert_eq!(rows[2].title, "MM1 34804 0°");
+    assert_eq!(rows[2].extra, "in use on in 2");
+    assert_eq!(rows[3].extra, "not in use");
+    assert_eq!(rows[4].title, "MM1 34804 on in 2 of fake:loop");
+
+    // → / ←: one request each, the next / previous curve (off after the last).
+    let row = |curve: CurveChoice| InputSetup {
+        channel: 1,
+        mic: Some("MM1 34804".into()),
+        curve,
+    };
+    let r = t.key("ArrowRight");
+    assert_eq!(inputs_call(&r), Some(vec![row(label("90°"))]));
+    t.conn(mirror(mm1_state(label("90°"))));
+    let r = t.key("ArrowRight");
+    assert_eq!(inputs_call(&r), Some(vec![row(CurveChoice::Off)]));
+    let r = t.key("ArrowLeft");
+    assert_eq!(inputs_call(&r), Some(vec![row(label("0°"))]));
+
+    // I: a curve file for this input's mic, by path.
+    let r = t.type_key("I", "i");
+    assert!(r.is_empty());
+    t.text("/curves/449350_34804_90Grad.txt");
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|x| matches!(x,
+            Request::ImportCurve { path, mic, input: Some(1) }
+                if mic == "MM1 34804" && path.ends_with("449350_34804_90Grad.txt"))),
+        "{r:?}"
+    );
+    assert!(cal_view(&t).edit.is_none());
+
+    // N: another mic name on the input drops the curve choice.
+    t.type_key("N", "n");
+    for _ in 0.."MM1 34804".len() {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("ECM 8000");
+    let r = t.key("Enter");
+    assert_eq!(
+        inputs_call(&r),
+        Some(vec![InputSetup {
+            channel: 1,
+            mic: Some("ECM 8000".into()),
+            curve: CurveChoice::NotChosen,
+        }])
+    );
+
+    // On the 90° curve: R renames, Delete twice deletes.
+    t.key("ArrowDown");
+    t.key("ArrowDown");
+    assert_eq!(
+        cal_view(&t).focused(&st),
+        Some(CalLine::Curve(MicCurveId {
+            mic: "MM1 34804".into(),
+            label: "90°".into()
+        }))
+    );
+    t.type_key("R", "r");
+    for _ in 0..3 {
+        t.st.update(Msg::Backspace, &t.keys);
+    }
+    t.text("grazing");
+    let r = t.key("Enter");
+    assert!(
+        matches!(
+            calls(&r).as_slice(),
+            [Command::CalCurveRename { curve, label }] if curve.label == "90°" && label == "grazing"
+        ),
+        "{r:?}"
+    );
+    let r = t.key("Delete");
+    assert!(calls(&r).is_empty());
+    assert!(
+        cal_view(&t)
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("Delete again"))
+    );
+    let r = t.key("Delete");
+    assert!(matches!(
+        calls(&r).as_slice(),
+        [Command::CalCurveDelete { curve }] if curve.label == "90°"
+    ));
+    // The sensitivity calibration; Backspace deletes as Delete does.
+    t.key("ArrowDown");
+    t.st.update(Msg::Backspace, &t.keys);
+    let r = t.st.update(Msg::Backspace, &t.keys);
+    assert!(matches!(
+        calls(&r).as_slice(),
+        [Command::CalDelete { key }] if key.mic == "MM1 34804" && key.channel == 1
+    ));
+    // ←/→ off an input line explain themselves instead of acting.
+    let r = t.key("ArrowRight");
+    assert!(inputs_call(&r).is_none());
+    assert!(cal_view(&t).notice.is_some());
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+#[test]
+fn input_setup_names_a_missing_curve_and_the_meter_label_follows() {
+    let mut t = T::new();
+    let mut s = mm1_state(CurveChoice::Curve {
+        label: "45°".into(),
+    });
+    if let Some(o) = &mut s.session.open {
+        o.config.input_channels = vec![0, 1];
+    }
+    t.conn(mirror(s));
+    let label = |t: &T| t.st.session_inputs()[1].label.clone();
+    assert_eq!(label(&t), "MM1 34804 · 45° not stored · mic (in 2)");
+    assert_eq!(
+        t.st.curve_note(1, false).as_deref(),
+        Some("mic curve 45° not stored for MM1 34804")
+    );
+    t.conn(mirror(mm1_state(CurveChoice::NotChosen)));
+    assert_eq!(label(&t), "MM1 34804 · curve not chosen · mic (in 2)");
+    t.conn(mirror(mm1_state(CurveChoice::Curve {
+        label: "90°".into(),
+    })));
+    assert_eq!(label(&t), "MM1 34804 · 90° · mic (in 2)");
+    assert_eq!(
+        t.st.curve_note(1, true).as_deref(),
+        Some("mic curve: MM1 34804 90°")
+    );
+}
+
+#[test]
+fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
+    let mut t = T::new();
+    // The session runs on the rig with MM1 34804 on input 2, 0° chosen.
+    t.conn(mirror(mm1_state(CurveChoice::Curve {
+        label: "0°".into()
+    })));
+    t.type_key("Shift+O", "O");
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert!(dialog(&t).is_open_device());
+    focus(&mut t, Row::Input(1));
+    let st = t.st.daemon().cloned().expect("state");
+    let text = dialog(&t)
+        .row_cal_text(1, &st, WallNs(3 * 3_600_000_000_000), Default::default())
+        .expect("named mic");
+    assert_eq!(
+        text,
+        (
+            "curve 0° · verified · 94.0 dB SPL at 1.00 kHz · 3 h ago".to_owned(),
+            false
+        )
+    );
+    // → applies at once: the session captures this mic already.
+    let r = t.key("ArrowRight");
+    assert_eq!(
+        inputs_call(&r),
+        Some(vec![InputSetup {
+            channel: 1,
+            mic: Some("MM1 34804".into()),
+            curve: CurveChoice::Curve {
+                label: "90°".into()
+            },
+        }])
+    );
+    assert_eq!(
+        dialog(&t).inputs[1].curve,
+        CurveChoice::Curve {
+            label: "90°".into()
+        }
+    );
+    // Another name typed: not live yet, the choice starts over and waits for Enter.
+    t.type_key("N", "n");
+    t.text(" B");
+    t.key("Enter");
+    assert_eq!(dialog(&t).inputs[1].curve, CurveChoice::NotChosen);
+    let r = t.key("ArrowRight");
+    assert_eq!(inputs_call(&r), None);
+    assert!(
+        dialog(&t)
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("when the session opens"))
+    );
+    // A row without a mic: nothing to choose.
+    focus(&mut t, Row::Input(2));
+    let r = t.key("ArrowRight");
+    assert_eq!(inputs_call(&r), None);
 }

@@ -215,14 +215,26 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
             color: i,
         });
     }
+    let notes: Vec<Option<String>> = cols
+        .iter()
+        .map(|c| {
+            let applied = match &c.tf.frame.data {
+                FrameData::Spec(f) => f.meta.mic_curve,
+                FrameData::Rta(f) => f.meta.mic_curve,
+                _ => false,
+            };
+            st.curve_note(crate::state::meas_input(&c.meas.config.kind), applied)
+        })
+        .collect();
     let mut traces = Vec::new();
-    for c in &cols {
+    for (c, note) in cols.iter().zip(&notes) {
         let name = c.meas.config.name.clone();
         let color = theme.trace_color(c.color);
         let mut t = match &c.tf.frame.data {
             FrameData::Spec(f) => SpectrumTrace::spectrum(
                 f,
                 c.tf.frame.stamp.capture_wall_ns,
+                note.as_deref(),
                 &c.freqs,
                 &c.edges,
                 name,
@@ -232,6 +244,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
             FrameData::Rta(f) => SpectrumTrace::rta(
                 f,
                 c.tf.frame.stamp.capture_wall_ns,
+                note.as_deref(),
                 &c.freqs,
                 &c.edges,
                 name,
@@ -296,7 +309,13 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
             peak: None,
             scale: *scale,
             quantity: *quantity,
-            caption: "stored".into(),
+            caption: match ac2_scene::trace::curve_note(
+                data.meta.mic.as_ref(),
+                data.meta.mic_curve.as_deref(),
+            ) {
+                Some(n) => format!("stored · {n}"),
+                None => "stored".into(),
+            },
             freshness: None,
         });
     }
@@ -403,8 +422,13 @@ pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Spl
             }),
     );
     // The daemon decided which calibration applies (verified / other mic or input) and
-    // whether the mic curve ran; the readout names the input's mic next to it.
-    let cal = cal_text(f.meta.cal, f.meta.mic_curve, now.wall, offset);
+    // whether the mic curve ran; the readout names the input's mic next to it, and which
+    // curve (or why none).
+    let cal = cal_text(f.meta.cal, false, now.wall, offset);
+    let cal = match st.curve_note(config.input, f.meta.mic_curve) {
+        Some(n) => format!("{cal} · {n}"),
+        None => cal,
+    };
     let cal = match daemon
         .inputs
         .iter()

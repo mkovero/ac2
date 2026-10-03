@@ -124,8 +124,9 @@ def tf_frame():
 CAL_AT = 1_789_000_000_000_000_000
 
 INPUTS = [
-    {"channel": 1, "mic": "M30 #1234", "mic_curve": True},
-    {"channel": 2, "mic": None, "mic_curve": False},
+    {"channel": 1, "mic": "M30 #1234", "curve": {"type": "curve", "label": "0°"}},
+    {"channel": 2, "mic": None, "curve": {"type": "not_chosen"}},
+    {"channel": 3, "mic": "ECM", "curve": {"type": "off"}},
 ]
 
 
@@ -406,15 +407,13 @@ def requests():
         ),
         req(
             31,
-            "cal.mic_curve",
+            "cal.curve_import",
             {
-                "input": 1,
                 "mic": "M30 #1234",
-                "action": {
-                    "type": "import",
-                    "file_name": "M30-1234.frd",
-                    "content": b"20 -0.5\n20000 1.5\n",
-                },
+                "label": "0°",
+                "file_name": "M30-1234.frd",
+                "content": b"20 -0.5\n20000 1.5\n",
+                "input": 1,
             },
         ),
         req(
@@ -437,10 +436,7 @@ def requests():
         req(
             43,
             "cal.delete",
-            {
-                "key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"},
-                "part": "sensitivity",
-            },
+            {"key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"}},
         ),
         req(44, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
         req(45, "session.preview_stop", mutation=False),
@@ -456,7 +452,8 @@ def requests():
             },
             mutation=False,
         ),
-        req(47, "trace.mic_curve", {"trace": 8, "mic": "M30 #1234"}),
+        req(47, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(49, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
     ]
 
 
@@ -475,6 +472,7 @@ def events():
             },
         },
         {"kind": "inputs", "rev": 50, "payload": INPUTS},
+        {"kind": "mic", "rev": 58, "payload": {"type": "deleted", "value": "ECM"}},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},
         {
             "kind": "sweep",

@@ -438,7 +438,7 @@ fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
     });
     ui.add_space(2.0);
     for r in &rows {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             if let Some(u) = r.used {
                 let color = match u {
@@ -453,11 +453,11 @@ fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
                         .background_color(color),
                 );
             }
+            // Wrapped, never cut: the label names the mic curve in use.
             ui.add(
                 egui::Label::new(RichText::new(&r.label).color(ch.text))
-                    .wrap_mode(egui::TextWrapMode::Truncate),
-            )
-            .on_hover_text(&r.label);
+                    .wrap_mode(egui::TextWrapMode::Wrap),
+            );
         });
         ui.horizontal(|ui| {
             super::session::meter_sized(ui, &r.reading, ch, 136.0);

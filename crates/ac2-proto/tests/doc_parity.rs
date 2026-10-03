@@ -130,8 +130,8 @@ fn protocol_doc_names_everything() {
         &mut missing,
     );
     check(
-        "mic-curve action",
-        &names_of::<model::MicCurveAction, _>(&Tagged { t: "no_such" }),
+        "curve choice",
+        &names_of::<model::CurveChoice, _>(&Tagged { t: "no_such" }),
         &doc,
         &mut missing,
     );

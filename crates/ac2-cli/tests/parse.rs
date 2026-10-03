@@ -232,44 +232,74 @@ fn other_commands_parse() {
 #[test]
 fn calibration_and_input_setup_parse() {
     let c = ok(&[
-        "cal",
-        "mic-curve",
-        "m30.frd",
-        "--input",
-        "3",
-        "--mic",
-        "M30 #1",
+        "cal", "curve", "import", "m30.frd", "--input", "3", "--mic", "M30 #1", "--label", "90°",
     ]);
     let Cmd::Cal {
-        cmd: CalCmd::MicCurve(a),
+        cmd: CalCmd::Curve(CalCurveCmd::Import(a)),
     } = c.cmd
     else {
-        panic!("not cal mic-curve");
+        panic!("not cal curve import");
     };
-    assert_eq!(a.input, Channel(2));
+    assert_eq!(a.input, Some(Channel(2)));
     assert_eq!(a.mic.as_deref(), Some("M30 #1"));
-    assert_eq!(a.file.as_deref(), Some(std::path::Path::new("m30.frd")));
-    assert!(!a.clear);
+    assert_eq!(a.label.as_deref(), Some("90°"));
+    assert_eq!(a.file, std::path::Path::new("m30.frd"));
+    // A mic or an input (whose mic it is) is required.
+    assert!(parse(&["cal", "curve", "import", "m30.frd"]).is_err());
     let c = ok(&[
-        "cal", "rm", "--input", "3", "--mic", "M30", "--device", "hw:1", "--curve",
+        "cal",
+        "curve",
+        "rename",
+        "--mic",
+        "MM1 34804",
+        "0°",
+        "on axis",
+    ]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Cal {
+            cmd: CalCmd::Curve(CalCurveCmd::Rename { ref mic, ref label, ref new_label })
+        } if mic == "MM1 34804" && label == "0°" && new_label == "on axis"
+    ));
+    let c = ok(&["cal", "curve", "rm", "--mic", "MM1 34804", "90°"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Cal {
+            cmd: CalCmd::Curve(CalCurveCmd::Rm { ref label, .. })
+        } if label == "90°"
+    ));
+    let c = ok(&["cal", "use", "2", "90°"]);
+    let Cmd::Cal {
+        cmd: CalCmd::Use { input, curve },
+    } = c.cmd
+    else {
+        panic!("not cal use");
+    };
+    assert_eq!(input, Channel(1));
+    assert_eq!(
+        curve.0,
+        ac2_proto::model::CurveChoice::Curve {
+            label: "90°".into()
+        }
+    );
+    let c = ok(&["cal", "use", "2", "OFF"]);
+    assert!(matches!(
+        c.cmd,
+        Cmd::Cal {
+            cmd: CalCmd::Use {
+                curve: CurveArg(ac2_proto::model::CurveChoice::Off),
+                ..
+            }
+        }
+    ));
+    let c = ok(&[
+        "cal", "rm", "--input", "3", "--mic", "M30", "--device", "hw:1",
     ]);
     let Cmd::Cal { cmd: CalCmd::Rm(a) } = c.cmd else {
         panic!("not cal rm");
     };
     assert_eq!(a.input, Channel(2));
     assert_eq!(a.device.as_deref(), Some("hw:1"));
-    assert!(a.curve && !a.sensitivity);
-    let c = ok(&["cal", "mic-curve", "--clear", "--input", "3"]);
-    assert!(matches!(
-        c.cmd,
-        Cmd::Cal {
-            cmd: CalCmd::MicCurve(CalMicCurve {
-                clear: true,
-                file: None,
-                ..
-            })
-        }
-    ));
 
     let c = ok(&[
         "session",
@@ -283,7 +313,7 @@ fn calibration_and_input_setup_parse() {
         "--curve",
         "3=off",
         "--curve",
-        "4=ON",
+        "4=90°",
     ]);
     let Cmd::Session {
         cmd: SessionCmd::Inputs(i),
@@ -311,13 +341,15 @@ fn calibration_and_input_setup_parse() {
     assert_eq!(
         i.curves,
         vec![
-            CurveSwitch {
+            CurveAssign {
                 input: Channel(2),
-                on: false
+                curve: CurveArg(ac2_proto::model::CurveChoice::Off),
             },
-            CurveSwitch {
+            CurveAssign {
                 input: Channel(3),
-                on: true
+                curve: CurveArg(ac2_proto::model::CurveChoice::Curve {
+                    label: "90°".into()
+                }),
             },
         ]
     );
@@ -389,14 +421,15 @@ fn refusals() {
         &["delay", "find", "x", "--band", "80-800"],
         &["delay", "find", "x", "--observation", "8"],
         &["cal", "spl", "--input", "3", "--ref", "94"],
-        &["cal", "mic-curve", "--input", "3"],
-        &["cal", "mic-curve", "m.frd", "--clear", "--input", "3"],
-        &["cal", "mic-curve", "m.frd"],
+        &["cal", "curve", "import", "--input", "3"],
+        &["cal", "use", "3"],
+        &["cal", "curve", "rename", "--mic", "M30", "0°"],
         &["cal", "rm", "--mic", "M30"],
         &["cal", "rm", "--input", "3", "--sensitivity", "--curve"],
         &["session", "inputs", "--mic", "M30"],
         &["session", "inputs", "--mic", "0=M30"],
-        &["session", "inputs", "--curve", "3=maybe"],
+        &["session", "inputs", "--curve", "3="],
+        &["cal", "use", "3", ""],
         &["spl", "watch"],
         &["spl", "watch", "--meas", "a", "--input", "1"],
         &["--timeout", "fast", "devices"],
