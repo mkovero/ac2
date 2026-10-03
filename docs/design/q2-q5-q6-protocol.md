@@ -1,6 +1,6 @@
 # Q2 / Q5 / Q6 — Delivery, state sync and stimulus lease
 
-Status: proposed for phase 3. Answers Q2, Q5 and Q6 in `open-questions.md` within the
+Status: implemented (`ac2d`, `ac2-client`, `docs/protocol.md`; phase 3). Answers Q2, Q5 and Q6 in `open-questions.md` within the
 decisions table (2a, 2b, 5a, 5b, 6a–6d). Transport facts come from `spike-zmq-curve.md`.
 
 ## Identities and counters

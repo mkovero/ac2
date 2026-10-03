@@ -1,9 +1,9 @@
 # ac2 user guide
 
 ac2 is a live dual-channel FFT analyzer for tuning sound systems: transfer functions with
-coherence, a delay finder, spectrum and RTA, a calibrated SPL meter, stored traces and
-sessions. This guide explains the concepts and the everyday workflow. Installing:
-[install.md](install.md). Scripting and integrations: [protocol.md](protocol.md), the
+coherence, a delay finder, sweep measurements with harmonic distortion, spectrum and RTA, a
+calibrated SPL meter with rolling Leq windows, stored traces, sessions and autosave. This
+guide explains the concepts and the everyday workflow. Installing: [install.md](install.md). Scripting and integrations: [protocol.md](protocol.md), the
 normative description of everything the daemon speaks.
 
 ## How the pieces fit
@@ -45,8 +45,8 @@ no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 
 within what the device allows) rather than the host's default, which can be large enough
 to deliver audio in lumps. Should a host still deliver in lumps, the daemon log says so
 once a minute (*audio arrives in bursts on …*) with the device and buffer to change.
-`fake` is a simulated rig. The fake backend is a simulated rig for trying things out and is never chosen for you:
-the session dialog preselects a real interface whenever the daemon lists one. Choosing
+`fake` is a simulated rig for trying things out and is never chosen for you: the session
+dialog preselects a real interface whenever the daemon lists one. Choosing
 *Simulated rig* in the app's connect dialog starts it ready to measure (session open, a
 transfer measurement "demo" running); *This computer's audio* starts with no session and
 opens the session dialog.
@@ -292,7 +292,7 @@ A sweep measures a speaker's response and its **harmonic distortion** (H2 … H5
 frequency) in a few seconds. The generator plays a synchronised exponential sine sweep on the
 speaker's output and on the loopback output; ac2 records the loopback (reference) and the mic,
 divides one by the other, and separates the harmonics, which arrive before the linear impulse
-response. Design and accuracy: `docs/design/sweep-distortion.md`.
+response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md).
 
 - **App:** **Shift+S** (or **Sweep measurement** in the palette) opens the dialog: reference,
   mic and the speaker's output by name (the session's loopback output always plays too), the
@@ -335,11 +335,15 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
 ## Sessions
 
 `ac2 session save <name>` (or **Session: save** in the palette) stores the measurements and
-traces, including slots and display edits (smoothing among them; curves are saved
-unsmoothed), in the daemon's session directory; `ac2 session load <name>` restores them.
-Sessions saved by an earlier version with a different session format are refused with the
-version named. A loaded session always comes up disarmed: nothing
-plays until someone types a level and fires.
+traces, including slots, display edits (smoothing, a mic curve applied after capture; curves
+are saved as measured), sweep distortion and impulse responses, and each SPL meter's
+per-second log, in the daemon's session directory (`sessions/` in the ac2 data directory);
+`ac2 session load <name>` (**Session: load** in the palette) restores them and
+`ac2 session list` lists them. A path instead of a name saves or loads anywhere on the
+daemon's machine. Calibrations are not part of a session: they describe the machine's
+hardware and stay in its calibration store. A session saved with a different session format
+is refused with the version named. A loaded session always comes up disarmed: nothing plays
+until someone types a level and fires.
 
 ### Autosave
 
@@ -395,7 +399,9 @@ the daemon's machine:
   file states (*15.0 mV/Pa = −36.5 dBV*) is shown as the data sheet value, never used as a
   calibration. Curves follow the mic name to any input and device.
 
-**Which curve is in use** is chosen per input, explicitly: `ac2 cal use 3 90°` (or `off`); in
+**Which curve is in use** is chosen per input, explicitly: `ac2 cal use 3 90°` (or `off`;
+`ac2 session inputs --mic 3=M30 --curve 3=90°` sets names and curves of several inputs at
+once, and `ac2 session inputs` alone lists them); in
 the app **←/→** on the input's row in the session dialog or in the **Input setup** view
 (palette), **Mic curve on input N…** (*3=90°*), or **Mic curve: next curve on the selected
 measurement's input**. Importing a mic's first curve on an input chooses it; with several
@@ -676,3 +682,18 @@ Every command takes `--json` for machine-readable output and `--remote <host>` t
 network daemon. Live views (`--watch`) redraw in the terminal. Units are written with
 suffixes: `-20dbfs`, `48khz`, `12.5ms`, `600samples`, `4.3m`, `94db`. `ac2 <command> --help`
 documents each command; `ac2 discover` lists daemons on the local network.
+
+| command | what it does |
+|---|---|
+| `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
+| `ac2 session open / close / status / inputs / save / load / list` | the audio session, each input's mic and active curve, saved sessions |
+| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements |
+| `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
+| `ac2 delay find / insert / set / track` | the delay finder and delay of a transfer measurement |
+| `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
+| `ac2 trace capture / list / show / rm / average / math / import / export / smooth / mic` | stored traces |
+| `ac2 cal spl / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
+| `ac2 spl watch`, `ac2 spl cal`, `ac2 spl leq watch / set / export` | SPL readout, calibration, Leq windows and the per-second log |
+| `ac2 timing --watch` | the loopback timing monitor |
+| `ac2 state dump` | the daemon's whole state as JSON |
+| `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |

@@ -1,5 +1,9 @@
 # Spike: headless GPU rendering and golden tests
 
+> **History.** A record of the phase 0 spike, not a description of the product. The
+> renderer is `crates/ac2-plot`, the app `crates/ac2-ui` (egui on wgpu, as chosen here); its
+> snapshot tests are in `crates/ac2-ui/tests/snapshots`.
+
 Crate: `spikes/gpu-headless` (`spike-gpu-headless`). Throwaway; this file is the output.
 Question: can `ac2-plot` render plot scenes with wgpu on a software adapter, read the pixels
 back and compare them to a reference image, so renderer tests run in CI without a GPU (§4.4)?

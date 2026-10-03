@@ -208,13 +208,17 @@ crates/
   ac2-proto/   Typed commands (serde enum), events, normative frame schema, topics, version.
   ac2-zmq/     The only crate linking libzmq (+libsodium): typed sockets, CURVE via SecureContext.
   ac2-client/  Async client: connect, call, subscribe, mirrored state.
-  ac2d/        Daemon: audio session, jobs, state store, sessions, SPL log,
-               ZMQ server, CURVE/ZAP, mDNS.
+  ac2-discovery/ mDNS advert and browse (names rigs, never trusts them).
+  ac2d/        Daemon: audio session, jobs, state store, sessions, autosave, SPL log,
+               calibration store, ZMQ server, CURVE/ZAP, mDNS.
   ac2-cli/     `ac2` binary.
+  ac2-traces/  Stored traces, trace math, text import/export, session files.
+  ac2-paths/   Platform config / data directories, atomic writes.
   ac2-scene/   Pure display layer: traces → geometry, axes, ticks, readout strings,
                banners. No GPU, no windowing, no sockets.
   ac2-plot/    wgpu renderer for scenes: lines, fills, heatmaps, grids, text.
   ac2-ui/      Desktop app; can host an embedded daemon (`--embedded`, local transports).
+  ac2-testkit/ Golden-vector and golden-image comparison for tests.
 tools/refgen/  numpy/scipy scripts producing golden vectors
 fixtures/      raw captures from real rigs + synthetic scenario captures
 ```
@@ -251,7 +255,7 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 ```
 - **Sync contract.** Every block carries its absolute sample index and flags (xrun, overflow, device change). All channels of a block travel together, so channels can never shift relative to each other. A gap is a discontinuity marker: affected jobs reset their averages and report it; nothing silently splices.
 - **Reference & timing contract.** A measured reference is required: stimulus and reference leave through the same converter and the reference is looped back into an input, so every latency in interface, console, network and processors cancels. While a stimulus plays, the daemon continuously correlates generator output against the loopback input and flags any offset jump (buffer change, device reset, clock slip); when silent, the last value is shown with its age. No start-up probe. Without a loopback there is no internal reference. Detail: `docs/design/open-questions.md` Q3.
-- **Job lifetime** follows explicit commands (`meas.start/stop`, `spl.log.start/stop`). Closing every UI never stops measuring, averaging, logging or alarms. Subscriptions only decide what is *published* and which optional display derivations are computed.
+- **Job lifetime** follows explicit commands (`meas.start/stop`; an SPL meter's per-second log and Leq windows run with the meter). Closing every UI never stops measuring, averaging, logging or alarms. Subscriptions only decide what is *published* and which optional display derivations are computed.
 - Block grid fixed to the sample stream (push pipeline); never re-segment a sliding buffer.
 - **Bounded freshness, not guaranteed latest.** Each topic has one latest-result slot in the daemon; the publisher sends only the newest frame per topic with a small PUB HWM. Frames already queued in ZMQ cannot be replaced, so clients also drain their socket and keep only the newest frame per topic before rendering. Frames carry a capture wall-clock time so age is measurable remotely; past a deadline they are shown STALE. Recoverable state events use a separate path with replay (§6.2). Detail: Q2.
 
@@ -386,7 +390,8 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 - Mic curve placement: TF, spectrum and RTA subtract the file's dB values from the
   displayed magnitude; SPL applies it as a filter before weighting and integration,
   normalised at the calibrator frequency (sensitivity cal uses the same convention, so
-  nothing double-counts). Phase is never touched. On/off per input.
+  nothing double-counts). Phase is never touched. A mic can have several curves (one per
+  incidence angle); each input chooses one of its mic's curves or none, explicitly.
 - Atomic writes; an unparseable file is never overwritten.
 
 ---
@@ -409,8 +414,9 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
 - Command groups: `session` (devices, open, close, status), `gen` (acquire, release, arm,
   fire, set, stop), `meas` (create, update, delete, start, stop, freeze, reset), `delay`
   (find, insert, set, track), `trace` (capture, list, get, update, delete, average, math,
-  import, export), `cal` (spl, mic-curve, list), `spl` (log), `ir` (capture), `state`
-  (snapshot, since), `grid` (get), `file` (save, load).
+  import, export, mic curve), `cal` (spl, curve import / rename / delete, list, delete),
+  `spl` (log get), `ir` (capture), `state` (snapshot, since), `grid` (get), `file` (save,
+  load, list). `docs/protocol.md` is the normative list.
 - Mutations take an optional `expect_rev` precondition; stale → `conflict` error.
   The daemon commits state changes serially.
 - **State sync:** client subscribes to `evt` first, buffers, then requests a snapshot
@@ -534,13 +540,19 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | # | CI criteria | HW criteria |
 |---|---|---|
 | 0 | done | duplex spike on real mac/win interface — **open** |
-| 1 | done (overflow → discontinuity, never a channel shift) | 8 in / 2 out, 1 h, per OS — **open** |
+| 1 | done (overflow → discontinuity, never a channel shift) | 8 in / 2 out, 1 h, per OS — **open** (Linux runs on a real rig daily, no formal 1 h run yet) |
 | 2 | done (refgen + Q1 scenario acceptance) | — |
-| 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **open** |
-| 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** |
+| 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **done** on Linux (`docs/rigs/pupu.md`, network test) |
+| 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration, SPL) | mains + sub + delay workflow per OS — **open** |
-| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open**; signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): ESS sweep / distortion; Leq windows, limits and alarms with the per-second SPL log (`docs/design/leq.md`) | 24 h log clean — **open** |
+| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits and alarms with the per-second SPL log (`docs/design/leq.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | 24 h log clean — **open** |
+
+Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
+transfer, delay finder, sweeps, remote CLI and app over CURVE, mDNS; `docs/rigs/pupu.md`);
+Windows only as an MSI install in a VM with the simulated rig (`docs/design/backlog.md`);
+macOS not yet on hardware. No GitHub release is published: installers are workflow
+artifacts of `release.yml` runs, unsigned.
 
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and
