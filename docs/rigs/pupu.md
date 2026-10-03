@@ -86,3 +86,24 @@ Arrival 3.45 ms (+0.11 ms, ≈ 4 cm longer path than at 102 cm).
   1540 points, isolated. The "0 of 420" figure above used a narrower selection.
 
 Data: `/home/mui/ac2-1083-sweep2-94cm.csv`, `/home/mui/ac2-1083-sweep3-94cm-8x.csv`.
+
+## One sweep at −30 dBFS (2026-10-03, operator-requested, ceiling lifted for this run only)
+
+Daemon restarted with `--max-level -30` for one sweep (`1083 94cm -30`, 12 s × 2, same
+geometry), then restarted with `--max-level -50` again. Data:
+`/home/mui/ac2-1083-sweep4-94cm-30dbfs.csv`.
+
+- **Response unchanged by drive level**: within ±0.6 dB of the −50 dBFS 8× run from 40 Hz to
+  16 kHz, overall gain −0.2 dB. No compression; the 2–6 kHz dip is the same.
+- **Floor 15–20 dB lower; distortion now clearly measured, third-harmonic dominated.** THD
+  (median over band): 0.3 % 30–150 Hz (at the floor below 100 Hz), 0.4 % 150–400 Hz,
+  **0.7 % 400–700 Hz (peak H3 −38 dB, 1.3 %, 39 dB over its floor)**, 0.3 % 700 Hz–1.2 kHz,
+  ≤ 0.1 % above 1.2 kHz. H2 stays ≤ −49 dB; H4/H5 ≤ −52 dB.
+- The H3 region is the one that stood out at −50 dBFS (510–680 Hz, −53…−58 dB). It rose about
+  15 dB for 20 dB more drive. A pure cubic nonlinearity would rise 40 dB, so the −50 dBFS value
+  was mostly something level-independent (noise/leakage) and the H3 seen here is the speaker.
+  An odd-order (symmetric) nonlinearity near the woofer/mid handover is the likely source.
+  A −40 dBFS run would pin down its growth with level.
+- The daemon logged two "output timing jump 0 → 96000 samples" warnings around arming the
+  sweep; the sweep's arrival (3.45 ms) is unchanged, so the measurement is not affected.
+

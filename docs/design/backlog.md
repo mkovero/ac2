@@ -19,6 +19,8 @@ the commit when it lands.
   gives 1 s, ← from 3 s wraps to 12 s, so 6 s takes three presses from the default. Sort the
   choices and stop at the ends.
 - **Name field: Ctrl+A does not select** the default name; typing appends to it.
+- **"output timing jump 0 → 96000 samples" (and back)** logged twice around arming a sweep on
+  pupu (2026-10-03 03:55); find whether the output timing record or the jump check is wrong.
 - Re-arm after a sweep reproduced on both later runs (2×, 8×).
 
 ## Flaky tests (seen on CI, passed on rerun)
