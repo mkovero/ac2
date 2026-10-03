@@ -3,6 +3,25 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## Leq windows and limits (left after the first version, `docs/design/leq.md`)
+
+- **History strip starts when the app connects**: the app draws what it received; a backfill
+  from the daemon's log (`spl.log_get`, windows recomputed from the rows) would show the show
+  so far after a reconnect.
+- **Peak limits not judged**: DIN 15905-5 also limits LCpeak (135 dB), V-NISSG LAFmax
+  (125 dB). The meter shows LCpeak / LAFmax; no limit, state or alarm on them yet.
+- **No measuring-position correction**: a limit for the loudest audience position read from a
+  FOH mic needs the difference added by hand; a per-meter offset (with its own "corrected"
+  label) would do it.
+- **No way to start the windows afresh** (show start after a loud soundcheck) short of a new
+  meter: a `spl.log_clear` (keeping the old rows in an exported file first).
+- **No hysteresis on the alarms**: judged at 0.1 dB, a window hovering on its limit toggles
+  over / recovered each time the rounded value crosses it.
+- **The app has no calibration flow**: the Leq tiles stay "not calibrated" until
+  `ac2 cal spl` is run; a calibrator dialog would close the loop in the app.
+- **Autosave rewrites the whole session once a minute while a meter logs** (trace files
+  included); appending to the log file would cut that to the new rows.
+
 ## Windows (2026-10-03, operator's Windows 11 VM, release build of 6c122d5)
 
 - MSI installed cleanly (unsigned: SmartScreen "More info → Run anyway"), Start-menu entry and

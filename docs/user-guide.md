@@ -428,6 +428,43 @@ LCeq, LCpeak, Lmax and Lmin, as a big-number display in the SPL pane or in the t
 to stop on its own). With `--input` the command runs its own meter for as long as it runs, so
 Leq, Lmax and Lmin cover exactly what it watched; `--meas` shows an existing meter instead.
 
+### Leq windows and limits
+
+Every SPL meter also keeps **rolling Leq windows** — by default LAeq over 1, 5, 10, 30 and
+60 min — and a **per-second log** (LAeq, LCeq and LZeq of every second, the last 48 hours).
+Both run as long as the meter runs, whether or not any app or terminal is watching, and carry
+on when the meter is stopped and started, its windows are changed, the session is reopened or
+the daemon restarts (the log is in the autosave and in saved sessions).
+
+- **G** in the SPL pane switches between the meter and its windows: one tile per window, as
+  large as the pane allows. A tile turns **amber** within the warn margin (3 dB by default) of
+  its limit and **red** above it, and goes back when the window recovers; each going over and
+  each recovery also shows as a message. **W** gives the pane the whole window, **F11** the
+  whole screen. Below the tiles a strip shows each window over time against its limit
+  (dashed), red where it was over.
+- Each tile shows the window's Leq; its limit; the **headroom**: the highest steady level
+  for the next minute that keeps the window at or below its limit ("next 1 min ≤ 101.5 dB"),
+  or "over — can't recover within 1 min" with how long it takes at the limit; while the window
+  fills, how much of it there is ("12:30 / 30:00"); and "gaps" when part of it was not
+  measured (the meter stopped, the capture lost samples). Gaps are never counted as silence.
+- **Shift+L** (or "Leq windows and limits…" in Ctrl+K) sets them: the window lengths and
+  weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
+  **preset** row and the headroom horizon. ↑/↓ moves between rows, Tab between cells,
+  **Insert** adds a window, **Delete** removes one, Enter applies.
+- Presets set a published limit on its window, informational only (each regulation also
+  has peak limits, a measuring position and duties of its own): DIN 15905-5, LAeq 30 min ≤
+  99 dB; Swiss V-NISSG, LAeq 60 min ≤ 93, 96 or 100 dB; WHO safe listening (2022), LAeq
+  15 min ≤ 100 dB. No measuring-position correction is applied: a mic at FOH reading for the
+  loudest audience position needs the difference added to the limit by hand.
+- Limits are judged only on a calibrated input (dB SPL, see above); an uncalibrated meter
+  shows its windows in dBFS, marked "not calibrated".
+
+In the terminal: `ac2 spl leq watch` (big numbers; `--json` for one line per second),
+`ac2 spl leq set --preset din15905 --limit 1min=102db` (also `--windows 1min,5min,c:30s`,
+`--warn 3db`, `--horizon 1min`), `ac2 spl leq export -o show.csv` (the per-second log as
+CSV, for the record). Each takes `--meas` or `--input` when there is more than one meter.
+How it is computed: `docs/design/leq.md`.
+
 ## Keyboard
 
 Everything in the app is reachable from the keyboard. **/** (or **F1**) shows the bindings,

@@ -159,8 +159,8 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Calibration tied to device + input channel + mic name; mismatch → "cal from other mic / input", otherwise cal age shown | P0 | ac (simplified) | 5 |
 | Fast / Slow / Impulse; Leq, LAeq, LCeq, LCpeak, Lmax/Lmin | P0 | ac (partly) | 5 |
 | Big-number SPL display + history | P0 | new | 5 |
-| Rolling Leq windows, limits and alarms | P1 | new | 7 |
-| Continuous crash-safe logging, export | P1 | new | 7 |
+| Rolling Leq windows, limits and alarms (done: `docs/design/leq.md`) | P1 | new | 7 |
+| Continuous crash-safe logging, export (done for the per-second LAeq/LCeq/LZeq log: autosaved, in sessions, CSV export) | P1 | new | 7 |
 | LUFS / true peak meter | P2 | ac | later |
 
 ### 3.7 IR / room acoustics
@@ -529,7 +529,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
 | 7 | Post-1.0 extras | ASIO, SPL logging/alarms, ESS IR + ISO 3382, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | per-feature criteria (room metrics vs published values; 24 h log clean; …) |
 
-### 9.0 Status (2026-10-02)
+### 9.0 Status (2026-10-03)
 
 | # | CI criteria | HW criteria |
 |---|---|---|
@@ -540,7 +540,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** |
 | 5 | done (traces, sessions, calibration, SPL) | mains + sub + delay workflow per OS — **open** |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open**; signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | not started (post-1.0) | — |
+| 7 | in progress (post-1.0): ESS sweep / distortion; Leq windows, limits and alarms with the per-second SPL log (`docs/design/leq.md`) | 24 h log clean — **open** |
 
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and

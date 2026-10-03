@@ -73,7 +73,22 @@ below the limit), found by one pass over the ring.
 
 State changes go into the meter's `spl_log` entity: each window's state with the time it
 began, and an alarm list (window, over / recovered, time, Leq, limit; newest 100). The
-daemon logs each over and recovery. Clients toast them.
+daemon logs each over and recovery. Clients toast them. There is no hysteresis beyond the
+0.1 dB resolution: a window that hovers on its limit reports each crossing.
+
+## Where it shows
+
+- App: **G** switches the SPL pane between the meter and its tiles (amber near, red over,
+  with the headroom; **W** maximises the pane, **F11** goes full screen) and a history strip
+  of each window against its limit, from the frames received since the app connected.
+  **Shift+L** opens the windows dialog (lengths and weightings picked, limits typed, a
+  preset row, the horizon). Over / recovered alarms are toasts.
+- CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second),
+  `ac2 spl leq set` (`--windows`, `--preset`, `--limit 30min=99db`, `--warn`, `--horizon`),
+  `ac2 spl leq export` (the CSV).
+
+What is left: `docs/design/backlog.md` (history backfill, peak limits, position
+correction, a fresh start of the windows, alarm hysteresis).
 
 ## Presets (informational, not legal advice)
 
