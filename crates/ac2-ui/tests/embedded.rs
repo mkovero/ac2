@@ -141,7 +141,7 @@ impl Driver {
 fn measure_from_empty(d: &mut Driver) -> R {
     d.synced()?;
     assert!(d.st.open_session().is_none());
-    let hint = d.st.empty_hint(&d.keys).unwrap_or_default();
+    let hint = d.st.empty_hint(&d.keys).map(|h| h.text).unwrap_or_default();
     assert!(
         hint.starts_with(&format!(
             "No audio session — press {}",
@@ -383,15 +383,18 @@ fn the_platform_audio_is_the_only_real_backend() {
 /// (Esc, Shift+O, with no frame in between). Its stop and its new preview reach the daemon
 /// in that order; were they to cross, the daemon would close the new preview and the meters
 /// would stay blank until a renewal.
+///
+/// The reducer's clock stands still, so it never renews: meters that come back at all came
+/// from the preview opened by the reopening, however long (within the daemon's 5 s preview
+/// expiry) a loaded machine takes to show them.
 #[test]
 fn session_dialog_meters_return_every_round() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
     d.synced()?;
-    let t0 = Instant::now();
     let tick = |d: &mut Driver| {
         d.send(Msg::Tick {
-            now_s: t0.elapsed().as_secs_f64(),
+            now_s: 0.0,
             dt_s: 0.02,
         })
     };
@@ -416,7 +419,7 @@ fn session_dialog_meters_return_every_round() -> R {
         // Long enough for a stop that overtook the preview to have closed it.
         pump_for(&mut d, 300);
         let before = seq(&d);
-        let end = Instant::now() + Duration::from_millis(700);
+        let end = Instant::now() + DEADLINE;
         loop {
             d.pump();
             tick(&mut d);

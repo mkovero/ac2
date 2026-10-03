@@ -75,6 +75,11 @@ fn harness(opts: AppOptions) -> Harness<'static, App> {
         .build_eframe(move |cc| App::new(cc, opts))
 }
 
+/// How long a wait for the UI may take. Only a ceiling: every wait ends as soon as its
+/// condition holds, and on a loaded machine (software rasteriser, every core busy) the
+/// link thread and the rig's publisher can each fall seconds behind.
+const WAIT: Duration = Duration::from_secs(60);
+
 /// Steps the UI (in real time, the link runs on its own thread) until `cond` holds.
 fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool) {
     let t0 = Instant::now();
@@ -82,10 +87,14 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
     // with a session open, a screenshot waits for it.
     let named = |a: &App| a.state.open_session().is_none() || a.state.devices.is_some();
     while !(cond(h.state()) && named(h.state())) {
-        assert!(
-            t0.elapsed() < Duration::from_secs(15),
-            "timed out waiting for {what}"
-        );
+        if t0.elapsed() > WAIT {
+            let a = h.state();
+            let toasts: Vec<&str> = a.state.toasts.iter().map(|t| t.text.as_str()).collect();
+            panic!(
+                "timed out waiting for {what}; conn {:?}; overlay {:?}; stimulus {:?}; toasts {toasts:?}",
+                a.state.conn, a.state.overlay, a.state.stimulus.phase
+            );
+        }
         h.step();
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -93,6 +102,53 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
     for _ in 0..3 {
         h.step();
     }
+}
+
+/// The link is healthy as of `now`: responding, and every frame shown fresh. These are
+/// wall-clock indications (STALE, "not responding", the dimmed curves) that a picture
+/// would otherwise catch in whichever state a stalled thread left them.
+fn healthy(app: &App, now: Instant) -> bool {
+    let st = &app.state;
+    let link = match &st.conn {
+        ConnState::Connected { .. } => st.mirror.as_ref().is_some_and(|m| m.responding(now)),
+        _ => true,
+    };
+    let fresh = st.data.as_ref().is_none_or(|d| {
+        d.latest
+            .frames
+            .values()
+            .all(|f| !ac2_ui::scenes::freshness(f).is_stale())
+    });
+    link && fresh
+}
+
+/// Compares the UI with its reference once a pass has been laid out while the link was
+/// healthy. Health is checked after the pass, against a later clock, so the pass itself
+/// was healthy too (ages only grow).
+fn snapshot(h: &mut Harness<'_, App>, name: &str) {
+    snapshot_when(h, name, |_| {}, |_| true);
+}
+
+/// [`snapshot`] of state that moves with the wall clock: `pin` before every pass, and the
+/// pass is taken only when `drawn` says it shows the pinned state (a pass advances the
+/// reducer's clock by however long the machine took since the previous one).
+fn snapshot_when(
+    h: &mut Harness<'_, App>,
+    name: &str,
+    pin: impl Fn(&mut App),
+    drawn: impl Fn(&App) -> bool,
+) {
+    let t0 = Instant::now();
+    loop {
+        pin(h.state_mut());
+        h.step();
+        if healthy(h.state(), Instant::now()) && drawn(h.state()) {
+            break;
+        }
+        assert!(t0.elapsed() < WAIT, "{name}: the link never settled");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.snapshot_options(name, &snapshot_options());
 }
 
 fn live(app: &App) -> bool {
@@ -159,7 +215,7 @@ fn transfer_view_two_traces_and_banner() {
         let banners: Vec<&str> = s.banners.iter().map(|b| b.text.as_str()).collect();
         assert_eq!(banners, ["NO DELAY ESTIMATE"]);
     }
-    h.snapshot_options("transfer_two_traces_banner", &snapshot_options());
+    snapshot(&mut h, "transfer_two_traces_banner");
 }
 
 #[test]
@@ -172,7 +228,7 @@ fn help_overlay() {
     step_until(&mut h, "live frames", live);
     h.key_press(Key::Slash);
     step_until(&mut h, "help", |a| a.state.overlay == Overlay::Help);
-    h.snapshot_options("help_overlay", &snapshot_options());
+    snapshot(&mut h, "help_overlay");
     // `/` closes it again.
     h.key_press(Key::Slash);
     step_until(&mut h, "help closed", |a| a.state.overlay == Overlay::None);
@@ -196,7 +252,7 @@ fn command_palette() {
         "query",
         |a| matches!(&a.state.overlay, Overlay::Palette(p) if p.query == "delay"),
     );
-    h.snapshot_options("command_palette", &snapshot_options());
+    snapshot(&mut h, "command_palette");
     // Enter runs the highlighted command against the fake daemon.
     h.key_press(Key::Enter);
     step_until(&mut h, "palette closed", |a| {
@@ -230,7 +286,7 @@ fn ambiguous_delay_candidate_list() {
     // Toasts expire on the wall clock; the snapshot shows the list and the plots.
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("delay_pick_candidates", &snapshot_options());
+    snapshot(&mut h, "delay_pick_candidates");
     // 2 inserts the second candidate (12.7 ms) and resolves the finding.
     h.key_press(Key::Num2);
     step_until(&mut h, "inserted", |a| {
@@ -253,12 +309,12 @@ fn themes() {
     step_until(&mut h, "live frames", live);
     h.key_press(Key::T);
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
-    h.snapshot_options("theme_light", &snapshot_options());
+    snapshot(&mut h, "theme_light");
     h.key_press(Key::T);
     step_until(&mut h, "high contrast", |a| {
         a.state.theme == ThemeName::HighContrast
     });
-    h.snapshot_options("theme_high_contrast", &snapshot_options());
+    snapshot(&mut h, "theme_high_contrast");
 }
 
 #[test]
@@ -310,21 +366,38 @@ fn startup_first_frame() {
     if !have_gpu("startup_first_frame") {
         return;
     }
-    // Device creation is part of startup, as in the real app; the daemon link is not
-    // (the first frame never waits for it).
+    // The bound is on the app's own startup: from `App::new` (fonts, state, the link's
+    // thread) through its first UI pass, which never waits for the daemon. GPU device
+    // creation and the first render are timed and printed but not bounded: on a software
+    // rasteriser they are dominated by shader compilation, whose wall time scales with
+    // whatever else the machine is running (3–7 s at load 30 on 12 cores).
     let t0 = Instant::now();
-    let mut h = harness(options(None));
+    let mut h = Harness::builder()
+        .with_size(SIZE)
+        .with_pixels_per_point(1.0)
+        .wgpu()
+        .build_eframe(move |cc| {
+            let mut opts = options(None);
+            opts.started = Instant::now();
+            App::new(cc, opts)
+        });
     h.step();
+    let app = h.state().startup.first_ui.expect("first UI pass");
+    let t_render = Instant::now();
     let img = h.render().expect("render");
-    let first = t0.elapsed();
+    let render = t_render.elapsed();
+    let total = t0.elapsed();
     assert_eq!(img.width(), SIZE.x as u32);
     println!(
-        "startup: first frame rendered headless in {:.1} ms (target < 300 ms)",
-        first.as_secs_f64() * 1e3
+        "startup: app {:.1} ms to its first UI pass; first frame rendered headless in {:.1} ms \
+         (render {:.1} ms; target < 300 ms on the real window, `--bench-startup`)",
+        app.as_secs_f64() * 1e3,
+        total.as_secs_f64() * 1e3,
+        render.as_secs_f64() * 1e3,
     );
-    // Software rasterizers in CI are slower than the target hardware; this bound catches a
-    // blocking call on the startup path, `--bench-startup` measures the real window.
-    assert!(first < Duration::from_secs(2), "{first:?}");
+    // Tens of milliseconds unloaded; a blocking call on the startup path (a connect, a
+    // device or file wait) takes the bound out at once.
+    assert!(app < Duration::from_secs(1), "{app:?}");
 }
 
 /// Two captures in slots 1 and 2 and an imported target curve, drawn with the live traces:
@@ -393,7 +466,7 @@ fn stored_traces_and_target() {
     // Toasts expire on the wall clock; the snapshot shows the plots only.
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("transfer_stored_traces", &snapshot_options());
+    snapshot(&mut h, "transfer_stored_traces");
 }
 
 /// The transfer pane's title chip names the measurement it shows; a click opens the list of
@@ -418,7 +491,7 @@ fn pane_measurement_chip_and_list() {
     );
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("pane_measurement_list", &snapshot_options());
+    snapshot(&mut h, "pane_measurement_list");
     h.get_by_label("TF  Delay tower").click();
     step_until(&mut h, "delay tower shown", |a| {
         a.state.overlay == Overlay::None
@@ -486,7 +559,7 @@ fn slot_resmoothed() {
     )));
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("slot_resmoothed", &snapshot_options());
+    snapshot(&mut h, "slot_resmoothed");
 }
 
 /// Smoothing on phase and spectrum: the rig publishes scattered curves smoothed as the
@@ -541,7 +614,7 @@ fn smoothed_phase_and_spectrum() {
         assert_eq!(sp.unit, "dBFS (tone, 1/6 oct smoothed)");
         assert_eq!(sp.caption, "Hann window");
     }
-    h.snapshot_options("smoothed_phase_and_spectrum", &snapshot_options());
+    snapshot(&mut h, "smoothed_phase_and_spectrum");
 }
 
 /// A daemon with no audio session (a fresh local daemon, an embedded one on real audio):
@@ -551,20 +624,47 @@ fn empty_session_hint() {
     if !have_gpu("empty_session_hint") {
         return;
     }
-    let fake = ac2_client::fake::FakeDaemon::start(ac2_client::fake::FakeOptions::default())
-        .expect("fake daemon");
+    let fake = ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon");
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced, no session", |a| {
         a.state.mirror.as_ref().is_some_and(|m| m.synced())
             && a.state.empty_hint(&a.keymap).is_some()
     });
     assert_eq!(
-        h.state().state.empty_hint(&h.state().keymap).as_deref(),
+        h.state()
+            .state
+            .empty_hint(&h.state().keymap)
+            .map(|h| h.text)
+            .as_deref(),
         Some("No audio session — press Shift+O (or Ctrl+K → Open audio session)")
     );
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("empty_session_hint", &snapshot_options());
+    snapshot(&mut h, "empty_session_hint");
+
+    // A stored curve (an imported target) is drawn without a session: the hint moves to
+    // the pane's title strip, out of the curve's way.
+    h.key_press(Key::Z);
+    step_until(&mut h, "target prompt", |a| {
+        matches!(a.state.overlay, Overlay::Prompt(_))
+    });
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ac2-traces/tests/fixtures/house_curve.txt");
+    h.event(Event::Text(path.to_string_lossy().into_owned()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the target drawn", |a| {
+        a.state.transfer_shows_stored() && a.state.overlay == Overlay::None
+    });
+    assert_eq!(
+        h.state()
+            .state
+            .empty_hint(&h.state().keymap)
+            .map(|h| h.place),
+        Some(ac2_ui::state::HintPlace::Title)
+    );
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "empty_session_hint_over_traces");
 }
 
 /// Publishes steady input meters on the fake daemon: the preview of `fake:loop` (in 1 the
@@ -658,10 +758,8 @@ fn session_dialog() {
     if !have_gpu("session_dialog") {
         return;
     }
-    let fake = Arc::new(
-        ac2_client::fake::FakeDaemon::start(ac2_client::fake::FakeOptions::default())
-            .expect("fake daemon"),
-    );
+    let fake =
+        Arc::new(ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon"));
     let _meters = Meters::start(Arc::clone(&fake));
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced", |a| {
@@ -692,7 +790,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("session_dialog", &snapshot_options());
+    snapshot(&mut h, "session_dialog");
 
     // D, a typed level, Enter: the fake answers in 1, which becomes the Reference.
     h.key_press(Key::D);
@@ -705,7 +803,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("session_dialog_detect_confirm", &snapshot_options());
+    snapshot(&mut h, "session_dialog_detect_confirm");
     h.key_press(Key::Enter);
     step_until(&mut h, "detected", |a| {
         session_dialog_of(a).is_some_and(|d| {
@@ -723,7 +821,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("session_dialog_detected", &snapshot_options());
+    snapshot(&mut h, "session_dialog_detected");
 
     h.key_press(Key::Enter);
     step_until(&mut h, "session open, offer shown", |a| {
@@ -736,11 +834,12 @@ fn session_dialog() {
         "the session replaced the preview"
     );
     h.key_press(Key::Enter);
-    step_until(&mut h, "measurement created", |a| {
+    // Created, then started by a second command: the picture shows it running.
+    step_until(&mut h, "measurement created and running", |a| {
         a.state
             .measurements()
             .iter()
-            .any(|m| m.config.name == "Reference → M30 FOH")
+            .any(|m| m.config.name == "Reference → M30 FOH" && m.running)
     });
 
     // The new-measurement dialog picks inputs by name, with the session's meters.
@@ -752,7 +851,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("transfer_dialog", &snapshot_options());
+    snapshot(&mut h, "transfer_dialog");
     h.key_press(Key::Escape);
     step_until(&mut h, "dialog closed", |a| {
         a.state.overlay == Overlay::None
@@ -778,7 +877,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("sweep_dialog", &snapshot_options());
+    snapshot(&mut h, "sweep_dialog");
     h.key_press(Key::Enter);
     step_until(&mut h, "armed with the sweep", |a| {
         a.state.daemon().is_some_and(|s| {
@@ -805,13 +904,13 @@ fn session_dialog() {
     // In the grid, beside the other panes: caption and legend fit a small pane.
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("sweep_distortion_pane", &snapshot_options());
+    snapshot(&mut h, "sweep_distortion_pane");
     // The focused pane alone, for the picture.
     h.key_press(Key::W);
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("sweep_distortion", &snapshot_options());
+    snapshot(&mut h, "sweep_distortion");
     // The title's dB | % toggle (U does the same): percent on a log axis.
     h.get_by_label("%").click();
     step_until(&mut h, "percent", |a| {
@@ -821,7 +920,7 @@ fn session_dialog() {
     h.event(Event::PointerGone);
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("sweep_distortion_percent", &snapshot_options());
+    snapshot(&mut h, "sweep_distortion_percent");
     h.key_press(Key::H);
     step_until(&mut h, "sweep IR", |a| a.state.view.distortion.show_ir);
     // G: the log view, where the harmonics' impulses read at their level.
@@ -831,7 +930,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    h.snapshot_options("sweep_ir", &snapshot_options());
+    snapshot(&mut h, "sweep_ir");
 }
 
 /// A set of sweeps running while the transfer pane is maximised: the progress strip shows
@@ -880,12 +979,26 @@ fn sweep_progress_strip() {
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
     h.state_mut().state.toasts.clear();
     // The bar at the start of the step, for a picture that does not depend on timing.
-    let now = h.state().state.now_s;
-    if let Some(seen) = &mut h.state_mut().state.sweep.step_seen {
-        seen.2 = now;
-    }
-    h.step();
-    h.snapshot_options("sweep_progress", &snapshot_options());
+    let start = {
+        let st = &h.state().state;
+        let run = st.daemon().and_then(|s| s.sweep.clone()).expect("run");
+        ac2_scene::progress::sweep(&run, 0.0).expect("progress")
+    };
+    snapshot_when(
+        &mut h,
+        "sweep_progress",
+        |a| {
+            let now = a.state.now_s;
+            if let Some(seen) = &mut a.state.sweep.step_seen {
+                seen.2 = now;
+            }
+        },
+        |a| {
+            a.state.operation().is_some_and(|p| {
+                p.remaining == start.remaining && (p.fraction - start.fraction).abs() < 2e-3
+            })
+        },
+    );
     let stops = rig.fake.executions("gen.stop");
     h.get_by_label_contains("Stop (").click();
     step_until(&mut h, "stop sent", |_| {

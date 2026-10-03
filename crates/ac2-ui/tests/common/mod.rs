@@ -281,6 +281,17 @@ fn transfer(meas_in: u16) -> MeasKind {
     }
 }
 
+/// The fake daemon for the UI tests. Its stimulus lease outlives any stall of a loaded
+/// machine: these tests follow the app's flow, and a lease lost to a test process starved
+/// past the daemon's 1.5 s would read as the flow failing (the expiry itself is tested in
+/// `ac2d` and in the link's own tests, against the real deadline).
+pub fn fake_options() -> FakeOptions {
+    FakeOptions {
+        lease_expiry: Duration::from_secs(60),
+        ..FakeOptions::default()
+    }
+}
+
 impl Rig {
     pub fn start() -> Self {
         Self::start_with(false)
@@ -293,7 +304,7 @@ impl Rig {
     }
 
     fn start_with(smoothed: bool) -> Self {
-        let fake = Arc::new(FakeDaemon::start(FakeOptions::default()).unwrap());
+        let fake = Arc::new(FakeDaemon::start(fake_options()).unwrap());
         {
             let mut s = fake.lock();
             s.grids.insert(TF_GRID.id(), TF_GRID);
