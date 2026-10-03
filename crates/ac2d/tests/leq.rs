@@ -330,7 +330,12 @@ async fn windows_go_over_and_recover_and_survive() {
     })
     .await;
     assert_eq!(l.windows[1].judgement, LeqJudgement::NoLimit);
-    assert!(page(&c, 0).await.total > rows_before);
+    // The log goes on past the change.
+    let deadline = Instant::now() + WAIT;
+    while page(&c, 0).await.total <= rows_before {
+        assert!(Instant::now() < deadline, "the log stopped at the change");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Stopped for a while and started again: the windows are rebuilt from the log with
     // the stop as a gap (incomplete, not silence).
