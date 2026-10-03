@@ -562,7 +562,23 @@ fn columns(n: usize, w: f32, h: f32) -> usize {
         .unwrap_or(1)
 }
 
-fn draw_tile(c: &mut Canvas, t: &LeqTile, r: Rect, stale: bool, theme: &Theme) {
+/// A window's name as shown: `30 min` when every window shares the weighting the caption
+/// names once (`LAeq`), else the full `LAeq 30 min`.
+fn shown_name<'a>(name: &'a str, shared: Option<&str>) -> &'a str {
+    shared
+        .and_then(|w| name.strip_prefix(w))
+        .and_then(|rest| rest.strip_prefix(' '))
+        .unwrap_or(name)
+}
+
+fn draw_tile(
+    c: &mut Canvas,
+    t: &LeqTile,
+    r: Rect,
+    stale: bool,
+    shared: Option<&str>,
+    theme: &Theme,
+) {
     let (bg, fg) = tile_colors(t.state, theme);
     c.base.rects.push(FillRect {
         rect: r,
@@ -584,7 +600,7 @@ fn draw_tile(c: &mut Canvas, t: &LeqTile, r: Rect, stale: bool, theme: &Theme) {
         c.overlay.labels.push(l);
     };
     push(
-        t.name.clone(),
+        shown_name(&t.name, shared).to_string(),
         [r.x + pad, r.y + pad],
         HAlign::Left,
         VAlign::Top,
@@ -657,7 +673,7 @@ fn draw_tile(c: &mut Canvas, t: &LeqTile, r: Rect, stale: bool, theme: &Theme) {
     }
 }
 
-fn draw_history(c: &mut Canvas, s: &HistoryStrip, theme: &Theme) {
+fn draw_history(c: &mut Canvas, s: &HistoryStrip, shared: Option<&str>, theme: &Theme) {
     canvas::pane_frame(c, s.plot, &s.x, &s.y, true, "dB", theme);
     for l in &s.lines {
         if let Some(y) = l.limit_y {
@@ -696,14 +712,15 @@ fn draw_history(c: &mut Canvas, s: &HistoryStrip, theme: &Theme) {
     // Legend: each window's name in its colour, along the top of the strip.
     let mut x = s.plot.x + 30.0;
     for l in &s.lines {
+        let name = shown_name(&l.name, shared);
         c.overlay.labels.push(label(
-            l.name.clone(),
+            name.to_string(),
             [x, s.plot.y + 4.0],
             anchor(HAlign::Left, VAlign::Top),
             theme.small_font_size,
             l.color,
         ));
-        x += canvas::text_width(&l.name, theme.small_font_size) + 12.0;
+        x += canvas::text_width(name, theme.small_font_size) + 12.0;
     }
 }
 
@@ -804,11 +821,15 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
                 tw.max(1.0),
                 th.max(1.0),
             );
-            draw_tile(&mut c, t, r, v.stale.is_some(), theme);
+            draw_tile(&mut c, t, r, v.stale.is_some(), shared.as_deref(), theme);
             rects.push(r);
         }
     }
-    let left = caption_left(v, cols.as_ref().and_then(|k| k.weighting.as_deref()));
+    let left = caption_left(
+        v,
+        cols.as_ref()
+            .map_or(shared.as_deref(), |k| k.weighting.as_deref()),
+    );
     // The caption: the meter (with the unit, and the weighting the columns' names leave
     // out), the run, and the calibration.
     c.overlay.labels.push(label(
@@ -849,7 +870,7 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
     let history = match (hist_area, v.history) {
         (Some(r), Some(h)) => {
             let s = history_strip(v.cfg, h, judged, r, theme);
-            draw_history(&mut c, &s, theme);
+            draw_history(&mut c, &s, shared.as_deref(), theme);
             Some(s)
         }
         _ => None,
@@ -869,7 +890,7 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
 /// The caption's left part: the meter, and for columns the unit and the `weighting` their
 /// names leave out.
 fn caption_left(v: &LeqView<'_>, weighting: Option<&str>) -> String {
-    if v.layout.style != LeqStyle::Columns || v.tiles.is_empty() {
+    if v.tiles.is_empty() {
         return v.meter.clone();
     }
     let unit = v.tiles.first().map_or("", |t| t.unit.as_str());

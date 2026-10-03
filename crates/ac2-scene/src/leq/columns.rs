@@ -158,8 +158,11 @@ fn name_levels(tiles: &[&LeqTile]) -> Vec<(Vec<String>, bool)> {
         Some(_) => String::new(),
         None => format!("{} ", w_letter(w)),
     };
-    vec![
-        (tiles.iter().map(|t| t.name.clone()).collect(), false),
+    // One weighting for every window: the caption names it once (`LAeq`), the columns only
+    // their lengths; mixed weightings keep it on every name.
+    let full = (tiles.iter().map(|t| t.name.clone()).collect(), false);
+    let mut levels = vec![
+        full,
         (
             tiles
                 .iter()
@@ -174,7 +177,11 @@ fn name_levels(tiles: &[&LeqTile]) -> Vec<(Vec<String>, bool)> {
                 .collect(),
             one.is_some(),
         ),
-    ]
+    ];
+    if one.is_some() {
+        levels.remove(0);
+    }
+    levels
 }
 
 /// The first of `candidates` that fits `width` at `size`.

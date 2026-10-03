@@ -229,9 +229,9 @@ fn scene_lays_tiles_out_and_colours_them() {
     assert!(s.tiles.iter().all(|r| r.w > r.h));
     let all = texts(&s.scene);
     for want in [
-        "FOH SPL",
+        "FOH SPL · LAeq, dB SPL",
         "M30 · cal 3 h ago",
-        "LAeq 30 min",
+        "30 min",
         "97.8",
         "OVER",
         "NEAR",
@@ -465,16 +465,7 @@ fn columns_are_the_default_and_go_shortest_left() {
     let order: Vec<usize> = k.columns.iter().map(|x| x.window).collect();
     assert_eq!(order, [4, 3, 2, 1, 0]);
     let names: Vec<&str> = k.columns.iter().map(|x| x.name.as_str()).collect();
-    assert_eq!(
-        names,
-        [
-            "LAeq 1 min",
-            "LAeq 2 min",
-            "LAeq 5 min",
-            "LAeq 10 min",
-            "LAeq 15 min"
-        ]
-    );
+    assert_eq!(names, ["1 min", "2 min", "5 min", "10 min", "15 min"]);
     assert!(
         k.columns
             .windows(2)
@@ -682,7 +673,7 @@ fn column_colours_follow_the_state() {
     }
     let all = texts(&s.scene);
     assert!(all.contains(&"not calibrated"), "{all:?}");
-    assert!(all.contains(&"FOH SPL · dBFS"), "{all:?}");
+    assert!(all.contains(&"FOH SPL · LAeq, dBFS"), "{all:?}");
     assert!(!all.contains(&"OVER"), "{all:?}");
 }
 
@@ -697,7 +688,7 @@ fn column_texts() {
     );
     let all = texts(&s.scene);
     for want in [
-        "FOH SPL · dB SPL",
+        "FOH SPL · LAeq, dB SPL",
         "M30 · cal 3 h ago",
         "101.3",
         "OVER",
@@ -711,7 +702,8 @@ fn column_texts() {
         "2:00 / 5:00",
         "0:00 / 1:00",
         "—",
-        "LAeq 15 min",
+        // One weighting: the caption names it once, the columns only their lengths.
+        "15 min",
     ] {
         assert!(all.contains(&want), "{want} in {all:?}");
     }
@@ -727,7 +719,7 @@ fn column_texts() {
     };
     let v = size_of(&s, "101.3");
     assert!(v > 60.0, "{v}");
-    assert!(v > size_of(&s, "LAeq 15 min"));
+    assert!(v > size_of(&s, "15 min"));
     let small = leq_scene(
         &columns_view(&c, &f, None),
         &Status::default(),

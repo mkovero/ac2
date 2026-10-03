@@ -972,7 +972,8 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     let c = columns(&d.st);
     assert_eq!(
         (c[0].0.as_str(), c[1].0.as_str()),
-        ("LAeq 5 s", "LAeq 10 s")
+        // One weighting: the caption says LAeq once, the columns only their lengths.
+        ("5 s", "10 s")
     );
     let t = tiles(&d.st);
     assert_eq!(t[0].name, "LAeq 5 s");
