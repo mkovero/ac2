@@ -3,6 +3,12 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## Parked
+
+- **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Revisit once
+  distortion measurement (Farina) exists: check mic height/aim vs the speaker's reference axis,
+  ±10 cm at 1 m, then 2 m; listen during a burst; measure harmonic distortion vs frequency.
+
 ## From the first rig session on pupu (2026-10-03)
 
 Open:
