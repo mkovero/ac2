@@ -4,6 +4,7 @@
 mod autosave;
 mod cal;
 mod chrome;
+mod leq;
 mod overlays;
 mod panes;
 mod session;

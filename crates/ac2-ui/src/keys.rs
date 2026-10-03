@@ -339,6 +339,7 @@ commands! {
     Help => "help", "Show / hide key bindings", [Global];
     Palette => "palette", "Command palette", [Global];
     Quit => "quit", "Quit", [Global];
+    Fullscreen => "fullscreen", "Full screen on / off", [Global];
 
     StimulusArm => "stimulus_arm", "Stimulus: arm (needs a typed level)", [Global];
     StimulusFire => "stimulus_fire", "Stimulus: fire (when armed)", [Global];
@@ -411,6 +412,7 @@ commands! {
     CalDelete => "cal_delete", "Calibration: delete a sensitivity calibration (input=mic)…", [Global];
     TraceMicCurve => "trace_mic_curve", "Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)…", [Global];
     SweepNew => "sweep_new", "Sweep measurement: response and harmonic distortion…", [Global];
+    LeqWindows => "leq_windows", "Leq windows and limits of the SPL meter…", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
@@ -456,6 +458,8 @@ commands! {
 
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
 
+    SplLeqView => "spl_leq_view", "SPL: meter / Leq windows", [Spl];
+
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
     SweepIr => "sweep_ir", "Sweep: distortion / impulse response", [Distortion];
     HideDistortion => "hide_distortion", "Hide the sweep / distortion pane", [Distortion];
@@ -494,6 +498,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::Help, S::Global, k(K::F1)),
         (C::Palette, S::Global, cmd(K::K)),
         (C::Quit, S::Global, cmd(K::Q)),
+        (C::Fullscreen, S::Global, k(K::F11)),
         (C::StimulusLevel, S::Global, k(K::L)),
         // Plain digits are the slots' (as in `ac`); panes take Alt+digit.
         (C::FocusTransfer, S::Global, alt(K::Num1)),
@@ -572,6 +577,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spectrum, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::H)),
         (C::IrMode, S::Ir, k(K::G)),
+        (C::SplLeqView, S::Spl, k(K::G)),
+        // Plain L types the stimulus level; Shift+L is the Leq windows.
+        (C::LeqWindows, S::Global, sh(K::L)),
         (C::IrMode, S::Distortion, k(K::G)),
         (C::DistortionUnit, S::Distortion, k(K::U)),
         (C::SweepIr, S::Distortion, k(K::H)),

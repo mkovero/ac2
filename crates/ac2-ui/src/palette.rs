@@ -211,6 +211,8 @@ mod tests {
             ("new rta", CommandId::NewRta),
             ("new spl", CommandId::NewSpl),
             ("delete meas", CommandId::DeleteMeasurement),
+            ("leq limits", CommandId::LeqWindows),
+            ("full screen", CommandId::Fullscreen),
         ] {
             let r = search(q, &k, Scope::Transfer);
             assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");

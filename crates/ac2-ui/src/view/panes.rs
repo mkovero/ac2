@@ -92,6 +92,7 @@ fn scene_for(
             (s.scene, Some(s.x_axis.mapping))
         }
         PaneKind::Ir => (scenes::ir(st, theme, vp, now)?.scene, None),
+        PaneKind::Spl if st.view.spl.leq => (scenes::leq(st, theme, vp, now)?.scene, None),
         PaneKind::Spl => (scenes::spl(st, theme, vp, now)?.scene, None),
         PaneKind::Distortion => {
             let s = scenes::sweep(st, theme, vp, now);
@@ -117,6 +118,10 @@ fn placeholder(pane: PaneKind, app: &App) -> &'static str {
     match pane {
         PaneKind::Ir if scenes::focus_tf(&app.state).is_none() => "no transfer measurement",
         PaneKind::Ir => "no IR frame yet",
+        PaneKind::Spl if app.state.view.spl.leq && scenes::has_spl(&app.state) => {
+            "no Leq windows yet: they show once the meter has measured a second"
+        }
+        PaneKind::Spl if scenes::has_spl(&app.state) => "no SPL frame yet",
         PaneKind::Spl => "no SPL meter",
         _ => "",
     }

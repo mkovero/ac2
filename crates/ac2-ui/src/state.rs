@@ -20,6 +20,7 @@ use ac2_proto::model::{
     Measurement, MicCurveId, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode,
     State, SweepStatus, TraceData, TraceKind, TraceMeta,
 };
+use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::theme::ThemeName;
@@ -34,6 +35,7 @@ use crate::cal_view::{CalAction, CalView};
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
 use crate::forms::{Form, FormKind, SweepPlan};
 use crate::keys::{Chord, CommandId, Keymap, Scope};
+use crate::leq_dialog::LeqDialog;
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
@@ -629,6 +631,8 @@ pub enum Overlay {
     Offer(Box<Offer>),
     /// The calibrations and input setup view.
     Calibrations(Box<CalView>),
+    /// The Leq windows and limits of an SPL meter.
+    Leq(Box<LeqDialog>),
 }
 
 /// Transfer measurements offered after the session dialog opened a session.
@@ -704,6 +708,23 @@ pub enum Msg {
     Session(SessionMsg),
     /// Mouse on the measurement offer: `true` creates, `false` skips.
     Offer(bool),
+    /// Mouse on the Leq windows dialog.
+    Leq(LeqMsg),
+}
+
+/// What the mouse does on the Leq windows dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeqMsg {
+    Focus(crate::leq_dialog::Focus),
+    /// ‹/› on a choice.
+    Cycle(crate::leq_dialog::Focus, i32),
+    /// Insert (a window after the focused one).
+    Add,
+    /// Delete (the focused window).
+    Remove,
+    Submit,
+    /// Closes the dialog without touching the stimulus.
+    Cancel,
 }
 
 /// What the mouse does on the session dialog.
@@ -796,6 +817,8 @@ pub struct AppState {
     pub toasts: Vec<Toast>,
     pub now_s: f64,
     pub quit: bool,
+    /// The window fills the screen (the app applies it).
+    pub fullscreen: bool,
     /// The key that just opened a text overlay also arrives as text; drop that one char.
     swallow_text: Option<char>,
     /// Settings sent with the arm in flight; a change made before the arm is confirmed is
@@ -813,6 +836,11 @@ pub struct AppState {
     /// The session the device list was last asked for on its own (for the input names of
     /// the always-on meters).
     devices_for: Option<ac2_proto::units::SessionEpoch>,
+    /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
+    /// last `seq` folded in).
+    pub leq_history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
+    /// The newest over / recovered alarm of each meter already shown (`None`: none yet).
+    leq_alarms_seen: BTreeMap<MeasId, Option<ac2_proto::model::LeqAlarm>>,
 }
 
 impl Default for AppState {
@@ -861,6 +889,7 @@ impl AppState {
             toasts: Vec::new(),
             now_s: 0.0,
             quit: false,
+            fullscreen: false,
             swallow_text: None,
             armed_with: None,
             pending_select: None,
@@ -868,6 +897,8 @@ impl AppState {
             devices: None,
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
+            leq_history: BTreeMap::new(),
+            leq_alarms_seen: BTreeMap::new(),
         }
     }
 
@@ -1445,6 +1476,7 @@ impl AppState {
                 Overlay::Calibrations(_) => {
                     self.cal_view_key(Chord::key(eframe::egui::Key::Delete), None, out);
                 }
+                Overlay::Leq(d) => d.backspace(),
                 Overlay::Prompt(p) => {
                     p.text.pop();
                     p.error = None;
@@ -1456,6 +1488,7 @@ impl AppState {
             Msg::Form(m) => self.form_msg(m, out),
             Msg::Session(m) => self.session_msg(m, out),
             Msg::Offer(create) => self.offer(create, out),
+            Msg::Leq(m) => self.leq_msg(m, out),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
@@ -1569,6 +1602,22 @@ impl AppState {
                 }
                 return;
             }
+            Overlay::Leq(d) => {
+                match chord.key {
+                    Key::Enter => self.submit_leq(out),
+                    Key::ArrowUp => d.move_row(-1),
+                    Key::ArrowDown => d.move_row(1),
+                    Key::Tab if chord.shift => d.move_cell(-1),
+                    Key::Tab => d.move_cell(1),
+                    Key::ArrowLeft => d.cycle(-1),
+                    Key::ArrowRight => d.cycle(1),
+                    Key::Insert => d.add_window(),
+                    Key::Delete => d.remove_window(),
+                    Key::A if chord.command => d.select_all(),
+                    _ => self.swallow_text = swallow,
+                }
+                return;
+            }
             Overlay::Form(f) => {
                 match chord.key {
                     Key::Enter => self.submit_form(out),
@@ -1639,7 +1688,11 @@ impl AppState {
             self.command(c, keymap, out);
             let opened_text = matches!(
                 self.overlay,
-                Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Session(_)
+                Overlay::Palette(_)
+                    | Overlay::Prompt(_)
+                    | Overlay::Form(_)
+                    | Overlay::Session(_)
+                    | Overlay::Leq(_)
             );
             if opened_text && std::mem::discriminant(&self.overlay) != before {
                 self.swallow_text = typed_char(&chord);
@@ -1663,6 +1716,7 @@ impl AppState {
             Overlay::Form(f) => f.type_text(&t),
             Overlay::Session(d) => d.type_text(&t),
             Overlay::Calibrations(v) => v.type_text(&t),
+            Overlay::Leq(d) => d.type_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;
@@ -2436,6 +2490,7 @@ impl AppState {
                 };
             }
             C::Quit => self.quit = true,
+            C::Fullscreen => self.fullscreen = !self.fullscreen,
 
             C::StimulusArm => self.arm(false, keymap, out),
             C::StimulusTakeOver => self.arm(true, keymap, out),
@@ -2970,6 +3025,161 @@ impl AppState {
                     IrMode::Etc => IrMode::Linear,
                 };
             }
+            C::SplLeqView => {
+                self.view.spl.leq = !self.view.spl.leq;
+                self.focus(PaneKind::Spl);
+            }
+            C::LeqWindows => match self.pane_meas(PaneKind::Spl).cloned() {
+                Some(m) => {
+                    let calibrated = self.leq_calibrated(m.id);
+                    if let Some(d) = LeqDialog::new(&m, calibrated) {
+                        self.overlay = Overlay::Leq(Box::new(d));
+                    }
+                }
+                None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
+            },
+        }
+    }
+
+    /// Whether SPL meter `meas` reads dB SPL (its newest frame says so).
+    fn leq_calibrated(&self, meas: MeasId) -> bool {
+        use ac2_proto::FrameData;
+        use ac2_proto::model::LevelScale;
+        let scale = |s: Stream| {
+            self.data
+                .as_ref()
+                .and_then(|d| d.latest.get(&Topic::Data { meas, stream: s }))
+                .and_then(|f| match &f.frame.data {
+                    FrameData::Leq(l) => Some(l.meta.scale),
+                    FrameData::Spl(l) => Some(l.meta.scale),
+                    _ => None,
+                })
+        };
+        scale(Stream::Leq).or_else(|| scale(Stream::Spl)) == Some(LevelScale::DbSpl)
+    }
+
+    fn leq_msg(&mut self, m: LeqMsg, out: &mut Vec<Request>) {
+        if m == LeqMsg::Submit {
+            self.submit_leq(out);
+            return;
+        }
+        let Overlay::Leq(d) = &mut self.overlay else {
+            return;
+        };
+        match m {
+            LeqMsg::Focus(f) => {
+                d.focus = f;
+                d.select_all();
+            }
+            LeqMsg::Cycle(f, step) => {
+                d.focus = f;
+                d.cycle(step);
+            }
+            LeqMsg::Add => d.add_window(),
+            LeqMsg::Remove => d.remove_window(),
+            LeqMsg::Cancel => self.overlay = Overlay::None,
+            LeqMsg::Submit => {}
+        }
+    }
+
+    /// Enter on the Leq dialog: the meter's windows go out (applied in place: its log and
+    /// windows carry on) and the SPL pane shows them; or the dialog says what is wrong.
+    fn submit_leq(&mut self, out: &mut Vec<Request>) {
+        let Overlay::Leq(d) = &mut self.overlay else {
+            return;
+        };
+        match d.meas_config() {
+            Ok(config) => {
+                let (meas, name) = (d.meas, d.name.clone());
+                self.overlay = Overlay::None;
+                self.view.spl.leq = true;
+                self.focus(PaneKind::Spl);
+                self.call(
+                    out,
+                    Command::MeasUpdate { meas, config },
+                    format!("{name}: Leq windows set"),
+                );
+            }
+            Err(e) => d.error = Some(e),
+        }
+    }
+
+    /// Folds the newest `leq` frame of each SPL meter into its history.
+    fn fold_leq(&mut self, d: &DataSnapshot) {
+        use ac2_proto::FrameData;
+        let cfgs: BTreeMap<MeasId, ac2_proto::model::LeqConfig> = self
+            .measurements()
+            .iter()
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Spl { config } => Some((m.id, config.leq.clone())),
+                _ => None,
+            })
+            .collect();
+        self.leq_history.retain(|k, _| cfgs.contains_key(k));
+        for tf in d.latest.frames.values() {
+            let FrameData::Leq(f) = &tf.frame.data else {
+                continue;
+            };
+            let Some(cfg) = cfgs.get(&f.meas) else {
+                continue;
+            };
+            let seq = tf.frame.stamp.seq;
+            let e = self.leq_history.entry(f.meas).or_default();
+            if seq > e.0 {
+                e.0 = seq;
+                e.1.push(cfg, f, tf.frame.stamp.capture_wall_ns.0 as f64 / 1e9);
+            }
+        }
+    }
+
+    /// Toasts each window that went over its limit or came back since the last mirror; the
+    /// alarms already there when the app connected are history, not news.
+    fn follow_leq_alarms(&mut self) {
+        let Some(st) = self.daemon() else {
+            return;
+        };
+        let names: BTreeMap<MeasId, String> = st
+            .measurements
+            .iter()
+            .map(|m| (m.id, m.config.name.clone()))
+            .collect();
+        let mut news = Vec::new();
+        let mut seen = BTreeMap::new();
+        for l in &st.spl_logs {
+            let newest = l.alarms.last().copied();
+            match self.leq_alarms_seen.get(&l.meas) {
+                None => {}
+                Some(prev) => {
+                    let from = match prev {
+                        None => 0,
+                        Some(p) => l.alarms.iter().rposition(|a| a == p).map_or(0, |i| i + 1),
+                    };
+                    let name = names.get(&l.meas).cloned().unwrap_or_default();
+                    news.extend(l.alarms[from..].iter().map(|a| (name.clone(), *a)));
+                }
+            }
+            seen.insert(l.meas, newest);
+        }
+        self.leq_alarms_seen = seen;
+        for (name, a) in news {
+            let w = ac2_proto::model::LeqWindow {
+                duration: a.duration,
+                weighting: a.weighting,
+                limit: Some(a.limit),
+                warn_margin: ac2_proto::units::Db(0.0),
+            };
+            let window = ac2_scene::leq::window_name(&w);
+            match a.kind {
+                ac2_proto::model::LeqAlarmKind::Over => self.error(format!(
+                    "{name}: {window} over its limit — {} dB > {} dB",
+                    format::level(a.leq.0),
+                    format::level(a.limit.0)
+                )),
+                ac2_proto::model::LeqAlarmKind::Recovered => self.toast(format!(
+                    "{name}: {window} back within its limit — {} dB",
+                    format::level(a.leq.0)
+                )),
+            }
         }
     }
 
@@ -3043,6 +3253,7 @@ impl AppState {
                 }
                 self.follow_output_device();
                 self.follow_sweep(out);
+                self.follow_leq_alarms();
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
                     if self.open_session().is_none() && self.overlay == Overlay::None {
@@ -3104,6 +3315,7 @@ impl AppState {
                 if self.view.spectrum.peak_hold {
                     self.fold_peaks(&d);
                 }
+                self.fold_leq(&d);
                 self.data = Some(d);
             }
             ConnEvent::Trace(mut t, g) => {

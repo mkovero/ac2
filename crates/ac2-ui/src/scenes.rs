@@ -12,8 +12,10 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
+use ac2_scene::format;
 use ac2_scene::grid::{column_edges, column_frequencies};
 use ac2_scene::ir::{IrScene, ir_scene};
+use ac2_scene::leq::{LeqScene, LeqView, leq_scene, leq_tiles};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::spectrum::{Quantity, SpectrumScene, SpectrumTrace, spectrum_scene};
 use ac2_scene::spl::{SplScene, cal_text, spl_readout, spl_scene};
@@ -395,6 +397,72 @@ pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPan
     SweepPane::Distortion(Box::new(distortion_scene(
         view, &status, &st.view, theme, size,
     )))
+}
+
+/// Calibration text of an SPL meter's input: the daemon's verdict with the input's mic.
+fn spl_cal(
+    st: &AppState,
+    input: u16,
+    cal: ac2_proto::model::CalStatus,
+    mic_curve: bool,
+    now: Now,
+) -> String {
+    let offset = ClockOffset(
+        st.mirror
+            .as_ref()
+            .and_then(|v| v.clock_offset_ns)
+            .map_or(0, |o| {
+                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            }),
+    );
+    let cal = cal_text(cal, mic_curve, now.wall, offset);
+    match st
+        .daemon()
+        .and_then(|d| d.inputs.iter().find(|i| i.channel == input))
+        .and_then(|i| i.mic.as_deref())
+    {
+        Some(mic) => format!("{mic} · {cal}"),
+        None => cal,
+    }
+}
+
+/// Whether the daemon has an SPL meter.
+pub fn has_spl(st: &AppState) -> bool {
+    st.measurements()
+        .iter()
+        .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+}
+
+/// The Leq windows of the SPL meter the pane shows (else the first one with a `leq` frame).
+pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<LeqScene> {
+    let (m, tf) = pane_order(st, PaneKind::Spl)
+        .into_iter()
+        .find_map(|(_, m)| {
+            matches!(m.config.kind, MeasKind::Spl { .. })
+                .then(|| frame(st, m.id, Stream::Leq).map(|f| (m, f)))
+                .flatten()
+        })?;
+    let FrameData::Leq(f) = &tf.frame.data else {
+        return None;
+    };
+    let MeasKind::Spl { config } = &m.config.kind else {
+        return None;
+    };
+    // The frame describes the windows of the configuration it was made under.
+    let cfg = &config.leq;
+    let fresh = freshness(tf);
+    let v = LeqView {
+        meter: m.config.name.clone(),
+        cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
+        cfg,
+        tiles: leq_tiles(cfg, f),
+        history: st.leq_history.get(&m.id).map(|(_, h)| h),
+        stale: fresh
+            .is_stale()
+            .then(|| format!("STALE {}", format::age(fresh.age_s()))),
+    };
+    let status = status(st, &[], None, now);
+    Some(leq_scene(&v, &status, theme, size))
 }
 
 /// The SPL measurement the pane shows (else the first one with a frame).

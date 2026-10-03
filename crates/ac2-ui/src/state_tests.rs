@@ -3714,3 +3714,194 @@ fn session_dialog_steps_the_mic_curve_of_a_named_mic() {
     let r = t.key("ArrowRight");
     assert_eq!(inputs_call(&r), None);
 }
+
+fn spl_meter() -> MeasKind {
+    MeasKind::Spl {
+        config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),
+    }
+}
+
+fn with_spl() -> State {
+    let mut s = daemon_state();
+    s.measurements.push(meas(4, "FOH SPL", spl_meter()));
+    s
+}
+
+/// A `leq` frame of meter 4 with `seq`, as the link delivers it.
+fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) -> ConnEvent {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{Frame, FrameData, LeqFrame, LeqMeta};
+    let n = 5;
+    let data = FrameData::Leq(LeqFrame {
+        meas: MeasId(4),
+        meta: LeqMeta {
+            scale: LevelScale::DbSpl,
+            cal: CalStatus::Verified {
+                calibrated_at: WallNs(1),
+            },
+            mic_curve: false,
+            horizon: Seconds(60.0),
+            logged: seq,
+        },
+        leq: vec![leq; n],
+        elapsed: vec![60.0; n],
+        measured: vec![60.0; n],
+        allowed: vec![f32::NAN; n],
+        recover: vec![f32::NAN; n],
+        flags: vec![flags; n],
+    });
+    let mut stamp = ac2_proto::samples::stamp(None);
+    stamp.seq = seq;
+    stamp.capture_wall_ns = WallNs(at_s * 1_000_000_000);
+    let f = TopicFrame {
+        topic: data.topic(),
+        frame: Arc::new(Frame { stamp, data }),
+        received: Instant::now(),
+        since_new: std::time::Duration::ZERO,
+        age: Some(0.0),
+        stale: false,
+    };
+    let mut latest = Latest::default();
+    latest.frames.insert(f.topic.to_string(), f);
+    ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids: Default::default(),
+        drained: Instant::now(),
+    }))
+}
+
+/// Shift+L opens the SPL meter's Leq windows by name; a preset and a typed limit, Enter
+/// sends the meter's configuration with the new windows and the SPL pane shows them. G
+/// switches the pane between the meter and its windows.
+#[test]
+fn leq_windows_from_the_keyboard() {
+    let mut t = T::new();
+    // No meter: the key says what to do.
+    t.key("Shift+L");
+    assert!(
+        t.last_toast().contains("no SPL meter"),
+        "{}",
+        t.last_toast()
+    );
+    t.conn(mirror(with_spl()));
+    t.conn(leq_data(1, 100, 80.0, ac2_proto::frame::LeqFlags::NONE));
+    t.type_key("Shift+L", "L");
+    let Overlay::Leq(d) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay)
+    };
+    assert_eq!(d.name, "FOH SPL");
+    assert!(d.calibrated);
+    assert_eq!(d.rows.len(), 5);
+    // → on the preset: DIN 15905-5 limits the 30 min window.
+    t.key("ArrowRight");
+    // ↓ ↓ to the 1 min window, Tab Tab to its limit, typed.
+    t.key("ArrowDown");
+    t.key("ArrowDown");
+    t.key("Tab");
+    t.key("Tab");
+    t.text("100");
+    let Overlay::Leq(d) = &t.st.overlay else {
+        panic!()
+    };
+    assert_eq!(d.rows[0].limit, "100");
+    assert_eq!(d.rows[3].limit, "99");
+    let r = t.key("Enter");
+    assert_eq!(t.st.overlay, Overlay::None);
+    let sent = r
+        .iter()
+        .find_map(|r| match r {
+            Request::Call {
+                cmd: Command::MeasUpdate { meas, config },
+                what,
+            } => Some((*meas, config.clone(), what.clone())),
+            _ => None,
+        })
+        .expect("meas.update");
+    assert_eq!(sent.0, MeasId(4));
+    assert_eq!(sent.2, "FOH SPL: Leq windows set");
+    let MeasKind::Spl { config } = sent.1.kind else {
+        panic!()
+    };
+    assert_eq!(config.leq.windows[0].limit, Some(DbSpl(100.0)));
+    assert_eq!(config.leq.windows[3].limit, Some(DbSpl(99.0)));
+    assert_eq!(config.input, 1);
+    assert!(t.st.view.spl.leq);
+    assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    // G: back to the meter, and again to the windows.
+    t.key("G");
+    assert!(!t.st.view.spl.leq);
+    t.key("G");
+    assert!(t.st.view.spl.leq);
+    // A refused value keeps the dialog open and says why.
+    t.type_key("Shift+L", "L");
+    t.key("ArrowDown");
+    t.key("ArrowDown");
+    t.key("Tab");
+    t.key("Tab");
+    t.text("loud");
+    t.key("Enter");
+    let Overlay::Leq(d) = &t.st.overlay else {
+        panic!()
+    };
+    assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
+}
+
+/// Each new `leq` frame goes into the meter's history once; a window going over or coming
+/// back is a toast, alarms that were there before the app connected are not.
+#[test]
+fn leq_history_and_alarm_toasts() {
+    use ac2_proto::frame::LeqFlags;
+    let mut t = T::new();
+    let mut s = with_spl();
+    let old = LeqAlarm {
+        at: WallNs(5),
+        duration: Seconds(1800.0),
+        weighting: Weighting::A,
+        kind: LeqAlarmKind::Over,
+        leq: DbSpl(99.4),
+        limit: DbSpl(99.0),
+    };
+    s.spl_logs = vec![SplLog {
+        meas: MeasId(4),
+        started_at: Some(WallNs(1)),
+        windows: vec![],
+        alarms: vec![old],
+    }];
+    t.conn(mirror(s.clone()));
+    let toasts = t.st.toasts.len();
+    let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
+    t.conn(leq_data(1, 100, 98.0, judged));
+    t.conn(leq_data(1, 100, 98.0, judged));
+    t.conn(leq_data(2, 101, 99.5, judged.with(LeqFlags::OVER)));
+    let cfg = LeqConfig::default_windows();
+    let h = &t.st.leq_history[&MeasId(4)].1;
+    let p = h.points(&cfg.windows[0]).expect("series");
+    assert_eq!(p.len(), 2);
+    assert!(p[1].over && !p[0].over);
+    assert_eq!(t.st.toasts.len(), toasts, "old alarms are history");
+    // Over, then recovered: one toast each, the over one an error.
+    let over = LeqAlarm {
+        at: WallNs(10),
+        ..old
+    };
+    s.spl_logs[0].alarms.push(over);
+    t.conn(mirror(s.clone()));
+    assert_eq!(
+        t.last_toast(),
+        "FOH SPL: LAeq 30 min over its limit — 99.4 dB > 99.0 dB"
+    );
+    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    t.conn(mirror(s.clone()));
+    assert_eq!(t.st.toasts.len(), toasts + 1, "the same alarm toasts once");
+    s.spl_logs[0].alarms.push(LeqAlarm {
+        at: WallNs(20),
+        kind: LeqAlarmKind::Recovered,
+        leq: DbSpl(98.9),
+        ..old
+    });
+    t.conn(mirror(s));
+    assert_eq!(
+        t.last_toast(),
+        "FOH SPL: LAeq 30 min back within its limit — 98.9 dB"
+    );
+}

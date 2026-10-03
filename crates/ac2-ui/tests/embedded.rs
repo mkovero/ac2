@@ -741,3 +741,243 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// Calibrates input 2 of the simulated rig against a 1 kHz tone as `ac2 cal spl` would (the
+/// app has no calibration flow of its own): a client of its own takes the stimulus lease,
+/// plays the tone at −20 dBFS and asks for 94 dB until the reading is steady, then gives
+/// the lease back.
+fn calibrate(ep: &Endpoints) -> R {
+    use ac2_client::{Client, ClientError, OnDrop};
+    use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
+    use ac2_proto::units::{DbSpl, Dbfs, Hz};
+    use ac2_proto::{Command, ReplyBody};
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let c = Client::connect(ClientConfig::new(ep.clone(), "ac2-ui e2e calibrator")).await?;
+        c.wait_synced(Duration::from_secs(10)).await?;
+        let lease = c.acquire_lease(false, OnDrop::Release).await?;
+        lease
+            .set(GeneratorDesired {
+                settings: GeneratorSettings {
+                    signal: Signal::Sine { freq: Hz(1000.0) },
+                    level: Dbfs(-20.0),
+                    band: None,
+                    outputs: vec![0],
+                },
+                armed: true,
+                firing: true,
+            })
+            .await?;
+        let end = Instant::now() + DEADLINE;
+        loop {
+            match c
+                .call(Command::CalSpl {
+                    input: 1,
+                    mic: "Room mic".into(),
+                    calibrator_level: DbSpl(94.0),
+                    calibrator_freq: Hz(1000.0),
+                })
+                .await
+            {
+                Ok(ReplyBody::Calibration(_)) => break,
+                Err(ClientError::Daemon(p)) if p.msg.contains("not steady") => {}
+                other => return Err(format!("cal.spl: {other:?}").into()),
+            }
+            if Instant::now() > end {
+                return Err("the calibrator never read steady".into());
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        lease.end().await?;
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })
+}
+
+fn spl_log(s: &AppState) -> Option<&ac2_proto::model::SplLog> {
+    s.daemon()?.spl_logs.first()
+}
+
+fn judgement(s: &AppState, i: usize) -> Option<ac2_proto::model::LeqJudgement> {
+    spl_log(s)?.windows.get(i).map(|w| w.judgement)
+}
+
+/// The tiles the SPL pane would show now, from the newest `leq` frame.
+fn tiles(s: &AppState) -> Vec<ac2_scene::leq::LeqTile> {
+    let Some(m) = s
+        .measurements()
+        .into_iter()
+        .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+    else {
+        return Vec::new();
+    };
+    let MeasKind::Spl { config } = &m.config.kind else {
+        return Vec::new();
+    };
+    let topic = Topic::Data {
+        meas: m.id,
+        stream: Stream::Leq,
+    };
+    match s
+        .data
+        .as_ref()
+        .and_then(|d| d.latest.get(&topic))
+        .map(|f| &f.frame.data)
+    {
+        Some(FrameData::Leq(f)) => ac2_scene::leq::leq_tiles(&config.leq, f),
+        _ => Vec::new(),
+    }
+}
+
+/// Leq windows with limits from an empty daemon, using the app: the session from its dialog,
+/// an SPL meter from the palette, its windows from the Leq dialog by keys (a 5 s and a 10 s
+/// window limited to 85 dB), the stimulus from the keys. Pink noise at −20 dBFS reads about
+/// 91 dB(A) on the calibrated mic: both tiles turn red, the alarms arrive as toasts; the
+/// stop brings both back under the limit, and that is a toast too.
+#[test]
+fn leq_limits_go_over_and_recover_from_the_app() -> R {
+    use ac2_proto::model::LeqJudgement;
+    use ac2_scene::leq::TileState;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+
+    // Ctrl+K, "new spl", Enter: the dialog picks the mic; Enter creates and starts it.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+    d.until("its windows, not judged yet", |s| {
+        judgement(s, 0) == Some(LeqJudgement::NoLimit)
+    })?;
+    calibrate(&ep)?;
+
+    // Shift+L: the meter's windows. ↓↓ to the first, ←←← to 5 s, Tab Tab to its limit,
+    // 85; ↓ to the second window's limit, 85, Shift+Tab ×2 to its length, ←← to 10 s.
+    d.key("Shift+L");
+    d.send(Msg::Text("L".into()));
+    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    for k in [
+        "ArrowDown",
+        "ArrowDown",
+        "ArrowLeft",
+        "ArrowLeft",
+        "ArrowLeft",
+        "Tab",
+        "Tab",
+    ] {
+        d.key(k);
+    }
+    d.send(Msg::Text("85".into()));
+    d.key("ArrowDown");
+    d.send(Msg::Text("85".into()));
+    for k in [
+        "Shift+Tab",
+        "Shift+Tab",
+        "ArrowLeft",
+        "ArrowLeft",
+        "ArrowLeft",
+    ] {
+        d.key(k);
+    }
+    if let Overlay::Leq(x) = &d.st.overlay {
+        let names: Vec<String> = x
+            .rows
+            .iter()
+            .map(|r| r.cell(ac2_ui::leq_dialog::Col::Length))
+            .collect();
+        assert_eq!(names[..2], ["LAeq 5 s", "LAeq 10 s"], "{names:?}");
+    }
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    assert!(d.st.view.spl.leq, "the SPL pane shows the windows");
+    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    // The windows are rebuilt from the meter's log, which may still hold the calibrator's
+    // 94 dB seconds (they go over and come back on their own). Then quiet, judged.
+    let quiet = |t: &ac2_scene::leq::LeqTile| {
+        t.state == TileState::Ok && t.value.parse::<f64>().is_ok_and(|v| v < 80.0)
+    };
+    d.until("both windows quiet and judged", |s| {
+        let t = tiles(s);
+        t.len() >= 2 && t[..2].iter().all(quiet)
+    })?;
+    let seen = spl_log(&d.st).map_or(0, |l| l.alarms.len());
+    let toasts = d.st.toasts.len();
+    let new_toasts = move |s: &AppState, what: &str, error: bool| {
+        s.toasts[toasts.min(s.toasts.len())..]
+            .iter()
+            .filter(|t| t.error == error && t.text.contains(what))
+            .count()
+    };
+
+    // The level typed before is kept: Space arms, Enter fires.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.until("both tiles red", |s| {
+        let t = tiles(s);
+        t.len() >= 2 && t[0].state == TileState::Over && t[1].state == TileState::Over
+    })?;
+    let t = tiles(&d.st);
+    assert_eq!(t[0].name, "LAeq 5 s");
+    assert_eq!(t[0].state_text.as_deref(), Some("OVER"));
+    assert_eq!(t[0].limit.as_deref(), Some("limit 85.0 dB"));
+    assert_eq!(t[0].unit, "dB SPL");
+    d.until("the over alarms as toasts", |s| {
+        new_toasts(s, "over its limit", true) == 2
+    })?;
+
+    d.stop()?;
+    d.until("both back under the limit", |s| {
+        let t = tiles(s);
+        t.len() >= 2
+            && t[..2].iter().all(|x| x.state == TileState::Ok)
+            && judgement(s, 1) == Some(LeqJudgement::Ok)
+    })?;
+    d.until("the recoveries as toasts", |s| {
+        new_toasts(s, "back within its limit", false) == 2
+    })?;
+    let l = spl_log(&d.st).ok_or("log")?;
+    let kinds: Vec<_> = l.alarms[seen..]
+        .iter()
+        .map(|a| (a.duration.0, a.kind))
+        .collect();
+    use ac2_proto::model::LeqAlarmKind::{Over, Recovered};
+    assert_eq!(
+        kinds,
+        [
+            (5.0, Over),
+            (10.0, Over),
+            (5.0, Recovered),
+            (10.0, Recovered)
+        ]
+    );
+    // The history holds the excursion: over-limit seconds, and ones after it that are not.
+    let (_, h) = d.st.leq_history.values().next().ok_or("history")?;
+    let m =
+        d.st.measurements()
+            .into_iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+            .ok_or("meter")?
+            .clone();
+    let MeasKind::Spl { config } = &m.config.kind else {
+        return Err("not an SPL meter".into());
+    };
+    let p = h.points(&config.leq.windows[0]).ok_or("points")?;
+    assert!(p.iter().any(|x| x.over));
+    assert!(!p.back().ok_or("newest")?.over);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

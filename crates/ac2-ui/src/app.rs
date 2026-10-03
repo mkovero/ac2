@@ -78,6 +78,8 @@ pub struct App {
     pub startup: StartupTiming,
     bench_startup: bool,
     applied_theme: Option<ThemeName>,
+    /// The full-screen state last sent to the window.
+    applied_fullscreen: bool,
     pub(crate) generation: u64,
     pub(crate) scenes: HashMap<PaneKind, CachedScene>,
     pub(crate) plots: bool,
@@ -139,6 +141,7 @@ impl App {
             startup: StartupTiming::default(),
             bench_startup: opts.bench_startup,
             applied_theme: None,
+            applied_fullscreen: false,
             generation: 0,
             scenes: HashMap::new(),
             plots,
@@ -248,6 +251,7 @@ impl App {
                 | Overlay::Form(_)
                 | Overlay::Session(_)
                 | Overlay::Calibrations(_)
+                | Overlay::Leq(_)
         );
         let events = ctx.input_mut(|i| {
             let (mine, rest): (Vec<Event>, Vec<Event>) =
@@ -349,6 +353,10 @@ impl eframe::App for App {
         }
         if self.state.quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if self.applied_fullscreen != self.state.fullscreen {
+            self.applied_fullscreen = self.state.fullscreen;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.state.fullscreen));
         }
 
         let t = self.theme();

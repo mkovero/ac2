@@ -19,6 +19,19 @@ use crate::mirror::MirrorView;
 
 /// No new frame on a topic for this long, or a frame older than this: STALE.
 pub const STALE_AFTER: Duration = Duration::from_secs(1);
+/// The same for `leq` frames, which come once a second by design: three missed.
+pub const STALE_AFTER_LEQ: Duration = Duration::from_secs(3);
+
+/// When a topic's newest frame counts as stale.
+pub fn stale_after(t: &Topic) -> Duration {
+    match t {
+        Topic::Data {
+            stream: ac2_proto::Stream::Leq,
+            ..
+        } => STALE_AFTER_LEQ,
+        _ => STALE_AFTER,
+    }
+}
 /// Most messages read by one drain; bounds the time spent when the publisher outpaces us.
 pub const DRAIN_LIMIT: usize = 4096;
 
@@ -53,7 +66,8 @@ pub struct TopicFrame {
     /// Frame age, `now_local + offset − capture_wall_ns`, seconds; `None` until a keepalive
     /// gave a clock offset.
     pub age: Option<f64>,
-    /// STALE (Q2): no new frame for 1 s, age above 1 s, or the daemon not responding.
+    /// STALE (Q2): no new frame for 1 s, age above 1 s (3 s for `leq`), or the daemon not
+    /// responding.
     pub stale: bool,
 }
 
@@ -202,9 +216,10 @@ impl DataState {
             .map(|(topic, k)| {
                 let since_new = now.saturating_duration_since(k.received);
                 let age = frame_age(&k.frame, now_wall_ns, view.clock_offset_ns);
+                let after = stale_after(topic);
                 let stale = !responding
-                    || since_new > STALE_AFTER
-                    || age.is_some_and(|a| a > STALE_AFTER.as_secs_f64());
+                    || since_new > after
+                    || age.is_some_and(|a| a > after.as_secs_f64());
                 (
                     topic.to_string(),
                     TopicFrame {

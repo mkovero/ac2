@@ -223,6 +223,13 @@ impl Default for DistortionView {
     }
 }
 
+/// The SPL pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct SplView {
+    /// The meter's rolling Leq windows instead of its readout.
+    pub leq: bool,
+}
+
 /// Everything the operator chose about the view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewState {
@@ -232,6 +239,7 @@ pub struct ViewState {
     pub spectrum: SpectrumView,
     pub ir: IrView,
     pub distortion: DistortionView,
+    pub spl: SplView,
     /// Comparison cursor, Hz; synchronised across traces and panes.
     pub cursor_hz: Option<f64>,
     /// Air temperature for the delay → distance readout (decision A).
@@ -246,6 +254,7 @@ impl Default for ViewState {
             spectrum: SpectrumView::default(),
             ir: IrView::default(),
             distortion: DistortionView::default(),
+            spl: SplView::default(),
             cursor_hz: None,
             temperature_c: 20.0,
         }

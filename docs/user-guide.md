@@ -460,6 +460,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `/` or `F1` | Show / hide key bindings | `help` |
 | `Ctrl+K` | Command palette | `palette` |
 | `Ctrl+Q` | Quit | `quit` |
+| `F11` | Full screen on / off | `fullscreen` |
 | `Space` | Stimulus: arm (needs a typed level) | `stimulus_arm` |
 | `Enter` | Stimulus: fire (when armed) | `stimulus_fire` |
 | `Esc` | Stimulus: stop and disarm | `stimulus_stop` |
@@ -509,6 +510,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+V` | Select previous shown slot (then live) | `prev_slot` |
 | `Shift+O` | Open audio session… | `session_open` |
 | `Shift+S` | Sweep measurement: response and harmonic distortion… | `sweep_new` |
+| `Shift+L` | Leq windows and limits of the SPL meter… | `leq_windows` |
 
 #### Transfer function
 
@@ -561,6 +563,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
+| `G` | SPL: meter / Leq windows | `spl_leq_view` |
 
 #### Sweep / distortion
 

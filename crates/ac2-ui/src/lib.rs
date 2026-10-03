@@ -20,6 +20,7 @@ pub mod connect;
 pub mod embedded;
 pub mod forms;
 pub mod keys;
+pub mod leq_dialog;
 pub mod palette;
 pub mod plot;
 pub mod prefs;
