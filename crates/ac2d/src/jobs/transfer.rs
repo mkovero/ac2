@@ -35,6 +35,23 @@ use crate::fanout::Block;
 const ROUTING_CORRELATION: f64 = 0.99;
 /// Measurement level above which a silent reference means swapped inputs, dBFS.
 const ROUTING_SIGNAL_DBFS: f64 = -60.0;
+/// A mis-patch is a standing fault, not a moment: CHECK ROUTING rises only after the finding
+/// has held this long, and clears after it has been absent this long, so room noise
+/// hovering at the level rule's threshold cannot flash it.
+const ROUTING_RAISE_S: f64 = 1.0;
+const ROUTING_CLEAR_S: f64 = 2.0;
+
+/// What one interval of the routing check found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Routing {
+    /// Nothing to say (or nothing measured).
+    Clean,
+    /// The same signal on both inputs: one source patched to both.
+    Identical,
+    /// A silent reference with a live measurement input: the inputs may be swapped, or the
+    /// reference is simply missing (which NO REFERENCE already reports).
+    ReferenceSilent,
+}
 
 /// Zero-lag routing check over one frame interval.
 #[derive(Debug, Default, Clone, Copy)]
@@ -56,24 +73,55 @@ impl RoutingCheck {
         self.n += r.len().min(m.len()) as u64;
     }
 
-    /// Whether the interval looks mis-patched, given the reference floor; then a new interval.
-    pub(crate) fn take(&mut self, reference_floor_dbfs: f64) -> bool {
+    /// What the interval looks like, given the reference floor, and its length in samples;
+    /// then a new interval.
+    pub(crate) fn take(&mut self, reference_floor_dbfs: f64) -> (Routing, u64) {
         let c = *self;
         *self = Self::default();
         if c.n == 0 {
-            return false;
+            return (Routing::Clean, 0);
         }
         let n = c.n as f64;
         let ref_db = ac2_core::spectrum::rms_dbfs((c.rr / n).sqrt());
         let meas_db = ac2_core::spectrum::rms_dbfs((c.mm / n).sqrt());
         if ref_db < reference_floor_dbfs && meas_db > ROUTING_SIGNAL_DBFS {
-            return true;
+            return (Routing::ReferenceSilent, c.n);
         }
         if ref_db >= reference_floor_dbfs && c.mm > 0.0 {
             let corr = c.rm / (c.rr * c.mm).sqrt();
-            return corr.abs() >= ROUTING_CORRELATION;
+            if corr.abs() >= ROUTING_CORRELATION {
+                return (Routing::Identical, c.n);
+            }
         }
-        false
+        (Routing::Clean, c.n)
+    }
+}
+
+/// CHECK ROUTING with time hysteresis (see [`ROUTING_RAISE_S`]).
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct RoutingLatch {
+    up: bool,
+    present_s: f64,
+    absent_s: f64,
+}
+
+impl RoutingLatch {
+    /// One interval of `dt_s` seconds in which the finding was (or was not) present.
+    pub(crate) fn step(&mut self, present: bool, dt_s: f64) -> bool {
+        if present {
+            self.present_s += dt_s;
+            self.absent_s = 0.0;
+            if self.present_s >= ROUTING_RAISE_S {
+                self.up = true;
+            }
+        } else {
+            self.absent_s += dt_s;
+            self.present_s = 0.0;
+            if self.absent_s >= ROUTING_CLEAR_S {
+                self.up = false;
+            }
+        }
+        self.up
     }
 }
 
@@ -95,7 +143,7 @@ pub(crate) struct Transfer {
     apply_pending: bool,
     levels: LevelsMeter,
     routing: RoutingCheck,
-    check_routing: bool,
+    check_routing: RoutingLatch,
     rbuf: Vec<f32>,
     mbuf: Vec<f32>,
     end: Option<u64>,
@@ -201,7 +249,7 @@ impl Transfer {
             applied_at: 0,
             apply_pending: true,
             routing: RoutingCheck::default(),
-            check_routing: false,
+            check_routing: RoutingLatch::default(),
             rbuf: Vec::new(),
             mbuf: Vec::new(),
             end: None,
@@ -356,9 +404,17 @@ impl Analysis for Transfer {
         let Some(end) = self.end else {
             return;
         };
-        let routing = self.routing.take(self.guard.config().reference_floor_dbfs);
-        self.check_routing = routing;
+        let (routing, n) = self.routing.take(self.guard.config().reference_floor_dbfs);
         let banners = self.guard.banners();
+        // With NO REFERENCE up, a silent reference is already reported; only identical inputs
+        // add something then. Without it, a silent reference beside a live measurement input
+        // still points at swapped inputs.
+        let finding = match routing {
+            Routing::Identical => true,
+            Routing::ReferenceSilent => !banners.no_reference,
+            Routing::Clean => false,
+        };
+        let check_routing = self.check_routing.step(finding, n as f64 / self.fs);
         let mut prot = ProtectionFlags::NONE;
         if banners.no_reference {
             prot = prot.with(ProtectionFlags::NO_REFERENCE);
@@ -375,7 +431,7 @@ impl Analysis for Transfer {
         if self.discontinuity_until > end {
             prot = prot.with(ProtectionFlags::DISCONTINUITY);
         }
-        if self.check_routing {
+        if check_routing {
             prot = prot.with(ProtectionFlags::CHECK_ROUTING);
         }
         let stamp = StampArgs {
@@ -516,19 +572,49 @@ mod tests {
         // Same signal on both inputs, different gain.
         let half: Vec<f32> = noise.iter().map(|v| v * 0.5).collect();
         c.push(&noise, &half);
-        assert!(c.take(-80.0));
+        assert_eq!(c.take(-80.0), (Routing::Identical, 4800));
         // Reference silent, measurement live.
         c.push(&vec![0.0; 4800], &noise);
-        assert!(c.take(-80.0));
+        assert_eq!(c.take(-80.0), (Routing::ReferenceSilent, 4800));
         // Delayed copy: not flagged.
         let delayed: Vec<f32> = std::iter::repeat_n(0.0, 37)
             .chain(noise.iter().copied())
             .take(4800)
             .collect();
         c.push(&noise, &delayed);
-        assert!(!c.take(-80.0));
+        assert_eq!(c.take(-80.0).0, Routing::Clean);
         // Nothing at all: not flagged.
         c.push(&vec![0.0; 4800], &vec![0.0; 4800]);
-        assert!(!c.take(-80.0));
+        assert_eq!(c.take(-80.0).0, Routing::Clean);
+    }
+
+    /// Room noise hovering at the level rule's threshold (present one interval in three, as
+    /// on the rig with no reference connected) never raises CHECK ROUTING; a standing finding
+    /// does, after a second, and clears only after two seconds without it.
+    #[test]
+    fn routing_latch_needs_a_standing_finding() {
+        let dt = 1.0 / 30.0;
+        let mut l = RoutingLatch::default();
+        for k in 0..300 {
+            assert!(!l.step(k % 3 == 0, dt), "flashed at interval {k}");
+        }
+        let mut raised_at = None;
+        for k in 0..60 {
+            if l.step(true, dt) && raised_at.is_none() {
+                raised_at = Some(k);
+            }
+        }
+        let r = raised_at.expect("raised");
+        assert!((28..=30).contains(&r), "raised after {r} intervals");
+        // A short gap keeps it up; a long one clears it.
+        for _ in 0..30 {
+            assert!(l.step(false, dt));
+        }
+        assert!(l.step(true, dt));
+        let mut cleared = false;
+        for _ in 0..70 {
+            cleared |= !l.step(false, dt);
+        }
+        assert!(cleared);
     }
 }
