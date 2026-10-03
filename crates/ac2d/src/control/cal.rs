@@ -1,5 +1,5 @@
 //! Calibration commands (`docs/design/q7-calibration.md`): sensitivity calibrations
-//! (`cal.spl`, `cal.delete`), the mic library (`cal.curve_import`, `cal.curve_rename`,
+//! (`cal.spl`, `cal.spl_electrical`, `cal.delete`), the mic library (`cal.curve_import`, `cal.curve_rename`,
 //! `cal.curve_delete`), the input setup (`session.inputs`) and `cal.list`.
 //!
 //! Every change goes through [`Control::commit_store`]: the store file is written first
@@ -11,9 +11,10 @@ use std::sync::Arc;
 use ac2_core::mic_curve::{MicCurve, file_info};
 use ac2_proto::cal;
 use ac2_proto::model::{
-    CalEntry, CalKey, CurveChoice, InputSetup, Mic, MicCurveId, MicCurveRef, SplCal,
+    CalEntry, CalKey, CalMethod, CurveChoice, ElectricalConnection, InputSetup, Mic, MicCurveId,
+    MicCurveRef, SensitivitySource, SplCal,
 };
-use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, Rev, WallNs};
+use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, Volts, WallNs};
 
 use super::{
     Change, Control, ErrorCode, MAX_CAL_UNSETTLED_DB, Patch, ProtoError, ReplyBody, block_index,
@@ -31,6 +32,18 @@ fn set_input_mic(inputs: &[InputSetup], channel: u16, mic: &str) -> Vec<InputSet
         row.curve = CurveChoice::NotChosen;
     }
     upsert_inputs(inputs, vec![row])
+}
+
+/// The fields of `cal.spl_electrical`.
+pub(super) struct ElectricalArgs {
+    pub(super) input: u16,
+    pub(super) mic: String,
+    pub(super) connection: ElectricalConnection,
+    pub(super) volts: Volts,
+    pub(super) freq: Hz,
+    pub(super) mic_sensitivity: Option<MvPerPa>,
+    pub(super) uncertainty: Option<Db>,
+    pub(super) replace_acoustic: bool,
 }
 
 fn not_found(msg: String) -> ProtoError {
@@ -115,6 +128,68 @@ impl Control {
         Ok(rt.open.input_device.clone())
     }
 
+    /// The steady, uncorrected broadband level of `input` (τ = 1 s) for a calibration,
+    /// with the device it is tied to. Refused without a session, without signal (below
+    /// −80 dBFS), when the input reached full scale in the last 2 s (a clipped tone reads
+    /// low) and while the level is not steady. `tone` names the signal in the refusals.
+    fn cal_reading(
+        &self,
+        input: u16,
+        tone: &str,
+    ) -> Result<(ac2_proto::model::DeviceId, f64), ProtoError> {
+        let device = self.cal_target(input)?;
+        let Some(rt) = self.session.as_ref() else {
+            return Err(perr(ErrorCode::Invalid, "no open session"));
+        };
+        let idx = block_index(&rt.input_map, input)
+            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
+        // Broadband and uncorrected: the mic curve is 0 dB at the calibration frequency,
+        // so the corrected paths read the tone the same (Q7 §3).
+        let (ms, fast) = rt.fanout.meters.mean_square(idx).unwrap_or((0.0, 0.0));
+        let measured = ac2_core::spectrum::rms_dbfs(ms.sqrt());
+        if !(measured.is_finite() && measured > -80.0) {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!("no {tone} signal on input {input} ({measured:.1} dBFS)"),
+            ));
+        }
+        let latest = rt.fanout.latest.load(std::sync::atomic::Ordering::Acquire);
+        if let Some(end) = rt.fanout.meters.clipped_until(idx)
+            && latest.saturating_sub(end) < 2 * u64::from(rt.sample_rate)
+        {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "input {input} clipped in the last 2 s: a clipped {tone} reads low; lower \
+                     the level or the gain and retry"
+                ),
+            ));
+        }
+        // The 1 s mean square is within 0.05 dB of a steady level once the 0.2 s one agrees
+        // with it that closely (about 5 s after the tone went on).
+        let unsettled = 10.0 * (fast / ms).log10();
+        if unsettled.is_nan() || unsettled.abs() > MAX_CAL_UNSETTLED_DB {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "the {tone} level on input {input} is not steady yet ({unsettled:+.2} dB \
+                     over the last second); keep it on and retry in a few seconds"
+                ),
+            ));
+        }
+        Ok((device, measured))
+    }
+
+    /// Stores `entry` (replacing the key's calibration) and binds the input's mic name.
+    fn store_calibration(&mut self, entry: &CalEntry) -> Result<(), ProtoError> {
+        let mut new = self.cal_contents();
+        new.calibrations.retain(|e| e.key != entry.key);
+        new.calibrations.push(entry.clone());
+        new.inputs = set_input_mic(&new.inputs, entry.key.channel, &entry.key.mic);
+        self.commit_store(new, self.cal.curves())?;
+        Ok(())
+    }
+
     pub(super) fn cal_spl(
         &mut self,
         input: u16,
@@ -133,34 +208,9 @@ impl Control {
                 "calibrator level and frequency must be finite, the frequency above 0 Hz",
             ));
         }
-        let device = self.cal_target(input)?;
-        let Some(rt) = self.session.as_ref() else {
-            return Err(perr(ErrorCode::Invalid, "no open session"));
-        };
-        let idx = block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {input} is not captured")))?;
-        // Broadband and uncorrected: the mic curve is 0 dB at the calibrator frequency, so
-        // the corrected paths read the calibrator the same (Q7 §3).
-        let (ms, fast) = rt.fanout.meters.mean_square(idx).unwrap_or((0.0, 0.0));
-        let measured = ac2_core::spectrum::rms_dbfs(ms.sqrt());
-        if !(measured.is_finite() && measured > -80.0) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("no calibrator signal on input {input} ({measured:.1} dBFS)"),
-            ));
-        }
-        // The 1 s mean square is within 0.05 dB of a steady level once the 0.2 s one agrees
-        // with it that closely (about 5 s after the calibrator went on).
-        let unsettled = 10.0 * (fast / ms).log10();
-        if unsettled.is_nan() || unsettled.abs() > MAX_CAL_UNSETTLED_DB {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "the calibrator level on input {input} is not steady yet ({unsettled:+.2} dB \
-                     over the last second); keep it on and retry in a few seconds"
-                ),
-            ));
-        }
+        let (device, measured) = self.cal_reading(input, "calibrator")?;
+        // A calibrator measures the whole chain, capsule included: it replaces an electrical
+        // calibration of the key without asking.
         let entry = CalEntry {
             key: CalKey {
                 device,
@@ -169,20 +219,161 @@ impl Control {
             },
             spl: SplCal {
                 sensitivity: Db(calibrator_level.0 - measured),
-                calibrator_level,
-                calibrator_freq,
+                method: CalMethod::Acoustic { calibrator_level },
+                freq: calibrator_freq,
                 measured: Dbfs(measured),
                 calibrated_at: WallNs(wall_ns()),
             },
         };
-        let mut new = self.cal_contents();
-        new.calibrations.retain(|e| e.key != entry.key);
-        new.calibrations.push(entry.clone());
-        new.inputs = set_input_mic(&new.inputs, input, &mic);
-        self.commit_store(new, self.cal.curves())?;
+        self.store_calibration(&entry)?;
         tracing::info!(
             "input {input} ({mic}) calibrated: {measured:.2} dBFS at {:.1} dB SPL",
             calibrator_level.0
+        );
+        Ok(ReplyBody::Calibration(entry))
+    }
+
+    /// `cal.spl_electrical` (Q7 §11): the voltage the operator measured at the input, the
+    /// level read at the same time and the mic's sensitivity give dB SPL of 0 dBFS.
+    pub(super) fn cal_spl_electrical(
+        &mut self,
+        a: ElectricalArgs,
+    ) -> Result<ReplyBody, ProtoError> {
+        self.cal.check()?;
+        calstore::check_mic_name(&a.mic)?;
+        let invalid = |m: String| perr(ErrorCode::Invalid, m);
+        let input = a.input;
+        // Ranges that catch a unit slip (mV typed as V, V/Pa as mV/Pa) rather than limits of
+        // the method.
+        if !(a.volts.0.is_finite() && (1e-4..=100.0).contains(&a.volts.0)) {
+            return Err(invalid(format!(
+                "measured voltage {} V is outside 0.1 mV … 100 V RMS",
+                a.volts.0
+            )));
+        }
+        if !(a.freq.0.is_finite() && (20.0..=20_000.0).contains(&a.freq.0)) {
+            return Err(invalid(format!(
+                "tone frequency {} Hz is outside 20 Hz … 20 kHz (1 kHz is the one mic \
+                 sensitivities are stated at)",
+                a.freq.0
+            )));
+        }
+        let uncertainty = a.uncertainty.unwrap_or(cal::DEFAULT_ELECTRICAL_UNCERTAINTY);
+        let (lo, hi) = cal::ELECTRICAL_UNCERTAINTY_RANGE;
+        if !(uncertainty.0.is_finite() && (lo..=hi).contains(&uncertainty.0)) {
+            return Err(invalid(format!(
+                "stated uncertainty ±{} dB is outside ±{lo} … ±{hi} dB",
+                uncertainty.0
+            )));
+        }
+        let (mic_sensitivity, from) = match a.mic_sensitivity {
+            Some(s) => (s, SensitivitySource::Typed),
+            None => match cal::data_sheet(&self.store.state().mics, &a.mic) {
+                cal::DataSheet::One(s, from) => (s, from),
+                cal::DataSheet::NoMic => {
+                    return Err(invalid(format!(
+                        "no mic sensitivity given and {} has no curve file in the mic library \
+                         to take a data-sheet value from: give the sensitivity (mV/Pa)",
+                        a.mic
+                    )));
+                }
+                cal::DataSheet::NoneStated => {
+                    return Err(invalid(format!(
+                        "no mic sensitivity given and the curve files of {} state none: give \
+                         the sensitivity (mV/Pa) from its data sheet",
+                        a.mic
+                    )));
+                }
+                cal::DataSheet::Differ(v) => {
+                    let v: Vec<String> = v.iter().map(|x| format!("{x} mV/Pa")).collect();
+                    return Err(invalid(format!(
+                        "the curve files of {} state different sensitivities ({}): give the \
+                         one to use",
+                        a.mic,
+                        v.join(", ")
+                    )));
+                }
+            },
+        };
+        if !(mic_sensitivity.0.is_finite() && (0.1..=1000.0).contains(&mic_sensitivity.0)) {
+            return Err(invalid(format!(
+                "mic sensitivity {} mV/Pa is outside 0.1 … 1000 mV/Pa",
+                mic_sensitivity.0
+            )));
+        }
+        let device = self.cal_target(input)?;
+        let key = CalKey {
+            device,
+            channel: input,
+            mic: a.mic.clone(),
+        };
+        if !a.replace_acoustic
+            && let Some(e) = self
+                .store
+                .state()
+                .calibrations
+                .iter()
+                .find(|e| e.key == key)
+            && let CalMethod::Acoustic { calibrator_level } = e.spl.method
+        {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "input {input} has an acoustic calibration for {} ({:.1} dB SPL calibrator): \
+                     it measured the whole chain and is the better one; replace it only on \
+                     purpose",
+                    a.mic, calibrator_level.0
+                ),
+            ));
+        }
+        let (_, measured) = self.cal_reading(input, "tone")?;
+        if measured > cal::ELECTRICAL_MAX_DBFS {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "input {input} reads {measured:.1} dBFS, too close to full scale for a \
+                     calibration (at most {} dBFS): lower the tone, not the gain",
+                    cal::ELECTRICAL_MAX_DBFS
+                ),
+            ));
+        }
+        if measured < cal::ELECTRICAL_MIN_DBFS {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "input {input} reads {measured:.1} dBFS, too low for a good reading (at \
+                     least {} dBFS): raise the tone, not the gain",
+                    cal::ELECTRICAL_MIN_DBFS
+                ),
+            ));
+        }
+        let full_scale = cal::full_scale_volts(a.volts.0, measured);
+        let sensitivity = cal::electrical_sensitivity_db(full_scale, mic_sensitivity.0);
+        let entry = CalEntry {
+            key,
+            spl: SplCal {
+                sensitivity: Db(sensitivity),
+                method: CalMethod::Electrical {
+                    connection: a.connection,
+                    volts: a.volts,
+                    full_scale: Volts(full_scale),
+                    mic_sensitivity,
+                    mic_sensitivity_from: from,
+                    uncertainty,
+                },
+                freq: a.freq,
+                measured: Dbfs(measured),
+                calibrated_at: WallNs(wall_ns()),
+            },
+        };
+        self.store_calibration(&entry)?;
+        tracing::info!(
+            "input {input} ({}) calibrated electrically ({:?}): {} V read at {measured:.2} dBFS \
+             → {full_scale:.4} V at 0 dBFS, {} mV/Pa → 0 dBFS = {sensitivity:.2} dB SPL",
+            a.mic,
+            a.connection,
+            a.volts.0,
+            mic_sensitivity.0
         );
         Ok(ReplyBody::Calibration(entry))
     }

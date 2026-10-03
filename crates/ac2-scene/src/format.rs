@@ -106,6 +106,32 @@ pub fn freq_readout(hz: f64) -> String {
     }
 }
 
+/// Voltage, four significant digits (a bench meter's resolution) in µV, mV or V:
+/// `15.03 mV`, `1.500 V`, `250.0 µV`.
+pub fn volts(v: f64) -> String {
+    if !v.is_finite() || v <= 0.0 {
+        return NO_VALUE.to_string();
+    }
+    let r = round_sig(v, 4);
+    let (x, unit) = if r >= 1.0 {
+        (r, "V")
+    } else if r >= 1e-3 {
+        (r * 1e3, "mV")
+    } else {
+        (r * 1e6, "µV")
+    };
+    let decimals = if x < 10.0 {
+        3
+    } else if x < 100.0 {
+        2
+    } else if x < 1000.0 {
+        1
+    } else {
+        0
+    };
+    format!("{} {unit}", fixed(x, decimals))
+}
+
 /// Level difference readout: `+3.2 dB`, `−12.0 dB`.
 pub fn db_readout(db: f64) -> String {
     with_unit(signed(db, 1), " dB")

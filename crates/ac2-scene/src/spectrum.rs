@@ -49,12 +49,13 @@ impl Quantity {
 /// (`docs/design/q7-calibration.md` §3), so no client clock offset enters it.
 pub fn cal_caption(cal: CalStatus, curve: Option<&str>, captured: WallNs) -> String {
     let mut s = String::new();
-    match cal {
-        CalStatus::Uncalibrated => {}
-        CalStatus::OtherMicOrInput { .. } => s.push_str(" · cal from other mic / input"),
-        CalStatus::Verified { calibrated_at } => {
-            let age = captured.0.saturating_sub(calibrated_at.0) as f64 / 1e9;
-            s.push_str(&format!(" · cal {}", format::ago(age)));
+    if let CalStatus::Verified { calibrated_at, .. }
+    | CalStatus::OtherMicOrInput { calibrated_at, .. } = cal
+    {
+        let age = captured.0.saturating_sub(calibrated_at.0) as f64 / 1e9;
+        if let Some(t) = crate::cal::status_text(cal, age) {
+            s.push_str(" · ");
+            s.push_str(&t);
         }
     }
     if let Some(c) = curve {
@@ -606,42 +607,67 @@ mod tests {
         );
         let at = WallNs(97 * H - 59_000_000_000);
         assert_eq!(
-            cal_caption(CalStatus::Verified { calibrated_at: at }, None, now),
-            " · cal 3 h ago"
-        );
-        assert_eq!(
-            cal_caption(
-                CalStatus::Verified { calibrated_at: at },
-                Some("mic curve off"),
-                now
-            ),
-            " · cal 3 h ago · mic curve off"
-        );
-        assert_eq!(
             cal_caption(
                 CalStatus::Verified {
-                    calibrated_at: WallNs(100 * H - 600_000_000_000)
+                    calibrated_at: at,
+                    basis: ac2_proto::model::CalBasis::Acoustic {
+                        calibrator_level: ac2_proto::units::DbSpl(94.0)
+                    }
                 },
                 None,
                 now
             ),
-            " · cal 10 min ago"
+            " · cal 94 dB · 3 h ago"
+        );
+        assert_eq!(
+            cal_caption(
+                CalStatus::Verified {
+                    calibrated_at: at,
+                    basis: ac2_proto::model::CalBasis::Acoustic {
+                        calibrator_level: ac2_proto::units::DbSpl(94.0)
+                    }
+                },
+                Some("mic curve off"),
+                now
+            ),
+            " · cal 94 dB · 3 h ago · mic curve off"
+        );
+        assert_eq!(
+            cal_caption(
+                CalStatus::Verified {
+                    calibrated_at: WallNs(100 * H - 600_000_000_000),
+                    basis: ac2_proto::model::CalBasis::Acoustic {
+                        calibrator_level: ac2_proto::units::DbSpl(94.0)
+                    }
+                },
+                None,
+                now
+            ),
+            " · cal 94 dB · 10 min ago"
         );
         // A calibration stamped after the frame (clock stepped back) is not in the future.
         assert_eq!(
             cal_caption(
                 CalStatus::Verified {
-                    calibrated_at: WallNs(101 * H)
+                    calibrated_at: WallNs(101 * H),
+                    basis: ac2_proto::model::CalBasis::Acoustic {
+                        calibrator_level: ac2_proto::units::DbSpl(94.0)
+                    }
                 },
                 None,
                 now
             ),
-            " · cal just now"
+            " · cal 94 dB · just now"
         );
         // The mismatch says so instead of an age: the age would be another mic's.
         assert_eq!(
             cal_caption(
-                CalStatus::OtherMicOrInput { calibrated_at: at },
+                CalStatus::OtherMicOrInput {
+                    calibrated_at: at,
+                    basis: ac2_proto::model::CalBasis::Acoustic {
+                        calibrator_level: ac2_proto::units::DbSpl(94.0)
+                    }
+                },
                 Some("mic curve: MM1 0°"),
                 now
             ),
@@ -655,6 +681,9 @@ mod tests {
         const H: u64 = 3_600_000_000_000;
         let cal = CalStatus::Verified {
             calibrated_at: WallNs(H),
+            basis: ac2_proto::model::CalBasis::Acoustic {
+                calibrator_level: ac2_proto::units::DbSpl(94.0),
+            },
         };
         let rta = RtaFrame {
             meas: MeasId(1),
@@ -681,7 +710,7 @@ mod tests {
         );
         assert_eq!(
             t.caption,
-            "1/3 oct · A-weighted · cal 2 h ago · mic curve: MM1 90°"
+            "1/3 oct · A-weighted · cal 94 dB · 2 h ago · mic curve: MM1 90°"
         );
         let spec = SpecFrame {
             meas: MeasId(2),
@@ -705,7 +734,7 @@ mod tests {
             Color::WHITE,
             fresh,
         );
-        assert_eq!(t.caption, "Hann window · cal 1 d ago");
+        assert_eq!(t.caption, "Hann window · cal 94 dB · 1 d ago");
         assert_eq!(t.quantity, Quantity::Tone);
         let mut smoothed = spec.clone();
         smoothed.meta.smoothing = Some(SmoothingFraction::Sixth);
@@ -719,7 +748,7 @@ mod tests {
             Color::WHITE,
             fresh,
         );
-        assert_eq!(t.caption, "Hann window · cal 1 d ago");
+        assert_eq!(t.caption, "Hann window · cal 94 dB · 1 d ago");
         assert_eq!(t.quantity, Quantity::SmoothedTone(SmoothingFraction::Sixth));
     }
 

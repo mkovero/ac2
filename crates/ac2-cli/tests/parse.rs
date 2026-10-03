@@ -113,6 +113,22 @@ fn plan_examples_parse() {
     assert_eq!(a.freq, Freq(Hz(1000.0)));
     assert_eq!(a.mic, None);
 
+    let c = ok(&["cal", "electrical", "--input", "2", "--volts", "15.03mv"]);
+    let Cmd::Cal {
+        cmd: CalCmd::Electrical(a),
+    } = c.cmd
+    else {
+        panic!("not cal electrical");
+    };
+    assert_eq!(a.volts.0.0, 0.01503);
+    assert_eq!(a.freq, Freq(Hz(1000.0)));
+    assert_eq!(a.method, ElectricalMethodArg::Inline);
+    assert_eq!(a.sensitivity, None);
+    assert!(!a.replace_acoustic);
+    // Every value carries its unit: a bare voltage is refused.
+    assert!(parse(&["cal", "electrical", "--input", "2", "--volts", "0.015"]).is_err());
+    assert!(parse(&["cal", "electrical", "--input", "2"]).is_err());
+
     ok(&["trace", "capture", "main-l", "--name", "l-pre-eq"]);
     let c = ok(&["trace", "export", "l-pre-eq", "--csv", "out.csv"]);
     assert!(matches!(

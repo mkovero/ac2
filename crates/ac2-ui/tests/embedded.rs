@@ -1552,3 +1552,235 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// A steady 1 kHz tone at −20 dBFS on the simulated rig's output from a client of its own:
+/// the operator's own tone source of an in-line electrical calibration. Holds the stimulus
+/// lease until dropped.
+struct Tone {
+    rt: tokio::runtime::Runtime,
+    lease: Option<ac2_client::StimulusLease>,
+    _client: ac2_client::Client,
+}
+
+impl Tone {
+    fn start(ep: &Endpoints) -> R<Self> {
+        use ac2_client::{Client, OnDrop};
+        use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
+        use ac2_proto::units::{Dbfs, Hz};
+        let rt = tokio::runtime::Runtime::new()?;
+        let (client, lease) = rt.block_on(async {
+            let c = Client::connect(ClientConfig::new(ep.clone(), "ac2-ui e2e tone")).await?;
+            c.wait_synced(Duration::from_secs(10)).await?;
+            let lease = c.acquire_lease(false, OnDrop::Release).await?;
+            lease
+                .set(GeneratorDesired {
+                    settings: GeneratorSettings {
+                        signal: Signal::Sine { freq: Hz(1000.0) },
+                        level: Dbfs(-20.0),
+                        band: None,
+                        outputs: vec![0],
+                    },
+                    armed: true,
+                    firing: true,
+                })
+                .await?;
+            Ok::<_, Box<dyn std::error::Error>>((c, lease))
+        })?;
+        Ok(Self {
+            rt,
+            lease: Some(lease),
+            _client: client,
+        })
+    }
+}
+
+impl Drop for Tone {
+    fn drop(&mut self) {
+        if let Some(l) = self.lease.take() {
+            let _ = self.rt.block_on(l.end());
+        }
+    }
+}
+
+/// The text labels of a scene.
+fn scene_texts(s: &ac2_scene::primitives::Scene) -> Vec<String> {
+    s.layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.clone()))
+        .collect()
+}
+
+/// Electrical calibration (no acoustic calibrator) from an empty daemon with the app
+/// alone: a session from its dialog, an SPL meter from the palette, the mic named and its
+/// curve file (which states 15.0 mV/Pa) imported in the calibrations view, then E on the mic's input:
+/// the dialog offers the data sheet's sensitivity, the operator types the voltage the meter
+/// shows (15 mV) while a steady 1 kHz tone plays, Enter. The SPL meter then reads dB SPL,
+/// says the calibration is electrical with its uncertainty, and so does the Leq caption.
+#[test]
+fn electrical_calibration_from_the_app() -> R {
+    use ac2_proto::model::{CalBasis, CalStatus, LevelScale};
+    use ac2_ui::cal_view::{CalLine, lines};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+
+    // The calibrations view, on the mic's input (in 2, "Room mic").
+    d.key("Ctrl+K");
+    d.send(Msg::Text("calibrations".into()));
+    d.key("Enter");
+    let focused = |s: &AppState| match &s.overlay {
+        Overlay::Calibrations(v) => s.daemon().and_then(|st| v.focused(st)),
+        _ => None,
+    };
+    for _ in 0..8 {
+        if focused(&d.st) == Some(CalLine::Input(1)) {
+            break;
+        }
+        d.key("ArrowDown");
+    }
+    assert_eq!(
+        focused(&d.st),
+        Some(CalLine::Input(1)),
+        "{:?}",
+        d.st.daemon().map(lines)
+    );
+    // N names the mic on it; I imports its curve file.
+    d.key("N");
+    d.send(Msg::Text("n".into()));
+    d.send(Msg::Text("MM1 34804".into()));
+    d.key("Enter");
+    d.until("the mic named", |s| {
+        s.daemon().is_some_and(|x| {
+            x.inputs
+                .iter()
+                .any(|i| i.channel == 1 && i.mic.as_deref() == Some("MM1 34804"))
+        })
+    })?;
+    d.key("I");
+    d.send(Msg::Text("i".into()));
+    d.send(Msg::Text(mic_curve_file("449350_34804_0Grad.txt")));
+    d.key("Enter");
+    d.until("the curve with its data-sheet sensitivity", |s| {
+        s.daemon().is_some_and(|x| {
+            x.mics
+                .iter()
+                .any(|m| m.name == "MM1 34804" && m.curves[0].stated_sensitivity == Some(15.0))
+        })
+    })?;
+
+    let tone = Tone::start(&ep)?;
+    d.key("E");
+    d.send(Msg::Text("e".into()));
+    let dialog = |s: &AppState| match &s.overlay {
+        Overlay::Calibrations(v) => v.electrical.clone(),
+        _ => None,
+    };
+    let dl = dialog(&d.st).ok_or("the electrical dialog")?;
+    assert_eq!(dl.sensitivity, "15.0 mV/Pa");
+    assert_eq!(dl.sensitivity_source(), "data sheet (MM1 34804 0°)");
+    assert!(dl.safety().contains("pins 2 and 3"), "{}", dl.safety());
+    d.send(Msg::Text("15 mV".into()));
+    // Enter reads the input; until the tone is there and steady the daemon says so in the
+    // dialog, and Enter again retries.
+    let end = Instant::now() + DEADLINE;
+    loop {
+        d.key("Enter");
+        d.until("the reply", |s| {
+            dialog(s).is_none_or(|x| x.pending.is_none())
+        })?;
+        match dialog(&d.st) {
+            None => break,
+            Some(x) => {
+                let e = x.error.unwrap_or_default();
+                assert!(
+                    e.contains("not steady") || e.contains("no tone"),
+                    "refused: {e}"
+                );
+            }
+        }
+        if Instant::now() > end {
+            return Err("the tone never read steady".into());
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let notice = match &d.st.overlay {
+        Overlay::Calibrations(v) => v.notice.clone().unwrap_or_default(),
+        _ => String::new(),
+    };
+    assert!(notice.contains("stored"), "{notice}");
+    d.key("Escape");
+
+    // −20 dBFS out reads −26.02 dBFS in; 15 mV there with 15 mV/Pa is 1 Pa: 94.0 dB SPL.
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    let want = "electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB";
+    d.until("the SPL meter in dB SPL, electrically calibrated", |s| {
+        ac2_ui::scenes::spl(s, &Theme::dark(), size, now()).is_some_and(|x| {
+            let t = scene_texts(&x.scene);
+            t.iter().any(|l| l.contains(want))
+                && t.iter().any(|l| l == "94.0")
+                && t.iter().any(|l| l.contains("dB SPL"))
+        })
+    })?;
+    d.until("the Leq caption naming the electrical calibration", |s| {
+        ac2_ui::scenes::leq(s, &Theme::dark(), size, now())
+            .is_some_and(|x| scene_texts(&x.scene).iter().any(|l| l.contains(want)))
+    })?;
+    // The Leq frames are in dB SPL and say what the calibration rests on: limits are
+    // judged on them.
+    let m =
+        d.st.measurements()
+            .into_iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+            .ok_or("meter")?;
+    let topic = Topic::Data {
+        meas: m.id,
+        stream: Stream::Leq,
+    };
+    d.until("the leq frame calibrated", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Leq(l) => {
+                    l.meta.scale == LevelScale::DbSpl
+                        && matches!(
+                            l.meta.cal,
+                            CalStatus::Verified {
+                                basis: CalBasis::Electrical { .. },
+                                ..
+                            }
+                        )
+                }
+                _ => false,
+            })
+        })
+    })?;
+    drop(tone);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

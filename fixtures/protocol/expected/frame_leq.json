@@ -1,7 +1,7 @@
 {
  "topic": "d/4/leq",
  "header": {
-  "v": 10,
+  "v": 11,
   "kind": "leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -50,7 +50,14 @@
     "scale": "db_spl",
     "cal": {
      "type": "verified",
-     "calibrated_at": 1789000000000000000
+     "calibrated_at": 1789000000000000000,
+     "basis": {
+      "type": "electrical",
+      "connection": "injected",
+      "mic_sensitivity": 15.0,
+      "data_sheet": false,
+      "uncertainty": 1.0
+     }
     },
     "mic_curve": false,
     "horizon": 60.0,

@@ -433,7 +433,7 @@ impl Shared {
                         .calibrations
                         .iter()
                         .find(|e| e.key == *key)
-                        .map(|e| e.spl.calibrator_freq.0),
+                        .map(|e| ac2_proto::cal::f_norm(&e.spl).0),
                     CalState::Uncalibrated => None,
                 }
                 .unwrap_or(1000.0);

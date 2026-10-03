@@ -3715,8 +3715,10 @@ fn mm1_state(curve: CurveChoice) -> State {
         },
         spl: SplCal {
             sensitivity: Db(130.0),
-            calibrator_level: DbSpl(94.0),
-            calibrator_freq: Hz(1000.0),
+            method: ac2_proto::model::CalMethod::Acoustic {
+                calibrator_level: DbSpl(94.0),
+            },
+            freq: Hz(1000.0),
             measured: Dbfs(-36.0),
             calibrated_at: WallNs(0),
         },
@@ -3864,6 +3866,84 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
+/// E on an input of the calibrations view: the electrical calibration dialog, prefilled
+/// with the data sheet's sensitivity; Enter sends `cal.spl_electrical`, a refusal stays in
+/// the dialog, a success closes it with what to do next.
+#[test]
+fn electrical_calibration_from_the_input_setup_view() {
+    use ac2_proto::model::ElectricalConnection;
+    use ac2_proto::units::Volts;
+    let mut t = T::new();
+    let mut s = mm1_state(CurveChoice::Curve {
+        label: "0°".into()
+    });
+    s.calibrations.clear();
+    for c in &mut s.mics[0].curves {
+        c.stated_sensitivity = Some(15.0);
+    }
+    t.conn(mirror(s));
+    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    let r = t.type_key("E", "e");
+    assert!(r.is_empty());
+    let d = cal_view(&t).electrical.clone().expect("the dialog");
+    assert_eq!(d.title(), "Electrical calibration · in 2 · MM1 34804");
+    assert_eq!(d.sensitivity, "15.0 mV/Pa");
+    assert_eq!(d.sensitivity_source(), "data sheet (MM1 34804 0°)");
+    assert!(d.safety().contains("pins 2 and 3"));
+    // The typed letter that opened it is not in the voltage.
+    assert_eq!(d.volts, "");
+    t.text("15.03 mV");
+    let r = t.key("Enter");
+    let what = match r.as_slice() {
+        [
+            Request::Call {
+                cmd:
+                    Command::CalSplElectrical {
+                        input: 1,
+                        volts,
+                        mic_sensitivity: None,
+                        connection: ElectricalConnection::InLine,
+                        replace_acoustic: false,
+                        ..
+                    },
+                what,
+            },
+        ] if *volts == Volts(0.01503) => what.clone(),
+        other => panic!("{other:?}"),
+    };
+    // Backspace edits the field, it does not delete a calibration.
+    let r = t.st.update(Msg::Backspace, &t.keys);
+    assert!(calls(&r).is_empty());
+    t.text("V");
+    // A refusal stays in the dialog; Enter again retries.
+    t.conn(ConnEvent::Reply {
+        what: what.clone(),
+        result: Err("the tone level on input 2 is not steady yet".into()),
+    });
+    let d = cal_view(&t).electrical.clone().expect("still open");
+    assert!(d.error.as_deref().is_some_and(|e| e.contains("not steady")));
+    let r = t.key("Enter");
+    assert_eq!(calls(&r).len(), 1);
+    t.conn(ConnEvent::Reply {
+        what,
+        result: Ok(()),
+    });
+    assert!(cal_view(&t).electrical.is_none());
+    assert!(
+        cal_view(&t)
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("stored") && n.contains("unplug the meter")),
+        "{:?}",
+        cal_view(&t).notice
+    );
+    // Off an input line E explains itself.
+    t.key("ArrowDown");
+    t.type_key("E", "e");
+    assert!(cal_view(&t).electrical.is_none());
+    assert!(cal_view(&t).notice.is_some());
+}
+
 #[test]
 fn input_setup_names_a_missing_curve_and_the_meter_label_follows() {
     let mut t = T::new();
@@ -3974,6 +4054,9 @@ fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) ->
             scale: LevelScale::DbSpl,
             cal: CalStatus::Verified {
                 calibrated_at: WallNs(1),
+                basis: ac2_proto::model::CalBasis::Acoustic {
+                    calibrator_level: ac2_proto::units::DbSpl(94.0),
+                },
             },
             mic_curve: false,
             horizon: Seconds(60.0),

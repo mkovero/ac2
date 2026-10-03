@@ -155,7 +155,11 @@ def frames():
                 "fraction": "third",
                 "weighting": "z",
                 "scale": "db_spl",
-                "cal": {"type": "verified", "calibrated_at": CAL_AT},
+                "cal": {
+                    "type": "verified",
+                    "calibrated_at": CAL_AT,
+                    "basis": {"type": "acoustic", "calibrator_level": 94.0},
+                },
                 "mic_curve": True,
             },
             [
@@ -194,7 +198,11 @@ def frames():
                 "leq": 92.0,
                 "lpeak": 112.7,
                 "duration": 60.0,
-                "cal": {"type": "other_mic_or_input", "calibrated_at": CAL_AT},
+                "cal": {
+                    "type": "other_mic_or_input",
+                    "calibrated_at": CAL_AT,
+                    "basis": {"type": "acoustic", "calibrator_level": 114.0},
+                },
                 "mic_curve": True,
             },
             [],
@@ -205,7 +213,17 @@ def frames():
             None,
             {
                 "scale": "db_spl",
-                "cal": {"type": "verified", "calibrated_at": CAL_AT},
+                "cal": {
+                    "type": "verified",
+                    "calibrated_at": CAL_AT,
+                    "basis": {
+                        "type": "electrical",
+                        "connection": "injected",
+                        "mic_sensitivity": 15.0,
+                        "data_sheet": False,
+                        "uncertainty": 1.0,
+                    },
+                },
                 "mic_curve": False,
                 "horizon": 60.0,
                 "logged": 1800,
@@ -553,6 +571,20 @@ def requests():
         req(46, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
         req(48, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
         req(49, "spl.log_new", {"meas": 4}),
+        req(
+            50,
+            "cal.spl_electrical",
+            {
+                "input": 1,
+                "mic": "M30 #1234",
+                "connection": "in_line",
+                "volts": 0.015,
+                "freq": 1000.0,
+                "mic_sensitivity": 15.0,
+                "uncertainty": None,
+                "replace_acoustic": False,
+            },
+        ),
     ]
 
 

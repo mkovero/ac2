@@ -243,7 +243,8 @@ pub(crate) struct Control {
 const LOG_SAVE_EVERY: Duration = Duration::from_secs(60);
 
 const MAX_DELAY_S: f64 = 10.0;
-/// Largest difference between the fast and slow input mean squares `cal.spl` accepts, dB.
+/// Largest difference between the fast and slow input mean squares a calibration accepts,
+/// dB.
 const MAX_CAL_UNSETTLED_DB: f64 = 0.05;
 
 /// Refuses a `delay.find` the finder could not run as asked: band edges or observation out
@@ -1060,6 +1061,25 @@ impl Control {
                 calibrator_level,
                 calibrator_freq,
             } => self.cal_spl(input, mic, calibrator_level, calibrator_freq),
+            Command::CalSplElectrical {
+                input,
+                mic,
+                connection,
+                volts,
+                freq,
+                mic_sensitivity,
+                uncertainty,
+                replace_acoustic,
+            } => self.cal_spl_electrical(cal::ElectricalArgs {
+                input,
+                mic,
+                connection,
+                volts,
+                freq,
+                mic_sensitivity,
+                uncertainty,
+                replace_acoustic,
+            }),
             Command::CalCurveImport {
                 mic,
                 label,

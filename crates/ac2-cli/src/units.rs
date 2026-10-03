@@ -1,5 +1,5 @@
 //! Typed, unit-suffixed command-line values: `20hz`, `1.5khz`, `-12dbfs`, `3db`, `94db`,
-//! `1.5ms`, `480samples`, `3.4m`, `20c`, channel lists `1,2,5-6`.
+//! `15.0mv`, `15mv/pa`, `1.5ms`, `480samples`, `3.4m`, `20c`, channel lists `1,2,5-6`.
 //!
 //! Every value must carry its unit (a bare `-20` is refused: is it dBFS or dB?), units are
 //! case-insensitive, and parsers never panic: any input yields a value or a message.
@@ -9,7 +9,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, Seconds};
+use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Seconds, Volts};
 
 /// A rejected value, with the reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +149,49 @@ impl FromStr for SplLevel {
             return need_unit(s, &u, "db or dbspl");
         }
         Ok(Self(DbSpl(in_range(s, n, 0.0, 200.0, "SPL")?)))
+    }
+}
+
+/// An RMS voltage as a meter shows it: `15.03mv`, `0.01503v`, `250uv`. 0 < x ≤ 1000 V.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VoltsArg(pub Volts);
+
+impl FromStr for VoltsArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let (n, u) = split(s)?;
+        let v = match u.as_str() {
+            "v" => n,
+            "mv" => n * 1e-3,
+            "uv" | "µv" | "μv" => n * 1e-6,
+            _ => return need_unit(s, &u, "v, mv or uv"),
+        };
+        if !(v > 0.0 && v <= 1000.0) {
+            return fail(format!("{s:?}: voltage must be above 0 and at most 1000 V"));
+        }
+        Ok(Self(Volts(v)))
+    }
+}
+
+/// A mic sensitivity as data sheets state it: `15.0mv/pa`, `0.015v/pa`, `-36.5dbv/pa`.
+/// 0.01 … 10 000 mV/Pa.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MicSensitivityArg(pub MvPerPa);
+
+impl FromStr for MicSensitivityArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let (n, u) = split(s)?;
+        let mv = match u.replace(' ', "").as_str() {
+            "mv/pa" => n,
+            "v/pa" => n * 1e3,
+            "dbv/pa" | "dbv" => 1e3 * 10f64.powf(n / 20.0),
+            _ => return need_unit(s, &u, "mv/pa, v/pa or dbv/pa"),
+        };
+        if !(0.01..=10_000.0).contains(&mv) {
+            return fail(format!("{s:?}: mic sensitivity must be 0.01 … 10000 mV/Pa"));
+        }
+        Ok(Self(MvPerPa(mv)))
     }
 }
 
@@ -460,6 +503,24 @@ mod tests {
             "20", "hz", "0hz", "-1hz", "2mhz", "infhz", "nanhz", "1.2.3hz", "", "2e9hz",
         ] {
             assert!(bad.parse::<Freq>().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn volts_and_sensitivities() {
+        assert_eq!(ok::<VoltsArg>("15.0mV").0, Volts(0.015));
+        assert_eq!(ok::<VoltsArg>("0.0150v").0, Volts(0.015));
+        assert!((ok::<VoltsArg>("250uV").0.0 - 250e-6).abs() < 1e-15);
+        assert_eq!(ok::<VoltsArg>("1.228 V").0, Volts(1.228));
+        for bad in ["0.015", "15", "0mv", "-1mv", "2000v", "15ma"] {
+            assert!(bad.parse::<VoltsArg>().is_err(), "{bad}");
+        }
+        assert_eq!(ok::<MicSensitivityArg>("15.0mV/Pa").0, MvPerPa(15.0));
+        assert_eq!(ok::<MicSensitivityArg>("0.05V/Pa").0, MvPerPa(50.0));
+        let db = ok::<MicSensitivityArg>("-36.5dBV/Pa").0.0;
+        assert!((db - 14.962).abs() < 1e-3, "{db}");
+        for bad in ["15", "15mv", "0mv/pa", "15pa"] {
+            assert!(bad.parse::<MicSensitivityArg>().is_err(), "{bad}");
         }
     }
 

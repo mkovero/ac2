@@ -327,6 +327,16 @@ pub fn commands() -> Vec<Command> {
         },
         Command::CalCurveDelete { curve: curve_id() },
         Command::SplLogNew { meas: MeasId(4) },
+        Command::CalSplElectrical {
+            input: 1,
+            mic: "M30 #1234".into(),
+            connection: ElectricalConnection::InLine,
+            volts: Volts(0.015),
+            freq: Hz(1000.0),
+            mic_sensitivity: Some(MvPerPa(15.0)),
+            uncertainty: None,
+            replace_acoustic: false,
+        },
     ]
 }
 
@@ -593,11 +603,48 @@ fn cal_entry() -> CalEntry {
         key: cal_key(),
         spl: SplCal {
             sensitivity: Db(120.5),
-            calibrator_level: DbSpl(94.0),
-            calibrator_freq: Hz(1000.0),
+            method: CalMethod::Acoustic {
+                calibrator_level: DbSpl(94.0),
+            },
+            freq: Hz(1000.0),
             measured: Dbfs(-26.5),
             calibrated_at: WallNs(1_789_000_000_000_000_000),
         },
+    }
+}
+
+fn electrical_cal_entry() -> CalEntry {
+    CalEntry {
+        key: CalKey {
+            channel: 2,
+            ..cal_key()
+        },
+        spl: SplCal {
+            sensitivity: Db(133.98),
+            method: CalMethod::Electrical {
+                connection: ElectricalConnection::InLine,
+                volts: Volts(0.015),
+                full_scale: Volts(1.5),
+                mic_sensitivity: MvPerPa(15.0),
+                mic_sensitivity_from: SensitivitySource::DataSheet {
+                    label: "0°".into(),
+                    file_name: "449350_34804_0Grad.txt".into(),
+                },
+                uncertainty: Db(1.0),
+            },
+            freq: Hz(1000.0),
+            measured: Dbfs(-40.0),
+            calibrated_at: WallNs(1_789_000_000_000_000_000),
+        },
+    }
+}
+
+fn electrical_basis() -> CalBasis {
+    CalBasis::Electrical {
+        connection: ElectricalConnection::Injected,
+        mic_sensitivity: MvPerPa(15.0),
+        data_sheet: false,
+        uncertainty: Db(1.0),
     }
 }
 
@@ -798,7 +845,7 @@ pub fn state() -> State {
         measurements: vec![measurement()],
         traces: vec![trace_meta()],
         generator: generator(),
-        calibrations: vec![cal_entry()],
+        calibrations: vec![cal_entry(), electrical_cal_entry()],
         mics: vec![mic()],
         inputs: inputs(),
         spl_logs: vec![spl_log()],
@@ -960,6 +1007,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             content: Blob(b"freq_hz,mag_db\n1000,0\n".to_vec()),
         }),
         Ok(ReplyBody::Calibration(cal_entry())),
+        Ok(ReplyBody::Calibration(electrical_cal_entry())),
         Ok(ReplyBody::Calibrations {
             calibrations: vec![cal_entry()],
             mics: vec![mic()],
@@ -1120,6 +1168,9 @@ pub fn frames() -> Vec<Frame> {
                     scale: LevelScale::DbSpl,
                     cal: CalStatus::Verified {
                         calibrated_at: WallNs(1_789_000_000_000_000_000),
+                        basis: CalBasis::Acoustic {
+                            calibrator_level: DbSpl(94.0),
+                        },
                     },
                     mic_curve: true,
                 },
@@ -1163,6 +1214,9 @@ pub fn frames() -> Vec<Frame> {
                     duration: Seconds(60.0),
                     cal: CalStatus::OtherMicOrInput {
                         calibrated_at: WallNs(1_789_000_000_000_000_000),
+                        basis: CalBasis::Acoustic {
+                            calibrator_level: DbSpl(114.0),
+                        },
                     },
                     mic_curve: true,
                 },
@@ -1176,6 +1230,7 @@ pub fn frames() -> Vec<Frame> {
                     scale: LevelScale::DbSpl,
                     cal: CalStatus::Verified {
                         calibrated_at: WallNs(1_789_000_000_000_000_000),
+                        basis: electrical_basis(),
                     },
                     mic_curve: false,
                     horizon: Seconds(60.0),

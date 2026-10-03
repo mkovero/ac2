@@ -5,8 +5,10 @@
 //! readouts from the same functions, so what is shown as in use is what is in use.
 
 use crate::model::{
-    CalEntry, CalStatus, CurveChoice, DeviceId, InputSetup, Mic, MicCurveRef, State,
+    CalEntry, CalMethod, CalStatus, CurveChoice, DeviceId, InputSetup, Mic, MicCurveRef,
+    SensitivitySource, SplCal, State,
 };
+use crate::units::{Db, Hz, MvPerPa};
 
 /// Longest mic name, characters.
 pub const MAX_MIC_NAME: usize = 64;
@@ -158,9 +160,11 @@ impl<'a> Sensitivity<'a> {
             Self::Uncalibrated => CalStatus::Uncalibrated,
             Self::Verified(e) => CalStatus::Verified {
                 calibrated_at: e.spl.calibrated_at,
+                basis: e.spl.method.basis(),
             },
             Self::OtherMicOrInput(e) => CalStatus::OtherMicOrInput {
                 calibrated_at: e.spl.calibrated_at,
+                basis: e.spl.method.basis(),
             },
         }
     }
@@ -291,11 +295,95 @@ pub fn state_input_use(s: &State, channel: u16) -> InputUse<'_> {
     )
 }
 
+// ---------------------------------------------------------------------------------------
+// Electrical calibration (`docs/design/q7-calibration.md` §11)
+
+/// Reference sound pressure of dB SPL, Pa.
+pub const P_REF_PA: f64 = 20e-6;
+/// Frequency mic sensitivities are specified at (IEC 61094, every data sheet).
+pub const MIC_SENSITIVITY_FREQ: Hz = Hz(1000.0);
+/// Stated uncertainty of an electrical calibration when the operator states none, ± dB:
+/// the data-sheet sensitivity's tolerance dominates (§11).
+pub const DEFAULT_ELECTRICAL_UNCERTAINTY: Db = Db(1.0);
+/// Highest level read for an electrical calibration, dBFS: closer to full scale, a
+/// converter's or preamp's onset of compression (and the next gain change) is too near.
+pub const ELECTRICAL_MAX_DBFS: f64 = -3.0;
+/// Lowest level read, dBFS: below it the input's noise adds to the tone (−70 dBFS with a
+/// typical −110 dBFS noise floor is still 40 dB clear, an error below 0.001 dB).
+pub const ELECTRICAL_MIN_DBFS: f64 = -70.0;
+/// Stated uncertainties accepted, ± dB.
+pub const ELECTRICAL_UNCERTAINTY_RANGE: (f64, f64) = (0.05, 6.0);
+
+/// Volts at 0 dBFS from `volts` (RMS) read as `level_dbfs`.
+pub fn full_scale_volts(volts: f64, level_dbfs: f64) -> f64 {
+    volts / 10f64.powf(level_dbfs / 20.0)
+}
+
+/// dB SPL of 0 dBFS for an input whose full scale is `full_scale_volts` with a mic of
+/// `mv_per_pa`: 0 dBFS is `V_FS / S` pascal.
+pub fn electrical_sensitivity_db(full_scale_volts: f64, mv_per_pa: f64) -> f64 {
+    20.0 * (full_scale_volts / (mv_per_pa / 1000.0 * P_REF_PA)).log10()
+}
+
+/// The frequency a calibration normalises the mic curve at: the calibrator's (the tone was
+/// read uncorrected through the capsule, so 0 dB there counts nothing twice), or 1 kHz for an
+/// electrical one (the data-sheet sensitivity is the capsule's at 1 kHz).
+pub fn f_norm(spl: &SplCal) -> Hz {
+    match spl.method {
+        CalMethod::Acoustic { .. } => spl.freq,
+        CalMethod::Electrical { .. } => MIC_SENSITIVITY_FREQ,
+    }
+}
+
+/// The data-sheet sensitivity a mic's curve files state.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DataSheet {
+    /// The mic is not in the library.
+    NoMic,
+    /// Its files state none.
+    NoneStated,
+    /// One value (several files may state it).
+    One(MvPerPa, SensitivitySource),
+    /// The files disagree: the operator says which.
+    Differ(Vec<f64>),
+}
+
+/// The sensitivity `mic`'s curve files state.
+pub fn data_sheet(mics: &[Mic], mic_name: &str) -> DataSheet {
+    let Some(m) = mic(mics, mic_name) else {
+        return DataSheet::NoMic;
+    };
+    let mut values: Vec<f64> = Vec::new();
+    for v in m.curves.iter().filter_map(|c| c.stated_sensitivity) {
+        if !values.contains(&v) {
+            values.push(v);
+        }
+    }
+    match values.as_slice() {
+        [] => DataSheet::NoneStated,
+        [v] => {
+            let c = m
+                .curves
+                .iter()
+                .find(|c| c.stated_sensitivity == Some(*v))
+                .unwrap_or(&m.curves[0]);
+            DataSheet::One(
+                MvPerPa(*v),
+                SensitivitySource::DataSheet {
+                    label: c.label.clone(),
+                    file_name: c.file_name.clone(),
+                },
+            )
+        }
+        _ => DataSheet::Differ(values),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{CalKey, SplCal};
-    use crate::units::{Db, DbSpl, Dbfs, Hz, WallNs};
+    use crate::model::{CalKey, ElectricalConnection};
+    use crate::units::{DbSpl, Dbfs, Volts, WallNs};
 
     fn curve_ref(label: &str) -> MicCurveRef {
         MicCurveRef {
@@ -319,8 +407,10 @@ mod tests {
             },
             spl: SplCal {
                 sensitivity: Db(130.0),
-                calibrator_level: DbSpl(94.0),
-                calibrator_freq: Hz(1000.0),
+                method: CalMethod::Acoustic {
+                    calibrator_level: DbSpl(94.0),
+                },
+                freq: Hz(1000.0),
                 measured: Dbfs(-36.0),
                 calibrated_at: WallNs(at),
             },
@@ -429,5 +519,78 @@ mod tests {
         assert_eq!(s(3, Some(&d)), Sensitivity::Uncalibrated);
         // Without a session only the mic matches.
         assert!(matches!(s(0, None), Sensitivity::OtherMicOrInput(_)));
+    }
+
+    #[test]
+    fn electrical_maths_by_hand() {
+        // 15 mV read at −40.0 dBFS: 0 dBFS is 100 × 15 mV = 1.5 V.
+        let vfs = full_scale_volts(0.015, -40.0);
+        assert!((vfs - 1.5).abs() < 1e-12, "{vfs}");
+        // With 15 mV/Pa, 1.5 V is 100 Pa: 20·lg(100 / 20 µPa) = 133.979 dB SPL.
+        let s = electrical_sensitivity_db(vfs, 15.0);
+        assert!((s - 133.979_400_086_720_4).abs() < 1e-9, "{s}");
+        // That mic at 1 Pa (93.98 dB SPL) gives 15 mV, which reads −40 dBFS: 94.0 shown.
+        let spl = -40.0 + s;
+        assert!((spl - 20.0 * (1.0 / P_REF_PA).log10()).abs() < 1e-9);
+        assert_eq!(format!("{spl:.1}"), "94.0");
+        // 0 dBFS = 1.228 V (+4 dBu), 50 mV/Pa: 24.56 Pa, 20·lg(1.228e6) = 121.784 dB.
+        assert!((electrical_sensitivity_db(1.228, 50.0) - 121.784).abs() < 1e-3);
+    }
+
+    #[test]
+    fn electrical_f_norm_and_data_sheet() {
+        let mut e = entry("hw:A", 0, "MM1", 1).spl;
+        e.freq = Hz(250.0);
+        assert_eq!(f_norm(&e), Hz(250.0));
+        e.method = CalMethod::Electrical {
+            connection: ElectricalConnection::InLine,
+            volts: Volts(0.015),
+            full_scale: Volts(1.5),
+            mic_sensitivity: MvPerPa(15.0),
+            mic_sensitivity_from: SensitivitySource::Typed,
+            uncertainty: Db(1.0),
+        };
+        // The data-sheet sensitivity is the capsule's at 1 kHz, whatever tone was read.
+        assert_eq!(f_norm(&e), Hz(1000.0));
+
+        let stated = |label: &str, v: Option<f64>| MicCurveRef {
+            stated_sensitivity: v,
+            ..curve_ref(label)
+        };
+        let lib = |curves: Vec<MicCurveRef>| {
+            vec![Mic {
+                name: "MM1".into(),
+                curves,
+            }]
+        };
+        assert_eq!(data_sheet(&[], "MM1"), DataSheet::NoMic);
+        assert_eq!(
+            data_sheet(&lib(vec![stated("0°", None)]), "MM1"),
+            DataSheet::NoneStated
+        );
+        assert_eq!(
+            data_sheet(
+                &lib(vec![
+                    stated("0°", None),
+                    stated("90°", Some(15.0)),
+                    stated("x", Some(15.0))
+                ]),
+                "MM1"
+            ),
+            DataSheet::One(
+                MvPerPa(15.0),
+                SensitivitySource::DataSheet {
+                    label: "90°".into(),
+                    file_name: "90°.txt".into()
+                }
+            )
+        );
+        assert_eq!(
+            data_sheet(
+                &lib(vec![stated("0°", Some(15.0)), stated("90°", Some(14.2))]),
+                "MM1"
+            ),
+            DataSheet::Differ(vec![15.0, 14.2])
+        );
     }
 }

@@ -17,6 +17,7 @@ pub mod app;
 pub mod cal_view;
 pub mod conn;
 pub mod connect;
+pub mod electrical_dialog;
 pub mod embedded;
 pub mod forms;
 pub mod hints;

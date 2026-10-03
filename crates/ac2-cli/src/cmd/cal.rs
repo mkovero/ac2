@@ -1,9 +1,11 @@
-//! Calibration (`cal spl`, `cal curve …`, `cal use`, `cal list`, `cal rm`) and the input
+//! Calibration (`cal spl`, `cal electrical`, `cal curve …`, `cal use`, `cal list`, `cal rm`) and the input
 //! setup (`session inputs`, `session open --mic`): `docs/design/q7-calibration.md`.
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::cal::input_setup;
-use ac2_proto::model::{CalEntry, CalKey, DeviceId, InputSetup, Mic, MicCurveId, State};
+use ac2_proto::model::{
+    CalEntry, CalKey, DeviceId, ElectricalConnection, InputSetup, Mic, MicCurveId, State,
+};
 use ac2_proto::units::Blob;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
@@ -11,8 +13,8 @@ use serde_json::json;
 use super::{connect, state};
 use crate::CliError;
 use crate::args::{
-    CalCmd, CalCurveCmd, CalCurveImport, CalRm, CalSpl, Cli, CurveArg, CurveAssign, MicAssign,
-    SessionInputs,
+    CalCmd, CalCurveCmd, CalCurveImport, CalElectrical, CalRm, CalSpl, Cli, CurveArg, CurveAssign,
+    ElectricalMethodArg, MicAssign, SessionInputs,
 };
 use crate::output::{self, Out};
 use crate::watch::now_wall;
@@ -101,6 +103,32 @@ pub(crate) async fn cal_spl(cli: &Cli, a: &CalSpl, out: &mut Out<'_>) -> Result<
         .await?;
     let e = expect_body!("cal.spl", r, ReplyBody::Calibration(e) => e)?;
     out.emit(&e, || output::calibrations(std::slice::from_ref(&e)))?;
+    Ok(())
+}
+
+/// `cal electrical`.
+async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let s = state(&c).await?;
+    let mic = mic_for(&s, a.input.0, a.mic.as_ref())?;
+    let connection = match a.method {
+        ElectricalMethodArg::Inline => ElectricalConnection::InLine,
+        ElectricalMethodArg::Injected => ElectricalConnection::Injected,
+    };
+    let r = c
+        .call(Command::CalSplElectrical {
+            input: a.input.0,
+            mic,
+            connection,
+            volts: a.volts.0,
+            freq: a.freq.0,
+            mic_sensitivity: a.sensitivity.map(|x| x.0),
+            uncertainty: a.uncertainty.map(|x| x.0),
+            replace_acoustic: a.replace_acoustic,
+        })
+        .await?;
+    let e = expect_body!("cal.spl_electrical", r, ReplyBody::Calibration(e) => e)?;
+    out.emit(&e, || output::electrical_calibration(&e, connection))?;
     Ok(())
 }
 
@@ -284,6 +312,7 @@ async fn rm(cli: &Cli, a: &CalRm, out: &mut Out<'_>) -> Result<(), CliError> {
 pub(crate) async fn run(cli: &Cli, cmd: &CalCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
         CalCmd::Spl(a) => cal_spl(cli, a, out).await,
+        CalCmd::Electrical(a) => cal_electrical(cli, a, out).await,
         CalCmd::Curve(c) => curve(cli, c, out).await,
         CalCmd::Use { input, curve } => use_curve(cli, *input, curve, out).await,
         CalCmd::Rm(a) => rm(cli, a, out).await,

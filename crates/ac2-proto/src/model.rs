@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::units::{
-    ClientId, Db, DbSpl, Dbfs, Degrees, Hz, MeasId, Rev, SampleIndex, Samples, Seconds,
-    SessionEpoch, SweepId, TraceId, WallNs,
+    ClientId, Db, DbSpl, Dbfs, Degrees, Hz, MeasId, MvPerPa, Rev, SampleIndex, Samples, Seconds,
+    SessionEpoch, SweepId, TraceId, Volts, WallNs,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -2041,20 +2041,122 @@ pub struct CalKey {
     pub mic: String,
 }
 
-/// A sensitivity calibration against an acoustic calibrator.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// A sensitivity calibration: what 0 dBFS on the input is in dB SPL, and how that was
+/// found (`docs/design/q7-calibration.md` §2, §11).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplCal {
     /// dB SPL = dBFS + sensitivity.
     pub sensitivity: Db,
-    /// Calibrator level.
-    pub calibrator_level: DbSpl,
-    /// Calibrator frequency; the mic curve is normalised to 0 dB here.
-    pub calibrator_freq: Hz,
-    /// Broadband level read from the calibrator, uncorrected.
+    /// How it was measured.
+    pub method: CalMethod,
+    /// Frequency of the tone read.
+    pub freq: Hz,
+    /// Broadband level read from the tone, uncorrected.
     pub measured: Dbfs,
     /// When (daemon clock).
     pub calibrated_at: WallNs,
+}
+
+/// How a sensitivity calibration was measured.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CalMethod {
+    /// An acoustic calibrator on the mic: the whole chain, capsule included. The mic curve
+    /// is normalised to 0 dB at the calibrator frequency.
+    Acoustic {
+        /// Calibrator level.
+        calibrator_level: DbSpl,
+    },
+    /// A voltage measured at the input while ac2 read its level, with the mic's
+    /// sensitivity from the operator or the data sheet. The mic curve is normalised to 0 dB
+    /// at 1 kHz, where mic sensitivities are specified.
+    Electrical {
+        /// Where the voltage was measured.
+        connection: ElectricalConnection,
+        /// Voltage measured, RMS.
+        volts: Volts,
+        /// Voltage at 0 dBFS: `volts / 10^(measured / 20)`.
+        full_scale: Volts,
+        /// Mic sensitivity used.
+        mic_sensitivity: MvPerPa,
+        /// Where it came from.
+        mic_sensitivity_from: SensitivitySource,
+        /// Stated uncertainty of the sensitivity, ± dB.
+        uncertainty: Db,
+    },
+}
+
+/// Where the voltage of an electrical calibration was measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ElectricalConnection {
+    /// Across XLR pins 2–3 with the mic connected and powered and a steady tone at the
+    /// mic: the mic's own source impedance loads the preamp as in use.
+    InLine,
+    /// A generator in place of the mic (phantom power off).
+    Injected,
+}
+
+/// Where the mic sensitivity of an electrical calibration came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SensitivitySource {
+    /// Typed by the operator.
+    Typed,
+    /// The stated sensitivity in the header of one of the mic's curve files.
+    DataSheet {
+        /// The curve's label.
+        label: String,
+        /// Its file name.
+        file_name: String,
+    },
+}
+
+/// What a readout's calibration rests on, as frames carry it: enough to word it
+/// (`cal 94 dB`, `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CalBasis {
+    /// An acoustic calibrator.
+    Acoustic {
+        /// Calibrator level.
+        calibrator_level: DbSpl,
+    },
+    /// A measured voltage and the mic's sensitivity.
+    Electrical {
+        /// Where the voltage was measured.
+        connection: ElectricalConnection,
+        /// Mic sensitivity used.
+        mic_sensitivity: MvPerPa,
+        /// It is the data sheet's (else typed).
+        data_sheet: bool,
+        /// Stated uncertainty, ± dB.
+        uncertainty: Db,
+    },
+}
+
+impl CalMethod {
+    /// What frames carry of it.
+    pub fn basis(&self) -> CalBasis {
+        match self {
+            Self::Acoustic { calibrator_level } => CalBasis::Acoustic {
+                calibrator_level: *calibrator_level,
+            },
+            Self::Electrical {
+                connection,
+                mic_sensitivity,
+                mic_sensitivity_from,
+                uncertainty,
+                ..
+            } => CalBasis::Electrical {
+                connection: *connection,
+                mic_sensitivity: *mic_sensitivity,
+                data_sheet: matches!(mic_sensitivity_from, SensitivitySource::DataSheet { .. }),
+                uncertainty: *uncertainty,
+            },
+        }
+    }
 }
 
 /// Provenance of one imported mic curve (the points stay in the daemon's store).
@@ -2075,8 +2177,9 @@ pub struct MicCurveRef {
     pub f_hi: Hz,
     /// When (daemon clock).
     pub imported_at: WallNs,
-    /// Sensitivity the file's header states, mV/Pa. Information only: never used as a
-    /// calibration (that is `cal.spl`, which measures the whole chain).
+    /// Sensitivity the file's header states, mV/Pa. Used only when the operator takes it
+    /// for an electrical calibration (`cal.spl_electrical`); an acoustic calibration
+    /// measures the whole chain instead.
     pub stated_sensitivity: Option<f64>,
 }
 
@@ -2142,7 +2245,7 @@ pub struct InputSetup {
 
 /// Calibration state of a calibrated readout (decisions 7a/7b). The age is the frame's
 /// `capture_wall_ns − calibrated_at`, both on the daemon clock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CalStatus {
     /// No sensitivity calibration applies: dBFS.
@@ -2151,12 +2254,16 @@ pub enum CalStatus {
     Verified {
         /// When it was taken.
         calibrated_at: WallNs,
+        /// What it rests on.
+        basis: CalBasis,
     },
     /// A calibration of another mic on this input, or of this mic on another input or
     /// device, is applied.
     OtherMicOrInput {
         /// When it was taken.
         calibrated_at: WallNs,
+        /// What it rests on.
+        basis: CalBasis,
     },
 }
 

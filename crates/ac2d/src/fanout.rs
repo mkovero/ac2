@@ -47,14 +47,22 @@ impl Block {
     }
 }
 
-/// Per-input running mean square, f64 bits; read by `cal.spl`. Two time constants: the
-/// 1 s one is the reading, the 0.2 s one tells whether the level has been steady long
-/// enough for the slow one to have settled.
+/// Per-input running mean square, f64 bits; read by `cal.spl` and `cal.spl_electrical`.
+/// Two time constants: the 1 s one is the reading, the 0.2 s one tells whether the level
+/// has been steady long enough for the slow one to have settled. Beside them, where the
+/// input last reached full scale: a clipped tone reads low, so a calibration taken from it
+/// would be wrong by an unknown amount.
 #[derive(Debug)]
 pub(crate) struct InputMeters {
     ms: Box<[AtomicU64]>,
     fast: Box<[AtomicU64]>,
+    /// One past the last sample of the newest block that reached [`CLIP_FULL_SCALE`]; 0 =
+    /// never.
+    clip_end: Box<[AtomicU64]>,
 }
+
+/// Sample magnitude counted as clipping: within 0.01 dB of full scale.
+const CLIP_FULL_SCALE: f32 = 0.9989;
 
 /// Time constants of [`InputMeters`], s.
 const METER_SLOW_S: f64 = 1.0;
@@ -65,7 +73,15 @@ impl InputMeters {
         Self {
             ms: (0..channels).map(|_| AtomicU64::new(0)).collect(),
             fast: (0..channels).map(|_| AtomicU64::new(0)).collect(),
+            clip_end: (0..channels).map(|_| AtomicU64::new(0)).collect(),
         }
+    }
+
+    /// One past the last sample of the newest block in which block channel `ch` reached
+    /// full scale, `None` if it never did.
+    pub(crate) fn clipped_until(&self, ch: usize) -> Option<u64> {
+        let v = self.clip_end.get(ch)?.load(Ordering::Acquire);
+        (v > 0).then_some(v)
     }
 
     /// Mean square of block channel `ch` (τ = 1 s) and its fast companion (τ = 0.2 s).
@@ -226,14 +242,18 @@ fn run(
                 if frames == 0 {
                     continue;
                 }
-                let sq: f64 = block
+                let (sum, peak) = block
                     .data
                     .iter()
                     .skip(ch)
                     .step_by(n)
-                    .map(|v| f64::from(*v) * f64::from(*v))
-                    .sum::<f64>()
-                    / frames as f64;
+                    .fold((0.0f64, 0.0f32), |(s, p), v| {
+                        (s + f64::from(*v) * f64::from(*v), p.max(v.abs()))
+                    });
+                let sq = sum / frames as f64;
+                if peak >= CLIP_FULL_SCALE {
+                    meters.clip_end[ch].store(block.end_sample(), Ordering::Release);
+                }
                 m.0 += a_slow * (sq - m.0);
                 m.1 += a_fast * (sq - m.1);
                 meters.ms[ch].store(m.0.to_bits(), Ordering::Release);

@@ -1636,7 +1636,7 @@ impl AppState {
                 Overlay::Palette(p) => p.backspace(),
                 Overlay::Form(f) => f.backspace(),
                 Overlay::Session(d) => d.backspace(),
-                Overlay::Calibrations(v) if v.edit.is_some() => v.backspace(),
+                Overlay::Calibrations(v) if v.typing() => v.backspace(),
                 // Not typing: Backspace deletes, as Delete does.
                 Overlay::Calibrations(_) => {
                     self.cal_view_key(Chord::key(eframe::egui::Key::Delete), None, out);
@@ -3760,10 +3760,15 @@ impl AppState {
                 }
                 self.traces.insert(t.meta.id, (t, g));
             }
-            ConnEvent::Reply { what, result } => match result {
-                Ok(()) => self.toast(what),
-                Err(e) => self.error(format!("{what}: {e}")),
-            },
+            ConnEvent::Reply { what, result } => {
+                if let Overlay::Calibrations(v) = &mut self.overlay {
+                    v.reply(&what, &result);
+                }
+                match result {
+                    Ok(()) => self.toast(what),
+                    Err(e) => self.error(format!("{what}: {e}")),
+                }
+            }
             ConnEvent::DelayFound {
                 meas,
                 pick,
@@ -3912,6 +3917,14 @@ impl AppState {
         let Overlay::Calibrations(v) = &mut self.overlay else {
             return;
         };
+        if let Some(d) = &mut v.electrical {
+            if let Some(a) = crate::electrical_dialog::key(d, &chord) {
+                self.cal_action(a, out);
+            } else {
+                self.swallow_text = swallow;
+            }
+            return;
+        }
         let plain = !(chord.command || chord.alt);
         let action = match chord.key {
             Key::Enter if v.edit.is_some() => v.finish(&st),
@@ -3956,6 +3969,12 @@ impl AppState {
                 }
                 None
             }
+            Key::E if plain => {
+                if v.start_electrical(&st) {
+                    self.swallow_text = typed_char(&chord);
+                }
+                None
+            }
             Key::Delete | Key::Backspace => v.delete(&st),
             _ => {
                 self.swallow_text = swallow;
@@ -3991,6 +4010,7 @@ impl AppState {
                 ),
                 cmd: Command::CalCurveDelete { curve: id },
             }),
+            CalAction::Electrical(cmd, what) => out.push(Request::Call { what, cmd }),
             CalAction::DeleteSensitivity(key) => out.push(Request::Call {
                 what: format!(
                     "sensitivity calibration of {} on input {} deleted",

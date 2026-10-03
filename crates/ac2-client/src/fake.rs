@@ -908,9 +908,67 @@ impl Shared {
                 let e = CalEntry {
                     spl: SplCal {
                         sensitivity: Db(calibrator_level.0 + 20.0),
-                        calibrator_level,
-                        calibrator_freq,
+                        method: ac2_proto::model::CalMethod::Acoustic { calibrator_level },
+                        freq: calibrator_freq,
                         measured: Dbfs(-20.0),
+                        calibrated_at: WallNs(1_790_000_000_000_000_000),
+                    },
+                    key,
+                };
+                self.commit(Change::Calibration(Patch::Set(e.clone())));
+                self.set_mic(input, &mic);
+                ReplyBody::Calibration(e)
+            }
+            // The fake input reads −20 dBFS, as for `cal.spl`.
+            C::CalSplElectrical {
+                input,
+                mic,
+                connection,
+                volts,
+                freq,
+                mic_sensitivity,
+                uncertainty,
+                replace_acoustic,
+            } => {
+                use ac2_proto::cal;
+                use ac2_proto::model::{CalMethod, SensitivitySource};
+                let key = fake_cal_key(input, &mic)?;
+                let (s, from) = match mic_sensitivity {
+                    Some(s) => (s, SensitivitySource::Typed),
+                    None => match cal::data_sheet(&self.state.mics, &mic) {
+                        cal::DataSheet::One(s, from) => (s, from),
+                        _ => {
+                            return Err(err(
+                                ErrorCode::Invalid,
+                                "no mic sensitivity given and no data-sheet value",
+                            ));
+                        }
+                    },
+                };
+                if !replace_acoustic
+                    && self
+                        .state
+                        .calibrations
+                        .iter()
+                        .any(|e| e.key == key && matches!(e.spl.method, CalMethod::Acoustic { .. }))
+                {
+                    return Err(err(ErrorCode::Refused, "input has an acoustic calibration"));
+                }
+                let measured = -20.0;
+                let full_scale = cal::full_scale_volts(volts.0, measured);
+                let e = CalEntry {
+                    spl: SplCal {
+                        sensitivity: Db(cal::electrical_sensitivity_db(full_scale, s.0)),
+                        method: CalMethod::Electrical {
+                            connection,
+                            volts,
+                            full_scale: ac2_proto::units::Volts(full_scale),
+                            mic_sensitivity: s,
+                            mic_sensitivity_from: from,
+                            uncertainty: uncertainty.unwrap_or(cal::DEFAULT_ELECTRICAL_UNCERTAINTY),
+                        },
+                        freq,
+                        measured: Dbfs(measured),
                         calibrated_at: WallNs(1_790_000_000_000_000_000),
                     },
                     key,

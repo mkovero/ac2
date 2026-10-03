@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 10`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 11`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -103,6 +103,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
+| `cal.spl_electrical` | `input`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
 | `cal.curve_import` | `mic`, `label: string \| nil`, `file_name`, `content: bin`, `input: u16 \| nil` | `mic` | |
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
@@ -345,8 +346,8 @@ display edits and are never applied to the stored data.
   log and linear grids, as the band power average on IEC bands, phase and coherence never —
   and corrects a sweep's distortion (order n at f by c(f) − c(n·f), floors alike, THD
   re-summed from the corrected orders; the impulse response untouched). `f_norm` is the
-  calibrator frequency of the trace's sensitivity calibration, else of the newest
-  sensitivity calibration of the mic, else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
+  normalisation frequency of the trace's sensitivity calibration (the calibrator's; 1 kHz
+  for an electrical one), else of the newest sensitivity calibration of the mic, else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
   calibration store does not change it. `trace.export` writes the uncorrected columns and
   names the curve in its `# mic:` line; `trace.average` / `trace.math` combine corrected
   columns, and the result's `mic.curve` names the curve its columns now carry. Refused:
@@ -479,17 +480,33 @@ the open session's capture device, the input channel and the mic name (`CalKey`)
 Each input chooses which of its mic's curves applies (`InputSetup.curve`).
 
 - `cal.spl` reads the input's broadband RMS (uncorrected, τ = 1 s) and stores `CalEntry`
-  {`key`, `spl: SplCal` {`sensitivity`: Db (dB SPL of 0 dBFS), `calibrator_level`,
-  `calibrator_freq`, `measured`: Dbfs, `calibrated_at`}}. It is `refused` below −80 dBFS
-  and while the level is not steady (0.2 s and 1 s readings differ by more than 0.05 dB).
-  It sets the input's mic name to `mic` (the name is typed once, at calibration time).
+  {`key`, `spl: SplCal` {`sensitivity`: Db (dB SPL of 0 dBFS), `method: CalMethod`, `freq`:
+  Hz (the tone read), `measured`: Dbfs, `calibrated_at`}} with `method` `acoustic`
+  {`calibrator_level`: DbSpl}. It is `refused` below −80 dBFS, when the input clipped in
+  the last 2 s, and while the level is not steady (0.2 s and 1 s readings differ by more
+  than 0.05 dB). It sets the input's mic name to `mic` (the name is typed once, at
+  calibration time). It replaces any calibration of the key, electrical ones included.
+- `cal.spl_electrical` reads the level `L` the same way while the operator measures
+  `volts` (RMS) at the input, and stores `sensitivity = 20·lg(V_FS / (S · 20 µPa))` with
+  `V_FS = volts / 10^(L/20)` (volts at 0 dBFS) and `S` = `mic_sensitivity` (mV/Pa), or, when
+  nil, the one value the `stated_sensitivity` of `mic`'s curves states (`invalid` when they
+  state none or disagree). `method` is `electrical` {`connection`: `in_line` (pins 2–3 with
+  the mic connected and powered) | `injected` (a generator in place of the mic), `volts`,
+  `full_scale`: Volts (V_FS), `mic_sensitivity`: MvPerPa, `mic_sensitivity_from:
+  SensitivitySource` (tagged by `type`: `typed` | `data_sheet` {`label`, `file_name`}),
+  `uncertainty`: Db (± dB; 1 when nil; 0.05–6 accepted)}. Refused like `cal.spl`, and
+  also above −3 dBFS or below −70 dBFS (a poor reading), for `volts` outside 0.1 mV–100 V,
+  a mic sensitivity outside 0.1–1000 mV/Pa, or a `freq` outside 20 Hz–20 kHz (any `freq`
+  in that range is accepted; the mic curve is normalised at 1 kHz, where data sheets
+  state the sensitivity). An existing `acoustic` calibration of the key is `refused`
+  unless `replace_acoustic`.
 - `cal.curve_import` parses a magnitude file (frequency, gain dB, further columns ignored;
   text lines skipped; whitespace / comma or semicolon + decimal-comma separated) and stores
   it as `mic`'s curve `label` — by default the incidence angle the file's header or name
   states (`90-degree-curve`, `_90Grad`, `0deg` → `90°`, `0°`), else the file stem; a curve
   of that label is replaced. `MicCurveRef` = {`label`, `file_name`, `content_hash` (FNV-1a
   64 hex), `points`, `f_lo`, `f_hi`, `imported_at`, `stated_sensitivity`: f64 mV/Pa | nil
-  (as the header states it; information only, never a calibration)}; the points stay in the
+  (as the header states it; used only as `cal.spl_electrical`'s default sensitivity)}; the points stay in the
   daemon. With `input`, that input's mic name becomes `mic`, and the curve becomes its
   active one when it is the mic's only curve. A refused file is `invalid` with `detail:
   {type: mic_curve_file, line: u32 | nil, reason}`, `reason` one of `too_few_points`,
@@ -510,6 +527,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   curve applies until the operator chooses. A new mic name on a row starts `not_chosen`.
   Mic names are 1–64 characters.
 - When the daemon's calibration store file cannot be read it is never written: `cal.spl`,
+  `cal.spl_electrical`,
   `cal.curve_*`, `cal.delete`, `cal.list` and `session.inputs` are `refused` with `detail:
   {type: cal_store, path, reason}`.
 
@@ -517,10 +535,14 @@ Which calibration a measurement uses (shown as `CalStatus` in `spl`, `rta` and `
 frames): the entry of device + input + the input's mic → `verified`; else the newest one
 on the same device + input (another mic, or no mic name set), else the newest one for the
 same mic elsewhere → `other_mic_or_input`; else `uncalibrated` (dBFS). `CalStatus` is
-tagged by `type`: `uncalibrated` | `verified` {`calibrated_at`} | `other_mic_or_input`
-{`calibrated_at`}; the age is `capture_wall_ns − calibrated_at`. The mic curve is the
-input's chosen curve of its mic — only that one; none when not chosen, off, or not stored —
-normalised to 0 dB at the calibrator frequency in use (1 kHz uncalibrated). The rules are
+tagged by `type`: `uncalibrated` | `verified` {`calibrated_at`, `basis`} |
+`other_mic_or_input` {`calibrated_at`, `basis`}; the age is `capture_wall_ns −
+calibrated_at`. `basis: CalBasis` (tagged by `type`) says what the calibration rests on:
+`acoustic` {`calibrator_level`} | `electrical` {`connection`, `mic_sensitivity`,
+`data_sheet`: bool, `uncertainty`}. The mic curve is the input's chosen curve of its mic —
+only that one; none when not chosen, off, or not stored — normalised to 0 dB at the
+calibration's frequency in use (the calibrator's; 1 kHz for an electrical calibration and
+uncalibrated). The rules are
 the pure functions of `ac2_proto::cal`, which clients use to word what is in use.
 
 #### Averaging depth
