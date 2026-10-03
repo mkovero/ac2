@@ -557,12 +557,12 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
         f.set_text(FieldId::Level, "-20");
         f.set_text(FieldId::From, "100 Hz");
         f.set_text(FieldId::To, "5 kHz");
-        for (id, want) in [
-            (FieldId::Duration, "1 s (quick look)"),
-            (FieldId::Repeats, "2"),
+        for (id, step, want) in [
+            (FieldId::Duration, -1, "1 s (quick look)"),
+            (FieldId::Repeats, 1, "2"),
         ] {
             f.focus = f.fields.iter().position(|x| x.id == id).ok_or("field")?;
-            f.cycle(1);
+            f.cycle(step);
             assert_eq!(f.fields[f.focus].display(), want);
         }
     }
