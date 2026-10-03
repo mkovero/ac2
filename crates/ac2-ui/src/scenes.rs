@@ -39,16 +39,20 @@ pub fn frame(st: &AppState, meas: MeasId, stream: Stream) -> Option<&TopicFrame>
 }
 
 /// Freshness of a received frame: its age, or STALE when the client says so (no new frame
-/// for 1 s, or the daemon not responding).
+/// within the stream's threshold — 3 s for Leq, 1 s otherwise — or the daemon not
+/// responding).
 pub fn freshness(tf: &TopicFrame) -> Freshness {
     let since = tf.since_new.as_secs_f64();
     let age = tf.age.unwrap_or(since);
+    // The client's flag already applies each stream's own threshold (a once-a-second Leq frame
+    // is 3 s, the rest 1 s); judging the age again here with the general 1 s would dim a Leq
+    // view for a moment whenever a frame arrived a little after its second.
     if tf.stale {
         Freshness::Stale {
             age_s: age.max(since),
         }
     } else {
-        Freshness::from_age(age)
+        Freshness::Fresh { age_s: age }
     }
 }
 

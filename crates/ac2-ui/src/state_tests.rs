@@ -3770,6 +3770,21 @@ fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) ->
     }))
 }
 
+/// A once-a-second Leq frame is a little over 1 s old just before the next one arrives; only
+/// the client's per-stream flag makes it stale, so the Leq view does not dim for a moment.
+#[test]
+fn leq_frame_a_little_over_a_second_old_is_fresh() {
+    let ConnEvent::Data(d) = leq_data(1, 100, 80.0, ac2_proto::frame::LeqFlags::NONE) else {
+        unreachable!()
+    };
+    let mut f = d.latest.frames.values().next().expect("frame").clone();
+    f.age = Some(1.2);
+    f.since_new = std::time::Duration::from_millis(1200);
+    assert!(!crate::scenes::freshness(&f).is_stale());
+    f.stale = true;
+    assert!(crate::scenes::freshness(&f).is_stale());
+}
+
 /// Shift+L opens the SPL meter's Leq windows by name; a preset and a typed limit, Enter
 /// sends the meter's configuration with the new windows and the SPL pane shows them. G
 /// switches the pane between the meter and its windows.
