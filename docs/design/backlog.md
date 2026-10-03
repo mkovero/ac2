@@ -5,7 +5,6 @@ the commit when it lands.
 
 ## From the first sweep run on pupu (2026-10-03)
 
-- **Top bar: ARMED badge overlaps the session text** ("2ARMED…") at 1290 px width.
 - **A sweep CSV re-import cannot bring a sweep back.** `trace import` of a sweep export keeps
   only its transfer function (and delay 0), because `SweepData` needs the IR and analysis info
   that the CSV lacks (the parsed distortion in `Imported::distortion` is dropped). Options:
@@ -47,6 +46,11 @@ Open:
   no line for a refused client.
 
 ## Done
+
+- **Top bar: ARMED badge overlapped the session text** ("2ARMED…") at 1290 px. The bar is now
+  fitted before it is drawn: lower-priority texts (key help, next-key hint, autosave, the
+  device name) shorten or go first, the state badge and level always stay; `top_bar_never_overlaps`
+  checks 640–1600 px.
 
 Sweep findings from pupu (2026-10-03), fixed on the sweep-fixes branch:
 - **Generator re-armed after a sweep** (every run). Not a restore of the pre-sweep state:

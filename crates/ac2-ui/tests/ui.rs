@@ -892,3 +892,76 @@ fn sweep_progress_strip() {
         rig.fake.executions("gen.stop") > stops
     });
 }
+
+/// The top bar never overlaps itself: with the generator armed by another client (badge,
+/// level, "held by", hint all shown) and a session open, at every width from wide to
+/// narrow every label in the bar keeps its own space inside the window; lower-priority
+/// texts shorten or go first, the state badge always stays.
+#[test]
+fn top_bar_never_overlaps() {
+    use ac2_proto::event::Change;
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{By, NodeT};
+    if !have_gpu("top_bar_never_overlaps") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    {
+        let mut s = rig.fake.lock();
+        let mut g = s.state.generator.clone();
+        g.owner = Some(ac2_proto::units::ClientId("FOH laptop".into()));
+        g.armed = true;
+        s.commit(Change::Generator(g));
+    }
+    step_until(&mut h, "armed by the other client", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.armed)
+    });
+    for width in [1600.0, 1290.0, 1100.0, 900.0, 760.0, 640.0] {
+        h.set_size(egui::vec2(width, 800.0));
+        for _ in 0..3 {
+            h.step();
+        }
+        let labels: Vec<(String, egui::Rect)> = h
+            .query_all(By::new().predicate(|n| n.role() == Role::Label))
+            .map(|n| {
+                let a = n.accesskit_node();
+                (
+                    a.label().or_else(|| a.value()).unwrap_or_default(),
+                    n.rect(),
+                )
+            })
+            .filter(|(_, r)| r.max.y <= 34.0)
+            .collect();
+        assert!(
+            labels.iter().any(|(t, _)| t == "ARMED"),
+            "{width} px: no badge in {labels:?}"
+        );
+        let has = |s: &str| labels.iter().any(|(t, _)| t.contains(s));
+        if width >= 1600.0 {
+            // Wide: everything in full.
+            for s in ["held by FOH laptop", "commands", "frames", "fake daemon"] {
+                assert!(has(s), "{width} px: no {s:?} in {labels:?}");
+            }
+        }
+        if width <= 640.0 {
+            // Narrow: the key help and the hint have given way to the stimulus state.
+            assert!(!has("commands"), "{width} px: {labels:?}");
+            assert!(has("dBFS") || has("no level"), "{width} px: {labels:?}");
+        }
+        for (i, (a, ra)) in labels.iter().enumerate() {
+            assert!(
+                ra.min.x >= 0.0 && ra.max.x <= width,
+                "{width} px: {a:?} {ra:?} outside the window"
+            );
+            for (b, rb) in &labels[i + 1..] {
+                let o = ra.intersect(*rb);
+                assert!(
+                    o.width() <= 0.5 || o.height() <= 0.5,
+                    "{width} px: {a:?} {ra:?} overlaps {b:?} {rb:?}"
+                );
+            }
+        }
+    }
+}

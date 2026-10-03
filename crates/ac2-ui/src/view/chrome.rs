@@ -1,6 +1,7 @@
 //! Top bar (link, session, stimulus) and the measurement list.
 
 use ac2_proto::model::{MeasKind, TraceKind};
+use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
 use eframe::egui::{self, Color32, RichText};
 
@@ -22,65 +23,278 @@ fn key_hint(app: &App, c: CommandId) -> String {
         .map_or_else(|| "—".into(), |k| k.label())
 }
 
+/// One thing in the top bar: its texts from the longest to the shortest, and how much it
+/// matters. The bar is fitted before it is drawn, so nothing overlaps at any width: the
+/// least important items shorten first, then go.
+struct Item {
+    /// Higher stays longer.
+    prio: u8,
+    /// Longest first; the bar shows one of them.
+    variants: Vec<RichText>,
+    /// May disappear entirely once its shortest text does not fit.
+    droppable: bool,
+    /// A status dot before the text.
+    dot: Option<Color32>,
+    /// A separator after it (on its far side from the bar's edge).
+    sep: bool,
+    hover: Option<String>,
+}
+
+impl Item {
+    fn new(prio: u8, variants: Vec<RichText>) -> Self {
+        Self {
+            prio,
+            variants,
+            droppable: true,
+            dot: None,
+            sep: false,
+            hover: None,
+        }
+    }
+
+    fn kept(mut self) -> Self {
+        self.droppable = false;
+        self
+    }
+
+    fn sep(mut self) -> Self {
+        self.sep = true;
+        self
+    }
+}
+
+/// Item spacing in the bar.
+const BAR_GAP: f32 = 8.0;
+/// A separator's own width (it also takes a gap on each side).
+const BAR_SEP: f32 = 6.0;
+/// The status dot.
+const BAR_DOT: f32 = 10.0;
+
+/// Which text of each item the bar shows (`None`: dropped) so that the sum of `widths`
+/// (per item: each variant's width, extras included) fits `available`. Starting from the
+/// longest texts, the lowest-priority item that can still give way shortens or, past its
+/// shortest text, goes, until everything fits or nothing more may give way.
+fn fit_bar(widths: &[(u8, Vec<f32>, bool)], available: f32) -> Vec<Option<usize>> {
+    let mut pick: Vec<Option<usize>> = widths
+        .iter()
+        .map(|(_, v, _)| (!v.is_empty()).then_some(0))
+        .collect();
+    let total = |pick: &[Option<usize>]| -> f32 {
+        widths
+            .iter()
+            .zip(pick)
+            .filter_map(|((_, v, _), p)| p.map(|i| v[i]))
+            .sum()
+    };
+    while total(&pick) > available {
+        let next = widths
+            .iter()
+            .enumerate()
+            .filter(|(i, (_, v, drop))| match pick[*i] {
+                Some(k) => k + 1 < v.len() || *drop,
+                None => false,
+            })
+            .min_by_key(|(_, (p, _, _))| *p)
+            .map(|(i, _)| i);
+        let Some(i) = next else { break };
+        let n = widths[i].1.len();
+        pick[i] = match pick[i] {
+            Some(k) if k + 1 < n => Some(k + 1),
+            _ => None,
+        };
+    }
+    pick
+}
+
+fn text_width(ui: &egui::Ui, t: &RichText) -> f32 {
+    egui::WidgetText::from(t.clone())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x
+}
+
+/// Draws item `it` with its text `k`. Right to left, the code order flips: the text first,
+/// then the dot (shown before it), then the separator (shown inwards of it).
+fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) {
+    let text = |ui: &mut egui::Ui| {
+        let r = ui.label(it.variants[k].clone());
+        if let Some(h) = &it.hover {
+            r.on_hover_text(h);
+        }
+    };
+    if rtl {
+        text(ui);
+        if let Some(c) = it.dot {
+            dot(ui, c);
+        }
+    } else {
+        if let Some(c) = it.dot {
+            dot(ui, c);
+        }
+        text(ui);
+    }
+    if it.sep {
+        ui.separator();
+    }
+}
+
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let st = &app.state;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        ui.label(RichText::new("ac2").strong().size(16.0));
-        ui.separator();
-        let now = std::time::Instant::now();
-        let (color, text) = match &st.conn {
-            ConnState::Connecting { target } => (ch.warn, format!("connecting to {target}…")),
-            ConnState::Failed { target, error } => {
-                (ch.fault, format!("{target}: {error} · retrying"))
+    let now = std::time::Instant::now();
+    let (color, link_full, link_short) = match &st.conn {
+        ConnState::Connecting { target } => (
+            ch.warn,
+            format!("connecting to {target}…"),
+            "connecting…".to_owned(),
+        ),
+        ConnState::Failed { target, error } => (
+            ch.fault,
+            format!("{target}: {error} · retrying"),
+            "link failed · retrying".to_owned(),
+        ),
+        ConnState::Connected { target, server, .. } => {
+            let responding = st.mirror.as_ref().is_some_and(|m| m.responding(now));
+            let synced = st.mirror.as_ref().is_some_and(|m| m.synced());
+            if !responding {
+                (
+                    ch.fault,
+                    format!("{server} · {target} · not responding"),
+                    "not responding".to_owned(),
+                )
+            } else if !synced {
+                (
+                    ch.warn,
+                    format!("{server} · {target} · syncing"),
+                    "syncing".to_owned(),
+                )
+            } else {
+                (ch.ok, format!("{server} · {target}"), target.clone())
             }
-            ConnState::Connected { target, server, .. } => {
-                let responding = st.mirror.as_ref().is_some_and(|m| m.responding(now));
-                let synced = st.mirror.as_ref().is_some_and(|m| m.synced());
-                if !responding {
-                    (ch.fault, format!("{server} · {target} · not responding"))
-                } else if !synced {
-                    (ch.warn, format!("{server} · {target} · syncing"))
-                } else {
-                    (ch.ok, format!("{server} · {target}"))
-                }
-            }
-        };
-        dot(ui, color);
-        ui.label(text);
-        ui.separator();
-        let session = match st.daemon().and_then(|s| s.session.open.as_ref()) {
-            Some(o) => format!(
-                "{} · {} kHz · {} frames",
-                o.input_device.0,
-                format::fixed(f64::from(o.sample_rate_hz) / 1000.0, 1),
-                o.buffer_frames
-            ),
-            None if st.daemon().is_some() => format!(
-                "no audio session · {} opens one",
-                key_hint(app, CommandId::OpenSession)
-            ),
-            None => "—".into(),
-        };
-        ui.label(RichText::new(session).color(ch.dim));
+        }
+    };
+    let dim = |s: String| RichText::new(s).color(ch.dim);
+    let session = match st.daemon().and_then(|s| s.session.open.as_ref()) {
+        Some(o) => {
+            let rate = format::fixed(f64::from(o.sample_rate_hz) / 1000.0, 1);
+            Item::new(
+                40,
+                vec![
+                    dim(format!(
+                        "{} · {rate} kHz · {} frames",
+                        o.input_device.0, o.buffer_frames
+                    )),
+                    dim(format!("{rate} kHz · {} frames", o.buffer_frames)),
+                ],
+            )
+        }
+        None if st.daemon().is_some() => Item::new(
+            60,
+            vec![
+                dim(format!(
+                    "no audio session · {} opens one",
+                    key_hint(app, CommandId::OpenSession)
+                )),
+                dim("no audio session".into()),
+            ],
+        ),
+        None => Item::new(40, vec![dim("—".into())]),
+    };
+    let mut link = Item::new(
+        70,
+        vec![
+            RichText::new(link_full),
+            RichText::new(link_short),
+            RichText::new(""),
+        ],
+    )
+    .kept()
+    .sep();
+    link.dot = Some(color);
+    let left = [
+        Item::new(100, vec![RichText::new("ac2").strong().size(16.0)])
+            .kept()
+            .sep(),
+        link,
+        session,
+    ];
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(format!(
+    // Right side, from the edge inwards.
+    let mut right = vec![
+        Item::new(
+            10,
+            vec![
+                dim(format!(
                     "{} keys · {} commands",
                     key_hint(app, CommandId::Help),
                     key_hint(app, CommandId::Palette)
-                ))
-                .color(ch.dim),
-            );
-            ui.separator();
-            super::autosave::autosave(app, ui, ch);
-            stimulus(app, ui, ch);
+                )),
+                dim(format!("{} keys", key_hint(app, CommandId::Help))),
+            ],
+        )
+        .sep(),
+    ];
+    if let Some(l) = st.autosave_label(super::now().wall) {
+        let color = match l.tone {
+            AutosaveTone::Quiet | AutosaveTone::Busy => ch.dim,
+            AutosaveTone::Warning => ch.warn,
+        };
+        let mut it = Item::new(
+            if l.tone == AutosaveTone::Warning {
+                65
+            } else {
+                30
+            },
+            vec![RichText::new(l.text).color(color)],
+        )
+        .sep();
+        it.hover = Some(l.detail);
+        right.push(it);
+    }
+    right.extend(stimulus(app, ch));
+
+    let items: Vec<&Item> = left.iter().chain(right.iter()).collect();
+    let widths: Vec<(u8, Vec<f32>, bool)> = items
+        .iter()
+        .map(|it| {
+            let extra = BAR_GAP
+                + it.dot.map_or(0.0, |_| BAR_DOT + BAR_GAP)
+                + if it.sep { BAR_SEP + 2.0 * BAR_GAP } else { 0.0 };
+            let v = it
+                .variants
+                .iter()
+                .map(|t| text_width(ui, t) + extra)
+                .collect();
+            (it.prio, v, it.droppable)
+        })
+        .collect();
+    // A little slack: egui rounds widget sizes to whole pixels.
+    let pick = fit_bar(&widths, ui.available_width() - 4.0);
+    let (lp, rp) = pick.split_at(left.len());
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = BAR_GAP;
+        for (it, p) in left.iter().zip(lp) {
+            if let Some(k) = p {
+                draw_item(ui, it, *k, false);
+            }
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            for (it, p) in right.iter().zip(rp) {
+                if let Some(k) = p {
+                    draw_item(ui, it, *k, true);
+                }
+            }
         });
     });
 }
 
-fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
+/// The stimulus items, from the bar's right edge inwards: what the keys do next, who holds
+/// the generator, the level and outputs, the state badge.
+fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
     let st = &app.state;
     let generator = st.daemon().map(|s| &s.generator);
     let mine = generator
@@ -118,28 +332,43 @@ fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
         (None, StimPhase::Armed) => "Enter fires · Esc stops".to_string(),
         _ => "Esc stops".to_string(),
     };
-    ui.label(RichText::new(hint).color(ch.dim));
-    if let Some(o) = other {
-        ui.label(RichText::new(format!("held by {o}")).color(ch.warn));
-    }
-    ui.label(format!(
-        "{}{level} → out {}",
-        if sweep { "sweep " } else { "" },
-        outputs_text(&st.stimulus.outputs)
-    ));
+    let off = badge == "STIM OFF";
     let badge_text = RichText::new(badge)
         .strong()
-        .color(if badge == "STIM OFF" {
-            ch.dim
-        } else {
-            Color32::BLACK
-        })
-        .background_color(if badge == "STIM OFF" {
-            Color32::TRANSPARENT
-        } else {
-            color
-        });
-    ui.label(badge_text);
+        .color(if off { ch.dim } else { Color32::BLACK })
+        .background_color(if off { Color32::TRANSPARENT } else { color });
+    let prefix = if sweep { "sweep " } else { "" };
+    let mut v = vec![
+        Item::new(100, vec![badge_text]).kept(),
+        Item::new(
+            90,
+            vec![
+                RichText::new(format!(
+                    "{prefix}{level} → out {}",
+                    outputs_text(&st.stimulus.outputs)
+                )),
+                RichText::new(format!("{prefix}{level}")),
+            ],
+        )
+        .kept(),
+    ];
+    if let Some(o) = other {
+        v.push(Item::new(
+            85,
+            vec![
+                RichText::new(format!("held by {o}")).color(ch.warn),
+                RichText::new("held").color(ch.warn),
+            ],
+        ));
+    }
+    v.push(Item::new(20, vec![dim_text(hint, ch)]));
+    // From the bar's edge inwards: the hint is outermost, the badge innermost.
+    v.reverse();
+    v
+}
+
+fn dim_text(s: String, ch: &Chrome) -> RichText {
+    RichText::new(s).color(ch.dim)
 }
 
 /// The running operation: what, which step, a bar, time left, and Stop.
@@ -356,5 +585,44 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     }
     if let Some(id) = clicked_trace {
         app.dispatch(Msg::SelectTrace(id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit_bar;
+
+    #[test]
+    fn the_bar_shortens_then_drops_the_least_important_first() {
+        // (priority, widths of its texts longest first, may go)
+        let items = vec![
+            (100, vec![30.0], false),
+            (70, vec![200.0, 80.0, 20.0], false),
+            (40, vec![250.0, 120.0], true),
+            (10, vec![150.0, 60.0], true),
+            (100, vec![60.0], false),
+        ];
+        assert_eq!(
+            fit_bar(&items, 1000.0),
+            vec![Some(0), Some(0), Some(0), Some(0), Some(0)]
+        );
+        // The keys hint shortens first, then goes, then the session text shortens.
+        assert_eq!(
+            fit_bar(&items, 650.0),
+            vec![Some(0), Some(0), Some(0), Some(1), Some(0)]
+        );
+        assert_eq!(
+            fit_bar(&items, 545.0),
+            vec![Some(0), Some(0), Some(0), None, Some(0)]
+        );
+        assert_eq!(
+            fit_bar(&items, 420.0),
+            vec![Some(0), Some(0), Some(1), None, Some(0)]
+        );
+        // Kept items never go: at their shortest they stay even when nothing fits.
+        assert_eq!(
+            fit_bar(&items, 50.0),
+            vec![Some(0), Some(2), None, None, Some(0)]
+        );
     }
 }
