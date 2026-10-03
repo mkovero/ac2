@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 9`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 10`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -108,7 +108,8 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
 | `cal.list` | — | `calibrations` (`calibrations`, `mics`) | |
 | `cal.delete` | `key: CalKey` | `ack` | |
-| `spl.log_get` | `meas`, `from: u64`, `max: u32` | `spl_log_page` | |
+| `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
+| `spl.log_new` | `meas` | `ack` | |
 | `ir.capture` | `lease_token`, `request: SweepRequest`, `name` | `sweep` (the run as started) | L (held for the capture), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
@@ -160,7 +161,7 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
 - **SPL** (`SplConfig.leq: LeqConfig`): a change to the Leq windows alone (and the name)
   applies in place; the meter, its log and its windows go on (§3.2, SPL log).
 
-#### SPL log and Leq windows (`spl.log_get`, `leq` frames)
+#### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 
 Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8, in
 display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60)}. `LeqWindow` =
@@ -181,7 +182,16 @@ are display operations). `spl.log_get` returns `SplLogPage` {`meas`, `from`, `to
 `rows`}: rows are numbered from the meter's first logged second; `from` says where the
 returned rows start (later than asked when older rows were dropped), `total` is one past
 the newest row, at most 20000 rows per reply. `invalid` for a measurement that is not an
-SPL meter.
+SPL meter. `log` (`SplLogWhich`: `current` \| `previous`) picks the log the meter is writing
+or the one `spl.log_new` ended last; `not_found` when there is no previous log.
+
+`spl.log_new` ends the meter's log and starts an empty one: the windows, their judgements,
+the alarms, the run clock and the total start over; the windows, limits and horizon are
+kept. Rows of the new log are numbered from 0 again. The ended log is kept as the
+`previous` log (in memory: until the next `spl.log_new` of the meter, the meter's deletion
+or a daemon restart; session files and the autosave carry only the current log), so a
+client exports it after the reset without losing the seconds in between. `invalid` for a
+measurement that is not an SPL meter.
 
 A window of N seconds covers the newest N seconds of time, measured or not; its Leq is over
 the measured time in it (never extrapolated; `elapsed` < N while it fills after the log's
@@ -200,6 +210,16 @@ The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (
 \| `not_calibrated` \| `ok` \| `near` \| `over`), when the windows change and when the log
 starts (`started_at`). Going over and recovering append a `LeqAlarm` {`at`, `duration`,
 `weighting`, `kind`: `over` \| `recovered`, `leq`, `limit`} to `alarms` (the newest 100).
+
+The `leq` frame's `run` (`LeqRun` \| nil before the log's first second) is the log as a
+whole, every second: `started_at` (WallNs of its oldest kept second), `until` (WallNs of the
+end of its newest second), `measured` and `gaps` (Seconds: time measured between them, and
+time not measured — capture gaps, the meter or the daemon stopped; a gap is never
+silence), `trimmed` (bool: the log is at its 48 h retention, so older seconds were or may
+have been dropped and `started_at` is the oldest kept), and `laeq`, `lceq`, `lzeq` (f64 in
+the frame's `scale`: the energy average over all the measured time, exactly from the
+seconds' energies; NaN before anything was measured). The run clock is `until −
+started_at`; it carries on across app and daemon restarts as the log does.
 
 #### Devices, preview and loopback detection (`session.*`)
 
@@ -637,7 +657,7 @@ bitmask array says why.
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
-| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far) |
+| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log) |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |

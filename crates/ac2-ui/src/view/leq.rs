@@ -228,3 +228,47 @@ pub(super) fn leq(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         app.dispatch(Msg::Leq(m));
     }
 }
+
+/// The confirmation before a new SPL log: what ends, what starts over, what is kept.
+pub(super) fn new_log(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    let Overlay::NewLog(p) = &app.state.overlay else {
+        return;
+    };
+    let k = p.confirm.clone();
+    backdrop(ctx);
+    let mut msg = None;
+    egui::Area::new(egui::Id::new("ac2-new-log"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(520.0);
+                ui.label(RichText::new(&k.title).strong().size(16.0));
+                ui.add_space(6.0);
+                for (i, l) in k.lines.iter().enumerate() {
+                    let t = RichText::new(l);
+                    ui.label(if i == 0 {
+                        t.color(ch.warn)
+                    } else {
+                        t.color(ch.text)
+                    });
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(RichText::new("Start a new log").strong())
+                        .clicked()
+                    {
+                        msg = Some(true);
+                    }
+                    if ui.button("Keep the current log").clicked() {
+                        msg = Some(false);
+                    }
+                });
+                ui.label(RichText::new(&k.hint).small().color(ch.dim));
+            });
+        });
+    if let Some(m) = msg {
+        app.dispatch(Msg::NewLog(m));
+    }
+}

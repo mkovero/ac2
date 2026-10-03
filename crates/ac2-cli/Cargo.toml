@@ -28,6 +28,8 @@ ac2-scene = { path = "../ac2-scene" }
 # The SPL log CSV (`spl leq export`) is the session file format: one writer.
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
+# Local time of day (the SPL log's start): the UTC offset in force at an instant.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = "7.1"
 crossterm = "0.29"

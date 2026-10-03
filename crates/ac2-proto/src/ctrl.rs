@@ -15,8 +15,8 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat,
     ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement, Mic,
-    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLogPage, SweepRequest,
-    SweepRun, TraceData, TraceEdit, TraceMeta,
+    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLogPage, SplLogWhich,
+    SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -386,10 +386,21 @@ pub enum Command {
     SplLogGet {
         /// SPL measurement.
         meas: MeasId,
+        /// Which log: the current one, or the one `spl.log_new` ended last.
+        log: SplLogWhich,
         /// First row wanted.
         from: u64,
         /// Most rows wanted.
         max: u32,
+    },
+    /// Ends an SPL meter's log and starts a new one: the windows, their states, the alarms,
+    /// the run clock and the total start over; the windows and limits are kept. The ended
+    /// log stays readable (`spl.log_get` with `log: previous`) until the next `spl.log_new`
+    /// of the meter, the meter's deletion or a daemon restart.
+    #[serde(rename = "spl.log_new")]
+    SplLogNew {
+        /// SPL measurement.
+        meas: MeasId,
     },
 
     // -- ir -----------------------------------------------------------------------------
@@ -487,6 +498,7 @@ impl Command {
             Self::CalList => "cal.list",
             Self::CalDelete { .. } => "cal.delete",
             Self::SplLogGet { .. } => "spl.log_get",
+            Self::SplLogNew { .. } => "spl.log_new",
             Self::IrCapture { .. } => "ir.capture",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",

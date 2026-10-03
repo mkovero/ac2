@@ -252,6 +252,68 @@ async fn leq_set_watch_and_export() {
     assert_eq!(f[3], "dB SPL");
     assert!((f[4].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
 
+    // The run in watch's JSON: the whole log's clock from its first second and its total.
+    let run_json = &last["run"];
+    assert!(
+        run_json["running_s"].as_f64().unwrap() >= 12.0,
+        "{run_json}"
+    );
+    assert!(
+        (run_json["laeq"].as_f64().unwrap() - 94.0).abs() < 0.3,
+        "{run_json}"
+    );
+    assert!(run_json["lceq"].is_number() && run_json["lzeq"].is_number());
+    assert_eq!(run_json["trimmed"], false);
+    assert!(run_json["gaps_s"].as_f64().unwrap() >= 0.0);
+    assert!(run_json["started_at"].as_str().unwrap().ends_with('Z'));
+    let line = run_json["text"]["line"].as_str().unwrap();
+    assert!(line.starts_with("running 0:00:"), "{line}");
+    assert!(line.contains("LAeq total 94."), "{line}");
+
+    // A new log: refused without --yes, naming what ends; with it, the ended log is
+    // written whole and the clock starts over.
+    let (code, text) = run(&ep, &["spl", "leq", "new"]).await;
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("this ends FOH SPL's SPL log"), "{text}");
+    assert!(text.contains("--yes"), "{text}");
+    let ended = dir.path().join("soundcheck.csv");
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "leq",
+            "new",
+            "--yes",
+            "--export",
+            ended.to_str().unwrap(),
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let summary = document(&text);
+    let exported = summary["exported_rows"].as_u64().unwrap();
+    assert!(exported >= n, "{summary}");
+    assert!(exported >= summary["ended_rows"].as_u64().unwrap());
+    let csv = std::fs::read_to_string(&ended).unwrap();
+    assert!(csv.contains("# name: FOH SPL"));
+    // The previous log stays exportable.
+    let (code, text) = run(&ep, &["spl", "leq", "export", "--previous"]).await;
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(text.lines().count(), csv.lines().count(), "{text}");
+    let (code, text) = run(&ep, &["spl", "leq", "watch", "--for", "2.5s"]).await;
+    assert_eq!(code, 0, "{text}");
+    let after = lines(&text)
+        .into_iter()
+        .rev()
+        .find(|v| v["run"].is_object())
+        .expect("a line with the new run");
+    assert!(
+        after["run"]["running_s"].as_f64().unwrap() < 6.0,
+        "{}",
+        after["run"]
+    );
+    assert!(after["logged"].as_u64().unwrap() < n, "{after}");
+
     lease.end().await.unwrap();
     drop(c);
     h.shutdown();

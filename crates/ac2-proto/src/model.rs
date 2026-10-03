@@ -2244,6 +2244,16 @@ pub struct SplLogRow {
     pub sensitivity: Option<Db>,
 }
 
+/// Which of an SPL meter's logs `spl.log_get` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplLogWhich {
+    /// The log the meter is writing.
+    Current,
+    /// The log `spl.log_new` ended last (kept in memory until the next one).
+    Previous,
+}
+
 /// Rows of an SPL meter's log (`spl.log_get`). Rows are numbered from the first second the
 /// meter logged; the oldest are dropped after [`SplLogPage::RETAINED_ROWS`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

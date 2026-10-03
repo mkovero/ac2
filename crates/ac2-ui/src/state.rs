@@ -634,6 +634,16 @@ pub enum Overlay {
     Calibrations(Box<CalView>),
     /// The Leq windows and limits of an SPL meter.
     Leq(Box<LeqDialog>),
+    /// The confirmation before a new SPL log.
+    NewLog(Box<NewLogPrompt>),
+}
+
+/// The confirmation before `spl.log_new`: which meter, and what it says.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NewLogPrompt {
+    pub meas: MeasId,
+    pub meter: String,
+    pub confirm: ac2_scene::leq::NewLogConfirm,
 }
 
 /// Transfer measurements offered after the session dialog opened a session.
@@ -709,6 +719,8 @@ pub enum Msg {
     Session(SessionMsg),
     /// Mouse on the measurement offer: `true` creates, `false` skips.
     Offer(bool),
+    /// Mouse on the new SPL log confirmation: `true` starts it, `false` keeps the log.
+    NewLog(bool),
     /// Mouse on the Leq windows dialog.
     Leq(LeqMsg),
 }
@@ -810,6 +822,8 @@ pub struct AppState {
     pub prefs: UiPrefs,
     /// `prefs` changed since the app last saved them.
     pub prefs_dirty: bool,
+    /// Local time of day for wall times.
+    pub local_zone: crate::scenes::LocalZone,
     /// The output device the stimulus outputs belong to (the open session's).
     stim_device: Option<String>,
     /// Band and observation X / Shift+X run the finder with.
@@ -884,6 +898,7 @@ impl AppState {
             sweep: SweepUi::default(),
             prefs: UiPrefs::default(),
             prefs_dirty: false,
+            local_zone: crate::scenes::LocalZone::System,
             stim_device: None,
             finder: FinderChoice::default(),
             overlay: Overlay::None,
@@ -1509,6 +1524,7 @@ impl AppState {
             Msg::Form(m) => self.form_msg(m, out),
             Msg::Session(m) => self.session_msg(m, out),
             Msg::Offer(create) => self.offer(create, out),
+            Msg::NewLog(go) => self.new_log(go, out),
             Msg::Leq(m) => self.leq_msg(m, out),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
@@ -1620,6 +1636,14 @@ impl AppState {
                     self.offer(true, out);
                 } else if matches!(chord.key, Key::Backspace | Key::N) {
                     self.offer(false, out);
+                }
+                return;
+            }
+            Overlay::NewLog(_) => {
+                if chord.key == Key::Enter {
+                    self.new_log(true, out);
+                } else if matches!(chord.key, Key::Backspace | Key::N) {
+                    self.new_log(false, out);
                 }
                 return;
             }
@@ -3066,6 +3090,27 @@ impl AppState {
                 self.prefs.leq = self.view.spl.layout;
                 self.prefs_dirty = true;
             }
+            C::SplNewLog => match self.pane_meas(PaneKind::Spl).cloned() {
+                Some(m) => {
+                    let MeasKind::Spl { config } = &m.config.kind else {
+                        return;
+                    };
+                    let zone = self.local_zone;
+                    let run = self
+                        .leq_run(m.id)
+                        .map(|r| ac2_scene::leq::run_text(&r, &config.leq, |t| zone.offset_s(t)));
+                    self.overlay = Overlay::NewLog(Box::new(NewLogPrompt {
+                        meas: m.id,
+                        meter: m.config.name.clone(),
+                        confirm: ac2_scene::leq::new_log_confirm(
+                            &m.config.name,
+                            &config.leq,
+                            run.as_ref(),
+                        ),
+                    }));
+                }
+                None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
+            },
             C::LeqWindows => match self.pane_meas(PaneKind::Spl).cloned() {
                 Some(m) => {
                     let calibrated = self.leq_calibrated(m.id);
@@ -3076,6 +3121,23 @@ impl AppState {
                 None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
             },
         }
+    }
+
+    /// The run of SPL meter `meas`'s log, from its newest `leq` frame.
+    fn leq_run(&self, meas: MeasId) -> Option<ac2_proto::frame::LeqRun> {
+        use ac2_proto::FrameData;
+        self.data
+            .as_ref()
+            .and_then(|d| {
+                d.latest.get(&Topic::Data {
+                    meas,
+                    stream: Stream::Leq,
+                })
+            })
+            .and_then(|f| match &f.frame.data {
+                FrameData::Leq(l) => l.meta.run,
+                _ => None,
+            })
     }
 
     /// Whether SPL meter `meas` reads dB SPL (its newest frame says so).
@@ -3699,6 +3761,18 @@ impl AppState {
             },
             what: format!("audio session open on {}", plan.device_name),
         });
+        self.overlay = Overlay::None;
+    }
+
+    /// The new SPL log confirmation: start it, or keep the current log.
+    fn new_log(&mut self, go: bool, out: &mut Vec<Request>) {
+        let Overlay::NewLog(p) = &self.overlay else {
+            return;
+        };
+        if go {
+            let (meas, what) = (p.meas, format!("{}: new SPL log started", p.meter));
+            self.call(out, Command::SplLogNew { meas }, what);
+        }
         self.overlay = Overlay::None;
     }
 

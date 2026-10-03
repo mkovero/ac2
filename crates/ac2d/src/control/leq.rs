@@ -1,12 +1,13 @@
 //! SPL logs and Leq windows on the control thread: one log per SPL measurement (kept
 //! across its job's restarts), the `spl_log` entity with each window's state and the
-//! alarms, `spl.log_get` (`docs/design/leq.md`).
+//! alarms, `spl.log_get`, `spl.log_new` (`docs/design/leq.md`).
 
 use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindowState, MeasKind, Measurement, SplLog,
+    SplLogWhich,
 };
 use ac2_proto::units::{MeasId, Rev, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -99,9 +100,10 @@ impl Control {
         self.spl_logs.insert(id, Arc::new(Mutex::new(log)));
     }
 
-    /// Forgets a measurement's log and its entity.
+    /// Forgets a measurement's logs and its entity.
     pub(super) fn drop_spl_log(&mut self, id: MeasId) {
         self.spl_logs.remove(&id);
+        self.spl_prev_logs.remove(&id);
         if self.spl_log_entity(id).is_some() {
             self.commit(Change::SplLog(Patch::Deleted(id)));
         }
@@ -128,6 +130,7 @@ impl Control {
     pub(super) fn leq_reported(
         &mut self,
         meas: MeasId,
+        epoch: u64,
         config_rev: Rev,
         at: WallNs,
         judgements: &[LeqJudgement],
@@ -140,8 +143,14 @@ impl Control {
             .iter()
             .find(|m| m.id == meas)
             .map(|m| m.config_rev);
-        // A report from a job the configuration has moved on from describes other windows.
-        if current != Some(config_rev) {
+        // A report from a job the configuration has moved on from describes other windows;
+        // one from before `spl.log_new` belongs to the ended log.
+        if current != Some(config_rev)
+            || self
+                .spl_logs
+                .get(&meas)
+                .is_none_or(|l| leq_log::lock(l).epoch() != epoch)
+        {
             return;
         }
         let (Some(prev), Some((name, _))) =
@@ -187,13 +196,8 @@ impl Control {
         self.commit_spl_log(l);
     }
 
-    /// `spl.log_get`.
-    pub(super) fn spl_log_get(
-        &self,
-        meas: MeasId,
-        from: u64,
-        max: u32,
-    ) -> Result<ReplyBody, ProtoError> {
+    /// `invalid` unless `meas` is an SPL meter.
+    fn spl_meter(&self, meas: MeasId) -> Result<&Measurement, ProtoError> {
         let m = self.meas(meas)?;
         if !matches!(m.config.kind, MeasKind::Spl { .. }) {
             return Err(perr(
@@ -201,21 +205,97 @@ impl Control {
                 format!("measurement {meas} is not an SPL meter"),
             ));
         }
-        let page = match self.spl_logs.get(&meas) {
-            Some(l) => leq_log::lock(l).page(meas, from, max),
-            None => LeqLog::default().page(meas, from, max),
+        Ok(m)
+    }
+
+    /// `spl.log_get`.
+    pub(super) fn spl_log_get(
+        &self,
+        meas: MeasId,
+        which: SplLogWhich,
+        from: u64,
+        max: u32,
+    ) -> Result<ReplyBody, ProtoError> {
+        self.spl_meter(meas)?;
+        let page = match which {
+            SplLogWhich::Current => match self.spl_logs.get(&meas) {
+                Some(l) => leq_log::lock(l).page(meas, from, max),
+                None => LeqLog::default().page(meas, from, max),
+            },
+            SplLogWhich::Previous => self
+                .spl_prev_logs
+                .get(&meas)
+                .ok_or_else(|| {
+                    perr(
+                        ErrorCode::NotFound,
+                        format!(
+                            "SPL meter {meas} has no previous log: none was ended since the \
+                             daemon started"
+                        ),
+                    )
+                })?
+                .page(meas, from, max),
         };
         Ok(ReplyBody::SplLogPage(page))
     }
 
-    /// Rows logged per SPL meter, for the autosave's change check.
-    pub(super) fn spl_log_totals(&self) -> Vec<(MeasId, u64)> {
-        let mut v: Vec<(MeasId, u64)> = self
+    /// `spl.log_new`: the current log becomes the previous one and an empty log starts;
+    /// the entity's windows go back to their initial states and the alarms are cleared. A
+    /// running job sees the new log at its next second and starts its windows over.
+    pub(super) fn spl_log_new(&mut self, meas: MeasId) -> Result<ReplyBody, ProtoError> {
+        let m = self.spl_meter(meas)?.clone();
+        let MeasKind::Spl { config } = &m.config.kind else {
+            return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
+        };
+        let log = self
+            .spl_logs
+            .entry(meas)
+            .or_insert_with(|| Arc::new(Mutex::new(LeqLog::default())))
+            .clone();
+        let ended = {
+            let mut l = leq_log::lock(&log);
+            let next = l.next();
+            std::mem::replace(&mut *l, next)
+        };
+        if let Some(run) = ended.run() {
+            tracing::info!(
+                "SPL meter {meas} ({}): new log; the one ended ran {:.0} s from {} ({} rows)",
+                m.config.name,
+                (run.until.0.saturating_sub(run.started_at.0)) as f64 / 1e9,
+                ac2_traces::spl_log::utc_iso(run.started_at.0),
+                ended.total()
+            );
+        }
+        self.spl_prev_logs.insert(meas, ended);
+        let windows = leq_log::window_states(
+            &config.leq,
+            None,
+            &[],
+            self.input_calibrated(config.input),
+            WallNs(wall_ns()),
+        );
+        self.commit_spl_log(SplLog {
+            meas,
+            started_at: None,
+            windows,
+            alarms: Vec::new(),
+        });
+        Ok(ReplyBody::Ack {
+            rev: self.store.rev(),
+        })
+    }
+
+    /// Which log and how many rows per SPL meter, for the autosave's change check.
+    pub(super) fn spl_log_totals(&self) -> Vec<(MeasId, u64, u64)> {
+        let mut v: Vec<(MeasId, u64, u64)> = self
             .spl_logs
             .iter()
-            .map(|(id, l)| (*id, leq_log::lock(l).total()))
+            .map(|(id, l)| {
+                let l = leq_log::lock(l);
+                (*id, l.epoch(), l.total())
+            })
             .collect();
-        v.sort_by_key(|(id, _)| *id);
+        v.sort_by_key(|(id, ..)| *id);
         v
     }
 

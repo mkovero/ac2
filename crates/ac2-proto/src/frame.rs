@@ -381,6 +381,33 @@ pub struct LeqMeta {
     pub horizon: Seconds,
     /// Rows the meter's log has logged so far (`spl.log_get`).
     pub logged: u64,
+    /// The whole log: its run clock and total; `None` before its first second.
+    pub run: Option<LeqRun>,
+}
+
+/// An SPL meter's log as a whole: from its oldest kept second to its newest, the time
+/// measured in between and the energy average over that measured time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqRun {
+    /// Wall time of the oldest second kept (the log's start, or the oldest second the
+    /// retention kept when `trimmed`).
+    pub started_at: WallNs,
+    /// Wall time of the end of the newest second.
+    pub until: WallNs,
+    /// Time measured from `started_at` to `until`.
+    pub measured: Seconds,
+    /// Time between them not measured (capture gaps, the meter or the daemon stopped).
+    pub gaps: Seconds,
+    /// The log reached its retention ([`crate::model::SplLogPage::RETAINED_ROWS`]): older
+    /// seconds were dropped or may have been.
+    pub trimmed: bool,
+    /// LAeq over the measured time, in the frame's `scale`; NaN when nothing was measured.
+    pub laeq: f64,
+    /// LCeq over the measured time.
+    pub lceq: f64,
+    /// LZeq over the measured time.
+    pub lzeq: f64,
 }
 
 /// Input meters metadata.

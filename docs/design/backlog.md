@@ -13,8 +13,6 @@ the commit when it lands.
 - **No measuring-position correction**: a limit for the loudest audience position read from a
   FOH mic needs the difference added by hand; a per-meter offset (with its own "corrected"
   label) would do it.
-- **No way to start the windows afresh** (show start after a loud soundcheck) short of a new
-  meter: a `spl.log_clear` (keeping the old rows in an exported file first).
 - **No hysteresis on the alarms**: judged at 0.1 dB, a window hovering on its limit toggles
   over / recovered each time the rounded value crosses it.
 - **The app has no calibration flow**: the Leq tiles stay "not calibrated" until
@@ -57,6 +55,21 @@ the commit when it lands.
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## Done
+
+Leq run clock and a new log (operator: "should I see a timer somewhere which shows the whole
+measurement time?"; `docs/design/leq.md` "Run clock and total", "A new log"; 774e690):
+- **No timer for the whole measurement** → every Leq caption (columns, tiles, stage view) and
+  `ac2 spl leq watch` (`run` in `--json`) show `running 2:14:05 since 19:02 · LAeq total
+  97.8 · gaps 0:12`: the clock from the log's first kept second (it carries on across app
+  and daemon restarts with the log), the energy average over the whole log's measured time,
+  the unmeasured time; "last 48 h" once the log is at its retention. Shortened, then moved
+  to a row of its own, at narrow widths. Protocol 10: `LeqMeta.run`.
+- **No way to start the windows afresh** (show start after a loud soundcheck) → `spl.log_new`:
+  the windows, their states, the alarms, the clock and the total start over, windows and
+  limits stay; the ended log stays readable as the previous log (`spl.log_get` with `log:
+  previous`, `ac2 spl leq export --previous`) until the next new log or a daemon restart.
+  App: Shift+R in the SPL pane or "Start a new SPL log…", after a confirmation naming the
+  run that ends; CLI: `ac2 spl leq new --yes [--export FILE]`.
 
 Calibration visibility (field, 2026-10-03; `docs/design/q7-calibration.md` §10; de17a13):
 - **No calibration view in the app** → the Calibrations view (palette **Calibrations…**,

@@ -21,10 +21,12 @@ use crate::theme::Theme;
 use crate::view::{LeqLayout, LeqStyle};
 
 mod columns;
+mod run;
 pub use columns::{
     ABOVE_LIMIT_DB, BELOW_LIMIT_DB, FREE_SPAN_DB, LeqColumn, LeqColumns, column_colors,
     column_range,
 };
+pub use run::{LeqRunText, NewLogConfirm, new_log_confirm, run_text};
 
 fn w_letter(w: Weighting) -> &'static str {
     match w {
@@ -524,6 +526,8 @@ pub struct LeqView<'a> {
     /// The headroom's horizon in words: `1 min`.
     pub horizon: String,
     pub layout: LeqLayout,
+    /// The log as a whole: run clock, start, total, gaps (`None` before its first second).
+    pub run: Option<LeqRunText>,
 }
 
 /// The Leq view as drawn.
@@ -538,6 +542,10 @@ pub struct LeqScene {
     pub history: Option<HistoryStrip>,
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+    /// The caption above the windows: meter, run, calibration.
+    pub caption: Rect,
+    /// The run's wording as drawn, if there was room for any.
+    pub run: Option<String>,
 }
 
 /// Columns of a grid of `n` tiles in `w × h` that makes the tiles largest at about 2:1.
@@ -707,11 +715,32 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
     let pad = 10.0;
     let strip = canvas::banner_strip(&mut c, status, pad, size.width - 2.0 * pad, size, theme);
     let top = strip.rect.bottom() + pad;
+    let n = v.tiles.len();
+    // The columns decide whether their names leave the weighting to the caption once the
+    // caption's height is known; the run is placed clear of the longer of the two texts.
+    let shared = v
+        .tiles
+        .first()
+        .map(|t| t.weighting)
+        .filter(|w| v.tiles.iter().all(|t| t.weighting == *w))
+        .map(|w| format!("L{}eq", w_letter(w)));
+    let right = match &v.stale {
+        Some(s) => format!("{s} · {}", v.cal),
+        None => v.cal.clone(),
+    };
+    let cap = caption(
+        v,
+        &caption_left(v, shared.as_deref()),
+        &right,
+        top,
+        size,
+        theme,
+    );
     let area = Rect::new(
         pad,
-        top + theme.font_size * 1.6,
+        top + cap.height,
         (size.width - 2.0 * pad).max(1.0),
-        (size.height - top - theme.font_size * 1.6 - pad).max(1.0),
+        (size.height - top - cap.height - pad).max(1.0),
     );
     // The strip takes a third of a tall pane; a short one is all windows.
     let show_history =
@@ -730,7 +759,6 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
     } else {
         (area, None)
     };
-    let n = v.tiles.len();
     let mut rects = Vec::new();
     let mut cols = None;
     if n == 0 {
@@ -780,18 +808,9 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
             rects.push(r);
         }
     }
+    let left = caption_left(v, cols.as_ref().and_then(|k| k.weighting.as_deref()));
     // The caption: the meter (with the unit, and the weighting the columns' names leave
-    // out), and the calibration.
-    let left = match &cols {
-        Some(k) => {
-            let unit = v.tiles.first().map_or("", |t| t.unit.as_str());
-            match &k.weighting {
-                Some(w) => format!("{} · {w}, {unit}", v.meter),
-                None => format!("{} · {unit}", v.meter),
-            }
-        }
-        None => v.meter.clone(),
-    };
+    // out), the run, and the calibration.
     c.overlay.labels.push(label(
         left,
         [pad, top],
@@ -799,10 +818,19 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
         theme.font_size,
         theme.text_dim,
     ));
-    let right = match &v.stale {
-        Some(s) => format!("{s} · {}", v.cal),
-        None => v.cal.clone(),
-    };
+    if let Some((text, pos, size)) = &cap.run {
+        c.overlay.labels.push(label(
+            text.clone(),
+            *pos,
+            anchor(HAlign::Left, VAlign::Top),
+            *size,
+            if v.stale.is_some() {
+                theme.text_dim
+            } else {
+                theme.text
+            },
+        ));
+    }
     c.overlay.labels.push(label(
         right,
         [size.width - pad, top],
@@ -833,6 +861,85 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
         history,
         strip: strip.rect,
         banners: strip.rows,
+        caption: Rect::new(0.0, top, size.width, cap.height),
+        run: cap.run.map(|(t, ..)| t),
+    }
+}
+
+/// The caption's left part: the meter, and for columns the unit and the `weighting` their
+/// names leave out.
+fn caption_left(v: &LeqView<'_>, weighting: Option<&str>) -> String {
+    if v.layout.style != LeqStyle::Columns || v.tiles.is_empty() {
+        return v.meter.clone();
+    }
+    let unit = v.tiles.first().map_or("", |t| t.unit.as_str());
+    match weighting {
+        Some(w) => format!("{} · {w}, {unit}", v.meter),
+        None => format!("{} · {unit}", v.meter),
+    }
+}
+
+/// Where the run goes in the caption.
+struct Caption {
+    height: f32,
+    /// Text, top-left position, size.
+    run: Option<(String, [f32; 2], f32)>,
+}
+
+/// Lays the run into the caption: in large type between the meter and the calibration
+/// when a wording down to the clock and the total fits there, else on a row of its own
+/// below them in the longest wording that fits (at the caption's type size when nothing
+/// fits large); left out only when not even the clock fits. Large type is a share of the
+/// pane's height, so the run reads from a distance on a full-screen pane.
+fn caption(
+    v: &LeqView<'_>,
+    left: &str,
+    right: &str,
+    top: f32,
+    size: Viewport,
+    theme: &Theme,
+) -> Caption {
+    let pad = 10.0;
+    let gap = theme.font_size;
+    let base_h = theme.font_size * 1.6;
+    let Some(run) = &v.run else {
+        return Caption {
+            height: base_h,
+            run: None,
+        };
+    };
+    let big = (size.height * 0.04).clamp(theme.font_size, theme.font_size * 2.0);
+    let variants = run.variants();
+    let left_end = pad + canvas::text_width(left, theme.font_size);
+    let right_start = size.width - pad - canvas::text_width(right, theme.font_size);
+    let free = right_start - left_end - 2.0 * gap;
+    // On the meter's row: down to the clock and the total, never the bare clock alone.
+    let inline = variants.len().saturating_sub(1).max(1);
+    if let Some(t) = variants
+        .iter()
+        .take(inline)
+        .find(|t| canvas::text_width(t, big) <= free)
+    {
+        let w = canvas::text_width(t, big);
+        let x = left_end + gap + (free - w) / 2.0;
+        return Caption {
+            height: (big * 1.35).max(base_h),
+            run: Some((t.clone(), [x, top], big)),
+        };
+    }
+    let row_y = top + base_h;
+    let width = size.width - 2.0 * pad;
+    for s in [big, theme.font_size] {
+        if let Some(t) = variants.iter().find(|t| canvas::text_width(t, s) <= width) {
+            return Caption {
+                height: base_h + (s * 1.35).max(base_h),
+                run: Some((t.clone(), [pad, row_y], s)),
+            };
+        }
+    }
+    Caption {
+        height: base_h,
+        run: None,
     }
 }
 

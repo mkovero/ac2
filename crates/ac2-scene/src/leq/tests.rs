@@ -1,5 +1,5 @@
 use super::*;
-use ac2_proto::frame::{LeqFlags, LeqMeta};
+use ac2_proto::frame::{LeqFlags, LeqMeta, LeqRun};
 use ac2_proto::model::CalStatus;
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds, WallNs};
 
@@ -28,6 +28,28 @@ fn judged(extra: LeqFlags) -> LeqFlags {
     LeqFlags::LIMIT.with(LeqFlags::JUDGED).with(extra)
 }
 
+/// 17:02 UTC on 3 October 2026: 19:02 at UTC+2.
+const START_S: u64 = 1_791_046_920;
+const UTC_PLUS_2: i32 = 7200;
+
+/// A run of 2:14:05 from 19:02 local, 12 s of it not measured.
+fn run() -> LeqRun {
+    LeqRun {
+        started_at: WallNs(START_S * 1_000_000_000),
+        until: WallNs((START_S + 8045) * 1_000_000_000 + 400_000_000),
+        measured: Seconds(8033.0),
+        gaps: Seconds(12.4),
+        trimmed: false,
+        laeq: 97.84,
+        lceq: 110.21,
+        lzeq: 112.0,
+    }
+}
+
+fn run_of(c: &LeqConfig, f: &LeqFrame) -> Option<LeqRunText> {
+    f.meta.run.map(|r| run_text(&r, c, |_| UTC_PLUS_2))
+}
+
 fn frame(scale: LevelScale) -> LeqFrame {
     LeqFrame {
         meas: MeasId(4),
@@ -39,6 +61,7 @@ fn frame(scale: LevelScale) -> LeqFrame {
             mic_curve: false,
             horizon: Seconds(60.0),
             logged: 3600,
+            run: Some(run()),
         },
         leq: vec![97.84, 98.26, 96.94, f32::NAN],
         elapsed: vec![60.0, 900.0, 750.0, 3600.0],
@@ -185,6 +208,7 @@ fn scene_lays_tiles_out_and_colours_them() {
             style: LeqStyle::Tiles,
             history: true,
         },
+        run: run_of(&c, &f),
     };
     let th = Theme::dark();
     let s = leq_scene(&v, &Status::default(), &th, size(1200.0, 700.0));
@@ -214,6 +238,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         "limit 99.0 dB · next 1 min ≤ 104.2 dB",
         "12:30 / 30:00",
         "now",
+        "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12",
     ] {
         assert!(all.contains(&want), "{want} in {all:?}");
     }
@@ -410,6 +435,7 @@ fn columns_view<'a>(c: &'a LeqConfig, f: &LeqFrame, h: Option<&'a LeqHistory>) -
         scale: f.meta.scale,
         horizon: "1 min".into(),
         layout: LeqLayout::default(),
+        run: run_of(c, f),
     }
 }
 
@@ -718,7 +744,7 @@ fn column_labels(s: &LeqScene) -> Vec<(&crate::primitives::Label, Option<usize>)
         .layers
         .iter()
         .flat_map(|l| &l.labels)
-        .filter(|l| l.pos[1] > s.strip.bottom() + 25.0)
+        .filter(|l| l.pos[1] >= s.caption.bottom())
         .map(|l| {
             let b = crate::canvas::tests::label_box(l);
             let at = k
@@ -780,20 +806,7 @@ fn columns_fit_two_to_eight_windows_without_overlap() {
                             );
                         }
                     }
-                    // The caption's two halves stay apart.
-                    let caption: Vec<Rect> = s
-                        .scene
-                        .layers
-                        .iter()
-                        .flat_map(|l| &l.labels)
-                        .filter(|l| l.pos[1] <= s.strip.bottom() + 25.0)
-                        .map(crate::canvas::tests::label_box)
-                        .collect();
-                    assert_eq!(caption.len(), 2, "{at}");
-                    assert!(
-                        !crate::canvas::tests::intersects(caption[0], caption[1]),
-                        "{at}: caption"
-                    );
+                    assert_caption_fits(&s, w, &at);
                     // Each column keeps its value and its name.
                     for x in &k.columns {
                         let inside = labels
@@ -808,6 +821,219 @@ fn columns_fit_two_to_eight_windows_without_overlap() {
             }
         }
     }
+}
+
+/// The caption's labels (meter, run, calibration) stay apart, inside the pane and above
+/// the windows, and the run is there at least as its clock.
+fn assert_caption_fits(s: &LeqScene, w: f32, at: &str) {
+    let caption: Vec<(&str, Rect)> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| &l.labels)
+        .filter(|l| l.pos[1] >= s.caption.y - 0.5 && l.pos[1] < s.caption.bottom())
+        .map(|l| (l.text.as_str(), crate::canvas::tests::label_box(l)))
+        .collect();
+    assert!(s.run.is_some(), "{at}: no run in the caption");
+    assert_eq!(caption.len(), 3, "{at}: {caption:?}");
+    for (i, (t, b)) in caption.iter().enumerate() {
+        assert!(b.x >= -0.5 && b.right() <= w + 0.5, "{at}: {t:?} {b:?}");
+        assert!(
+            b.bottom() <= s.caption.bottom() + 0.5,
+            "{at}: {t:?} {b:?} below the caption"
+        );
+        for (u, c) in &caption[i + 1..] {
+            assert!(
+                !crate::canvas::tests::intersects(*b, *c),
+                "{at}: {t:?} overlaps {u:?}"
+            );
+        }
+    }
+}
+
+/// The run in the caption at every width, in columns and tiles: the longest wording that
+/// fits, shortened to the clock and the total and then to the clock, never overlapping
+/// the meter or the calibration; large on a full-screen pane.
+#[test]
+fn caption_run_fits_every_width() {
+    let th = Theme::dark();
+    for style in [LeqStyle::Columns, LeqStyle::Tiles] {
+        for mixed in [false, true] {
+            let (c, f) = many(5, mixed, LevelScale::DbSpl);
+            for (w, h) in [
+                (320.0, 240.0),
+                (320.0, 480.0),
+                (480.0, 320.0),
+                (640.0, 400.0),
+                (960.0, 540.0),
+                (1280.0, 720.0),
+                (1920.0, 1080.0),
+            ] {
+                let v = LeqView {
+                    layout: LeqLayout {
+                        style,
+                        history: false,
+                    },
+                    ..columns_view(&c, &f, None)
+                };
+                let s = leq_scene(&v, &Status::default(), &th, size(w, h));
+                let at = format!("{style:?} ({mixed}) at {w}×{h}");
+                assert_caption_fits(&s, w, &at);
+                // The windows start under the caption.
+                for r in s.tiles.iter().chain(
+                    s.columns
+                        .iter()
+                        .flat_map(|k| k.columns.iter().map(|x| &x.rect)),
+                ) {
+                    assert!(r.y >= s.caption.bottom() - 0.5, "{at}: {r:?}");
+                }
+                let run = s.run.clone().unwrap_or_default();
+                assert!(
+                    run.starts_with("running 2:14:05") || run.starts_with("2:14:05"),
+                    "{at}: {run}"
+                );
+                if w >= 1280.0 {
+                    assert!(
+                        run.starts_with("running 2:14:05 since 19:02 · LAeq total 97.8"),
+                        "{at}: {run}"
+                    );
+                }
+                if w >= 1920.0 {
+                    let want = if mixed {
+                        "running 2:14:05 since 19:02 · LAeq total 97.8 · LCeq total 110.2 · gaps 0:12"
+                    } else {
+                        "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12"
+                    };
+                    assert_eq!(run, want, "{at}");
+                }
+            }
+        }
+    }
+    // The stage: a full-screen pane writes the run large, on the meter's row.
+    let (c, f) = many(5, false, LevelScale::DbSpl);
+    let s = leq_scene(
+        &columns_view(&c, &f, None),
+        &Status::default(),
+        &th,
+        size(1920.0, 1080.0),
+    );
+    let label = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| &l.labels)
+        .find(|l| Some(&l.text) == s.run.as_ref())
+        .expect("run label");
+    assert!(label.size >= 2.0 * th.font_size, "{}", label.size);
+    assert!((label.pos[1] - s.caption.y).abs() < 0.5);
+    // At 320 px it has a row of its own, shortened.
+    let narrow = leq_scene(
+        &columns_view(&c, &f, None),
+        &Status::default(),
+        &th,
+        size(320.0, 480.0),
+    );
+    let run = narrow.run.clone().expect("run");
+    assert!(
+        run.len() < "running 2:14:05 since 19:02 · LAeq total 97.8".len(),
+        "{run}"
+    );
+    // Without a run (nothing logged yet) the caption is the meter and the calibration.
+    let none = LeqView {
+        run: None,
+        ..columns_view(&c, &f, None)
+    };
+    let s = leq_scene(&none, &Status::default(), &th, size(960.0, 540.0));
+    assert_eq!(s.run, None);
+}
+
+#[test]
+fn run_wordings() {
+    let c = cfg();
+    let r = run_text(&run(), &c, |_| UTC_PLUS_2);
+    assert_eq!(r.clock, "2:14:05");
+    assert_eq!(r.since, "19:02");
+    assert_eq!(r.gaps.as_deref(), Some("0:12"));
+    assert_eq!(
+        r.variants(),
+        [
+            "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12",
+            "2:14:05 since 19:02 · total 97.8 · gaps 0:12",
+            "2:14:05 · total 97.8 · gaps 0:12",
+            "2:14:05 · total 97.8",
+            "2:14:05",
+        ]
+    );
+    // No gaps: none named. A C-weighted window adds LCeq and names LAeq in the short form.
+    let mut whole = run();
+    whole.gaps = Seconds(0.4);
+    let mut cc = c.clone();
+    cc.windows[1].weighting = Weighting::C;
+    let r = run_text(&whole, &cc, |_| UTC_PLUS_2);
+    assert_eq!(
+        r.variants(),
+        [
+            "running 2:14:05 since 19:02 · LAeq total 97.8 · LCeq total 110.2",
+            "running 2:14:05 since 19:02 · LAeq total 97.8",
+            "2:14:05 since 19:02 · LAeq total 97.8",
+            "2:14:05 · LAeq total 97.8",
+            "2:14:05",
+        ]
+    );
+    // Started yesterday (local): the date is named. Under an hour: still h:mm:ss.
+    let mut early = run();
+    early.started_at = WallNs((START_S - 20 * 3600) * 1_000_000_000);
+    let r = run_text(&early, &c, |_| UTC_PLUS_2);
+    assert_eq!(r.since, "2 Oct 23:02");
+    let mut short = run();
+    short.until = WallNs((START_S + 75) * 1_000_000_000);
+    assert_eq!(run_text(&short, &c, |_| UTC_PLUS_2).clock, "0:01:15");
+    // The offset in force at each instant: a start before a DST change.
+    let r = run_text(&run(), &c, |t| {
+        if t.0 < (START_S + 60) * 1_000_000_000 {
+            3600
+        } else {
+            7200
+        }
+    });
+    assert_eq!(r.since, "18:02");
+    // Trimmed at 48 h: said so, the clock is the span kept.
+    let mut full = run();
+    full.trimmed = true;
+    full.until = WallNs((START_S + 48 * 3600 + 30) * 1_000_000_000);
+    full.gaps = Seconds(30.0);
+    let r = run_text(&full, &c, |_| UTC_PLUS_2);
+    let v = r.variants();
+    assert_eq!(
+        v[0],
+        "last 48 h: 48:00:30 since 3 Oct 19:02 · LAeq total 97.8 · gaps 0:30"
+    );
+    assert_eq!(v[v.len() - 1], "last 48 h");
+    // Nothing measured: no value.
+    let mut empty = run();
+    empty.laeq = f64::NAN;
+    assert!(run_text(&empty, &c, |_| 0).line().contains("LAeq total —"));
+}
+
+#[test]
+fn new_log_confirmation_names_what_ends() {
+    let c = cfg();
+    let r = run_text(&run(), &c, |_| UTC_PLUS_2);
+    let k = new_log_confirm("FOH SPL", &c, Some(&r));
+    assert_eq!(k.title, "Start a new SPL log for FOH SPL?");
+    assert_eq!(
+        k.lines[0],
+        "The current log ends: running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12."
+    );
+    assert!(
+        k.lines[1].contains(
+            "the 4 Leq windows and their states, the alarms, the run clock and the total"
+        )
+    );
+    assert!(k.lines[2].starts_with("Kept: the windows, limits"));
+    assert!(k.lines[3].contains("ac2 spl leq export --previous"));
+    let k = new_log_confirm("FOH SPL", &c, None);
+    assert_eq!(k.lines[0], "The current log ends (no seconds logged yet).");
 }
 
 #[test]

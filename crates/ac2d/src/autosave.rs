@@ -40,9 +40,14 @@ pub(crate) const MAX_WAIT: Duration = Duration::from_secs(10);
 pub(crate) const RETRY: Duration = Duration::from_secs(10);
 
 /// What a write would put on disk, minus the trace data and the SPL log rows: trace data
-/// never changes without its metadata being committed again, and a log only grows, so
-/// equal fingerprints (with each log's row count) mean equal autosaves.
-pub(crate) type Fingerprint = (Vec<SavedMeasurement>, Vec<TraceMeta>, Vec<(MeasId, u64)>);
+/// never changes without its metadata being committed again, and a log only grows until
+/// `spl.log_new` replaces it, so equal fingerprints (with each log's epoch and row count)
+/// mean equal autosaves.
+pub(crate) type Fingerprint = (
+    Vec<SavedMeasurement>,
+    Vec<TraceMeta>,
+    Vec<(MeasId, u64, u64)>,
+);
 
 /// `<dir><suffix>` beside `dir`.
 fn sibling(dir: &Path, prefix: &str, suffix: &str) -> PathBuf {

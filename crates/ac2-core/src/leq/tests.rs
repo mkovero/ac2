@@ -466,3 +466,68 @@ fn correction_in_the_path() {
     g.set_correction(None);
     assert!(!g.has_correction());
 }
+
+/// The total over a whole log with gaps and partial seconds, grown at the newest end and
+/// trimmed at the oldest: the running total equals the brute-force energy average over the
+/// seconds held, over their measured time (gaps are not silence).
+#[test]
+fn log_total_matches_brute_force_with_gaps_and_trimming() {
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    let mut t = LogTotal::default();
+    let mut held: std::collections::VecDeque<Second> = std::collections::VecDeque::new();
+    assert!(t.level_dbfs(Weighting::A).is_nan());
+    for step in 0..4000 {
+        let u = rng.next();
+        let s = if u < 0.05 {
+            Second::GAP
+        } else {
+            let base = if (step / 300) % 2 == 0 { -5.0 } else { -95.0 };
+            let l = base + 20.0 * rng.next();
+            let m = if u < 0.1 { 0.2 + 0.6 * rng.next() } else { 1.0 };
+            Second::from_levels([l, l + 3.0, l + 6.0], m)
+        };
+        t.add(&s);
+        held.push_back(s);
+        // Past 1000 seconds the oldest go, as a log at its retention.
+        if held.len() > 1000 {
+            let o = held.pop_front().expect("held");
+            t.remove(&o);
+        }
+        if step % 7 == 0 {
+            let (mut m, mut e) = (0.0, [0.0; 3]);
+            for x in &held {
+                m += x.measured;
+                for (k, ek) in e.iter_mut().enumerate() {
+                    *ek += x.energy[k];
+                }
+            }
+            assert!((t.measured() - m).abs() < 1e-9, "step {step}");
+            for (k, w) in WEIGHTINGS.into_iter().enumerate() {
+                let want = power_dbfs(e[k] / m);
+                assert!(
+                    close_db(t.level_dbfs(w), want, 1e-6),
+                    "step {step} {w:?}: {} vs {want}",
+                    t.level_dbfs(w)
+                );
+            }
+            let exact = LogTotal::of(&held);
+            assert!(close_db(
+                exact.level_dbfs(Weighting::A),
+                t.level_dbfs(Weighting::A),
+                1e-6
+            ));
+        }
+    }
+}
+
+/// A partial second weighs by its measured time: a 0.25 s second at −10 dBFS and a whole
+/// second at −30 dBFS average over 1.25 s, never over the 2 s of wall time.
+#[test]
+fn log_total_is_over_measured_time() {
+    let a = Second::from_levels([-10.0; 3], 0.25);
+    let b = Second::from_levels([-30.0; 3], 1.0);
+    let t = LogTotal::of([&a, &Second::GAP, &b]);
+    assert!((t.measured() - 1.25).abs() < 1e-12);
+    let want = 10.0 * ((0.25 * 10f64.powf(-1.0) + 10f64.powf(-3.0)) / 1.25).log10();
+    assert!((t.level_dbfs(Weighting::A) - want).abs() < 1e-9);
+}

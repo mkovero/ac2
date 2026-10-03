@@ -33,6 +33,8 @@ ac2-plot = { path = "../ac2-plot" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
 ac2-zmq = { path = "../ac2-zmq" }
+# Local time of day (the SPL log's start): the UTC offset in force at an instant.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4.5", features = ["derive"] }
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wayland", "wgpu", "x11"] }
 egui-wgpu = "0.36.2"

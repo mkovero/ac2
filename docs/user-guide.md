@@ -458,7 +458,7 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   shows or hides the **history strip** below them: each window over time against its limit
   (dashed), red where it was over. The app remembers both. **W** gives the pane the whole
   window, **F11** the whole screen; both together are the **stage view**: nothing but the
-  columns and a one-line caption with the meter's name and its calibration (the top bar comes
+  columns and the caption with the meter's name, the run and its calibration (the top bar comes
   back while a stimulus is armed or playing). F11 again leaves it.
 - Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
   steady level for the next minute that keeps the window at or below its limit ("next 1 min ≤
@@ -466,6 +466,20 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   limit; while the window fills, how much of it there is; and "gaps" when part of it was not
   measured (the meter stopped, the capture lost samples). Gaps are never counted as silence.
   Narrow columns use the shorter wordings, or leave a line out.
+- The caption above the windows says how long the meter has been logging and the level of
+  the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12`** — the
+  time since the log's first second (it keeps counting when the app or the daemon is
+  restarted: the log comes back with the autosave), its start in local time, the energy
+  average over everything measured (LCeq and LZeq too when a window uses them; dB SPL when
+  calibrated), and the time not measured, if any (the meter stopped, the daemon down, lost
+  samples — never counted as silence). It is large in the stage view and shortened in
+  narrow panes (`2:14:05 · total 97.8`). After 48 hours the log keeps its last 48 hours and
+  the caption says "last 48 h".
+- **Shift+R** in the SPL pane (or "Start a new SPL log…" in Ctrl+K) starts a **new log** — for
+  the show after a loud soundcheck: the windows, their states, the alarms, the clock and the
+  total start over; the windows and limits stay. It asks first, naming the run that ends.
+  The ended log can still be exported (`ac2 spl leq export --previous`) until the next new
+  log or a daemon restart.
 - **Shift+L** (or "Leq windows and limits…" in Ctrl+K) sets them: the window lengths and
   weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
   **preset** row and the headroom horizon. ↑/↓ moves between rows, Tab between cells,
@@ -500,7 +514,9 @@ the daemon restarts (the log is in the autosave and in saved sessions).
 In the terminal: `ac2 spl leq watch` (big numbers; `--json` for one line per second),
 `ac2 spl leq set --preset france --limit 1min=102db` (also `--windows 1min,5min,c:30s`,
 `--warn 3db`, `--horizon 1min`), `ac2 spl leq export -o show.csv` (the per-second log as
-CSV, for the record). Each takes `--meas` or `--input` when there is more than one meter.
+CSV, for the record), `ac2 spl leq new --yes --export soundcheck.csv` (a new log, the ended
+one written first; without `--yes` it only says what would end). Each takes `--meas` or
+`--input` when there is more than one meter.
 How it is computed: `docs/design/leq.md`.
 
 ## Keyboard
@@ -641,6 +657,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `G` | SPL: meter / Leq windows | `spl_leq_view` |
 | `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | `H` | SPL Leq windows: history strip on / off | `spl_leq_history` |
+| `Shift+R` | Start a new SPL log… | `spl_new_log` |
 
 #### Sweep / distortion
 
@@ -712,7 +729,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
 | `ac2 trace capture / list / show / rm / average / math / import / export / smooth / mic` | stored traces |
 | `ac2 cal spl / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
-| `ac2 spl watch`, `ac2 spl cal`, `ac2 spl leq watch / set / export` | SPL readout, calibration, Leq windows and the per-second log |
+| `ac2 spl watch`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, calibration, Leq windows, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |
 | `ac2 state dump` | the daemon's whole state as JSON |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |

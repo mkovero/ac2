@@ -1033,3 +1033,115 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// The caption's run as the SPL pane draws it now (the pane at 1280 × 720).
+fn run_caption(s: &AppState) -> Option<String> {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    ac2_ui::scenes::leq(s, &Theme::dark(), size, now).and_then(|x| x.run)
+}
+
+/// Seconds on the caption's run clock (`running 0:01:05 …`).
+fn run_seconds(s: &AppState) -> Option<u64> {
+    let text = run_caption(s)?;
+    let clock = text.strip_prefix("running ")?.split(' ').next()?;
+    let parts: Vec<u64> = clock
+        .split(':')
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    match parts[..] {
+        [h, m, sec] => Some(h * 3600 + m * 60 + sec),
+        _ => None,
+    }
+}
+
+/// The run clock and a new log from an empty daemon, using the app: a session and an SPL
+/// meter from the app; the Leq view's caption counts the meter's log (`running 0:00:05
+/// since … · LAeq total …`); Shift+R asks first, naming the run that ends; N keeps it,
+/// Shift+R and Enter start a new log, and the clock starts again from zero.
+#[test]
+fn run_clock_and_a_new_log_from_the_app() -> R {
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.stop()?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+    // G: the windows, with the run in the caption.
+    d.key("Alt+4");
+    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    if !d.st.view.spl.leq {
+        d.key("G");
+    }
+    d.until("the run clock past 4 s", |s| {
+        run_seconds(s).is_some_and(|t| t >= 4)
+    })?;
+    let caption = run_caption(&d.st).ok_or("caption")?;
+    assert!(caption.contains(" since "), "{caption}");
+    assert!(caption.contains("LAeq total "), "{caption}");
+    let before = run_seconds(&d.st).ok_or("clock")?;
+
+    // Shift+R asks first; N keeps the log and its clock.
+    d.key("Shift+R");
+    let Overlay::NewLog(p) = &d.st.overlay else {
+        return Err(format!("no confirmation: {:?}", d.st.overlay).into());
+    };
+    assert!(p.confirm.title.starts_with("Start a new SPL log for "));
+    assert!(
+        p.confirm.lines[0].starts_with("The current log ends: running 0:00:"),
+        "{:?}",
+        p.confirm.lines
+    );
+    assert!(p.confirm.lines[1].contains("the run clock and the total"));
+    d.key("N");
+    assert_eq!(d.st.overlay, Overlay::None);
+    d.until("the clock going on", |s| {
+        run_seconds(s).is_some_and(|t| t >= before + 2)
+    })?;
+    let ended = run_seconds(&d.st).ok_or("clock")?;
+
+    // Shift+R, Enter: a new log; the clock starts from zero again.
+    d.key("Shift+R");
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    d.until("the new log toasted", |s| {
+        s.toasts
+            .iter()
+            .any(|t| t.text.contains("new SPL log started"))
+    })?;
+    d.until("the clock started again", |s| {
+        run_seconds(s).is_some_and(|t| t + 3 < ended)
+    })?;
+    d.until("the new clock counting", |s| {
+        run_seconds(s).is_some_and(|t| t >= 2)
+    })?;
+    let l = spl_log(&d.st).ok_or("log")?;
+    assert!(l.alarms.is_empty());
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

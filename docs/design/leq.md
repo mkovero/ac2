@@ -1,7 +1,7 @@
 # Rolling Leq windows, limits and alarms
 
-Status: implemented (`ac2_core::leq`, the SPL meter job, `spl.log_get`, the SPL pane's Leq
-view, `ac2 spl leq`). Answers PLAN.md §3.6 "Rolling Leq windows, limits and alarms" and the
+Status: implemented (`ac2_core::leq`, the SPL meter job, `spl.log_get`, `spl.log_new`, the
+SPL pane's Leq view, `ac2 spl leq`). Answers PLAN.md §3.6 "Rolling Leq windows, limits and alarms" and the
 log half of "Continuous crash-safe logging, export".
 
 ## What the operator gets
@@ -51,6 +51,49 @@ The windows survive the job: stopping and starting the meter, a device reopen, a
 the windows or a daemon restart (autosave) rebuild them from the log by wall time, with the
 time in between as gap.
 
+## Run clock and total
+
+Besides its windows, the log as a whole is a figure the operator asks for ("how long have we
+been going, and what is the show's level so far?"). Every `leq` frame carries the log's
+**run**, computed by the daemon from the rows it holds:
+
+    started_at = start of the oldest row        until = start of the newest row + 1 s
+    LAeq,total = 10·lg(2 · Σ e_i / Σ m_i)        (LCeq, LZeq the same)
+    gaps = Σ (1 − m_i) + whole seconds without a row between rows
+
+Exact, as the windows: the sums are compensated (`ac2_core::leq::LogTotal`), kept as rows
+come and go and recomputed from the rows once an hour of trimming, so subtracting the rows
+the retention drops leaves no residue (tests: brute force over logs with pauses, lost and
+partial seconds, and over a trimmed 48 h log). The total is in the frame's unit with the
+sensitivity in force, as the windows are; gaps (the meter stopped, the daemon down, lost
+samples) are never silence. Because `started_at` comes from the log, the clock carries on
+across app restarts, meter restarts and daemon restarts (the log is in the autosave); the
+time the daemon was down counts as gap. A log at its 48 h retention is **trimmed**: the
+clock and the total then cover the 48 h kept, and the caption says "last 48 h".
+
+The caption: `running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12` — the clock always
+in hours (it is never a time of day), the start in local time (with the date when not the
+newest second's day), LAeq always and LCeq / LZeq when a window uses that weighting, gaps
+only when there are some (≥ 1 s). Large (4 % of the pane's height, up to twice the caption
+type) between the meter and the calibration so it reads from a distance in the stage view;
+narrower panes get `2:14:05 since 19:02 · total 97.8 · gaps 0:12`, then `2:14:05 · total
+97.8`, and when even that does not fit beside the meter it moves to a row of its own,
+shortened down to the clock. Tested at 320–1920 px in columns and tiles: no overlap.
+
+## A new log
+
+`spl.log_new` ends the meter's log and starts an empty one: the windows, their states, the
+alarms, the run clock and the total start over, the windows, limits and horizon are kept.
+The ended log is not thrown away at once: the daemon keeps it as the meter's **previous** log
+(`spl.log_get` with `log: previous`) until the next new log, the meter's deletion or a
+daemon restart — only the current log is saved with the session and the autosave. That is
+the minimal honest form: `ac2 spl leq new --yes --export FILE` writes the ended log after
+the reset, whole, with no second lost between an export and the reset; `ac2 spl leq export
+--previous` gets it later. The meter's job sees the new log at its next second (each log has
+an epoch) and starts its windows over; judgement reports from before the reset are dropped.
+The app asks first (Shift+R in the SPL pane, "Start a new SPL log…"), naming the run that
+ends and what starts over; the CLI wants `--yes`.
+
 ## Limits
 
 Judged only when the meter is calibrated (values in dB SPL; a calibration from another mic
@@ -85,12 +128,13 @@ daemon logs each over and recovery. Clients toast them. There is no hysteresis b
   goes full screen, the two together are the stage view. **Shift+L** opens the windows
   dialog (lengths and weightings picked, limits typed, a preset row, the horizon). Over /
   recovered alarms are toasts. See *Display* below.
-- CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second),
-  `ac2 spl leq set` (`--windows`, `--preset`, `--limit 30min=99db`, `--warn`, `--horizon`),
-  `ac2 spl leq export` (the CSV).
+- CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second, with the
+  run), `ac2 spl leq set` (`--windows`, `--preset`, `--limit 30min=99db`, `--warn`,
+  `--horizon`), `ac2 spl leq export` (the CSV; `--previous` the ended log), `ac2 spl leq
+  new` (`--yes`, `--export FILE`).
 
 What is left: `docs/design/backlog.md` (history backfill, peak limits, position
-correction, a fresh start of the windows, alarm hysteresis).
+correction, alarm hysteresis).
 
 ## Display
 
@@ -125,7 +169,7 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
 - **Tiles** (B) keep every figure written out in a grid; the **history strip** (H) goes under
   either. Defaults: columns, no strip.
 - **Stage view**: full screen with the SPL pane maximised on its windows draws only the
-  scene — columns and the caption (meter, unit, calibration) — without the app's top bar,
+  scene — columns and the caption (meter, unit, run, calibration) — without the app's top bar,
   measurement list or pane title. While a stimulus is armed or playing, or a sweep runs, the
   top bar is shown anyway: what drives the speakers is never hidden.
 

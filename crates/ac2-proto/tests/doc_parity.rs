@@ -178,6 +178,12 @@ fn protocol_doc_names_everything() {
         &mut missing,
     );
     check(
+        "spl log which",
+        &names_of::<model::SplLogWhich, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
         "leq alarm kind",
         &names_of::<model::LeqAlarmKind, _>(&"no_such"),
         &doc,
@@ -195,6 +201,10 @@ fn protocol_doc_names_everything() {
         (
             "leq meta field",
             names_of::<frame::LeqMeta, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "leq run field",
+            names_of::<frame::LeqRun, _>(&Bogus { bogus_field: 0 }),
         ),
     ] {
         check(group, &fields, &doc, &mut missing);

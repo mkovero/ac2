@@ -10,7 +10,7 @@ use crate::ctrl::{
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
     ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags,
-    LeqFrame, LeqMeta, LevelsFrame, LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta,
+    LeqFrame, LeqMeta, LeqRun, LevelsFrame, LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta,
     ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta,
     TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
@@ -268,6 +268,7 @@ pub fn commands() -> Vec<Command> {
         Command::CalList,
         Command::SplLogGet {
             meas: MeasId(4),
+            log: SplLogWhich::Previous,
             from: 120,
             max: 3600,
         },
@@ -325,6 +326,7 @@ pub fn commands() -> Vec<Command> {
             label: "on axis".into(),
         },
         Command::CalCurveDelete { curve: curve_id() },
+        Command::SplLogNew { meas: MeasId(4) },
     ]
 }
 
@@ -1178,6 +1180,16 @@ pub fn frames() -> Vec<Frame> {
                     mic_curve: false,
                     horizon: Seconds(60.0),
                     logged: 1800,
+                    run: Some(LeqRun {
+                        started_at: WallNs(1_790_000_000_000_000_000),
+                        until: WallNs(1_790_001_810_000_000_000),
+                        measured: Seconds(1790.0),
+                        gaps: Seconds(20.0),
+                        trimmed: false,
+                        laeq: 97.8,
+                        lceq: 110.25,
+                        lzeq: 112.5,
+                    }),
                 },
                 leq: vec![96.5, 99.25],
                 elapsed: vec![60.0, 1800.0],
