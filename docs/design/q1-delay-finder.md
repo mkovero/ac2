@@ -291,9 +291,9 @@ Behaviour (decision 1c):
 alone with a one-row list: `BorderlineLevel` and `CloseArrivals` each add a second candidate,
 and `OutsideRefinement` alone lists the coarse pick. A merged lobe is a peak whose shape does
 not fit one arrival in the band: two arrivals closer than the pulse width, or a dispersive
-path. The first rig used a three-way box. Modelled with LR4 crossovers at 430 Hz and 2.6 kHz,
-which is an assumption and not the box's datasheet, the 2.6 kHz crossover inside the full band
-does exactly that. Its LR4 sum is a flat-level 2nd-order allpass
+path. The first rig's box is a two-way (woofer and tweeter). The test models crossovers at
+430 Hz and 2.6 kHz (LR4, an assumption, not the box's datasheet); the 2.6 kHz one, inside the
+full band, alone does exactly that. Its LR4 sum is a flat-level 2nd-order allpass
 with ≈ 0.17 ms group delay at f0, so the lobe is smeared (misfit ≈ 0.17 against μ 0.10), its
 phase is far from 0°, and its centre sits ≈ 1.2 samples after the onset. That is outside the
 full-band tolerance, so accepting it would break §12. The floor bounce (+3.5 ms, −23 dB) is many

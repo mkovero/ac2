@@ -9,7 +9,7 @@ what ac2 learned on it.
 - **Audio:** RME Fireface 400, JACK `jack-ac.service`, 96 kHz / 256 frames / 3 periods, `-S`.
   JACK port order can move (ADAT block before/after analog): check silently before emitting —
   captures 9–14 read exact digital zero when analog is first.
-- **Wiring:** out 1 (AN1) → Genelec 1083 (three-way); out 2 (AN2) → cable → in 2 (reference
+- **Wiring:** out 1 (AN1) → Genelec 1083 (two-way: woofer and tweeter); out 2 (AN2) → cable → in 2 (reference
   loopback); in 1 = measurement mic, beyerdynamic MM1 (449350, s/n 34804), **mounted at 90°
   (pointing up)** → use `~/src/ac/beyer/449350_34804_90Grad.txt`.
 - **Emission ceilings:** −40 dBFS standing, **−50 dBFS on anything that drives the speaker**.
@@ -102,7 +102,7 @@ geometry), then restarted with `--max-level -50` again. Data:
 - The H3 region is the one that stood out at −50 dBFS (510–680 Hz, −53…−58 dB). It rose about
   15 dB for 20 dB more drive. A pure cubic nonlinearity would rise 40 dB, so the −50 dBFS value
   was mostly something level-independent (noise/leakage) and the H3 seen here is the speaker.
-  An odd-order (symmetric) nonlinearity near the woofer/mid handover is the likely source.
+  An odd-order (symmetric) nonlinearity in the woofer (the box is two-way) is the likely source.
   A −40 dBFS run would pin down its growth with level.
 - The daemon logged two "output timing jump 0 → 96000 samples" warnings around arming the
   sweep; the sweep's arrival (3.45 ms) is unchanged, so the measurement is not affected.
@@ -120,3 +120,21 @@ after the sweep, "autosaved just now", dB | % toggle with the log % axis. The ex
 Arrival 3.62 ms, 0.17 ms (≈ 6 cm) later than the morning's 94 cm runs: the mic or the speaker
 moved slightly in between. The four morning sweeps were re-imported from their v1 CSVs as
 transfer traces (delay kept, distortion not recoverable from v1).
+
+## Independent check of the 2–6 kHz dip (2026-10-03, no ac2 code in the chain)
+
+A Python JACK client on pupu (`~/ac2-test/jsweep.py`, venv `~/ac2-test/venv-meas`) played its
+own 12 s exponential sweep × 2 at −50 dBFS RMS to playback_1 + playback_2 and recorded
+capture_1 (mic) and capture_2 (loopback) in the same JACK cycles; numpy deconvolved mic re
+loopback. Repeat-to-repeat IR difference −36 dB; mic noise −68 dBFS vs −56 dBFS during the sweep.
+
+- **Same answer as ac2:** with ac2's 100 ms window, within 0.5 dB of ac2's sweep in every
+  third-octave band 63 Hz–16 kHz. Plot: `/home/mui/ac2-1083-independent-check.png`.
+- **The dip is in the direct sound:** gated to 3 ms after the arrival (before the floor bounce at
+  +3.44 ms; the only earlier reflection, +2.15 ms at −21.6 dB, can move the level ±0.7 dB at
+  most) it keeps the same shape. At 1/12 octave it is two notches, −9…−11 dB at 1.8–2.1 kHz and
+  −8…−10 dB at 3–4 kHz, with a peak at 2.5 kHz between them, back to ≈ 0 dB by 7 kHz.
+- **Likely cause: woofer–tweeter interference around the one crossover**, i.e. the mic off the
+  axis where the two drivers sum in phase. That is vertical (the drivers are stacked); 102 →
+  94 cm at 1 m is only ≈ 5°. Next: 3–4 heights through the marked reference axis, 15–30°
+  horizontally, and the listening position; check the rear-panel switches.

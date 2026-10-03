@@ -16,8 +16,10 @@ the commit when it lands.
 
 - **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Mic at 102 cm
   and 94 cm (re-centred) gives the same dip within ±1.2 dB, and no distortion above 0.15 % goes
-  with it, so mic geometry is ruled out. Left: rear-panel settings, near-field per driver,
-  off-axis, 2 m; listen during a burst;
+  with it, so it is not a reflection at the mic, and an independent JACK + numpy capture confirms it in
+  the direct sound (docs/rigs/pupu.md). Two-way box: most likely woofer–tweeter interference off
+  the summing axis. Left: heights through the reference axis, 15–30° off axis, rear-panel
+  settings, listening position; listen during a burst;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## Done
