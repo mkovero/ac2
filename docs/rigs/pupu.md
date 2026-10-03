@@ -106,4 +106,6 @@ geometry), then restarted with `--max-level -50` again. Data:
   A −40 dBFS run would pin down its growth with level.
 - The daemon logged two "output timing jump 0 → 96000 samples" warnings around arming the
   sweep; the sweep's arrival (3.45 ms) is unchanged, so the measurement is not affected.
+  (Explained: false timing peaks at the search-range ends during the sweep's low part; see
+  the backlog's Done list.)
 

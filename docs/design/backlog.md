@@ -5,22 +5,11 @@ the commit when it lands.
 
 ## From the first sweep run on pupu (2026-10-03)
 
-- **Generator re-armed after a sweep.** After the sweep finished the daemon logged "generator Set
-  by daemon" and the app showed ARMED again (restored pre-sweep state). A finished or aborted sweep
-  must leave the generator disarmed.
 - **Top bar: ARMED badge overlaps the session text** ("2ARMED…") at 1290 px width.
 - **Sweep pane caption overlaps** ("arrival … window …" collides with the axis title) when the pane
   is small; fine when maximised.
 - **Distortion pane shades only the H2 noise floor**; each harmonic has its own floor in the data —
   show the relevant one (or the lowest) and label it.
-- **Sweep dialog defaults** picked capture_1 as Reference until the session declared its loopback;
-  without a loopback mapping, ask for the reference explicitly instead of guessing by order.
-- **Sweep dialog duration stepper is unsorted and wraps** (3 s, 1 s, 6 s, 12 s): → from 3 s
-  gives 1 s, ← from 3 s wraps to 12 s, so 6 s takes three presses from the default. Sort the
-  choices and stop at the ends.
-- **Name field: Ctrl+A does not select** the default name; typing appends to it.
-- **"output timing jump 0 → 96000 samples" (and back)** logged twice around arming a sweep on
-  pupu (2026-10-03 03:55); find whether the output timing record or the jump check is wrong.
 - **Sweep results lost on daemon restart, and a CSV re-import cannot bring them back.** Stored
   traces live in daemon memory; `trace import` of a sweep export keeps only its transfer
   function (and delay 0), because `SweepData` needs the IR and analysis info that the CSV lacks
@@ -28,7 +17,6 @@ the commit when it lands.
   `--max-level` needs a restart, so a ceiling change loses that session's sweeps. Options:
   autosave traces in the daemon, export the IR + info so a sweep CSV round-trips, or make the
   sweep pane draw a sweep without its IR.
-- Re-arm after a sweep reproduced on both later runs (2×, 8×).
 
 ## Flaky tests (seen on CI, passed on rerun)
 
@@ -64,6 +52,26 @@ Open:
   no line for a refused client.
 
 ## Done
+
+Sweep findings from pupu (2026-10-03), fixed on the sweep-fixes branch:
+- **Generator re-armed after a sweep** (every run). Not a restore of the pre-sweep state:
+  `ir.capture` needs an armed generator, and once the recording was in the daemon only
+  cleared `firing` ("generator Set by daemon"), leaving it armed with the sweep; the app
+  followed with ARMED and "Enter sweeps again". The daemon now disarms (`Stop` by daemon,
+  lease kept) as soon as the sweep has played, and on failure; the app shows STIM OFF, gives
+  the lease back once the result (or failure) is in, and ends sweep mode.
+- **Sweep dialog steppers** sorted (1 s, 3 s default, 6 s, 12 s) and every dialog stepper
+  (choices, inputs, the session dialog's backend and device) stops at the ends.
+- **Text fields select their text on focus** (and Ctrl+A), so typing replaces the default
+  name or level.
+- **Sweep reference** is the loopback input, else "choose the reference": the sweep does not
+  arm until one is picked.
+- **"output timing jump 0 → 96000 samples"**: not the output record. At 96 kHz the
+  acquisition range is 0 … 96 000 samples; a slow sweep's first seconds are a near-tone, and
+  GCC-PHAT on a rectangular capture window turned the window's end leakage into confident
+  peaks exactly at the range ends (0 and 96 000, also ±64 while tracking). The capture window
+  is now tapered: those windows are no measurement (Lost) instead of a false jump.
+  Reproduced in `ac2-core` (`a_slow_sweep_start_never_reads_as_a_range_edge`).
 
 Rig findings fixed on `fix/rig-findings`:
 - **Remote generator played silence on JACK.** Arming reopened the stream to change the
