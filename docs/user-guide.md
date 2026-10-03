@@ -84,6 +84,22 @@ Nothing in the dialog is a channel number to type. From the top:
 
 The measurement dialogs pick inputs the same way: by name, with their meters, **←/→**.
 
+### Input meters
+
+While a session is open, the top of the left-hand list shows **Inputs**: one live meter per
+input the session captures — RMS as the bar, the sample peak as a tick, the RMS in dBFS
+beside it, and *CLIP* in red, held for a second after the input clipped. The meters run
+whether or not anything measures, and keep running during sweeps and other operations, so
+the mic and the reference stay in sight while you set levels.
+
+Each row is named, not numbered: the mic's name, else the backend's channel name (the JACK
+port), else *Input N*; then its role — *reference* (the loopback input, or the reference of
+a transfer measurement) or *mic* (a named mic, or the measured input of a transfer
+measurement) — and the input number when the name does not already say it:
+*MM1 34804 · mic (in 1)*, *loopback · reference (in 2)*, *capture_4 (in 4)*. A **REF** /
+**MEAS** mark shows what the running sweep uses, or, with nothing running, the selected
+measurement.
+
 ## Reference wiring and loopback
 
 A transfer function divides what the microphone hears by what you sent. "What you sent" is
@@ -254,6 +270,12 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
   sweep's impulse response with the harmonics' impulses marked (**G**: linear / log / ETC),
   **N** steps through stored sweeps, **Shift+H** hides the pane. The sweep is also a stored
   trace, drawn in the transfer pane like any capture.
+- **Progress strip:** while a sweep runs (from this app, another client or the CLI), a strip
+  under the top bar — visible whichever pane is maximised — shows its name and level,
+  *sweep 1 of 2*, a bar and the time left (about the remaining repeats × (sweep + the
+  silence after it), counted from when each repeat began), then *analysing…*. Its
+  **Stop (Esc)** button, like **Esc**, fades the output out, disarms the generator and
+  discards the run; nothing is stored.
 - **CLI:** `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs` (`--from 20hz --to
   20khz --duration 3s --repeats 1 --gate 5ms --name …`). Like `gen`, it arms and waits:
   **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. The daemon disarms the generator as soon
