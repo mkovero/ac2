@@ -125,6 +125,68 @@ pub fn channel_choice(channel: u16, name: &str) -> String {
     format!("{} · {name}", u32::from(channel) + 1)
 }
 
+/// What an input is wired as in the setup: the loopback return of the stimulus, or a
+/// measurement mic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputRole {
+    Reference,
+    Mic,
+}
+
+impl InputRole {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Reference => "reference",
+            Self::Mic => "mic",
+        }
+    }
+}
+
+/// What the operation in focus (the running sweep, else the selected measurement) uses an
+/// input as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputUse {
+    Reference,
+    Measurement,
+}
+
+impl InputUse {
+    /// The short mark next to the meter.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Reference => "REF",
+            Self::Measurement => "MEAS",
+        }
+    }
+}
+
+/// A session input's row in the always-on meters: its label, what the operation in focus
+/// uses it as, and its reading.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputRow {
+    pub channel: u16,
+    pub label: String,
+    pub used: Option<InputUse>,
+    pub reading: MeterReading,
+}
+
+/// A session input's label: its name ([`input_name`]), its role, and the one-based input
+/// number when the name does not already say it: `MM1 34804 · mic (in 1)`,
+/// `loopback · reference (in 2)`, `Input 3 · mic`, `capture_4 (in 4)`.
+pub fn input_label(channel: u16, name: &str, role: Option<InputRole>) -> String {
+    let n = u32::from(channel) + 1;
+    let generic = name == format!("Input {n}");
+    let mut s = name.to_owned();
+    if let Some(r) = role {
+        s.push_str(" · ");
+        s.push_str(r.name());
+    }
+    if !generic {
+        s.push_str(&format!(" (in {n})"));
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,5 +227,25 @@ mod tests {
         assert_eq!(output_name(1, None), "Output 2");
         assert_eq!(output_name(1, Some("playback_2")), "playback_2");
         assert_eq!(channel_choice(1, "Room mic"), "2 · Room mic");
+    }
+
+    #[test]
+    fn input_labels_name_the_role_and_the_input() {
+        assert_eq!(
+            input_label(0, "MM1 34804", Some(InputRole::Mic)),
+            "MM1 34804 · mic (in 1)"
+        );
+        assert_eq!(
+            input_label(1, "loopback", Some(InputRole::Reference)),
+            "loopback · reference (in 2)"
+        );
+        assert_eq!(
+            input_label(2, "Input 3", Some(InputRole::Mic)),
+            "Input 3 · mic"
+        );
+        assert_eq!(input_label(3, "capture_4", None), "capture_4 (in 4)");
+        assert_eq!(input_label(3, "Input 4", None), "Input 4");
+        assert_eq!(InputUse::Reference.tag(), "REF");
+        assert_eq!(InputUse::Measurement.tag(), "MEAS");
     }
 }

@@ -641,6 +641,9 @@ pub struct SweepUi {
     pub shown: Option<TraceId>,
     /// The lease is being given back after a finished sweep: its stop is no operator stop.
     pub releasing: bool,
+    /// The mirrored run's step (any client's run) and when this client first saw it, in
+    /// `now_s`: the progress strip counts the time within a step from it.
+    pub step_seen: Option<(SweepId, SweepStatus, f64)>,
 }
 
 /// Everything the UI holds.
@@ -695,6 +698,9 @@ pub struct AppState {
     pub devices: Option<Vec<ac2_proto::model::BackendInfo>>,
     /// When the device preview was last asked for.
     preview_sent_s: f64,
+    /// The session the device list was last asked for on its own (for the input names of
+    /// the always-on meters).
+    devices_for: Option<ac2_proto::units::SessionEpoch>,
 }
 
 impl Default for AppState {
@@ -749,6 +755,7 @@ impl AppState {
             open_session_when_empty: false,
             devices: None,
             preview_sent_s: f64::NEG_INFINITY,
+            devices_for: None,
         }
     }
 
@@ -958,22 +965,156 @@ impl AppState {
         let tick = matches!(msg, Msg::Tick { .. });
         self.update_inner(msg, keymap, &mut out);
         self.sync_meters(before, tick, &mut out);
+        self.sync_session_watch(&mut out);
         out
     }
 
-    /// What the open dialog needs metered: the input meters subscription, and a device
-    /// preview (the session dialog on a device the session does not capture).
+    /// What needs metering: the session's input meters while a session is open (the
+    /// sidebar shows them all the time) or a dialog meters inputs, and a device preview (the
+    /// session dialog on a device the session does not capture).
     fn meter_wants(
         &self,
     ) -> (
         bool,
         Option<(ac2_proto::model::BackendKind, ac2_proto::model::DeviceId)>,
     ) {
+        let session = self.open_session().is_some();
         match &self.overlay {
             Overlay::Session(d) => (true, d.preview_target()),
             Overlay::Form(_) => (true, None),
-            _ => (false, None),
+            _ => (session, None),
         }
+    }
+
+    /// Follows what the always-on parts of the window need from the mirror: the device
+    /// list once per session (the inputs' channel names), and when the running sweep's
+    /// step began.
+    fn sync_session_watch(&mut self, out: &mut Vec<Request>) {
+        let epoch = self
+            .daemon()
+            .filter(|s| s.session.open.is_some())
+            .map(|s| s.session.epoch);
+        if let Some(e) = epoch
+            && self.devices.is_none()
+            && self.devices_for != Some(e)
+            && self.connected()
+        {
+            self.devices_for = Some(e);
+            if !matches!(self.overlay, Overlay::Session(_) | Overlay::Form(_)) {
+                out.push(Request::Devices);
+            }
+        }
+        let run = self
+            .daemon()
+            .and_then(|s| s.sweep.as_ref())
+            .filter(|r| r.active())
+            .map(|r| (r.id, r.status.clone()));
+        match run {
+            None => self.sweep.step_seen = None,
+            Some((id, status)) => {
+                let same = self
+                    .sweep
+                    .step_seen
+                    .as_ref()
+                    .is_some_and(|(i, s, _)| *i == id && *s == status);
+                if !same {
+                    self.sweep.step_seen = Some((id, status, self.now_s));
+                }
+            }
+        }
+    }
+
+    /// The multi-step operation running on the daemon (a set of sweeps), as the progress
+    /// strip shows it.
+    pub fn operation(&self) -> Option<ac2_scene::progress::Progress> {
+        let run = self.daemon()?.sweep.as_ref()?;
+        let since = self
+            .sweep
+            .step_seen
+            .as_ref()
+            .filter(|(i, s, _)| *i == run.id && *s == run.status)
+            .map_or(0.0, |(_, _, t)| self.now_s - t);
+        ac2_scene::progress::sweep(run, since)
+    }
+
+    /// Every input the open session captures, labelled by name and role, with its meter
+    /// and what the running sweep (else the selected measurement) uses it as.
+    pub fn session_inputs(&self) -> Vec<ac2_scene::meter::InputRow> {
+        use ac2_scene::meter::{InputRole, InputRow, InputUse, MeterReading, input_label};
+        let Some(o) = self.open_session() else {
+            return Vec::new();
+        };
+        let meters = if matches!(self.overlay, Overlay::Session(_)) {
+            // The dialog's meters may be another device's preview.
+            BTreeMap::new()
+        } else {
+            self.input_meters()
+        };
+        let device_names = self
+            .devices
+            .iter()
+            .flatten()
+            .filter(|b| b.kind == o.backend)
+            .flat_map(|b| &b.devices)
+            .find(|d| d.id == o.input_device)
+            .and_then(|d| d.input.as_ref())
+            .and_then(|i| i.channel_names.clone());
+        let ms = self.measurements();
+        let loopback = o.config.loopback.map(|l| l.input);
+        let run = self
+            .daemon()
+            .and_then(|s| s.sweep.as_ref())
+            .filter(|r| r.active());
+        let uses: Vec<(u16, InputUse)> = match (run, self.selected_meas()) {
+            (Some(r), _) => vec![
+                (r.reference_input, InputUse::Reference),
+                (r.measurement_input, InputUse::Measurement),
+            ],
+            (None, Some(m)) => match &m.config.kind {
+                MeasKind::Transfer { config } => vec![
+                    (config.reference_input, InputUse::Reference),
+                    (config.measurement_input, InputUse::Measurement),
+                ],
+                MeasKind::Spectrum { config } => vec![(config.input, InputUse::Measurement)],
+                MeasKind::Rta { config } => vec![(config.input, InputUse::Measurement)],
+                MeasKind::Spl { config } => vec![(config.input, InputUse::Measurement)],
+            },
+            (None, None) => Vec::new(),
+        };
+        o.config
+            .input_channels
+            .iter()
+            .map(|&c| {
+                let mic = self.input_setup(c).mic;
+                let dev = device_names
+                    .as_ref()
+                    .and_then(|n| n.get(usize::from(c)).cloned());
+                let name = ac2_scene::meter::input_name(c, mic.as_deref(), dev.as_deref());
+                let is_ref = loopback == Some(c)
+                    || ms.iter().any(|m| {
+                        matches!(&m.config.kind, MeasKind::Transfer { config }
+                            if config.reference_input == c)
+                    });
+                let is_mic = mic.is_some()
+                    || ms.iter().any(|m| {
+                        matches!(&m.config.kind, MeasKind::Transfer { config }
+                            if config.measurement_input == c)
+                    });
+                let role = if is_ref {
+                    Some(InputRole::Reference)
+                } else if is_mic {
+                    Some(InputRole::Mic)
+                } else {
+                    None
+                };
+                InputRow {
+                    channel: c,
+                    label: input_label(c, &name, role),
+                    used: uses.iter().find(|(i, _)| *i == c).map(|(_, u)| *u),
+                    reading: meters.get(&c).cloned().unwrap_or_else(MeterReading::none),
+                }
+            })
+            .collect()
     }
 
     /// Subscribes, opens, renews and closes what [`Self::meter_wants`] changed to.

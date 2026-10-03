@@ -510,3 +510,110 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon, using only the app: the session's inputs metered by name and role
+/// in the sidebar, then a set of two sweeps followed on the progress strip, sweep 1 of 2
+/// then 2 of 2, stopped from it: the output stops, the generator is disarmed and the run
+/// is discarded.
+#[test]
+fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
+    use ac2_proto::model::{SweepFailure, SweepStatus};
+    use ac2_scene::meter::{InputUse, MeterState};
+    use ac2_ui::forms::FieldId;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+
+    // Every captured input, named with its role, metering the rig's signal.
+    d.until("the input meters with names", |s| {
+        let rows = s.session_inputs();
+        rows.len() == 2
+            && s.devices.is_some()
+            && rows.iter().all(|r| r.reading.state != MeterState::NoData)
+    })?;
+    let rows = d.st.session_inputs();
+    assert!(
+        rows[0].label.contains("reference") && rows[0].label.contains("(in 1)"),
+        "{}",
+        rows[0].label
+    );
+    assert!(
+        rows[1].label.starts_with("Room mic · mic"),
+        "{}",
+        rows[1].label
+    );
+    // The selected transfer measurement's inputs are the marked ones.
+    assert_eq!(rows[0].used, Some(InputUse::Reference));
+    assert_eq!(rows[1].used, Some(InputUse::Measurement));
+    assert_eq!(d.st.operation(), None);
+
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        f.set_text(FieldId::Level, "-20");
+        f.set_text(FieldId::From, "100 Hz");
+        f.set_text(FieldId::To, "5 kHz");
+        for (id, want) in [
+            (FieldId::Duration, "1 s (quick look)"),
+            (FieldId::Repeats, "2"),
+        ] {
+            f.focus = f.fields.iter().position(|x| x.id == id).ok_or("field")?;
+            f.cycle(1);
+            assert_eq!(f.fields[f.focus].display(), want);
+        }
+    }
+    d.key("Enter");
+    d.until("armed with the sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
+    })?;
+    d.key("Enter");
+    let step = |s: &AppState| s.operation().map(|p| p.step);
+    d.until("sweep 1 of 2", |s| {
+        step(s).as_deref() == Some("sweep 1 of 2")
+    })?;
+    let p = d.st.operation().ok_or("progress")?;
+    assert_eq!(p.title, "sweep \"Sweep 1\"");
+    assert!(
+        p.remaining
+            .is_some_and(|r| r.ends_with("left") || r == "finishing")
+    );
+    // The meters keep running during the sweep.
+    let seq = |s: &AppState| {
+        s.data
+            .as_ref()
+            .and_then(|x| x.latest.get(&Topic::SessionLevels))
+            .map_or(0, |f| f.frame.stamp.seq)
+    };
+    let before = seq(&d.st);
+    d.until("meter frames during the sweep", |s| seq(s) > before)?;
+    d.until("sweep 2 of 2", |s| {
+        step(s).as_deref() == Some("sweep 2 of 2")
+    })?;
+
+    // The strip's Stop button (the same command as Esc).
+    d.send(Msg::Command(CommandId::StimulusStop));
+    d.until("stopped and disarmed, the run discarded", |s| {
+        s.daemon().is_some_and(|x| {
+            !x.generator.firing
+                && !x.generator.armed
+                && x.sweep.as_ref().is_some_and(|r| {
+                    matches!(
+                        r.status,
+                        SweepStatus::Failed {
+                            reason: SweepFailure::Stopped,
+                            ..
+                        }
+                    )
+                })
+        })
+    })?;
+    assert_eq!(d.st.operation(), None);
+    assert!(d.st.sweep.plan.is_none());
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

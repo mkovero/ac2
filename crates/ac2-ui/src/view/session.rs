@@ -20,7 +20,12 @@ const METER_H: f32 = 10.0;
 
 /// One input meter: the RMS as a bar, the peak as a tick, coloured by state.
 pub(super) fn meter(ui: &mut egui::Ui, m: &MeterReading, ch: &Chrome) {
-    let (r, _) = ui.allocate_exact_size(egui::vec2(METER_W, METER_H), egui::Sense::hover());
+    meter_sized(ui, m, ch, METER_W);
+}
+
+/// [`meter`] with a bar `width` wide (the readout beside it keeps its width).
+pub(super) fn meter_sized(ui: &mut egui::Ui, m: &MeterReading, ch: &Chrome, width: f32) {
+    let (r, _) = ui.allocate_exact_size(egui::vec2(width, METER_H), egui::Sense::hover());
     let (t, _) = ui.allocate_exact_size(egui::vec2(64.0, METER_H), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(r, 2.0, ch.panel);

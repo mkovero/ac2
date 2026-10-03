@@ -365,6 +365,9 @@ impl eframe::App for App {
             // The dialog renews its device preview from the frame tick, also when no meter
             // frame arrives to wake the UI.
             ctx.request_repaint_after(Duration::from_millis(500));
+        } else if self.state.operation().is_some() {
+            // The progress bar and time left move between the daemon's step reports.
+            ctx.request_repaint_after(Duration::from_millis(200));
         } else if let Some(next) = self
             .state
             .toasts

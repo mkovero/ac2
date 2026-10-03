@@ -26,6 +26,7 @@ pub mod grid;
 pub mod ir;
 pub mod meter;
 pub mod primitives;
+pub mod progress;
 pub mod readout;
 pub mod spectrum;
 pub mod spl;

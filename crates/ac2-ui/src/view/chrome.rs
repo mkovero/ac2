@@ -109,11 +109,9 @@ fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
         .and_then(|s| s.sweep.as_ref())
         .filter(|r| r.active());
     let sweep = st.sweep.plan.is_some();
-    let hint = match (run.map(|r| (&r.status, r.repeats)), st.stimulus.phase) {
-        (Some((ac2_proto::model::SweepStatus::Playing { repeat }, n)), _) => {
-            format!("sweep {repeat}/{n} playing · Esc stops")
-        }
-        (Some(_), _) => "sweep recorded · analysing".to_string(),
+    // A running sweep's progress and Stop are on the strip below the bar.
+    let hint = match (run, st.stimulus.phase) {
+        (Some(_), _) => format!("{} stops", key_hint(app, CommandId::StimulusStop)),
         (None, StimPhase::Idle) if st.stimulus.level.is_none() => "L types a level".to_string(),
         (None, StimPhase::Idle) => "Space arms".to_string(),
         (None, StimPhase::Armed) if sweep => "Enter plays the sweep · Esc stops".to_string(),
@@ -144,6 +142,50 @@ fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
     ui.label(badge_text);
 }
 
+/// The running operation: what, which step, a bar, time left, and Stop.
+pub(super) fn progress(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    ch: &Chrome,
+    p: &ac2_scene::progress::Progress,
+) {
+    let stop_key = key_hint(app, CommandId::StimulusStop);
+    let mut stop = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.label(RichText::new(&p.title).strong().size(15.0).color(ch.text));
+        ui.label(RichText::new(&p.detail).color(ch.dim));
+        ui.label(RichText::new(&p.step).strong().size(15.0).color(ch.armed));
+        ui.add(
+            egui::ProgressBar::new(p.fraction)
+                .desired_width(260.0)
+                .fill(ch.armed),
+        );
+        if let Some(r) = &p.remaining {
+            ui.label(RichText::new(r).color(ch.text));
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let b = egui::Button::new(
+                RichText::new(format!("■ Stop ({stop_key})"))
+                    .strong()
+                    .color(Color32::BLACK),
+            )
+            .fill(ch.fault)
+            .min_size(egui::vec2(96.0, 22.0));
+            if ui
+                .add(b)
+                .on_hover_text("Fades the output out, disarms and discards this run")
+                .clicked()
+            {
+                stop = true;
+            }
+        });
+    });
+    if stop {
+        app.dispatch(Msg::Command(CommandId::StimulusStop));
+    }
+}
+
 /// Short kind tag of a measurement in lists.
 pub(super) fn kind_tag(k: &MeasKind) -> &'static str {
     match k {
@@ -154,9 +196,58 @@ pub(super) fn kind_tag(k: &MeasKind) -> &'static str {
     }
 }
 
+/// Every input of the open session, metered all the time: the operator sees what reaches
+/// the mic and the reference before and during any measurement.
+fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
+    let rows = app.state.session_inputs();
+    if rows.is_empty() {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Inputs").strong());
+        ui.label(RichText::new("dBFS RMS · peak tick").small().color(ch.dim));
+    });
+    ui.add_space(2.0);
+    for r in &rows {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if let Some(u) = r.used {
+                let color = match u {
+                    ac2_scene::meter::InputUse::Reference => ch.focus,
+                    ac2_scene::meter::InputUse::Measurement => ch.ok,
+                };
+                ui.label(
+                    RichText::new(u.tag())
+                        .small()
+                        .strong()
+                        .color(ch.panel)
+                        .background_color(color),
+                );
+            }
+            ui.add(
+                egui::Label::new(RichText::new(&r.label).color(ch.text))
+                    .wrap_mode(egui::TextWrapMode::Truncate),
+            )
+            .on_hover_text(&r.label);
+        });
+        ui.horizontal(|ui| {
+            super::session::meter_sized(ui, &r.reading, ch, 136.0);
+        });
+        ui.add_space(2.0);
+    }
+    ui.add_space(10.0);
+}
+
 pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| sidebar_lists(app, ui, ch));
+}
+
+fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let mut clicked = None;
     let mut clicked_trace = None;
+    inputs(app, ui, ch);
     {
         let st = &app.state;
         ui.label(RichText::new("Measurements").strong());

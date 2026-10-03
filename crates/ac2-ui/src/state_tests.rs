@@ -2627,6 +2627,184 @@ fn input_meters_follow_the_dialog() {
     assert_eq!(m[&1].state, ac2_scene::meter::MeterState::Silent);
 }
 
+/// The sidebar's always-on meters: every captured input by name and role, its reading,
+/// and what the running sweep (else the selected measurement) uses it as.
+#[test]
+fn sidebar_meters_name_every_session_input_by_role() {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{ClipFlags, SessionLevelsFrame};
+    use ac2_proto::{Frame, FrameData};
+    use ac2_scene::meter::{InputUse, MeterState};
+    let mut t = T::new();
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.backend = BackendKind::Fake;
+        o.config.input_channels = vec![0, 1, 2];
+        o.config.loopback = Some(LoopbackRoute {
+            output: 0,
+            input: 0,
+        });
+    }
+    s.inputs = vec![InputSetup {
+        channel: 1,
+        mic: Some("MM1 34804".into()),
+        mic_curve: true,
+    }];
+    t.conn(mirror(s.clone()));
+    let labels = |t: &T| -> Vec<(String, Option<InputUse>)> {
+        t.st.session_inputs()
+            .into_iter()
+            .map(|r| (r.label, r.used))
+            .collect()
+    };
+    // Before the device list: the mic's name, else `Input N`, with the role.
+    assert_eq!(
+        labels(&t),
+        vec![
+            ("Input 1 · reference".into(), Some(InputUse::Reference)),
+            ("MM1 34804 · mic (in 2)".into(), Some(InputUse::Measurement)),
+            ("Input 3".into(), None),
+        ]
+    );
+    // The device's channel names once listed.
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert_eq!(
+        labels(&t),
+        vec![
+            (
+                "Loop return · reference (in 1)".into(),
+                Some(InputUse::Reference)
+            ),
+            ("MM1 34804 · mic (in 2)".into(), Some(InputUse::Measurement)),
+            ("Line 3 (in 3)".into(), None),
+        ]
+    );
+    // Readings from the session's meters; an input without one reads as no data.
+    let mut latest = Latest::default();
+    let data = FrameData::SessionLevels(SessionLevelsFrame {
+        meta: ac2_proto::frame::LevelsMeta {
+            channels: vec![0, 1],
+        },
+        peak: vec![-10.0, -1.0],
+        rms: vec![-20.0, -12.0],
+        clip: vec![ClipFlags::NONE, ClipFlags::HELD],
+    });
+    let f = TopicFrame {
+        topic: data.topic(),
+        frame: Arc::new(Frame {
+            stamp: ac2_proto::samples::stamp(None),
+            data,
+        }),
+        received: Instant::now(),
+        since_new: std::time::Duration::ZERO,
+        age: Some(0.0),
+        stale: false,
+    };
+    latest.frames.insert(f.topic.to_string(), f);
+    t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids: Default::default(),
+        drained: Instant::now(),
+    }));
+    let rows = t.st.session_inputs();
+    assert_eq!(rows[0].reading.with_unit(), "\u{2212}20.0 dBFS");
+    assert_eq!(rows[0].reading.state, MeterState::Signal);
+    assert_eq!(rows[1].reading.state, MeterState::Clip);
+    assert_eq!(rows[2].reading.state, MeterState::NoData);
+
+    // A running sweep's inputs are the marked ones while it runs.
+    let mut run = sweep_run(SweepStatus::Playing { repeat: 1 });
+    run.reference_input = 2;
+    s.sweep = Some(run);
+    t.conn(mirror(s.clone()));
+    let used: Vec<_> = labels(&t).into_iter().map(|(_, u)| u).collect();
+    assert_eq!(
+        used,
+        vec![None, Some(InputUse::Measurement), Some(InputUse::Reference)]
+    );
+}
+
+/// The meters stay subscribed while a session is open, whatever dialog opens and closes,
+/// and the subscription ends with the session.
+#[test]
+fn session_meters_stay_subscribed_while_a_session_is_open() {
+    let mut t = T::disconnected();
+    connected_to(&mut t, "local daemon");
+    let r = t.conn(mirror(daemon_state()));
+    assert!(
+        r.iter().any(|x| matches!(x, Request::Meters(true))),
+        "{r:?}"
+    );
+    let r = t.st.update(Msg::Command(CommandId::NewTransfer), &t.keys);
+    assert!(!r.iter().any(|x| matches!(x, Request::Meters(_))), "{r:?}");
+    let r = t.key("Escape");
+    assert!(!r.iter().any(|x| matches!(x, Request::Meters(_))), "{r:?}");
+    let r = t.conn(mirror(no_session_state()));
+    assert!(
+        r.iter().any(|x| matches!(x, Request::Meters(false))),
+        "{r:?}"
+    );
+}
+
+/// A set of sweeps on the progress strip: which one of how many, the bar, the time left
+/// counted from when each step was seen, analysing, and gone once it ends.
+#[test]
+fn sweep_progress_strip_counts_steps_and_time_left() {
+    let mut t = T::new();
+    let tick = |t: &mut T, now_s: f64| {
+        t.st.update(Msg::Tick { now_s, dt_s: 0.02 }, &t.keys);
+    };
+    tick(&mut t, 10.0);
+    assert_eq!(t.st.operation(), None);
+    let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("c1".into()));
+    s.generator.armed = true;
+    s.generator.firing = true;
+    let mut run = sweep_run(SweepStatus::Playing { repeat: 1 });
+    run.repeats = 2;
+    // Each step: 3.1 s of sweep and 1 s of silence.
+    s.sweep = Some(run.clone());
+    t.conn(mirror(s.clone()));
+    let p = t.st.operation().expect("progress");
+    assert_eq!(p.title, "sweep \"Sweep 1\"");
+    assert_eq!(p.step, "sweep 1 of 2");
+    assert_eq!(p.fraction, 0.0);
+    assert_eq!(p.remaining.as_deref(), Some("about 9 s left"));
+    tick(&mut t, 12.05);
+    let p = t.st.operation().expect("progress");
+    assert!((p.fraction - 0.25).abs() < 1e-3, "{}", p.fraction);
+    assert_eq!(p.remaining.as_deref(), Some("about 7 s left"));
+
+    tick(&mut t, 14.0);
+    run.status = SweepStatus::Playing { repeat: 2 };
+    s.sweep = Some(run.clone());
+    t.conn(mirror(s.clone()));
+    let p = t.st.operation().expect("progress");
+    assert_eq!(p.step, "sweep 2 of 2");
+    assert!((p.fraction - 0.5).abs() < 1e-3, "{}", p.fraction);
+    assert_eq!(p.remaining.as_deref(), Some("about 5 s left"));
+
+    // Stop (the strip's button sends the same command as Esc).
+    let r = t.st.update(Msg::Command(CommandId::StimulusStop), &t.keys);
+    assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+
+    run.status = SweepStatus::Analysing;
+    s.sweep = Some(run.clone());
+    t.conn(mirror(s.clone()));
+    let p = t.st.operation().expect("progress");
+    assert_eq!(p.step, "analysing…");
+    assert_eq!(p.remaining, None);
+
+    run.status = SweepStatus::Failed {
+        reason: SweepFailure::Stopped,
+        msg: "stopped".into(),
+    };
+    s.sweep = Some(run);
+    t.conn(mirror(s));
+    assert_eq!(t.st.operation(), None);
+    assert_eq!(t.st.sweep.step_seen, None);
+}
+
 #[test]
 fn close_session_and_delete_measurement() {
     let mut t = T::new();
@@ -2752,11 +2930,16 @@ fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
     assert!(t.conn(mirror(no_session_state())).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
 
-    // A daemon that already has a session: no dialog.
+    // A daemon that already has a session: no dialog; its input meters and the channel
+    // names for them.
     let mut t = T::disconnected();
     t.st.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (cpal)");
-    assert!(t.conn(mirror(daemon_state())).is_empty());
+    let r = t.conn(mirror(daemon_state()));
+    assert!(
+        matches!(r.as_slice(), [Request::Meters(true), Request::Devices]),
+        "{r:?}"
+    );
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(!t.st.open_session_when_empty);
 }

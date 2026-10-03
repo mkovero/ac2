@@ -78,7 +78,10 @@ fn harness(opts: AppOptions) -> Harness<'static, App> {
 /// Steps the UI (in real time, the link runs on its own thread) until `cond` holds.
 fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool) {
     let t0 = Instant::now();
-    while !cond(h.state()) {
+    // The sidebar's input labels take the device's channel names once the list arrives:
+    // with a session open, a screenshot waits for it.
+    let named = |a: &App| a.state.open_session().is_none() || a.state.devices.is_some();
+    while !(cond(h.state()) && named(h.state())) {
         assert!(
             t0.elapsed() < Duration::from_secs(15),
             "timed out waiting for {what}"
@@ -665,11 +668,17 @@ fn session_dialog() {
         a.state.mirror.as_ref().is_some_and(|m| m.synced())
     });
     h.key_press_modifiers(Modifiers::SHIFT, Key::O);
-    step_until(&mut h, "dialog with devices and meters", |a| {
-        session_dialog_of(a).is_some_and(|d| d.device_info().is_some())
-            && a.state.input_meters().len() == 4
-    });
-    assert!(fake.lock().preview.is_some(), "the device is previewed");
+    // This fake publishes preview frames unasked, and with a session open the meters are
+    // subscribed before the dialog opens: the preview request is waited for on its own.
+    step_until(
+        &mut h,
+        "dialog with devices, meters and the device previewed",
+        |a| {
+            session_dialog_of(a).is_some_and(|d| d.device_info().is_some())
+                && a.state.input_meters().len() == 4
+                && fake.lock().preview.is_some()
+        },
+    );
     // ↓↓↓ to input 2, N names its mic.
     for _ in 0..3 {
         h.key_press(Key::ArrowDown);
@@ -823,4 +832,63 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("sweep_ir", &snapshot_options());
+}
+
+/// A set of sweeps running while the transfer pane is maximised: the progress strip shows
+/// which sweep of how many, the bar and the time left, and the sidebar marks the sweep's
+/// inputs; the strip's Stop button stops the stimulus.
+#[test]
+fn sweep_progress_strip() {
+    use ac2_proto::event::Change;
+    use ac2_proto::model::{EssSpec, SweepRun, SweepStatus};
+    use ac2_proto::units::{ClientId, Dbfs, Hz, Seconds, SweepId, WallNs};
+    if !have_gpu("sweep_progress_strip") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    {
+        let mut s = rig.fake.lock();
+        let mut g = s.state.generator.clone();
+        g.armed = true;
+        g.firing = true;
+        s.commit(Change::Generator(g));
+        s.commit(Change::Sweep(SweepRun {
+            id: SweepId(1),
+            owner: ClientId("other".into()),
+            name: "Sweep 1".into(),
+            reference_input: 0,
+            measurement_input: 1,
+            outputs: vec![0, 1],
+            level: Dbfs(-30.0),
+            sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(30.0)),
+            sweep_duration: Seconds(30.0),
+            post_roll: Seconds(1.0),
+            repeats: 2,
+            gate: None,
+            status: SweepStatus::Playing { repeat: 1 },
+            started_at: WallNs(0),
+        }));
+    }
+    step_until(&mut h, "the progress strip", |a| {
+        a.state.operation().is_some()
+    });
+    let p = h.state().state.operation().expect("progress");
+    assert_eq!(p.step, "sweep 1 of 2");
+    h.key_press(Key::W);
+    step_until(&mut h, "maximized", |a| a.state.layout.maximized);
+    h.state_mut().state.toasts.clear();
+    // The bar at the start of the step, for a picture that does not depend on timing.
+    let now = h.state().state.now_s;
+    if let Some(seen) = &mut h.state_mut().state.sweep.step_seen {
+        seen.2 = now;
+    }
+    h.step();
+    h.snapshot_options("sweep_progress", &snapshot_options());
+    let stops = rig.fake.executions("gen.stop");
+    h.get_by_label_contains("Stop (").click();
+    step_until(&mut h, "stop sent", |_| {
+        rig.fake.executions("gen.stop") > stops
+    });
 }

@@ -32,6 +32,17 @@ pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
                 .inner_margin(egui::Margin::symmetric(10, 6)),
         )
         .show(ui, |ui| chrome::top_bar(app, ui, &ch));
+    // Outside the panes: visible whichever pane is maximised.
+    if let Some(p) = app.state.operation() {
+        egui::Panel::top("ac2-progress")
+            .frame(
+                egui::Frame::new()
+                    .fill(ch.panel)
+                    .stroke(egui::Stroke::new(1.0, ch.armed))
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(ui, |ui| chrome::progress(app, ui, &ch, &p));
+    }
     egui::Panel::left("ac2-measurements")
         .resizable(false)
         .exact_size(230.0)
