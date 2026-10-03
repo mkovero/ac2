@@ -7,6 +7,7 @@ mod daemon;
 mod discover;
 mod gen_;
 mod ir;
+mod leq;
 mod traces;
 
 use std::time::Duration;

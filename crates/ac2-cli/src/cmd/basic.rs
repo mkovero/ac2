@@ -565,6 +565,7 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
 pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
         SplCmd::Cal(a) => super::cal::cal_spl(cli, a, out).await,
+        SplCmd::Leq { cmd } => super::leq::run(cli, cmd, out).await,
         SplCmd::Watch(w) => {
             let c = connect(cli, true).await?;
             let s = state(&c).await?;

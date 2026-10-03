@@ -7,7 +7,8 @@ use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
-    Celsius, Channel, Channels, DelayAmount, Freq, LevelDbfs, SampleCount, SplLevel, Time,
+    Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs,
+    SampleCount, SplLevel, Time,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -660,6 +661,98 @@ pub enum SplCmd {
     Watch(SplWatch),
     /// Calibrate an input against an acoustic calibrator (same as `cal spl`).
     Cal(CalSpl),
+    /// Rolling Leq windows of an SPL meter: watch them, set windows and limits, export the
+    /// per-second log.
+    Leq {
+        #[command(subcommand)]
+        cmd: LeqCmd,
+    },
+}
+
+/// `spl leq …`.
+#[derive(Debug, Subcommand)]
+pub enum LeqCmd {
+    /// Big-number view of the meter's windows: value, limit, state, headroom (q/Esc/Ctrl-C
+    /// quits). With `--json` one line per second.
+    Watch(LeqWatch),
+    /// Set the meter's windows, limits, warn margin, a preset or the headroom horizon; the
+    /// meter, its log and its windows carry on.
+    Set(LeqSet),
+    /// Write the meter's per-second log (LAeq, LCeq, LZeq per second) as CSV.
+    Export(LeqExport),
+}
+
+/// Which SPL meter: `--meas`, the one on `--input`, or the only one.
+#[derive(Debug, Args)]
+pub struct MeterRef {
+    /// SPL measurement (id or name).
+    #[arg(long, conflicts_with = "input")]
+    pub meas: Option<MeasRef>,
+    /// The SPL meter on this input.
+    #[arg(long)]
+    pub input: Option<Channel>,
+}
+
+/// `spl leq watch`.
+#[derive(Debug, Args)]
+pub struct LeqWatch {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// Quit after this long, e.g. `10s` (scripts).
+    #[arg(long = "for", value_name = "TIME")]
+    pub duration: Option<Time>,
+}
+
+/// Informational limit presets (not legal advice; `docs/design/leq.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PresetArg {
+    /// DIN 15905-5: LAeq 30 min ≤ 99 dB.
+    #[value(name = "din15905")]
+    Din15905,
+    /// Swiss V-NISSG: LAeq 60 min ≤ 93 dB.
+    #[value(name = "swiss93")]
+    Swiss93,
+    /// Swiss V-NISSG: LAeq 60 min ≤ 96 dB.
+    #[value(name = "swiss96")]
+    Swiss96,
+    /// Swiss V-NISSG: LAeq 60 min ≤ 100 dB.
+    #[value(name = "swiss100")]
+    Swiss100,
+    /// WHO safe listening (2022): LAeq 15 min ≤ 100 dB.
+    Who,
+}
+
+/// `spl leq set`.
+#[derive(Debug, Args)]
+pub struct LeqSet {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// The windows, replacing the meter's: `1min,5min,10min,30min,60min` (A-weighted;
+    /// `c:30s` for C). Windows kept keep their limits.
+    #[arg(long, value_delimiter = ',', value_name = "WINDOWS")]
+    pub windows: Option<Vec<LeqWindowArg>>,
+    /// A preset's limit on its window (added if missing); repeatable.
+    #[arg(long, value_enum)]
+    pub preset: Vec<PresetArg>,
+    /// A window's limit: `30min=99db`, `30min=none` removes it; repeatable.
+    #[arg(long = "limit", value_name = "WINDOW=LIMIT")]
+    pub limits: Vec<LeqLimitArg>,
+    /// Warn margin of every window: near when this close below the limit, e.g. `3db`.
+    #[arg(long, value_name = "DB")]
+    pub warn: Option<Gain>,
+    /// Headroom horizon: the steady level allowed over this much of the future, e.g. `1min`.
+    #[arg(long, value_name = "WINDOW")]
+    pub horizon: Option<LeqWindowArg>,
+}
+
+/// `spl leq export`.
+#[derive(Debug, Args)]
+pub struct LeqExport {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// Write to this file (default: standard output).
+    #[arg(long, short = 'o', value_name = "FILE")]
+    pub out: Option<PathBuf>,
 }
 
 /// `spl watch`.

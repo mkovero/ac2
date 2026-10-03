@@ -783,7 +783,7 @@ restored one was). Status changes are ordinary events, so they bump `rev`.
 ### 7.4 SPL log (CSV)
 
 What sessions store and `ac2 spl leq export` writes: the first line is exactly
-`# ac2 spl log v1`, then `# key: value` lines (`meas`, `name`, `input`, `mic`), then the
+`# ac2 spl log v1`, then `# key: value` lines (`meas`, `name`, `input` (1-based), `mic`), then the
 header `start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,sensitivity_db` and one
 row per logged second: ISO 8601 UTC time of the second's start, the same in Unix ns, the
 measured time, `dB SPL` or `dBFS`, the three levels in that unit (4 decimals; `-inf` for

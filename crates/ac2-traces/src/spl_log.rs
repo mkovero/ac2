@@ -5,7 +5,7 @@
 //! # ac2 spl log v1
 //! # meas: 4
 //! # name: FOH SPL
-//! # input: 1
+//! # input: 2
 //! # mic: M30
 //! start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,sensitivity_db
 //! 2026-10-03T14:57:25.000Z,1790000245000000000,1,dB SPL,95.1234,98.0000,99.5000,120.0200
@@ -93,7 +93,8 @@ pub fn export_csv(info: &SplLogInfo, rows: &[SplLogRow]) -> String {
     s.push('\n');
     s.push_str(&format!("# meas: {}\n", info.meas.0));
     s.push_str(&format!("# name: {}\n", info.name.replace('\n', " ")));
-    s.push_str(&format!("# input: {}\n", info.input));
+    // Inputs as printed on the interface: 1-based.
+    s.push_str(&format!("# input: {}\n", u32::from(info.input) + 1));
     if let Some(m) = &info.mic {
         s.push_str(&format!("# mic: {}\n", m.replace('\n', " ")));
     }

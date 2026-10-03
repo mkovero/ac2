@@ -366,6 +366,78 @@ pub fn channels_text(ch: &[u16]) -> String {
         .join(",")
 }
 
+/// A Leq window: an optional weighting and a length in whole seconds, 1 s … 24 h: `30min`,
+/// `1h`, `10s`, `c:30s` (A-weighted unless a weighting is given).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeqWindowArg {
+    /// `a:`, `c:` or `z:`; `None`: A.
+    pub weighting: Option<ac2_proto::model::Weighting>,
+    /// Length, s.
+    pub seconds: u32,
+}
+
+impl LeqWindowArg {
+    /// The weighting meant: A unless given.
+    pub fn weighting(&self) -> ac2_proto::model::Weighting {
+        self.weighting.unwrap_or(ac2_proto::model::Weighting::A)
+    }
+}
+
+impl FromStr for LeqWindowArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        use ac2_proto::model::Weighting;
+        let t = s.trim().to_ascii_lowercase();
+        let (weighting, len) = match t.split_once(':') {
+            Some(("a", l)) => (Some(Weighting::A), l),
+            Some(("c", l)) => (Some(Weighting::C), l),
+            Some(("z", l)) => (Some(Weighting::Z), l),
+            Some((w, _)) => return fail(format!("{s:?}: weighting {w:?} (expected a, c or z)")),
+            None => (None, t.as_str()),
+        };
+        let (n, u) = split(len)?;
+        let sec = match u.as_str() {
+            "s" | "sec" => n,
+            "min" => n * 60.0,
+            "h" => n * 3600.0,
+            _ => return need_unit(s, &u, "s, min or h"),
+        };
+        let sec = in_range(s, sec, 1.0, 86_400.0, "a window")?;
+        if sec.fract() != 0.0 {
+            return fail(format!("{s:?}: a window is whole seconds"));
+        }
+        Ok(Self {
+            weighting,
+            seconds: sec as u32,
+        })
+    }
+}
+
+/// A limit on a window: `30min=99db`, `c:10min=110db`; `30min=none` removes it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LeqLimitArg {
+    pub window: LeqWindowArg,
+    pub limit: Option<DbSpl>,
+}
+
+impl FromStr for LeqLimitArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let Some((w, l)) = s.split_once('=') else {
+            return fail(format!(
+                "{s:?}: expected window=limit, e.g. 30min=99db (or 30min=none)"
+            ));
+        };
+        let window = w.parse()?;
+        let limit = if l.trim().eq_ignore_ascii_case("none") {
+            None
+        } else {
+            Some(l.parse::<SplLevel>()?.0)
+        };
+        Ok(Self { window, limit })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,6 +532,27 @@ mod tests {
         assert_eq!(channels_text(&[0, 3]), "1,4");
         for bad in ["0", "1,,2", "3-1", "1,1", "a", "", "257", "1-", "-2"] {
             assert!(bad.parse::<Channels>().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn leq_windows_and_limits() {
+        use ac2_proto::model::Weighting;
+        let w: LeqWindowArg = ok("30min");
+        assert_eq!((w.weighting(), w.seconds), (Weighting::A, 1800));
+        let w: LeqWindowArg = ok("C:10s");
+        assert_eq!((w.weighting, w.seconds), (Some(Weighting::C), 10));
+        assert_eq!(ok::<LeqWindowArg>("1h").seconds, 3600);
+        for bad in ["30", "0.5s", "2d", "x:1min", "25h", "1.5s"] {
+            assert!(bad.parse::<LeqWindowArg>().is_err(), "{bad}");
+        }
+        let l: LeqLimitArg = ok("30min=99db");
+        assert_eq!(l.limit, Some(DbSpl(99.0)));
+        assert_eq!(l.window.seconds, 1800);
+        let l: LeqLimitArg = ok("c:60min=None");
+        assert_eq!(l.limit, None);
+        for bad in ["30min", "30min=99", "=99db"] {
+            assert!(bad.parse::<LeqLimitArg>().is_err(), "{bad}");
         }
     }
 }

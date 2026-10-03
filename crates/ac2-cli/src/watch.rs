@@ -335,6 +335,229 @@ pub async fn spl(
     .await
 }
 
+/// Three-row block digits for the Leq view: `0`–`9`, `.`, `−`, `—`.
+fn big_glyph(c: char) -> [&'static str; 3] {
+    match c {
+        '0' => ["█▀█", "█ █", "▀▀▀"],
+        '1' => [" ▀█", "  █", "  ▀"],
+        '2' => ["▀▀█", "█▀▀", "▀▀▀"],
+        '3' => ["▀▀█", " ▀█", "▀▀▀"],
+        '4' => ["█ █", "▀▀█", "  ▀"],
+        '5' => ["█▀▀", "▀▀█", "▀▀▀"],
+        '6' => ["█▀▀", "█▀█", "▀▀▀"],
+        '7' => ["▀▀█", "  █", "  ▀"],
+        '8' => ["█▀█", "█▀█", "▀▀▀"],
+        '9' => ["█▀█", "▀▀█", "▀▀▀"],
+        '.' => [" ", " ", "▄"],
+        '\u{2212}' | '-' | '—' => ["   ", "▀▀▀", "   "],
+        _ => ["   ", "   ", "   "],
+    }
+}
+
+/// `text` (a level) in block digits, three rows.
+pub(crate) fn big_number(text: &str) -> [String; 3] {
+    let mut rows = [String::new(), String::new(), String::new()];
+    for c in text.chars() {
+        let g = big_glyph(c);
+        for (r, part) in rows.iter_mut().zip(g) {
+            r.push_str(part);
+            r.push(' ');
+        }
+    }
+    rows
+}
+
+/// `spl leq watch` of SPL meter `meas`: on a terminal each window as a big number with its
+/// state, limit and headroom; piped, one line per window per second; `--json`, one line per
+/// second.
+pub async fn leq(
+    c: &Client,
+    meas: MeasId,
+    until: Option<Instant>,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
+    use ac2_scene::leq::{TileState, leq_tiles};
+    let topic = Topic::Data {
+        meas,
+        stream: Stream::Leq,
+    };
+    let big = !out.json && std::io::stdout().is_terminal();
+    live_until(
+        c,
+        out,
+        &[Subscription::Topic(topic)],
+        until,
+        |view, latest| {
+            let mut lines = Vec::new();
+            let key = latest
+                .get(&topic)
+                .map_or(vec![0], |t| vec![t.frame.stamp.seq]);
+            if view.state.is_none() {
+                lines.push("waiting for the daemon's state …".to_owned());
+                return View {
+                    lines,
+                    json: json!({ "topic": topic.to_string(), "frame": null }),
+                    key: vec![0],
+                };
+            }
+            if !latest.responding {
+                lines.push(NOT_RESPONDING.to_owned());
+            }
+            let m = view
+                .state
+                .as_ref()
+                .and_then(|s| s.measurements.iter().find(|m| m.id == meas).cloned());
+            let Some(m) = m else {
+                lines.push(format!("measurement {} is gone", meas.0));
+                return View {
+                    lines,
+                    json: json!({ "meas": meas.0, "gone": true }),
+                    key,
+                };
+            };
+            let MeasKind::Spl { config } = &m.config.kind else {
+                return View {
+                    lines,
+                    json: json!(null),
+                    key,
+                };
+            };
+            let Some(tf) = latest.get(&topic) else {
+                lines.push(format!(
+                    "{}: waiting for the first second …",
+                    m.config.name
+                ));
+                return View {
+                    lines,
+                    json: json!({ "topic": topic.to_string(), "frame": null }),
+                    key,
+                };
+            };
+            let FrameData::Leq(f) = &tf.frame.data else {
+                return View {
+                    lines,
+                    json: json!(null),
+                    key,
+                };
+            };
+            let tiles = leq_tiles(&config.leq, f);
+            let offset = view.clock_offset_ns.map_or(0, |o| {
+                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            });
+            let mic = view.state.as_ref().and_then(|s| {
+                s.inputs
+                    .iter()
+                    .find(|i| i.channel == config.input)
+                    .and_then(|i| i.mic.clone())
+            });
+            let cal = output::cal_status(f.meta.cal, f.meta.mic_curve, now_wall(), offset);
+            let cal = match &mic {
+                Some(name) => format!("{name} · {cal}"),
+                None => cal,
+            };
+            let head = format!(
+                "{} · in {} · {cal} · age {}",
+                m.config.name,
+                u32::from(config.input) + 1,
+                age_text(tf.age, tf.stale)
+            );
+            lines.push(head.clone());
+            for t in &tiles {
+                let state = t.state_text.clone().unwrap_or_default();
+                let marker = match t.state {
+                    TileState::Over => "▶ OVER",
+                    TileState::Near => "▷ NEAR",
+                    _ => "",
+                };
+                let details: Vec<String> = [&t.limit, &t.headroom, &t.recover, &t.filling, &t.incomplete]
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                if big {
+                    lines.push(String::new());
+                    let title = if marker.is_empty() {
+                        format!("{}   {state}", t.name)
+                    } else {
+                        format!("{}   {marker}", t.name)
+                    };
+                    lines.push(title);
+                    let rows = big_number(&t.value);
+                    lines.push(format!("  {}", rows[0]));
+                    lines.push(format!("  {}", rows[1]));
+                    lines.push(format!("  {}  {}", rows[2], t.unit));
+                    if !details.is_empty() {
+                        lines.push(format!("  {}", details.join(" · ")));
+                    }
+                } else {
+                    let mut l = format!("{}  {} {}", t.name, t.value, t.unit);
+                    if !state.is_empty() {
+                        l.push_str(&format!("  {state}"));
+                    }
+                    if !details.is_empty() {
+                        l.push_str(&format!("  {}", details.join(" · ")));
+                    }
+                    lines.push(l);
+                }
+            }
+            let windows: Vec<serde_json::Value> = config
+                .leq
+                .windows
+                .iter()
+                .zip(&tiles)
+                .enumerate()
+                .map(|(i, (w, t))| {
+                    let num = |v: f32| f64::from(v).is_finite().then_some(f64::from(v));
+                    json!({
+                        "name": t.name,
+                        "duration_s": w.duration.0,
+                        "weighting": w.weighting,
+                        "leq": num(f.leq[i]),
+                        "limit": w.limit,
+                        "warn_margin": w.warn_margin,
+                        "judgement": f.flags[i].judgement(),
+                        "elapsed_s": f.elapsed[i],
+                        "measured_s": f.measured[i],
+                        "incomplete": f.flags[i].contains(ac2_proto::frame::LeqFlags::INCOMPLETE),
+                        "allowed": num(f.allowed[i]),
+                        "cannot_recover": f.flags[i].contains(ac2_proto::frame::LeqFlags::CANNOT_RECOVER),
+                        "recover_s": num(f.recover[i]),
+                        "text": {
+                            "value": t.value,
+                            "state": t.state_text,
+                            "limit": t.limit,
+                            "headroom": t.headroom,
+                            "recover": t.recover,
+                            "filling": t.filling,
+                            "incomplete": t.incomplete,
+                        },
+                    })
+                })
+                .collect();
+            View {
+                lines,
+                json: json!({
+                    "topic": topic.to_string(),
+                    "meas": meas.0,
+                    "name": m.config.name,
+                    "seq": tf.frame.stamp.seq,
+                    "age_s": tf.age,
+                    "stale": tf.stale,
+                    "responding": latest.responding,
+                    "scale": f.meta.scale,
+                    "cal": f.meta.cal,
+                    "cal_text": cal,
+                    "horizon_s": f.meta.horizon.0,
+                    "logged": f.meta.logged,
+                    "windows": windows,
+                }),
+                key,
+            }
+        },
+    )
+    .await
+}
+
 /// `timing --watch`.
 pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
     let topic = Topic::Timing;

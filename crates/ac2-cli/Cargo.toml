@@ -25,6 +25,8 @@ ac2-client = { path = "../ac2-client" }
 ac2-discovery = { path = "../ac2-discovery" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
+# The SPL log CSV (`spl leq export`) is the session file format: one writer.
+ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
 clap = { version = "4.5", features = ["derive"] }
 comfy-table = "7.1"

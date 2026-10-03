@@ -22,6 +22,7 @@ dependencies = [
  "ac2-discovery",
  "ac2-proto",
  "ac2-scene",
+ "ac2-traces",
  "ac2-zmq",
  "ac2d",
  "clap",
