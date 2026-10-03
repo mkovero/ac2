@@ -32,7 +32,7 @@ pub fn ambiguity_text(r: AmbiguityReason) -> &'static str {
     match r {
         AmbiguityReason::BorderlineLevel => "near the threshold",
         AmbiguityReason::CloseArrivals => "close arrivals",
-        AmbiguityReason::MergedLobe => "merged arrivals",
+        AmbiguityReason::MergedLobe => "arrivals merged into one peak",
         AmbiguityReason::OutsideRefinement => "coarse evidence only",
     }
 }
@@ -57,6 +57,48 @@ pub fn band_text(b: DelayBand) -> String {
         DelayBand::Mid => format!("mid {}", edges(300.0, 3000.0)),
         DelayBand::Sub => format!("sub {}", edges(20.0, 120.0)),
         DelayBand::Custom { lo_hz, hi_hz } => format!("custom {}", edges(lo_hz.0, hi_hz.0)),
+    }
+}
+
+/// What an ambiguous finding's list holds when it offers a single candidate, and what the
+/// operator can do about it; `None` when the list itself shows the choice (two or more rows)
+/// or the finding is not ambiguous.
+///
+/// A merged lobe is a peak whose shape does not fit one arrival in the analysed band: two
+/// arrivals closer than the band's pulse width, or a dispersive path such as a crossover's
+/// group delay inside the band. No estimator in that band can split it, so the finder lists
+/// the peak and never invents a second arrival (design Q1 §2, §8).
+pub fn ambiguity_note(o: &DelayOutcome) -> Option<String> {
+    let DelayOutcome::Ambiguous {
+        reasons, ranked, ..
+    } = o
+    else {
+        return None;
+    };
+    if ranked.len() > 1 {
+        return None;
+    }
+    let mut s = if reasons.contains(&AmbiguityReason::MergedLobe) {
+        "One peak only: two arrivals closer than this band resolves (or a crossover's group \
+         delay) are merged into it and cannot be listed apart. 1 inserts the peak's delay; to \
+         find the first arrival, run the finder in another band (one without the crossover) \
+         and compare."
+            .to_owned()
+    } else {
+        "One candidate only: 1 inserts it.".to_owned()
+    };
+    if reasons.contains(&AmbiguityReason::OutsideRefinement) {
+        s.push_str(" Its delay is coarse: a longer reference block would refine it.");
+    }
+    Some(s)
+}
+
+/// The keys that pick from `n` listed candidates: `1`, `1–2`, `1–3`.
+pub fn pick_keys(n: usize) -> String {
+    match n.min(3) {
+        0 => String::new(),
+        1 => "1".into(),
+        k => format!("1–{k}"),
     }
 }
 
@@ -214,11 +256,69 @@ mod tests {
         );
         assert_eq!(
             outcome_text(&f.outcome),
-            "AMBIGUOUS · near the threshold, merged arrivals"
+            "AMBIGUOUS · near the threshold, arrivals merged into one peak"
         );
         assert_eq!(
             confidence_text(&f.confidence),
             "PSR 24.0 dB · band SNR 30.0 dB · excited 100 % · σ 0.20 smp"
+        );
+    }
+
+    /// The rig case: a three-way box's crossover group delay inside the full band widens the
+    /// one peak there is, so the finder lists that peak alone. The text must explain the single
+    /// row instead of promising arrivals it does not show.
+    #[test]
+    fn merged_lobe_with_one_candidate_says_why() {
+        let peak = DelayArrival {
+            phase: Degrees(160.0),
+            misfit: 0.17,
+            ..a(3.346, 0.0)
+        };
+        let f = finding(DelayOutcome::Ambiguous {
+            reasons: vec![AmbiguityReason::MergedLobe],
+            ranked: vec![peak],
+            strongest: peak,
+        });
+        assert_eq!(
+            outcome_text(&f.outcome),
+            "AMBIGUOUS · arrivals merged into one peak"
+        );
+        let rows = pick_rows(&f);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].text, "3.35 ms  0.0 dB · rule pick · strongest");
+        assert_eq!(pick_keys(rows.len()), "1");
+        let note = ambiguity_note(&f.outcome).expect("a single row is explained");
+        assert!(note.starts_with("One peak only: two arrivals"), "{note}");
+        assert!(note.contains("1 inserts the peak's delay"), "{note}");
+        assert!(note.contains("another band"), "{note}");
+
+        let coarse = DelayOutcome::Ambiguous {
+            reasons: vec![AmbiguityReason::OutsideRefinement],
+            ranked: vec![a(3.0, 0.0)],
+            strongest: a(3.0, 0.0),
+        };
+        assert_eq!(
+            ambiguity_note(&coarse).as_deref(),
+            Some(
+                "One candidate only: 1 inserts it. Its delay is coarse: a longer reference block would refine it."
+            )
+        );
+    }
+
+    #[test]
+    fn several_rows_need_no_note() {
+        let o = DelayOutcome::Ambiguous {
+            reasons: vec![AmbiguityReason::MergedLobe, AmbiguityReason::CloseArrivals],
+            ranked: vec![a(3.0, 0.0), a(3.1, -3.0)],
+            strongest: a(3.0, 0.0),
+        };
+        assert_eq!(ambiguity_note(&o), None);
+        assert_eq!(pick_keys(2), "1–2");
+        assert_eq!(pick_keys(3), "1–3");
+        assert_eq!(pick_keys(5), "1–3");
+        assert_eq!(
+            ambiguity_note(&DelayOutcome::NoEstimate { reasons: vec![] }),
+            None
         );
     }
 

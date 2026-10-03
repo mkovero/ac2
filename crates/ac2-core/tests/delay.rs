@@ -658,6 +658,91 @@ fn ambiguous_lists_rule_pick_first() {
     }
 }
 
+/// Filter by a complex response H(f) (circular).
+fn respond(x: &[f64], h: impl Fn(f64) -> Complex64) -> Vec<f64> {
+    let n = x.len();
+    let mut planner = RealFftPlanner::<f64>::new();
+    let fwd = planner.plan_fft_forward(n);
+    let inv = planner.plan_fft_inverse(n);
+    let mut buf = x.to_vec();
+    let mut spec = fwd.make_output_vec();
+    fwd.process(&mut buf, &mut spec).expect("fft");
+    for (k, s) in spec.iter_mut().enumerate() {
+        *s *= h(k as f64 * FS / n as f64);
+    }
+    let last = spec.len() - 1;
+    spec[0].im = 0.0;
+    spec[last].im = 0.0;
+    let mut out = vec![0.0; n];
+    inv.process(&mut spec, &mut out).expect("ifft");
+    out.iter().map(|v| v / n as f64).collect()
+}
+
+/// The acoustic sum of a Linkwitz–Riley 4th-order crossover at `f0`: a 2nd-order allpass
+/// with Q = 1/√2. Flat in level, but its group delay (≈ 0.17 ms at 2.6 kHz) spreads one
+/// arrival over several full-band pulse widths around f0.
+fn lr4_sum(f: f64, f0: f64) -> Complex64 {
+    let s = Complex64::new(0.0, f / f0);
+    let q = std::f64::consts::FRAC_1_SQRT_2;
+    (s * s - s / q + 1.0) / (s * s + s / q + 1.0)
+}
+
+/// The rig case: a three-way box (crossovers 430 Hz and 2.6 kHz) at 3.32 ms, floor bounce
+/// 3.5 ms later at −23 dB, a late reflection at +17.9 ms, −18 dB. The floor bounce is far
+/// outside the pulse width and does not merge; the 2.6 kHz crossover inside the full band
+/// does. The finder must call the one peak a merged lobe and list it alone, never accept it
+/// (its centre is not the first arrival's delay) and never invent a second arrival.
+#[test]
+fn crossover_in_band_is_a_merged_lobe_listed_alone() {
+    let n = 60_000;
+    let d0 = 0.00332 * FS;
+    let arrivals = [
+        (d0, 1.0),
+        (d0 + 0.0035 * FS, db(-23.0)),
+        (d0 + 0.0179 * FS, db(-18.0)),
+    ];
+    let x = pink(n, 0.1, 41);
+    let room = paths(&x, &arrivals);
+    let noise = pink(n, 0.1 * db(-30.0), 42);
+    let build = |h: &dyn Fn(f64) -> Complex64| -> Vec<f32> {
+        let m = respond(&room, h);
+        to_f32(&m.iter().zip(&noise).map(|(a, b)| a + b).collect::<Vec<_>>())
+    };
+    let r = to_f32(&x);
+    let cfg = full_cfg(2400);
+
+    // Point source, same room: accepted at the direct sound.
+    let m = build(&|_| Complex64::new(1.0, 0.0));
+    let (rb, mb) = full_window(&r, &m, 20_000, 2400);
+    let res = find(rb, mb, &cfg).expect("config");
+    let first = res
+        .accepted()
+        .unwrap_or_else(|| panic!("{:?}", res.outcome));
+    assert!((first.delay_frac - d0).abs() < 0.5, "{first:?}");
+
+    // Three-way box: one merged peak, listed alone, explained by MergedLobe.
+    let m = build(&|f| lr4_sum(f, 430.0) * lr4_sum(f, 2600.0));
+    let (rb, mb) = full_window(&r, &m, 20_000, 2400);
+    let res = find(rb, mb, &cfg).expect("config");
+    match &res.outcome {
+        Outcome::Ambiguous {
+            reasons,
+            ranked,
+            strongest,
+        } => {
+            assert_eq!(reasons, &[AmbiguityReason::MergedLobe]);
+            assert_eq!(ranked.len(), 1, "{ranked:?}");
+            assert_eq!(ranked[0], *strongest);
+            assert!(ranked[0].misfit > 0.10, "{:?}", ranked[0]);
+            // The peak's centre lags the onset: accepting it would miss the full-band
+            // 1-sample tolerance.
+            assert!(ranked[0].delay_frac - d0 > 1.0, "{:?}", ranked[0]);
+            assert!(res.candidates.contains(&ranked[0]));
+        }
+        other => panic!("expected Ambiguous{{MergedLobe}}, got {other:?}"),
+    }
+}
+
 /// Filter by a zero-phase magnitude response.
 fn shape(x: &[f64], mag: impl Fn(f64) -> f64) -> Vec<f64> {
     let n = x.len();

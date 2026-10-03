@@ -287,6 +287,24 @@ Behaviour (decision 1c):
   (`Delay finder: auto / full / mid / sub band`, `custom band (Hz)…`, `observation length
   (s)…`); auto band and automatic observation by default.
 
+**`MergedLobe` with a single candidate.** `MergedLobe` is the only reason that can stand
+alone with a one-row list: `BorderlineLevel` and `CloseArrivals` each add a second candidate,
+and `OutsideRefinement` alone lists the coarse pick. A merged lobe is a peak whose shape does
+not fit one arrival in the band: two arrivals closer than the pulse width, or a dispersive
+path. The first rig used a three-way box. Modelled with LR4 crossovers at 430 Hz and 2.6 kHz,
+which is an assumption and not the box's datasheet, the 2.6 kHz crossover inside the full band
+does exactly that. Its LR4 sum is a flat-level 2nd-order allpass
+with ≈ 0.17 ms group delay at f0, so the lobe is smeared (misfit ≈ 0.17 against μ 0.10), its
+phase is far from 0°, and its centre sits ≈ 1.2 samples after the onset. That is outside the
+full-band tolerance, so accepting it would break §12. The floor bounce (+3.5 ms, −23 dB) is many
+pulse widths away and plays no part. Decision: the outcome stays `Ambiguous{MergedLobe}`
+and lists only the peak. The finder never invents the second arrival (§2). The CLI and the
+app say why there is a single row ("One peak only: two arrivals closer than this band resolves
+(or a crossover's group delay) are merged into it …") and offer only key/`--pick` 1. They
+point the operator to another band (one without the crossover) for the first arrival.
+`ac2-core` test `crossover_in_band_is_a_merged_lobe_listed_alone` reproduces the rig case,
+and `ac2-scene` `finding` tests pin the text.
+
 ---
 
 ## 9. Parameters per band

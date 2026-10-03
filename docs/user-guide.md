@@ -216,6 +216,12 @@ to mic is compensated. The delay finder estimates it from the impulse response a
 - When the result is ambiguous (two similar arrivals, a strong reflection), the candidates
   are listed and you pick one with 1–3. When there is no usable estimate, ac2 says so and
   inserts nothing.
+- **Arrivals merged into one peak** lists a single candidate: the peak does not have the
+  shape of one arrival in that band, because two arrivals lie closer than the band can
+  separate or a crossover inside the band smears it (a multi-way box in the full band is the
+  usual case). **1** inserts the peak's delay; for the first arrival, run the finder in a
+  band without the crossover (palette: *Delay finder: mid / sub band* or a custom band, CLI
+  `--band`) and compare.
 - **D** types a delay (`12.5ms`, `600samples`, or a distance such as `4.3m`, converted with
   the speed of sound at the set temperature); **,** and **.** nudge by 0.1 ms; **Y** tracks
   the delay continuously.
