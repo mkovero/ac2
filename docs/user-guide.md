@@ -264,6 +264,37 @@ Sessions saved by an earlier version with a different session format are refused
 version named. A loaded session always comes up disarmed: nothing
 plays until someone types a level and fires.
 
+### Autosave
+
+A stand-alone daemon (`ac2d`, `ac2 daemon start`, the `ac2d` user service) also **autosaves**
+the same content — measurements, traces with sweep distortion and impulse responses, slots,
+display edits — shortly after every change (1.5 s after the last edit of a burst, at most
+10 s after the first) and once more when it stops. When it starts again, for example after
+`--max-level` was changed, it loads that autosave exactly like `session load`: disarmed, no
+audio session opened (open one as usual; restored measurements wait for it). Its log says
+what was restored.
+
+The top bar shows the state next to the stimulus: *autosaved just now* / *autosaved 5 min
+ago*, *saving…* while a change is being written, and *autosave failed: <reason>* in warning
+colour when the disk refused (it retries; hover for the whole reason). `ac2 status` and
+`ac2 session status` print the same line. The daemon hosted inside the app does not autosave;
+save a session by name there.
+
+Files, in the ac2 data directory (`~/.local/share/ac2` on Linux, `~/Library/Application
+Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
+
+| | |
+|---|---|
+| `autosave/` | the current autosave (a session directory) |
+| `autosave.prev/` | the one before it, a backup should the newest be damaged |
+| `autosave.v<N>/` | an autosave of another session format, set aside at start, not deleted |
+| `autosave.damaged/` | an unreadable autosave, set aside |
+| `autosave.unrestored/` | what `ac2d --no-restore` did not load |
+
+Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.prev`.
+`ac2d --no-restore` starts empty, `--autosave <dir>` puts the autosave elsewhere (one daemon
+per directory), `--no-autosave` keeps everything in memory only.
+
 ## Calibration and SPL
 
 Inputs carry a **mic name** (**N** on the input in the session dialog,
