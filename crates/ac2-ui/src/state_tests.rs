@@ -835,21 +835,26 @@ fn smoothing_keys_change_a_selected_slot() {
 }
 
 #[test]
-fn slots_are_selected_from_the_keyboard() {
+fn traces_are_selected_from_the_keyboard() {
     let mut t = T::new();
-    // No shown slot: V says so.
+    // No shown trace: V says so.
     assert!(t.key("V").is_empty());
-    assert!(t.last_toast().contains("no shown slots"));
+    assert!(t.last_toast().contains("no shown stored traces"));
     let mut hidden = stored(11, Some(2), 2);
     hidden.edit.visible = false;
-    let unslotted = stored(13, None, 2);
+    let mut hidden_sweep = sweep_meta(14);
+    hidden_sweep.edit.visible = false;
     t.conn(with_traces(vec![
         stored(12, Some(5), 2),
         hidden,
         stored(10, Some(1), 2),
-        unslotted,
+        stored(13, None, 2),
+        hidden_sweep,
     ]));
-    // V steps through the shown slots in slot order (hidden and unslotted skipped), then
+    // The list's order: slotted by slot, then the rest oldest first.
+    let order: Vec<u32> = t.st.trace_list().iter().map(|x| x.id.0).collect();
+    assert_eq!(order, [10, 11, 12, 13, 14]);
+    // V steps through the shown traces in that order, slotted or not (hidden skipped), then
     // back to the live measurement; it sends nothing.
     assert!(t.key("V").is_empty());
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
@@ -857,20 +862,33 @@ fn slots_are_selected_from_the_keyboard() {
     t.key("V");
     assert_eq!(t.st.selected_trace, Some(TraceId(12)));
     t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    assert_eq!(t.last_toast(), "t13 selected");
+    t.key("V");
     assert_eq!(t.st.selected_trace, None);
     assert!(t.last_toast().contains("live measurement"));
-    // Shift+V goes the other way, from live to the last shown slot.
+    // Shift+V goes the other way, from live to the last shown trace.
+    t.key("Shift+V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    // K then changes the selected trace, though it has no slot.
+    assert_eq!(smoothing_set(&t.key("K")).0, "t13");
     t.key("Shift+V");
     assert_eq!(t.st.selected_trace, Some(TraceId(12)));
-    // K then changes the selected slot.
-    assert_eq!(smoothing_set(&t.key("K")).0, "t12");
-    t.key("Shift+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
-    t.key("Shift+V");
-    assert_eq!(t.st.selected_trace, None);
-    // A hidden slot selected by click: V starts from the first shown one.
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    // Alt+V reaches the hidden ones too.
+    t.key("Alt+V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    t.key("Alt+V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    assert_eq!(t.last_toast(), "t14 (hidden) selected");
+    t.key("Alt+Shift+V");
+    t.key("Alt+Shift+V");
+    t.key("Alt+Shift+V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
+    // From a hidden trace, V and Shift+V go to the shown ones beside it.
     t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(12)));
+    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.key("Shift+V");
     assert_eq!(t.st.selected_trace, Some(TraceId(10)));
     // The palette entry deselects.
     t.st.update(Msg::Command(CommandId::SelectLive), &t.keys);
@@ -889,6 +907,217 @@ fn slots_are_selected_from_the_keyboard() {
     t.key("V");
     t.key("N");
     assert_eq!(t.st.selected_trace, None);
+}
+
+/// The TraceUpdate a reply carries, with its toast text.
+fn trace_update(r: &[Request]) -> (TraceId, TraceEdit, String) {
+    match r {
+        [
+            Request::Call {
+                cmd: Command::TraceUpdate { trace, edit },
+                what,
+            },
+        ] => (*trace, edit.clone(), what.clone()),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_shows_and_hides_the_selected_trace_and_the_eye_any_trace() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![
+        stored(10, Some(1), 2),
+        stored(13, None, 2),
+    ]));
+    // Nothing selected: A says how to select.
+    assert!(t.key("A").is_empty());
+    assert!(t.last_toast().contains("select a stored trace first"));
+    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    let (id, edit, what) = trace_update(&t.key("A"));
+    assert_eq!(id, TraceId(13));
+    assert!(!edit.visible);
+    assert_eq!(edit.slot, None);
+    assert_eq!(what, "t13 hidden");
+    // The eye in the list toggles any trace, selected or not, and selects nothing.
+    let (id, edit, what) = trace_update(&t.st.update(Msg::ToggleShown(TraceId(10)), &t.keys));
+    assert_eq!(id, TraceId(10));
+    assert!(!edit.visible);
+    assert_eq!(what, "slot 1 (t10) hidden");
+    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    // The list says what each one is and which is selected.
+    let rows = t.st.trace_rows();
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.name.as_str(), r.details[0].as_str(), r.selected))
+            .collect::<Vec<_>>(),
+        [
+            ("t10", "capture · slot 1 · no data yet", false),
+            ("t13", "capture · no data yet", true),
+        ]
+    );
+}
+
+#[test]
+fn the_selected_trace_moves_to_a_slot() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![
+        stored(10, Some(1), 2),
+        stored(13, None, 2),
+    ]));
+    t.st.update(Msg::Command(CommandId::TraceSlot), &t.keys);
+    assert_eq!(t.st.overlay, Overlay::None, "nothing selected");
+    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.update(Msg::Command(CommandId::TraceSlot), &t.keys);
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::TraceSlot(TraceId(13)) && p.text.is_empty()
+    ));
+    t.text("1");
+    // The daemon takes slot 1 from its holder.
+    let (id, edit, what) = trace_update(&t.key("Enter"));
+    assert_eq!((id, edit.slot, edit.visible), (TraceId(13), Some(1), true));
+    assert_eq!(what, "t13 in slot 1");
+    let r = prompt_text(&mut t, CommandId::TraceSlot, "none");
+    let (_, edit, what) = trace_update(&r);
+    assert_eq!(edit.slot, None);
+    assert_eq!(what, "t13: slot freed");
+    let r = prompt_text(&mut t, CommandId::TraceSlot, "10");
+    assert!(r.is_empty());
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.error.as_deref().is_some_and(|e| e.contains("1 … 9"))
+    ));
+    assert_eq!(parse_slot("slot 3"), Ok(Some(3)));
+    assert_eq!(parse_slot(" "), Ok(None));
+    assert!(parse_slot("0").is_err());
+}
+
+#[test]
+fn trace_keys_act_on_the_selected_trace() {
+    let mut t = T::new();
+    let mut locked = stored(12, None, 2);
+    locked.edit.locked = true;
+    let mut target = stored(15, None, 2);
+    target.kind = TraceKind::Target;
+    let mut spec = stored(16, None, 2);
+    spec.kind = TraceKind::Spectrum {
+        scale: LevelScale::Dbfs,
+    };
+    t.conn(with_traces(vec![
+        stored(13, None, 2),
+        locked,
+        target,
+        spec,
+        sweep_meta(14),
+    ]));
+    // An unslotted capture: U, J, , . and E change it, not the live measurement.
+    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    let (id, edit, what) = trace_update(&t.key("U"));
+    assert_eq!((id, edit.polarity), (TraceId(13), Polarity::Inverted));
+    assert_eq!(what, "t13: polarity inverted");
+    t.type_key("J", "j");
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::TraceOffset(TraceId(13)) && p.text.is_empty()
+    ));
+    t.text("-3,5 dB");
+    let (_, edit, what) = trace_update(&t.key("Enter"));
+    assert_eq!(edit.offset, Db(-3.5));
+    assert_eq!(what, "t13: offset −3.5 dB");
+    let (_, edit, _) = trace_update(&t.key("."));
+    assert!((edit.delay_nudge.0 - 0.000_1).abs() < 1e-15);
+    let (_, edit, _) = trace_update(&t.key(","));
+    assert!((edit.delay_nudge.0 + 0.000_1).abs() < 1e-15);
+    assert!(t.key("E").is_empty());
+    assert_eq!(
+        t.st.view.tf.phase_reference,
+        Some(TraceKey::Stored(TraceId(13)))
+    );
+    assert_eq!(t.last_toast(), "phase reference: t13");
+    assert_eq!(t.st.edit(MeasId(1)), LiveEdit::default(), "live untouched");
+    // A sweep result too.
+    t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
+    assert_eq!(trace_update(&t.key("U")).0, TraceId(14));
+    // A locked trace says so and sends nothing.
+    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    assert!(t.key("U").is_empty());
+    assert!(t.last_toast().contains("t12 is locked"));
+    // A target curve has an offset but no phase.
+    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    assert!(t.key("U").is_empty());
+    assert!(t.last_toast().contains("no phase"));
+    assert!(t.key("E").is_empty());
+    assert!(t.last_toast().contains("no phase"));
+    t.type_key("J", "j");
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::TraceOffset(TraceId(15))
+    ));
+    t.key("Esc");
+    // The caption names a selected target.
+    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    assert_eq!(
+        t.st.pane_caption(PaneKind::Transfer).as_deref(),
+        Some("t15")
+    );
+    // A spectrum trace is not on the transfer pane: the keys act on the live measurement.
+    t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
+    assert!(t.key("U").is_empty());
+    assert!(t.st.edit(MeasId(1)).inverted);
+}
+
+/// One selection: a sweep selected in the transfer pane is what the sweep pane shows, and
+/// N on the sweep pane selects the sweep it steps to.
+#[test]
+fn the_sweep_pane_follows_the_selection_and_selects() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![
+        stored(10, Some(1), 2),
+        sweep_meta(14),
+        sweep_meta(15),
+    ]));
+    for id in [14, 15] {
+        let (d, g) = sweep_data(id);
+        t.conn(ConnEvent::Trace(d, g));
+    }
+    let shown = |t: &T| t.st.shown_sweep().map(|(d, _)| d.meta.id.0);
+    // Nothing chosen: the newest.
+    assert_eq!(shown(&t), Some(15));
+    // V in the transfer pane: slot 1, then the first sweep, which the sweep pane shows.
+    t.key("V");
+    assert_eq!(
+        shown(&t),
+        Some(15),
+        "a capture selected: the sweep pane keeps its sweep"
+    );
+    t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    assert_eq!(shown(&t), Some(14));
+    assert_eq!(
+        t.st.pane_caption(PaneKind::Transfer).as_deref(),
+        Some("t14: smoothing off")
+    );
+    // Back to live: the sweep pane keeps the sweep selected last.
+    t.key("Esc");
+    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(shown(&t), Some(14));
+    // N on the sweep pane steps the sweeps and selects them for the transfer pane.
+    t.key("Alt+5");
+    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    t.key("N");
+    assert_eq!(shown(&t), Some(15));
+    assert_eq!(t.st.selected_trace, Some(TraceId(15)));
+    assert_eq!(t.last_toast(), "t15 selected");
+    t.key("Shift+N");
+    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    // U on the sweep pane is its unit; on the transfer pane it inverts the selected sweep.
+    assert!(t.key("U").is_empty());
+    t.key("Alt+1");
+    assert_eq!(trace_update(&t.key("U")).0, TraceId(14));
+    // A click on a sweep in the list does the same.
+    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    assert_eq!(shown(&t), Some(15));
 }
 
 #[test]
@@ -1133,7 +1362,7 @@ fn digits_show_and_hide_slots_alt_digits_focus_panes() {
     assert_eq!(*trace, TraceId(9));
     assert!(!edit.visible);
     assert_eq!(edit.slot, Some(3));
-    assert_eq!(what, "slot 3 hidden");
+    assert_eq!(what, "slot 3 (t9) hidden");
     // The pane did not change focus.
     assert_eq!(t.st.layout.focus, PaneKind::Transfer);
     // An empty slot says how to fill it.

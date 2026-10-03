@@ -246,16 +246,38 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 (see *Smoothing* above).
 
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
-  there); **1 … 9** show and hide a slot; **V** / **Shift+V** select the next / previous
-  shown slot (highlighted in the list) and **Esc** goes back to the live measurement.
+  there); **1 … 9** show and hide a slot.
+- The **Traces** list beside the panes holds every stored trace, slotted or not: its name,
+  what it is (*capture*, *sweep*, *imported*, *average*, *A − B*, *target* …), its slot,
+  *hidden* when it is, and a dot in its curve's colour (a ring when hidden). Slotted traces
+  come first by slot, then the rest oldest first. A click on a row selects the trace (again:
+  deselects); a click on its dot shows or hides it.
+- **V** / **Shift+V** select the next / previous **shown** trace in that order — sweep
+  results and imports included — with the live measurement as the stop between the last and
+  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. **Esc** goes back
+  to the live measurement. **A** shows or hides the selected trace. **Move the selected
+  trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
+  gives it up; `none` frees its slot), so the digit keys reach it.
+- The trace keys act on the selected trace when its curve is on the transfer pane (else on
+  the live measurement): **U** inverts it, **J** types its offset, **,** / **.** nudge it,
+  **E** makes it the phase reference, **K** / **Shift+K** smooth it, and **Mic curve on the
+  selected trace…** corrects it. A target curve takes an offset only (it has no phase); a
+  locked trace refuses. The pane's title names the selected trace (`Sweep 2: smoothing
+  off`).
+- **One selection for the sweeps:** a sweep selected in the list or with V is the one the
+  **Sweep / distortion** pane shows, and **N** / **Shift+N** on that pane select the sweep they
+  step to, for the transfer pane and the trace keys too. A finished sweep is selected.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
-  times between traces stay visible. **E** makes the selected trace the phase reference.
+  times between traces stay visible.
 - **C** turns on the comparison cursor, synchronised across panes and traces; **Shift+←/→**
   moves it.
 - **M** averages the shown stored traces (power; complex and coherence-weighted averages are
   in the command palette); A − B is a dB difference, A / B a complex division.
 - **Z** loads a target curve; the command palette imports CSV and other analyzers' text
   exports. `ac2 trace export <name> --csv out.csv` exports.
+- From the command line: `ac2 trace display <trace> on|off` shows or hides a trace, `ac2
+  trace slot <trace> 3` puts it in slot 3 (`none` frees its slot); `ac2 trace list` shows
+  both.
 
 ### Export and import
 
@@ -275,8 +297,8 @@ dropped and the import says why (`note:` in the CLI output, and in `ac2 trace sh
 A trace captured before the mic had a curve — or with no mic name, or with the input's
 mic curve off — can be corrected afterwards: `ac2 trace mic <trace> "MM1 34804" --label 90°`
 applies that curve of the mic library (the label may be left out when the mic has one
-curve), and `ac2 trace mic <trace> none` takes it off again. In the app: select the trace's
-slot, then **Mic curve on the selected trace…** in the palette (`Ctrl+K`), prefilled with the
+curve), and `ac2 trace mic <trace> none` takes it off again. In the app: select the trace
+(Traces list or V), then **Mic curve on the selected trace…** in the palette (`Ctrl+K`), prefilled with the
 trace's mic; type the curve's label after it (*MM1 34804 90°*). Like smoothing it is a
 display setting: the stored curve stays as measured, the correction (0 dB at the calibrator
 frequency, else 1 kHz) is applied when the trace is shown, and `ac2 trace show` reads `mic
@@ -311,8 +333,8 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   **U**) switches the distortion between dB re fundamental and percent (a log axis: 0.01 %,
   0.1 %, 1 %, …), readouts included. **H** shows the
   sweep's impulse response with the harmonics' impulses marked (**G**: linear / log / ETC),
-  **N** steps through stored sweeps, **Shift+H** hides the pane. The sweep is also a stored
-  trace, drawn in the transfer pane like any capture.
+  **N** steps through stored sweeps (selecting each), **Shift+H** hides the pane. The sweep is also a stored
+  trace, drawn in the transfer pane like any capture and listed under Traces (see *Traces and slots*).
 - **Progress strip:** while a sweep runs (from this app, another client or the CLI), a strip
   under the top bar — visible whichever pane is maximised — shows its name and level,
   *sweep 1 of 2*, a bar and the time left (about the remaining repeats × (sweep + the
@@ -597,8 +619,11 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `7` | Show / hide slot 7 | `show_slot_7` |
 | `8` | Show / hide slot 8 | `show_slot_8` |
 | `9` | Show / hide slot 9 | `show_slot_9` |
-| `V` | Select next shown slot (then live) | `next_slot` |
-| `Shift+V` | Select previous shown slot (then live) | `prev_slot` |
+| `V` | Select next shown stored trace (then live) | `next_trace` |
+| `Shift+V` | Select previous shown stored trace (then live) | `prev_trace` |
+| `Alt+V` | Select next trace incl. hidden (then live) | `next_any_trace` |
+| `Alt+Shift+V` | Select previous trace incl. hidden (then live) | `prev_any_trace` |
+| `A` | Show / hide the selected stored trace | `toggle_trace` |
 | `Shift+O` | Open audio session… | `session_open` |
 | `Shift+S` | Sweep measurement: response and harmonic distortion… | `sweep_new` |
 | `Shift+L` | Leq windows and limits of the SPL meter… | `leq_windows` |
@@ -625,8 +650,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+C` | Coherence: own pane / over magnitude | `coherence_placement` |
 | `M` | Average shown stored traces (power) | `average` |
 | `P` | Phase wrapped / unwrapped | `phase_unwrap` |
-| `K` | Smoothing coarser (selected slot or pane's measurement) | `smooth_coarser` |
-| `Shift+K` | Smoothing finer (selected slot or pane's measurement) | `smooth_finer` |
+| `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
+| `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `Shift+P` | Phase / group delay | `group_delay` |
 
 #### Spectrum / RTA
@@ -636,8 +661,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `F` | Freeze / unfreeze selected measurement | `freeze` |
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
-| `K` | Smoothing coarser (selected slot or pane's measurement) | `smooth_coarser` |
-| `Shift+K` | Smoothing finer (selected slot or pane's measurement) | `smooth_finer` |
+| `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
+| `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `B` | RTA: bars / line | `spectrum_style` |
 | `H` | Peak hold on / off | `peak_hold` |
 
@@ -675,7 +700,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Stimulus: type output channels… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
-| Deselect the slot: keys act on the live measurement again | `select_live` |
+| Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
+| Deselect the stored trace: keys act on the live measurement again | `select_live` |
 | Import a trace file (CSV / analyzer text)… | `import_trace` |
 | Session: save (name or path)… | `session_save` |
 | Session: load, disarmed (name or path)… | `session_load` |

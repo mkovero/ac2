@@ -1030,6 +1030,21 @@ pub enum TraceCmd {
         #[arg(long)]
         magnitude_only: bool,
     },
+    /// Show or hide a trace in the app's panes (`on` shows, `off` hides).
+    Display {
+        /// Trace id or name.
+        trace: MeasRef,
+        /// `on` or `off`.
+        state: Shown,
+    },
+    /// Put a trace in slot 1 … 9 (the trace holding it gives it up), or `none` to free its
+    /// slot.
+    Slot {
+        /// Trace id or name.
+        trace: MeasRef,
+        /// 1 … 9, or `none`.
+        slot: TraceSlot,
+    },
     /// Apply a curve of the mic library to a stored trace (a display edit: the columns stay
     /// as measured), or `none` to remove it. Refused for a trace captured with a curve
     /// already in its columns.
@@ -1042,6 +1057,34 @@ pub enum TraceCmd {
         #[arg(long)]
         label: Option<String>,
     },
+}
+
+/// Whether a trace is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Shown {
+    /// Drawn.
+    On,
+    /// Hidden.
+    Off,
+}
+
+/// A slot argument: `1` … `9`, or `none` (`off`, `-`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceSlot(pub Option<u8>);
+
+impl FromStr for TraceSlot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        let t = s.trim().to_ascii_lowercase();
+        if matches!(t.as_str(), "none" | "off" | "-") {
+            return Ok(Self(None));
+        }
+        match t.parse::<u8>() {
+            Ok(n @ 1..=9) => Ok(Self(Some(n))),
+            _ => Err(format!("{s:?}: a slot is 1 … 9, or none")),
+        }
+    }
 }
 
 /// A trace smoothing argument: `1/N`, `N` or `none` (`off`).

@@ -17,11 +17,11 @@ use ac2_proto::GridDef;
 use ac2_proto::model::{
     AverageMethod, CalKey, CurveChoice, DelayFinding, DelayOutcome, DelayPick, DelayReference,
     FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind,
-    Measurement, MicCurveId, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode,
-    State, SweepStatus, TraceData, TraceKind, TraceMeta,
+    Measurement, MicCurveId, Polarity, SessionRef, Signal, Smoothing, SmoothingFraction,
+    SmoothingMode, State, SweepStatus, TraceData, TraceKind, TraceMeta,
 };
 use ac2_proto::topic::{Stream, Topic};
-use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
+use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
@@ -214,13 +214,10 @@ impl SmoothTarget {
         }
     }
 
-    /// `slot 3 (Main L S3)` or the measurement name.
+    /// `slot 3 (Main L S3)`, the trace's name, or the measurement name.
     pub fn label(&self) -> String {
         match self {
-            SmoothTarget::Trace(t) => match t.edit.slot {
-                Some(n) => format!("slot {n} ({})", t.edit.name),
-                None => t.edit.name.clone(),
-            },
+            SmoothTarget::Trace(t) => trace_label(t),
             SmoothTarget::Meas(m) => m.config.name.clone(),
         }
     }
@@ -553,6 +550,10 @@ pub enum PromptKind {
     CalDelete,
     /// Mic whose curve goes on a stored trace (`none` removes the applied one).
     TraceMicCurve(TraceId),
+    /// Display offset of a stored trace.
+    TraceOffset(TraceId),
+    /// The slot a stored trace moves to (`none` frees it).
+    TraceSlot(TraceId),
     /// Custom delay-finder band edges.
     FinderBand,
     /// Delay-finder observation.
@@ -565,6 +566,10 @@ impl PromptKind {
             PromptKind::StimulusLevel => "Stimulus level (dBFS)",
             PromptKind::StimulusOutputs => "Stimulus outputs (1-based, e.g. 1, 2)",
             PromptKind::Offset(_) => "Display offset (dB)",
+            PromptKind::TraceOffset(_) => "Display offset of the selected trace (dB)",
+            PromptKind::TraceSlot(_) => {
+                "Slot for the selected trace: 1 … 9 (its holder gives it up), none frees it"
+            }
             PromptKind::Delay(_) => "Delay (ms)",
             PromptKind::ImportFile(ImportRole::Target) => "Target curve file (path)",
             PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
@@ -693,8 +698,11 @@ pub enum Msg {
     },
     /// A measurement clicked in the list: selected, and shown by its pane.
     SelectMeas(MeasId),
-    /// A slot clicked in the list: selected for the smoothing keys (again: deselected).
+    /// A stored trace clicked in the list: selected, so the trace keys act on it (again:
+    /// deselected).
     SelectTrace(TraceId),
+    /// A stored trace's eye in the list: shown / hidden.
+    ToggleShown(TraceId),
     /// A click in a pane: focuses it and selects the measurement it shows.
     FocusPane(PaneKind),
     /// The pane title chip: opens (or closes) the pane's measurement list.
@@ -780,7 +788,8 @@ pub struct SweepUi {
     pub run: Option<SweepId>,
     /// The last status of that run acted on.
     pub seen: Option<SweepStatus>,
-    /// The sweep trace the distortion pane shows; `None`: the newest.
+    /// The sweep last selected: the distortion pane shows it while another kind of trace (or
+    /// the live measurement) is selected; `None`: the newest.
     pub shown: Option<TraceId>,
     /// The lease is being given back after a finished sweep: its stop is no operator stop.
     pub releasing: bool,
@@ -809,8 +818,8 @@ pub struct AppState {
     /// The measurement each pane shows (keys act on it); a pane without a choice shows the
     /// selected measurement if it fits, else its first one.
     pub pane_meas: BTreeMap<PaneKind, MeasId>,
-    /// A slot's trace selected in the list: the smoothing keys change it instead of the
-    /// transfer pane's measurement.
+    /// The stored trace selected (list, V, the sweep pane's N): the trace keys change it
+    /// instead of the pane's measurement, and a selected sweep is what the sweep pane shows.
     pub selected_trace: Option<TraceId>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
@@ -960,6 +969,14 @@ impl AppState {
             .or_else(|| c.first().copied())
     }
 
+    /// Stored trace `id` as mirrored, or why not.
+    fn trace_meta(&self, id: TraceId) -> Result<TraceMeta, String> {
+        self.daemon()
+            .and_then(|s| s.traces.iter().find(|t| t.id == id))
+            .cloned()
+            .ok_or_else(|| "that trace is gone (deleted meanwhile)".to_string())
+    }
+
     /// The stored trace selected in the list, if it still exists.
     pub fn selected_trace_meta(&self) -> Option<&TraceMeta> {
         let id = self.selected_trace?;
@@ -979,9 +996,10 @@ impl AppState {
         self.pane_meas(pane).map(|m| SmoothTarget::Meas(m.clone()))
     }
 
-    /// A pane's title caption: the smoothing of the selected slot when its curve is drawn
-    /// there, else of the pane's measurement — `smoothing 1/6 oct`,
-    /// `slot 3 (Main L S3): smoothing off`. Nothing for curves smoothing does not apply to.
+    /// A pane's title caption: the selected stored trace with its smoothing when its curve
+    /// is drawn there, else the smoothing of the pane's measurement — `smoothing 1/6 oct`,
+    /// `slot 3 (Main L S3): smoothing off`, `Sweep 2: smoothing off`; a selected target
+    /// curve is named alone. Nothing for other curves smoothing does not apply to.
     pub fn smoothing_caption(&self, pane: PaneKind) -> Option<String> {
         if !matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) {
             return None;
@@ -992,6 +1010,11 @@ impl AppState {
             }
             _ => SmoothTarget::Meas(self.pane_meas(pane)?.clone()),
         };
+        if let SmoothTarget::Trace(_) = &t
+            && t.kind() == Smoothable::No
+        {
+            return Some(t.label());
+        }
         if !matches!(t.kind(), Smoothable::Transfer | Smoothable::Spectrum) {
             return None;
         }
@@ -1070,6 +1093,27 @@ impl AppState {
             .unwrap_or_default();
         v.sort_by_key(|t| (t.edit.order, t.id));
         v
+    }
+
+    /// Every stored trace in the list's order (slotted by slot, then the rest oldest first):
+    /// the order V / Shift+V step through.
+    pub fn trace_list(&self) -> Vec<&TraceMeta> {
+        let mut v = self.stored_traces();
+        v.sort_by_key(|t| ac2_scene::trace_list::sort_key(t));
+        v
+    }
+
+    /// The sidebar's rows of stored traces.
+    pub fn trace_rows(&self) -> Vec<ac2_scene::trace_list::TraceRow> {
+        let items: Vec<ac2_scene::trace_list::TraceItem<'_>> = self
+            .stored_traces()
+            .into_iter()
+            .map(|meta| ac2_scene::trace_list::TraceItem {
+                meta,
+                has_data: self.traces.contains_key(&meta.id),
+            })
+            .collect();
+        ac2_scene::trace_list::trace_rows(&items, self.selected_trace)
     }
 
     /// The trace in each slot 1…9 (index 0 = slot 1).
@@ -1535,13 +1579,17 @@ impl AppState {
             }
             Msg::SelectMeas(id) => self.select(id),
             Msg::SelectTrace(id) => {
-                self.selected_trace = if self.selected_trace == Some(id) {
-                    None
-                } else {
-                    Some(id)
-                };
+                let id = (self.selected_trace != Some(id)).then_some(id);
+                self.select_trace(id);
             }
-            Msg::FocusPane(p) => self.focus(p),
+            Msg::ToggleShown(id) => self.toggle_shown(id, out),
+            Msg::FocusPane(p) => {
+                self.focus(p);
+                // A click in a pane is about what it shows live.
+                if self.pane_meas(p).is_some() {
+                    self.selected_trace = None;
+                }
+            }
             Msg::PaneMenu(p) => {
                 self.overlay = match self.overlay {
                     Overlay::PaneMenu(m) if m.pane == p => Overlay::None,
@@ -1839,6 +1887,31 @@ impl AppState {
             PromptKind::Offset(id) => parse_number(&text, &["db"]).map(|v| {
                 self.edits.entry(id).or_default().offset_db = v;
             }),
+            PromptKind::TraceOffset(id) => parse_number(&text, &["db"]).and_then(|v| {
+                let t = self.trace_meta(id)?;
+                let mut edit = t.edit.clone();
+                edit.offset = Db(v);
+                let what = format!("{}: offset {}", trace_label(&t), format::db_readout(v));
+                out.push(Request::Call {
+                    cmd: Command::TraceUpdate { trace: id, edit },
+                    what,
+                });
+                Ok(())
+            }),
+            PromptKind::TraceSlot(id) => parse_slot(&text).and_then(|slot| {
+                let t = self.trace_meta(id)?;
+                let mut edit = t.edit.clone();
+                edit.slot = slot;
+                let what = match slot {
+                    Some(n) => format!("{} in slot {n}", t.edit.name),
+                    None => format!("{}: slot freed", t.edit.name),
+                };
+                out.push(Request::Call {
+                    cmd: Command::TraceUpdate { trace: id, edit },
+                    what,
+                });
+                Ok(())
+            }),
             PromptKind::ImportFile(role) => {
                 let path = text.trim();
                 if path.is_empty() {
@@ -2118,6 +2191,9 @@ impl AppState {
             }
             SweepStatus::Done { trace } => {
                 self.sweep.run = None;
+                // The new result is selected: listed highlighted, named in the captions,
+                // and what the trace keys change.
+                self.selected_trace = Some(trace);
                 self.sweep.shown = Some(trace);
                 self.release_after_sweep(out);
                 self.layout.shown[PaneKind::Distortion.index()] = true;
@@ -2163,16 +2239,19 @@ impl AppState {
             .collect()
     }
 
-    /// The sweep trace the distortion pane shows: the chosen one, else the newest.
+    /// The sweep trace the distortion pane shows: the selected trace when it is a sweep,
+    /// else the sweep selected last, else the newest.
     pub fn shown_sweep(&self) -> Option<(&TraceData, &GridDef)> {
         let all = self.sweep_traces();
-        self.sweep
-            .shown
-            .and_then(|id| all.iter().find(|(t, _)| t.meta.id == id).copied())
+        let find = |id: TraceId| all.iter().find(|(t, _)| t.meta.id == id).copied();
+        self.selected_trace
+            .and_then(find)
+            .or_else(|| self.sweep.shown.and_then(find))
             .or_else(|| all.last().copied())
     }
 
-    /// N / Shift+N on the sweep pane: the next / previous stored sweep.
+    /// N / Shift+N on the sweep pane: the next / previous stored sweep, selected (the
+    /// transfer pane and the trace keys follow it).
     fn cycle_sweep(&mut self, d: i32) {
         let ids: Vec<TraceId> = self.sweep_traces().iter().map(|(t, _)| t.meta.id).collect();
         if ids.is_empty() {
@@ -2184,10 +2263,24 @@ impl AppState {
             .and_then(|c| ids.iter().position(|x| *x == c))
             .unwrap_or(0) as i32;
         let id = ids[(i + d).rem_euclid(ids.len() as i32) as usize];
-        self.sweep.shown = Some(id);
+        self.select_trace(Some(id));
         if let Some((t, _)) = self.shown_sweep() {
-            let name = t.meta.edit.name.clone();
-            self.toast(format!("sweep pane: {name}"));
+            let name = trace_label(&t.meta);
+            self.toast(format!("{name} selected"));
+        }
+    }
+
+    /// The one trace selection: a sweep selected is also what the sweep pane shows.
+    fn select_trace(&mut self, id: Option<TraceId>) {
+        self.selected_trace = id;
+        if let Some(id) = id
+            && self.daemon().is_some_and(|s| {
+                s.traces
+                    .iter()
+                    .any(|t| t.id == id && t.kind == TraceKind::Sweep)
+            })
+        {
+            self.sweep.shown = Some(id);
         }
     }
 
@@ -2317,10 +2410,20 @@ impl AppState {
     }
 
     /// Focuses `p` and selects the measurement it shows.
+    /// Focuses pane `p` from the keyboard: it selects the measurement the pane shows,
+    /// unless the selected stored trace is drawn there (the sweep chosen on the sweep pane
+    /// stays selected on the way to the transfer pane).
     fn focus(&mut self, p: PaneKind) {
         self.layout.shown[p.index()] = true;
         self.layout.focus = p;
+        let keep = self
+            .selected_trace_meta()
+            .filter(|t| drawn_in(t, p))
+            .map(|t| t.id);
         self.select_shown(p);
+        if keep.is_some() {
+            self.selected_trace = keep;
+        }
     }
 
     /// Selects the measurement pane `p` shows, if any.
@@ -2457,8 +2560,7 @@ impl AppState {
             .position(|p| *p == self.layout.focus)
             .unwrap_or(0) as i32;
         let n = vis.len() as i32;
-        self.layout.focus = vis[((i + d).rem_euclid(n)) as usize];
-        self.select_shown(self.layout.focus);
+        self.focus(vis[((i + d).rem_euclid(n)) as usize]);
     }
 
     /// N / Shift+N: the next / previous measurement the focused pane can show.
@@ -2476,40 +2578,90 @@ impl AppState {
         self.select(ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
     }
 
-    /// V / Shift+V: the next / previous shown slot, with the live measurement as the stop
-    /// between the last slot and the first.
-    fn cycle_slot(&mut self, d: i32) {
+    /// V / Shift+V: the next / previous shown stored trace in the list's order (slotted
+    /// or not), with the live measurement as the stop between the last and the first;
+    /// `hidden` (Alt) steps through the hidden ones too.
+    fn cycle_trace(&mut self, d: i32, hidden: bool) {
         let ids: Vec<TraceId> = self
-            .slots()
-            .iter()
-            .flatten()
-            .filter(|t| t.edit.visible)
+            .trace_list()
+            .into_iter()
+            .filter(|t| hidden || t.edit.visible)
             .map(|t| t.id)
             .collect();
         if ids.is_empty() {
-            self.error("no shown slots (1 … 9 show one)");
+            self.error(if hidden {
+                "no stored traces (Ctrl+1 … 9 capture one)"
+            } else {
+                "no shown stored traces (1 … 9 show a slot; Alt+V reaches hidden traces)"
+            });
             return;
         }
-        // Position 0 is the live measurement, slot k is k + 1.
+        // Position 0 is the live measurement, the k-th trace is k + 1. A selected trace off
+        // the cycle (hidden) steps from its place in the whole list.
         let n = ids.len() as i32 + 1;
-        let i = self
-            .selected_trace
-            .and_then(|s| ids.iter().position(|x| *x == s))
-            .map_or(0, |i| i as i32 + 1);
-        match (i + d).rem_euclid(n) {
+        let i = self.selected_trace.and_then(|s| {
+            if let Some(i) = ids.iter().position(|x| *x == s) {
+                return Some(i as i32 + 1);
+            }
+            let all: Vec<TraceId> = self.trace_list().iter().map(|t| t.id).collect();
+            let at = all.iter().position(|x| *x == s)?;
+            // The traces of the cycle before it: stepping forward lands on the next one.
+            let before = all[..at].iter().filter(|x| ids.contains(x)).count() as i32;
+            Some(if d > 0 { before } else { before + 1 })
+        });
+        match (i.unwrap_or(0) + d).rem_euclid(n) {
             0 => self.select_live(),
             k => {
-                self.selected_trace = Some(ids[(k - 1) as usize]);
+                self.select_trace(Some(ids[(k - 1) as usize]));
                 if let Some(t) = self.selected_trace_meta() {
-                    let label = SmoothTarget::Trace(t.clone()).label();
-                    self.toast(format!("{label} selected"));
+                    let hidden = if t.edit.visible { "" } else { " (hidden)" };
+                    let label = trace_label(t);
+                    self.toast(format!("{label}{hidden} selected"));
                 }
             }
         }
     }
 
+    /// Shows or hides stored trace `id`.
+    fn toggle_shown(&mut self, id: TraceId, out: &mut Vec<Request>) {
+        let Some(t) = self
+            .daemon()
+            .and_then(|s| s.traces.iter().find(|t| t.id == id))
+        else {
+            return;
+        };
+        let mut edit = t.edit.clone();
+        edit.visible = !edit.visible;
+        let what = format!(
+            "{} {}",
+            trace_label(t),
+            if edit.visible { "shown" } else { "hidden" }
+        );
+        self.call(out, Command::TraceUpdate { trace: id, edit }, what);
+    }
+
+    /// The selected stored trace when its curve is on the transfer pane, where the trace
+    /// keys (U, J, `,` `.`, E) act on it; `Ok(None)`: they act on the live measurement. A
+    /// locked trace is refused here, saying so.
+    fn transfer_trace_for_edit(&mut self) -> Result<Option<TraceMeta>, ()> {
+        let Some(t) = self.selected_trace_meta().cloned() else {
+            return Ok(None);
+        };
+        if !matches!(
+            t.kind,
+            TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
+        ) {
+            return Ok(None);
+        }
+        if t.edit.locked {
+            self.error(format!("{} is locked", trace_label(&t)));
+            return Err(());
+        }
+        Ok(Some(t))
+    }
+
     fn select_live(&mut self) {
-        self.selected_trace = None;
+        self.select_trace(None);
         self.toast("keys act on the live measurement");
     }
 
@@ -2608,8 +2760,21 @@ impl AppState {
             C::NextMeasurement => self.cycle_meas(1),
             C::PrevMeasurement => self.cycle_meas(-1),
             C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
-            C::NextSlot => self.cycle_slot(1),
-            C::PrevSlot => self.cycle_slot(-1),
+            C::NextTrace => self.cycle_trace(1, false),
+            C::PrevTrace => self.cycle_trace(-1, false),
+            C::NextAnyTrace => self.cycle_trace(1, true),
+            C::PrevAnyTrace => self.cycle_trace(-1, true),
+            C::ToggleTrace => match self.selected_trace {
+                Some(id) => self.toggle_shown(id, out),
+                None => self.error(SELECT_TRACE_FIRST),
+            },
+            C::TraceSlot => match self.selected_trace_meta().cloned() {
+                Some(t) => {
+                    let text = t.edit.slot.map(|n| n.to_string()).unwrap_or_default();
+                    self.prompt(PromptKind::TraceSlot(t.id), text);
+                }
+                None => self.error(SELECT_TRACE_FIRST),
+            },
             C::SelectLive => self.select_live(),
             C::SmoothCoarser => self.smooth(1, None, out),
             C::SmoothFiner => self.smooth(-1, None, out),
@@ -2704,19 +2869,11 @@ impl AppState {
             | C::ShowSlot8
             | C::ShowSlot9 => {
                 let slot = slot_of(c);
-                match self.slots()[usize::from(slot - 1)].cloned() {
+                match self.slots()[usize::from(slot - 1)].map(|t| t.id) {
                     None => self.error(format!(
                         "slot {slot} is empty (Ctrl+{slot} captures into it)"
                     )),
-                    Some(t) => {
-                        let mut edit = t.edit.clone();
-                        edit.visible = !edit.visible;
-                        let what = format!(
-                            "slot {slot} {}",
-                            if edit.visible { "shown" } else { "hidden" }
-                        );
-                        self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
-                    }
+                    Some(id) => self.toggle_shown(id, out),
                 }
             }
             C::ImportTrace => self.prompt(PromptKind::ImportFile(ImportRole::Trace), String::new()),
@@ -2973,41 +3130,94 @@ impl AppState {
                     );
                 }
             }
-            C::Invert => {
-                if let Some(m) = self.need_tf() {
-                    let e = self.edits.entry(m.id).or_default();
-                    e.inverted = !e.inverted;
+            C::Invert => match self.transfer_trace_for_edit() {
+                Err(()) => {}
+                Ok(Some(t)) if t.kind == TraceKind::Target => {
+                    self.error(format!("{}: a target curve has no phase", trace_label(&t)));
                 }
-            }
-            C::Offset => {
-                if let Some(m) = self.need_tf() {
-                    let v = self.edit(m.id).offset_db;
-                    let text = if v == 0.0 {
-                        String::new()
-                    } else {
-                        format::fixed(v, 1).replace(format::MINUS, "-")
+                Ok(Some(t)) => {
+                    let mut edit = t.edit.clone();
+                    edit.polarity = match edit.polarity {
+                        Polarity::Normal => Polarity::Inverted,
+                        Polarity::Inverted => Polarity::Normal,
                     };
-                    self.prompt(PromptKind::Offset(m.id), text);
+                    let what = format!(
+                        "{}: polarity {}",
+                        trace_label(&t),
+                        match edit.polarity {
+                            Polarity::Normal => "normal",
+                            Polarity::Inverted => "inverted",
+                        }
+                    );
+                    self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
                 }
-            }
+                Ok(None) => {
+                    if let Some(m) = self.need_tf() {
+                        let e = self.edits.entry(m.id).or_default();
+                        e.inverted = !e.inverted;
+                    }
+                }
+            },
+            C::Offset => match self.transfer_trace_for_edit() {
+                Err(()) => {}
+                Ok(Some(t)) => {
+                    let text = offset_text(t.edit.offset.0);
+                    self.prompt(PromptKind::TraceOffset(t.id), text);
+                }
+                Ok(None) => {
+                    if let Some(m) = self.need_tf() {
+                        let text = offset_text(self.edit(m.id).offset_db);
+                        self.prompt(PromptKind::Offset(m.id), text);
+                    }
+                }
+            },
             C::NudgeEarlier | C::NudgeLater => {
-                if let Some(m) = self.need_tf() {
-                    let d = if c == C::NudgeEarlier {
-                        -NUDGE_S
-                    } else {
-                        NUDGE_S
-                    };
-                    let e = self.edits.entry(m.id).or_default();
-                    // Whole steps: repeated nudges never accumulate float error.
-                    e.nudge_s = ((e.nudge_s + d) / NUDGE_S).round() * NUDGE_S;
+                let d = if c == C::NudgeEarlier {
+                    -NUDGE_S
+                } else {
+                    NUDGE_S
+                };
+                // Whole steps: repeated nudges never accumulate float error.
+                let step = |v: f64| ((v + d) / NUDGE_S).round() * NUDGE_S;
+                match self.transfer_trace_for_edit() {
+                    Err(()) => {}
+                    Ok(Some(t)) if t.kind == TraceKind::Target => {
+                        self.error(format!("{}: a target curve has no phase", trace_label(&t)));
+                    }
+                    Ok(Some(t)) => {
+                        let mut edit = t.edit.clone();
+                        edit.delay_nudge = Seconds(step(edit.delay_nudge.0));
+                        let what = format!(
+                            "{}: nudged {}",
+                            trace_label(&t),
+                            format::ms(edit.delay_nudge.0, 1)
+                        );
+                        self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
+                    }
+                    Ok(None) => {
+                        if let Some(m) = self.need_tf() {
+                            let e = self.edits.entry(m.id).or_default();
+                            e.nudge_s = step(e.nudge_s);
+                        }
+                    }
                 }
             }
-            C::PhaseReference => {
-                if let Some(m) = self.need_tf() {
-                    self.view.tf.phase_reference = Some(TraceKey::Live(m.id));
-                    self.toast(format!("phase reference: {}", m.config.name));
+            C::PhaseReference => match self.transfer_trace_for_edit() {
+                Err(()) => {}
+                Ok(Some(t)) if t.kind == TraceKind::Target => {
+                    self.error(format!("{}: a target curve has no phase", trace_label(&t)));
                 }
-            }
+                Ok(Some(t)) => {
+                    self.view.tf.phase_reference = Some(TraceKey::Stored(t.id));
+                    self.toast(format!("phase reference: {}", trace_label(&t)));
+                }
+                Ok(None) => {
+                    if let Some(m) = self.need_tf() {
+                        self.view.tf.phase_reference = Some(TraceKey::Live(m.id));
+                        self.toast(format!("phase reference: {}", m.config.name));
+                    }
+                }
+            },
             C::Target => self.prompt(PromptKind::ImportFile(ImportRole::Target), String::new()),
             C::Average => self.average(AverageMethod::Power, out),
             C::AverageComplex => self.average(AverageMethod::Complex, out),
@@ -4039,6 +4249,53 @@ pub enum HintPlace {
     Centre,
     /// One line in the pane's title strip: the plot shows stored curves.
     Title,
+}
+
+/// A stored trace as messages and captions name it: `slot 3 (Main L S3)`, or its name.
+pub fn trace_label(t: &TraceMeta) -> String {
+    match t.edit.slot {
+        Some(n) => format!("slot {n} ({})", t.edit.name),
+        None => t.edit.name.clone(),
+    }
+}
+
+/// What a trace command without a selected trace says.
+const SELECT_TRACE_FIRST: &str =
+    "select a stored trace first (V, Alt+V for hidden ones, or click it in the list)";
+
+/// A display offset as its prompt starts: empty for none, else `-3.5`.
+fn offset_text(v: f64) -> String {
+    if v == 0.0 {
+        String::new()
+    } else {
+        format::fixed(v, 1).replace(format::MINUS, "-")
+    }
+}
+
+/// A slot as typed: `1` … `9`, or `none` (also empty, `-`, `off`) to free it.
+pub fn parse_slot(text: &str) -> Result<Option<u8>, String> {
+    let t = text.trim().to_ascii_lowercase();
+    let t = t.strip_prefix("slot").map_or(t.as_str(), str::trim);
+    if matches!(t, "" | "none" | "-" | "off") {
+        return Ok(None);
+    }
+    match t.parse::<u8>() {
+        Ok(n @ 1..=9) => Ok(Some(n)),
+        _ => Err(format!("{text:?}: a slot is 1 … 9, or none")),
+    }
+}
+
+/// Whether pane `p` draws stored trace `t` (when shown).
+fn drawn_in(t: &TraceMeta, p: PaneKind) -> bool {
+    match p {
+        PaneKind::Transfer | PaneKind::Ir => matches!(
+            t.kind,
+            TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
+        ),
+        PaneKind::Spectrum => matches!(t.kind, TraceKind::Spectrum { .. } | TraceKind::Rta { .. }),
+        PaneKind::Distortion => t.kind == TraceKind::Sweep,
+        PaneKind::Spl => false,
+    }
 }
 
 /// A stored trace the transfer pane draws: shown, and a transfer-like curve.

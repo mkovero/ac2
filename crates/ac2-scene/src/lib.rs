@@ -37,6 +37,7 @@ pub mod tf;
 pub mod theme;
 pub mod time;
 pub mod trace;
+pub mod trace_list;
 pub mod view;
 
 pub use primitives::*;

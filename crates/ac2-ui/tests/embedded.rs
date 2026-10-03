@@ -1145,3 +1145,164 @@ fn run_clock_and_a_new_log_from_the_app() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// One short sweep from the dialog, played and stored (the simulated rig: no real audio).
+fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
+    use ac2_ui::forms::FieldId;
+    let before = d.st.sweep_traces().len();
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        f.set_text(FieldId::Level, "-20");
+        f.set_text(FieldId::From, "100 Hz");
+        f.set_text(FieldId::To, "5 kHz");
+        f.focus = f
+            .fields
+            .iter()
+            .position(|x| x.id == FieldId::Duration)
+            .ok_or("duration")?;
+        f.cycle(-1);
+    }
+    d.key("Enter");
+    d.until("armed with the sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
+    })?;
+    d.key("Enter");
+    d.until("the sweep stored with its data", |s| {
+        s.sweep.run.is_none() && s.sweep_traces().len() == before + 1
+    })?;
+    d.until("the stimulus off and the lease given back", |s| {
+        s.stimulus.phase == StimPhase::Idle
+            && s.daemon().is_some_and(|x| {
+                !x.generator.armed && !x.generator.firing && x.generator.owner.is_none()
+            })
+    })?;
+    // The new result is the selection.
+    d.st.selected_trace
+        .ok_or_else(|| "the new sweep is not selected".into())
+}
+
+/// From an empty daemon, two sweeps, then the transfer pane chooses between them: V selects
+/// each in turn and the sweep pane follows; A hides one, V skips it; N on the sweep pane
+/// selects for the transfer pane too.
+#[test]
+fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let first = sweep_from_the_dialog(&mut d)?;
+    let second = sweep_from_the_dialog(&mut d)?;
+    assert_ne!(first, second);
+    let shown = |s: &AppState| s.shown_sweep().map(|(t, _)| t.meta.id);
+    let name = |s: &AppState, id| {
+        s.trace_list()
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.edit.name.clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(shown(&d.st), Some(second));
+    let (n1, n2) = (name(&d.st, first), name(&d.st, second));
+    assert_ne!(n1, n2);
+
+    // Both in the list, by name, as sweeps; the newest selected.
+    let rows = d.st.trace_rows();
+    let listed: Vec<(&str, &str, bool, bool)> = rows
+        .iter()
+        .map(|r| (r.name.as_str(), r.kind, r.shown, r.selected))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (n1.as_str(), "sweep", true, false),
+            (n2.as_str(), "sweep", true, true)
+        ]
+    );
+
+    // Live again, the transfer pane focused: V selects the first sweep, then the second;
+    // the sweep pane shows whichever is selected.
+    d.key("Escape");
+    d.key("Alt+1");
+    assert_eq!(d.st.layout.focus, PaneKind::Transfer);
+    assert_eq!(d.st.selected_trace, None);
+    d.key("V");
+    assert_eq!(d.st.selected_trace, Some(first));
+    assert_eq!(shown(&d.st), Some(first));
+    assert_eq!(
+        d.st.pane_caption(PaneKind::Transfer),
+        Some(format!("{n1}: smoothing off"))
+    );
+    let theme = Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 500.0,
+    };
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let caption = |s: &AppState| match ac2_ui::scenes::sweep(s, &theme, size, now) {
+        ac2_ui::scenes::SweepPane::Distortion(x) => x.caption.clone(),
+        ac2_ui::scenes::SweepPane::Ir(_) => String::new(),
+    };
+    assert!(caption(&d.st).starts_with(&n1), "{}", caption(&d.st));
+    d.key("V");
+    assert_eq!(d.st.selected_trace, Some(second));
+    assert_eq!(shown(&d.st), Some(second));
+    assert!(caption(&d.st).starts_with(&n2), "{}", caption(&d.st));
+
+    // A hides the selected sweep: the transfer pane stops drawing it, V skips it.
+    d.key("A");
+    d.until("the second sweep hidden", |s| {
+        s.trace_rows()
+            .iter()
+            .any(|r| r.id == second && !r.shown && r.details[0].contains("hidden"))
+            && s.traces
+                .get(&second)
+                .is_some_and(|(t, _)| !t.meta.edit.visible)
+    })?;
+    let legend: Vec<String> = ac2_ui::scenes::transfer(&d.st, &theme, size, now)
+        .legend
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+    assert!(legend.contains(&n1), "{legend:?}");
+    assert!(!legend.contains(&n2), "{legend:?}");
+    d.key("V");
+    assert_eq!(d.st.selected_trace, None, "past the last shown: live");
+    d.key("V");
+    assert_eq!(d.st.selected_trace, Some(first));
+    d.key("V");
+    assert_eq!(d.st.selected_trace, None);
+    // Alt+V reaches it hidden; the sweep pane still shows what is selected.
+    d.key("Alt+Shift+V");
+    assert_eq!(d.st.selected_trace, Some(second));
+    assert_eq!(shown(&d.st), Some(second));
+
+    // N on the sweep pane steps the sweeps and selects them for the transfer pane.
+    d.key("Alt+5");
+    assert_eq!(d.st.layout.focus, PaneKind::Distortion);
+    d.key("N");
+    assert_eq!(d.st.selected_trace, Some(first));
+    assert_eq!(shown(&d.st), Some(first));
+    d.key("Alt+1");
+    assert_eq!(
+        d.st.selected_trace,
+        Some(first),
+        "kept on the way to the transfer pane"
+    );
+
+    // Shown again from the list's eye.
+    d.send(Msg::ToggleShown(second));
+    d.until("the second sweep shown again", |s| {
+        s.trace_rows().iter().all(|r| r.shown)
+    })?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

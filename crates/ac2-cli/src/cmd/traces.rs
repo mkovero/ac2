@@ -230,6 +230,27 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::trace_meta(&t))?;
         }
+        TraceCmd::Display {
+            trace,
+            state: shown,
+        } => {
+            let s = state(&c).await?;
+            let t = find_trace(&s, trace)?.clone();
+            let mut edit = t.edit.clone();
+            edit.visible = *shown == Shown::On;
+            let r = c.call(Command::TraceUpdate { trace: t.id, edit }).await?;
+            let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
+        }
+        TraceCmd::Slot { trace, slot } => {
+            let s = state(&c).await?;
+            let t = find_trace(&s, trace)?.clone();
+            let mut edit = t.edit.clone();
+            edit.slot = slot.0;
+            let r = c.call(Command::TraceUpdate { trace: t.id, edit }).await?;
+            let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
+        }
         TraceCmd::Mic { trace, mic, label } => {
             let s = state(&c).await?;
             let id = find_trace(&s, trace)?.id;

@@ -390,9 +390,13 @@ commands! {
     ShowSlot7 => "show_slot_7", "Show / hide slot 7", [Global];
     ShowSlot8 => "show_slot_8", "Show / hide slot 8", [Global];
     ShowSlot9 => "show_slot_9", "Show / hide slot 9", [Global];
-    NextSlot => "next_slot", "Select next shown slot (then live)", [Global];
-    PrevSlot => "prev_slot", "Select previous shown slot (then live)", [Global];
-    SelectLive => "select_live", "Deselect the slot: keys act on the live measurement again", [Global];
+    NextTrace => "next_trace", "Select next shown stored trace (then live)", [Global];
+    PrevTrace => "prev_trace", "Select previous shown stored trace (then live)", [Global];
+    NextAnyTrace => "next_any_trace", "Select next trace incl. hidden (then live)", [Global];
+    PrevAnyTrace => "prev_any_trace", "Select previous trace incl. hidden (then live)", [Global];
+    ToggleTrace => "toggle_trace", "Show / hide the selected stored trace", [Global];
+    TraceSlot => "trace_slot", "Move the selected trace to slot… (1 … 9, none frees its slot)", [Global];
+    SelectLive => "select_live", "Deselect the stored trace: keys act on the live measurement again", [Global];
     ImportTrace => "import_trace", "Import a trace file (CSV / analyzer text)…", [Global];
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
@@ -443,8 +447,8 @@ commands! {
     MathDifference => "math_difference", "A − B: dB difference of the two lowest shown slots", [Transfer];
     MathDivide => "math_divide", "A / B: complex division of the two lowest shown slots", [Transfer];
     PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
-    SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected slot or pane's measurement)", [Transfer, Spectrum];
-    SmoothFiner => "smooth_finer", "Smoothing finer (selected slot or pane's measurement)", [Transfer, Spectrum];
+    SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected trace or pane's measurement)", [Transfer, Spectrum];
+    SmoothFiner => "smooth_finer", "Smoothing finer (selected trace or pane's measurement)", [Transfer, Spectrum];
     SmoothOff => "smooth_off", "Smoothing: off", [Transfer, Spectrum];
     Smooth48 => "smooth_48", "Smoothing: 1/48 oct", [Transfer, Spectrum];
     Smooth24 => "smooth_24", "Smoothing: 1/24 oct", [Transfer, Spectrum];
@@ -544,9 +548,21 @@ pub fn defaults() -> Vec<Binding> {
         (C::ShowSlot7, S::Global, k(K::Num7)),
         (C::ShowSlot8, S::Global, k(K::Num8)),
         (C::ShowSlot9, S::Global, k(K::Num9)),
-        // Shift+digit is punctuation on most layouts, so slot selection steps with V.
-        (C::NextSlot, S::Global, k(K::V)),
-        (C::PrevSlot, S::Global, sh(K::V)),
+        // Shift+digit is punctuation on most layouts, so trace selection steps with V; with
+        // Alt it reaches the hidden traces too.
+        (C::NextTrace, S::Global, k(K::V)),
+        (C::PrevTrace, S::Global, sh(K::V)),
+        (C::NextAnyTrace, S::Global, alt(K::V)),
+        (
+            C::PrevAnyTrace,
+            S::Global,
+            Chord {
+                shift: true,
+                ..alt(K::V)
+            },
+        ),
+        // A is free in every pane; the digits stay the slots' show / hide.
+        (C::ToggleTrace, S::Global, k(K::A)),
         (C::InsertDelay, S::Transfer, k(K::X)),
         (C::InsertStrongest, S::Transfer, sh(K::X)),
         (C::TypeDelay, S::Transfer, k(K::D)),
@@ -869,6 +885,7 @@ mod tests {
             CommandId::MicCurveInput,
             CommandId::CalDelete,
             CommandId::TraceMicCurve,
+            CommandId::TraceSlot,
             CommandId::FinderAuto,
             CommandId::FinderFull,
             CommandId::FinderMid,
@@ -923,8 +940,11 @@ mod tests {
             ("O", CommandId::ZoomOut),
             ("K", CommandId::SmoothCoarser),
             ("Shift+K", CommandId::SmoothFiner),
-            ("V", CommandId::NextSlot),
-            ("Shift+V", CommandId::PrevSlot),
+            ("V", CommandId::NextTrace),
+            ("Shift+V", CommandId::PrevTrace),
+            ("Alt+V", CommandId::NextAnyTrace),
+            ("Alt+Shift+V", CommandId::PrevAnyTrace),
+            ("A", CommandId::ToggleTrace),
         ] {
             assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
         }

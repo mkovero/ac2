@@ -1,6 +1,6 @@
 //! Top bar (link, session, stimulus) and the measurement list.
 
-use ac2_proto::model::{MeasKind, TraceKind};
+use ac2_proto::model::MeasKind;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
 use eframe::egui::{self, Color32, RichText};
@@ -476,6 +476,7 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let mut clicked = None;
     let mut clicked_trace = None;
+    let mut toggled_trace = None;
     inputs(app, ui, ch);
     {
         let st = &app.state;
@@ -528,49 +529,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             }
         }
         ui.add_space(12.0);
-        ui.label(RichText::new("Slots").strong());
+        traces_header(app, ui, ch);
         ui.add_space(4.0);
-        let mut any = false;
-        for (i, s) in st.slots().iter().enumerate() {
-            let Some(t) = s else { continue };
-            any = true;
-            let data = if st.traces.contains_key(&t.id) {
-                ""
-            } else {
-                " (no data)"
-            };
-            let lock = if t.edit.locked { " 🔒" } else { "" };
-            let smooth = t
-                .edit
-                .smoothing
-                .map(|s| match t.kind {
-                    // A spectrum has no phase: its smoothing has no mode to name.
-                    TraceKind::Spectrum { .. } => {
-                        format!(" · smoothed {}", format::octave_fraction(s.fraction))
-                    }
-                    _ => format!(" · {}", format::smoothing(Some(s))),
-                })
-                .unwrap_or_default();
-            let text = format!("{}  {}{data}{lock}{smooth}", i + 1, t.edit.name);
-            let c = t.edit.color;
-            let color = if t.edit.visible {
-                egui::Color32::from_rgb(c.r, c.g, c.b)
-            } else {
-                ch.dim
-            };
-            // A selected slot is what the smoothing keys change.
-            let r = ui.add(
-                egui::Button::selectable(
-                    st.selected_trace == Some(t.id),
-                    RichText::new(text).color(color),
-                )
-                .wrap_mode(egui::TextWrapMode::Wrap),
-            );
-            if r.clicked() {
-                clicked_trace = Some(t.id);
-            }
-        }
-        if !any {
+        let rows = st.trace_rows();
+        if rows.is_empty() {
             ui.label(
                 RichText::new(format!(
                     "{} captures the selected TF",
@@ -579,6 +541,13 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 .color(ch.dim),
             );
         }
+        for row in &rows {
+            match trace_row(ui, row, ch) {
+                Some(RowClick::Select) => clicked_trace = Some(row.id),
+                Some(RowClick::Eye) => toggled_trace = Some(row.id),
+                None => {}
+            }
+        }
     }
     if let Some(id) = clicked {
         app.dispatch(Msg::SelectMeas(id));
@@ -586,6 +555,107 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     if let Some(id) = clicked_trace {
         app.dispatch(Msg::SelectTrace(id));
     }
+    if let Some(id) = toggled_trace {
+        app.dispatch(Msg::ToggleShown(id));
+    }
+}
+
+/// "Traces" and the keys that act on the list.
+fn traces_header(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("Traces").strong());
+        ui.label(
+            RichText::new(format!(
+                "{} selects · {} shows / hides",
+                key_hint(app, CommandId::NextTrace),
+                key_hint(app, CommandId::ToggleTrace)
+            ))
+            .small()
+            .color(ch.dim),
+        );
+    });
+}
+
+/// What a click on a trace row did.
+enum RowClick {
+    /// The row: select (again: deselect).
+    Select,
+    /// Its colour dot: show / hide.
+    Eye,
+}
+
+/// Width of a row's colour dot, which is also its show / hide toggle.
+const EYE_W: f32 = 18.0;
+
+/// One stored trace: its colour dot (filled when shown, a ring when hidden; a click shows
+/// or hides it) and its name over what it is, highlighted when selected.
+fn trace_row(
+    ui: &mut egui::Ui,
+    row: &ac2_scene::trace_list::TraceRow,
+    ch: &Chrome,
+) -> Option<RowClick> {
+    let c = row.color;
+    let color = Color32::from_rgba_unmultiplied(
+        (c.r * 255.0).round() as u8,
+        (c.g * 255.0).round() as u8,
+        (c.b * 255.0).round() as u8,
+        255,
+    );
+    let mut click = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let (r, eye) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
+        let what = if row.shown { "Hide" } else { "Show" };
+        let label = format!("{what} {}", row.name);
+        eye.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        let centre = egui::pos2(r.center().x, r.min.y + 9.0);
+        if row.shown {
+            ui.painter().circle_filled(centre, 5.5, color);
+        } else {
+            ui.painter()
+                .circle_stroke(centre, 4.5, egui::Stroke::new(1.5, color));
+        }
+        if eye.hovered() {
+            ui.painter()
+                .circle_stroke(centre, 8.0, egui::Stroke::new(1.0, ch.border));
+        }
+        if eye.on_hover_text(format!("{what} this trace")).clicked() {
+            click = Some(RowClick::Eye);
+        }
+        // The longest detail line that fits beside the dot, measured as drawn.
+        let room = ui.available_width() - 2.0 * ui.spacing().button_padding.x;
+        let small = egui::TextStyle::Small.resolve(ui.style());
+        let detail = row
+            .details
+            .iter()
+            .find(|d| {
+                ui.painter()
+                    .layout_no_wrap((*d).clone(), small.clone(), ch.dim)
+                    .size()
+                    .x
+                    <= room
+            })
+            .or(row.details.last())
+            .cloned()
+            .unwrap_or_default();
+        let mut job = egui::text::LayoutJob::default();
+        let body = egui::TextStyle::Body.resolve(ui.style());
+        job.append(
+            &row.name,
+            0.0,
+            egui::TextFormat::simple(body, if row.shown { color } else { ch.dim }),
+        );
+        job.append("\n", 0.0, egui::TextFormat::simple(small.clone(), ch.dim));
+        job.append(&detail, 0.0, egui::TextFormat::simple(small, ch.dim));
+        job.wrap.max_width = room;
+        let r = ui
+            .add(egui::Button::selectable(row.selected, job).wrap_mode(egui::TextWrapMode::Wrap))
+            .on_hover_text(&row.describe);
+        if r.clicked() {
+            click = Some(RowClick::Select);
+        }
+    });
+    click
 }
 
 #[cfg(test)]

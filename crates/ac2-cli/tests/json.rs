@@ -863,6 +863,30 @@ async fn trace_commands_json() -> R {
     let off = ok_json(&f, &["trace", "mic", "a", "none", "--json"]).await?;
     assert_eq!(off["mic_curve"], json!(null));
 
+    // Shown or hidden, and slots, for any trace: the average has none until given one.
+    let hidden = ok_json(&f, &["trace", "display", "avg", "off", "--json"]).await?;
+    assert_eq!(hidden["edit"]["visible"], false);
+    assert_eq!(hidden["edit"]["slot"], json!(null));
+    let shown = ok_json(&f, &["trace", "display", "avg", "on", "--json"]).await?;
+    assert_eq!(shown["edit"]["visible"], true);
+    // Slot 1 moves from "a" to the average.
+    let slotted = ok_json(&f, &["trace", "slot", "avg", "1", "--json"]).await?;
+    assert_eq!(slotted["edit"]["slot"], 1);
+    let l = ok_json(&f, &["trace", "list", "--json"]).await?;
+    let slot_of = |name: &str| {
+        l.as_array()
+            .and_then(|a| a.iter().find(|t| t["edit"]["name"] == name))
+            .map(|t| t["edit"]["slot"].clone())
+    };
+    assert_eq!(slot_of("a"), Some(json!(null)));
+    assert_eq!(slot_of("avg"), Some(json!(1)));
+    let freed = ok_json(&f, &["trace", "slot", "avg", "none", "--json"]).await?;
+    assert_eq!(freed["edit"]["slot"], json!(null));
+    let human = ac2(&f, &["trace", "slot", "b", "3"]).await?;
+    assert!(human.stdout.contains(" 3 "), "{}", human.stdout);
+    assert!(Cli::try_parse_from(["ac2", "trace", "slot", "a", "10"]).is_err());
+    assert!(Cli::try_parse_from(["ac2", "trace", "display", "a", "maybe"]).is_err());
+
     let rew = fixture("rew_export.txt");
     let i = ok_json(&f, &["trace", "import", &rew, "--json"]).await?;
     assert_eq!(i["edit"]["name"], "rew_export");

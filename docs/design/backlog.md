@@ -54,7 +54,31 @@ the commit when it lands.
   settings, listening position; listen during a burst;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
+## Stored traces in the app (left after the Traces list)
+
+- **No export or delete of the selected trace from the app**: `ac2 trace export` / `ac2
+  trace rm` do it by name; a palette entry (export to a typed path, delete twice) would close
+  it.
+- **A − B takes the two lowest shown slots**: an unslotted trace has to be moved to a slot
+  first (**Move the selected trace to slot…**); "selected trace minus the next shown one"
+  would not need it.
+- **The transfer legend does not mark the selected trace**: the pane's title names it and the
+  list highlights it; a thicker line or a marker in the legend would show it in the plot.
+
 ## Done
+
+Choosing between stored traces (field, 2026-10-03: "in transfer view where there are several
+sweep traces, should I be able to choose between them?"):
+- **Only slots 1–9 could be selected or hidden** → the sidebar's **Traces** list holds every
+  stored trace (name, kind, slot, hidden, its curve's colour; a click selects, a click on
+  the dot shows / hides). **V** / **Shift+V** step through every shown trace, **Alt+V** /
+  **Alt+Shift+V** the hidden ones too, **A** shows / hides the selected one, **Move the
+  selected trace to slot…** slots it. U, J, `,` `.`, E, K and the mic curve act on any
+  selected trace on the transfer pane (they used to act on the live measurement only).
+- **The sweep pane's choice was its own** → one selection: a sweep selected in the transfer
+  pane is what the sweep pane shows, and N there selects. A finished sweep is selected.
+- CLI: `ac2 trace display <t> on|off`, `ac2 trace slot <t> <1-9|none>` (`trace.update`; no
+  wire change).
 
 Leq run clock and a new log (operator: "should I see a timer somewhere which shows the whole
 measurement time?"; `docs/design/leq.md` "Run clock and total", "A new log"; 774e690):

@@ -608,7 +608,8 @@ fn slot_resmoothed() {
         a.state.slots()[0].is_some() && a.state.traces.len() == 1
     });
     let id = h.state().state.slots()[0].map(|t| t.id).expect("slot 1");
-    h.get_by_label("1  Main L S1 · 1/6 oct").click();
+    h.get_by_label("Main L S1\ncapture · slot 1 · 1/6 oct")
+        .click();
     step_until(&mut h, "slot selected", |a| {
         a.state.selected_trace == Some(id)
     });
@@ -1582,4 +1583,55 @@ fn leq_tiles_from_an_empty_daemon() {
     step_until(&mut h, "the stage view", |a| a.state.stage_view());
     snapshot_when(&mut h, "leq_columns_fullscreen", pin, first_is(true));
     drop(leq);
+}
+
+/// The Traces list: every stored trace by name with what it is, its slot, shown or hidden
+/// (the dot, a click on it toggles) and the selected one highlighted (a click on the row).
+#[test]
+fn traces_list() {
+    if !have_gpu("traces_list") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    h.key_press(Key::N);
+    step_until(&mut h, "delay tower", |a| {
+        a.state.selected == Some(MeasId(2))
+    });
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
+    h.key_press(Key::Z);
+    step_until(&mut h, "target prompt", |a| {
+        matches!(a.state.overlay, Overlay::Prompt(_))
+    });
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ac2-traces/tests/fixtures/house_curve.txt");
+    h.event(Event::Text(path.to_string_lossy().into_owned()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "three stored traces with data", |a| {
+        a.state.traces.len() == 3
+    });
+    // The dot hides slot 2; a click on the target's row selects it.
+    h.get_by_label("Hide Delay tower S2").click();
+    step_until(&mut h, "slot 2 hidden", |a| {
+        a.state.slots()[1].is_some_and(|t| !t.edit.visible)
+    });
+    h.get_by_label("house_curve\ntarget").click();
+    step_until(&mut h, "target selected", |a| {
+        a.state
+            .selected_trace_meta()
+            .is_some_and(|t| t.edit.name == "house_curve")
+    });
+    assert_eq!(
+        h.state().state.pane_caption(PaneKind::Transfer).as_deref(),
+        Some("house_curve")
+    );
+    // The hidden trace's dot now offers to show it.
+    h.get_by_label("Show Delay tower S2");
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "traces_list");
 }
