@@ -4,64 +4,72 @@ Status: accepted for phase 5. Answers Q7 in `open-questions.md` within decisions
 (calibration tied to device + input channel + mic name; mismatch → "cal from other mic /
 input", otherwise cal age; no gain/phantom fields, no prompts), 7c (mic curve: TF /
 spectrum / RTA subtract the file's dB from the displayed magnitude; SPL applies it as a
-filter before weighting; phase never touched; on/off per input), K8 (a mic name per input
+filter before weighting; phase never touched; the active curve chosen per input, §10), K8 (a mic name per input
 in the session's input setup) and PLAN.md §3.6, §5.3, §5.7.
 
 ## 1. What is stored
 
-One **calibration entry** per key `(device uid, input channel, mic name)`:
+Two stores and the input setup (§10 says why the curves are a library of their own).
+
+One **sensitivity calibration** per key `(device uid, input channel, mic name)`:
 
 | field | meaning |
 |---|---|
 | `key.device` | capture device id as the backend reports it (`DeviceId`) |
 | `key.channel` | zero-based device input channel |
 | `key.mic` | mic name as typed by the operator (exact, case-sensitive, non-empty, ≤ 64 chars) |
-| `spl` | sensitivity calibration or nil: `sensitivity` (dB SPL of 0 dBFS), `calibrator_level` (dB SPL), `calibrator_freq` (Hz), `measured` (dBFS read from the calibrator), `calibrated_at` (daemon wall ns) |
-| `mic_curve` | mic-curve reference or nil: `name` (file stem), `file_name`, `content_hash` (FNV-1a 64 of the file bytes, hex), `points`, `f_lo`, `f_hi` (Hz), `imported_at` |
+| `spl` | `sensitivity` (dB SPL of 0 dBFS), `calibrator_level` (dB SPL), `calibrator_freq` (Hz), `measured` (dBFS read from the calibrator), `calibrated_at` (daemon wall ns) |
 
-The curve's points are kept in the store file and in the daemon; the mirrored state carries
-only the reference (provenance), so a 2000-point curve never travels in every snapshot.
+The **mic library**: per mic name, any number of **curves**, each a `MicCurveRef` —
+`label` (short, unique per mic: `0°`, `90°`, or the operator's), `file_name`,
+`content_hash` (FNV-1a 64 of the file bytes, hex), `points`, `f_lo`, `f_hi` (Hz),
+`imported_at`, `stated_sensitivity` (mV/Pa as the file's header states it, or nil;
+information only, §10) — with its points. The points are kept in the store file and in the
+daemon; the mirrored state carries only the references, so a 2000-point curve never travels
+in every snapshot.
 
 The **input setup** (K8) is daemon state too, one row per input channel:
-`{channel, mic: string | nil, mic_curve: bool}`. `mic_curve` is the on/off switch of decision
-7c and defaults to on (a curve only applies when one resolves, §3). The input setup is
+`{channel, mic: string | nil, curve: not_chosen | off | curve{label}}`. The input setup is
 keyed by channel, not by device: it describes what is plugged into the session's inputs,
 and a device change shows up as a key mismatch, not as lost mic names.
 
-Neither entries nor input setup hold preamp gain or phantom state (7b): ac2 cannot know
+Neither store nor the input setup holds preamp gain or phantom state (7b): ac2 cannot know
 them, and recalibrating after a gain change is the operator's job.
 
 ## 2. Commands
 
 - `cal.spl {input, mic, calibrator_level, calibrator_freq}` reads the input's broadband,
   uncorrected RMS (exponential mean square, τ = 1 s), stores `sensitivity = calibrator_level − measured` on the
-  entry `(session input device, input, mic)` (keeping its mic curve), and sets the input
-  setup's mic name to `mic`. The mic name is typed once, at calibration time (§5.7); setting
+  key `(session input device, input, mic)`, and sets the input setup's mic name to `mic`.
+  The mic name is typed once, at calibration time (§5.7); setting
   it on the input in the same step means the readout is *verified* immediately rather than
   flagging the calibration that was just taken. Refused without an open session, without
   signal (below −80 dBFS), with a non-finite / non-positive level or frequency, and while the
   level is not steady: a companion τ = 0.2 s mean square must agree with the 1 s one within
   0.05 dB, which bounds the reading's settling error to 0.05 dB (about 5 s after the
   calibrator goes on; the operator is told to retry).
-- `cal.mic_curve {input, mic, action}`: `import {file_name, content}` parses the file
-  (§4) and stores it on the entry `(session input device, input, mic)`, setting the input's
-  mic name as `cal.spl` does; `clear` removes the curve from that entry (the entry goes
-  away when it holds neither a sensitivity nor a curve). Reply: the entry (`calibration`),
-  or nil after a clear that removed it.
-- `cal.list` → every entry.
-- `cal.delete {key, part}` removes the sensitivity calibration (`sensitivity`), the curve
-  (`mic_curve`) or both (`all`) from the entry `key`, on any device: a mic sold or an
-  interface retired leaves entries that no session can reach through `cal.spl` /
-  `cal.mic_curve`, so deletion is by the full key and needs no open session. An entry left
-  with neither is deleted; the input setup is untouched. `not_found` when the entry or the
-  named part is missing. CLI `ac2 cal rm --input N [--mic NAME] [--device ID] [--sensitivity
-  | --curve]` (device: the open session's, else the one device holding that input + mic);
-  UI palette `Calibration: delete …` (the session's capture device).
+- `cal.curve_import {mic, label?, file_name, content, input?}` parses the file (§4) and
+  stores it as `mic`'s curve `label` (default from the file, §10; a curve of that label is
+  replaced). With `input`, the input's mic name becomes `mic` as `cal.spl` does, and the
+  curve becomes the input's active one when it is the mic's only curve. Reply: the mic.
+  No open session needed (the library is not tied to a device).
+- `cal.curve_rename {curve: {mic, label}, label}`: inputs that chose the curve follow.
+  `cal.curve_delete {curve}`: a mic left without curves is deleted; inputs that chose the
+  curve keep the label and show it as not stored (§10).
+- `cal.list` → the sensitivity calibrations and the mic library.
+- `cal.delete {key}` removes the sensitivity calibration `key`, on any device: a mic sold or
+  an interface retired leaves entries that no session can reach through `cal.spl`, so
+  deletion is by the full key and needs no open session. The input setup is untouched.
+  `not_found` when there is none. CLI `ac2 cal rm --input N [--mic NAME] [--device ID]`
+  (device: the open session's, else the one device holding that input + mic); UI palette
+  `Calibration: delete a sensitivity calibration…` and the calibrations view.
 - `session.inputs {inputs: [InputSetup]}` upserts the listed rows (others unchanged); reply
-  `inputs` (the full list). Duplicate channels or empty / over-long mic names are invalid.
+  `inputs` (the full list). Duplicate channels or empty / over-long mic names are invalid,
+  as is a chosen curve not stored for the row's mic (unless the row is unchanged: a row
+  whose curve was deleted can be sent back as it is).
 
-The mirrored state holds `calibrations` (keyed by `CalKey`, events `calibration`) and
-`inputs` (one value, event `inputs`).
+The mirrored state holds `calibrations` (keyed by `CalKey`, events `calibration`), `mics`
+(keyed by name, events `mic`) and `inputs` (one value, event `inputs`).
 
 ## 3. Matching (decisions 7a/7b, K8)
 
@@ -70,20 +78,24 @@ mic `m` (possibly unset):
 
 **Sensitivity** — the first match wins:
 
-1. entry `(D, c, m)` with a sensitivity → **verified**;
-2. otherwise the newest entry with a sensitivity on `(D, c)` (another mic, or no mic name
-   set) → **other mic / input**;
-3. otherwise the newest entry with a sensitivity for mic `m` on another device or channel →
-   **other mic / input**;
+1. entry `(D, c, m)` → **verified**;
+2. otherwise the newest entry on `(D, c)` (another mic, or no mic name set) → **other mic /
+   input**;
+3. otherwise the newest entry for mic `m` on another device or channel → **other mic /
+   input**;
 4. otherwise **uncalibrated** (dBFS).
 
 A mismatched calibration is still applied — the readouts stay in dB SPL — and every
 readout that depends on it says so. ac2 does not prompt (7b).
 
-**Mic curve** — it is a property of the capsule, so it follows the mic name: the curve of
-entry `(D, c, m)`, else the newest curve imported for mic `m` on any device or channel.
-With no mic name set, no curve applies. It applies only while the input's `mic_curve`
-switch is on.
+**Mic curve** — the input's chosen curve of mic `m`, and only that one: none without a mic
+name, none when the choice is `off` or `not_chosen`, none when the chosen label is not
+stored for `m` (§10). A curve is a property of the capsule, so the library follows the mic
+name to any device and channel; which curve applies is the input's explicit choice.
+
+These rules are the pure functions of `ac2_proto::cal` (`input_use`, `settle`, `step`):
+the daemon applies what they say and every client words its readouts from them, so what is
+shown as in use is what is in use.
 
 **Normalisation frequency** — the calibrator frequency of the sensitivity calibration in
 use; 1 kHz when uncalibrated. The curve is shifted so that its value at that frequency is
@@ -100,9 +112,10 @@ nothing double-counts (§5.7).
 
 The age is `capture_wall_ns − calibrated_at`, both on the daemon clock, so no client clock
 offset enters it. Wording (`ac2-scene`): `cal 3 h ago`, `cal from other mic / input`,
-`uncalibrated`; when a curve is applied the line adds `· mic curve`. Spectrum and RTA
-captions append the same (`1/3 oct · A-weighted · cal 3 h ago · mic curve`), saying
-nothing when uncalibrated (the axis unit says dBFS).
+`uncalibrated`; the frame's `mic_curve` flag with the input's setup gives the curve note
+(§10): `mic curve: MM1 34804 90°`, or why none applied. Spectrum and RTA captions append the
+same (`1/3 oct · A-weighted · cal 3 h ago · mic curve: MM1 34804 90°`), saying nothing about
+the calibration when uncalibrated (the axis unit says dBFS).
 
 ## 4. Mic-curve files
 
@@ -182,15 +195,23 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   override (tests and in-process daemons may run without a file — memory only). The store
   is machine configuration (it describes the hardware), so it lives with the config, not with
   the sessions in the data directory (round 5, C2).
-- Format: JSON `{"format": "ac2-calibrations", "version": 1, "entries": [...], "inputs":
-  [...]}`, entries with their curve points. Human-readable, diffable, hand-repairable.
+- Format: JSON `{"format": "ac2-calibrations", "version": 2, "sensitivities": [CalEntry],
+  "mics": [{"name", "curves": [{"reference": MicCurveRef, "points": [[Hz, dB]]}]}],
+  "inputs": [InputSetup]}`. Human-readable, diffable, hand-repairable.
 - Writes are atomic: a temporary file in the same directory, flushed and synced, renamed
   over the old one, directory synced. A crash leaves the old file or the new one, never a
   mix.
 - Read once at daemon start. Missing → empty store (created on the first write).
+  **Another version** of this format (version 1 held one curve per device + input + mic
+  entry and an on/off switch per input) → the file is set aside as `<file>.v<N>` (the time
+  appended when that exists; never deleted) and the daemon starts with an empty, writable
+  store, logging what happened and how to recover: calibrate again (`ac2 cal spl`) and
+  import the curves again (`ac2 cal curve import FILE --mic NAME`); the old file shows the
+  mic and file names. There is no migration: a version-1 entry's curve says nothing about
+  which incidence angle it was, which is exactly what the new format makes explicit.
   **Unparseable** (bad JSON, unknown `format`/`version`, an entry that fails §4
   validation) → the daemon starts with an empty, **read-only** store: the file is never
-  overwritten; `cal.spl`, `cal.mic_curve`, `session.inputs` and `cal.list` are refused
+  overwritten; `cal.spl`, `cal.curve_*`, `cal.delete`, `session.inputs` and `cal.list` are refused
   (`refused`, detail `cal_store {path, reason}`) with "calibration store … is unreadable
   …; fix or move it away and restart ac2d". Measurements keep running uncalibrated.
 - One daemon per file; the daemon is the only writer.
@@ -213,15 +234,17 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   and untouched, matching rules (verified / other mic / other input / uncalibrated),
   frames carry the state, TF/RTA/spectrum corrected and flagged, on/off.
 - CLI, client fake, scene wording, UI reducer (mic-name prompt, curve toggle).
-- `cal.delete`: daemon (part by part, persisted across a restart, refused on an unreadable
-  store, `not_found`), client fake, CLI `cal rm`, UI palette prompt; spectrum / RTA caption
-  age (`ac2-scene`).
+- `cal.delete`: daemon (persisted across a restart, refused on an unreadable store,
+  `not_found`), client fake, CLI `cal rm`, UI palette prompt; spectrum / RTA caption age
+  (`ac2-scene`).
+- §10: see there.
 
 ## 9. Mic curve on a stored trace
 
 A trace captured before the mic had a curve (or with no mic name, or the input's curve
-switched off) can be corrected afterwards: `trace.mic_curve {trace, mic}` (CLI
-`ac2 trace mic <trace> <mic|none>`, UI palette **Mic curve on the selected trace…**).
+off) can be corrected afterwards: `trace.mic_curve {trace, curve: {mic, label}}` (CLI
+`ac2 trace mic <trace> <mic|none> [--label L]`, the label optional for a mic with one curve;
+UI palette **Mic curve on the selected trace…**, typed as `MM1 34804 90°`).
 
 **Choice: a display edit, like smoothing.** The stored columns stay as measured; the
 correction is applied when the trace is served (`trace.get`), after the display smoothing —
@@ -233,15 +256,14 @@ JSON line), and the same rules hold for every display edit (offset, polarity, nu
 smoothing, mic curve: never in the columns). Baking the curve into the columns would have
 needed the curve's points kept anyway to undo it.
 
-- **Which curve.** The §3 rule: the curve follows the mic name — the entry on the trace's
-  calibrated device + input (`cal.key`) when it holds one, else the newest curve imported
-  for that mic on any device or input.
+- **Which curve.** The one named: a mic with several curves has no "the" curve (§10).
 - **Normalisation** (§3, §5.7): the calibrator frequency of the trace's sensitivity
-  calibration, else of the curve entry's own, else 1 kHz; recorded as `f_norm`.
+  calibration, else of the mic's newest sensitivity calibration, else 1 kHz; recorded as
+  `f_norm`.
 - **Recorded** in `TraceMeta.mic_curve` (`TraceMicCurve`: mic name, the `MicCurveRef` —
-  name, file, content hash, points, range, import time — and `f_norm`). The daemon keeps the
+  label, file, content hash, points, range, import time — and `f_norm`). The daemon keeps the
   curve's **points** with the trace (and a session keeps them in its manifest,
-  `mic_curve_points`, session format 5), so deleting or replacing the curve in the store
+  `mic_curve_points`, session format 6), so deleting or replacing the curve in the store
   later never changes a stored trace.
 - **Where it applies** (§5): transfer and sweep traces per log-grid column, spectra per
   bin, RTA bands as the band power average; phase and coherence never. A sweep's
@@ -249,8 +271,9 @@ needed the curve's points kept anyway to undo it.
   up at n·f to what it picked up at f, so level and floor move by c(f) − c(n·f); THD is
   re-summed from the corrected orders (the analysis's power sum). The impulse response is
   not corrected (a time-domain view; the curve is a magnitude-only display correction).
-- **No double correction.** `TraceMeta.mic.curve` set means the capture's columns carry a
-  curve already (the live job corrected them): `trace.mic_curve` is refused (`refused`,
+- **No double correction.** `TraceMeta.mic.curve` (the full `MicCurveRef`: label, file,
+  hash) set means the capture's columns carry that curve already (the live job corrected
+  them): `trace.mic_curve` is refused (`refused`,
   "captured with mic curve … applied: it is in the columns already, a second curve would
   correct twice"). The two fields are never set together. A sweep's analysis works on the
   raw recordings, so a sweep trace never names a curve in `mic.curve` (the earlier capture
@@ -267,3 +290,85 @@ session round trip with points, averages of corrected columns, refusals, sweep d
 and THD), daemon (`mic_curve_on_a_stored_trace`: apply from the store, served magnitude,
 export, a capture with the curve refused, session reload, removal), CLI (`trace mic`,
 `trace show` wording), UI reducer (palette prompt prefilled with the trace's mic).
+
+## 10. Several curves per mic, the active curve per input
+
+A measurement mic usually comes with more than one calibration file: one per incidence
+angle (beyerdynamic MM1: `…_0Grad.txt` for a mic pointed at the source, `…_90Grad.txt` with
+the header `rel. Level [dB], 90-degree-curve` for grazing incidence). They differ by up to a
+few dB above 5 kHz, so the curve in use is part of the measurement: the wrong one is a
+measurement error, and one that changes silently (a newer import replacing the older one,
+as "the newest curve for the mic" did) cannot be told from a change in the system.
+
+**Model.** Curves live in a mic library keyed by mic name, each with a short `label`; the
+sensitivity calibration stays per (device, input, mic), because it calibrates the chain
+including the preamp gain. Each input chooses explicitly which curve of its mic applies:
+`not_chosen`, `off`, or `curve{label}`.
+
+**Labels.** The default label is the incidence angle the file states — in a header line
+(`90-degree-curve`, `90°`, `90 deg`) or else in the file name (`_90Grad`, `0deg`) — as `N°`;
+else the file stem (cut to 32 characters). A number of at most three digits directly before
+`°`, `deg`, `degree(s)` or `Grad` counts; longer digit runs are serial numbers, `Phase
+(degrees)` has no number, `gradient` is not `Grad`. `--label` overrides; `cal.curve_rename`
+renames later. Labels are unique per mic and never `off` / `none` (the CLI's words for no
+curve).
+
+**Stated sensitivity.** A header's `Sensitivity: 15.0mV/Pa` is kept as
+`stated_sensitivity` and shown (`15.0 mV/Pa (−36.5 dBV/Pa)`, "data sheet") but never used:
+the sensitivity calibration measures the whole chain (preamp gain, converter), which a
+capsule's data sheet value cannot know.
+
+**Choosing, never guessing.** A mic with exactly one curve has nothing to confuse it with:
+the daemon chooses it on any row of that mic where none is chosen (`ac2_proto::cal::settle`,
+run on every change of the setup or the library), and importing a mic's first curve on an
+input chooses it. With several curves and none chosen, no curve applies and the input says
+`choose: 0°, 90°`. A new mic name on a row starts `not_chosen`: the previous choice named
+another capsule's curve. Deleting the chosen curve leaves the label on the row, shown as
+`90° — not stored for MM1 34804`, and no curve applies; re-importing that label restores it.
+
+**Switching** is one action: ←/→ on the input's row (session dialog, input setup view) step
+off → 0° → 90° … (`ac2_proto::cal::step`: off, then the mic's curves in import order); the
+palette's **Mic curve on input N…** (`2=90°`) and **Mic curve: next curve on the selected
+measurement's input**; `ac2 cal use <in> <label|off>`, `ac2 session inputs --curve 2=90°`.
+The daemon hands the running jobs the new correction at once. The correction is a display
+correction of the magnitude (TF, spectrum, RTA) applied after averaging, so averages need
+no reset; the SPL path's correction filter changes with it (its Leq / Lmax then mix the two
+for the interval, as after any calibration change).
+
+**Always visible.** Every place a corrected readout is shown says which curve is in it, or
+why none is (`ac2-scene::cal`):
+
+| where | applied | not applied |
+|---|---|---|
+| sidebar input label | `MM1 34804 · 90° · mic (in 1)` | `· curve off`, `· curve not chosen`, `· no curve stored`, `· 90° not stored` |
+| pane captions (TF title, spectrum / RTA legend, SPL readout, stored traces, sweep) | `mic curve: MM1 34804 90°` | `mic curve off`, `mic curve not chosen`, `no mic curve stored for MM1 34804`, `mic curve 90° not stored for MM1 34804` |
+| session dialog / input setup rows, `ac2 cal list`, `ac2 status` | `90°` | `off`, `choose: 0°, 90°`, `no curve stored for MM1 34804`, `90° — not stored for MM1 34804` |
+
+with the sensitivity state beside it: `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago`,
+`from ECM on in 2 · …`, `uncalibrated`. The pane caption takes "applied" from the frame (what
+the daemon did) and the label from the input setup; a frame from before a switch says just
+`mic curve` until the next one arrives.
+
+**Traces** record exactly which curve their columns carry: `MicState.curve` is the full
+`MicCurveRef` (label, file, content hash), and the export header names it (`# mic: MM1 34804
+(curve: 90°, in the columns; file "449350_34804_90Grad.txt", hash …)`).
+
+**The calibrations view** (palette **Calibrations…**; **Input setup…** opens it on the
+selected measurement's input) lists what each input uses (mic, curve state, sensitivity
+state), every mic with its curves (file, points, range, data-sheet sensitivity, which inputs
+use it) and every sensitivity calibration (device, input, mic, calibrator level and
+frequency, reading, age). Keys: ↑/↓, ←/→ (an input's curve), N (name the mic), I (import a
+curve file by path), R (rename a curve), Delete twice (delete a curve or a sensitivity
+calibration), Enter, Esc.
+
+Tests: `ac2-core` (angle and stated sensitivity from the real MM1 headers and from file
+names; what is not an angle), `ac2-proto::cal` (states, `settle`, `step`, matching),
+calstore (several curves per mic round trip, points per label, labels and stated
+sensitivity from the real files, a version-1 store set aside and the store writable),
+daemon `two_curves_of_one_mic_switched_on_an_input` (both MM1 files imported, the first
+chosen, 0° → 90° → off moves the served TF magnitude by exactly the curves' difference,
+captures record label + hash, export header, a deleted chosen curve shows as not stored),
+`ac2-scene::cal` wording, CLI (`cal curve import/rename/rm`, `cal use`, `cal list` with
+curves per mic and the active curve per input, `status`), UI reducer (stepping, the
+palette prompts, the session dialog rows), and the end-to-end UI test
+`mic_curves_imported_and_switched_in_the_input_setup` from an empty daemon.
