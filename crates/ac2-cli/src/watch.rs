@@ -213,7 +213,7 @@ async fn live_until(
 }
 
 /// This machine's wall clock, Unix ns.
-fn now_wall() -> ac2_proto::units::WallNs {
+pub(crate) fn now_wall() -> ac2_proto::units::WallNs {
     ac2_proto::units::WallNs(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

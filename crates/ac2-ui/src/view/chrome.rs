@@ -74,6 +74,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 .color(ch.dim),
             );
             ui.separator();
+            super::autosave::autosave(app, ui, ch);
             stimulus(app, ui, ch);
         });
     });

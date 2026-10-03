@@ -1882,4 +1882,36 @@ pub struct State {
     pub timing: TimingStatus,
     /// The latest sweep run, if any.
     pub sweep: Option<SweepRun>,
+    /// Autosave of the measurements and traces.
+    pub autosave: Autosave,
+}
+
+/// Autosave of the measurements and traces: the daemon writes them, in the session file
+/// format, to its autosave directory shortly after they change, and restores them when it
+/// starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Autosave {
+    /// What the autosave is doing.
+    pub state: AutosaveState,
+    /// When the autosave on disk was written (after a restore: when the restored one was).
+    /// `None` until something has been written.
+    pub saved_at: Option<WallNs>,
+}
+
+/// State of the autosave.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AutosaveState {
+    /// This daemon does not autosave.
+    Off,
+    /// What is on disk is the current state.
+    Saved,
+    /// A change waits to be written, or is being written.
+    Pending,
+    /// The last write failed; the next change, or a retry, writes again.
+    Failed {
+        /// Why, as the file system said it.
+        reason: String,
+    },
 }

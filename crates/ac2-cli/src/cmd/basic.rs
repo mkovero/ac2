@@ -129,7 +129,16 @@ pub(crate) async fn session(
         SessionCmd::Status => {
             let r = c.call(Command::SessionStatus).await?;
             let s = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
-            out.emit(&s, || output::session(&s))?;
+            let autosave = state(&c).await?.autosave;
+            let mut j = json!(s);
+            j["autosave"] = json!(autosave);
+            out.emit(&j, || {
+                format!(
+                    "{}\n{}",
+                    output::session(&s),
+                    output::autosave(&autosave, crate::watch::now_wall())
+                )
+            })?;
         }
         SessionCmd::Save { session } => {
             super::traces::save_or_load(cli, &c, session, false, out).await?;

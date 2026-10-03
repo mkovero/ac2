@@ -4,10 +4,10 @@ use std::io::{self, Write};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    Availability, BackendInfo, CalEntry, CalState, CalStatus, DelayReference, DepthPolicy,
-    InputSetup, LevelScale, MeasKind, Measurement, PeakWeighting, Polarity, Session, SessionFile,
-    SmoothingFraction, SmoothingMode, TimeWeighting, TimingState, TimingStatus, TraceData,
-    TraceKind, TraceMeta, TraceSource, Weighting,
+    Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
+    DelayReference, DepthPolicy, InputSetup, LevelScale, MeasKind, Measurement, PeakWeighting,
+    Polarity, Session, SessionFile, SmoothingFraction, SmoothingMode, TimeWeighting, TimingState,
+    TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource, Weighting,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
@@ -242,6 +242,18 @@ pub fn devices(backends: &[BackendInfo]) -> String {
 }
 
 /// Session, as lines.
+/// The daemon's autosave as one line: `autosave     autosaved 5 min ago`, `saving…`,
+/// `failed: <reason>` (in full), `off`. The age assumes this machine's clock matches the
+/// daemon's.
+pub fn autosave(a: &Autosave, now: WallNs) -> String {
+    let text = match &a.state {
+        AutosaveState::Failed { reason } => format!("FAILED: {reason}"),
+        _ => ac2_scene::autosave::autosave_label(a, now, ac2_scene::time::ClockOffset(0))
+            .map_or_else(|| "off".to_owned(), |l| l.text),
+    };
+    format!("autosave     {text}")
+}
+
 pub fn session(s: &Session) -> String {
     match &s.open {
         None => format!("session closed (epoch {})", s.epoch),
@@ -595,4 +607,44 @@ pub fn timing(t: &TimingStatus, rate: Option<u32>) -> String {
         }
     ));
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autosave_line() {
+        const S: u64 = 1_000_000_000;
+        let now = WallNs(1_000 * S);
+        let a = |state, saved_at: Option<u64>| Autosave {
+            state,
+            saved_at: saved_at.map(WallNs),
+        };
+        assert_eq!(
+            autosave(&a(AutosaveState::Off, None), now),
+            "autosave     off"
+        );
+        assert_eq!(
+            autosave(&a(AutosaveState::Saved, Some(400 * S)), now),
+            "autosave     autosaved 10 min ago"
+        );
+        assert_eq!(
+            autosave(&a(AutosaveState::Pending, None), now),
+            "autosave     saving…"
+        );
+        let reason = "x".repeat(100);
+        assert_eq!(
+            autosave(
+                &a(
+                    AutosaveState::Failed {
+                        reason: reason.clone()
+                    },
+                    None
+                ),
+                now
+            ),
+            format!("autosave     FAILED: {reason}")
+        );
+    }
 }

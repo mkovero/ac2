@@ -23,11 +23,12 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    Availability, BackendInfo, CalEntry, CalKey, CalPart, CalState, DelayOutcome, DelayState,
-    FinderBand, GenAction, GenAudit, Generator, GeneratorDesired, GeneratorSettings, InputSetup,
-    Lease as WireLease, LoopbackDetection, MeasConfig, MeasKind, Measurement, MicCurveAction,
-    MicCurveRef, MicState, Session, SessionConfig, SplCal, SweepFailure, SweepInputs, SweepRequest,
-    SweepRun, SweepStatus, TimingStatus, TraceKind, TraceMeta, TraceSource,
+    Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalKey, CalPart, CalState,
+    DelayOutcome, DelayState, FinderBand, GenAction, GenAudit, Generator, GeneratorDesired,
+    GeneratorSettings, InputSetup, Lease as WireLease, LoopbackDetection, MeasConfig, MeasKind,
+    Measurement, MicCurveAction, MicCurveRef, MicState, Session, SessionConfig, SplCal,
+    SweepFailure, SweepInputs, SweepRequest, SweepRun, SweepStatus, TimingStatus, TraceKind,
+    TraceMeta, TraceSource,
 };
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -39,6 +40,7 @@ use ac2_proto::{
 };
 use ac2_zmq::Context;
 
+use crate::autosave::Autosaver;
 use crate::calstore::{self, CalStore, InputCal};
 use crate::config::{DedupLimits, ReplayLimits};
 use crate::conv;
@@ -53,6 +55,7 @@ use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
 use crate::sweep::Recording;
 use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
 
+mod autosave;
 mod files;
 mod sweeps;
 mod traces;
@@ -100,6 +103,8 @@ pub(crate) enum ControlMsg {
         id: SweepId,
         result: Box<Result<SweepAnalysis, SweepError>>,
     },
+    /// The autosave write finished: the time it was written, or why it failed.
+    Autosaved { result: Box<Result<WallNs, String>> },
     /// The network sockets are gone (ZAP handler exited); shut down.
     Fatal(String),
     /// Orderly shutdown.
@@ -128,6 +133,8 @@ pub(crate) struct Setup {
     /// Network mode: `file.*` accept names only, never paths.
     pub(crate) network: bool,
     pub(crate) cal_store: Option<std::path::PathBuf>,
+    /// Autosave directory and whether to restore it at start.
+    pub(crate) autosave: Option<crate::config::AutosaveConfig>,
 }
 
 /// A request answered when a worker thread reports back.
@@ -209,6 +216,9 @@ pub(crate) struct Control {
     traces: traces::TraceStore,
     sweep: Option<ActiveSweep>,
     next_sweep: u32,
+    autosave: Option<Autosaver>,
+    /// Load the autosave when the control thread starts.
+    restore: bool,
 }
 
 const MAX_DELAY_S: f64 = 10.0;
@@ -387,7 +397,28 @@ impl Control {
             Some(p) => CalStore::open(p),
             None => (CalStore::memory(), Vec::new(), Vec::new()),
         };
-        let store = Store::new(Dbfs(s.ceiling_dbfs), s.replay).with_calibrations(entries, inputs);
+        let (autosave, status) = match &s.autosave {
+            None => (None, AutosaveState::Off),
+            Some(c) => match crate::autosave::Writer::spawn(c.dir.clone(), s.to_self.clone()) {
+                Ok(w) => (Some(Autosaver::new(c.dir.clone(), w)), AutosaveState::Saved),
+                Err(e) => {
+                    tracing::error!("autosave disabled: cannot start its thread: {e}");
+                    (
+                        None,
+                        AutosaveState::Failed {
+                            reason: format!("cannot start the autosave thread: {e}"),
+                        },
+                    )
+                }
+            },
+        };
+        let restore = s.autosave.as_ref().is_some_and(|c| c.restore);
+        let store = Store::new(Dbfs(s.ceiling_dbfs), s.replay)
+            .with_calibrations(entries, inputs)
+            .with_autosave(Autosave {
+                state: status,
+                saved_at: None,
+            });
         let dedup = Dedup::new(s.dedup);
         Self {
             store,
@@ -414,13 +445,24 @@ impl Control {
             traces: traces::TraceStore::default(),
             sweep: None,
             next_sweep: 1,
+            autosave,
+            restore,
             s,
         }
     }
 
     pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) {
+        self.start_autosave();
         loop {
             let now = Instant::now();
+            if self
+                .autosave
+                .as_ref()
+                .and_then(Autosaver::due)
+                .is_some_and(|d| d <= now)
+            {
+                self.autosave_write();
+            }
             self.check_lease(now);
             self.check_muted();
             if now >= self.next_ka {
@@ -437,6 +479,9 @@ impl Control {
             }
             if let Some(p) = &self.preview {
                 wake = wake.min(p.deadline);
+            }
+            if let Some(d) = self.autosave.as_ref().and_then(Autosaver::due) {
+                wake = wake.min(d);
             }
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
                 Ok(ControlMsg::Request {
@@ -483,6 +528,7 @@ impl Control {
                 Ok(ControlMsg::SweepProgress { id, repeat }) => self.sweep_progress(id, repeat),
                 Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
                 Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, *result),
+                Ok(ControlMsg::Autosaved { result }) => self.autosaved(*result),
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;
@@ -503,16 +549,21 @@ impl Control {
         if let Some(rt) = self.session.take() {
             rt.close();
         }
+        self.flush_autosave();
         self.s.outbox.stop();
     }
 
     // -- plumbing --------------------------------------------------------------------------
 
     fn commit(&mut self, change: Change) -> Rev {
+        let saved = matches!(change, Change::Measurement(_) | Change::Trace(_));
         let ev = self.store.commit(change, Instant::now());
         match ac2_proto::encode_event(&ev) {
             Ok(b) => self.s.outbox.event(&b),
             Err(e) => tracing::error!("event not encodable: {e}"),
+        }
+        if saved {
+            self.autosave_changed();
         }
         ev.rev
     }

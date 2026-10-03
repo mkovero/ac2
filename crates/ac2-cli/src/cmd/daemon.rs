@@ -33,7 +33,12 @@ pub(crate) async fn run(cli: &Cli, cmd: &DaemonCmd, out: &mut Out<'_>) -> Result
     }
 }
 
-fn status_json(c: &Client, session: &ac2_proto::model::Session, local: bool) -> serde_json::Value {
+fn status_json(
+    c: &Client,
+    session: &ac2_proto::model::Session,
+    autosave: &ac2_proto::model::Autosave,
+    local: bool,
+) -> serde_json::Value {
     let w = c.welcome();
     let build = parse_build_id(&w.server);
     let matches = build.map(|b| b == BUILD_ID);
@@ -49,10 +54,16 @@ fn status_json(c: &Client, session: &ac2_proto::model::Session, local: bool) -> 
         "session_epoch": w.session_epoch,
         "rev": w.rev,
         "session": session,
+        "autosave": autosave,
     })
 }
 
-fn status_text(c: &Client, session: &ac2_proto::model::Session, local: bool) -> String {
+fn status_text(
+    c: &Client,
+    session: &ac2_proto::model::Session,
+    autosave: &ac2_proto::model::Autosave,
+    local: bool,
+) -> String {
     let w = c.welcome();
     let mut s = format!("daemon       {}", w.server);
     match parse_build_id(&w.server) {
@@ -73,6 +84,8 @@ fn status_text(c: &Client, session: &ac2_proto::model::Session, local: bool) -> 
         w.rev,
         output::session(session)
     ));
+    s.push('\n');
+    s.push_str(&output::autosave(autosave, crate::watch::now_wall()));
     s
 }
 
@@ -80,9 +93,10 @@ pub(crate) async fn status(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError>
     let c = connect(cli, false).await?;
     let r = c.call(Command::SessionStatus).await?;
     let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
+    let autosave = super::state(&c).await?.autosave;
     let local = is_local(cli);
-    out.emit(&status_json(&c, &session, local), || {
-        status_text(&c, &session, local)
+    out.emit(&status_json(&c, &session, &autosave, local), || {
+        status_text(&c, &session, &autosave, local)
     })?;
     Ok(())
 }
@@ -141,11 +155,15 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     if let Some(c) = probe(cli).await {
         let r = c.call(Command::SessionStatus).await?;
         let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
-        let mut j = status_json(&c, &session, true);
+        let autosave = super::state(&c).await?.autosave;
+        let mut j = status_json(&c, &session, &autosave, true);
         j["started"] = json!(false);
         j["already_running"] = json!(true);
         out.emit(&j, || {
-            format!("already running\n{}", status_text(&c, &session, true))
+            format!(
+                "already running\n{}",
+                status_text(&c, &session, &autosave, true)
+            )
         })?;
         return Ok(());
     }
@@ -197,7 +215,8 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     };
     let r = c.call(Command::SessionStatus).await?;
     let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
-    let mut j = status_json(&c, &session, true);
+    let autosave = super::state(&c).await?.autosave;
+    let mut j = status_json(&c, &session, &autosave, true);
     j["started"] = json!(true);
     j["pid"] = json!(pid);
     j["exe"] = json!(exe);
@@ -205,7 +224,7 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         format!(
             "started {} (pid {pid})\n{}",
             exe.display(),
-            status_text(&c, &session, true)
+            status_text(&c, &session, &autosave, true)
         )
     })?;
     Ok(())

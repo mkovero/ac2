@@ -277,6 +277,82 @@ fn empty_local_daemon_measures_from_the_app() -> R {
     Ok(())
 }
 
+/// A stand-alone daemon on the simulated rig with an autosave directory.
+fn autosaving_daemon(dir: &std::path::Path) -> R<(ac2d::Handle, Endpoints)> {
+    let listen = ac2d::Listen::Local {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+    };
+    let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
+    let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
+    config.session_dir = dir.join("sessions");
+    config.autosave = Some(ac2d::AutosaveConfig {
+        dir: dir.join("autosave"),
+        restore: true,
+    });
+    let handle = ac2d::Daemon::start(config)?;
+    let ep = Endpoints {
+        ctrl: handle.ctrl_endpoint().to_owned(),
+        data: handle.data_endpoint().to_owned(),
+    };
+    Ok((handle, ep))
+}
+
+/// From an empty autosaving daemon: measure, capture to slot 1 from the keys, the top bar
+/// says it is autosaved; the daemon restarts and the trace is back in its slot, nothing
+/// armed, and the bar still says when it was saved.
+#[test]
+fn a_captured_trace_survives_a_daemon_restart() -> R {
+    let now = || {
+        ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        )
+    };
+    let dir = tempfile::tempdir()?;
+    let (handle, ep) = autosaving_daemon(dir.path())?;
+    let mut d = Driver::connect(ep, "local daemon")?;
+    d.synced()?;
+    assert_eq!(
+        d.st.autosave_label(now()).map(|l| l.text),
+        Some("autosave on".to_owned())
+    );
+    measure_from_empty(&mut d)?;
+    d.send(Msg::Command(CommandId::Slot1));
+    d.until("the trace in slot 1", |s| {
+        s.daemon()
+            .is_some_and(|x| x.traces.iter().any(|t| t.edit.slot == Some(1)))
+    })?;
+    d.until("autosaved", |s| {
+        s.daemon().is_some_and(|x| {
+            x.autosave.state == ac2_proto::model::AutosaveState::Saved
+                && x.autosave.saved_at.is_some()
+        })
+    })?;
+    let label = d.st.autosave_label(now()).ok_or("no indicator")?;
+    assert_eq!(label.text, "autosaved just now");
+    let traces = d.st.daemon().ok_or("state")?.traces.clone();
+    drop(d);
+    handle.shutdown();
+
+    let (handle, ep) = autosaving_daemon(dir.path())?;
+    let mut d = Driver::connect(ep, "local daemon")?;
+    d.synced()?;
+    let st = d.st.daemon().ok_or("state")?;
+    assert_eq!(st.traces, traces);
+    assert!(st.session.open.is_none());
+    assert!(!st.generator.armed && !st.generator.firing);
+    assert_eq!(st.measurements.len(), 1);
+    assert_eq!(
+        d.st.autosave_label(now()).map(|l| l.text),
+        Some("autosaved just now".to_owned())
+    );
+    drop(d);
+    handle.shutdown();
+    Ok(())
+}
+
 #[test]
 fn demo_setup_is_for_the_simulated_rig_only() {
     for b in [EmbeddedBackend::Cpal, EmbeddedBackend::Jack] {

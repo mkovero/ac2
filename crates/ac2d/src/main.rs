@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use ac2d::{Advertise, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
+use ac2d::{
+    Advertise, AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity,
+};
 
 const USAGE: &str = "\
 usage: ac2d [options]
@@ -32,6 +34,12 @@ Audio / WASAPI) on macOS and Windows.
   --cal-store <path>     calibration store (default calibrations.json in the ac2 config
                          directory, ~/.config/ac2 on Linux); an unreadable
                          file is never overwritten
+  --autosave <dir>       where measurements and traces are autosaved (default: autosave
+                         in the ac2 data directory, ~/.local/share/ac2 on Linux); the
+                         previous autosave is kept beside it as <dir>.prev
+  --no-restore           start empty: the autosave is not loaded but moved aside to
+                         <dir>.unrestored
+  --no-autosave          keep measurements and traces in memory only
   -V, --version          print the version and build id
   -h, --help             this text
 
@@ -49,6 +57,9 @@ struct Args {
     cal_store: Option<PathBuf>,
     name: Option<String>,
     mdns: bool,
+    autosave: Option<PathBuf>,
+    restore: bool,
+    no_autosave: bool,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -65,6 +76,9 @@ fn parse() -> Result<Option<Args>, String> {
         cal_store: None,
         name: None,
         mdns: true,
+        autosave: None,
+        restore: true,
+        no_autosave: false,
     };
     while let Some(flag) = it.next() {
         let mut val = || it.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -87,6 +101,9 @@ fn parse() -> Result<Option<Args>, String> {
             "--cal-store" => a.cal_store = Some(PathBuf::from(val()?)),
             "--name" => a.name = Some(val()?),
             "--no-mdns" => a.mdns = false,
+            "--autosave" => a.autosave = Some(PathBuf::from(val()?)),
+            "--no-restore" => a.restore = false,
+            "--no-autosave" => a.no_autosave = true,
             "--max-level" => {
                 let v = val()?;
                 let v = v.strip_suffix("dbfs").unwrap_or(&v);
@@ -96,6 +113,9 @@ fn parse() -> Result<Option<Args>, String> {
             }
             other => return Err(format!("unknown argument {other}")),
         }
+    }
+    if a.no_autosave && (a.autosave.is_some() || !a.restore) {
+        return Err("--no-autosave excludes --autosave and --no-restore".into());
     }
     if let Some(b) = backend {
         a.backend = b.parse()?;
@@ -170,6 +190,13 @@ fn main() -> ExitCode {
     config.backends = backends;
     config.advertise = advertise;
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
+    config.autosave = (!args.no_autosave).then(|| AutosaveConfig {
+        dir: args
+            .autosave
+            .clone()
+            .unwrap_or_else(ac2_paths::autosave_dir),
+        restore: args.restore,
+    });
     let handle = match Daemon::start(config) {
         Ok(h) => h,
         Err(e) => {

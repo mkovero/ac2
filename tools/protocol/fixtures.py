@@ -495,6 +495,17 @@ def events():
                 "started_at": 1790000000000000000,
             },
         },
+        {
+            "kind": "autosave",
+            "rev": 57,
+            "payload": {
+                "state": {
+                    "type": "failed",
+                    "reason": "No space left on device (os error 28)",
+                },
+                "saved_at": 1790000000000000000,
+            },
+        },
     ]
 
 

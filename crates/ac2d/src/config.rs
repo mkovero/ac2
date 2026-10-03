@@ -34,9 +34,22 @@ pub struct DaemonConfig {
     /// Calibration store file (`docs/design/q7-calibration.md` §7); `None` keeps
     /// calibrations in memory only.
     pub cal_store: Option<PathBuf>,
+    /// Autosave of the measurements and traces; `None` keeps them in memory only.
+    pub autosave: Option<AutosaveConfig>,
     /// mDNS advert of a network-mode daemon (`_ac2._tcp`); ignored in local modes, which
     /// are not reachable from the network. `None` advertises nothing.
     pub advertise: Option<Advertise>,
+}
+
+/// Where the daemon autosaves, and whether it loads that autosave when it starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AutosaveConfig {
+    /// The autosave (a session directory); its backup and set-aside copies live beside it
+    /// (`<dir>.prev`, …).
+    pub dir: PathBuf,
+    /// Load the autosave at start (disarmed, as `file.load`). `false` moves it aside to
+    /// `<dir>.unrestored` and starts empty.
+    pub restore: bool,
 }
 
 /// What a network-mode daemon advertises over mDNS. The advert names the rig and its key
@@ -66,6 +79,7 @@ impl fmt::Debug for DaemonConfig {
             .field("keepalive", &self.keepalive)
             .field("session_dir", &self.session_dir)
             .field("cal_store", &self.cal_store)
+            .field("autosave", &self.autosave)
             .field("advertise", &self.advertise)
             .finish()
     }
@@ -86,6 +100,7 @@ impl DaemonConfig {
             keepalive: Duration::from_millis(250),
             session_dir: ac2_paths::session_dir(),
             cal_store: None,
+            autosave: None,
             advertise: None,
         }
     }

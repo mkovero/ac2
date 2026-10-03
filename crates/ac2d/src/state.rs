@@ -9,7 +9,9 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use ac2_proto::event::{Change, Event, Patch, StateSnapshot};
-use ac2_proto::model::{Generator, Session, State, TimingState, TimingStatus};
+use ac2_proto::model::{
+    Autosave, AutosaveState, Generator, Session, State, TimingState, TimingStatus,
+};
 use ac2_proto::units::{DaemonIncarnation, Dbfs, Rev, SessionEpoch};
 
 use crate::config::ReplayLimits;
@@ -53,6 +55,10 @@ impl Store {
                     internal_reference: false,
                 },
                 sweep: None,
+                autosave: Autosave {
+                    state: AutosaveState::Off,
+                    saved_at: None,
+                },
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -68,6 +74,12 @@ impl Store {
     ) -> Self {
         self.state.calibrations = calibrations;
         self.state.inputs = inputs;
+        self
+    }
+
+    /// The initial autosave status (rev 0, no events).
+    pub(crate) fn with_autosave(mut self, autosave: Autosave) -> Self {
+        self.state.autosave = autosave;
         self
     }
 
@@ -161,6 +173,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,
         Change::Sweep(r) => s.sweep = Some(r.clone()),
+        Change::Autosave(a) => s.autosave = a.clone(),
     }
 }
 

@@ -1,6 +1,7 @@
 //! Drawing: top bar, measurement list, panes, overlays. Reads the state, emits messages
 //! (clicks, wheel, drags) through [`App::dispatch`]; never computes a measurement value.
 
+mod autosave;
 mod chrome;
 mod overlays;
 mod panes;
