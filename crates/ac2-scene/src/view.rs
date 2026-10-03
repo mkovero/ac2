@@ -194,6 +194,35 @@ impl Default for IrView {
     }
 }
 
+/// How distortion is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DistortionUnit {
+    /// dB re the fundamental.
+    Db,
+    /// Percent of the fundamental.
+    Percent,
+}
+
+/// The sweep (distortion) pane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DistortionView {
+    pub unit: DistortionUnit,
+    /// y range of the dB view.
+    pub range_db: Range,
+    /// The sweep's impulse response instead of its distortion.
+    pub show_ir: bool,
+}
+
+impl Default for DistortionView {
+    fn default() -> Self {
+        Self {
+            unit: DistortionUnit::Db,
+            range_db: Range::new(-100.0, 0.0),
+            show_ir: false,
+        }
+    }
+}
+
 /// Everything the operator chose about the view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewState {
@@ -202,6 +231,7 @@ pub struct ViewState {
     pub tf: TfView,
     pub spectrum: SpectrumView,
     pub ir: IrView,
+    pub distortion: DistortionView,
     /// Comparison cursor, Hz; synchronised across traces and panes.
     pub cursor_hz: Option<f64>,
     /// Air temperature for the delay → distance readout (decision A).
@@ -215,6 +245,7 @@ impl Default for ViewState {
             tf: TfView::default(),
             spectrum: SpectrumView::default(),
             ir: IrView::default(),
+            distortion: DistortionView::default(),
             cursor_hz: None,
             temperature_c: 20.0,
         }

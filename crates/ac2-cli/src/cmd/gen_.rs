@@ -93,14 +93,14 @@ fn signal_text(s: &GeneratorSettings) -> String {
 }
 
 #[derive(Debug)]
-enum Input {
+pub(crate) enum Input {
     Key(Key),
     Eof,
 }
 
 /// Enter / quit from the terminal (raw mode) or, when stdin is not a terminal, from lines:
 /// an empty line is Enter, `q` or end of input is quit.
-fn input() -> Result<(Option<RawTerm>, mpsc::UnboundedReceiver<Input>), CliError> {
+pub(crate) fn input() -> Result<(Option<RawTerm>, mpsc::UnboundedReceiver<Input>), CliError> {
     let (tx, rx) = mpsc::unbounded_channel();
     if std::io::stdin().is_terminal() {
         let (term, mut keys) = RawTerm::enter(false)?;
@@ -138,7 +138,13 @@ fn input() -> Result<(Option<RawTerm>, mpsc::UnboundedReceiver<Input>), CliError
     }
 }
 
-fn say(out: &mut Out<'_>, raw: bool, event: &str, human: &str, extra: serde_json::Value) {
+pub(crate) fn say(
+    out: &mut Out<'_>,
+    raw: bool,
+    event: &str,
+    human: &str,
+    extra: serde_json::Value,
+) {
     if out.json {
         let mut j = json!({ "event": event });
         if let (Some(o), serde_json::Value::Object(e)) = (j.as_object_mut(), extra) {

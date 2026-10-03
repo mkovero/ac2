@@ -92,6 +92,12 @@ pub enum Cmd {
         #[arg(long)]
         watch: bool,
     },
+    /// Sweep measurement: response, harmonic distortion and impulse response.
+    Ir {
+        /// Action.
+        #[command(subcommand)]
+        cmd: IrCmd,
+    },
     /// Stored traces.
     Trace {
         /// Action.
@@ -807,6 +813,64 @@ pub enum TraceCmd {
         #[arg(long, value_name = "FILE")]
         csv: PathBuf,
     },
+}
+
+/// `ir …`.
+#[derive(Debug, Subcommand)]
+pub enum IrCmd {
+    /// Play a synchronised sweep in the foreground (Enter plays, Esc/Ctrl-C stops), record
+    /// the reference and the mic, and store a sweep trace with harmonic distortion H2 … H5
+    /// and THD vs frequency; prints a summary.
+    Capture(IrCaptureArgs),
+}
+
+/// `ir capture`.
+#[derive(Debug, Args)]
+pub struct IrCaptureArgs {
+    /// Reference (loopback) input, e.g. `2`.
+    #[arg(
+        long = "ref",
+        value_name = "IN",
+        required_unless_present = "meas",
+        conflicts_with = "meas",
+        requires = "mic"
+    )]
+    pub reference: Option<Channel>,
+    /// Measurement (mic) input, e.g. `1`.
+    #[arg(long, value_name = "IN", requires = "reference")]
+    pub mic: Option<Channel>,
+    /// Take both inputs from this transfer measurement instead.
+    #[arg(long, value_name = "MEAS")]
+    pub meas: Option<MeasRef>,
+    /// Outputs playing the sweep: the speaker's and the loopback's, e.g. `1,2`.
+    #[arg(long = "out", value_name = "OUTS")]
+    pub outputs: Channels,
+    /// RMS level of the sweep, e.g. `-50dbfs`; required (there is no default level).
+    #[arg(long, allow_hyphen_values = true)]
+    pub level: LevelDbfs,
+    /// Start frequency.
+    #[arg(long, default_value = "20hz")]
+    pub from: Freq,
+    /// End frequency.
+    #[arg(long, default_value = "20khz")]
+    pub to: Freq,
+    /// Sweep duration (rounded so the harmonics stay in phase); longer sweeps resolve lower
+    /// frequencies and lower the noise floor.
+    #[arg(long, default_value = "3s")]
+    pub duration: Time,
+    /// Sweeps played and averaged (1 … 8): each doubling lowers the noise floor by 3 dB.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=8))]
+    pub repeats: u8,
+    /// Gate the linear response this long after the arrival (e.g. `5ms` for the free-field
+    /// response); default: the whole response.
+    #[arg(long, value_name = "TIME")]
+    pub gate: Option<Time>,
+    /// Name of the stored trace.
+    #[arg(long, default_value = "sweep")]
+    pub name: String,
+    /// Take the stimulus lease over from another client.
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Trace averaging method.

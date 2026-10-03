@@ -6,6 +6,7 @@ mod cal;
 mod daemon;
 mod discover;
 mod gen_;
+mod ir;
 mod traces;
 
 use std::time::Duration;
@@ -32,6 +33,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Spl { cmd } => basic::spl(cli, cmd, out).await,
         Cmd::Cal { cmd } => cal::run(cli, cmd, out).await,
         Cmd::Timing { watch } => basic::timing(cli, *watch, out).await,
+        Cmd::Ir { cmd } => ir::run(cli, cmd, out).await,
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::State { cmd } => basic::state_dump(cli, cmd, out).await,
         Cmd::Discover(a) => discover::run(cli, a, out),

@@ -11,13 +11,14 @@
 //! and the clock offset ([`time`]).
 //!
 //! Builders: [`tf::transfer_scene`], [`spectrum::spectrum_scene`], [`ir::ir_scene`],
-//! [`spl::spl_scene`]. Strings without geometry: [`readout`], [`banner::banners`],
+//! [`spl::spl_scene`], [`distortion::distortion_scene`]. Strings without geometry: [`readout`], [`banner::banners`],
 //! [`spl::spl_readout`].
 #![forbid(unsafe_code)]
 
 pub mod axis;
 pub mod banner;
 mod canvas;
+pub mod distortion;
 pub mod finding;
 pub mod format;
 pub mod grid;
