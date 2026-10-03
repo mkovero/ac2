@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::util::{perr, perr_detail};
 
 const FORMAT: &str = "ac2-calibrations";
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 /// Normalisation frequency when no sensitivity calibration applies.
 pub(crate) const DEFAULT_F_NORM: f64 = 1000.0;
 
@@ -197,7 +197,7 @@ impl CalStore {
                     tracing::warn!(
                         "calibration store {} is format version {} (this ac2d reads {VERSION}); \
                          set aside as {} and starting with an empty store — calibrate again \
-                         (`ac2 cal spl`) and import the mic curves again (`ac2 cal curve import \
+                         (`ac2 cal spl` or `ac2 cal electrical`) and import the mic curves again (`ac2 cal curve import \
                          FILE --mic NAME`); the old file shows the mic names and file names",
                         path.display(),
                         h.version,
@@ -400,10 +400,10 @@ fn parse(text: &[u8]) -> Result<(Contents, Curves), String> {
     ))
 }
 
-/// The normalisation frequency of a sensitivity calibration in use: its calibrator
-/// frequency (the tone was read uncorrected, so 0 dB there counts nothing twice).
+/// The normalisation frequency of a sensitivity calibration in use
+/// ([`ac2_proto::cal::f_norm`]); 1 kHz without one.
 pub(crate) fn f_norm(spl: Option<&CalEntry>) -> f64 {
-    spl.map_or(DEFAULT_F_NORM, |e| e.spl.calibrator_freq.0)
+    spl.map_or(DEFAULT_F_NORM, |e| cal::f_norm(&e.spl).0)
 }
 
 /// What a job on `channel` of `device` uses (Q7 §3, `ac2_proto::cal::input_use`).

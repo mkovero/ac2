@@ -1,7 +1,7 @@
 {
  "topic": "d/4/spl",
  "header": {
-  "v": 10,
+  "v": 11,
   "kind": "spl",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -28,7 +28,11 @@
     "duration": 60.0,
     "cal": {
      "type": "other_mic_or_input",
-     "calibrated_at": 1789000000000000000
+     "calibrated_at": 1789000000000000000,
+     "basis": {
+      "type": "acoustic",
+      "calibrator_level": 114.0
+     }
     },
     "mic_curve": true
    }

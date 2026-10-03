@@ -65,8 +65,10 @@ pub struct SplReadout {
 }
 
 /// Calibration text of a readout (decisions 7a/7b, `docs/design/q7-calibration.md` §3):
-/// the calibration's age when it belongs to this device + input + mic, a mismatch warning
-/// when it belongs to another mic or input, `uncalibrated` otherwise; `· mic curve` when the
+/// what the calibration rests on and its age when it belongs to this device + input + mic
+/// (`cal 94 dB · 3 h ago`, `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 3 h
+/// ago`), a mismatch warning when it belongs to another mic or input, `uncalibrated`
+/// otherwise; `· mic curve` when the
 /// mic's correction curve is applied. The age is on the daemon clock (`offset`).
 pub fn cal_text(
     cal: CalStatus,
@@ -75,13 +77,13 @@ pub fn cal_text(
     offset: ClockOffset,
 ) -> String {
     let base = match cal {
-        CalStatus::Uncalibrated => "uncalibrated".to_string(),
-        CalStatus::OtherMicOrInput { .. } => "cal from other mic / input".to_string(),
-        CalStatus::Verified { calibrated_at } => format!(
-            "cal {}",
-            format::ago(time::age_s(calibrated_at, client_now, offset))
-        ),
-    };
+        CalStatus::Uncalibrated => None,
+        CalStatus::Verified { calibrated_at, .. }
+        | CalStatus::OtherMicOrInput { calibrated_at, .. } => {
+            crate::cal::status_text(cal, time::age_s(calibrated_at, client_now, offset))
+        }
+    }
+    .unwrap_or_else(|| "uncalibrated".to_string());
     if mic_curve {
         format!("{base} · mic curve")
     } else {
@@ -338,6 +340,9 @@ mod tests {
                 duration: Seconds(83.9),
                 cal: CalStatus::Verified {
                     calibrated_at: WallNs(97 * H),
+                    basis: ac2_proto::model::CalBasis::Acoustic {
+                        calibrator_level: ac2_proto::units::DbSpl(94.0),
+                    },
                 },
                 mic_curve: false,
             },
@@ -348,7 +353,7 @@ mod tests {
     fn readout_strings() {
         let r = spl_readout(
             &frame(LevelScale::DbSpl),
-            "cal 3 h ago".into(),
+            "cal 94 dB · 3 h ago".into(),
             Some(Freshness::from_age(0.2)),
         );
         assert_eq!(r.metric, "LAF");
@@ -380,14 +385,20 @@ mod tests {
         let off = ClockOffset(0);
         let verified = CalStatus::Verified {
             calibrated_at: WallNs(97 * H - 1),
+            basis: ac2_proto::model::CalBasis::Acoustic {
+                calibrator_level: ac2_proto::units::DbSpl(94.0),
+            },
         };
-        assert_eq!(cal_text(verified, false, now, off), "cal 3 h ago");
+        assert_eq!(cal_text(verified, false, now, off), "cal 94 dB · 3 h ago");
         assert_eq!(
             cal_text(verified, true, now, off),
-            "cal 3 h ago · mic curve"
+            "cal 94 dB · 3 h ago · mic curve"
         );
         let other = CalStatus::OtherMicOrInput {
             calibrated_at: WallNs(99 * H),
+            basis: ac2_proto::model::CalBasis::Acoustic {
+                calibrator_level: ac2_proto::units::DbSpl(94.0),
+            },
         };
         assert_eq!(
             cal_text(other, false, now, off),
@@ -405,19 +416,22 @@ mod tests {
         let off = ClockOffset(2 * H as i64);
         assert_eq!(
             cal_text(verified, false, WallNs(98 * H), off),
-            "cal 3 h ago"
+            "cal 94 dB · 3 h ago"
         );
         // Minutes and days.
         let v = |ago: u64| CalStatus::Verified {
             calibrated_at: WallNs(100 * H - ago),
+            basis: ac2_proto::model::CalBasis::Acoustic {
+                calibrator_level: ac2_proto::units::DbSpl(94.0),
+            },
         };
         assert_eq!(
             cal_text(v(H / 6), false, now, ClockOffset(0)),
-            "cal 10 min ago"
+            "cal 94 dB · 10 min ago"
         );
         assert_eq!(
             cal_text(v(50 * H), false, now, ClockOffset(0)),
-            "cal 2 d ago"
+            "cal 94 dB · 2 d ago"
         );
     }
 
@@ -425,7 +439,7 @@ mod tests {
     fn scene_carries_the_strings() {
         let r = spl_readout(
             &frame(LevelScale::DbSpl),
-            "cal 3 h ago".into(),
+            "cal 94 dB · 3 h ago".into(),
             Some(Freshness::from_age(5.0)),
         );
         let s = spl_scene(
@@ -453,7 +467,7 @@ mod tests {
             "LAeq 92.1",
             "LCpeak 110.3",
             "over 1 min 23 s",
-            "cal 3 h ago",
+            "cal 94 dB · 3 h ago",
             "STALE 5.0 s",
         ] {
             assert!(texts.contains(&want), "{want} in {texts:?}");
@@ -469,7 +483,11 @@ mod tests {
 
     #[test]
     fn banners_push_the_readout_down() {
-        let r = spl_readout(&frame(LevelScale::DbSpl), "cal 3 h ago".into(), None);
+        let r = spl_readout(
+            &frame(LevelScale::DbSpl),
+            "cal 94 dB · 3 h ago".into(),
+            None,
+        );
         let size = Viewport {
             width: 400.0,
             height: 300.0,
@@ -567,7 +585,11 @@ mod tests {
     #[test]
     fn narrow_meter_wraps_the_statistics() {
         use crate::canvas::tests::{intersects, label_box};
-        let r = spl_readout(&frame(LevelScale::DbSpl), "cal 3 h ago".into(), None);
+        let r = spl_readout(
+            &frame(LevelScale::DbSpl),
+            "cal 94 dB · 3 h ago".into(),
+            None,
+        );
         let stats = |w: f32| {
             let s = spl_scene(
                 &r,

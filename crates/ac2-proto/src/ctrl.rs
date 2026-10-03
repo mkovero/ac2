@@ -13,14 +13,14 @@ use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
-    DelayReference, DeviceId, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat,
-    ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement, Mic,
-    MicCurveId, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLogPage, SplLogWhich,
-    SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
+    DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
+    GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MathOp,
+    MeasConfig, Measurement, Mic, MicCurveId, Preview, Session, SessionConfig, SessionFile,
+    SessionRef, SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
-    Blob, ClientId, DaemonIncarnation, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
-    Seconds, SessionEpoch, TraceId,
+    Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
+    Rev, Seconds, SessionEpoch, TraceId, Volts,
 };
 
 /// Largest ctrl message accepted, bytes (trace import / export bodies included).
@@ -337,6 +337,31 @@ pub enum Command {
         /// Calibrator frequency.
         calibrator_freq: Hz,
     },
+    /// Calibrate an input electrically: the operator measured `volts` (RMS) at the input
+    /// while a steady tone of `freq` is on it; the daemon reads the input's level and
+    /// stores `20·lg(V_FS / (S · 20 µPa))` with `V_FS = volts / 10^(level/20)` and the mic
+    /// sensitivity `S` (`None`: the data-sheet value of `mic`'s curve files, when they
+    /// state exactly one).
+    #[serde(rename = "cal.spl_electrical")]
+    CalSplElectrical {
+        /// Input channel.
+        input: u16,
+        /// Mic name.
+        mic: String,
+        /// Where the voltage was measured.
+        connection: ElectricalConnection,
+        /// Voltage measured, RMS.
+        volts: Volts,
+        /// Frequency of the tone.
+        freq: Hz,
+        /// Mic sensitivity; `None` = the data sheet's.
+        mic_sensitivity: Option<MvPerPa>,
+        /// Stated uncertainty, ± dB; `None` = 1 dB.
+        uncertainty: Option<Db>,
+        /// Replace an acoustic calibration of this input and mic (refused otherwise: a
+        /// calibrator reading is the better one).
+        replace_acoustic: bool,
+    },
     /// Import a mic curve file into the mic library as `mic`'s curve `label` (default:
     /// the angle the file names, `90°`, else its file stem); a curve with that label is
     /// replaced. With `input`, that input's mic name is set to `mic`, and the curve becomes
@@ -492,6 +517,7 @@ impl Command {
             Self::TraceMicCurve { .. } => "trace.mic_curve",
             Self::TraceExport { .. } => "trace.export",
             Self::CalSpl { .. } => "cal.spl",
+            Self::CalSplElectrical { .. } => "cal.spl_electrical",
             Self::CalCurveImport { .. } => "cal.curve_import",
             Self::CalCurveRename { .. } => "cal.curve_rename",
             Self::CalCurveDelete { .. } => "cal.curve_delete",
@@ -609,7 +635,7 @@ pub enum ReplyBody {
         /// Content.
         content: Blob,
     },
-    /// `cal.spl`.
+    /// `cal.spl`, `cal.spl_electrical`.
     Calibration(CalEntry),
     /// `cal.curve_import`, `cal.curve_rename`: the mic with its curves.
     Mic(Mic),

@@ -306,8 +306,10 @@ fn calibrations_view() {
             },
             spl: SplCal {
                 sensitivity: Db(130.5),
-                calibrator_level: DbSpl(94.0),
-                calibrator_freq: Hz(1000.0),
+                method: ac2_proto::model::CalMethod::Acoustic {
+                    calibrator_level: DbSpl(94.0),
+                },
+                freq: Hz(1000.0),
                 measured: Dbfs(-36.5),
                 calibrated_at: WallNs(now - 3 * 3_600_000_000_000 - 60_000_000_000),
             },
@@ -1300,6 +1302,9 @@ fn leq_frame(
             scale: LevelScale::DbSpl,
             cal: CalStatus::Verified {
                 calibrated_at: WallNs(calibrated_at),
+                basis: ac2_proto::model::CalBasis::Acoustic {
+                    calibrator_level: ac2_proto::units::DbSpl(94.0),
+                },
             },
             mic_curve: false,
             horizon: Seconds(60.0),

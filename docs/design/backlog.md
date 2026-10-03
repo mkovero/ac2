@@ -15,8 +15,19 @@ the commit when it lands.
   label) would do it.
 - **No hysteresis on the alarms**: judged at 0.1 dB, a window hovering on its limit toggles
   over / recovered each time the rounded value crosses it.
-- **The app has no calibration flow**: the Leq tiles stay "not calibrated" until
-  `ac2 cal spl` is run; a calibrator dialog would close the loop in the app.
+- **The app has no acoustic calibration flow**: an electrical calibration (DMM in-line or an
+  injected generator, `q7-calibration.md` §11) is in the app (**E** in the Calibrations
+  view); a calibrator dialog (`cal.spl`) is still CLI only.
+
+## Electrical calibration (left after the first version, `q7-calibration.md` §11)
+
+- **Stored traces do not record the method**: `CalState::Calibrated` names the key and the
+  sensitivity, not whether it was electrical or its uncertainty; trace captions say `cal`
+  either way. Adding it is a session-format change.
+- **Clipping refusal is not exercised end to end**: the fake rig's generator ceiling keeps
+  the input below full scale; the clip tracking is covered only by reading.
+- **No guided in-line tone**: the operator starts the 1 kHz tone (own source or the
+  generator); the dialog could offer to arm a 1 kHz sine under the usual ceiling.
 - **Autosave rewrites the whole session once a minute while a meter logs** (trace files
   included); appending to the log file would cut that to the new rows.
 

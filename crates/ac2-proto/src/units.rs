@@ -42,6 +42,14 @@ float_unit!(
     /// Angle, degrees.
     Degrees
 );
+float_unit!(
+    /// Voltage, volts RMS.
+    Volts
+);
+float_unit!(
+    /// Microphone sensitivity, millivolts per pascal (the unit data sheets state it in).
+    MvPerPa
+);
 
 /// Signed sample count (offsets, delays in samples).
 #[derive(

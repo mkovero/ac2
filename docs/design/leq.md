@@ -97,7 +97,9 @@ ends and what starts over; the CLI wants `--yes`.
 ## Limits
 
 Judged only when the meter is calibrated (values in dB SPL; a calibration from another mic
-or input counts, and the tile says so). Uncalibrated meters show dBFS values, "not
+or input counts, and the tile says so; an electrical calibration counts too, and the caption
+names it with its uncertainty, `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB`,
+`q7-calibration.md` §11). Uncalibrated meters show dBFS values, "not
 calibrated", and no state. With limit `L` and margin `μ`, at the displayed 0.1 dB
 resolution (so the colour never disagrees with the number):
 

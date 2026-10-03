@@ -604,6 +604,86 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     let err = r.json()?;
     assert_eq!(err["error"]["code"], "invalid", "{err}");
 
+    // `cal electrical`: the acoustic calibration of input 2 is not replaced by accident.
+    let r = ac2(
+        &f,
+        &[
+            "cal",
+            "electrical",
+            "--input",
+            "2",
+            "--volts",
+            "15mv",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_ne!(r.code, 0);
+    assert_eq!(r.json()?["error"]["code"], "refused");
+    // Replaced on purpose, the sensitivity from the data sheet of the mic's curve (the fake
+    // input reads −20 dBFS: 0 dBFS = 150 mV, 150 mV / 15 mV/Pa = 10 Pa = 114.0 dB SPL).
+    let e = ok_json(
+        &f,
+        &[
+            "cal",
+            "electrical",
+            "--input",
+            "2",
+            "--volts",
+            "15mv",
+            "--replace-acoustic",
+            "--json",
+        ],
+    )
+    .await?;
+    let m = &e["spl"]["method"];
+    assert_eq!(m["type"], "electrical");
+    assert_eq!(m["connection"], "in_line");
+    assert_eq!(m["mic_sensitivity"], 15.0);
+    assert_eq!(m["mic_sensitivity_from"]["type"], "data_sheet");
+    assert_eq!(m["uncertainty"], 1.0);
+    let s = e["spl"]["sensitivity"].as_f64().unwrap_or_default();
+    assert!((s - 113.979_400_086_720_4).abs() < 1e-9, "{s}");
+    // The text names the numbers it rests on and what to do with the phantom power.
+    let text = ac2(
+        &f,
+        &[
+            "cal",
+            "electrical",
+            "--input",
+            "2",
+            "--volts",
+            "0.1v",
+            "--freq",
+            "400hz",
+            "--sensitivity",
+            "-40dbv/pa",
+            "--method",
+            "injected",
+            "--uncertainty",
+            "0.5db",
+        ],
+    )
+    .await?;
+    assert_eq!(text.code, 0, "{}", text.stderr);
+    for want in [
+        "electrical injected, 100.0 mV at 400 Hz, 0 dBFS = 1.000 V, 10.0 mV/Pa",
+        "±0.5 dB",
+        "0 dBFS = 134.0 dB SPL on input 2 (MM1 34804)",
+        "note: the tone was 400 Hz",
+        "switch phantom power back ON",
+    ] {
+        assert!(text.stdout.contains(want), "{want:?} in\n{}", text.stdout);
+    }
+    let text = ac2(&f, &["cal", "list"]).await?;
+    for want in [
+        "electrical injected",
+        "±0.5 dB",
+        "verified · electrical (injected, 10.0 mV/Pa) ±0.5 dB",
+    ] {
+        assert!(text.stdout.contains(want), "{want:?} in\n{}", text.stdout);
+    }
+
     // `cal rm`: the sensitivity calibration of the session's device, the input's mic by
     // default.
     let d = ok_json(&f, &["cal", "rm", "--input", "2", "--json"]).await?;
@@ -632,8 +712,11 @@ async fn cal_and_unreachable_daemon() -> R {
         c["key"],
         json!({ "device": "fake:loop", "channel": 2, "mic": "M30" })
     );
-    assert_eq!(c["spl"]["calibrator_level"], 94.0);
-    assert_eq!(c["spl"]["calibrator_freq"], 1000.0);
+    assert_eq!(
+        c["spl"]["method"],
+        json!({ "type": "acoustic", "calibrator_level": 94.0 })
+    );
+    assert_eq!(c["spl"]["freq"], 1000.0);
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["calibrations"].as_array().map(Vec::len), Some(1));
     // Calibrating bound the input's mic name.

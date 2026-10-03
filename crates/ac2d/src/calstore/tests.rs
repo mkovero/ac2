@@ -1,6 +1,8 @@
 use super::*;
-use ac2_proto::model::{CalKey, CurveChoice, SplCal};
-use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, WallNs};
+use ac2_proto::model::{
+    CalBasis, CalKey, CalMethod, CurveChoice, ElectricalConnection, SensitivitySource, SplCal,
+};
+use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MvPerPa, Volts, WallNs};
 
 fn key(dev: &str, ch: u16, mic: &str) -> CalKey {
     CalKey {
@@ -13,12 +15,40 @@ fn key(dev: &str, ch: u16, mic: &str) -> CalKey {
 fn spl(sens: f64, at: u64, freq: f64) -> SplCal {
     SplCal {
         sensitivity: Db(sens),
-        calibrator_level: DbSpl(94.0),
-        calibrator_freq: Hz(freq),
+        method: CalMethod::Acoustic {
+            calibrator_level: DbSpl(94.0),
+        },
+        freq: Hz(freq),
         measured: Dbfs(94.0 - sens),
         calibrated_at: WallNs(at),
     }
 }
+
+/// An electrical calibration: 15 mV in-line read at −40 dBFS with the data sheet's
+/// 15 mV/Pa, the tone at `freq`.
+fn electrical(at: u64, freq: f64) -> SplCal {
+    SplCal {
+        sensitivity: Db(cal::electrical_sensitivity_db(1.5, 15.0)),
+        method: CalMethod::Electrical {
+            connection: ElectricalConnection::InLine,
+            volts: Volts(0.015),
+            full_scale: Volts(1.5),
+            mic_sensitivity: MvPerPa(15.0),
+            mic_sensitivity_from: SensitivitySource::DataSheet {
+                label: "0°".into(),
+                file_name: "449350_34804_0Grad.txt".into(),
+            },
+            uncertainty: Db(1.0),
+        },
+        freq: Hz(freq),
+        measured: Dbfs(-40.0),
+        calibrated_at: WallNs(at),
+    }
+}
+
+const ACOUSTIC: CalBasis = CalBasis::Acoustic {
+    calibrator_level: DbSpl(94.0),
+};
 
 fn entry(k: CalKey, s: SplCal) -> CalEntry {
     CalEntry { key: k, spl: s }
@@ -90,7 +120,8 @@ fn sensitivity_matching_rules() {
     assert_eq!(
         x.status,
         CalStatus::Verified {
-            calibrated_at: WallNs(10)
+            calibrated_at: WallNs(10),
+            basis: ACOUSTIC,
         }
     );
     assert_eq!(x.sensitivity, Some(120.0));
@@ -99,7 +130,8 @@ fn sensitivity_matching_rules() {
     assert_eq!(
         x.status,
         CalStatus::OtherMicOrInput {
-            calibrated_at: WallNs(20)
+            calibrated_at: WallNs(20),
+            basis: ACOUSTIC,
         }
     );
     assert_eq!(x.sensitivity, Some(110.0));
@@ -111,7 +143,8 @@ fn sensitivity_matching_rules() {
     assert_eq!(
         x.status,
         CalStatus::OtherMicOrInput {
-            calibrated_at: WallNs(5)
+            calibrated_at: WallNs(5),
+            basis: ACOUSTIC,
         }
     );
     assert_eq!(x.sensitivity, Some(100.0));
@@ -173,6 +206,22 @@ fn only_the_chosen_curve_applies() {
     c.inputs = vec![setup(5, Some("MM1"), label("90°"))];
     let x = resolve(&state(&c), &store2, &dev, 5);
     assert_eq!(x.correction.expect("curve").f_norm(), DEFAULT_F_NORM);
+    // An electrical calibration read at 250 Hz still normalises at 1 kHz: the data-sheet
+    // sensitivity is the capsule's there. Its basis travels with the status.
+    c.calibrations = vec![entry(key("hw:A", 5, "MM1"), electrical(30, 250.0))];
+    let x = resolve(&state(&c), &store2, &dev, 5);
+    assert_eq!(x.correction.expect("curve").f_norm(), 1000.0);
+    assert!(matches!(
+        x.status,
+        CalStatus::Verified {
+            basis: CalBasis::Electrical {
+                data_sheet: true,
+                ..
+            },
+            ..
+        }
+    ));
+    assert!((x.sensitivity.expect("calibrated") - 133.979_400_086_720_4).abs() < 1e-9);
 }
 
 #[test]
@@ -189,6 +238,7 @@ fn file_round_trip_and_atomic_write() {
                 spl(120.050_816_734_789_08, 10, 1000.0),
             ),
             entry(key("hw:A", 3, "ECM"), spl(110.0, 20, 1000.0)),
+            entry(key("hw:A", 4, "MM1"), electrical(30, 997.0)),
         ],
         mics: vec![Mic {
             name: "M30 #1".into(),
@@ -255,6 +305,17 @@ fn a_store_of_the_previous_format_is_set_aside() {
         })
         .count();
     assert_eq!(n, 2);
+
+    // Version 2 (sensitivity calibrations without a method) is set aside the same way.
+    let v2 = br#"{"format":"ac2-calibrations","version":2,"sensitivities":[{"key":{"device":"d","channel":0,"mic":"M"},"spl":{"sensitivity":120.0,"calibrator_level":94.0,"calibrator_freq":1000.0,"measured":-26.0,"calibrated_at":1}}],"mics":[],"inputs":[]}"#;
+    std::fs::write(&path, v2).expect("write");
+    let (s, c) = CalStore::open(&path);
+    s.check().expect("writable");
+    assert_eq!(c, Contents::default());
+    assert_eq!(
+        std::fs::read(dir.path().join("calibrations.json.v2")).expect("set aside"),
+        v2
+    );
 }
 
 #[test]
@@ -264,8 +325,8 @@ fn unreadable_file_is_refused_and_never_written() {
     for bad in [
         &b"{ not json"[..],
         br#"{"format":"other","version":2,"sensitivities":[],"mics":[],"inputs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":2,"sensitivities":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[]}"#,
-        br#"{"format":"ac2-calibrations","version":2,"sensitivities":[],"mics":[{"name":"m","curves":[]}],"inputs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":3,"sensitivities":[],"mics":[{"name":"m","curves":[{"reference":{"label":"0deg","file_name":"c","content_hash":"0","points":2,"f_lo":20.0,"f_hi":10.0,"imported_at":1,"stated_sensitivity":null},"points":[[20.0,0.0],[10.0,0.0]]}]}],"inputs":[]}"#,
+        br#"{"format":"ac2-calibrations","version":3,"sensitivities":[],"mics":[{"name":"m","curves":[]}],"inputs":[]}"#,
     ] {
         std::fs::write(&path, bad).expect("write");
         let (mut s, c) = CalStore::open(&path);

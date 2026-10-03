@@ -510,14 +510,15 @@ pub fn utc(ns: u64) -> String {
     )
 }
 
-/// Sensitivity calibrations table.
+/// Sensitivity calibrations table: what 0 dBFS is, how it was found and how sure.
 pub fn calibrations(c: &[CalEntry]) -> String {
     let mut t = table(&[
         "device",
         "in",
         "mic",
         "sensitivity",
-        "calibrator",
+        "method",
+        "uncertainty",
         "measured",
         "calibrated (UTC)",
     ]);
@@ -527,12 +528,34 @@ pub fn calibrations(c: &[CalEntry]) -> String {
             (u32::from(e.key.channel) + 1).to_string(),
             e.key.mic.clone(),
             format::db_readout(e.spl.sensitivity.0),
-            ac2_scene::cal::calibrator(e),
+            ac2_scene::cal::method_cell(e),
+            ac2_scene::cal::uncertainty_cell(e),
             dbfs(e.spl.measured.0),
             utc(e.spl.calibrated_at.0),
         ]);
     }
     t.to_string()
+}
+
+/// An electrical calibration just taken: the table row, then the numbers it rests on, the
+/// notes and what to do with the phantom power now.
+pub fn electrical_calibration(e: &CalEntry, c: ac2_proto::model::ElectricalConnection) -> String {
+    let mut s = calibrations(std::slice::from_ref(e));
+    s.push('\n');
+    s.push_str(&ac2_scene::cal::method_detail(e));
+    s.push_str(&format!(
+        "\n0 dBFS = {} dB SPL on input {} ({})",
+        format::level(e.spl.sensitivity.0),
+        u32::from(e.key.channel) + 1,
+        e.key.mic
+    ));
+    for n in ac2_scene::cal::electrical_notes(e) {
+        s.push_str("\nnote: ");
+        s.push_str(&n);
+    }
+    s.push('\n');
+    s.push_str(ac2_scene::cal::electrical_after(c));
+    s
 }
 
 /// The mic library: one row per curve.

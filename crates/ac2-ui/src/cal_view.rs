@@ -5,6 +5,7 @@
 //! - ↑/↓ move between lines;
 //! - ←/→ on an input steps its mic curve: off → 0° → 90° … (applied at once: the
 //!   correction is a display correction, so averages need no reset);
+//! - E on an input opens the electrical calibration dialog ([`crate::electrical_dialog`]);
 //! - N names the mic on an input; I imports a curve file for the focused mic (path);
 //!   R renames the focused curve; Delete deletes the focused curve or sensitivity
 //!   calibration (pressed twice);
@@ -15,6 +16,8 @@
 
 use ac2_proto::cal;
 use ac2_proto::model::{CalKey, CurveChoice, InputSetup, MicCurveId, State};
+
+use crate::electrical_dialog::ElectricalDialog;
 
 /// One line of the view.
 #[derive(Clone, Debug, PartialEq)]
@@ -92,6 +95,9 @@ pub enum CalAction {
     DeleteCurve(MicCurveId),
     /// `cal.delete`.
     DeleteSensitivity(CalKey),
+    /// `cal.spl_electrical` from the electrical calibration dialog; the reply comes back by
+    /// `what`.
+    Electrical(ac2_proto::Command, String),
 }
 
 /// The view's own state: focus, a typed edit, a pending deletion.
@@ -103,6 +109,8 @@ pub struct CalView {
     pub confirm: Option<usize>,
     pub notice: Option<String>,
     pub error: Option<String>,
+    /// The electrical calibration dialog, over the view.
+    pub electrical: Option<ElectricalDialog>,
 }
 
 fn input_no(c: u16) -> u32 {
@@ -205,6 +213,55 @@ impl CalView {
         true
     }
 
+    /// Typing goes to a typed edit or the electrical dialog.
+    pub fn typing(&self) -> bool {
+        self.edit.is_some() || self.electrical.is_some()
+    }
+
+    /// E on an input of the open session with a mic name: the electrical calibration
+    /// dialog.
+    pub fn start_electrical(&mut self, s: &State) -> bool {
+        self.clear();
+        let Some(CalLine::Input(c)) = self.focused(s) else {
+            self.notice = Some("E calibrates an input electrically: on an input line".into());
+            return false;
+        };
+        let captured = s
+            .session
+            .open
+            .as_ref()
+            .is_some_and(|o| o.config.input_channels.contains(&c));
+        if !captured {
+            self.notice = Some(format!(
+                "input {} is not in the open session: a calibration reads the input live",
+                input_no(c)
+            ));
+            return false;
+        }
+        let Some(mic) = cal::input_setup(&s.inputs, c).mic else {
+            self.notice = Some(format!(
+                "input {} has no mic name: N names it, then E calibrates it",
+                input_no(c)
+            ));
+            return false;
+        };
+        self.electrical = Some(ElectricalDialog::new(s, c, &mic));
+        true
+    }
+
+    /// A command's reply: the electrical dialog's own closes it on success and says what
+    /// to do next.
+    pub fn reply(&mut self, what: &str, result: &Result<(), String>) {
+        let Some(d) = &mut self.electrical else {
+            return;
+        };
+        if d.reply(what, result) {
+            let after = ac2_scene::cal::electrical_after(d.connection);
+            self.notice = Some(format!("{what}: stored. {after}"));
+            self.electrical = None;
+        }
+    }
+
     /// R on a curve: types its new label.
     pub fn start_rename(&mut self, s: &State) -> bool {
         self.clear();
@@ -256,14 +313,18 @@ impl CalView {
     }
 
     pub fn type_text(&mut self, t: &str) {
-        if let Some(e) = &mut self.edit {
+        if let Some(d) = &mut self.electrical {
+            d.type_text(t);
+        } else if let Some(e) = &mut self.edit {
             e.text.extend(t.chars().filter(|c| !c.is_control()));
             self.error = None;
         }
     }
 
     pub fn backspace(&mut self) {
-        if let Some(e) = &mut self.edit {
+        if let Some(d) = &mut self.electrical {
+            d.backspace();
+        } else if let Some(e) = &mut self.edit {
             e.text.pop();
         }
     }
@@ -414,15 +475,7 @@ pub fn line_texts(
                 let e = s.calibrations.iter().find(|e| e.key == *k);
                 LineText {
                     title: format!("{} on in {} of {}", k.mic, input_no(k.channel), k.device.0),
-                    detail: e
-                        .map(|e| {
-                            format!(
-                                "{} · read {} dBFS",
-                                ac2_scene::cal::calibrator(e),
-                                ac2_scene::format::level(e.spl.measured.0)
-                            )
-                        })
-                        .unwrap_or_default(),
+                    detail: e.map(ac2_scene::cal::method_detail).unwrap_or_default(),
                     extra: e
                         .map(|e| {
                             format!(

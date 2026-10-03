@@ -6,6 +6,7 @@ use eframe::egui::{self, RichText};
 
 use crate::app::App;
 use crate::cal_view::{CalLine, CalView, line_texts};
+use crate::electrical_dialog::{ElectricalDialog, Field};
 use crate::state::Overlay;
 use crate::theme::Chrome;
 
@@ -122,8 +123,124 @@ pub(super) fn calibrations(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.label(
                     RichText::new(
                         "↑↓ move · ←→ mic curve of an input (off / 0° / 90° …) · N names the \
-                         mic · I imports a curve file · R renames a curve · Delete deletes \
-                         (twice) · Enter ends typing / closes · Esc closes",
+                         mic · I imports a curve file · R renames a curve · E calibrates an \
+                         input electrically (meter, no calibrator) · Delete deletes (twice) · \
+                         Enter ends typing / closes · Esc closes",
+                    )
+                    .small()
+                    .color(ch.dim),
+                );
+            });
+        });
+    if let Some(d) = &v.electrical {
+        electrical(app, ctx, ch, d);
+    }
+}
+
+/// The electrical calibration dialog over the view: where the voltage is measured (with its
+/// safety note, prominent), the input's level now, the voltage, the tone, the sensitivity
+/// and where it comes from.
+fn electrical(app: &App, ctx: &egui::Context, ch: &Chrome, d: &ElectricalDialog) {
+    let meter = app
+        .state
+        .input_meters()
+        .get(&d.input)
+        .cloned()
+        .unwrap_or_else(ac2_scene::meter::MeterReading::none);
+    egui::Area::new(egui::Id::new("ac2-electrical-cal"))
+        .order(egui::Order::Tooltip)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(720.0);
+                ui.label(RichText::new(d.title()).strong().size(16.0));
+                ui.add_space(4.0);
+                ui.label(RichText::new(d.safety()).strong().color(ch.armed));
+                ui.add_space(6.0);
+                egui::Grid::new("ac2-electrical-fields")
+                    .num_columns(4)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .show(ui, |ui| {
+                        let row = |ui: &mut egui::Ui, f: Option<Field>, label: &str| {
+                            let focused = f.is_some_and(|f| f == d.focus);
+                            ui.label(
+                                RichText::new(if focused { "▸" } else { " " })
+                                    .color(ch.focus)
+                                    .monospace(),
+                            );
+                            ui.label(RichText::new(label).color(if focused {
+                                ch.focus
+                            } else {
+                                ch.text
+                            }));
+                            focused
+                        };
+                        let value = |ui: &mut egui::Ui, text: &str, focused: bool| {
+                            ui.label(
+                                RichText::new(if focused {
+                                    format!("{text}▏")
+                                } else {
+                                    text.to_owned()
+                                })
+                                .monospace()
+                                .color(if focused {
+                                    ch.focus
+                                } else {
+                                    ch.text
+                                }),
+                            );
+                        };
+                        row(ui, Some(Field::Method), "Measured");
+                        ui.label(RichText::new(d.method_text()).color(ch.text));
+                        ui.label(RichText::new("←/→").small().color(ch.dim));
+                        ui.end_row();
+                        row(ui, None, "Input level now");
+                        ui.horizontal(|ui| super::session::meter(ui, &meter, ch));
+                        ui.label(
+                            RichText::new("dBFS · steady, not clipping")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(Field::Volts), "Voltage measured (RMS)");
+                        value(ui, &d.volts, f);
+                        ui.label(
+                            RichText::new("as the meter shows it, e.g. 15.03 mV")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(Field::Freq), "Tone");
+                        value(ui, &d.freq, f);
+                        ui.label(
+                            RichText::new("1 kHz: where mic sensitivities are stated")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(Field::Sensitivity), "Mic sensitivity");
+                        value(ui, &d.sensitivity, f);
+                        ui.label(RichText::new(d.sensitivity_source()).small().color(ch.dim));
+                        ui.end_row();
+                    });
+                if let Some(n) = &d.no_data_sheet {
+                    ui.label(RichText::new(n).small().color(ch.dim));
+                }
+                for (text, color) in [
+                    (d.pending.as_ref().map(|_| "reading the input…"), ch.dim),
+                    (d.notice.as_deref(), ch.armed),
+                    (d.error.as_deref(), ch.fault),
+                ] {
+                    if let Some(t) = text {
+                        ui.label(RichText::new(t).color(color));
+                    }
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "Keep the gain you will measure with. ↑↓ field · ←→ in-line / \
+                         injected · type the values · Enter reads the input and stores · \
+                         Esc closes",
                     )
                     .small()
                     .color(ch.dim),

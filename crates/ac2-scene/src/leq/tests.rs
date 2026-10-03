@@ -57,6 +57,9 @@ fn frame(scale: LevelScale) -> LeqFrame {
             scale,
             cal: CalStatus::Verified {
                 calibrated_at: WallNs(1),
+                basis: ac2_proto::model::CalBasis::Acoustic {
+                    calibrator_level: ac2_proto::units::DbSpl(94.0),
+                },
             },
             mic_curve: false,
             horizon: Seconds(60.0),

@@ -460,7 +460,8 @@ the daemon's machine:
   input level with that sensitivity. It calibrates the whole chain, preamp gain included, so
   it belongs to that input: a calibration from another mic or input is used but shown as
   such (*from M30 on in 2*); otherwise its age is shown (*verified · 94.0 dB SPL at 1.00 kHz
-  · 3 h ago*).
+  · 3 h ago*). Without a calibrator, an **electrical calibration** (below) gives the same
+  thing from a voltmeter and the mic's data sheet, with a stated uncertainty (±1 dB).
 - **Mic curves** — per mic, any number, each with a short **label**: a measurement mic often
   comes with one file per incidence angle (0° for pointing at the source, 90° for grazing
   incidence), and using the wrong one is a few dB of error at high frequencies.
@@ -469,8 +470,8 @@ the daemon's machine:
   label comes from the file — the angle its header or name states (*90-degree-curve*,
   `_90Grad`, `0deg` → *90°*, *0°*), else the file name — or from `--label`;
   `ac2 cal curve rename --mic "MM1 34804" 0° "on axis"` renames it later. A sensitivity the
-  file states (*15.0 mV/Pa = −36.5 dBV*) is shown as the data sheet value, never used as a
-  calibration. Curves follow the mic name to any input and device.
+  file states (*15.0 mV/Pa = −36.5 dBV*) is shown as the data sheet value; it is used only
+  as the default sensitivity of an electrical calibration. Curves follow the mic name to any input and device.
 
 **Which curve is in use** is chosen per input, explicitly: `ac2 cal use 3 90°` (or `off`;
 `ac2 session inputs --mic 3=M30 --curve 3=90°` sets names and curves of several inputs at
@@ -493,13 +494,82 @@ input) lists what each input uses, every mic with its curves (file, points, rang
 sheet sensitivity, which inputs use it) and every sensitivity calibration (device, input,
 mic, calibrator level and frequency, reading, age). **↑/↓** move; **←/→** choose an input's
 curve; **N** names the mic on an input; **I** imports a curve file for the focused mic (type
-the path); **R** renames a curve; **Delete** (twice) deletes a curve or a sensitivity
+the path); **R** renames a curve; **E** calibrates an input electrically (below); **Delete** (twice) deletes a curve or a sensitivity
 calibration. On the command line: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`,
 `ac2 cal rm --input 3` (a sensitivity calibration).
 
 A calibration store written by an older ac2 is set aside (renamed to
-`calibrations.json.v1`, never deleted) and the daemon starts with an empty store: calibrate
+`calibrations.json.v1`, `.v2`, …, never deleted) and the daemon starts with an empty store: calibrate
 again and import the curves again; the old file shows the mic and file names.
+
+### Calibrating without a calibrator (electrical)
+
+No 94 dB calibrator at hand, but a true-RMS multimeter (or an Analog Discovery 2)? ac2
+reads the input's level while you measure the voltage at the same input; the mic's
+sensitivity (mV/Pa, from its data sheet) turns that into dB SPL:
+
+    V_FS = V / 10^(L / 20)                 volts at 0 dBFS (V measured, L read in dBFS)
+    dB SPL = dBFS + 20·lg(V_FS / (S · 20 µPa))     S = mic sensitivity in V/Pa
+
+Example: 15.0 mV read at −40.0 dBFS → 0 dBFS = 1.500 V; with 15.0 mV/Pa that is 100 Pa, so
+0 dBFS = 134.0 dB SPL, and the mic at 1 Pa (94 dB) gives the 15 mV that reads 94.0.
+
+It counts as a calibration everywhere — dB SPL, Leq limits judged — and says what it rests
+on wherever it is shown: *electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago*
+(an acoustic one says *cal 94 dB · 2 h ago*). The ±1 dB is mostly the data sheet's: a
+capsule's sensitivity tolerance is typically ±0.5…1 dB (an individual calibration sheet of
+your mic is better: then state `--uncertainty 0.5db`); the meter adds a little (see its
+accuracy at the range and 1 kHz). An acoustic calibration later replaces it; it never
+replaces an acoustic one unless you say so (`--replace-acoustic`, or Enter twice in the app).
+
+**In-line (the usual way: the mic stays connected and powered).**
+
+1. Put an XLR breakout (in-line adapter with test points) between the mic cable and the
+   input. Phantom power stays **on**.
+2. Set the preamp gain you will measure with. Do not change it afterwards (a gain change
+   needs a new calibration).
+3. Play a steady **1 kHz** sine through a speaker at the mic, loud enough that the meter
+   reads well above its range floor (a handheld DMM: ≥ 5–10 mV) and the input stays below
+   −3 dBFS. Your own tone source, or ac2's generator (arm and fire as usual; its level
+   ceiling applies). The mic and the speaker must not move during the reading.
+4. Set the meter to **AC volts** (true RMS; AC-coupled, which also blocks the phantom
+   voltage), its lowest range that fits; check its stated accuracy at that range and 1 kHz.
+   Measure **between pins 2 and 3 only**. Phantom power puts +48 V on both pins 2 and 3
+   against pin 1: never measure to pin 1, never short pins together (that is what the
+   breakout is for).
+5. Calibrate while the tone plays: in the app, **Calibrations…** (palette), the mic's input,
+   **E**; type the voltage the meter shows (*15.03 mV*), check the sensitivity (prefilled
+   from the mic's curve file when it states one, else type the data sheet's, e.g. *15.0 mV/Pa*
+   or *−36.5 dBV/Pa*), **Enter**. On the command line:
+   `ac2 cal electrical --input 2 --volts 15.03mv` (the sensitivity from the data sheet in the
+   mic's curve file, or `--sensitivity 15.0mv/pa`). ac2 refuses while the level is not yet
+   steady (retry after a few seconds), without signal, when the input clipped, above
+   −3 dBFS or below −70 dBFS.
+
+In-line includes the mic's real source impedance loading the preamp, which an injected
+signal does not.
+
+**Injected (a generator in place of the mic).** An Analog Discovery 2's waveform generator
+(or any sine source) drives the input directly:
+
+1. **Switch phantom power OFF on that input first.** 48 V on the XLR can damage the
+   generator; ac2 cannot switch phantom power.
+2. Wire the generator between pins 2 (hot) and 3 (cold, also to pin 1 for an unbalanced
+   generator), the gain as you will measure with.
+3. Play 1 kHz at a level near what the mic gives (tens of mV), measure the voltage at the
+   XLR pins 2–3 with the scope channel or a DMM, and run
+   `ac2 cal electrical --method injected --input 2 --volts 15.0mv` (in the app: ←/→ on
+   *Measured* chooses injected).
+4. Disconnect the generator, plug the mic back in and **switch phantom power back on**.
+
+Small voltages are hard to read accurately on a handheld meter. **Divider tip:** set the
+generator to about 1 V, measure that precisely, and feed the input through a precise
+divider (e.g. 0.1 % resistors, 10 kΩ : 100 Ω ≈ 1 : 101) — the input voltage is the measured
+one times the divider ratio. Measure the divider's output loaded by the input when you can.
+
+A tone other than 1 kHz is accepted (`--freq 400hz`; a meter specified only to 400 Hz):
+the sensitivity is still the capsule's at 1 kHz, so this assumes the preamp is flat between
+the two — ac2 notes it. The mic curve stays normalised at 1 kHz.
 
 The **SPL meter** shows Fast / Slow / Impulse levels with A, C or Z weighting, Leq, LAeq,
 LCeq, LCpeak, Lmax and Lmin, as a big-number display in the SPL pane or in the terminal:
@@ -851,7 +921,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 delay find / insert / set / track` | the delay finder and delay of a transfer measurement |
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
 | `ac2 trace capture / list / show / rm / average / math / import / export / smooth / mic` | stored traces |
-| `ac2 cal spl / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
+| `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
 | `ac2 spl watch`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, calibration, Leq windows, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |
 | `ac2 state dump` | the daemon's whole state as JSON |
