@@ -57,7 +57,7 @@ the commit when it lands.
 ## Done
 
 Leq run clock and a new log (operator: "should I see a timer somewhere which shows the whole
-measurement time?"; `docs/design/leq.md` "Run clock and total", "A new log"):
+measurement time?"; `docs/design/leq.md` "Run clock and total", "A new log"; 774e690):
 - **No timer for the whole measurement** → every Leq caption (columns, tiles, stage view) and
   `ac2 spl leq watch` (`run` in `--json`) show `running 2:14:05 since 19:02 · LAeq total
   97.8 · gaps 0:12`: the clock from the log's first kept second (it carries on across app
