@@ -8,7 +8,10 @@ use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use eframe::egui;
 
+use ac2_scene::view::DistortionUnit;
+
 use crate::app::{App, CachedScene};
+use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{Msg, Overlay, PaneKind};
@@ -152,6 +155,9 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         );
         // After the pane's own response, so a click on the chip is the chip's.
         title_chip(app, ui, pane, title, label.right() + 10.0, ch);
+        if pane == PaneKind::Distortion && !app.state.view.distortion.show_ir {
+            unit_toggle(app, ui, title, label.right() + 10.0, ch);
+        }
         if plot_rect.width() < 8.0 || plot_rect.height() < 8.0 {
             continue;
         }
@@ -268,6 +274,84 @@ fn title_chip(
         &chip,
         ch,
     );
+}
+
+/// The distortion pane's unit, `dB | %`, at the right end of its title: the shown one
+/// highlighted, a click shows the other (as the key does, which the tooltip names). Left
+/// out when the title is too narrow to hold it beside the pane's name (from `min_x`).
+fn unit_toggle(app: &mut App, ui: &egui::Ui, title: egui::Rect, min_x: f32, ch: &Chrome) {
+    let current = app.state.view.distortion.unit;
+    let tip = match app
+        .keymap
+        .key_hint(CommandId::DistortionUnit, Scope::Distortion)
+    {
+        Some(k) => format!("Distortion in dB re fundamental or percent of it · {k}"),
+        None => "Distortion in dB re fundamental or percent of it".to_string(),
+    };
+    let font = egui::FontId::proportional(12.0);
+    let pad = 7.0;
+    let painter = ui.painter();
+    let items: Vec<(DistortionUnit, &str, std::sync::Arc<egui::Galley>)> =
+        [(DistortionUnit::Db, "dB"), (DistortionUnit::Percent, "%")]
+            .into_iter()
+            .map(|(u, t)| {
+                let color = if u == current { ch.text } else { ch.dim };
+                (
+                    u,
+                    t,
+                    painter.layout_no_wrap(t.to_string(), font.clone(), color),
+                )
+            })
+            .collect();
+    let total: f32 = items.iter().map(|(_, _, g)| g.size().x + 2.0 * pad).sum();
+    let mut x = title.max.x - 6.0 - total;
+    if x < min_x {
+        return;
+    }
+    let (y, h) = (title.min.y + 2.0, TITLE_H - 3.0);
+    let mut picked = None;
+    for (unit, text, galley) in items {
+        let r =
+            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(galley.size().x + 2.0 * pad, h));
+        x = r.max.x;
+        let resp = ui.interact(
+            r,
+            ui.id().with(("distortion-unit", text)),
+            egui::Sense::click(),
+        );
+        let selected = unit == current;
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, text)
+        });
+        if selected {
+            painter.rect_filled(r, 3.0, ch.focus.gamma_multiply(0.35));
+        } else if resp.hovered() {
+            painter.rect_filled(r, 3.0, ch.panel);
+        }
+        let gh = galley.size().y;
+        painter.galley(
+            egui::pos2(r.min.x + pad, r.center().y - gh / 2.0),
+            galley,
+            ch.text,
+        );
+        if resp.clicked() && !selected {
+            picked = Some(unit);
+        }
+        resp.on_hover_text(tip.as_str());
+    }
+    let whole = egui::Rect::from_min_max(
+        egui::pos2(title.max.x - 6.0 - total, y),
+        egui::pos2(x, y + h),
+    );
+    painter.rect_stroke(
+        whole,
+        3.0,
+        egui::Stroke::new(1.0, ch.border),
+        egui::StrokeKind::Inside,
+    );
+    if let Some(u) = picked {
+        app.dispatch(Msg::DistortionUnit(u));
+    }
 }
 
 /// The open measurement list of `pane`, under its chip.

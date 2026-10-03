@@ -785,16 +785,26 @@ fn session_dialog() {
         a.state.layout.focus == PaneKind::Distortion && a.state.shown_sweep().is_some()
     });
     assert_eq!(fake.executions("ir.capture"), 1);
+    // In the grid, beside the other panes: caption and legend fit a small pane.
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("sweep_distortion_pane", &snapshot_options());
     // The focused pane alone, for the picture.
     h.key_press(Key::W);
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("sweep_distortion", &snapshot_options());
-    h.key_press(Key::U);
+    // The title's dB | % toggle (U does the same): percent on a log axis.
+    h.get_by_label("%").click();
     step_until(&mut h, "percent", |a| {
         a.state.view.distortion.unit == ac2_scene::view::DistortionUnit::Percent
     });
+    // The pointer away again: no cursor or tooltip in the pictures.
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("sweep_distortion_percent", &snapshot_options());
     h.key_press(Key::H);
     step_until(&mut h, "sweep IR", |a| a.state.view.distortion.show_ir);
     // G: the log view, where the harmonics' impulses read at their level.

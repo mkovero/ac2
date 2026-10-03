@@ -190,31 +190,53 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         sc.fundamental.bottom() < sc.plot.y,
         "fundamental above distortion"
     );
-    let names: Vec<&str> = sc.legend.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["noise floor (H2)", "H2", "H3", "THD"]);
+    let names: Vec<&str> = sc.legend.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["H2", "H3", "THD", "< floor", "noise"]);
+    assert_eq!(sc.legend[3].mark, LegendMark::Dashed);
+    assert_eq!(sc.legend[4].mark, LegendMark::Shade);
     assert!(
         sc.info
             .starts_with("1083 sweep · arrival 3.32 ms · 2 × 3.10 s"),
         "{}",
         sc.info
     );
-    // H2 is drawn at −40 dB up to 2 kHz; H3 (all within the noise) is not drawn.
+    assert_eq!(sc.caption, sc.info, "room for all of it");
+    // Wide: the legend is one row beside the axis title.
+    let legend_ys: Vec<f32> = legend_labels(&sc).iter().map(|l| l.pos[1]).collect();
+    assert!(
+        legend_ys.iter().all(|y| *y == legend_ys[0]),
+        "{legend_ys:?}"
+    );
+    // H2 is drawn at −40 dB up to 2 kHz, solid; H3 (all within the noise) at its floor,
+    // dashed, in its own colour.
     let data_layer = &sc.scene.layers[1];
-    let y40 = sc.y_axis.mapping.to_px(-40.0);
+    let at = |db: f64| sc.y_axis.mapping.to_px(db);
+    let on = |p: &Polyline, y: f32| p.points.iter().all(|q| (q[1] - y).abs() < 0.01);
     let h2 = data_layer
         .polylines
         .iter()
-        .find(|p| p.clip == Some(sc.plot) && p.points.iter().all(|q| (q[1] - y40).abs() < 0.01))
+        .find(|p| p.clip == Some(sc.plot) && on(p, at(-40.0)))
         .expect("H2 line");
+    assert!(h2.stroke.dash.is_none());
     let x2k = sc.x_axis.mapping.to_px(2000.0);
     assert!(h2.points.iter().all(|q| q[0] <= x2k + 0.5));
+    let h3 = data_layer
+        .polylines
+        .iter()
+        .find(|p| p.clip == Some(sc.plot) && on(p, at(-70.0)))
+        .expect("H3 at its floor");
+    assert!(h3.stroke.dash.is_some());
+    assert_eq!(
+        h3.stroke.color,
+        order_color(&Theme::dark(), 3).with_alpha(0.6)
+    );
     let drawn_in_plot = data_layer
         .polylines
         .iter()
         .filter(|p| p.clip == Some(sc.plot))
         .count();
-    assert_eq!(drawn_in_plot, 2, "H2 and THD; H3 stays in the noise");
-    assert_eq!(data_layer.bands.len(), 1, "floor shaded");
+    assert_eq!(drawn_in_plot, 3, "H2, THD solid; H3 dashed at its floor");
+    assert_eq!(data_layer.bands.len(), 1, "noise shaded");
     let cur = sc.cursor.expect("cursor");
     assert_eq!(cur.freq, "1.00 kHz");
     let row = |n: &str| cur.rows.iter().find(|r| r.0 == n).unwrap().1.clone();
@@ -222,9 +244,10 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
     assert_eq!(row("H3"), "< −70.0 dB");
     assert_eq!(row("fund"), "−6.0 dB");
 
-    // Percent: same curves, a 0-based axis that holds the largest valid value.
+    // Percent: a log axis over the same ratios (0.001 … 100 %), decade labels; the curves
+    // land where they did in dB, the readouts in percent.
     view.distortion.unit = DistortionUnit::Percent;
-    let sc = distortion_scene(
+    let pc = distortion_scene(
         Some(SweepView {
             data: &d,
             freqs: &f,
@@ -234,10 +257,198 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         &Theme::dark(),
         SIZE,
     );
-    assert_eq!(sc.y_axis.mapping.range.lo, 0.0);
-    assert!(sc.y_axis.mapping.range.hi >= 1.0);
-    let cur = sc.cursor.expect("cursor");
-    assert_eq!(cur.rows.iter().find(|r| r.0 == "H2").unwrap().1, "1.00 %");
+    let m = pc.y_axis.mapping;
+    assert_eq!(m.scale, crate::axis::Scale::Log);
+    assert!((m.range.lo - 0.001).abs() < 1e-12 && (m.range.hi - 100.0).abs() < 1e-9);
+    let labels = pc.y_axis.labels();
+    for l in ["0.01", "0.1", "1", "10", "100"] {
+        assert!(labels.contains(&l), "{labels:?}");
+    }
+    assert!((m.to_px(1.0) - sc.y_axis.mapping.to_px(-40.0)).abs() < 1e-3);
+    let pc_lines = pc.scene.layers[1].polylines.clone();
+    let h2_pc = pc_lines
+        .iter()
+        .find(|p| p.clip == Some(pc.plot) && on(p, m.to_px(1.0)))
+        .expect("H2 at 1 %");
+    assert_eq!(h2_pc.points.len(), h2.points.len());
+    let cur = pc.cursor.expect("cursor");
+    let row = |n: &str| cur.rows.iter().find(|r| r.0 == n).unwrap().1.clone();
+    assert_eq!(row("H2"), "1.00 %");
+    assert_eq!(row("H3"), "< 0.0316 %");
+    assert_eq!(row("THD"), "1.01 %");
+    assert_eq!(row("fund"), "−6.0 dB", "the response stays in dB");
+}
+
+/// The legend's names (overlay labels in the legend's colours along the plot's top).
+fn legend_labels(sc: &DistortionScene) -> Vec<crate::primitives::Label> {
+    let names: Vec<&str> = sc.legend.iter().map(|e| e.name.as_str()).collect();
+    sc.scene.layers[2]
+        .labels
+        .iter()
+        .filter(|l| names.contains(&l.text.as_str()))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn caption_and_legend_never_overlap_in_small_panes() {
+    use crate::canvas::tests::{intersects, label_box};
+    let mut d = data();
+    d.meta.edit.name = "Main L 1083 on stand".into();
+    d.sweep.as_mut().unwrap().info.clipped = true;
+    let f = column_frequencies(&grid());
+    for unit in [DistortionUnit::Db, DistortionUnit::Percent] {
+        let mut view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        view.distortion.unit = unit;
+        // A quarter of a 1290 px window (≈ 520 × 330) and smaller, up to maximised.
+        for (w, h) in [
+            (300.0, 220.0),
+            (400.0, 260.0),
+            (520.0, 330.0),
+            (640.0, 400.0),
+            (900.0, 500.0),
+            (1290.0, 780.0),
+        ] {
+            let size = Viewport {
+                width: w,
+                height: h,
+            };
+            let sc = distortion_scene(
+                Some(SweepView {
+                    data: &d,
+                    freqs: &f,
+                }),
+                &status(),
+                &view,
+                &Theme::dark(),
+                size,
+            );
+            // Every text placed inside the two plots: axis titles, caption, legend, cursor.
+            let inside = |p: [f32; 2]| {
+                [sc.fundamental, sc.plot]
+                    .iter()
+                    .any(|r| p[0] >= r.x && p[0] <= r.right() && p[1] >= r.y && p[1] <= r.bottom())
+            };
+            let labels: Vec<_> = sc
+                .scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.labels)
+                .filter(|l| inside(l.pos))
+                .collect();
+            assert!(labels.len() >= 2 + sc.legend.len(), "{w}×{h}");
+            for (i, a) in labels.iter().enumerate() {
+                let ba = label_box(a);
+                assert!(
+                    ba.x >= sc.plot.x && ba.right() <= sc.plot.right() + 0.5,
+                    "{w}×{h} {unit:?}: {:?} leaves the plot",
+                    a.text
+                );
+                for b in &labels[i + 1..] {
+                    assert!(
+                        !intersects(ba, label_box(b)),
+                        "{w}×{h} {unit:?}: {:?} over {:?}",
+                        a.text,
+                        b.text
+                    );
+                }
+            }
+            // The arrival is kept as long as it fits; CLIPPED always.
+            assert!(sc.caption.contains("CLIPPED"), "{w}×{h}: {:?}", sc.caption);
+            if w >= 400.0 {
+                assert!(sc.caption.starts_with("arrival") || sc.caption == sc.info);
+            }
+            if w >= 900.0 {
+                assert_eq!(sc.caption, sc.info);
+            }
+        }
+    }
+}
+
+#[test]
+fn lone_valid_points_are_short_lines_and_noise_is_dashed() {
+    // H2 alternates: valid at even columns, within the noise at odd ones (a curve hovering
+    // at its floor), as on a speaker measured near the noise.
+    let mut d = data();
+    let s = d.sweep.as_mut().unwrap();
+    let h2 = &mut s.harmonics[0].curve;
+    for (i, (l, fl)) in h2.level_db.iter_mut().zip(&mut h2.floor_db).enumerate() {
+        if l.is_finite() {
+            *fl = -70.0;
+            *l = if i % 2 == 0 { -50.0 } else { -66.0 };
+        }
+    }
+    let f = column_frequencies(&grid());
+    // Columns closer than the pixels of a 1/4 pane would make dots.
+    let size = Viewport {
+        width: 420.0,
+        height: 300.0,
+    };
+    let sc = distortion_scene(
+        Some(SweepView {
+            data: &d,
+            freqs: &f,
+        }),
+        &status(),
+        &ViewState::default(),
+        &Theme::dark(),
+        size,
+    );
+    let y50 = sc.y_axis.mapping.to_px(-50.0);
+    let y70 = sc.y_axis.mapping.to_px(-70.0);
+    let lines = &sc.scene.layers[1].polylines;
+    let solid = lines
+        .iter()
+        .find(|p| p.stroke.dash.is_none() && p.points.iter().any(|q| (q[1] - y50).abs() < 0.01))
+        .expect("H2 valid points");
+    let segs = crate::canvas::tests::segments(&solid.points);
+    assert!(segs.len() > 10);
+    for s in &segs {
+        assert_eq!(s.len(), 2, "each lone point is a level across its cell");
+        assert!(s[1][0] - s[0][0] > 0.5, "visible length: {s:?}");
+        assert_eq!(s[0][1], s[1][1]);
+    }
+    // The odd columns are the order's floor, dashed: distinguishable from the level.
+    let dashed = lines
+        .iter()
+        .find(|p| {
+            p.stroke.dash.is_some()
+                && p.stroke.color == order_color(&Theme::dark(), 2).with_alpha(0.6)
+        })
+        .expect("H2 floor where within the noise");
+    assert!(
+        dashed
+            .points
+            .iter()
+            .all(|q| !q[1].is_finite() || (q[1] - y70).abs() < 0.01)
+    );
+    // Cells meet: a lone level and its neighbours' floor share their edges.
+    let first = segs[0][1][0];
+    assert!(
+        dashed.points.iter().any(|q| (q[0] - first).abs() < 0.01),
+        "floor cell starts where the level's ends"
+    );
+}
+
+#[test]
+fn runs_join_neighbours_and_widen_lone_points() {
+    let xs = [0.0, 10.0, 20.0, 30.0, 40.0];
+    let nan = f32::NAN;
+    let r = runs(&xs, &[1.0, 2.0, nan, 4.0, nan]);
+    assert_eq!(r.len(), 5);
+    assert_eq!(r[..2], [[0.0, 1.0], [10.0, 2.0]]);
+    assert!(r[2][0].is_nan());
+    // A lone point spans its cell, half-way to each neighbour.
+    assert_eq!(r[3..], [[25.0, 4.0], [35.0, 4.0]]);
+    // At the edge: as wide on the open side as on the other.
+    assert_eq!(
+        runs(&xs, &[1.0, nan, nan, nan, nan]),
+        [[-5.0, 1.0], [5.0, 1.0]]
+    );
+    assert!(runs(&xs, &[nan; 5]).is_empty());
 }
 
 #[test]
