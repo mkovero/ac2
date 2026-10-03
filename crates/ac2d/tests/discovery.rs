@@ -50,7 +50,7 @@ fn network_mode_advertises_fingerprint_local_mode_does_not() {
     let mut cfg = config(manual_rig(), listen);
     cfg.advertise = Some(Advertise {
         name: "stage.rig".into(),
-        mdns,
+        mdns: mdns.clone(),
     });
     let h = Daemon::start(cfg).unwrap();
     let fullname = h.advertised_as().expect("advert registered").to_owned();
@@ -89,6 +89,33 @@ fn network_mode_advertises_fingerprint_local_mode_does_not() {
     );
     assert_eq!(rig.port, port);
     assert_eq!(rig.connect_host(), "127.0.0.1");
-    h.shutdown();
+
+    // Served the way `ac2d` serves (blocked in `wait`), the rig still answers a browser
+    // that asks only now: the advert lives as long as the daemon does.
+    let stopper = h.stopper();
+    let serving = std::thread::spawn(move || h.wait());
+    std::thread::sleep(Duration::from_millis(500));
+    let late = ac2_discovery::Browser::start(&mdns).unwrap();
+    let mut table = ac2_discovery::RigTable::default();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline && table.is_empty() {
+        if let Some(u) = late.next(Duration::from_millis(200)) {
+            table.apply(u);
+        }
+    }
+    assert_eq!(
+        table.rigs().first().map(|r| r.instance.as_str()),
+        Some(fullname.as_str()),
+        "a serving daemon answers queries"
+    );
+    let mut asked = Vec::new();
+    late.queried(&mut asked);
+    assert!(
+        asked.iter().any(|q| q.name == "lo" || q.addr.is_loopback())
+            && asked.iter().all(|q| q.error.is_none()),
+        "the browser asked on loopback itself: {asked:?}"
+    );
+    stopper.stop();
+    serving.join().unwrap();
     hl.shutdown();
 }

@@ -35,8 +35,8 @@ async fn discover_lists_rigs_with_pairing_status() -> R {
     let paired = KeyPair::generate()?;
     let rekeyed = KeyPair::generate()?;
     let pinned_elsewhere = KeyPair::generate()?;
-    let _a = Advertiser::start(&advert("paired rig", &paired), 47_900, &lo, &opts)?;
-    let _b = Advertiser::start(&advert("rekeyed rig", &rekeyed), 47_910, &lo, &opts)?;
+    let _a = Advertiser::start(&advert("paired rig", &paired), 47_900, &lo, &opts, |_| {})?;
+    let _b = Advertiser::start(&advert("rekeyed rig", &rekeyed), 47_910, &lo, &opts, |_| {})?;
 
     let dir = tempfile::tempdir()?;
     let kd = KeyDir::new(dir.path());

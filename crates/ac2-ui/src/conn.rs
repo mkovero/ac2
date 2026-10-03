@@ -320,21 +320,15 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
         let client = match attempt {
             Ok(Ok(c)) => c,
             Ok(Err(e)) => {
-                if wait_retry(&target, &mut ctl, &out, describe_err(&e), &mut meters).await {
+                let why = describe_err(&e, &target);
+                if wait_retry(&target, &mut ctl, &out, why, &mut meters).await {
                     continue;
                 }
                 return;
             }
             Err(_) => {
-                if wait_retry(
-                    &target,
-                    &mut ctl,
-                    &out,
-                    "not responding".into(),
-                    &mut meters,
-                )
-                .await
-                {
+                let why = not_responding(&target);
+                if wait_retry(&target, &mut ctl, &out, why, &mut meters).await {
                     continue;
                 }
                 return;
@@ -353,10 +347,18 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
     }
 }
 
-fn describe_err(e: &ClientError) -> String {
+fn describe_err(e: &ClientError, target: &Target) -> String {
     match e {
-        ClientError::Timeout { .. } => "not responding".into(),
+        ClientError::Timeout { .. } => not_responding(target),
         other => other.to_string(),
+    }
+}
+
+/// "not responding", with what to check on a daemon on another host.
+fn not_responding(target: &Target) -> String {
+    match target.config.endpoints.firewall_hint() {
+        Some(h) => format!("not responding; {h}"),
+        None => "not responding".into(),
     }
 }
 

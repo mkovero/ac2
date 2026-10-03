@@ -35,6 +35,7 @@ mod conv;
 mod dedup;
 mod detect;
 mod fanout;
+mod firewall;
 mod io;
 mod jobs;
 pub mod keys;
@@ -208,11 +209,13 @@ impl Handle {
     }
 
     fn join(&mut self) {
-        // Goodbye first, so browsers drop the rig before its sockets close.
-        self.advert = None;
+        // The advert lives as long as the daemon serves: only once control has stopped
+        // does the goodbye go out, still before the sockets close, so browsers drop the rig
+        // at once.
         if let Some(t) = self.control.take() {
             let _ = t.join();
         }
+        self.advert = None;
         if let Some(t) = self.io.take() {
             let _ = t.join();
         }
@@ -344,6 +347,9 @@ impl Daemon {
             .map_err(zerr(format!("bind {data_ep}")))?;
         let ctrl = router.last_endpoint().unwrap_or(ctrl_ep);
         let data = xpub.last_endpoint().unwrap_or(data_ep);
+        if network {
+            firewall::report(&ctrl, &data);
+        }
 
         let pull_ep = format!("inproc://ac2d-{:016x}/out", incarnation.0);
         let pull = ctx.socket(SocketType::Pull).map_err(zerr("PULL"))?;
@@ -437,11 +443,26 @@ fn advertise(a: &Advertise, key: &PublicKey, ctrl: &str) -> Option<ac2_discovery
         proto: ac2_proto::PROTO_VERSION,
         fingerprint: key.fingerprint(),
     };
+    let report = |e: ac2_discovery::AdvertEvent| match e {
+        ac2_discovery::AdvertEvent::Error(e) => {
+            tracing::warn!("mDNS responder: {e}; the rig may not be discoverable");
+        }
+        ac2_discovery::AdvertEvent::AddressAdded(a) => {
+            tracing::info!("mDNS: advertising on {a}");
+        }
+        ac2_discovery::AdvertEvent::AddressRemoved(a) => {
+            tracing::info!("mDNS: {a} went away");
+        }
+        ac2_discovery::AdvertEvent::Renamed { from, to } => {
+            tracing::warn!("mDNS: {from:?} is taken on this network; advertising as {to:?}");
+        }
+    };
     match ac2_discovery::Advertiser::start(
         &advert,
         port,
         &ac2_discovery::Bind::from_listen_host(host),
         &a.mdns,
+        report,
     ) {
         Ok(adv) => {
             tracing::info!(
@@ -452,7 +473,10 @@ fn advertise(a: &Advertise, key: &PublicKey, ctrl: &str) -> Option<ac2_discovery
             Some(adv)
         }
         Err(e) => {
-            tracing::warn!("{e}; not advertised (clients can still connect by address)");
+            tracing::warn!(
+                "{e}: the rig is not advertised, `ac2 discover` will not list it (clients can \
+                 still connect with --remote <address>)"
+            );
             None
         }
     }

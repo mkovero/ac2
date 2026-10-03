@@ -41,6 +41,30 @@ impl Endpoints {
         }
     }
 
+    /// What to check when a daemon on another host does not answer: its firewall must let
+    /// both TCP ports in. `None` for local endpoints (ipc, loopback), where no firewall sits
+    /// in between.
+    pub fn firewall_hint(&self) -> Option<String> {
+        let port = |ep: &str| -> Option<(String, u16)> {
+            let rest = ep.strip_prefix("tcp://")?;
+            let (host, port) = rest.rsplit_once(':')?;
+            Some((host.trim_matches(['[', ']']).to_owned(), port.parse().ok()?))
+        };
+        let (host, ctrl) = port(&self.ctrl)?;
+        let (_, data) = port(&self.data)?;
+        let loopback = host == "localhost"
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|a| a.is_loopback());
+        (!loopback).then(|| {
+            format!(
+                "if the daemon is running, a firewall on its host may be blocking TCP ports \
+                 {ctrl} and {data}: allow each port on its own (e.g. `sudo ufw allow \
+                 {ctrl}/tcp` and `sudo ufw allow {data}/tcp`)"
+            )
+        })
+    }
+
     /// A remote daemon.
     pub fn remote(addr: &RemoteAddr) -> Self {
         Self::tcp(&addr.host, addr.port)
@@ -150,6 +174,24 @@ impl FromStr for RemoteAddr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn firewall_hint_only_for_other_hosts() {
+        let a: RemoteAddr = "rig.local".parse().unwrap_or_else(|e| panic!("{e}"));
+        let h = Endpoints::remote(&a).firewall_hint().unwrap_or_default();
+        assert!(
+            h.contains("47820/tcp") && h.contains("47821/tcp") && h.contains("firewall"),
+            "{h}"
+        );
+        for local in ["127.0.0.1:47820", "localhost", "[::1]:5000"] {
+            let a: RemoteAddr = local.parse().unwrap_or_else(|e| panic!("{e}"));
+            assert_eq!(Endpoints::remote(&a).firewall_hint(), None, "{local}");
+        }
+        assert_eq!(
+            Endpoints::local_in(Path::new("/run/ac2")).firewall_hint(),
+            None
+        );
+    }
 
     #[test]
     fn remote_addr_forms() {

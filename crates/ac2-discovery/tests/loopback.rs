@@ -37,6 +37,7 @@ fn advert_is_browsed_and_goodbye_removes_it() {
         47_999,
         &Bind::Addr(IpAddr::V4(Ipv4Addr::LOCALHOST)),
         &opts,
+        |e| eprintln!("responder: {e:?}"),
     )
     .unwrap_or_else(|e| panic!("{e}"));
     let fullname = adv.fullname().to_owned();

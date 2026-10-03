@@ -19,9 +19,14 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{DaemonEvent, DaemonStatus, IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
+
+mod query;
+
+pub use query::{InterfaceQuery, query_interfaces};
 
 /// DNS-SD service type of an ac2 daemon's ctrl socket (the data socket is ctrl + 1).
 pub const SERVICE_TYPE: &str = "_ac2._tcp.local.";
@@ -361,6 +366,24 @@ impl Bind {
     }
 }
 
+/// Something the responder reports while an advert runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdvertEvent {
+    /// The responder failed at something (binding, joining the group, sending).
+    Error(String),
+    /// An address the advert names appeared on the host.
+    AddressAdded(IpAddr),
+    /// An address went away.
+    AddressRemoved(IpAddr),
+    /// Another host claimed the name; the responder renamed the advert.
+    Renamed {
+        /// The name asked for.
+        from: String,
+        /// The name now in use.
+        to: String,
+    },
+}
+
 /// A registered advert. Dropping it sends the goodbye and stops the responder.
 pub struct Advertiser {
     daemon: ServiceDaemon,
@@ -376,9 +399,39 @@ impl fmt::Debug for Advertiser {
 }
 
 impl Advertiser {
-    /// Registers `advert` for a ctrl socket on `port`.
-    pub fn start(advert: &Advert, port: u16, bind: &Bind, opts: &Options) -> Result<Self, Error> {
+    /// Registers `advert` for a ctrl socket on `port`. The responder runs on its own thread
+    /// for as long as the returned value lives; `report` hears what it runs into (from that
+    /// thread), so a responder that cannot bind or send never fails silently.
+    ///
+    /// Fails when the responder is not running once the advert is registered.
+    pub fn start(
+        advert: &Advert,
+        port: u16,
+        bind: &Bind,
+        opts: &Options,
+        mut report: impl FnMut(AdvertEvent) + Send + 'static,
+    ) -> Result<Self, Error> {
         let daemon = responder(opts)?;
+        let events = daemon.monitor().map_err(merr)?;
+        std::thread::Builder::new()
+            .name("ac2-mdns-monitor".into())
+            .spawn(move || {
+                // Ends when the responder shuts down and drops its side.
+                while let Ok(e) = events.recv() {
+                    let e = match e {
+                        DaemonEvent::Error(e) => AdvertEvent::Error(e.to_string()),
+                        DaemonEvent::IpAdd(a) => AdvertEvent::AddressAdded(a),
+                        DaemonEvent::IpDel(a) => AdvertEvent::AddressRemoved(a),
+                        DaemonEvent::NameChange(c) => AdvertEvent::Renamed {
+                            from: c.original,
+                            to: c.new_name,
+                        },
+                        _ => continue,
+                    };
+                    report(e);
+                }
+            })
+            .map_err(|e| Error(format!("cannot start the monitor thread: {e}")))?;
         let host = format!("{}.local.", local_host_label());
         let name = instance_name(&advert.name);
         if name.is_empty() {
@@ -406,6 +459,14 @@ impl Advertiser {
         };
         let fullname = info.get_fullname().to_owned();
         daemon.register(info).map_err(merr)?;
+        let status = daemon
+            .status()
+            .map_err(merr)?
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|e| Error(format!("the responder does not answer: {e}")))?;
+        if !matches!(status, DaemonStatus::Running) {
+            return Err(Error(format!("the responder is not running: {status:?}")));
+        }
         Ok(Self { daemon, fullname })
     }
 
@@ -428,9 +489,16 @@ impl Drop for Advertiser {
 }
 
 /// A running browse for `_ac2._tcp`. Dropping it stops the responder.
+///
+/// Besides the responder's own queries, the browser asks on every interface itself, with
+/// the RFC 6762 §5.2 back-off (0, 1, 3 s): an interface the responder leaves out (one that
+/// shares a subnet with another, one not flagged running) still gets the question, and the
+/// answers come back to the responder like any other. Answers are merged per instance.
 pub struct Browser {
     daemon: ServiceDaemon,
     rx: mdns_sd::Receiver<ServiceEvent>,
+    stop: Option<mpsc::Sender<()>>,
+    queried: mpsc::Receiver<Vec<InterfaceQuery>>,
 }
 
 impl fmt::Debug for Browser {
@@ -470,7 +538,50 @@ impl Browser {
     pub fn start(opts: &Options) -> Result<Self, Error> {
         let daemon = responder(opts)?;
         let rx = daemon.browse(SERVICE_TYPE).map_err(merr)?;
-        Ok(Self { daemon, rx })
+        let (stop, stopped) = mpsc::channel::<()>();
+        let (tell, queried) = mpsc::channel();
+        let o = opts.clone();
+        std::thread::Builder::new()
+            .name("ac2-mdns-query".into())
+            .spawn(move || {
+                for wait in [
+                    Duration::ZERO,
+                    Duration::from_secs(1),
+                    Duration::from_secs(2),
+                ] {
+                    match stopped.recv_timeout(wait) {
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                        _ => return,
+                    }
+                    if tell.send(query_interfaces(&o)).is_err() {
+                        return;
+                    }
+                }
+            })
+            .map_err(|e| Error(format!("cannot start the query thread: {e}")))?;
+        Ok(Self {
+            daemon,
+            rx,
+            stop: Some(stop),
+            queried,
+        })
+    }
+
+    /// The interfaces asked so far, each once (by name and address), with any failure.
+    pub fn queried(&self, seen: &mut Vec<InterfaceQuery>) {
+        for round in self.queried.try_iter() {
+            for q in round {
+                match seen
+                    .iter_mut()
+                    .find(|s| s.name == q.name && s.addr == q.addr)
+                {
+                    // A later success clears an earlier failure.
+                    Some(s) if s.error.is_some() => *s = q,
+                    Some(_) => {}
+                    None => seen.push(q),
+                }
+            }
+        }
     }
 
     /// Everything that arrived since the last call, without blocking.
@@ -497,6 +608,7 @@ impl Browser {
 
 impl Drop for Browser {
     fn drop(&mut self) {
+        drop(self.stop.take());
         let _ = self.daemon.stop_browse(SERVICE_TYPE);
         if let Ok(rx) = self.daemon.shutdown() {
             let _ = rx.recv_timeout(Duration::from_millis(500));
@@ -504,20 +616,30 @@ impl Drop for Browser {
     }
 }
 
+/// What a browse found, and where it asked.
+#[derive(Clone, Debug, Default)]
+pub struct Discovery {
+    /// The rigs that answered, one per instance.
+    pub table: RigTable,
+    /// The interfaces the browser asked on itself.
+    pub queried: Vec<InterfaceQuery>,
+}
+
 /// Browses for `window` and returns what was found.
-pub fn discover(window: Duration, opts: &Options) -> Result<RigTable, Error> {
+pub fn discover(window: Duration, opts: &Options) -> Result<Discovery, Error> {
     let b = Browser::start(opts)?;
-    let mut table = RigTable::default();
+    let mut found = Discovery::default();
     let deadline = Instant::now() + window;
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
         match b.next(left) {
             Some(u) => {
-                table.apply(u);
+                found.table.apply(u);
             }
             None => break,
         }
     }
-    Ok(table)
+    b.queried(&mut found.queried);
+    Ok(found)
 }
 
 #[cfg(test)]

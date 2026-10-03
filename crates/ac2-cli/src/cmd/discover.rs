@@ -50,7 +50,8 @@ pub(crate) fn run(cli: &Cli, a: &DiscoverArgs, out: &mut Out<'_>) -> Result<(), 
         loopback_only: a.loopback,
     };
     let wait = Duration::from_secs_f64(a.wait.0.0.clamp(0.1, 60.0));
-    let table = ac2_discovery::discover(wait, &opts).map_err(|e| CliError::Usage(e.to_string()))?;
+    let found = ac2_discovery::discover(wait, &opts).map_err(|e| CliError::Usage(e.to_string()))?;
+    let table = &found.table;
     let kd = key_dir(cli);
     let mut rows = Vec::new();
     for r in table.rigs() {
@@ -82,11 +83,24 @@ pub(crate) fn run(cli: &Cli, a: &DiscoverArgs, out: &mut Out<'_>) -> Result<(), 
         .collect();
     out.emit(&doc, || {
         if rows.is_empty() {
+            let asked: Vec<String> = found
+                .queried
+                .iter()
+                .map(|q| match &q.error {
+                    None => format!("{} ({})", q.name, q.addr),
+                    Some(e) => format!("{} ({}: not sent, {e})", q.name, q.addr),
+                })
+                .collect();
             return format!(
-                "no ac2 daemons answered within {:.1} s.\n\
+                "no ac2 daemons answered within {:.1} s (asked on {}).\n\
                  A daemon advertises only in network mode (`ac2d --listen tcp://0.0.0.0`), and \
                  mDNS does not cross routers or VPNs; connect with `--remote <address>` instead.",
-                wait.as_secs_f64()
+                wait.as_secs_f64(),
+                if asked.is_empty() {
+                    "no interface".to_owned()
+                } else {
+                    asked.join(", ")
+                }
             );
         }
         let mut t = output::table(&["name", "--remote", "version", "fingerprint", "pairing"]);
