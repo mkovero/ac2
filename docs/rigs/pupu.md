@@ -19,7 +19,10 @@ what ac2 learned on it.
 - **Network:** ufw active. Since 2026-10-03 (operator approved): `47820/tcp`, `47821/tcp` and
   `5353/udp` allowed from 192.168.9.0/24 only, one rule per port — the RT kernel lacks the
   iptables `multiport` module, so a ufw port *range* is listed but silently not enforced.
-  Clients: ketunkolo (192.168.9.25) authorized as `ketunkolo`.
+  Also `47820/tcp`, `47821/tcp` from 100.100.44.45 (rantu over the VPN; there is a further
+  firewall between the VPN and this LAN that must allow those ports too). mDNS does not cross the
+  VPN: connect by address. Clients authorized: `ketunkolo` (192.168.9.25), `rantu`
+  (100.100.44.45).
 
 ## First measurement (2026-10-03, ac2 850a3a4)
 
