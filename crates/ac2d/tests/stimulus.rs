@@ -8,8 +8,10 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::FakeDriver;
 use ac2_proto::frame::FrameData;
-use ac2_proto::model::{GenAction, GeneratorDesired, GeneratorSettings, Signal};
-use ac2_proto::units::{ClientId, Dbfs, LeaseToken, MeasId};
+use ac2_proto::model::{
+    BandLimit, FilterOrder, GenAction, GeneratorDesired, GeneratorSettings, Signal,
+};
+use ac2_proto::units::{ClientId, Dbfs, Hz, LeaseToken, MeasId};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody};
 use ac2d::Daemon;
 use common::*;
@@ -34,12 +36,20 @@ fn acquire(c: &mut Client, force: bool) -> Result<LeaseToken, ac2_proto::ProtoEr
     })
 }
 
+/// Pink noise high-passed at 50 Hz. Full-band pink reaches down to 5 Hz, where a 200–300 ms
+/// meter span holds one or two cycles: its RMS over such a span scatters by up to +2.7 /
+/// −1.6 dB from seed to seed (about 1 % of seeds beyond ±1.5 dB), and the daemon picks a fresh
+/// seed every time. Above 50 Hz the same spans stay within ±0.75 dB.
 fn fire(level: f64) -> GeneratorDesired {
     GeneratorDesired {
         settings: GeneratorSettings {
             signal: Signal::Pink,
             level: Dbfs(level),
-            band: None,
+            band: Some(BandLimit {
+                highpass: Some(Hz(50.0)),
+                lowpass: None,
+                order: FilterOrder::Second,
+            }),
             outputs: vec![0],
         },
         armed: true,

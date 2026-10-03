@@ -126,15 +126,16 @@ impl Emitter {
             },
             data,
         };
-        match ac2_proto::encode_frame(&frame) {
-            Ok(parts) => {
-                self.outbox.frame(&parts);
-            }
+        let parts = match ac2_proto::encode_frame(&frame) {
+            Ok(parts) => parts,
             Err(e) => {
                 tracing::error!("{topic}: frame not encodable: {e}");
                 return;
             }
-        }
+        };
+        // The capture slot is filled before the frame leaves: a client that has seen this
+        // frame and asks for a capture must get this result (or a newer one), never the
+        // one before it.
         if let Some(c) = capture {
             frame.data = c;
         }
@@ -144,6 +145,7 @@ impl Emitter {
         ) {
             *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = Some(frame);
         }
+        self.outbox.frame(&parts);
     }
 }
 
