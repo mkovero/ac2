@@ -18,5 +18,6 @@ pub mod rta;
 pub mod smoothing;
 pub mod spectrum;
 pub mod spl;
+pub mod sweep;
 pub mod timing;
 pub mod weighting;

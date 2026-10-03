@@ -283,7 +283,7 @@ fn source_text(s: &TraceSource) -> String {
             ac2_proto::model::MathOp::MagnitudeDifference => format!("{a} − {b} (dB)"),
             ac2_proto::model::MathOp::ComplexDivision => format!("{a} / {b} (complex)"),
         },
-        TraceSource::IrCapture { .. } => "ir capture".to_owned(),
+        TraceSource::IrCapture { run, .. } => format!("sweep {run}"),
     }
 }
 
@@ -293,6 +293,7 @@ fn kind_text(k: TraceKind) -> &'static str {
         TraceKind::Target => "target",
         TraceKind::Spectrum { .. } => "spectrum",
         TraceKind::Rta { .. } => "rta",
+        TraceKind::Sweep => "sweep",
     }
 }
 
@@ -325,7 +326,7 @@ pub fn traces(t_: &[TraceMeta]) -> String {
 
 fn time_base(s: &TraceSource) -> &'static str {
     match s {
-        TraceSource::Captured { .. } => "shared",
+        TraceSource::Captured { .. } | TraceSource::IrCapture { .. } => "shared",
         _ => "indep.",
     }
 }
@@ -393,6 +394,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         TraceSource::Captured {
             epoch, at_sample, ..
         } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
+        TraceSource::IrCapture { epoch, .. } => format!("\n  epoch       {}", epoch.0),
         _ => String::new(),
     };
     format!(

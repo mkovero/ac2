@@ -1,7 +1,7 @@
 //! Column data of a stored trace and resampling between grids.
 
 use ac2_proto::GridDef;
-use ac2_proto::model::{TraceData, TraceMeta};
+use ac2_proto::model::{SweepData, TraceData, TraceMeta};
 
 /// A trace's columns, in grid order. NaN = no value in that column (a gap, never bridged).
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +42,8 @@ pub struct StoredTrace {
     pub grid: GridDef,
     /// Data.
     pub columns: Columns,
+    /// A sweep trace's distortion and impulse response (on the same grid as `columns`).
+    pub sweep: Option<SweepData>,
 }
 
 impl StoredTrace {
@@ -63,6 +65,7 @@ impl StoredTrace {
             mag_db: c.mag_db,
             phase_deg: c.phase_deg,
             coherence: c.coherence,
+            sweep: self.sweep.clone(),
         }
     }
 }

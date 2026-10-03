@@ -19,6 +19,11 @@
 //! them. A gap is `nan`. Values are written in their shortest exact form, so an export
 //! re-imports bit-for-bit onto the grid named in the header.
 //!
+//! A sweep trace adds `h2_db,h2_floor_db,…,thd_db,thd_floor_db` after `phase_deg`: each
+//! harmonic order's level and noise floor in dB re the fundamental at the row's (fundamental)
+//! frequency, then the total. Imported as a trace, a sweep export is its transfer function;
+//! a session keeps the distortion with the trace ([`crate::session`]).
+//!
 //! # Analyzer text
 //!
 //! Liberal in what it reads: columns separated by commas, semicolons (decimal commas
@@ -36,8 +41,8 @@ use ac2_proto::GridDef;
 use ac2_proto::ImportProblem;
 use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{
-    CalState, DepthPolicy, ImportFormat, ImportRole, Polarity, SmoothingFraction, SmoothingMode,
-    TraceKind, TraceSource,
+    CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportRole, Polarity,
+    SmoothingFraction, SmoothingMode, TraceKind, TraceSource,
 };
 
 use crate::columns::{Columns, StoredTrace, frequencies, resample, wrap_deg};
@@ -91,6 +96,9 @@ pub struct Imported {
     pub columns: Columns,
     /// Data rows read.
     pub rows: usize,
+    /// A sweep export's distortion columns (per order, then THD), when the data is on the
+    /// grid named in its header.
+    pub distortion: Option<(Vec<HarmonicCurve>, DistortionCurve)>,
 }
 
 fn decode(content: &[u8]) -> Result<String, ImportError> {
@@ -458,6 +466,7 @@ fn kind_from_header(v: &str) -> Option<TraceKind> {
         "rta dB SPL" => TraceKind::Rta {
             scale: LevelScale::DbSpl,
         },
+        "sweep" => TraceKind::Sweep,
         _ => return None,
     })
 }
@@ -479,6 +488,7 @@ fn kind_header(k: TraceKind) -> &'static str {
         TraceKind::Rta {
             scale: LevelScale::DbSpl,
         } => "rta dB SPL",
+        TraceKind::Sweep => "sweep",
     }
 }
 
@@ -524,8 +534,20 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     }
     let (hno, header) =
         header.ok_or_else(|| fail(None, ImportProblem::NoData, "no column header"))?;
-    let names: Vec<&str> = header.iter().map(String::as_str).collect();
-    let layout = match names.as_slice() {
+    let all: Vec<&str> = header.iter().map(String::as_str).collect();
+    let base = all
+        .iter()
+        .position(|n| n.starts_with('h') || n.starts_with("thd"))
+        .unwrap_or(all.len());
+    let (names, extra) = all.split_at(base);
+    let orders = distortion_columns(extra).ok_or_else(|| {
+        fail(
+            Some(hno),
+            ImportProblem::BadHeader,
+            format!("unknown columns {header:?}"),
+        )
+    })?;
+    let layout = match names {
         ["freq_hz", "mag_db"] => positional(2),
         ["freq_hz", "mag_db", "phase_deg"] => positional(3),
         ["freq_hz", "mag_db", "phase_deg", "coherence"] => positional(4),
@@ -545,7 +567,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     };
     let body: Vec<(usize, &str)> = lines.iter().copied().filter(|(n, _)| *n > hno).collect();
     let mut t = table(&body, Some(Delim::Comma))?;
-    if t.rows[0].1.len() != names.len() {
+    if t.rows[0].1.len() != all.len() {
         return Err(fail(
             Some(t.rows[0].0),
             ImportProblem::ColumnCount,
@@ -555,15 +577,53 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     t.layout = layout;
     let raw = validate(&t)?;
     let rows = raw.freqs.len();
+    let column = |i: usize| -> Vec<f32> { t.rows.iter().map(|(_, r)| number32(&r[i])).collect() };
+    let curve = |i: usize| DistortionCurve {
+        level_db: column(i),
+        floor_db: column(i + 1),
+    };
+    let distortion = (!orders.is_empty()).then(|| {
+        let harmonics = orders
+            .iter()
+            .enumerate()
+            .map(|(j, &order)| HarmonicCurve {
+                order,
+                curve: curve(base + 2 * j),
+            })
+            .collect();
+        (harmonics, curve(base + 2 * orders.len()))
+    });
+    let known = grid.clone();
     let (grid, columns) = on_import_grid(raw, grid)?;
     Ok(Imported {
         name,
         format: ImportFormat::Ac2Csv,
         kind,
+        // Distortion is kept only on the grid it was written on (it is not resampled).
+        distortion: distortion.filter(|_| known.as_ref() == Some(&grid)),
         grid,
         columns,
         rows,
     })
+}
+
+/// Orders of the distortion columns `h<k>_db,h<k>_floor_db,…,thd_db,thd_floor_db` (none
+/// when `extra` is empty); `None` when they are anything else.
+fn distortion_columns(extra: &[&str]) -> Option<Vec<u8>> {
+    if extra.is_empty() {
+        return Some(Vec::new());
+    }
+    let (pairs, thd) = extra.split_at(extra.len().checked_sub(2)?);
+    if thd != ["thd_db", "thd_floor_db"] || pairs.len() % 2 != 0 {
+        return None;
+    }
+    pairs
+        .chunks(2)
+        .map(|p| {
+            let k: u8 = p[0].strip_prefix('h')?.strip_suffix("_db")?.parse().ok()?;
+            (p[1] == format!("h{k}_floor_db") && k >= 2).then_some(k)
+        })
+        .collect()
 }
 
 fn import_text(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
@@ -578,10 +638,12 @@ fn import_text(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         grid,
         columns,
         rows,
+        distortion: None,
     })
 }
 
-/// Parses an imported file. A target keeps the magnitude only.
+/// Parses an imported file. A target keeps the magnitude only; a sweep export is its
+/// transfer function (its distortion is in [`Imported::distortion`]).
 pub fn import(
     content: &[u8],
     format: ImportFormat,
@@ -605,8 +667,9 @@ pub fn import(
         imported.kind = TraceKind::Target;
         imported.columns.phase_deg = None;
         imported.columns.coherence = None;
-    } else if imported.kind == TraceKind::Target {
-        // A target exported and re-imported as a trace is a magnitude-only transfer curve.
+    } else if matches!(imported.kind, TraceKind::Target | TraceKind::Sweep) {
+        // A target exported and re-imported as a trace is a magnitude-only transfer curve;
+        // a sweep without its impulse response is its fundamental's transfer function.
         imported.kind = TraceKind::Transfer;
     }
     Ok(imported)
@@ -659,7 +722,25 @@ fn source_text(s: &TraceSource) -> String {
                 .join(", ")
         ),
         TraceSource::Math { a, b, op } => format!("{op:?} of trace {a} and trace {b}"),
-        TraceSource::IrCapture { epoch, .. } => format!("IR capture, session epoch {}", epoch.0),
+        TraceSource::IrCapture {
+            run,
+            epoch,
+            sweep,
+            level,
+            repeats,
+            reference_input,
+            measurement_input,
+        } => format!(
+            "sweep {} ({} Hz – {} Hz, {} s, {} dBFS, {repeats}×), input {} re {}, session epoch {}",
+            run.0,
+            sweep.start.0,
+            sweep.end.0,
+            sweep.duration.0,
+            level.0,
+            u32::from(*measurement_input) + 1,
+            u32::from(*reference_input) + 1,
+            epoch.0
+        ),
     }
 }
 
@@ -684,7 +765,10 @@ pub fn export_csv(t: &StoredTrace) -> String {
     line("source", source_text(&m.source));
     line(
         "time_base",
-        if matches!(m.source, TraceSource::Captured { .. }) {
+        if matches!(
+            m.source,
+            TraceSource::Captured { .. } | TraceSource::IrCapture { .. }
+        ) {
             "shared within its session epoch".into()
         } else {
             "independent".into()
@@ -761,6 +845,19 @@ pub fn export_csv(t: &StoredTrace) -> String {
     if c.coherence.is_some() {
         out.push_str(",coherence");
     }
+    let curves: Vec<&DistortionCurve> = t.sweep.as_ref().map_or_else(Vec::new, |s| {
+        s.harmonics
+            .iter()
+            .map(|h| &h.curve)
+            .chain(std::iter::once(&s.thd))
+            .collect()
+    });
+    if let Some(s) = &t.sweep {
+        for h in &s.harmonics {
+            let _ = write!(out, ",h{0}_db,h{0}_floor_db", h.order);
+        }
+        out.push_str(",thd_db,thd_floor_db");
+    }
     out.push('\n');
     for (i, f) in frequencies(&t.grid).iter().enumerate() {
         let _ = write!(
@@ -773,6 +870,14 @@ pub fn export_csv(t: &StoredTrace) -> String {
         }
         if let Some(k) = &c.coherence {
             let _ = write!(out, ",{}", num32(k.get(i).copied().unwrap_or(f32::NAN)));
+        }
+        for d in &curves {
+            let _ = write!(
+                out,
+                ",{},{}",
+                num32(d.level_db.get(i).copied().unwrap_or(f32::NAN)),
+                num32(d.floor_db.get(i).copied().unwrap_or(f32::NAN))
+            );
         }
         out.push('\n');
     }

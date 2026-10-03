@@ -274,9 +274,18 @@ pub fn commands() -> Vec<Command> {
         Command::SplLogStop { meas: MeasId(4) },
         Command::IrCapture {
             lease_token: token(),
-            input: 1,
-            sweep: sweep(),
-            name: "room".into(),
+            request: SweepRequest {
+                inputs: SweepInputs::Channels {
+                    reference: 1,
+                    measurement: 0,
+                },
+                outputs: vec![0, 1],
+                level: Some(Dbfs(-50.0)),
+                sweep: sweep(),
+                repeats: 2,
+                gate: Some(Seconds(0.005)),
+            },
+            name: "1083 sweep".into(),
         },
         Command::StateSnapshot,
         Command::StateSince { rev: Rev(41) },
@@ -445,6 +454,84 @@ fn trace_meta() -> TraceMeta {
     }
 }
 
+fn sweep_run() -> SweepRun {
+    SweepRun {
+        id: SweepId(3),
+        owner: ClientId("alice".into()),
+        name: "1083 sweep".into(),
+        reference_input: 1,
+        measurement_input: 0,
+        outputs: vec![0, 1],
+        level: Dbfs(-50.0),
+        sweep: sweep(),
+        sweep_duration: Seconds(4.75),
+        post_roll: Seconds(1.0),
+        repeats: 2,
+        gate: None,
+        status: SweepStatus::Done { trace: TraceId(9) },
+        started_at: WallNs(1_790_000_000_000_000_000),
+    }
+}
+
+fn sweep_meta() -> TraceMeta {
+    TraceMeta {
+        id: TraceId(9),
+        kind: TraceKind::Sweep,
+        source: TraceSource::IrCapture {
+            run: SweepId(3),
+            epoch: SessionEpoch(2),
+            sweep: sweep(),
+            level: Dbfs(-50.0),
+            repeats: 2,
+            reference_input: 1,
+            measurement_input: 0,
+        },
+        depth: None,
+        cal: CalState::Uncalibrated,
+        ..trace_meta()
+    }
+}
+
+fn sweep_data() -> SweepData {
+    let curve = |l: f32| DistortionCurve {
+        level_db: vec![l, l - 6.0, f32::NAN],
+        floor_db: vec![-80.0, -78.0, f32::NAN],
+    };
+    SweepData {
+        harmonics: vec![
+            HarmonicCurve {
+                order: 2,
+                curve: curve(-40.0),
+            },
+            HarmonicCurve {
+                order: 3,
+                curve: curve(-50.0),
+            },
+        ],
+        thd: curve(-39.5),
+        ir: SweepIr {
+            t0: Seconds(-0.75),
+            dt: Seconds(1.0 / 48_000.0),
+            linear: vec![0.0, 0.5, -0.25],
+            etc_db: vec![-200.0, -6.0, -12.0],
+        },
+        info: SweepInfo {
+            sample_rate: Hz(48_000.0),
+            rate: Seconds(0.6875),
+            duration: Seconds(4.75),
+            repeats: 2,
+            arrival: Seconds(0.003_3),
+            reference_level: Db(2.25),
+            window_pre: Seconds(0.0125),
+            window_post: Seconds(0.1375),
+            gate_pre: Seconds(0.047_5),
+            gate: Seconds(0.875),
+            floor_margin: Db(6.0),
+            clipped: false,
+        },
+    }
+}
+
 fn session_file() -> SessionFile {
     SessionFile {
         name: "friday show".into(),
@@ -564,6 +651,7 @@ pub fn state() -> State {
         inputs: inputs(),
         spl_logs: vec![spl_log()],
         timing: timing(),
+        sweep: Some(sweep_run()),
     }
 }
 
@@ -586,6 +674,8 @@ pub fn events() -> Vec<Event> {
         ev(52, Change::SplLog(Patch::Set(spl_log()))),
         ev(53, Change::SplLog(Patch::Deleted(MeasId(4)))),
         ev(54, Change::Timing(timing())),
+        ev(55, Change::Sweep(sweep_run())),
+        ev(56, Change::Trace(Patch::Set(sweep_meta()))),
     ]
 }
 
@@ -684,6 +774,18 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             mag_db: vec![0.0, -3.0, f32::NAN],
             phase_deg: Some(vec![0.0, 45.0, f32::NAN]),
             coherence: None,
+            sweep: None,
+        })),
+        Ok(ReplyBody::TraceData(TraceData {
+            meta: sweep_meta(),
+            mag_db: vec![-6.0, -6.5, f32::NAN],
+            phase_deg: Some(vec![10.0, -20.0, f32::NAN]),
+            coherence: None,
+            sweep: Some(sweep_data()),
+        })),
+        Ok(ReplyBody::Sweep(SweepRun {
+            status: SweepStatus::Playing { repeat: 1 },
+            ..sweep_run()
         })),
         Ok(ReplyBody::Export {
             file_name: "main-l.csv".into(),

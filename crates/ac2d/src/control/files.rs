@@ -189,7 +189,9 @@ impl Control {
             .traces
             .iter()
             .filter_map(|t| match t.meta.source {
-                TraceSource::Captured { epoch, .. } => Some(epoch.0),
+                TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
+                    Some(epoch.0)
+                }
                 _ => None,
             })
             .max()

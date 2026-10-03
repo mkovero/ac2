@@ -436,6 +436,7 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::Inputs(i) => s.inputs = i.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = t,
+        Change::Sweep(r) => s.sweep = Some(r),
     }
 }
 

@@ -166,6 +166,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Grid(_) => "grid",
         ReplyBody::SessionFile(_) => "session_file",
         ReplyBody::Sessions(_) => "sessions",
+        ReplyBody::Sweep(_) => "sweep",
     }
 }
 

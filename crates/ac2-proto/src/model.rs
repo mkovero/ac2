@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::grid::GridId;
 use crate::units::{
     Blob, ClientId, Db, DbSpl, Dbfs, Degrees, Hz, MeasId, Rev, SampleIndex, Samples, Seconds,
-    SessionEpoch, TraceId, WallNs,
+    SessionEpoch, SweepId, TraceId, WallNs,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -1004,6 +1004,33 @@ pub struct EssSpec {
     pub fade_out: Seconds,
 }
 
+impl EssSpec {
+    /// Default start frequency of a sweep measurement, Hz.
+    pub const DEFAULT_START_HZ: f64 = 20.0;
+    /// Default end frequency, Hz.
+    pub const DEFAULT_END_HZ: f64 = 20_000.0;
+    /// Default requested duration, s.
+    pub const DEFAULT_DURATION_S: f64 = 3.0;
+
+    /// A sweep from `start` to `end` in about `duration`, fading in over its first 1/6
+    /// octave and out over its last 1/24 octave: it starts and stops without a step, and the
+    /// fades stay short enough to leave the band's ends measured.
+    pub fn with_fades(start: Hz, end: Hz, duration: Seconds) -> Self {
+        let rate = duration.0 / (end.0 / start.0).ln();
+        let fade = |octaves: f64| {
+            let s = rate * std::f64::consts::LN_2 * octaves;
+            Seconds(if s.is_finite() && s > 0.0 { s } else { 0.0 })
+        };
+        Self {
+            start,
+            end,
+            duration,
+            fade_in: fade(1.0 / 6.0),
+            fade_out: fade(1.0 / 24.0),
+        }
+    }
+}
+
 /// Generator signal.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -1181,6 +1208,10 @@ pub enum TraceKind {
         /// Level unit.
         scale: LevelScale,
     },
+    /// Sweep measurement: the fundamental's magnitude dB and phase (drawn like a transfer
+    /// function), harmonic distortion per order and the impulse response
+    /// ([`TraceData::sweep`]).
+    Sweep,
 }
 
 /// Export format.
@@ -1231,12 +1262,22 @@ pub enum TraceSource {
         /// Operation.
         op: MathOp,
     },
-    /// IR capture.
+    /// Sweep measurement (`ir.capture`).
     IrCapture {
-        /// Epoch.
+        /// The run that made it.
+        run: SweepId,
+        /// Epoch (shared time reference within it, like a capture).
         epoch: SessionEpoch,
-        /// Sweep used.
+        /// Sweep played.
         sweep: EssSpec,
+        /// Level played.
+        level: Dbfs,
+        /// Sweeps averaged.
+        repeats: u8,
+        /// Reference input.
+        reference_input: u16,
+        /// Measurement input.
+        measurement_input: u16,
     },
 }
 
@@ -1380,6 +1421,236 @@ pub struct TraceData {
     pub phase_deg: Option<Vec<f32>>,
     /// Coherence γ²; `None` when not available.
     pub coherence: Option<Vec<f32>>,
+    /// Distortion and impulse response of a [`TraceKind::Sweep`] trace.
+    pub sweep: Option<SweepData>,
+}
+
+// ---------------------------------------------------------------------------------------
+// Sweep measurement (`ir.capture`, docs/design/sweep-distortion.md)
+
+/// Which inputs a sweep records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SweepInputs {
+    /// The reference and measurement inputs of a transfer measurement.
+    Measurement {
+        /// The measurement.
+        meas: MeasId,
+    },
+    /// Inputs by number (zero-based device inputs).
+    Channels {
+        /// Reference (loopback).
+        reference: u16,
+        /// Measurement (mic).
+        measurement: u16,
+    },
+}
+
+/// Arguments of `ir.capture`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepRequest {
+    /// Inputs recorded.
+    pub inputs: SweepInputs,
+    /// Output channels carrying the sweep (zero-based): the speaker's and the loopback's.
+    pub outputs: Vec<u16>,
+    /// RMS level of the sweep's constant-envelope part; refused when absent (there is no
+    /// default level).
+    pub level: Option<Dbfs>,
+    /// The sweep.
+    pub sweep: EssSpec,
+    /// Sweeps played and averaged, 1 … [`SweepRequest::MAX_REPEATS`].
+    pub repeats: u8,
+    /// Linear-response gate after the arrival; `None` = the whole response up to the noise
+    /// window.
+    pub gate: Option<Seconds>,
+}
+
+impl SweepRequest {
+    /// Most repeats.
+    pub const MAX_REPEATS: u8 = 8;
+}
+
+/// Why a sweep run ended without a result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SweepFailure {
+    /// `gen.stop`, `gen.release` or a forced takeover stopped it.
+    Stopped,
+    /// The stimulus lease expired.
+    LeaseExpired,
+    /// The session closed or reopened.
+    SessionClosed,
+    /// Audio was lost while recording (an xrun or overflow).
+    Dropout,
+    /// The reference input carries no sweep.
+    NoReference,
+    /// The analysis refused the recording.
+    Analysis,
+}
+
+/// Where a sweep run is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SweepStatus {
+    /// Playing and recording sweep `repeat` (1-based).
+    Playing {
+        /// Repeat.
+        repeat: u8,
+    },
+    /// Recorded; the analysis runs.
+    Analysing,
+    /// Stored as a sweep trace.
+    Done {
+        /// The trace.
+        trace: TraceId,
+    },
+    /// Ended without a result; its audio is discarded.
+    Failed {
+        /// Why.
+        reason: SweepFailure,
+        /// Detail for the operator.
+        msg: String,
+    },
+}
+
+/// The latest sweep run (`ir.capture`), mirrored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepRun {
+    /// Id.
+    pub id: SweepId,
+    /// Client that started it.
+    pub owner: ClientId,
+    /// Name of the trace it makes.
+    pub name: String,
+    /// Reference input.
+    pub reference_input: u16,
+    /// Measurement input.
+    pub measurement_input: u16,
+    /// Outputs playing it.
+    pub outputs: Vec<u16>,
+    /// Level.
+    pub level: Dbfs,
+    /// Sweep as requested.
+    pub sweep: EssSpec,
+    /// Actual sweep duration (the rate constant is rounded).
+    pub sweep_duration: Seconds,
+    /// Silence after each sweep.
+    pub post_roll: Seconds,
+    /// Sweeps.
+    pub repeats: u8,
+    /// Linear gate.
+    pub gate: Option<Seconds>,
+    /// Status.
+    pub status: SweepStatus,
+    /// When it started.
+    pub started_at: WallNs,
+}
+
+impl SweepRun {
+    /// Total playing time: every sweep with its silence.
+    pub fn total(&self) -> Seconds {
+        Seconds(f64::from(self.repeats) * (self.sweep_duration.0 + self.post_roll.0))
+    }
+
+    /// Still playing or analysing.
+    pub fn active(&self) -> bool {
+        matches!(
+            self.status,
+            SweepStatus::Playing { .. } | SweepStatus::Analysing
+        )
+    }
+}
+
+/// A distortion curve on the trace's grid (fundamental frequency per column).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DistortionCurve {
+    /// Level re the fundamental, dB; NaN where not measured.
+    pub level_db: Vec<f32>,
+    /// Noise in the same window re the fundamental, dB; NaN where not measured.
+    pub floor_db: Vec<f32>,
+}
+
+impl DistortionCurve {
+    /// Column `i` counts as distortion: measured and at least `margin` above its floor
+    /// ([`SweepInfo::floor_margin`]). Otherwise it reads "< floor".
+    pub fn valid(&self, i: usize, margin: Db) -> bool {
+        let (Some(l), Some(f)) = (self.level_db.get(i), self.floor_db.get(i)) else {
+            return false;
+        };
+        l.is_finite() && (!f.is_finite() || f64::from(*l) >= f64::from(*f) + margin.0)
+    }
+}
+
+/// One harmonic order's distortion.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HarmonicCurve {
+    /// Order (2 = second harmonic).
+    pub order: u8,
+    /// Curve.
+    pub curve: DistortionCurve,
+}
+
+/// The impulse response of a sweep: from the highest order's window to the end of the
+/// linear window, decimated peak-preserving.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepIr {
+    /// Time of point 0 re the arrival.
+    pub t0: Seconds,
+    /// Point spacing.
+    pub dt: Seconds,
+    /// Signed extreme per point (unit: the reference's level).
+    pub linear: Vec<f32>,
+    /// Hilbert envelope maximum per point, dB.
+    pub etc_db: Vec<f32>,
+}
+
+/// What the analysis found and used.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepInfo {
+    /// Sample rate.
+    pub sample_rate: Hz,
+    /// Rate constant L of the sweep: harmonic k's impulse sits at −L·ln k.
+    pub rate: Seconds,
+    /// Actual sweep duration.
+    pub duration: Seconds,
+    /// Sweeps averaged.
+    pub repeats: u8,
+    /// Arrival of the linear response re the reference (the trace's `delay`).
+    pub arrival: Seconds,
+    /// The reference's sweep re the emitted level (loopback gain).
+    pub reference_level: Db,
+    /// Harmonic window before `t_k`.
+    pub window_pre: Seconds,
+    /// Harmonic window after `t_k`.
+    pub window_post: Seconds,
+    /// Linear window before the arrival.
+    pub gate_pre: Seconds,
+    /// Linear window after the arrival.
+    pub gate: Seconds,
+    /// How far above its noise floor a distortion point must be to count.
+    pub floor_margin: Db,
+    /// A sample of either input reached full scale.
+    pub clipped: bool,
+}
+
+/// Distortion and impulse response of a sweep trace.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepData {
+    /// H2 … H5.
+    pub harmonics: Vec<HarmonicCurve>,
+    /// Total harmonic distortion (power sum of the orders in band).
+    pub thd: DistortionCurve,
+    /// Impulse response.
+    pub ir: SweepIr,
+    /// Analysis facts.
+    pub info: SweepInfo,
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1609,4 +1880,6 @@ pub struct State {
     pub spl_logs: Vec<SplLog>,
     /// Timing.
     pub timing: TimingStatus,
+    /// The latest sweep run, if any.
+    pub sweep: Option<SweepRun>,
 }

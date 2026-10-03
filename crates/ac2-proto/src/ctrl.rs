@@ -13,10 +13,10 @@ use crate::event::{Event, StateSnapshot};
 use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, CalPart, DelayFinding, DelayPick,
-    DelayReference, DeviceId, EssSpec, ExportFormat, FinderBand, Generator, GeneratorDesired,
-    ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig,
-    Measurement, MicCurveAction, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLog,
-    TraceData, TraceEdit, TraceMeta,
+    DelayReference, DeviceId, ExportFormat, FinderBand, Generator, GeneratorDesired, ImportFormat,
+    ImportRole, InputSetup, Lease, LoopbackDetection, MathOp, MeasConfig, Measurement,
+    MicCurveAction, Preview, Session, SessionConfig, SessionFile, SessionRef, SplLog, SweepRequest,
+    SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, DbSpl, Dbfs, Hz, LeaseToken, MeasId, RequestId, Rev,
@@ -365,15 +365,16 @@ pub enum Command {
     },
 
     // -- ir -----------------------------------------------------------------------------
-    /// ESS impulse response capture; holds the lease for the whole capture.
+    /// Sweep measurement: plays `request.repeats` synchronised sweeps, records the reference
+    /// and measurement inputs and stores a `sweep` trace (response, harmonic distortion, IR).
+    /// Like firing, it needs the stimulus lease and the generator armed; the reply is the
+    /// started run, whose progress and outcome follow as `sweep` events.
     #[serde(rename = "ir.capture")]
     IrCapture {
         /// Lease.
         lease_token: LeaseToken,
-        /// Measurement input.
-        input: u16,
-        /// Sweep.
-        sweep: EssSpec,
+        /// What to play and record.
+        request: SweepRequest,
         /// Name of the resulting trace.
         name: String,
     },
@@ -550,8 +551,10 @@ pub enum ReplyBody {
     Measurement(Measurement),
     /// `delay.find`.
     DelayFinding(DelayFinding),
-    /// `trace.capture/update/average/math/import`, `ir.capture`.
+    /// `trace.capture/update/average/math/import`.
     Trace(TraceMeta),
+    /// `ir.capture`: the run, as started.
+    Sweep(SweepRun),
     /// `trace.list`.
     Traces(Vec<TraceMeta>),
     /// `trace.get`.

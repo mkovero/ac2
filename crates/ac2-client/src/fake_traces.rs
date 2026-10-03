@@ -78,6 +78,7 @@ impl Shared {
             meta,
             grid,
             columns,
+            sweep: None,
         })
     }
 

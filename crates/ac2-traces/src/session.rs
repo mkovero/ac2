@@ -3,7 +3,11 @@
 //! ```text
 //! <dir>/session.json                 manifest (format, version, measurements, trace metadata)
 //! <dir>/traces/<generation>-<id>.csv one ac2 CSV per trace (columns; header repeats metadata)
+//! <dir>/traces/<generation>-<id>.sweep.json  a sweep trace's IR and analysis facts
 //! ```
+//!
+//! A sweep trace's distortion curves are columns of its CSV; its impulse response and
+//! analysis facts (`SweepIr`, `SweepInfo`) are the JSON beside it.
 //!
 //! The manifest names the trace files it belongs to, and every save writes its trace files
 //! under a new generation before it replaces the manifest (write to a temporary file, then
@@ -26,7 +30,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
-use ac2_proto::model::{ImportFormat, ImportRole, MeasConfig, TraceMeta};
+use ac2_proto::model::{
+    ImportFormat, ImportRole, MeasConfig, SweepData, SweepInfo, SweepIr, TraceKind, TraceMeta,
+};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -37,7 +43,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 const TRACE_DIR: &str = "traces";
@@ -78,6 +84,19 @@ pub struct SavedTrace {
     pub grid: GridDef,
     /// Data file, relative to the session directory.
     pub file: String,
+    /// A sweep trace's impulse response and analysis facts, relative to the session
+    /// directory.
+    pub sweep_file: Option<String>,
+}
+
+/// What a sweep trace keeps beside its CSV.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SweepSidecar {
+    /// Impulse response.
+    pub ir: SweepIr,
+    /// Analysis facts.
+    pub info: SweepInfo,
 }
 
 /// The manifest.
@@ -212,10 +231,27 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     for t in &s.traces {
         let file = format!("{TRACE_DIR}/{generation}-{}.csv", t.meta.id.0);
         write_atomic(&dir.join(&file), export_csv(t).as_bytes())?;
+        let sweep_file = match &t.sweep {
+            Some(s) => {
+                let f = format!("{TRACE_DIR}/{generation}-{}.sweep.json", t.meta.id.0);
+                let side = SweepSidecar {
+                    ir: s.ir.clone(),
+                    info: s.info,
+                };
+                let json = serde_json::to_vec(&side).map_err(|e| SessionError::Corrupt {
+                    path: dir.join(&f),
+                    msg: e.to_string(),
+                })?;
+                write_atomic(&dir.join(&f), &json)?;
+                Some(f)
+            }
+            None => None,
+        };
         saved.push(SavedTrace {
             meta: t.meta.clone(),
             grid: t.grid.clone(),
             file,
+            sweep_file,
         });
     }
     let m = Manifest {
@@ -231,7 +267,11 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     })?;
     write_atomic(&dir.join(MANIFEST), &json)?;
     // Older generations are unreferenced now.
-    let keep: Vec<String> = m.traces.iter().map(|t| t.file.clone()).collect();
+    let keep: Vec<String> = m
+        .traces
+        .iter()
+        .flat_map(|t| std::iter::once(t.file.clone()).chain(t.sweep_file.clone()))
+        .collect();
     if let Ok(rd) = fs::read_dir(&traces_dir) {
         for e in rd.flatten() {
             let rel = format!("{TRACE_DIR}/{}", e.file_name().to_string_lossy());
@@ -287,11 +327,13 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
     let m = read_manifest(dir)?;
     let mut traces = Vec::with_capacity(m.traces.len());
     for t in &m.traces {
-        if t.file.contains("..") || Path::new(&t.file).is_absolute() {
-            return Err(SessionError::Corrupt {
-                path: dir.join(MANIFEST),
-                msg: format!("trace file {:?} is outside the session", t.file),
-            });
+        for f in std::iter::once(&t.file).chain(&t.sweep_file) {
+            if f.contains("..") || Path::new(f).is_absolute() {
+                return Err(SessionError::Corrupt {
+                    path: dir.join(MANIFEST),
+                    msg: format!("trace file {f:?} is outside the session"),
+                });
+            }
         }
         let p = dir.join(&t.file);
         let bytes = fs::read(&p).map_err(io(&p))?;
@@ -304,10 +346,34 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
         if imp.grid != t.grid || t.grid.id() != t.meta.grid_id {
             return Err(corrupt("data is not on the trace's grid".into()));
         }
+        let sweep = match (t.meta.kind, &t.sweep_file, imp.distortion) {
+            (TraceKind::Sweep, Some(f), Some((harmonics, thd))) => {
+                let sp = dir.join(f);
+                let b = fs::read(&sp).map_err(io(&sp))?;
+                let side: SweepSidecar =
+                    serde_json::from_slice(&b).map_err(|e| SessionError::Corrupt {
+                        path: sp.clone(),
+                        msg: e.to_string(),
+                    })?;
+                Some(SweepData {
+                    harmonics,
+                    thd,
+                    ir: side.ir,
+                    info: side.info,
+                })
+            }
+            (TraceKind::Sweep, _, _) => {
+                return Err(corrupt(
+                    "a sweep trace without its distortion columns or sweep file".into(),
+                ));
+            }
+            _ => None,
+        };
         traces.push(StoredTrace {
             meta: t.meta.clone(),
             grid: t.grid.clone(),
             columns: imp.columns,
+            sweep,
         });
     }
     Ok(Session {

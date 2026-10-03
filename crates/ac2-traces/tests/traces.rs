@@ -85,6 +85,7 @@ fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> Stored
             coherence: Some(vec![coh; f.len()]),
         },
         grid: g,
+        sweep: None,
     }
 }
 
@@ -273,6 +274,7 @@ fn linear_grid_spectrum_round_trips_with_dc_bin() {
             phase_deg: None,
             coherence: None,
         },
+        sweep: None,
     };
     let back = import(
         export_csv(&t).as_bytes(),
@@ -424,6 +426,7 @@ fn a_minus_b() {
         ),
         grid: target.grid,
         columns: target.columns,
+        sweep: None,
     };
     let d = math(&a, &tt, MathOp::MagnitudeDifference).unwrap();
     let i = col(&d.grid, 1000.0);
@@ -445,6 +448,7 @@ fn level_trace(id: u32, kind: TraceKind, g: GridDef) -> StoredTrace {
             coherence: None,
         },
         grid: g,
+        sweep: None,
     }
 }
 
@@ -702,18 +706,18 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (other smoothing mode names, spectra without a
-    // smoothing setting) is refused with its version named, never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 3", "\"version\": 2")).unwrap();
+    // A session of the previous format (no sweep traces) is refused with its version named,
+    // never read best-effort.
+    std::fs::write(&m, text.replace("\"version\": 4", "\"version\": 3")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 2
+            found: 3
         }
     );
-    assert!(e.to_string().contains("reads version 3 only"), "{e}");
+    assert!(e.to_string().contains("reads version 4 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -730,4 +734,141 @@ fn session_refusals() {
     for bad in ["", "../x", "a/b", ".hidden", "a\\b", " x"] {
         assert!(session::validate_name(bad).is_err(), "{bad:?}");
     }
+}
+
+fn sweep_trace(id: u32) -> StoredTrace {
+    let g = grid();
+    let n = frequencies(&g).len();
+    let source = TraceSource::IrCapture {
+        run: SweepId(1),
+        epoch: SessionEpoch(2),
+        sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+        level: Dbfs(-50.0),
+        repeats: 2,
+        reference_input: 1,
+        measurement_input: 0,
+    };
+    let ramp = |a: f32| (0..n).map(|i| a - i as f32 * 0.01).collect::<Vec<f32>>();
+    let mut level = ramp(-40.0);
+    level[n - 1] = f32::NAN;
+    let curve = |l: Vec<f32>| DistortionCurve {
+        floor_db: l.iter().map(|v| v - 30.0).collect(),
+        level_db: l,
+    };
+    StoredTrace {
+        meta: meta(id, source, 0.0033, TraceKind::Sweep, &g),
+        grid: g,
+        columns: Columns {
+            mag_db: ramp(-6.0),
+            phase_deg: Some(ramp(10.0)),
+            coherence: None,
+        },
+        sweep: Some(SweepData {
+            harmonics: vec![
+                HarmonicCurve {
+                    order: 2,
+                    curve: curve(level.clone()),
+                },
+                HarmonicCurve {
+                    order: 3,
+                    curve: curve(ramp(-50.0)),
+                },
+            ],
+            thd: curve(ramp(-39.6)),
+            ir: SweepIr {
+                t0: Seconds(-0.75),
+                dt: Seconds(1.0 / 48_000.0),
+                linear: vec![0.0, 0.5, -0.25, 0.125],
+                etc_db: vec![-200.0, -6.0, -12.0, -18.0],
+            },
+            info: SweepInfo {
+                sample_rate: Hz(48_000.0),
+                rate: Seconds(0.45),
+                duration: Seconds(3.1),
+                repeats: 2,
+                arrival: Seconds(0.0033),
+                reference_level: Db(2.3),
+                window_pre: Seconds(0.008),
+                window_post: Seconds(0.09),
+                gate_pre: Seconds(0.03),
+                gate: Seconds(0.88),
+                floor_margin: Db(6.0),
+                clipped: false,
+            },
+        }),
+    }
+}
+
+/// A sweep export carries every distortion curve; it re-imports as its transfer function
+/// (the curves read back exactly), and a session keeps the whole sweep.
+#[test]
+fn sweep_csv_and_session_round_trip() {
+    let t = sweep_trace(5);
+    let csv = export_csv(&t);
+    assert!(csv.contains("# kind: sweep"));
+    assert!(
+        csv.contains(
+            "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,thd_db,thd_floor_db\n"
+        ),
+        "{}",
+        &csv[..800]
+    );
+    let imp = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    assert_eq!(imp.kind, TraceKind::Transfer);
+    assert_eq!(imp.grid, t.grid);
+    let (h, thd) = imp.distortion.unwrap();
+    let s = t.sweep.as_ref().unwrap();
+    assert_eq!(h.len(), 2);
+    assert_eq!(h[1].order, 3);
+    assert_eq!(h[1].curve, s.harmonics[1].curve);
+    assert!(h[0].curve.level_db.last().unwrap().is_nan());
+    assert_eq!(thd, s.thd);
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("sweep");
+    let sess = Session {
+        saved_at: WallNs(1_790_000_000_000_000_001),
+        measurements: vec![],
+        traces: vec![t.clone()],
+    };
+    let m = session::save(&dir, &sess).unwrap();
+    let side = m.traces[0].sweep_file.clone().unwrap();
+    assert!(side.ends_with(".sweep.json"));
+    let back = session::load(&dir).unwrap();
+    let b = &back.traces[0];
+    assert_eq!(b.meta, t.meta);
+    let bs = b.sweep.as_ref().unwrap();
+    assert_eq!(bs.ir, s.ir);
+    assert_eq!(bs.info, s.info);
+    assert_eq!(bs.harmonics[1], s.harmonics[1]);
+    // The served data carries the sweep.
+    assert!(b.data().sweep.is_some());
+
+    // A sweep trace whose sweep file went missing is damaged, not silently a transfer.
+    std::fs::remove_file(dir.join(side)).unwrap();
+    assert!(session::load(&dir).is_err());
+}
+
+/// A sweep's response averages and divides like a transfer function (same epoch: shared
+/// time base).
+#[test]
+fn sweep_traces_combine_as_transfer_functions() {
+    let a = sweep_trace(5);
+    let b = sweep_trace(6);
+    let d = average(
+        &[&a, &b],
+        AverageMethod::Complex,
+        DelayReference::Trace { trace: TraceId(5) },
+    )
+    .unwrap();
+    assert_eq!(d.kind, TraceKind::Transfer);
+    assert!(d.columns.phase_deg.is_some());
+    let q = math(&a, &b, MathOp::ComplexDivision).unwrap();
+    assert!(
+        q.columns
+            .mag_db
+            .iter()
+            .filter(|v| v.is_finite())
+            .all(|v| v.abs() < 1e-4)
+    );
 }

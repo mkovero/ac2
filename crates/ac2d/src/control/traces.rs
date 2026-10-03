@@ -104,6 +104,7 @@ impl Control {
             meta,
             grid,
             columns,
+            sweep: None,
         })
     }
 
@@ -296,7 +297,7 @@ impl Control {
         let first = inputs.first().map(|t| &t.meta);
         let same = |f: &dyn Fn(&TraceMeta) -> bool| inputs.iter().all(|t| f(&t.meta));
         let cal = first.map_or(CalState::Uncalibrated, |m| m.cal.clone());
-        let cal = if d.kind != TraceKind::Transfer && same(&|m| m.cal == cal) {
+        let cal = if !ops::transfer_like(d.kind) && same(&|m| m.cal == cal) {
             cal
         } else {
             CalState::Uncalibrated

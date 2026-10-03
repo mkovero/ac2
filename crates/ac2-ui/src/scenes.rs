@@ -131,7 +131,11 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         .traces
         .values()
         .filter(|(t, _)| {
-            t.meta.edit.visible && matches!(t.meta.kind, TraceKind::Transfer | TraceKind::Target)
+            t.meta.edit.visible
+                && matches!(
+                    t.meta.kind,
+                    TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
+                )
         })
         .map(|(t, g)| (t.as_ref(), column_frequencies(g)))
         .collect();
@@ -163,7 +167,10 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     for (data, freqs) in &stored {
         let mut t = TfTrace::stored(data, freqs);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
-        if let (TraceSource::Captured { epoch, .. }, Some(cur)) = (
+        if let (
+            TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. },
+            Some(cur),
+        ) = (
             &data.meta.source,
             st.mirror.as_ref().and_then(|m| m.session_epoch),
         ) && *epoch != cur

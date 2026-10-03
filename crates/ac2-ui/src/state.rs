@@ -154,7 +154,7 @@ impl SmoothTarget {
     pub fn kind(&self) -> Smoothable {
         match self {
             SmoothTarget::Trace(t) => match t.kind {
-                TraceKind::Transfer => Smoothable::Transfer,
+                TraceKind::Transfer | TraceKind::Sweep => Smoothable::Transfer,
                 TraceKind::Spectrum { .. } => Smoothable::Spectrum,
                 TraceKind::Rta { .. } => Smoothable::Rta,
                 TraceKind::Target => Smoothable::No,
@@ -833,7 +833,13 @@ impl AppState {
         let mut v: Vec<&TraceMeta> = self
             .stored_traces()
             .into_iter()
-            .filter(|t| t.edit.visible && matches!(t.kind, TraceKind::Transfer | TraceKind::Target))
+            .filter(|t| {
+                t.edit.visible
+                    && matches!(
+                        t.kind,
+                        TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
+                    )
+            })
             .collect();
         v.sort_by_key(|t| (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id));
         v
@@ -2746,7 +2752,7 @@ impl AppState {
         let shown: Vec<&TraceMeta> = self
             .shown_transfer_traces()
             .into_iter()
-            .filter(|t| t.kind == TraceKind::Transfer)
+            .filter(|t| matches!(t.kind, TraceKind::Transfer | TraceKind::Sweep))
             .collect();
         if shown.len() < 2 {
             self.error("average: show at least two stored transfer traces (1…9)");

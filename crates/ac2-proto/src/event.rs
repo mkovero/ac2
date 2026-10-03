@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    CalEntry, CalKey, Generator, InputSetup, Measurement, Session, SplLog, State, TimingStatus,
-    TraceMeta,
+    CalEntry, CalKey, Generator, InputSetup, Measurement, Session, SplLog, State, SweepRun,
+    TimingStatus, TraceMeta,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
 
@@ -50,6 +50,8 @@ pub enum Change {
     SplLog(Patch<SplLog, MeasId>),
     /// Timing monitor state.
     Timing(TimingStatus),
+    /// The latest sweep run (never deleted; a new run replaces it).
+    Sweep(SweepRun),
 }
 
 /// One committed state change.
@@ -122,6 +124,13 @@ pub enum WireEvent {
         /// Payload.
         payload: TimingStatus,
     },
+    /// [`Change::Sweep`].
+    Sweep {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: SweepRun,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -136,6 +145,7 @@ impl From<Event> for WireEvent {
             Change::Inputs(payload) => Self::Inputs { rev, payload },
             Change::SplLog(payload) => Self::SplLog { rev, payload },
             Change::Timing(payload) => Self::Timing { rev, payload },
+            Change::Sweep(payload) => Self::Sweep { rev, payload },
         }
     }
 }
@@ -151,6 +161,7 @@ impl From<WireEvent> for Event {
             WireEvent::Inputs { rev, payload } => (rev, Change::Inputs(payload)),
             WireEvent::SplLog { rev, payload } => (rev, Change::SplLog(payload)),
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
+            WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
         };
         Event { rev, change }
     }
@@ -168,6 +179,7 @@ impl Change {
             Self::Inputs(_) => "inputs",
             Self::SplLog(_) => "spl_log",
             Self::Timing(_) => "timing",
+            Self::Sweep(_) => "sweep",
         }
     }
 }

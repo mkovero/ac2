@@ -915,6 +915,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
         mag_db: vec![0.0; 4],
         phase_deg: None,
         coherence: None,
+        sweep: None,
     });
     let grid = Arc::new(GridDef::Log {
         ppo: 1,
@@ -936,6 +937,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
         mag_db: vec![1.0; 4],
         phase_deg: None,
         coherence: None,
+        sweep: None,
     });
     t.conn(ConnEvent::Trace(fresh, grid));
     assert_eq!(t.st.traces[&TraceId(10)].0.meta, m2);
@@ -1234,6 +1236,7 @@ fn stored_trace_metadata_follows_the_mirror() {
         mag_db: vec![0.0; 3],
         phase_deg: None,
         coherence: None,
+        sweep: None,
     };
     t.conn(ConnEvent::Trace(
         Arc::new(data),

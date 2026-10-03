@@ -100,6 +100,10 @@ id_type!(
     TraceId(u32)
 );
 id_type!(
+    /// One `ir.capture` run, per incarnation.
+    SweepId(u32)
+);
+id_type!(
     /// Request id, unique per client within the dedup window.
     RequestId(u64)
 );

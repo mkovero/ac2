@@ -345,6 +345,9 @@ def measurement():
     }
 
 
+SWEEP = {"start": 20.0, "end": 20000.0, "duration": 5.0, "fade_in": 0.01, "fade_out": 0.01}
+
+
 def requests():
     """A subset of samples::commands(); `id` is the index in that list."""
     return [
@@ -414,6 +417,22 @@ def requests():
                 },
             },
         ),
+        req(
+            35,
+            "ir.capture",
+            {
+                "lease_token": TOKEN,
+                "request": {
+                    "inputs": {"type": "channels", "reference": 1, "measurement": 0},
+                    "outputs": [0, 1],
+                    "level": -50.0,
+                    "sweep": SWEEP,
+                    "repeats": 2,
+                    "gate": 0.005,
+                },
+                "name": "1083 sweep",
+            },
+        ),
         req(42, "session.inputs", {"inputs": INPUTS}),
         req(
             43,
@@ -456,6 +475,26 @@ def events():
         },
         {"kind": "inputs", "rev": 50, "payload": INPUTS},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},
+        {
+            "kind": "sweep",
+            "rev": 55,
+            "payload": {
+                "id": 3,
+                "owner": "alice",
+                "name": "1083 sweep",
+                "reference_input": 1,
+                "measurement_input": 0,
+                "outputs": [0, 1],
+                "level": -50.0,
+                "sweep": SWEEP,
+                "sweep_duration": 4.75,
+                "post_roll": 1.0,
+                "repeats": 2,
+                "gate": None,
+                "status": {"type": "done", "trace": 9},
+                "started_at": 1790000000000000000,
+            },
+        },
     ]
 
 

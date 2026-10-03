@@ -52,6 +52,7 @@ impl Store {
                     drift: None,
                     internal_reference: false,
                 },
+                sweep: None,
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -159,6 +160,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Inputs(i) => s.inputs = i.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,
+        Change::Sweep(r) => s.sweep = Some(r.clone()),
     }
 }
 

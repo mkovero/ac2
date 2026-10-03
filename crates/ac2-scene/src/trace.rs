@@ -118,10 +118,12 @@ impl<'a> TfTrace<'a> {
     pub fn stored(data: &'a TraceData, freqs: &'a [f64]) -> Self {
         let m = &data.meta;
         let time_base = match m.source {
-            TraceSource::Captured { epoch, .. } => TimeBase::Shared {
-                epoch,
-                delay: m.delay,
-            },
+            TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
+                TimeBase::Shared {
+                    epoch,
+                    delay: m.delay,
+                }
+            }
             _ => TimeBase::Independent,
         };
         let c = m.edit.color;

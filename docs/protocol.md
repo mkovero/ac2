@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 4`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 5`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -107,7 +107,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.delete` | `key: CalKey`, `part: sensitivity \| mic_curve \| all` | `ack` | |
 | `spl.log_start` | `meas`, `interval: Seconds` | `spl_log` | |
 | `spl.log_stop` | `meas` | `spl_log` | |
-| `ir.capture` | `lease_token`, `input`, `sweep: EssSpec`, `name` | `trace` | L (held for the capture) |
+| `ir.capture` | `lease_token`, `request: SweepRequest`, `name` | `sweep` (the run as started) | L (held for the capture), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
@@ -315,6 +315,45 @@ display edits and are never applied to the stored data.
   `not_ascending`, `out_of_range`, `too_many_rows` (> 65536), `bad_header`,
   `bad_coherence`.
 
+#### Sweep measurement (`ir.capture`)
+
+Design: `docs/design/sweep-distortion.md`. `SweepRequest`: `inputs` (`SweepInputs`, tagged by
+`type`: `measurement` {`meas`} — a transfer measurement's reference and measurement inputs —
+or `channels` {`reference`, `measurement`}), `outputs` ([u16], the speaker's and the
+loopback's), `level: Dbfs | nil`, `sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`,
+`fade_in`, `fade_out`}, `repeats` (1…8), `gate: Seconds | nil`.
+
+- Refused (`refused`) without a level, above the ceiling, or while the generator is not
+  armed by the caller (arm with `gen.set` first: like firing, the capture needs it), while it
+  fires, while a loopback detection or another sweep runs, or without an open session.
+  `invalid`: inputs not captured or equal, outputs empty / repeated / not in the session,
+  repeats outside 1…8, sweep parameters the generator refuses, a gate ≤ 0.
+- The daemon routes the generator to `outputs`, plays `repeats` synchronised sweeps each
+  followed by its silence (`post_roll`, ≥ 1 s), records both inputs, analyses on a job thread
+  and stores a trace of `kind: sweep` (source `ir_capture` {`run`, `epoch`, `sweep`, `level`,
+  `repeats`, `reference_input`, `measurement_input`}, `delay` = the arrival). While it plays
+  the generator is `firing` with the sweep as its settings; afterwards it is armed again.
+- Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `owner`, `name`,
+  `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
+  (actual), `post_roll`, `repeats`, `gate`, `started_at`, `status` (`SweepStatus`, tagged by
+  `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`trace`} or `failed`
+  {`reason`, `msg`}. `SweepFailure`: `stopped` (`gen.stop`, `gen.release`, forced takeover),
+  `lease_expired`, `session_closed`, `dropout` (audio lost while recording), `no_reference`
+  (the reference carries no sweep), `analysis`. A failed run's audio is discarded.
+- `trace.get` of a sweep trace: `mag_db` / `phase_deg` are the fundamental's response (mic re
+  reference, phase referred to the arrival; NaN outside the sweep), `coherence` nil, and
+  `sweep` (`SweepData`): `harmonics` ([`HarmonicCurve` {`order`, `curve`}], H2…H5), `thd`,
+  each `DistortionCurve` {`level_db`, `floor_db`} in dB re the fundamental per grid column
+  (harmonic k at k·f is reported at the fundamental f; NaN where that order is not measured);
+  `ir` (`SweepIr` {`t0`, `dt` re the arrival, `linear`, `etc_db`}, from H5's window to the
+  end of the linear window, at most 16384 points, peak-preserving); `info` (`SweepInfo`:
+  `sample_rate`, `rate` (L: harmonic k's impulse at −L·ln k), `duration`, `repeats`,
+  `arrival`, `reference_level` (loopback gain), `window_pre`, `window_post`, `gate_pre`,
+  `gate`, `floor_margin`, `clipped`). A distortion point is valid when
+  `level_db ≥ floor_db + floor_margin`; otherwise it reads "< floor".
+- Smoothing, average and A − B treat a sweep trace as a transfer function (magnitude and
+  phase; the distortion stays with the sweep trace).
+
 #### Sessions (`file.*`)
 
 `SessionRef` (tagged by `type`): `name` {`name`} — a directory in the daemon's session
@@ -387,7 +426,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `export`, `calibration`, `calibrations`, `inputs`, `spl_log`, `snapshot`, `events`,
-`grid`, `session_file`, `sessions`.
+`grid`, `session_file`, `sessions`, `sweep`.
 
 ### 3.4 Errors
 
@@ -408,19 +447,20 @@ The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported | average |
-math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `created_at`), `generator` (`owner`,
+math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `created_at`; `kind` one of
+`transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal | nil, `mic_curve`: MicCurveRef | nil),
 `inputs` ([InputSetup], sorted by channel), `spl_logs`, `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
-`drift`, `internal_reference`).
+`drift`, `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run).
 
 ### 4.2 Snapshot and events
 
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `inputs`, `spl_log`, `timing`. `payload` is the entity's
+`generator`, `calibration`, `inputs`, `spl_log`, `timing`, `sweep`. `payload` is the entity's
 full new value (`inputs`: the whole list); for keyed entities (`measurement`, `trace`,
 `calibration`, `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -568,7 +608,9 @@ every metadata field (`name`, `kind`, `source`, `time_base`, `delay_ms`,
 `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not applied),
 `depth`, `cal`, `mic`,
 `created_ns`, `note`, `grid` as the JSON `GridDef`); then the header
-`freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column. Values are written in
+`freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column; a sweep trace
+(`kind: sweep`) adds `h2_db,h2_floor_db,…,h5_db,h5_floor_db,thd_db,thd_floor_db` after
+`phase_deg` (dB re the fundamental at the row's fundamental frequency). Values are written in
 their shortest exact form and gaps as `nan`, so an export re-imports bit for bit onto the
 grid named in its header. Import reads `name`, `kind` and `grid`.
 
@@ -587,18 +629,21 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 ```
 <dir>/session.json                  manifest
 <dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace
+<dir>/traces/<generation>-<id>.sweep.json  a sweep trace's IR and analysis facts
 ```
 
-`session.json`: `{format: "ac2-session", version: 3, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 4, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
-[{meta: TraceMeta, grid: GridDef, file}]}` (JSON, field names as in this document). A save
+[{meta: TraceMeta, grid: GridDef, file, sweep_file: string | null}]}` (JSON, field names as
+in this document; `*.sweep.json` is `{ir: SweepIr, info: SweepInfo}`, the distortion curves
+are in the CSV). A save
 writes the trace files of a new generation first, then replaces `session.json` atomically
 (temporary file + rename), then removes older generations: a reader sees the old session
 or the new one, never a mix. `format` and `version` are read first; any other version is
 refused (no migration). Trace files hold the unsmoothed columns; each trace's display
 smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
 hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
-spectrum smoothing — are refused). A directory that holds other files is never written into.
+spectrum smoothing, version 3 had no sweep traces — are refused). A directory that holds other files is never written into.
 
 ## 8. Cross-language fixtures
 

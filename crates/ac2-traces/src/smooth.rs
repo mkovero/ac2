@@ -36,7 +36,10 @@ pub fn core_smoothing(s: Smoothing) -> (core::SmoothingFraction, core::Smoothing
 /// A smoothed spectrum is labelled as such wherever it is shown: it no longer reads as the
 /// tone level of a bin.
 pub fn smoothable(kind: TraceKind) -> bool {
-    matches!(kind, TraceKind::Transfer | TraceKind::Spectrum { .. })
+    matches!(
+        kind,
+        TraceKind::Transfer | TraceKind::Sweep | TraceKind::Spectrum { .. }
+    )
 }
 
 /// `c` (on `grid`) smoothed by `s`. Log grids (transfer traces) are smoothed as transfer

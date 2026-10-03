@@ -186,5 +186,37 @@
    },
    "internal_reference": true
   }
+ },
+ {
+  "kind": "sweep",
+  "rev": 55,
+  "payload": {
+   "id": 3,
+   "owner": "alice",
+   "name": "1083 sweep",
+   "reference_input": 1,
+   "measurement_input": 0,
+   "outputs": [
+    0,
+    1
+   ],
+   "level": -50.0,
+   "sweep": {
+    "start": 20.0,
+    "end": 20000.0,
+    "duration": 5.0,
+    "fade_in": 0.01,
+    "fade_out": 0.01
+   },
+   "sweep_duration": 4.75,
+   "post_roll": 1.0,
+   "repeats": 2,
+   "gate": null,
+   "status": {
+    "type": "done",
+    "trace": 9
+   },
+   "started_at": 1790000000000000000
+  }
  }
 ]

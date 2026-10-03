@@ -161,6 +161,7 @@ pub fn empty_state() -> State {
             drift: None,
             internal_reference: false,
         },
+        sweep: None,
     }
 }
 

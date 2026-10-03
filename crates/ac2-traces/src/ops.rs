@@ -93,7 +93,14 @@ pub fn kind_name(k: TraceKind) -> &'static str {
         TraceKind::Target => "target",
         TraceKind::Spectrum { .. } => "spectrum",
         TraceKind::Rta { .. } => "RTA",
+        TraceKind::Sweep => "sweep",
     }
+}
+
+/// Transfer functions and sweep responses (a sweep's fundamental is a transfer function on
+/// the same time base) combine with each other.
+pub fn transfer_like(k: TraceKind) -> bool {
+    matches!(k, TraceKind::Transfer | TraceKind::Sweep)
 }
 
 /// Columns of a new trace made by an operation.
@@ -158,7 +165,7 @@ pub fn capture_columns(data: &FrameData) -> Option<(TraceKind, Columns)> {
 /// The session epoch whose time base a trace's phase is in, if any.
 pub fn shared_epoch(t: &StoredTrace) -> Option<SessionEpoch> {
     match t.meta.source {
-        TraceSource::Captured { epoch, .. } => Some(epoch),
+        TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => Some(epoch),
         _ => None,
     }
 }
@@ -205,7 +212,10 @@ pub fn average(
         }
     }
     let kind = traces[0].meta.kind;
-    if traces.iter().any(|t| t.meta.kind != kind) {
+    if traces
+        .iter()
+        .any(|t| t.meta.kind != kind && !(transfer_like(t.meta.kind) && transfer_like(kind)))
+    {
         return Err(OpError::MixedKinds);
     }
     let grid = traces[0].grid.clone();
@@ -238,7 +248,9 @@ pub fn average(
                 delay: Seconds(0.0),
             })
         }
-        TraceKind::Transfer => average_tf(traces, &grid, &freqs, method, reference),
+        TraceKind::Transfer | TraceKind::Sweep => {
+            average_tf(traces, &grid, &freqs, method, reference)
+        }
     }
 }
 
@@ -402,7 +414,7 @@ fn average_tf(
 /// alignment. Transfer and target traces combine with each other; spectra and RTA only
 /// with their own kind on the same grid, and only by magnitude.
 pub fn math(a: &StoredTrace, b: &StoredTrace, op: MathOp) -> Result<Derived, OpError> {
-    let relative = |k: TraceKind| matches!(k, TraceKind::Transfer | TraceKind::Target);
+    let relative = |k: TraceKind| transfer_like(k) || k == TraceKind::Target;
     let (ka, kb) = (a.meta.kind, b.meta.kind);
     if !(relative(ka) && relative(kb)) && ka != kb {
         return Err(OpError::MixedKinds);
