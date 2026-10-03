@@ -138,3 +138,15 @@ loopback. Repeat-to-repeat IR difference −36 dB; mic noise −68 dBFS vs −56
   axis where the two drivers sum in phase. That is vertical (the drivers are stacked); 102 →
   94 cm at 1 m is only ≈ 5°. Next: 3–4 heights through the marked reference axis, 15–30°
   horizontally, and the listening position; check the rear-panel switches.
+
+## Electrical SPL calibration of input 1 (2026-10-04, ac2 54defea)
+
+In-line method: Keysight 34461A in ACV (100 mV range, slow filter) across XLR pins 2–3 of
+input 1 through a breakout, MM1 34804 connected with phantom on, gain as for use. (A first
+attempt read about 2 mV in a silent room: the leads were on one leg and ground, which shows
+half the signal plus common-mode noise; across 2–3 the silent floor reads ≈ 0.00 mV.)
+Daemon ceiling lifted to −30 dBFS for this only (operator's approval), 1 kHz sine at
+−30 dBFS on out 1 + out 2: DMM 4.315–4.325 mV (4.320 mV used), ac2 read −36.0 dBFS →
+0 dBFS = 271.3 mV; with the data-sheet 15.0 mV/Pa → **0 dBFS = 119.1 dB SPL** on input 1
+(±1 dB, labelled "electrical in-line, data sheet"). The tone was ≈ 83.2 dB SPL at the mic.
+Ceiling back at −50 dBFS afterwards. The calibration holds only at this preamp gain.
