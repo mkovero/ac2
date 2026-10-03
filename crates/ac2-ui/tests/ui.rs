@@ -762,9 +762,10 @@ fn session_dialog() {
         h.key_press(Key::ArrowDown);
     }
     h.event(Event::Text("-30".into()));
-    step_until(&mut h, "level typed", |a| {
+    step_until(&mut h, "level typed, inputs metered", |a| {
         matches!(&a.state.overlay, Overlay::Form(f)
             if f.text(ac2_ui::forms::FieldId::Level) == "-30")
+            && a.state.input_meters().len() == 2
     });
     h.state_mut().state.toasts.clear();
     h.step();
