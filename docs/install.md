@@ -8,10 +8,17 @@ ac2 ships three programs:
 | `ac2d` | the daemon: owns the audio interface, runs the measurements. |
 | `ac2` | the command-line client: set up sessions and measurements, script everything. |
 
-Release artifacts are on the [GitHub releases page](https://github.com/mkovero/ac2/releases),
-with a `SHA256SUMS` file. Check a download with `sha256sum -c SHA256SUMS --ignore-missing`
-(Linux), `shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS) or
-`Get-FileHash <file>` (Windows PowerShell).
+There is no published GitHub release yet. The installers come from the
+[Release workflow](https://github.com/mkovero/ac2/actions/workflows/release.yml): open its
+latest successful run (**Actions → Release**, signed in to GitHub) and download an artifact
+from the run's **Artifacts** list — `dist-linux`, `dist-macos`, `dist-windows`, or
+`release-<version>` with all of them and a `SHA256SUMS` file. A maintainer starts a new build
+with `gh workflow run release.yml`; a `v*` tag makes the same build into a draft release.
+Check a download with `sha256sum -c SHA256SUMS --ignore-missing` (Linux),
+`shasum -a 256 -c SHA256SUMS --ignore-missing` (macOS) or `Get-FileHash <file>` (Windows
+PowerShell). The installers are not code-signed yet; the macOS and Windows sections say how
+to open them anyway. To build from source instead, see the
+[README](../README.md#building-from-source).
 
 The goal is a clean machine to a first live transfer function in under two minutes. Each OS
 section ends at a running daemon; [First measurement](#first-measurement) is the same on all
@@ -92,7 +99,7 @@ distribution configures in `/etc/security/limits.d`.
 3. Start **ac2** from Applications. macOS asks for microphone access the first time an input
    is opened; allow it (ac2 reads your audio interface's inputs, nothing else).
 
-Unsigned builds (dry runs, or a release before the project has a Developer ID): macOS refuses
+Unsigned builds (every build so far: the project has no Developer ID yet): macOS refuses
 to open them at first. Open **System Settings → Privacy & Security** and click **Open
 Anyway** for ac2, or run `xattr -dr com.apple.quarantine /Applications/ac2.app`. For the CLI
 tools: `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
@@ -101,20 +108,23 @@ The daemon can run as a launchd agent: `launchd/io.github.mkovero.ac2d.plist` in
 image has the instructions in its header. A daemon started by launchd cannot show the
 microphone prompt, so either let the app host its daemon or start `ac2d` from Terminal.
 
+macOS builds are compiled and tested in CI but not yet verified with a real audio interface.
+
 ## Windows (10 1809 or newer, x64)
 
 1. Run `ac2-<version>-windows-x64.msi`. It installs into `C:\Program Files\ac2`, adds a
    Start-menu entry **ac2**, and puts the install folder on the system `PATH` (open a new
    terminal to see it). No Visual C++ redistributable is needed.
-2. Unsigned builds: SmartScreen shows "Windows protected your PC"; choose **More info → Run
-   anyway**.
+2. The installer is not code-signed yet: SmartScreen shows "Windows protected your PC";
+   choose **More info → Run anyway**.
 
 `ac2-<version>-windows-x64.zip` holds the same three programs for use without installing.
 Uninstall from **Settings → Apps** like any other program.
 
 On Windows the local daemon listens on `tcp://127.0.0.1:47820` and `:47821` (loopback only).
 WASAPI needs a buffer of 256 frames or more for reliable duplex; set it per session with
-`--buffer 256samples`.
+`--buffer 256samples`. So far the MSI install and the simulated rig are verified on Windows;
+WASAPI with a real interface is not yet.
 
 ## Starting a daemon
 
@@ -127,8 +137,10 @@ There are three ways; pick one.
   with it. The command-line client cannot reach it; everything it would do is in the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
   (Linux), or `ac2 daemon start` on any OS (`ac2 daemon stop` stops it). The app connects to
-  it automatically. It autosaves measurements and traces and restores them when it restarts
-  (`--no-restore` starts empty; [user guide](user-guide.md#autosave)).
+  it automatically. It autosaves measurements and traces and restores them, disarmed, when it
+  restarts; the top bar says *autosaved just now* (or why it failed). `ac2d --no-restore`
+  starts empty, `--autosave <dir>` keeps the autosave elsewhere, `--no-autosave` keeps
+  everything in memory only ([user guide](user-guide.md#autosave)).
 - **A network daemon** on a stage or FOH machine, used from another computer. See
   [Remote use](#remote-use-foh--stage).
 
@@ -169,7 +181,8 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
    creates and starts them. Later, **Ctrl+K** → *New transfer measurement…* (or *New
    spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
    (**←/→**); *Delete selected measurement* and *Close audio session* are in the palette
-   too.
+   too. While the session is open, the **Inputs** list on the left keeps a named meter per
+   input with its role (*reference*, *mic*), so levels stay in sight while you measure.
 
 **Or from a terminal**, with a per-user daemon running (see above):
 
@@ -255,11 +268,19 @@ ac2 auth pair 10.0.0.20 --server-key '<the 40-character key from the daemon host
 `auth pair` pins the daemon key and prints this client's key as one line. Add that line to
 the daemon host's `authorized_clients` file and restart the daemon. Then
 `ac2 --remote 10.0.0.20 status`, or open the app's connect dialog (`ac2-ui --connect`): paired
-rigs are selectable there, and an unpaired rig offers the same pairing steps.
+rigs are selectable there, and an unpaired rig offers the same pairing steps. Quote the key:
+Z85 keys can contain `-` and other shell characters, and a key that starts with `-` is still
+read as the value of `--server-key`.
 
-A client that is not authorized gets no answer, because CURVE refuses it silently. Its
-"not responding" message therefore also names its own fingerprint. The daemon logs every
-refused key, once per key and address every 10 s:
+A client that was never paired with a host says so before it tries to connect: *not paired
+with 10.0.0.20: no daemon key pinned for it in …; run `ac2 auth pair 10.0.0.20 --server-key
+<the key ac2d logs at startup>` (or pair in the app's connect dialog), then authorize this
+client on the daemon host*.
+
+A client that is paired but not authorized gets no answer, because CURVE refuses it
+silently. Its "not responding" message therefore also says *or this client is not authorized
+on it*, with its own fingerprint and the `authorized_clients` line to add. The daemon logs
+every refused key, once per key and address every 10 s:
 
 ```
 refused client key fingerprint 1a2b-3c4d-5e6f-7a8b-9c0d from 10.0.0.31: not in …/authorized_clients; …
