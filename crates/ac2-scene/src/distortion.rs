@@ -332,7 +332,7 @@ pub fn distortion_scene(
             });
             legend.push((
                 format!("noise floor ({})", order_name(h.order)),
-                floor_color,
+                theme.text_dim,
             ));
         }
         let curves: Vec<(String, u8, &DistortionCurve)> = s
@@ -529,7 +529,7 @@ pub fn sweep_ir_scene(
                 continue;
             }
             overlay.polylines.push(Polyline {
-                points: vec![[x, plot.y + 18.0], [x, plot.bottom()]],
+                points: vec![[x, plot.y], [x, plot.bottom() - 16.0]],
                 alpha: vec![],
                 stroke: Stroke {
                     color: theme.text_dim,
@@ -544,8 +544,8 @@ pub fn sweep_ir_scene(
             });
             overlay.labels.push(label(
                 name,
-                [x, plot.y + 18.0],
-                anchor(HAlign::Center, VAlign::Bottom),
+                [x + 3.0, plot.bottom() - 4.0],
+                anchor(HAlign::Left, VAlign::Bottom),
                 theme.small_font_size,
                 theme.text_dim,
             ));

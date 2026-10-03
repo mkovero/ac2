@@ -111,6 +111,8 @@ pub enum StimEvent {
     Lost(String),
     /// An arm / set / stop failed.
     Failed(String),
+    /// `ir.capture` started this run.
+    SweepStarted(Box<ac2_proto::model::SweepRun>),
 }
 
 /// What the UI asks for.
@@ -127,6 +129,11 @@ pub enum Request {
     StimSet(GeneratorDesired),
     /// Stop and release; without a lease, `gen.stop` (any client may stop the output).
     StimStop,
+    /// `ir.capture` under the held lease (the generator armed with the sweep).
+    Sweep {
+        request: ac2_proto::model::SweepRequest,
+        name: String,
+    },
     /// `delay.find` on `meas` in `band` over `observation`, to insert `pick` from; the
     /// reducer decides what to insert once the finding is back.
     FindDelay {
@@ -426,6 +433,7 @@ fn request_name(r: &Request) -> String {
         Request::StimArm { .. } => "arm".into(),
         Request::StimSet(_) => "stimulus".into(),
         Request::StimStop => "stop".into(),
+        Request::Sweep { name, .. } => format!("sweep {name}"),
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
         Request::Import { path, .. } => format!("import {}", path.display()),
         Request::FindDelay { .. } => "delay find".into(),
@@ -448,6 +456,10 @@ enum StimOp {
     Set(GeneratorDesired),
     Stop,
     Detect(crate::session_dialog::DetectRequest),
+    Sweep {
+        request: ac2_proto::model::SweepRequest,
+        name: String,
+    },
 }
 
 async fn session(
@@ -713,6 +725,9 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
         Request::StimStop => {
             let _ = stim.send(StimOp::Stop);
         }
+        Request::Sweep { request, name } => {
+            let _ = stim.send(StimOp::Sweep { request, name });
+        }
         Request::Reconnect => {}
     }
 }
@@ -825,6 +840,21 @@ async fn stimulus_task(client: Client, mut ops: mpsc::UnboundedReceiver<StimOp>,
                         None => StimEvent::Failed("no stimulus lease held".into()),
                     },
                     StimOp::Stop => stop(&client, &mut lease).await,
+                    StimOp::Sweep { request, name } => match &lease {
+                        Some(l) => match client
+                            .call(Command::IrCapture {
+                                lease_token: l.token(),
+                                request,
+                                name,
+                            })
+                            .await
+                            .and_then(|r| expect_body!("ir.capture", r, ReplyBody::Sweep(s) => s))
+                        {
+                            Ok(run) => StimEvent::SweepStarted(Box::new(run)),
+                            Err(e) => StimEvent::Failed(e.to_string()),
+                        },
+                        None => StimEvent::Failed("no stimulus lease held".into()),
+                    },
                     StimOp::Detect(d) => {
                         let r = detect(&client, &mut lease, d).await;
                         out.send(ConnEvent::LoopbackDetected(r));

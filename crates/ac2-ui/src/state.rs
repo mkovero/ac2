@@ -17,39 +17,45 @@ use ac2_proto::GridDef;
 use ac2_proto::model::{
     AverageMethod, CalKey, CalPart, DelayFinding, DelayOutcome, DelayPick, DelayReference,
     FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind,
-    Measurement, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode, State, TraceData,
-    TraceKind, TraceMeta,
+    Measurement, SessionRef, Signal, Smoothing, SmoothingFraction, SmoothingMode, State,
+    SweepStatus, TraceData, TraceKind, TraceMeta,
 };
-use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, TraceId};
+use ac2_proto::units::{ClientId, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
-use ac2_scene::view::{CoherencePlacement, FreqRange, IrMode, PhaseView, SpectrumStyle, ViewState};
+use ac2_scene::view::{
+    CoherencePlacement, DistortionUnit, FreqRange, IrMode, PhaseView, SpectrumStyle, ViewState,
+};
 use ac2_scene::{axis::Range, format};
 
 use crate::anim::FreqNav;
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
-use crate::forms::{Form, FormKind};
+use crate::forms::{Form, FormKind, SweepPlan};
 use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 
-/// The four panes.
+/// The panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PaneKind {
     Transfer,
     Spectrum,
     Ir,
     Spl,
+    /// Sweep results: response, harmonic distortion, the sweep's IR. Hidden until a sweep
+    /// is stored (or the operator shows it).
+    Distortion,
 }
 
 impl PaneKind {
-    pub const ALL: [PaneKind; 4] = [
+    pub const ALL: [PaneKind; 5] = [
         PaneKind::Transfer,
         PaneKind::Spectrum,
         PaneKind::Ir,
         PaneKind::Spl,
+        PaneKind::Distortion,
     ];
 
     pub fn scope(self) -> Scope {
@@ -58,6 +64,7 @@ impl PaneKind {
             PaneKind::Spectrum => Scope::Spectrum,
             PaneKind::Ir => Scope::Ir,
             PaneKind::Spl => Scope::Spl,
+            PaneKind::Distortion => Scope::Distortion,
         }
     }
 
@@ -67,6 +74,7 @@ impl PaneKind {
             PaneKind::Spectrum => "Spectrum / RTA",
             PaneKind::Ir => "Impulse response",
             PaneKind::Spl => "SPL",
+            PaneKind::Distortion => "Sweep / distortion",
         }
     }
 
@@ -81,6 +89,8 @@ impl PaneKind {
             PaneKind::Transfer | PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
             PaneKind::Spectrum => matches!(k, MeasKind::Spectrum { .. } | MeasKind::Rta { .. }),
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
+            // Sweep traces, not measurements.
+            PaneKind::Distortion => false,
         }
     }
 
@@ -107,6 +117,7 @@ impl PaneKind {
             PaneKind::Transfer | PaneKind::Ir => "transfer",
             PaneKind::Spectrum => "spectrum or RTA",
             PaneKind::Spl => "SPL",
+            PaneKind::Distortion => "sweep",
         }
     }
 }
@@ -223,7 +234,7 @@ pub struct PaneMenu {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
     pub focus: PaneKind,
-    pub shown: [bool; 4],
+    pub shown: [bool; 5],
     /// Only the focused pane.
     pub maximized: bool,
 }
@@ -232,7 +243,8 @@ impl Default for Layout {
     fn default() -> Self {
         Self {
             focus: PaneKind::Transfer,
-            shown: [true; 4],
+            // The sweep pane appears with the first sweep result.
+            shown: [true, true, true, true, false],
             maximized: false,
         }
     }
@@ -336,7 +348,12 @@ impl Stimulus {
             Signal::Pink => "pink noise".to_string(),
             Signal::PeriodicPink { .. } => "periodic pink".to_string(),
             Signal::Sine { freq } => format!("sine {}", format::freq_readout(freq.0)),
-            Signal::Ess { .. } => "sweep".to_string(),
+            Signal::Ess { sweep } => format!(
+                "sweep {} – {} {} s",
+                format::freq_readout(sweep.start.0),
+                format::freq_readout(sweep.end.0),
+                format::fixed(sweep.duration.0, 1)
+            ),
         };
         let level = self
             .level
@@ -608,6 +625,19 @@ pub enum FormMsg {
     Cancel,
 }
 
+/// The sweep measurement as this client runs it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SweepUi {
+    /// The dialog's sweep: armed (or arming) with it, Enter plays it; cleared by a stop.
+    pub plan: Option<SweepPlan>,
+    /// The run this client started, followed until it is stored or fails.
+    pub run: Option<SweepId>,
+    /// The last status of that run acted on.
+    pub seen: Option<SweepStatus>,
+    /// The sweep trace the distortion pane shows; `None`: the newest.
+    pub shown: Option<TraceId>,
+}
+
 /// Everything the UI holds.
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -633,6 +663,7 @@ pub struct AppState {
     /// time.
     pub peaks: BTreeMap<MeasId, (u64, u64, PeakHold)>,
     pub stimulus: Stimulus,
+    pub sweep: SweepUi,
     /// Remembered between runs (stimulus outputs per device).
     pub prefs: UiPrefs,
     /// `prefs` changed since the app last saved them.
@@ -698,6 +729,7 @@ impl AppState {
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
             stimulus: Stimulus::default(),
+            sweep: SweepUi::default(),
             prefs: UiPrefs::default(),
             prefs_dirty: false,
             stim_device: None,
@@ -1013,6 +1045,31 @@ impl AppState {
             );
         }
         out
+    }
+
+    /// The names of the open session's outputs: the device's channel name, else `Output N`.
+    pub fn session_output_names(&self) -> Vec<(u16, String)> {
+        let Some(o) = self.open_session() else {
+            return Vec::new();
+        };
+        let device_names = self
+            .devices
+            .iter()
+            .flatten()
+            .filter(|b| b.kind == o.backend)
+            .flat_map(|b| &b.devices)
+            .find(|d| d.id == o.output_device)
+            .and_then(|d| d.output.as_ref())
+            .and_then(|i| i.channel_names.clone());
+        (0..o.config.output_channels)
+            .map(|c| {
+                let name = device_names
+                    .as_ref()
+                    .and_then(|n| n.get(usize::from(c)).cloned())
+                    .unwrap_or_else(|| format!("Output {}", c + 1));
+                (c, name)
+            })
+            .collect()
     }
 
     /// The names of the open session's inputs, as the dialogs show them: mic name, else the
@@ -1461,6 +1518,178 @@ impl AppState {
         }
     }
 
+    /// The sweep dialog over the open session's inputs and outputs, by name.
+    fn open_sweep_dialog(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
+        let Some(o) = self.open_session().cloned() else {
+            self.error(format!(
+                "no audio session to sweep: {}",
+                open_session_hint(keymap)
+            ));
+            return;
+        };
+        let inputs = self.session_input_names();
+        let outputs = self.session_output_names();
+        let mics: Vec<u16> = self
+            .daemon()
+            .map(|s| {
+                s.inputs
+                    .iter()
+                    .filter(|i| i.mic.is_some())
+                    .map(|i| i.channel)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let sweeps = self.daemon().map_or(0, |s| {
+            s.traces
+                .iter()
+                .filter(|t| t.kind == TraceKind::Sweep)
+                .count()
+        });
+        let f = Form::sweep(
+            Some(&o),
+            sweeps,
+            &inputs,
+            &outputs,
+            &mics,
+            self.stimulus.level,
+        );
+        self.overlay = Overlay::Form(Box::new(f));
+        if self.devices.is_none() {
+            out.push(Request::Devices);
+        }
+    }
+
+    /// The dialog's sweep becomes the stimulus: armed with it (or re-sent when already
+    /// armed); Enter then plays it.
+    fn arm_sweep(&mut self, plan: SweepPlan, out: &mut Vec<Request>) {
+        let r = &plan.request;
+        self.stimulus.signal = Signal::Ess { sweep: r.sweep };
+        self.stimulus.level = r.level;
+        self.stimulus.outputs = r.outputs.clone();
+        self.sweep.plan = Some(plan);
+        match self.stimulus.phase {
+            StimPhase::Idle => {
+                if let Some(settings) = self.stimulus.settings() {
+                    self.stimulus.phase = StimPhase::Arming;
+                    self.armed_with = Some(settings.clone());
+                    out.push(Request::StimArm {
+                        settings,
+                        force: false,
+                    });
+                }
+            }
+            StimPhase::Firing | StimPhase::FireRequested => {
+                self.error("the stimulus is firing: Esc stops it, then arm the sweep");
+                self.sweep.plan = None;
+            }
+            _ => self.resend_stimulus(out),
+        }
+    }
+
+    /// Enter while armed with a sweep: `ir.capture` with the current level and outputs.
+    fn fire_sweep(&mut self, out: &mut Vec<Request>) {
+        let Some(plan) = &self.sweep.plan else {
+            return;
+        };
+        let mut request = plan.request.clone();
+        request.level = self.stimulus.level;
+        request.outputs = self.stimulus.outputs.clone();
+        if let Signal::Ess { sweep } = self.stimulus.signal {
+            request.sweep = sweep;
+        }
+        let name = plan.name.clone();
+        self.stimulus.phase = StimPhase::FireRequested;
+        out.push(Request::Sweep { request, name });
+    }
+
+    /// A stop ends the sweep set-up: the next arm is noise again.
+    fn end_sweep_mode(&mut self) {
+        if self.sweep.plan.take().is_some() {
+            self.stimulus.signal = Signal::Pink;
+        }
+    }
+
+    /// Acts on the run this client started as the mirror reports it: stored → the pane
+    /// shows it; failed → says why.
+    fn follow_sweep(&mut self) {
+        let Some(id) = self.sweep.run else {
+            return;
+        };
+        let Some(r) = self.daemon().and_then(|s| s.sweep.clone()) else {
+            return;
+        };
+        if r.id != id || self.sweep.seen.as_ref() == Some(&r.status) {
+            return;
+        }
+        self.sweep.seen = Some(r.status.clone());
+        match r.status {
+            SweepStatus::Playing { .. } => {}
+            SweepStatus::Analysing => {
+                if self.stimulus.phase == StimPhase::Firing {
+                    self.stimulus.phase = StimPhase::Armed;
+                }
+                self.toast("sweep recorded: analysing");
+            }
+            SweepStatus::Done { trace } => {
+                self.sweep.run = None;
+                self.sweep.shown = Some(trace);
+                if self.stimulus.phase == StimPhase::Firing {
+                    self.stimulus.phase = StimPhase::Armed;
+                }
+                self.layout.shown[PaneKind::Distortion.index()] = true;
+                self.layout.focus = PaneKind::Distortion;
+                self.toast(format!(
+                    "sweep stored as {:?}: U dB / %, H impulse response, Enter sweeps again",
+                    r.name
+                ));
+            }
+            SweepStatus::Failed { msg, .. } => {
+                self.sweep.run = None;
+                if self.stimulus.phase == StimPhase::Firing {
+                    self.stimulus.phase = StimPhase::Armed;
+                }
+                self.error(format!("sweep failed: {msg}"));
+            }
+        }
+    }
+
+    /// Sweep traces with their data, oldest first.
+    pub fn sweep_traces(&self) -> Vec<(&TraceData, &GridDef)> {
+        self.traces
+            .values()
+            .filter(|(t, _)| t.meta.kind == TraceKind::Sweep && t.sweep.is_some())
+            .map(|(t, g)| (t.as_ref(), g.as_ref()))
+            .collect()
+    }
+
+    /// The sweep trace the distortion pane shows: the chosen one, else the newest.
+    pub fn shown_sweep(&self) -> Option<(&TraceData, &GridDef)> {
+        let all = self.sweep_traces();
+        self.sweep
+            .shown
+            .and_then(|id| all.iter().find(|(t, _)| t.meta.id == id).copied())
+            .or_else(|| all.last().copied())
+    }
+
+    /// N / Shift+N on the sweep pane: the next / previous stored sweep.
+    fn cycle_sweep(&mut self, d: i32) {
+        let ids: Vec<TraceId> = self.sweep_traces().iter().map(|(t, _)| t.meta.id).collect();
+        if ids.is_empty() {
+            self.error("no sweep results yet: Shift+S sets one up");
+            return;
+        }
+        let cur = self.shown_sweep().map(|(t, _)| t.meta.id);
+        let i = cur
+            .and_then(|c| ids.iter().position(|x| *x == c))
+            .unwrap_or(0) as i32;
+        let id = ids[(i + d).rem_euclid(ids.len() as i32) as usize];
+        self.sweep.shown = Some(id);
+        if let Some((t, _)) = self.shown_sweep() {
+            let name = t.meta.edit.name.clone();
+            self.toast(format!("sweep pane: {name}"));
+        }
+    }
+
     fn set_finder(&mut self, f: FinderChoice) {
         self.finder = f;
         self.toast(format!("delay finder: {} · X finds", f.describe()));
@@ -1821,6 +2050,7 @@ impl AppState {
             C::StimulusArm => self.arm(false, keymap, out),
             C::StimulusTakeOver => self.arm(true, keymap, out),
             C::StimulusFire => match self.stimulus.phase {
+                StimPhase::Armed if self.sweep.plan.is_some() => self.fire_sweep(out),
                 StimPhase::Armed => {
                     if let Some(settings) = self.stimulus.settings() {
                         self.stimulus.phase = StimPhase::FireRequested;
@@ -1861,9 +2091,30 @@ impl AppState {
             C::FocusSpectrum => self.focus(PaneKind::Spectrum),
             C::FocusIr => self.focus(PaneKind::Ir),
             C::FocusSpl => self.focus(PaneKind::Spl),
+            C::FocusDistortion => self.focus(PaneKind::Distortion),
+            C::SweepNew => self.open_sweep_dialog(keymap, out),
+            C::DistortionUnit => {
+                self.view.distortion.unit = match self.view.distortion.unit {
+                    DistortionUnit::Db => DistortionUnit::Percent,
+                    DistortionUnit::Percent => DistortionUnit::Db,
+                };
+            }
+            C::SweepIr => self.view.distortion.show_ir = !self.view.distortion.show_ir,
+            C::HideDistortion => {
+                self.layout.shown[PaneKind::Distortion.index()] = false;
+                if self.layout.focus == PaneKind::Distortion {
+                    self.layout.focus = PaneKind::Transfer;
+                }
+            }
             C::NextPane => self.cycle_pane(1),
             C::PrevPane => self.cycle_pane(-1),
             C::MaximizePane => self.layout.maximized = !self.layout.maximized,
+            C::NextMeasurement if self.layout.focus == PaneKind::Distortion => {
+                self.cycle_sweep(1);
+            }
+            C::PrevMeasurement if self.layout.focus == PaneKind::Distortion => {
+                self.cycle_sweep(-1);
+            }
             C::NextMeasurement => self.cycle_meas(1),
             C::PrevMeasurement => self.cycle_meas(-1),
             C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
@@ -2374,6 +2625,7 @@ impl AppState {
                     self.view.tf.phase_reference = None;
                 }
                 self.follow_output_device();
+                self.follow_sweep();
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
                     if self.open_session().is_none() && self.overlay == Overlay::None {
@@ -2489,6 +2741,19 @@ impl AppState {
     /// what is wrong and stays.
     fn submit_form(&mut self, out: &mut Vec<Request>) {
         let open = self.open_session().cloned();
+        let ceiling = self.ceiling();
+        if let Overlay::Form(f) = &mut self.overlay
+            && f.kind == FormKind::Sweep
+        {
+            match f.sweep_plan(open.as_ref(), ceiling) {
+                Ok(plan) => {
+                    self.overlay = Overlay::None;
+                    self.arm_sweep(plan, out);
+                }
+                Err(e) => f.error = Some(e),
+            }
+            return;
+        }
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
@@ -2713,7 +2978,21 @@ impl AppState {
                     self.resend_stimulus(out);
                 }
                 let d = self.stimulus.describe();
-                self.toast(format!("armed: {d} · Enter fires · Esc stops"));
+                if self.sweep.plan.is_some() {
+                    self.toast(format!("armed: {d} · Enter plays the sweep · Esc stops"));
+                } else {
+                    self.toast(format!("armed: {d} · Enter fires · Esc stops"));
+                }
+            }
+            StimEvent::SweepStarted(run) => {
+                self.stimulus.phase = StimPhase::Firing;
+                self.sweep.run = Some(run.id);
+                self.sweep.seen = Some(run.status.clone());
+                self.toast(format!(
+                    "sweep playing: {} × {} s · Esc stops (and discards it)",
+                    run.repeats,
+                    format::fixed(run.sweep_duration.0 + run.post_roll.0, 1)
+                ));
             }
             StimEvent::Set { firing } => {
                 if self.stimulus.phase != StimPhase::Stopping {
@@ -2726,10 +3005,12 @@ impl AppState {
             }
             StimEvent::Stopped => {
                 self.stimulus.phase = StimPhase::Idle;
+                self.end_sweep_mode();
                 self.toast("stimulus stopped");
             }
             StimEvent::Lost(msg) => {
                 self.stimulus.phase = StimPhase::Idle;
+                self.end_sweep_mode();
                 self.error(format!("stimulus lease lost: {msg}"));
             }
             StimEvent::Failed(msg) => {
@@ -2849,9 +3130,12 @@ fn follow_meta(data: &mut Arc<TraceData>, m: &TraceMeta) {
     }
 }
 
-/// Renames the channel choices of a measurement dialog (the device's channel names arrived).
+/// Renames the input choices of a dialog (the device's channel names arrived).
 fn relabel(f: &mut Form, names: &[(u16, String)]) {
     for field in &mut f.fields {
+        if field.id == crate::forms::FieldId::Output {
+            continue;
+        }
         if let crate::forms::Value::Channel {
             channels, options, ..
         } = &mut field.value

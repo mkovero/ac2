@@ -710,6 +710,16 @@ impl Shared {
             C::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot)?,
             C::TraceList => ReplyBody::Traces(self.state.traces.clone()),
             C::TraceGet { trace } => self.trace_get(trace)?,
+            C::IrCapture {
+                lease_token,
+                request,
+                name,
+            } => {
+                self.expire_lease();
+                self.check_lease(lease_token)?;
+                self.refresh();
+                self.ir_capture(client, request, name)?
+            }
             C::TraceUpdate { trace, edit } => self.trace_update(trace, edit)?,
             C::TraceDelete { trace } => self.trace_delete(trace)?,
             C::TraceAverage {

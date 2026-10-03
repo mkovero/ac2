@@ -1,17 +1,18 @@
-//! The new-measurement dialogs: a few fields that build a `meas.create`. Inputs are picked
-//! by name from the session's captured inputs (with their meters in the view), never typed
-//! as numbers. Pure data; the reducer routes keys here and the view draws them. Every
-//! default is the CLI's (`ac2 meas new`), taken from the shared constructors in `ac2-proto`.
+//! The new-measurement dialogs: a few fields that build a `meas.create`, and the sweep
+//! dialog that sets up an `ir.capture`. Inputs and outputs are picked by name from the
+//! session's channels (inputs with their meters in the view), never typed as numbers. Pure
+//! data; the reducer routes keys here and the view draws them. Every default is the CLI's
+//! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
 //!
 //! The audio session dialog is [`crate::session_dialog`]; the rate and buffer parsers it
 //! shares live here.
 
 use ac2_proto::model::{
-    BandFraction, DepthPolicy, MeasConfig, MeasKind, Measurement, OpenSession, RtaConfig,
-    Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, TimeWeighting, TransferConfig,
-    Weighting,
+    BandFraction, DepthPolicy, EssSpec, MeasConfig, MeasKind, Measurement, OpenSession, RtaConfig,
+    Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, SweepInputs, SweepRequest,
+    TimeWeighting, TransferConfig, Weighting,
 };
-use ac2_proto::units::Seconds;
+use ac2_proto::units::{Dbfs, Hz, Seconds};
 
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +21,8 @@ pub enum FormKind {
     Spectrum,
     Rta,
     Spl,
+    /// Sweep measurement (harmonic distortion).
+    Sweep,
 }
 
 impl FormKind {
@@ -29,12 +32,24 @@ impl FormKind {
             FormKind::Spectrum => "New spectrum",
             FormKind::Rta => "New RTA",
             FormKind::Spl => "New SPL meter",
+            FormKind::Sweep => "Sweep measurement (response and harmonic distortion)",
         }
     }
 
     /// What Enter does.
     pub fn submit(self) -> &'static str {
-        "Enter creates and starts"
+        match self {
+            FormKind::Sweep => "Enter arms the sweep (then Enter plays it, Esc stops)",
+            _ => "Enter creates and starts",
+        }
+    }
+
+    /// The button that does it.
+    pub fn verb(self) -> &'static str {
+        match self {
+            FormKind::Sweep => "Arm",
+            _ => "Create and start",
+        }
     }
 }
 
@@ -50,6 +65,13 @@ pub enum FieldId {
     Fraction,
     Weighting,
     TimeWeighting,
+    /// The output the sweep plays on (the speaker's).
+    Output,
+    Level,
+    From,
+    To,
+    Duration,
+    Repeats,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
@@ -137,6 +159,42 @@ impl Field {
             } => channels.get(*index).copied(),
             _ => None,
         }
+    }
+}
+
+/// A sweep the dialog set up: what `ir.capture` gets once armed and fired.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweepPlan {
+    pub request: SweepRequest,
+    pub name: String,
+}
+
+/// Sweep durations offered (the CLI's default, 3 s, first).
+const DURATIONS: [(&str, f64); 4] = [
+    ("3 s", 3.0),
+    ("1 s (quick look)", 1.0),
+    ("6 s (lower floor, longer windows)", 6.0),
+    ("12 s", 12.0),
+];
+const REPEATS: [(&str, u8); 4] = [("1", 1), ("2", 2), ("4", 4), ("8", 8)];
+
+/// `20`, `20 Hz`, `20k`, `1.5 kHz`.
+pub fn parse_freq(text: &str) -> Result<f64, String> {
+    let t = text.trim().to_ascii_lowercase().replace(' ', "");
+    let (num, scale) = if let Some(n) = t.strip_suffix("khz").or_else(|| t.strip_suffix('k')) {
+        (n, 1000.0)
+    } else {
+        (t.strip_suffix("hz").unwrap_or(&t), 1.0)
+    };
+    let v = num
+        .replace(',', ".")
+        .parse::<f64>()
+        .map_err(|_| format!("not a frequency: {:?}", text.trim()))?
+        * scale;
+    if v.is_finite() && v > 0.0 {
+        Ok(v)
+    } else {
+        Err(format!("not a frequency: {:?}", text.trim()))
     }
 }
 
@@ -262,6 +320,8 @@ impl Form {
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
         let input_field = Field::channel(FieldId::Input, "Input", inputs, measurement, "");
         let fields = match kind {
+            // Built by [`Form::sweep`].
+            FormKind::Sweep => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -304,6 +364,154 @@ impl Form {
             ],
         };
         Self::new(kind, fields)
+    }
+
+    /// The sweep dialog over the session's captured `inputs` and its `outputs` (channel,
+    /// name). Reference, mic and the speaker output default as for a transfer measurement;
+    /// the loopback output (when the session has one) always plays the sweep too. `level` is
+    /// the operator's typed stimulus level, if any: there is no default.
+    pub fn sweep(
+        open: Option<&OpenSession>,
+        sweeps: usize,
+        inputs: &[(u16, String)],
+        outputs: &[(u16, String)],
+        mics: &[u16],
+        level: Option<Dbfs>,
+    ) -> Self {
+        let base = Self::measurement(FormKind::Transfer, open, &[], inputs, mics);
+        let pick = |id| base.channel(id).unwrap_or(0);
+        let loopback_out = open.and_then(|o| o.config.loopback.map(|l| l.output));
+        let speaker = outputs
+            .iter()
+            .map(|(c, _)| *c)
+            .find(|c| Some(*c) != loopback_out)
+            .or_else(|| outputs.first().map(|(c, _)| *c))
+            .unwrap_or(0);
+        let level_text = level.map_or_else(String::new, |l| {
+            ac2_scene::format::fixed(l.0, 1).replace(ac2_scene::format::MINUS, "-")
+        });
+        let hint_out = match loopback_out {
+            Some(l) => {
+                let name = outputs
+                    .iter()
+                    .find(|(c, _)| *c == l)
+                    .map_or_else(|| format!("output {}", l + 1), |(_, n)| n.clone());
+                format!("the speaker; the loopback output, {name}, plays too")
+            }
+            None => "the speaker".to_owned(),
+        };
+        let fields = vec![
+            Field::channel(
+                FieldId::Reference,
+                "Reference",
+                inputs,
+                pick(FieldId::Reference),
+                "the loopback (stimulus copy)",
+            ),
+            Field::channel(
+                FieldId::Measurement,
+                "Measurement",
+                inputs,
+                pick(FieldId::Measurement),
+                "the mic",
+            ),
+            Field::channel(FieldId::Output, "Output", outputs, speaker, &hint_out),
+            Field::text(
+                FieldId::Level,
+                "Level",
+                level_text,
+                "dBFS RMS, required (e.g. -50)",
+            ),
+            Field::text(FieldId::From, "From", "20 Hz", ""),
+            Field::text(FieldId::To, "To", "20 kHz", ""),
+            Field::choice(FieldId::Duration, "Duration", &DURATIONS.map(|d| d.0), 0),
+            Field::choice(FieldId::Repeats, "Repeats", &REPEATS.map(|r| r.0), 0),
+            Field::text(FieldId::Name, "Name", format!("Sweep {}", sweeps + 1), ""),
+        ];
+        Self::new(FormKind::Sweep, fields)
+    }
+
+    /// The sweep the dialog sets up, checked against the session and the daemon's ceiling.
+    pub fn sweep_plan(
+        &self,
+        open: Option<&OpenSession>,
+        ceiling: Option<Dbfs>,
+    ) -> Result<SweepPlan, String> {
+        let open = open.ok_or("no open audio session")?;
+        let captured = &open.config.input_channels;
+        let input = |id: FieldId, what: &str| -> Result<u16, String> {
+            let c = self
+                .channel(id)
+                .ok_or_else(|| format!("{what}: the session captures no input"))?;
+            if captured.contains(&c) {
+                Ok(c)
+            } else {
+                Err(format!("{what} {} is not captured by the session", c + 1))
+            }
+        };
+        let reference = input(FieldId::Reference, "reference input")?;
+        let measurement = input(FieldId::Measurement, "measurement input")?;
+        if reference == measurement {
+            return Err(
+                "the reference and the measurement are the same input: pick the mic as the \
+                 measurement"
+                    .into(),
+            );
+        }
+        let level = self.text(FieldId::Level).trim();
+        if level.is_empty() {
+            return Err("type the level (dBFS): a sweep has no default level".into());
+        }
+        let level = crate::state::parse_number(level, &["dbfs", "db"])?;
+        if level > 0.0 {
+            return Err("level must be ≤ 0 dBFS".into());
+        }
+        if let Some(c) = ceiling
+            && level > c.0
+        {
+            return Err(format!(
+                "above the daemon's ceiling {} dBFS",
+                ac2_scene::format::fixed(c.0, 1)
+            ));
+        }
+        let from = parse_freq(self.text(FieldId::From))?;
+        let to = parse_freq(self.text(FieldId::To))?;
+        let nyquist = f64::from(open.sample_rate_hz) / 2.0;
+        if from >= to || to > nyquist {
+            return Err(format!(
+                "the sweep must run up, within the rate's limit of {}",
+                ac2_scene::format::freq_readout(nyquist)
+            ));
+        }
+        let speaker = self
+            .channel(FieldId::Output)
+            .ok_or("no output to play on")?;
+        let mut outputs = vec![speaker];
+        if let Some(l) = open.config.loopback
+            && l.output != speaker
+        {
+            outputs.push(l.output);
+        }
+        let duration = DURATIONS[self.choice_index(FieldId::Duration).unwrap_or(0)].1;
+        let repeats = REPEATS[self.choice_index(FieldId::Repeats).unwrap_or(0)].1;
+        let name = self.text(FieldId::Name).trim();
+        if name.is_empty() {
+            return Err("type a name".into());
+        }
+        Ok(SweepPlan {
+            request: SweepRequest {
+                inputs: SweepInputs::Channels {
+                    reference,
+                    measurement,
+                },
+                outputs,
+                level: Some(Dbfs(level)),
+                sweep: EssSpec::with_fades(Hz(from), Hz(to), Seconds(duration)),
+                repeats,
+                gate: None,
+            },
+            name: name.to_owned(),
+        })
     }
 
     fn field(&self, id: FieldId) -> Option<&Field> {
@@ -428,6 +636,7 @@ impl Form {
         let pick = |id: FieldId| self.choice_index(id).unwrap_or(0);
         let smoothing = SMOOTHING[pick(FieldId::Smoothing).min(SMOOTHING.len() - 1)].1;
         let kind = match self.kind {
+            FormKind::Sweep => return Err("a sweep makes no measurement".into()),
             FormKind::Transfer => {
                 let r = input(FieldId::Reference, "reference input")?;
                 let m = input(FieldId::Measurement, "measurement input")?;

@@ -301,6 +301,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+2` | Focus spectrum / RTA pane | `focus_spectrum` |
 | `Alt+3` | Focus impulse-response pane | `focus_ir` |
 | `Alt+4` | Focus SPL pane | `focus_spl` |
+| `Alt+5` | Focus (and show) the sweep / distortion pane | `focus_distortion` |
 | `Tab` | Focus next pane | `next_pane` |
 | `Shift+Tab` | Focus previous pane | `prev_pane` |
 | `W` | Focused pane only / split layout | `maximize_pane` |
@@ -336,6 +337,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `V` | Select next shown slot (then live) | `next_slot` |
 | `Shift+V` | Select previous shown slot (then live) | `prev_slot` |
 | `Shift+O` | Open audio session… | `session_open` |
+| `Shift+S` | Sweep measurement: response and harmonic distortion… | `sweep_new` |
 
 #### Transfer function
 
@@ -388,6 +390,15 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
+
+#### Sweep / distortion
+
+| Keys | Command | `keys.toml` |
+|---|---|---|
+| `G` | IR: linear → log → ETC | `ir_mode` |
+| `U` | Distortion in dB re fundamental / percent | `distortion_unit` |
+| `H` | Sweep: distortion / impulse response | `sweep_ir` |
+| `Shift+H` | Hide the sweep / distortion pane | `hide_distortion` |
 
 #### Command palette only (`Ctrl+K`)
 

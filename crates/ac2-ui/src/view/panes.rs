@@ -90,6 +90,11 @@ fn scene_for(
         }
         PaneKind::Ir => (scenes::ir(st, theme, vp, now)?.scene, None),
         PaneKind::Spl => (scenes::spl(st, theme, vp, now)?.scene, None),
+        PaneKind::Distortion => {
+            let s = scenes::sweep(st, theme, vp, now);
+            let x = s.x_axis();
+            (s.scene(), x)
+        }
     };
     let scene = Arc::new(scene);
     app.scenes.insert(
@@ -397,7 +402,7 @@ mod tests {
     fn layout_tf_on_top() {
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 606.0));
         let l = layout(&PaneKind::ALL, area);
-        assert_eq!(l.len(), 4);
+        assert_eq!(l.len(), 5);
         assert_eq!(l[0].0, PaneKind::Transfer);
         assert!((l[0].1.height() - 372.0).abs() < 1e-3);
         // Bottom row splits evenly, no overlap.

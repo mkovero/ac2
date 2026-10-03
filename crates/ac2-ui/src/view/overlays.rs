@@ -464,7 +464,10 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                         if ui.small_button("›").clicked() {
                                             msg = Some(FormMsg::Cycle(i, 1));
                                         }
-                                        if let Some(c) = field.channel_value() {
+                                        if let Some(c) = field
+                                            .channel_value()
+                                            .filter(|_| field.id != crate::forms::FieldId::Output)
+                                        {
                                             let m = meters.get(&c).cloned().unwrap_or_else(
                                                 ac2_scene::meter::MeterReading::none,
                                             );
@@ -483,7 +486,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    let verb = "Create and start";
+                    let verb = f.kind.verb();
                     if ui.button(verb).clicked() {
                         msg = Some(FormMsg::Submit);
                     }

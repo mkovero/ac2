@@ -2755,3 +2755,231 @@ fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(!t.st.open_session_when_empty);
 }
+
+fn sweep_run(status: SweepStatus) -> SweepRun {
+    SweepRun {
+        id: SweepId(4),
+        owner: ClientId("c1".into()),
+        name: "Sweep 1".into(),
+        reference_input: 0,
+        measurement_input: 1,
+        outputs: vec![0],
+        level: Dbfs(-50.0),
+        sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+        sweep_duration: Seconds(3.1),
+        post_roll: Seconds(1.0),
+        repeats: 1,
+        gate: None,
+        status,
+        started_at: WallNs(0),
+    }
+}
+
+fn sweep_meta(id: u32) -> TraceMeta {
+    TraceMeta {
+        kind: TraceKind::Sweep,
+        source: TraceSource::IrCapture {
+            run: SweepId(4),
+            epoch: SessionEpoch(2),
+            sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+            level: Dbfs(-50.0),
+            repeats: 1,
+            reference_input: 0,
+            measurement_input: 1,
+        },
+        depth: None,
+        ..stored(id, None, 2)
+    }
+}
+
+fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
+    let grid = GridDef::Log {
+        ppo: 12,
+        k_min: -60,
+        k_max: 50,
+    };
+    let n = ac2_scene::grid::column_frequencies(&grid).len();
+    let curve = |l: f32| DistortionCurve {
+        level_db: vec![l; n],
+        floor_db: vec![-80.0; n],
+    };
+    let data = TraceData {
+        meta: sweep_meta(id),
+        mag_db: vec![-6.0; n],
+        phase_deg: Some(vec![0.0; n]),
+        coherence: None,
+        sweep: Some(SweepData {
+            harmonics: vec![HarmonicCurve {
+                order: 2,
+                curve: curve(-40.0),
+            }],
+            thd: curve(-40.0),
+            ir: SweepIr {
+                t0: Seconds(-0.1),
+                dt: Seconds(0.001),
+                linear: vec![0.0; 200],
+                etc_db: vec![-90.0; 200],
+            },
+            info: SweepInfo {
+                sample_rate: Hz(48_000.0),
+                rate: Seconds(0.45),
+                duration: Seconds(3.1),
+                repeats: 1,
+                arrival: Seconds(0.003),
+                reference_level: Db(0.0),
+                window_pre: Seconds(0.008),
+                window_post: Seconds(0.09),
+                gate_pre: Seconds(0.03),
+                gate: Seconds(0.9),
+                floor_margin: Db(6.0),
+                clipped: false,
+            },
+        }),
+    };
+    (Arc::new(data), Arc::new(grid))
+}
+
+/// The sweep from the palette's dialog to the distortion pane, keyboard only: the dialog
+/// arms the sweep, Enter plays it, the stored result opens the pane, Esc ends sweep mode.
+#[test]
+fn sweep_from_the_dialog_to_the_distortion_pane() {
+    let mut t = T::new();
+    assert!(
+        !t.st.layout.is_shown(PaneKind::Distortion),
+        "hidden until a sweep"
+    );
+    t.type_key("Shift+S", "S");
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("no dialog: {:?}", t.st.overlay);
+    };
+    assert_eq!(f.kind, FormKind::Sweep);
+    // Inputs by name, the mic as the measurement, the speaker output.
+    assert_eq!(f.channel(crate::forms::FieldId::Reference), Some(0));
+    assert_eq!(f.channel(crate::forms::FieldId::Measurement), Some(1));
+    assert_eq!(f.channel(crate::forms::FieldId::Output), Some(0));
+    assert_eq!(f.text(crate::forms::FieldId::Name), "Sweep 1");
+    // No level, no sweep: the dialog says so and stays.
+    assert!(t.key("Enter").is_empty());
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("dialog closed");
+    };
+    assert!(
+        f.error.as_deref().is_some_and(|e| e.contains("level")),
+        "{:?}",
+        f.error
+    );
+    let at = f
+        .fields
+        .iter()
+        .position(|x| x.id == crate::forms::FieldId::Level)
+        .expect("level field");
+    for _ in 0..at {
+        t.key("Down");
+    }
+    t.text("-50");
+    let r = t.key("Enter");
+    let settings = r
+        .iter()
+        .find_map(|x| match x {
+            Request::StimArm { settings, force } => {
+                assert!(!force);
+                Some(settings.clone())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no arm: {r:?}"));
+    assert_eq!(settings.level, Dbfs(-50.0));
+    assert_eq!(settings.outputs, vec![0]);
+    assert!(matches!(settings.signal, Signal::Ess { sweep } if sweep.start == Hz(20.0)));
+    assert_eq!(t.st.overlay, Overlay::None);
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert!(
+        t.last_toast().contains("Enter plays the sweep"),
+        "{}",
+        t.last_toast()
+    );
+
+    // Enter plays it: `ir.capture` under the held lease.
+    let r = t.key("Enter");
+    match r.as_slice() {
+        [Request::Sweep { request, name }] => {
+            assert_eq!(name, "Sweep 1");
+            assert_eq!(request.level, Some(Dbfs(-50.0)));
+            assert_eq!(
+                request.inputs,
+                SweepInputs::Channels {
+                    reference: 0,
+                    measurement: 1
+                }
+            );
+            assert_eq!(request.repeats, 1);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(t.st.stimulus.phase, StimPhase::FireRequested);
+    t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
+        sweep_run(SweepStatus::Playing { repeat: 1 }),
+    ))));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+
+    // Stored: the pane appears with it, focused; armed again for another sweep.
+    let mut s = daemon_state();
+    s.traces = vec![sweep_meta(7)];
+    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(7) }));
+    t.conn(mirror(s));
+    assert!(t.st.layout.is_shown(PaneKind::Distortion));
+    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.sweep.shown, Some(TraceId(7)));
+    let (d, g) = sweep_data(7);
+    t.conn(ConnEvent::Trace(d, g));
+    assert_eq!(t.st.shown_sweep().map(|(d, _)| d.meta.id), Some(TraceId(7)));
+    // The sweep is drawn like a transfer function in the transfer pane too.
+    assert_eq!(t.st.view.distortion.unit, DistortionUnit::Db);
+    t.key("U");
+    assert_eq!(t.st.view.distortion.unit, DistortionUnit::Percent);
+    t.key("H");
+    assert!(t.st.view.distortion.show_ir);
+    t.key("G");
+    assert_eq!(t.st.view.ir.mode, IrMode::Log);
+
+    // Esc stops and ends sweep mode: the next arm is noise again.
+    let r = t.key("Esc");
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(t.st.sweep.plan.is_none());
+    assert_eq!(t.st.stimulus.signal, Signal::Pink);
+    // Shift+H hides the pane again.
+    t.key("Shift+H");
+    assert!(!t.st.layout.is_shown(PaneKind::Distortion));
+    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+}
+
+#[test]
+fn a_failed_sweep_says_why_and_stays_armed() {
+    let mut t = T::new();
+    t.type_key("Shift+S", "S");
+    let Overlay::Form(f) = &mut t.st.overlay else {
+        panic!("no dialog");
+    };
+    f.set_text(crate::forms::FieldId::Level, "-50");
+    t.key("Enter");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    t.key("Enter");
+    t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
+        sweep_run(SweepStatus::Playing { repeat: 1 }),
+    ))));
+    let mut s = daemon_state();
+    s.sweep = Some(sweep_run(SweepStatus::Failed {
+        reason: SweepFailure::NoReference,
+        msg: "the reference input carries no sweep".into(),
+    }));
+    t.conn(mirror(s));
+    assert!(
+        t.last_toast().contains("carries no sweep"),
+        "{}",
+        t.last_toast()
+    );
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert!(!t.st.layout.is_shown(PaneKind::Distortion));
+}

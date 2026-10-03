@@ -744,4 +744,70 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("transfer_dialog", &snapshot_options());
+    h.key_press(Key::Escape);
+    step_until(&mut h, "dialog closed", |a| {
+        a.state.overlay == Overlay::None
+    });
+
+    // Shift+S: the sweep dialog, inputs and outputs by name; a typed level arms it, Enter
+    // plays it and the result opens the distortion pane.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::S);
+    h.event(Event::Text("S".into()));
+    step_until(
+        &mut h,
+        "sweep dialog",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Sweep),
+    );
+    for _ in 0..3 {
+        h.key_press(Key::ArrowDown);
+    }
+    h.event(Event::Text("-30".into()));
+    step_until(&mut h, "level typed", |a| {
+        matches!(&a.state.overlay, Overlay::Form(f)
+            if f.text(ac2_ui::forms::FieldId::Level) == "-30")
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("sweep_dialog", &snapshot_options());
+    h.key_press(Key::Enter);
+    step_until(&mut h, "armed with the sweep", |a| {
+        a.state.daemon().is_some_and(|s| {
+            s.generator.armed
+                && s.generator
+                    .settings
+                    .as_ref()
+                    .is_some_and(|g| matches!(g.signal, ac2_proto::model::Signal::Ess { .. }))
+        })
+    });
+    h.key_press(Key::Enter);
+    step_until(&mut h, "sweep stored and shown", |a| {
+        a.state.layout.focus == PaneKind::Distortion && a.state.shown_sweep().is_some()
+    });
+    assert_eq!(fake.executions("ir.capture"), 1);
+    // The focused pane alone, for the picture.
+    h.key_press(Key::W);
+    step_until(&mut h, "maximized", |a| a.state.layout.maximized);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("sweep_distortion", &snapshot_options());
+    h.key_press(Key::U);
+    step_until(&mut h, "percent", |a| {
+        a.state.view.distortion.unit == ac2_scene::view::DistortionUnit::Percent
+    });
+    h.key_press(Key::H);
+    step_until(&mut h, "sweep IR", |a| a.state.view.distortion.show_ir);
+    // G: the log view, where the harmonics' impulses read at their level.
+    h.key_press(Key::G);
+    step_until(&mut h, "log IR", |a| {
+        a.state.view.ir.mode == ac2_scene::view::IrMode::Log
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    h.snapshot_options("sweep_ir", &snapshot_options());
+    h.key_press(Key::Escape);
+    step_until(&mut h, "stopped and released", |a| {
+        a.state
+            .daemon()
+            .is_some_and(|s| s.generator.owner.is_none() && !s.generator.armed)
+    });
 }

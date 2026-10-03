@@ -103,10 +103,20 @@ fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
         || "no level".to_string(),
         |l| format!("{} dBFS", format::signed(l.0, 1)),
     );
-    let hint = match st.stimulus.phase {
-        StimPhase::Idle if st.stimulus.level.is_none() => "L types a level".to_string(),
-        StimPhase::Idle => "Space arms".to_string(),
-        StimPhase::Armed => "Enter fires · Esc stops".to_string(),
+    let run = st
+        .daemon()
+        .and_then(|s| s.sweep.as_ref())
+        .filter(|r| r.active());
+    let sweep = st.sweep.plan.is_some();
+    let hint = match (run.map(|r| (&r.status, r.repeats)), st.stimulus.phase) {
+        (Some((ac2_proto::model::SweepStatus::Playing { repeat }, n)), _) => {
+            format!("sweep {repeat}/{n} playing · Esc stops")
+        }
+        (Some(_), _) => "sweep recorded · analysing".to_string(),
+        (None, StimPhase::Idle) if st.stimulus.level.is_none() => "L types a level".to_string(),
+        (None, StimPhase::Idle) => "Space arms".to_string(),
+        (None, StimPhase::Armed) if sweep => "Enter plays the sweep · Esc stops".to_string(),
+        (None, StimPhase::Armed) => "Enter fires · Esc stops".to_string(),
         _ => "Esc stops".to_string(),
     };
     ui.label(RichText::new(hint).color(ch.dim));
@@ -114,7 +124,8 @@ fn stimulus(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
         ui.label(RichText::new(format!("held by {o}")).color(ch.warn));
     }
     ui.label(format!(
-        "{level} → out {}",
+        "{}{level} → out {}",
+        if sweep { "sweep " } else { "" },
         outputs_text(&st.stimulus.outputs)
     ));
     let badge_text = RichText::new(badge)

@@ -27,15 +27,17 @@ pub enum Scope {
     Spectrum,
     Ir,
     Spl,
+    Distortion,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 5] = [
+    pub const ALL: [Scope; 6] = [
         Scope::Global,
         Scope::Transfer,
         Scope::Spectrum,
         Scope::Ir,
         Scope::Spl,
+        Scope::Distortion,
     ];
 
     pub fn name(self) -> &'static str {
@@ -45,6 +47,7 @@ impl Scope {
             Scope::Spectrum => "spectrum",
             Scope::Ir => "ir",
             Scope::Spl => "spl",
+            Scope::Distortion => "distortion",
         }
     }
 
@@ -55,6 +58,7 @@ impl Scope {
             Scope::Spectrum => "Spectrum / RTA",
             Scope::Ir => "Impulse response",
             Scope::Spl => "SPL",
+            Scope::Distortion => "Sweep / distortion",
         }
     }
 
@@ -351,6 +355,7 @@ commands! {
     FocusSpectrum => "focus_spectrum", "Focus spectrum / RTA pane", [Global];
     FocusIr => "focus_ir", "Focus impulse-response pane", [Global];
     FocusSpl => "focus_spl", "Focus SPL pane", [Global];
+    FocusDistortion => "focus_distortion", "Focus (and show) the sweep / distortion pane", [Global];
     NextPane => "next_pane", "Focus next pane", [Global];
     PrevPane => "prev_pane", "Focus previous pane", [Global];
     MaximizePane => "maximize_pane", "Focused pane only / split layout", [Global];
@@ -403,6 +408,7 @@ commands! {
     CalDelete => "cal_delete", "Calibration: delete sensitivity and mic curve (input=mic)…", [Global];
     CalDeleteSensitivity => "cal_delete_sensitivity", "Calibration: delete sensitivity only (input=mic)…", [Global];
     CalDeleteCurve => "cal_delete_curve", "Calibration: delete mic curve only (input=mic)…", [Global];
+    SweepNew => "sweep_new", "Sweep measurement: response and harmonic distortion…", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
@@ -446,7 +452,11 @@ commands! {
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
     PeakHold => "peak_hold", "Peak hold on / off", [Spectrum];
 
-    IrMode => "ir_mode", "IR: linear → log → ETC", [Ir];
+    IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
+
+    DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
+    SweepIr => "sweep_ir", "Sweep: distortion / impulse response", [Distortion];
+    HideDistortion => "hide_distortion", "Hide the sweep / distortion pane", [Distortion];
 }
 
 /// One key in one scope.
@@ -488,6 +498,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::FocusSpectrum, S::Global, alt(K::Num2)),
         (C::FocusIr, S::Global, alt(K::Num3)),
         (C::FocusSpl, S::Global, alt(K::Num4)),
+        (C::FocusDistortion, S::Global, alt(K::Num5)),
+        (C::SweepNew, S::Global, sh(K::S)),
         (C::NextPane, S::Global, k(K::Tab)),
         (C::PrevPane, S::Global, sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
@@ -558,6 +570,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spectrum, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::H)),
         (C::IrMode, S::Ir, k(K::G)),
+        (C::IrMode, S::Distortion, k(K::G)),
+        (C::DistortionUnit, S::Distortion, k(K::U)),
+        (C::SweepIr, S::Distortion, k(K::H)),
+        (C::HideDistortion, S::Distortion, sh(K::H)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()

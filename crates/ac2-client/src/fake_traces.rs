@@ -1,6 +1,8 @@
 //! Trace and session commands of the fake daemon, on the same `ac2-traces` code the real
 //! daemon uses. Captures are synthetic: a flat −6 dB response with a 2nd-order roll-off
-//! below 80 Hz, the measurement's delay compensated, coherence 0.95.
+//! below 80 Hz, the measurement's delay compensated, coherence 0.95. A sweep (`ir.capture`)
+//! is stored at once (no audio): that response with H2 at −40 dB rising 12 dB/oct below
+//! 100 Hz, H3 at −50 dB, H4 and H5 in the noise, the floor at −80 dB.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,6 +22,8 @@ use super::{Shared, err};
 #[derive(Debug, Default)]
 pub(super) struct FakeTraces {
     pub(super) data: HashMap<TraceId, (GridDef, Columns)>,
+    pub(super) sweeps: HashMap<TraceId, SweepData>,
+    pub(super) next_sweep: u32,
 }
 
 fn session_err(e: SessionError) -> ProtoError {
@@ -78,7 +82,7 @@ impl Shared {
             meta,
             grid,
             columns,
-            sweep: None,
+            sweep: self.traces.sweeps.get(&id).cloned(),
         })
     }
 
@@ -90,6 +94,92 @@ impl Shared {
         self.traces.data.insert(meta.id, (grid, columns));
         self.commit(Change::Trace(Patch::Set(meta.clone())));
         ReplyBody::Trace(meta)
+    }
+
+    /// `ir.capture` (lease already checked): needs the generator armed and a level, then
+    /// stores a synthetic sweep trace and reports the run playing, then done.
+    pub(super) fn ir_capture(
+        &mut self,
+        client: &ClientId,
+        req: SweepRequest,
+        name: String,
+    ) -> Result<ReplyBody, ProtoError> {
+        meta::check_edit(&name, None).map_err(|e| err(ErrorCode::Invalid, e))?;
+        let Some(level) = req.level else {
+            return Err(err(ErrorCode::Refused, "type the sweep level"));
+        };
+        if level.0 > self.state.generator.ceiling.0 {
+            return Err(err(ErrorCode::Refused, "level above ceiling"));
+        }
+        if !self.state.generator.armed || self.state.generator.firing {
+            return Err(err(
+                ErrorCode::Refused,
+                "arm the stimulus first (gen.set armed)",
+            ));
+        }
+        let (reference, measurement) = match req.inputs {
+            SweepInputs::Channels {
+                reference,
+                measurement,
+            } => (reference, measurement),
+            SweepInputs::Measurement { meas } => match &self.meas(meas)?.config.kind {
+                MeasKind::Transfer { config } => (config.reference_input, config.measurement_input),
+                _ => return Err(err(ErrorCode::Invalid, "not a transfer measurement")),
+            },
+        };
+        let (f1, f2) = (req.sweep.start.0, req.sweep.end.0);
+        let k = |f: f64| (f / 1000.0).log2() * 48.0;
+        let grid = GridDef::Log {
+            ppo: 48,
+            k_min: k(f1).floor() as i32,
+            k_max: k(f2).ceil() as i32,
+        };
+        let id = SweepId(self.traces.next_sweep.max(1));
+        self.traces.next_sweep = id.0 + 1;
+        let rate = req.sweep.duration.0 / (f2 / f1).ln();
+        let mut run = SweepRun {
+            id,
+            owner: client.clone(),
+            name: name.clone(),
+            reference_input: reference,
+            measurement_input: measurement,
+            outputs: req.outputs.clone(),
+            level,
+            sweep: req.sweep,
+            sweep_duration: req.sweep.duration,
+            post_roll: Seconds(1.0),
+            repeats: req.repeats,
+            gate: req.gate,
+            status: SweepStatus::Playing { repeat: 1 },
+            started_at: WallNs(1_790_000_000_000_000_000),
+        };
+        let started = run.clone();
+        self.commit(Change::Sweep(run.clone()));
+        let (columns, sweep) = synthetic_sweep(&grid, f2, rate, req.repeats);
+        let tid = self.alloc_trace();
+        let mut meta = Self::new_meta(
+            tid,
+            name,
+            None,
+            TraceKind::Sweep,
+            TraceSource::IrCapture {
+                run: id,
+                epoch: self.state.session.epoch,
+                sweep: req.sweep,
+                level,
+                repeats: req.repeats,
+                reference_input: reference,
+                measurement_input: measurement,
+            },
+            &grid,
+            sweep.info.arrival,
+        );
+        meta.mic = None;
+        self.add_trace(meta, grid, columns);
+        self.traces.sweeps.insert(tid, sweep);
+        run.status = SweepStatus::Done { trace: tid };
+        self.commit(Change::Sweep(run));
+        Ok(ReplyBody::Sweep(started))
     }
 
     fn alloc_trace(&mut self) -> TraceId {
@@ -189,6 +279,7 @@ impl Shared {
             return Err(err(ErrorCode::Refused, format!("trace {id} is locked")));
         }
         self.traces.data.remove(&id);
+        self.traces.sweeps.remove(&id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
         Ok(ReplyBody::Ack { rev })
     }
@@ -374,6 +465,7 @@ impl Shared {
             self.commit(Change::Trace(Patch::Deleted(id)));
         }
         self.traces.data.clear();
+        self.traces.sweeps.clear();
         let newest = s
             .traces
             .iter()
@@ -424,6 +516,9 @@ impl Shared {
         for t in s.traces {
             self.next_id = self.next_id.max(t.meta.id.0 + 1);
             self.grids.insert(t.grid.id(), t.grid.clone());
+            if let Some(sw) = t.sweep {
+                self.traces.sweeps.insert(t.meta.id, sw);
+            }
             self.traces.data.insert(t.meta.id, (t.grid, t.columns));
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
@@ -444,4 +539,96 @@ impl Shared {
                 .collect(),
         ))
     }
+}
+
+/// A synthetic sweep result on `grid`: the capture response, H2 at −40 dB rising 12 dB/oct
+/// below 100 Hz, H3 at −50 dB, H4 and H5 below the −80 dB floor, nothing above `f2 / k`.
+fn synthetic_sweep(grid: &GridDef, f2: f64, rate: f64, repeats: u8) -> (Columns, SweepData) {
+    let f = frequencies(grid);
+    let mut columns = synthetic(grid);
+    columns.coherence = None;
+    let curve = |k: f64, level: &dyn Fn(f64) -> f64| DistortionCurve {
+        level_db: f
+            .iter()
+            .map(|x| {
+                if k * x <= f2 {
+                    level(*x) as f32
+                } else {
+                    f32::NAN
+                }
+            })
+            .collect(),
+        floor_db: f
+            .iter()
+            .map(|x| if k * x <= f2 { -80.0 } else { f32::NAN })
+            .collect(),
+    };
+    let h2 = |x: f64| -40.0 + 10.0 * (1.0 + (100.0 / x).powi(4)).log10();
+    let h3 = |_: f64| -50.0;
+    let low = |_: f64| -84.0;
+    let harmonics = vec![
+        HarmonicCurve {
+            order: 2,
+            curve: curve(2.0, &h2),
+        },
+        HarmonicCurve {
+            order: 3,
+            curve: curve(3.0, &h3),
+        },
+        HarmonicCurve {
+            order: 4,
+            curve: curve(4.0, &low),
+        },
+        HarmonicCurve {
+            order: 5,
+            curve: curve(5.0, &low),
+        },
+    ];
+    let thd = curve(2.0, &|x: f64| {
+        let p = |db: f64| 10f64.powf(db / 10.0);
+        let mut s = p(h2(x));
+        if 3.0 * x <= f2 {
+            s += p(-50.0);
+        }
+        10.0 * s.log10()
+    });
+    let fs = 48_000.0;
+    let dt = 1.0 / fs;
+    let t0 = -rate * 5f64.ln() - 0.01;
+    let n = ((0.25 - t0) / dt) as usize;
+    let at = |t: f64| ((t - t0) / dt).round() as usize;
+    let mut linear = vec![0.0f32; n];
+    let mut etc_db = vec![-90.0f32; n];
+    for (k, a) in [(1.0f64, 0.5f32), (2.0, 0.005), (3.0, 0.0016)] {
+        let i = at(-rate * k.ln());
+        if i < n {
+            linear[i] = a;
+            etc_db[i] = 20.0 * a.log10();
+        }
+    }
+    let sweep = SweepData {
+        harmonics,
+        thd,
+        ir: SweepIr {
+            t0: Seconds(t0),
+            dt: Seconds(dt),
+            linear,
+            etc_db,
+        },
+        info: SweepInfo {
+            sample_rate: Hz(fs),
+            rate: Seconds(rate),
+            duration: Seconds(rate * (f2 / 20.0).ln()),
+            repeats,
+            arrival: Seconds(0.0125),
+            reference_level: Db(0.0),
+            window_pre: Seconds(0.1 * rate * 1.2f64.ln()),
+            window_post: Seconds(0.9 * rate * 1.25f64.ln()),
+            gate_pre: Seconds(0.1 * rate * 2f64.ln()),
+            gate: Seconds(0.25),
+            floor_margin: Db(6.0),
+            clipped: false,
+        },
+    };
+    (columns, sweep)
 }

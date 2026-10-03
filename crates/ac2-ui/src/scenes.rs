@@ -11,6 +11,7 @@ use ac2_proto::model::{LevelScale, MeasKind, Measurement, Polarity, TraceKind, T
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
+use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::grid::{column_edges, column_frequencies};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::primitives::Viewport;
@@ -332,6 +333,55 @@ pub fn ir(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<IrSc
         theme,
         size,
     ))
+}
+
+/// What the sweep pane draws.
+#[derive(Debug)]
+pub enum SweepPane {
+    Distortion(Box<DistortionScene>),
+    Ir(Box<IrScene>),
+}
+
+impl SweepPane {
+    pub fn scene(self) -> ac2_scene::Scene {
+        match self {
+            SweepPane::Distortion(s) => s.scene,
+            SweepPane::Ir(s) => s.scene,
+        }
+    }
+
+    /// The frequency axis, for navigation (the IR view has a time axis).
+    pub fn x_axis(&self) -> Option<ac2_scene::axis::Mapping> {
+        match self {
+            SweepPane::Distortion(s) => Some(s.x_axis.mapping),
+            SweepPane::Ir(_) => None,
+        }
+    }
+}
+
+/// The sweep pane: the shown sweep trace's distortion, or its impulse response.
+pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPane {
+    let status = status(st, &[], None, now);
+    let shown = st.shown_sweep();
+    if st.view.distortion.show_ir
+        && let Some((d, _)) = shown
+    {
+        let c = d.meta.edit.color;
+        let color = ac2_scene::primitives::Color::from_rgba8([c.r, c.g, c.b, 255]);
+        if let Some(s) = sweep_ir_scene(d, color, &status, &st.view, theme, size) {
+            return SweepPane::Ir(Box::new(s));
+        }
+    }
+    let freqs = shown
+        .map(|(_, g)| column_frequencies(g))
+        .unwrap_or_default();
+    let view = shown.map(|(d, _)| SweepView {
+        data: d,
+        freqs: &freqs,
+    });
+    SweepPane::Distortion(Box::new(distortion_scene(
+        view, &status, &st.view, theme, size,
+    )))
 }
 
 /// The SPL measurement the pane shows (else the first one with a frame).
