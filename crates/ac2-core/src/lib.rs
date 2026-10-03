@@ -10,6 +10,7 @@ pub mod average;
 pub mod delay;
 pub mod generator;
 pub mod ir_view;
+pub mod leq;
 pub mod loopback;
 pub mod mic_curve;
 pub mod mtw;
