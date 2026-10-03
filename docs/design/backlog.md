@@ -3,6 +3,14 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## Windows (2026-10-03, operator's Windows 11 VM, release build of 6c122d5)
+
+- MSI installed cleanly (unsigned: SmartScreen "More info → Run anyway"), Start-menu entry and
+  PATH fine; the app ran the simulated rig. Real audio (WASAPI) on Windows is still untested.
+- **Sluggish without a GPU** (VM, software adapter). When wgpu reports a CPU / software adapter
+  (WARP, llvmpipe, lavapipe), lower the redraw rate and skip costly effects (MSAA, blur), and
+  say so once ("software rendering: reduced frame rate"); measure frame time before and after.
+
 ## Calibration visibility (2026-10-03)
 
 - **No calibration view in the app.** The palette can delete a sensitivity / mic curve but
