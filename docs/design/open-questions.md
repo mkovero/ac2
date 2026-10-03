@@ -44,7 +44,7 @@ note at the start of the phase that implements them, within the decisions here.
 | 4c | Flat-top window available as an option in spectrum view, not default. |
 | 6a | Dead-man heartbeat 0.5 s, timeout 1.5 s (configurable); daemon fades stimulus out on timeout. |
 | 7a/7b | Calibration tied to device + input channel + mic name. Mismatch → "cal from other mic / input"; otherwise shows cal age. No gain/phantom fields, no prompts. Recalibrating after gain changes is the operator's job. |
-| 7c | Mic curve: TF / spectrum / RTA subtract file dB from displayed magnitude; SPL applies it as a filter before weighting; phase never touched; on/off per input. |
+| 7c | Mic curve: TF / spectrum / RTA subtract file dB from displayed magnitude; SPL applies it as a filter before weighting; phase never touched; on/off per input (refined in [q7-calibration.md](q7-calibration.md) §10: a mic has several curves and each input chooses one, or none). |
 | 8b | Overlay reference = selected trace's measured delay (pick key to change); others drawn relative to it; per-trace nudge on top. |
 | M1 | MTW averaging: equal statistical confidence across stages is the default; a "fast LF" option caps the deepest stage's settling at ~1 s and shows its higher coherence floor. |
 | U1 | Banners live in a strip above the plots, outside the data area; plots shrink while a banner is up. |
@@ -82,7 +82,7 @@ Round 5 (T1–T3, C1–C3): proposals adopted provisionally and implemented; row
 
 ## Q1 — Delay target and acceptance (before phase 2)
 
-**Design:** [q1-delay-finder.md](q1-delay-finder.md). Decisions D1–D4 accepted provisionally (sheet).
+**Design:** [q1-delay-finder.md](q1-delay-finder.md) (implemented). Decisions D1–D4 accepted provisionally (sheet).
 
 **Question.** What exactly does the finder report, and when do we trust it?
 
@@ -112,7 +112,7 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q2 — Delivery freshness (before phase 3)
 
-**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (proposed).
+**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (implemented).
 
 **Question.** What freshness can the data path actually guarantee, end to end?
 
@@ -130,7 +130,7 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q3 — Duplex timing (before phase 1)
 
-**Design:** [q3-loopback-timing.md](q3-loopback-timing.md) (proposed). Spike input: [spike-audio-duplex.md](spike-audio-duplex.md).
+**Design:** [q3-loopback-timing.md](q3-loopback-timing.md) (implemented). Spike input: [spike-audio-duplex.md](spike-audio-duplex.md).
 
 **Question.** How is the generator→loopback offset monitored continuously (decided: 3a, 3b)?
 
@@ -144,7 +144,7 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q4 — Level normalisation (before phase 2)
 
-**Design:** [q4-level-normalisation.md](q4-level-normalisation.md) (proposed).
+**Design:** [q4-level-normalisation.md](q4-level-normalisation.md) (implemented).
 
 **Question.** Exact formulas and dB references for every displayed level.
 
@@ -162,7 +162,7 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q5 — Replay, epochs and frame identity (before phase 3)
 
-**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (proposed).
+**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (implemented).
 
 **Question.** How does a client always know which state and which audio a frame belongs to?
 
@@ -178,7 +178,7 @@ threshold of the strongest) and the estimator as regularised H1 → IFFT on unif
 
 ## Q6 — Stimulus lease protocol (before phase 3)
 
-**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (proposed).
+**Design:** [q2-q5-q6-protocol.md](q2-q5-q6-protocol.md) (implemented).
 
 **Question.** Exact lease mechanics so that output is never orphaned or contested.
 
@@ -196,8 +196,9 @@ disarms, stop is universal, CLI holds a lease only while a foreground command ru
 
 ## Q7 — Calibration store (before phase 5)
 
-**Design:** [q7-calibration.md](q7-calibration.md) (accepted; implemented in phase 5, with
-K8's mic name per input in the session's input setup).
+**Design:** [q7-calibration.md](q7-calibration.md) (implemented in phase 5, with K8's mic
+name per input in the session's input setup; several curves per mic and an active curve per
+input, §10).
 
 **Question.** Calibration store details (decided: 7a/7b, 7c — device + channel + mic name,
 cal age, no gain/phantom fields).
@@ -212,6 +213,10 @@ cal age, no gain/phantom fields).
 ---
 
 ## Q8 — Phase comparison time reference (before phase 4)
+
+**Answered by decisions 8a/8b** (no separate note); implemented in `ac2-scene` (overlays
+relative to the selected trace's measured delay, **E** picks the phase reference, per-trace
+nudge, traces from another session epoch or imported marked independent).
 
 **Question.** How do overlaid traces show true relative arrival, not just per-trace alignment?
 

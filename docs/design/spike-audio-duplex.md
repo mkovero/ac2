@@ -1,5 +1,10 @@
 # Spike: audio duplex (phase 0)
 
+> **History.** A record of what the phase 0 spike (`spikes/audio-duplex`) measured, not a
+> description of the product. The backends live in `crates/ac2-audio`; Linux there is JACK
+> only (decision L1 in `open-questions.md`), so the ALSA-through-cpal results below no longer
+> apply to a shipped path.
+
 **Question.** Can one small trait give RT-safe, multichannel, sample-indexed duplex capture
 on all three OSes, using cpal (CoreAudio / WASAPI / ALSA) and JACK (the `jack` crate)?
 

@@ -51,7 +51,7 @@ the commit when it lands.
 
 ## Done
 
-Calibration visibility (field, 2026-10-03; `docs/design/q7-calibration.md` §10):
+Calibration visibility (field, 2026-10-03; `docs/design/q7-calibration.md` §10; de17a13):
 - **No calibration view in the app** → the Calibrations view (palette **Calibrations…**,
   **Input setup…** on the selected measurement's input): what each input uses (mic, curve,
   sensitivity with calibrator and age), every mic with its curves, every sensitivity
@@ -68,7 +68,7 @@ Calibration visibility (field, 2026-10-03; `docs/design/q7-calibration.md` §10)
   day's sweeps); earlier ac2 traces are uncorrected (`ac2 trace mic` fixes them). After the
   update the store is set aside: re-import both MM1 files and calibrate again.
 
-Flaky tests (seen on CI and under load, 2026-10-03), by cause:
+Flaky tests (seen on CI and under load, 2026-10-03), by cause (db95852, d8fc428, 927c69c):
 - **A capture could return the result before the one a client was shown** (ac2d
   `traces::spectrum_smoothing_live_and_captured` "bin 1: live … vs ac2-core …",
   `live_smoothing_and_resmoothed_captures` "301 Hz: … vs live …",
@@ -98,12 +98,12 @@ Flaky tests (seen on CI and under load, 2026-10-03), by cause:
   `cargo test --workspace` runs (load 16–62): 0 failures; full workspace 3×: all pass; ac2d traces + stimulus 20× under
   36 burners: 0 failures.
 
-From the first rig session on pupu:
-- **"No audio session" hint covers stored traces**: while the transfer pane draws a stored
-  curve the hint is one line in the pane's title strip; over an empty plot it stays centred.
+Autosave (561d944):
+- **Sweep results lost on a daemon restart** (a `--max-level` change needs one): a stand-alone
+  daemon autosaves measurements and traces, sweep distortion and impulse responses included,
+  and restores them disarmed on start; the top bar shows the autosave state.
 
-
-Trace features (trace-mic-sweep-csv branch, protocol 7, session format 5):
+Trace features (protocol 7, session format 5; f3ea323):
 - **Mic curve on stored traces**: `trace.mic_curve` / `ac2 trace mic <t> <mic|none>` / palette
   **Mic curve on the selected trace…** applies the store's curve for a mic to a captured trace
   as a display edit (columns as measured, points kept with the trace, exports name it); a
@@ -117,24 +117,27 @@ Trace features (trace-mic-sweep-csv branch, protocol 7, session format 5):
   imports as its transfer function with a note (`sweep_without_analysis`). Sessions keep the
   sweep in its one CSV (no `.sweep.json` sidecar).
 
-- **Top bar: ARMED badge overlapped the session text** ("2ARMED…") at 1290 px. The bar is now
+- **Top bar: ARMED badge overlapped the session text** (076320e) ("2ARMED…") at 1290 px. The bar is now
   fitted before it is drawn: lower-priority texts (key help, next-key hint, autosave, the
   device name) shorten or go first, the state badge and level always stay; `top_bar_never_overlaps`
   checks 640–1600 px.
 
 From the first rig session on pupu (2026-10-03):
-- **Finder said "AMBIGUOUS · merged arrivals" with a single candidate.** The ambiguity is real.
+- **"No audio session" hint covers stored traces** (927c69c): while the transfer pane draws a
+  stored curve the hint is one line in the pane's title strip; over an empty plot it stays
+  centred.
+- **Finder said "AMBIGUOUS · merged arrivals" with a single candidate** (b01bd87). The ambiguity is real.
   A crossover inside the full band (LR4 sum = allpass) smears the one peak, so its centre is
   more than 1 sample after the onset. Two arrivals inside one pulse width do the same. The finder
   lists the peak and never invents a second arrival. The text now says "arrivals merged into one
   peak", explains the single row, offers only pick 1, and points to another band (q1 §8).
-- **Clearer refusal messages.** An unpaired client says "not paired with <host>: … run `ac2
+- **Clearer refusal messages** (2565cfd, edf8492). An unpaired client says "not paired with <host>: … run `ac2
   auth pair <host> --server-key …`" (CLI and app). "Not responding" from a CURVE client adds
   "or this client is not authorized on it (this client's fingerprint: …)" and where to
   authorize it. ac2d logs each refused key's fingerprint, key and address, once per key and
   address per 10 s, with the count it suppressed.
 
-Sweep findings from pupu (2026-10-03), fixed on the sweep-fixes branch:
+Sweep findings from pupu (2026-10-03; 2aa6867, 61e7ea5):
 - **Generator re-armed after a sweep** (every run). Not a restore of the pre-sweep state:
   `ir.capture` needs an armed generator, and once the recording was in the daemon only
   cleared `firing` ("generator Set by daemon"), leaving it armed with the sweep; the app
@@ -154,7 +157,7 @@ Sweep findings from pupu (2026-10-03), fixed on the sweep-fixes branch:
   is now tapered: those windows are no measurement (Lost) instead of a false jump.
   Reproduced in `ac2-core` (`a_slow_sweep_start_never_reads_as_a_range_edge`).
 
-Sweep / distortion pane (from the first sweep run on pupu):
+Sweep / distortion pane (from the first sweep run on pupu; a9ad7cb):
 - **Caption overlapped the axis title** in a small pane: the caption now shortens to fit
   (CLIPPED always kept), the legend wraps and the cursor readout starts below it; tested at
   300 … 1290 px.
@@ -164,7 +167,7 @@ Sweep / distortion pane (from the first sweep run on pupu):
 - **dB / % had no visible control**: a `dB | %` toggle in the pane's title (tooltip names U);
   percent is a log axis (0.001 … 100 %, decade labels).
 
-Rig findings fixed on `fix/rig-findings`:
+Rig findings (19ce861, 27bef5b, cd7d8af):
 - **Remote generator played silence on JACK.** Arming reopened the stream to change the
   generator routing, which closed and re-created the JACK client: every connection to
   `ac2:out_N` (the recorder, the hand patch to the interface) was gone while the state said

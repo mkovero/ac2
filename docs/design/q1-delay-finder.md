@@ -1,6 +1,6 @@
 # Q1 — Delay finder: target, estimator, confidence, acceptance
 
-Status: proposed for phase 2. Answers Q1 in `open-questions.md` within decisions 1a–1f
+Status: implemented (`ac2-core::delay`, phase 2). Answers Q1 in `open-questions.md` within decisions 1a–1f
 and 8b. Normative for `ac2-core::delay`.
 
 Evidence:

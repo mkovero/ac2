@@ -1,6 +1,6 @@
 # Q3 — Continuous loopback timing monitor
 
-Status: proposed design for phase 1. Answers Q3 in `open-questions.md`. Inputs: decisions
+Status: implemented (`ac2-core::timing`, `ac2 timing`; phase 1). Answers Q3 in `open-questions.md`. Inputs: decisions
 3a/3b, `spike-audio-duplex.md` §6–7.
 
 ## What is measured and why

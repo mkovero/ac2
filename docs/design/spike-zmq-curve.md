@@ -3,7 +3,7 @@
 Feeds PLAN.md §6 (protocol), §4.3 (publishing), open questions Q2 (freshness), Q5 (frame
 identity), Q6 (lease binding to identity).
 
-> **Code promoted.** The spike code (`spikes/zmq-curve`) has been removed; its build script,
+> **History; code promoted.** A record of the phase 0 spike. The spike code (`spikes/zmq-curve`) has been removed; its build script,
 > binding and tests were reviewed and promoted to `crates/ac2-zmq` (build, typed API,
 > `SecureContext` + ZAP handler, authorized-keys store, `drain_latest`,
 > `SubscriptionTracker`). Commands and paths below that name `spike-zmq-curve` describe the

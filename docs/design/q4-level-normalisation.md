@@ -1,6 +1,6 @@
 # Q4 — Level normalisation
 
-Status: proposed for phase 2. Answers Q4 in `open-questions.md`. Decisions 4a–4c apply.
+Status: implemented (`ac2-core` spectrum, RTA, generator; phase 2). Answers Q4 in `open-questions.md`. Decisions 4a–4c apply.
 The golden vectors in `fixtures/golden/spectrum_hann_tone_noise.*` (from `tools/refgen`)
 implement these formulas and cross-check them against `scipy.signal.periodogram`.
 
