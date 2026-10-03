@@ -361,12 +361,10 @@ fn describe_err(e: &ClientError, target: &Target) -> String {
     }
 }
 
-/// "not responding", with what to check on a daemon on another host.
+/// "not responding", with what to check on a daemon on another host (its firewall, and
+/// whether it authorized this client's key).
 fn not_responding(target: &Target) -> String {
-    match target.config.endpoints.firewall_hint() {
-        Some(h) => format!("not responding; {h}"),
-        None => "not responding".into(),
-    }
+    format!("not responding{}", target.config.not_responding_hints())
 }
 
 /// Reports the failure and waits [`RETRY_EVERY`]; `false` when the UI is shutting down.

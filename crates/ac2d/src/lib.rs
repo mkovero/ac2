@@ -26,6 +26,7 @@
 //! path itself ([`stimulus`]).
 #![deny(unsafe_code)]
 
+mod authlog;
 mod autosave;
 mod backend;
 mod burst;
@@ -306,14 +307,9 @@ impl Daemon {
                     kp.public.to_z85(),
                     kp.public.fingerprint()
                 );
-                let sc = SecureContext::new(ZAP_DOMAIN, authorized, |d| {
-                    if d.allowed() {
-                        tracing::info!(target: "ac2d::auth", "accepted {:?} from {}", d.verdict, d.address);
-                    } else {
-                        tracing::warn!(target: "ac2d::auth", "refused {:?} from {}", d.verdict, d.address);
-                    }
-                })
-                .map_err(zerr("ZAP handler"))?;
+                let log = authlog::AuthLog::new(&security.authorized_clients_file);
+                let sc = SecureContext::new(ZAP_DOMAIN, authorized, move |d| log.record(d))
+                    .map_err(zerr("ZAP handler"))?;
                 let router = sc
                     .curve_server_socket(SocketType::Router, &kp)
                     .map_err(zerr("CURVE ROUTER"))?;
