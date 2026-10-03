@@ -357,3 +357,74 @@ fn session_dialog_meters_return_every_round() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon to a stored sweep using only the app, on the simulated rig whose
+/// "speaker" distorts (H2 −40 dB, H3 −50 dB at −20 dBFS): the session from the dialog,
+/// Shift+S, a typed level, Enter arms, Enter plays, the result opens the distortion pane
+/// with the rig's harmonics; Esc ends it.
+#[test]
+fn empty_embedded_daemon_sweeps_from_the_app() -> R {
+    use ac2_scene::distortion::{Reading, reading_at};
+    use ac2_ui::forms::FieldId;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        assert_eq!(f.channel(FieldId::Reference), Some(0));
+        assert_eq!(f.channel(FieldId::Measurement), Some(1));
+        // A short sweep over the band the rig's harmonics stay below Nyquist in.
+        f.set_text(FieldId::Level, "-20");
+        f.set_text(FieldId::From, "100 Hz");
+        f.set_text(FieldId::To, "5 kHz");
+        f.focus = f
+            .fields
+            .iter()
+            .position(|x| x.id == FieldId::Duration)
+            .ok_or("duration")?;
+        f.cycle(1);
+        assert_eq!(f.fields[f.focus].display(), "1 s (quick look)");
+    }
+    d.key("Enter");
+    d.until("armed with the sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed
+            && s.daemon().is_some_and(|x| {
+                x.generator.armed
+                    && x.generator
+                        .settings
+                        .as_ref()
+                        .is_some_and(|g| matches!(g.signal, ac2_proto::model::Signal::Ess { .. }))
+            })
+    })?;
+    d.key("Enter");
+    d.until("the sweep stored and shown", |s| {
+        s.sweep.run.is_none() && s.layout.focus == PaneKind::Distortion && s.shown_sweep().is_some()
+    })?;
+    let (data, grid) = d.st.shown_sweep().ok_or("no sweep")?;
+    let freqs = ac2_scene::grid::column_frequencies(grid);
+    let s = data.sweep.as_ref().ok_or("no sweep data")?;
+    let m = s.info.floor_margin.0;
+    for (order, want) in [(2u8, -40.0), (3, -50.0)] {
+        let h = s
+            .harmonics
+            .iter()
+            .find(|h| h.order == order)
+            .ok_or("order")?;
+        match reading_at(&h.curve, &freqs, 1000.0, m) {
+            Reading::Level(v) => assert!((v - want).abs() < 1.0, "H{order} at 1 kHz: {v}"),
+            other => return Err(format!("H{order} at 1 kHz: {other:?}").into()),
+        }
+    }
+    d.stop()?;
+    assert!(d.st.sweep.plan.is_none());
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

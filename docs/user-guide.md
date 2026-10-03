@@ -227,6 +227,34 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **Z** loads a target curve; the command palette imports CSV and other analyzers' text
   exports. `ac2 trace export <name> --csv out.csv` exports.
 
+## Sweep measurement: response and harmonic distortion
+
+A sweep measures a speaker's response and its **harmonic distortion** (H2 … H5 and THD vs
+frequency) in a few seconds. The generator plays a synchronised exponential sine sweep on the
+speaker's output and on the loopback output; ac2 records the loopback (reference) and the mic,
+divides one by the other, and separates the harmonics, which arrive before the linear impulse
+response. Design and accuracy: `docs/design/sweep-distortion.md`.
+
+- **App:** **Shift+S** (or **Sweep measurement** in the palette) opens the dialog: reference,
+  mic and the speaker's output by name (the session's loopback output always plays too), the
+  **level** (typed, no default), 20 Hz – 20 kHz, duration (3 s; 6 s and 12 s lower the noise
+  floor), repeats (each doubling lowers the floor by 3 dB), name. **Enter** arms the sweep,
+  **Enter** again plays it, **Esc** stops (and discards it). The result opens the
+  **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
+  below with the noise floor shaded. **U** switches dB re fundamental / percent, **H** shows the
+  sweep's impulse response with the harmonics' impulses marked (**G**: linear / log / ETC),
+  **N** steps through stored sweeps, **Shift+H** hides the pane. The sweep is also a stored
+  trace, drawn in the transfer pane like any capture.
+- **CLI:** `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs` (`--from 20hz --to
+  20khz --duration 3s --repeats 1 --gate 5ms --name …`). Like `gen`, it arms and waits:
+  **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. It then prints THD at 100 Hz, 1 kHz and
+  10 kHz and each order's highest point; `--json` gives the same as JSON lines.
+  `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
+  floor, THD).
+- A distortion value is only shown where it is at least 6 dB above the noise in its window;
+  elsewhere it reads `< −72.0 dB` (the floor). Lower the floor with repeats or a longer sweep,
+  not with more level than the speaker should take.
+
 ## Sessions
 
 `ac2 session save <name>` (or **Session: save** in the palette) stores the measurements and

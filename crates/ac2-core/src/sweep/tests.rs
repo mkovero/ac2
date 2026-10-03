@@ -423,7 +423,10 @@ fn timing_follows_the_sweep() {
     assert_eq!(t.post_roll_s, MIN_POST_ROLL_S);
     // A long sweep needs a longer silence after it.
     let long = SweepTiming::new(&spec(ess(20.0, 20_000.0, 60.0))).expect("timing");
-    assert!(long.post_roll_s > 4.0 * long.window_s() - 1e-9);
+    assert!(long.post_roll_s >= 4.0 * long.window_s() - 1e-9);
+    // A long sweep's window is capped (the floor then falls with L), split as before.
+    assert!((long.window_s() - MAX_WINDOW_S).abs() < 1e-12);
+    assert!((long.pre_s / long.post_s - t.pre_s / t.post_s).abs() < 1e-9);
     assert!((db_to_percent(-40.0) - 1.0).abs() < 1e-12);
     assert!(is_valid(-40.0, -46.0) && !is_valid(-40.0, -45.0));
 }

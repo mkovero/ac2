@@ -224,6 +224,10 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
                 .max((f64::from(s.harmonics[1].curve.level_db[i]) - h3).abs());
         }
     }
+    eprintln!(
+        "daemon on the fake rig: H2 max error {:.3} dB, H3 max error {:.3} dB",
+        worst.0, worst.1
+    );
     assert!(worst.0 < 0.5 && worst.1 < 0.5, "H2 / H3 error {worst:?}");
     // The CSV export carries every curve.
     let csv = match c.ok(Command::TraceExport {

@@ -56,6 +56,8 @@ pub const DISTORTION_MIN_CELLS: f64 = 3.0;
 /// distortion point): noise is smooth in frequency, and a steady floor keeps one noisy
 /// estimate from being compared with another.
 pub const FLOOR_BAND_OCT: f64 = 1.0 / 3.0;
+/// Longest harmonic window, seconds: it still resolves fundamentals down to 2/W = 20 Hz.
+pub const MAX_WINDOW_S: f64 = 0.1;
 /// Audio kept before each sweep's onset when the repeats are cut apart, seconds.
 pub const PRE_ROLL_S: f64 = 0.1;
 /// Shortest silence after each sweep, seconds.
@@ -181,6 +183,10 @@ impl SweepTiming {
         let l = plan.rate_s;
         let pre_s = PRE_FRACTION * l * ((k + 1.0) / k).ln();
         let post_s = (1.0 - PRE_FRACTION) * l * (k / (k - 1.0)).ln();
+        // The noise in a window grows with its length while the sweep's energy per hertz
+        // grows with L: capping the window lets a longer sweep lower the floor.
+        let shrink = (MAX_WINDOW_S / (pre_s + post_s)).min(1.0);
+        let (pre_s, post_s) = (pre_s * shrink, post_s * shrink);
         let post_roll_s = MIN_POST_ROLL_S.max(4.0 * (pre_s + post_s));
         Ok(Self {
             plan,

@@ -166,7 +166,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 ### 3.7 IR / room acoustics
 | Feature | Pri | Src | Phase |
 |---|---|---|---|
-| IR capture by ESS, deconvolution, harmonic split, gating | P1 | ac | 7 |
+| IR capture by ESS, deconvolution, harmonic split, gating; H2…H5 / THD vs f (done: `docs/design/sweep-distortion.md`) | P1 | ac | 7 |
 | ETC, Schroeder, T20/T30/EDT, C50/C80/D50 per band | P1 | ac | 7 |
 | STI / STIPA | P2 | new | later |
 

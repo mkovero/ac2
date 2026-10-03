@@ -18,8 +18,8 @@ One synchronised exponential sine sweep per repeat (`ac2_core::generator::EssPla
   out over the last 1/24 octave (`EssSpec::with_fades`), so it starts and stops without a step.
   Distortion is not reported for fundamentals inside the fades: their level is lower there.
 - **level** is typed by the operator, dBFS RMS of the constant-envelope part (0 dBFS RMS = a
-  full-scale sine, so the sweep peaks at the typed level + 3 dB re 1/√2…, i.e. peak = 10^(L/20)
-  FS). No default; refused above the daemon's ceiling (§5.4).
+  full-scale sine, so a sweep at `L` dBFS peaks at `10^(L/20)` FS, crest factor √2). No
+  default; refused above the daemon's ceiling (§5.4), and the output path's peak limit holds.
 - each repeat is followed by `post_roll` of silence (≥ 1 s, longer for long sweeps) that
   carries the room's tail and the noise estimate; `repeats` (1…8) sweeps are averaged
   (complex mean of the deconvolved spectra: noise falls 3 dB per doubling, distortion stays).
@@ -55,19 +55,25 @@ so the highest order analysed (`K = 5`, H2…H5) sets one window used for **ever
 fundamental's distortion reference:
 
 - pre = 0.1·g_K (before `t_k`, half-Hann rise), post = 0.9·g_(K−1) (after `t_k`, half-Hann fall
-  over its last 20 %). For 20 Hz–20 kHz in 3 s: L = 0.434 s, window 8 ms + 87 ms.
+  over its last 20 %), both scaled down so the window is at most 100 ms. For 20 Hz–20 kHz in
+  3 s: L = 0.45 s (rounded), window 8 ms + 90 ms.
+- why the cap: the sweep's energy per hertz grows with L, the noise inside a window with its
+  length. Uncapped (W ∝ L) a longer sweep would only lengthen the window; capped, a sweep of
+  twice the duration lowers the floor by 3 dB, as repeats do.
 - one length for all orders makes the windows' noise and time resolution equal, so ratios and
   the noise floor compare like with like. A harmonic IR longer than the window (a long room
   tail at that frequency) is truncated, as in any gated measurement.
-- low-frequency limit: a 95 ms window resolves ≈ 2/W = 21 Hz; fundamentals below
-  `max(f1·2^(1/6), 2/W)` are not reported. Longer sweeps (L grows) lengthen the window.
+- low-frequency limit: a 100 ms window resolves ≈ 2/W = 20 Hz; fundamentals below
+  `max(f1·2^(1/6), 2/W)` are not reported.
 - high-frequency limit: harmonic k exists for fundamentals up to `f2/k` (the sweep stops at
   f2) and below `0.45·fs/k` (anti-alias filters).
 
 ## Distortion per harmonic, THD
 
-For the windowed spectra `S_k`, power is averaged over 1/24 octave around a frequency
-(`P_k(F)`), so a room's comb does not turn ratios into noise. Harmonic k at fundamental f:
+For the windowed spectra `S_k`, power is averaged over 1/24 octave around a frequency, but over
+at least three resolution cells (3/W Hz) of the window (`P_k(F)`): one cell of noise is
+exponentially distributed and exceeds four times its mean 2 % of the time, three averaged almost
+never, and a room's comb does not turn ratios into noise. Harmonic k at fundamental f:
 
 ```
 HD_k(f) = 10·log10( P_k(k·f) / P_1(f) )        dB re fundamental (k·f → plotted at f)
@@ -85,10 +91,15 @@ H2 `½a2A²`, H3 `¼a3A³` — the analytic values the tests compare against.
 
 A window of the same shape and length is cut from the deconvolved silence after the linear
 response (ending 10 ms before the end of the post-roll, which every repeat's record covers
-fully). Its spectrum gives `floor_k(f) = 10·log10(N(k·f)/P_1(f))` per order and the THD floor
-(power sum). A point is **valid** when `HD_k ≥ floor_k + 6 dB`: the noise inside the window then
-adds at most 1.25 dB. Otherwise it is shown and printed as `< floor` (the floor's value), never
-as a distortion figure. Repeats lower the floor by 10·log10(repeats).
+fully). Its spectrum, averaged over 1/3 octave (noise is smooth in frequency, and a steady floor
+keeps one noisy estimate from being compared with another), gives
+`floor_k(f) = 10·log10(N(k·f)/P_1(f))` per order and the THD floor (power sum). A point is
+**valid** when `HD_k ≥ floor_k + 6 dB`: the noise inside the window then adds at most 1.25 dB.
+Otherwise it is shown and printed as `< floor` (the floor's value), never as a distortion
+figure. The floor falls 3 dB per doubling of repeats, of the sweep duration (with the window
+capped) and per 3 dB more level; for white noise of variance σ² at the mic and a sweep of
+amplitude A there, `floor(F) ≈ 4·W·F·σ² / (fs·A²·L)` (for the noise test: −44.8 dB predicted,
+−44.2 dB measured).
 
 ## Linear response gating
 
@@ -100,18 +111,23 @@ The linear IR is windowed from `d − 0.1·L·ln 2` (just after H2's window) to 
   shows the harmonic impulses at `−L·ln k`; ≥ 16 384 points are decimated peak-preserving
   (signed extreme and Hilbert-envelope maximum per bucket).
 
-## Accuracy (tests in `crates/ac2-core/src/sweep/tests.rs`)
+## Accuracy
 
-Synthetic system through the same path the daemon uses (one continuous recording, onsets
-located, repeats cut and averaged), 48 kHz:
+Synthetic systems through the same path the daemon uses (one continuous recording, onsets
+located, repeats cut and averaged), 48 kHz, worst case over the fundamentals 100 Hz …
+f2/k/1.15 (`crates/ac2-core/src/sweep/tests.rs`), and the whole chain on the simulated rig
+(`crates/ac2d/tests/sweep.rs`: generator → fake converters with a distorting acoustic path →
+recorder → analysis, f32 audio):
 
 | system | quantity | target | achieved |
 |---|---|---|---|
-| memoryless a2, a3 (H2 −40 dB, H3 −50 dB), 50 Hz–6 kHz, 3 s | HD2, HD3 | ±0.5 dB | see test output |
-| same | THD | ±0.5 dB | |
-| same | fundamental magnitude 100 Hz–5 kHz | ±0.1 dB | |
-| Hammerstein (polynomial → 2nd-order low-pass at 2 kHz) | HD2, HD3 vs `|G(kf)|/|G(f)|` | ±1 dB | |
-| linear + noise | every harmonic invalid ("< floor"); floor within 3 dB of analytic | | |
+| memoryless a2, a3 (H2 −40 dB, H3 −50 dB), 50 Hz–6 kHz, 3 s | HD2 / HD3 | ±0.5 dB | 0.16 / 0.21 dB |
+| same | THD | ±0.5 dB | 0.16 dB |
+| same | fundamental magnitude 100 Hz–5 kHz | ±0.1 dB | 0.001 dB (phase < 2°) |
+| Hammerstein (same polynomial → 2nd-order low-pass at 2 kHz) | HD2 / HD3 vs `HD·|G(kf)|/|G(f)|` | ±1 dB | 0.16 / 0.21 dB |
+| linear system + noise | harmonics valid | ≤ 5 % of points | passes; level − floor median within 1.5 dB |
+| same, 4 repeats vs 1 | floor | −6 ± 1.5 dB | −5.3 dB |
+| daemon + fake rig (H2 −40 dB, H3 −50 dB at −20 dBFS), 100 Hz–5 kHz, 1 s | HD2 / HD3, 200 Hz–1.4 kHz | ±0.5 dB | 0.10 / 0.15 dB |
 
 ## Protocol and storage
 
@@ -124,8 +140,11 @@ the curves in the trace's CSV and the IR in a JSON sidecar.
 
 ## Running it on a speaker (pupu, Genelec 1083 at −50 dBFS)
 
-`ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`: 6 s gives
-L = 0.87 s (H5 window ≈ 190 ms, LF limit ≈ 11 Hz), two repeats lower the floor by 3 dB. At
-−50 dBFS with room noise ≈ −72 dBFS the fundamental SNR after deconvolution is ≈ 60 dB in band,
-so harmonics down to roughly −55…−60 dB re fundamental are measurable; below that the curves
-read `< floor`. Raise the level only within the speaker ceiling (−50 dBFS on pupu).
+`ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2` (about
+15 s: two 6 s sweeps, each with 1 s of silence after it). Out 2 must play the sweep too: it is
+the loopback the analysis divides by. 6 s and two repeats put the floor 6 dB under a single 3 s
+sweep (window 100 ms, fundamentals from 20 Hz). The level stays at the speaker ceiling
+(−50 dBFS); a 1083 at that level is expected to show H2/H3 well under 1 % (−40 dB) in the
+mid band, so where the summary prints `< −…` (below the floor) the next step is more repeats
+(−3 dB per doubling), never more level. Room rumble (60–200 Hz bursts up to −53 dBFS on the
+mic) raises the floor of low fundamentals' harmonics; repeat the sweep when a burst coincides.

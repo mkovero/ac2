@@ -5,9 +5,10 @@ the commit when it lands.
 
 ## Parked
 
-- **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Revisit once
-  distortion measurement (Farina) exists: check mic height/aim vs the speaker's reference axis,
-  ±10 cm at 1 m, then 2 m; listen during a burst; measure harmonic distortion vs frequency.
+- **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Distortion
+  measurement exists now (`ac2 ir capture`, `docs/design/sweep-distortion.md`): check mic
+  height/aim vs the speaker's reference axis, ±10 cm at 1 m, then 2 m; listen during a burst;
+  `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## From the first rig session on pupu (2026-10-03)
 

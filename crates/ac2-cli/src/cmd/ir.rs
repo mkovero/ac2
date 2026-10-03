@@ -328,7 +328,7 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
         return;
     }
     let mut t = format!(
-        "DONE   trace {} {:?}: arrival {} · reference {} · {}× {} s{}\n",
+        "DONE   trace {} {:?}: arrival {} · reference {} · {} × {} s{}\n",
         data.meta.id,
         data.meta.edit.name,
         ac2_scene::format::ms(s.info.arrival.0, 2),
@@ -371,7 +371,13 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
         };
         t.push_str(&line);
     }
-    t.push_str("  export: ac2 trace export <trace> --csv FILE (every curve)");
+    let _ = std::fmt::Write::write_fmt(
+        &mut t,
+        format_args!(
+            "  every curve: ac2 trace export {} --csv FILE",
+            data.meta.id
+        ),
+    );
     let _ = writeln!(out.w, "{t}");
 }
 
@@ -528,6 +534,21 @@ mod tests {
         let thd_1k = &done["thd"][1];
         assert_eq!(thd_1k["hz"], 1000.0);
         assert!((thd_1k["db"].as_f64().unwrap_or(f64::NAN) + 39.6).abs() < 1.0);
+        // The human summary of the same trace.
+        let id: u32 = done["trace"].as_u64().ok_or("trace id")?.try_into()?;
+        let data = c.call(Command::TraceGet { trace: TraceId(id) }).await?;
+        let ReplyBody::TraceData(data) = data else {
+            return Err("trace data".into());
+        };
+        let freqs = ac2_scene::grid::column_frequencies(&*c.grid(data.meta.grid_id).await?);
+        let mut human = Vec::new();
+        print_summary(&mut Out::new(false, &mut human), &data, &freqs);
+        let human = String::from_utf8(human)?;
+        eprintln!("{human}");
+        assert!(human.starts_with("DONE   trace "), "{human}");
+        assert!(human.contains("THD at  1.00 kHz"), "{human}");
+        assert!(human.contains("THD at  10.0 kHz             —"), "{human}");
+        assert!(human.contains("max H2 "), "{human}");
         // Released and disarmed.
         let st = c.snapshot().await?.state;
         assert!(st.generator.owner.is_none() && !st.generator.armed);
