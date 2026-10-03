@@ -3,6 +3,12 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## Flaky tests (seen on CI, passed on rerun)
+
+- Pink-noise level check on Linux and a spectrum-smoothing check on Windows failed once each
+  during the sweep-distortion branch runs (2026-10-03), then passed. Find the timing/tolerance
+  cause before they mask a real failure.
+
 ## Parked
 
 - **Genelec 1083 on pupu: 2–6 kHz dip of −5…−9.5 dB** (docs/rigs/pupu.md). Distortion
