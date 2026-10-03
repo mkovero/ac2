@@ -21,6 +21,13 @@ the commit when it lands.
 - **Name field: Ctrl+A does not select** the default name; typing appends to it.
 - **"output timing jump 0 → 96000 samples" (and back)** logged twice around arming a sweep on
   pupu (2026-10-03 03:55); find whether the output timing record or the jump check is wrong.
+- **Sweep results lost on daemon restart, and a CSV re-import cannot bring them back.** Stored
+  traces live in daemon memory; `trace import` of a sweep export keeps only its transfer
+  function (and delay 0), because `SweepData` needs the IR and analysis info that the CSV lacks
+  (the parsed distortion in `Imported::distortion` is dropped). Raising or lowering
+  `--max-level` needs a restart, so a ceiling change loses that session's sweeps. Options:
+  autosave traces in the daemon, export the IR + info so a sweep CSV round-trips, or make the
+  sweep pane draw a sweep without its IR.
 - Re-arm after a sweep reproduced on both later runs (2×, 8×).
 
 ## Flaky tests (seen on CI, passed on rerun)
