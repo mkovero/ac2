@@ -51,6 +51,15 @@ them. JACK gives every port one clock, exact sample indices and the server's sho
 - **JACK2**: start the server on your interface before the daemon, e.g.
   `jackd -d alsa -d hw:UMC1820 -r 48000 -p 256` (or with QjackCtl).
 
+The daemon connects JACK ports itself. The session's inputs come from the capture ports of
+the same number (input 1 = the first capture port in the device list). Outputs are
+connected only when you choose them for the stimulus: arming the generator on `--out 1,2`
+connects `ac2:out_1` and `ac2:out_2` to the first and second playback ports, and the
+session's loopback output is connected when the session opens. Other outputs are never
+connected, connections the daemon did not make (a recorder, a patch to another program)
+are left alone, and changing the generator's outputs never reopens the stream, so they
+stay.
+
 When JACK cannot be used, `ac2 devices`, the session dialog and the daemon log say why and
 what to do: *PipeWire is running but its JACK library isn't in use: install pipewire-jack …
 or start the daemon with `pw-jack ac2d`*, or *No JACK server: start JACK (e.g.
@@ -232,6 +241,8 @@ With ufw, add one rule per port and limit them to your network, e.g.
 `sudo ufw allow from 192.168.1.0/24 to any port 47820 proto tcp` (and 47821, and `5353/udp` for
 discovery). A port *range* rule (`47820:47821`) needs the kernel's iptables `multiport` module;
 without it (some real-time kernels) ufw lists the rule but does not enforce it.
+The daemon names the ports at startup and warns when it sees ufw or firewalld active; a
+client that gets no answer says "not responding" with the same hint.
 
 On the client:
 

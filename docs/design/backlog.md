@@ -5,16 +5,6 @@ the commit when it lands.
 
 ## From the first rig session on pupu (2026-10-03)
 
-Being fixed on `fix/rig-findings`:
-- **Remote generator plays silence.** A remote client (network mode, CURVE) gets ARMED/FIRING
-  and audit Fire, but the JACK output ports carry digital silence; the same command from a local
-  client works. Suspect: the lease gate latches the source muted before it is opened.
-- **JACK outputs never connected by the daemon**, and a generator start that changes routing
-  reopens the stream and drops manual `jack_connect`s, so the stimulus never reaches hardware.
-- **`ac2 spl watch` reads the wrong level/input** (−68.5 dBFS where an independent recording
-  showed −57.7 dBFS at 1 kHz on that input).
-- **Numeric measurement names can't be addressed** (`delay find 1083` → "no measurement 1083").
-
 Open:
 - **Mic curve on stored traces.** Apply (and remove) a mic correction curve to an already
   captured trace, so captures taken before calibration can be corrected afterwards; recorded in
@@ -31,10 +21,30 @@ Open:
   add "or this client is not authorized on the daemon (fingerprint …)" to that message, and have
   the daemon log every refused key's fingerprint and address (rate-limited) — the rig's log had
   no line for a refused client.
-- **mDNS discovery** (being fixed on `fix/rig-findings`): the daemon logs "advertising" but holds
-  no UDP socket and answers nothing; on a client with two interfaces in one subnet the query
-  leaves via the wrong one.
-- **Daemon network ports vs host firewall.** On a host with ufw active, network mode is silently
-  unreachable. `ac2d --listen` should warn when an active firewall (ufw/firewalld/nftables drop
-  policy) is detected and say which ports to open; `ac2 --remote` "not responding" should hint at
-  firewalls.
+
+## Done
+
+Rig findings fixed on `fix/rig-findings`:
+- **Remote generator played silence on JACK.** Arming reopened the stream to change the
+  generator routing, which closed and re-created the JACK client: every connection to
+  `ac2:out_N` (the recorder, the hand patch to the interface) was gone while the state said
+  FIRING. Routing now changes inside the running stream. The lease gate also never mutes a
+  source that has not played, and a mute on an expired deadline disarms with an `expiry`
+  event.
+- **JACK outputs never connected by the daemon.** The outputs chosen for the stimulus (and the
+  loopback output) are connected to the playback ports of the same number, and again after a
+  reopen; nothing else is connected or disconnected.
+- **`ac2 spl watch` read the wrong level.** `--input` reused any running SPL meter with the same
+  settings, typically one a killed watch had left behind, whose Leq integrated since long
+  before the tone. The watch now always runs its own meter, cleans it up on SIGTERM/SIGHUP too,
+  and prints the input and meter id; `--for` ends it after a set time.
+- **Numeric measurement names** resolve: id first, then name; a value that is one measurement's
+  id and another's name is refused naming both.
+- **Daemon network ports vs host firewall.** `ac2d --listen` names its ports and warns when ufw
+  or firewalld is active (one rule per port); "not responding" from a remote client hints at
+  the firewall.
+- **The daemon never answered mDNS.** `Handle::wait` dropped the advert before blocking, so the
+  responder said goodbye and shut down right after "advertising". The advert now lives until the
+  daemon stops; responder errors are logged.
+- **`ac2 discover` asked on some interfaces only.** The browser now also asks on every interface
+  address itself (0, 1, 3 s) and lists where it asked when nothing answered.

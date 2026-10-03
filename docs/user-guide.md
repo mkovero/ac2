@@ -253,7 +253,9 @@ another input, or plugging in another mic, is noticed:
 
 The **SPL meter** shows Fast / Slow / Impulse levels with A, C or Z weighting, Leq, LAeq,
 LCeq, LCpeak, Lmax and Lmin, as a big-number display in the SPL pane or in the terminal:
-`ac2 spl watch --input 3 --weight a` (add `--json` for one JSON line per update).
+`ac2 spl watch --input 3 --weight a` (add `--json` for one JSON line per update, `--for 10s`
+to stop on its own). With `--input` the command runs its own meter for as long as it runs, so
+Leq, Lmax and Lmin cover exactly what it watched; `--meas` shows an existing meter instead.
 
 ## Keyboard
 
