@@ -41,4 +41,10 @@ ketunkolo → pupu over the LAN, CURVE: remote CLI (status, session, measurement
 ketunkolo's display with live JACK data ✓; CLI + app on one daemon stay in sync ✓; unpaired and
 pinned-but-unauthorized clients refused ✓ (messages unclear — backlog); daemon killed → app shows
 DAEMON NOT RESPONDING + STALE with traces kept, restarted → app resyncs by itself ✓. mDNS
-discovery ✗ (backlog). Remote generator ✗ (silent output, being fixed).
+discovery ✗ and remote generator ✗ at first — both fixed in f7991d9 and re-verified on the rig:
+`ac2 discover` on ketunkolo lists pupu; remote 1 kHz −60 dBFS on out 2 → `ac2:out_2` −60.0,
+in 2 −57.7 dBFS; the daemon connects only the chosen outputs (`out_N → system:playback_N`).
+Also verified: rantu over the VPN (100.100.44.45) via a further firewall.
+
+Remote measurement (ketunkolo CLI, −50 dBFS pink, f7991d9): delay 3.32 ms (identical), response
+repeats the local measurement within 0.7 dB from 100 Hz to 16 kHz.
