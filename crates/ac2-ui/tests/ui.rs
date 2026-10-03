@@ -141,6 +141,8 @@ fn snapshot_when(
     let t0 = Instant::now();
     loop {
         pin(h.state_mut());
+        // A pin edits the state directly: cached pane scenes must see it too.
+        h.state_mut().state_edited();
         h.step();
         if healthy(h.state(), Instant::now()) && drawn(h.state()) {
             break;

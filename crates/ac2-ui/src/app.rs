@@ -207,6 +207,12 @@ impl App {
         }
     }
 
+    /// Marks the state as changed, so cached pane scenes are rebuilt on the next pass. Only
+    /// needed after editing `state` directly instead of through [`App::dispatch`].
+    pub fn state_edited(&mut self) {
+        self.generation += 1;
+    }
+
     /// Feeds one message through the reducer and forwards its requests.
     pub fn dispatch(&mut self, msg: Msg) {
         let is_tick = matches!(msg, Msg::Tick { .. });

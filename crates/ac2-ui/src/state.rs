@@ -3107,6 +3107,11 @@ impl AppState {
     /// Folds the newest `leq` frame of each SPL meter into its history.
     fn fold_leq(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
+        // Without a synced daemon state (a resync, a short drop) the meter list is unknown,
+        // not empty: keep every history until the state says a meter is gone.
+        if self.daemon().is_none() {
+            return;
+        }
         let cfgs: BTreeMap<MeasId, ac2_proto::model::LeqConfig> = self
             .measurements()
             .iter()

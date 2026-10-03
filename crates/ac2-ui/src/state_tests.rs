@@ -3846,6 +3846,27 @@ fn leq_windows_from_the_keyboard() {
     assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
 }
 
+/// A resync (no daemon state for a moment) is not "every meter deleted": the history strip
+/// keeps what it gathered and goes on from there.
+#[test]
+fn leq_history_survives_a_resync() {
+    use ac2_proto::frame::LeqFlags;
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
+    t.conn(leq_data(1, 100, 98.0, judged));
+    t.conn(leq_data(2, 101, 98.5, judged));
+    t.st.mirror = None;
+    t.conn(leq_data(3, 102, 99.0, judged));
+    t.conn(mirror(with_spl()));
+    t.conn(leq_data(4, 103, 99.2, judged));
+    let cfg = LeqConfig::default_windows();
+    let h = &t.st.leq_history[&MeasId(4)].1;
+    let p = h.points(&cfg.windows[0]).expect("series");
+    assert!(p.len() >= 3, "kept through the resync: {} points", p.len());
+    assert_eq!(p[0].t, 100.0);
+}
+
 /// Each new `leq` frame goes into the meter's history once; a window going over or coming
 /// back is a toast, alarms that were there before the app connected are not.
 #[test]
