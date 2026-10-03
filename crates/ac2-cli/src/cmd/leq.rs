@@ -3,7 +3,7 @@
 use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
     LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, SplConfig, SplLogPage,
-    SplLogRow, State, TimeWeighting, Weighting,
+    SplLogRow, SplLogWhich, State, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, Seconds};
 use ac2_proto::{Command, ReplyBody};
@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::{connect, find_meas, state};
 use crate::CliError;
-use crate::args::{Cli, LeqCmd, LeqExport, LeqSet, LeqWatch, MeterRef, PresetArg};
+use crate::args::{Cli, LeqCmd, LeqExport, LeqNew, LeqSet, LeqWatch, MeterRef, PresetArg};
 use crate::output::{self, Out};
 use crate::watch;
 
@@ -20,6 +20,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &LeqCmd, out: &mut Out<'_>) -> Result<()
         LeqCmd::Watch(w) => watch_cmd(cli, w, out).await,
         LeqCmd::Set(s) => set(cli, s, out).await,
         LeqCmd::Export(e) => export(cli, e, out).await,
+        LeqCmd::New(n) => new_log(cli, n, out).await,
     }
 }
 
@@ -275,10 +276,30 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
     Ok(())
 }
 
-/// Every row of the meter's log, paged.
+/// Rows of one of the meter's logs from `from`, at most `max`.
+async fn log_page(
+    c: &Client,
+    meas: ac2_proto::units::MeasId,
+    log: SplLogWhich,
+    from: u64,
+    max: u32,
+) -> Result<SplLogPage, CliError> {
+    let r = c
+        .call(Command::SplLogGet {
+            meas,
+            log,
+            from,
+            max,
+        })
+        .await?;
+    Ok(expect_body!("spl.log_get", r, ReplyBody::SplLogPage(p) => p)?)
+}
+
+/// Every row of one of the meter's logs, paged.
 pub(crate) async fn all_rows(
     c: &Client,
     meas: ac2_proto::units::MeasId,
+    log: SplLogWhich,
 ) -> Result<Vec<SplLogRow>, CliError> {
     let mut rows = Vec::new();
     let mut from = 0;
@@ -286,6 +307,7 @@ pub(crate) async fn all_rows(
         let r = c
             .call(Command::SplLogGet {
                 meas,
+                log,
                 from,
                 max: SplLogPage::MAX_ROWS,
             })
@@ -300,13 +322,9 @@ pub(crate) async fn all_rows(
     }
 }
 
-async fn export(cli: &Cli, e: &LeqExport, out: &mut Out<'_>) -> Result<(), CliError> {
-    let c = connect(cli, false).await?;
-    let st = state(&c).await?;
-    let m = meter(&st, &e.meter)?
-        .ok_or_else(|| CliError::Usage("no SPL meter on that input".into()))?;
+/// The CSV of `rows` of meter `m` (the session file's format).
+fn log_csv(st: &State, m: &Measurement, rows: &[SplLogRow]) -> Result<String, CliError> {
     let cfg = spl_config(m)?;
-    let rows = all_rows(&c, m.id).await?;
     let info = ac2_traces::spl_log::SplLogInfo {
         meas: m.id,
         name: m.config.name.clone(),
@@ -317,7 +335,91 @@ async fn export(cli: &Cli, e: &LeqExport, out: &mut Out<'_>) -> Result<(), CliEr
             .find(|i| i.channel == cfg.input)
             .and_then(|i| i.mic.clone()),
     };
-    let csv = ac2_traces::spl_log::export_csv(&info, &rows);
+    Ok(ac2_traces::spl_log::export_csv(&info, rows))
+}
+
+/// `spl leq new`: without `--yes`, says what would end and refuses; with it, ends the log
+/// and, with `--export`, writes the ended log (read back as the daemon's previous log, so
+/// no second logged in between is lost).
+async fn new_log(cli: &Cli, n: &LeqNew, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let st = state(&c).await?;
+    let m = meter(&st, &n.meter)?
+        .ok_or_else(|| CliError::Usage("no SPL meter on that input".into()))?
+        .clone();
+    spl_config(&m)?;
+    let head = log_page(&c, m.id, SplLogWhich::Current, 0, 1).await?;
+    let now = crate::watch::now_wall().0;
+    let ended = match head.rows.first() {
+        Some(r) => format!(
+            "{} seconds logged over {} since {}",
+            head.total,
+            ac2_scene::leq::clock(now.saturating_sub(r.start.0) as f64 / 1e9),
+            ac2_traces::spl_log::utc_iso(r.start.0)
+        ),
+        None => "nothing logged yet".to_owned(),
+    };
+    if !n.yes {
+        return Err(CliError::Usage(format!(
+            "this ends {}'s SPL log ({ended}): its Leq windows and their states, the alarms, \
+             the run clock and the total start over (windows and limits are kept). Pass --yes \
+             to go ahead; --export FILE writes the ended log first",
+            m.config.name
+        )));
+    }
+    c.call(Command::SplLogNew { meas: m.id }).await?;
+    let file = match &n.export {
+        Some(path) => {
+            let rows = all_rows(&c, m.id, SplLogWhich::Previous).await?;
+            let csv = log_csv(&st, &m, &rows)?;
+            std::fs::write(path, csv.as_bytes()).map_err(|e| {
+                CliError::Usage(format!(
+                    "the new log started, but {} could not be written ({e}); the ended log is \
+                     still in the daemon: ac2 spl leq export --previous -o FILE",
+                    path.display()
+                ))
+            })?;
+            Some((path.clone(), rows.len()))
+        }
+        None => None,
+    };
+    out.emit(
+        &json!({
+            "meas": m.id.0,
+            "ended_rows": head.total,
+            "ended_started_at": head.rows.first().map(|r| ac2_traces::spl_log::utc_iso(r.start.0)),
+            "file": file.as_ref().map(|(p, _)| p.to_string_lossy()),
+            "exported_rows": file.as_ref().map(|(_, k)| *k),
+        }),
+        || {
+            let mut t = format!(
+                "{}: new SPL log started; the ended log had {ended}",
+                m.config.name
+            );
+            match &file {
+                Some((p, k)) => t.push_str(&format!("; {k} seconds written to {}", p.display())),
+                None => t.push_str(
+                    "; until the next new log or a daemon restart: ac2 spl leq export --previous",
+                ),
+            }
+            t
+        },
+    )?;
+    Ok(())
+}
+
+async fn export(cli: &Cli, e: &LeqExport, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let st = state(&c).await?;
+    let m = meter(&st, &e.meter)?
+        .ok_or_else(|| CliError::Usage("no SPL meter on that input".into()))?;
+    let log = if e.previous {
+        SplLogWhich::Previous
+    } else {
+        SplLogWhich::Current
+    };
+    let rows = all_rows(&c, m.id, log).await?;
+    let csv = log_csv(&st, m, &rows)?;
     match &e.out {
         Some(path) => {
             std::fs::write(path, csv.as_bytes())?;

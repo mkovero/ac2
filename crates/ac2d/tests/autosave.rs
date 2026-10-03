@@ -311,6 +311,7 @@ fn no_restore_starts_empty() {
 fn log_page(c: &mut Client, meas: MeasId) -> SplLogPage {
     match c.ok(Command::SplLogGet {
         meas,
+        log: SplLogWhich::Current,
         from: 0,
         max: 1000,
     }) {
@@ -364,5 +365,35 @@ fn spl_log_survives_a_restart() {
         assert!((a.laeq.0 - b.laeq.0).abs() < 1e-3 || a.laeq.0 == b.laeq.0);
     }
     drop(c);
+    h.shutdown();
+
+    // Running again after the restart: the run clock starts where the log does, not at
+    // the restart, and the time the daemon was down is a gap.
+    let (h, backend) = start("autosave-spl-3", dir.path(), true);
+    let (mut c, sub) = connect(&h, &[b"evt", b"d/1/leq"]);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let mut d = driver(&backend);
+    let deadline = Instant::now() + T;
+    let run_after = loop {
+        run(&mut d, 1.2);
+        let f = sub.frame(
+            Duration::from_millis(200),
+            |f| matches!(&f.data, ac2_proto::FrameData::Leq(l) if l.meta.logged > back.total),
+        );
+        if let Some(f) = f
+            && let ac2_proto::FrameData::Leq(l) = f.data
+        {
+            break l.meta.run.expect("a run");
+        }
+        assert!(Instant::now() < deadline, "no leq frame after the restart");
+    };
+    assert_eq!(run_after.started_at, logged.rows[0].start);
+    assert!(run_after.until.0 > logged.rows[logged.rows.len() - 1].start.0);
+    assert!(run_after.gaps.0 >= 0.0);
+    assert!(!run_after.trimmed);
+    drop((c, sub));
     h.shutdown();
 }

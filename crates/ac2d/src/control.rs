@@ -110,6 +110,8 @@ pub(crate) enum ControlMsg {
     /// `config_rev`): a judgement changed, the windows changed or the log began.
     Leq {
         meas: MeasId,
+        /// The log's epoch the job judged in.
+        epoch: u64,
         config_rev: Rev,
         at: WallNs,
         judgements: Vec<ac2_proto::model::LeqJudgement>,
@@ -231,6 +233,8 @@ pub(crate) struct Control {
     restore: bool,
     /// Per-second log of each SPL measurement, shared with its job.
     spl_logs: HashMap<MeasId, crate::leq_log::SharedLog>,
+    /// The log `spl.log_new` ended last, per SPL meter.
+    spl_prev_logs: HashMap<MeasId, crate::leq_log::LeqLog>,
     /// When growing SPL logs next count as a change for the autosave.
     next_log_save: Instant,
 }
@@ -479,6 +483,7 @@ impl Control {
             autosave,
             restore,
             spl_logs: HashMap::new(),
+            spl_prev_logs: HashMap::new(),
             next_log_save: Instant::now() + LOG_SAVE_EVERY,
             s,
         }
@@ -569,11 +574,12 @@ impl Control {
                 Ok(ControlMsg::Autosaved { result }) => self.autosaved(*result),
                 Ok(ControlMsg::Leq {
                     meas,
+                    epoch,
                     config_rev,
                     at,
                     judgements,
                     alarms,
-                }) => self.leq_reported(meas, config_rev, at, &judgements, alarms),
+                }) => self.leq_reported(meas, epoch, config_rev, at, &judgements, alarms),
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;
@@ -1067,7 +1073,13 @@ impl Control {
             Command::CalDelete { key } => self.cal_delete(&key),
             Command::SessionInputs { inputs } => self.session_inputs(inputs),
 
-            Command::SplLogGet { meas, from, max } => self.spl_log_get(meas, from, max),
+            Command::SplLogGet {
+                meas,
+                log,
+                from,
+                max,
+            } => self.spl_log_get(meas, log, from, max),
+            Command::SplLogNew { meas } => self.spl_log_new(meas),
 
             Command::IrCapture {
                 lease_token,

@@ -13,7 +13,7 @@ use ac2_proto::frame::{FrameData, LeqFlags, LeqFrame};
 use ac2_proto::model::{
     GeneratorDesired, GeneratorSettings, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindow,
     LevelScale, MeasConfig, MeasKind, PeakWeighting, SessionRef, Signal, SplConfig, SplLog,
-    SplLogPage, State, TimeWeighting, Weighting,
+    SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};
@@ -118,6 +118,7 @@ async fn page(c: &Client, from: u64) -> SplLogPage {
     match c
         .call(Command::SplLogGet {
             meas: M,
+            log: SplLogWhich::Current,
             from,
             max: 100_000,
         })
@@ -390,6 +391,7 @@ async fn windows_go_over_and_recover_and_survive() {
     let e = c
         .call(Command::SplLogGet {
             meas: t,
+            log: SplLogWhich::Current,
             from: 0,
             max: 1,
         })
@@ -406,12 +408,172 @@ async fn windows_go_over_and_recover_and_survive() {
     let e = c
         .call(Command::SplLogGet {
             meas: M,
+            log: SplLogWhich::Current,
             from: 0,
             max: 1,
         })
         .await
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::NotFound));
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}
+
+async fn previous_page(c: &Client) -> Result<SplLogPage, ClientError> {
+    match c
+        .call(Command::SplLogGet {
+            meas: M,
+            log: SplLogWhich::Previous,
+            from: 0,
+            max: 100_000,
+        })
+        .await?
+    {
+        ReplyBody::SplLogPage(p) => Ok(p),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The run clock and the total in the `leq` frame, then `spl.log_new`: the windows, their
+/// states, the alarms, the clock and the total start over, the windows and limits stay,
+/// the ended log stays readable as the previous one, and a saved session carries the new
+/// log.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_new_log_starts_over_and_keeps_the_windows() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(realtime_rig(), local_tcp());
+    cfg.cal_store = Some(dir.path().join("calibrations.json"));
+    let h = Daemon::start(cfg).unwrap();
+    let c = connect(&h).await;
+    c.call(Command::SessionOpen {
+        config: session(false),
+    })
+    .await
+    .unwrap();
+    let windows = vec![window(3.0, Some(90.0)), window(30.0, None)];
+    c.call(Command::MeasCreate {
+        config: meter(windows.clone()),
+    })
+    .await
+    .unwrap();
+    // No log ended yet: no previous log.
+    let e = previous_page(&c).await.unwrap_err();
+    assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::NotFound));
+    c.call(Command::MeasStart { meas: M }).await.unwrap();
+    c.subscribe(Subscription::Meas(M)).unwrap();
+    let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
+    set_level(&lease, -20.0).await;
+    leq_until(&c, "the tone", |f| (f.leq[0] + 26.02).abs() < 0.1).await;
+    calibrate(&c).await;
+
+    // 94 dB SPL: over the 3 s window's limit, an alarm; the run's total is 94 dB.
+    log_until(&c, "over alarm", |l| {
+        l.alarms.iter().any(|a| a.kind == LeqAlarmKind::Over)
+    })
+    .await;
+    let f = leq_until(&c, "a run of 5 s", |f| {
+        f.meta.scale == LevelScale::DbSpl
+            && f.meta
+                .run
+                .is_some_and(|r| r.until.0 - r.started_at.0 >= 5_000_000_000)
+    })
+    .await;
+    let run = f.meta.run.unwrap();
+    assert!((run.laeq - 94.0).abs() < 0.3, "{run:?}");
+    assert!(run.lzeq.is_finite() && run.lceq.is_finite());
+    assert!(!run.trimmed);
+    let first_start = page(&c, 0).await.rows[0].start;
+    assert_eq!(run.started_at, first_start);
+    let elapsed = (run.until.0 - run.started_at.0) as f64 / 1e9;
+    assert!(
+        (run.measured.0 + run.gaps.0 - elapsed).abs() < 1.5,
+        "{run:?}"
+    );
+
+    // Turned down to 74 dB: the window recovers; then a new log.
+    set_level(&lease, -40.0).await;
+    log_until(&c, "recovered", |l| {
+        l.alarms.iter().any(|a| a.kind == LeqAlarmKind::Recovered)
+    })
+    .await;
+    leq_until(&c, "3 s at 74 dB", |f| (f.leq[0] - 74.0).abs() < 0.3).await;
+    let ended_total = page(&c, 0).await.total;
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    let r = c.call(Command::SplLogNew { meas: M }).await.unwrap();
+    assert!(matches!(r, ReplyBody::Ack { .. }), "{r:?}");
+    let l = log_until(&c, "entity reset", |l| l.alarms.is_empty()).await;
+    assert!(l.windows.iter().all(|w| w.since.0 >= at));
+    assert_eq!(l.windows[0].judgement, LeqJudgement::Ok);
+    assert_eq!(l.windows[1].judgement, LeqJudgement::NoLimit);
+    // The new log: a clock from about now, a total of the new seconds only, windows
+    // filling again.
+    let f = leq_until(&c, "the new run", |f| {
+        f.meta
+            .run
+            .is_some_and(|r| r.started_at.0 + 1_000_000_000 >= at)
+            && f.elapsed[1] >= 2.0
+    })
+    .await;
+    let run = f.meta.run.unwrap();
+    assert!((run.laeq - 74.0).abs() < 0.3, "{run:?}");
+    assert!(f.elapsed[1] < 15.0, "{:?}", f.elapsed);
+    assert!(f.meta.logged < ended_total, "{} rows", f.meta.logged);
+    let new = page(&c, 0).await;
+    assert_eq!(new.from, 0);
+    assert!(new.rows[0].start.0 + 1_000_000_000 >= at);
+    // The entity names the new log's start once it has one.
+    let l = log_until(&c, "new start", |l| l.started_at.is_some()).await;
+    assert_eq!(l.started_at, Some(new.rows[0].start));
+    // The windows and limits are the meter's still.
+    let st = state(&c).await;
+    let MeasKind::Spl { config } = &st.measurements[0].config.kind else {
+        panic!()
+    };
+    assert_eq!(config.leq.windows, windows);
+    // The ended log, whole, as the previous one.
+    let prev = previous_page(&c).await.unwrap();
+    assert!(prev.total >= ended_total);
+    assert_eq!(prev.rows[0].start, first_start);
+    let spl = |r: &ac2_proto::model::SplLogRow| r.laeq.0 + r.sensitivity.map_or(0.0, |s| s.0);
+    assert!(prev.rows.iter().any(|r| (spl(r) - 94.0).abs() < 0.3));
+    // No alarm carried over: 74 dB stays under the limit.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(state(&c).await.spl_logs.iter().all(|l| l.alarms.is_empty()));
+
+    // Saved and loaded: the session holds the new log only.
+    drop(lease);
+    let path = dir.path().join("show").to_string_lossy().into_owned();
+    c.call(Command::FileSave {
+        session: SessionRef::Path { path: path.clone() },
+    })
+    .await
+    .unwrap();
+    c.call(Command::FileLoad {
+        session: SessionRef::Path { path },
+    })
+    .await
+    .unwrap();
+    let p = page(&c, 0).await;
+    assert_eq!(p.rows[0].start, new.rows[0].start);
+
+    // Only SPL meters have a log to renew.
+    let t = match c
+        .call(Command::MeasCreate {
+            config: transfer("tf"),
+        })
+        .await
+        .unwrap()
+    {
+        ReplyBody::Measurement(m) => m.id,
+        other => panic!("{other:?}"),
+    };
+    let e = c.call(Command::SplLogNew { meas: t }).await.unwrap_err();
+    assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
         .unwrap();

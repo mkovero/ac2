@@ -1,7 +1,7 @@
 {
  "topic": "d/4/leq",
  "header": {
-  "v": 9,
+  "v": 10,
   "kind": "leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -54,7 +54,17 @@
     },
     "mic_curve": false,
     "horizon": 60.0,
-    "logged": 1800
+    "logged": 1800,
+    "run": {
+     "started_at": 1790000000000000000,
+     "until": 1790001810000000000,
+     "measured": 1790.0,
+     "gaps": 20.0,
+     "trimmed": false,
+     "laeq": 97.8,
+     "lceq": 110.25,
+     "lzeq": 112.5
+    }
    }
   }
  },

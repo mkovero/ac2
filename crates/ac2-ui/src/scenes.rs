@@ -433,6 +433,30 @@ fn spl_cal(
     }
 }
 
+/// How wall times become local times of day (the SPL log's start).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LocalZone {
+    /// The computer's time zone, with the offset in force at each instant.
+    #[default]
+    System,
+    /// A fixed offset from UTC (tests that compare pictures).
+    Fixed { offset_s: i32 },
+}
+
+impl LocalZone {
+    /// The UTC offset (s) in force at wall time `t`.
+    pub fn offset_s(self, t: ac2_proto::units::WallNs) -> i32 {
+        match self {
+            LocalZone::System => {
+                use chrono::{Local, Offset, TimeZone};
+                let ns = i64::try_from(t.0).unwrap_or(i64::MAX);
+                Local.timestamp_nanos(ns).offset().fix().local_minus_utc()
+            }
+            LocalZone::Fixed { offset_s } => offset_s,
+        }
+    }
+}
+
 /// Whether the daemon has an SPL meter.
 pub fn has_spl(st: &AppState) -> bool {
     st.measurements()
@@ -470,6 +494,10 @@ pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Leq
         scale: f.meta.scale,
         horizon: ac2_scene::leq::length(f.meta.horizon.0),
         layout: st.view.spl.layout,
+        run: f
+            .meta
+            .run
+            .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
     };
     let status = status(st, &[], None, now);
     Some(leq_scene(&v, &status, theme, size))

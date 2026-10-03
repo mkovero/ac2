@@ -462,6 +462,13 @@ pub async fn leq(
                 age_text(tf.age, tf.stale)
             );
             lines.push(head.clone());
+            let run = f
+                .meta
+                .run
+                .map(|r| (r, ac2_scene::leq::run_text(&r, &config.leq, output::local_offset_s)));
+            if let Some((_, rt)) = &run {
+                lines.push(rt.line());
+            }
             for t in &tiles {
                 let state = t.state_text.clone().unwrap_or_default();
                 let marker = match t.state {
@@ -549,6 +556,27 @@ pub async fn leq(
                     "cal_text": cal,
                     "horizon_s": f.meta.horizon.0,
                     "logged": f.meta.logged,
+                    "run": run.as_ref().map(|(r, rt)| {
+                        let num = |v: f64| v.is_finite().then_some(v);
+                        json!({
+                            "started_at": ac2_traces::spl_log::utc_iso(r.started_at.0),
+                            "started_at_ns": r.started_at.0,
+                            "until_ns": r.until.0,
+                            "running_s": r.until.0.saturating_sub(r.started_at.0) as f64 / 1e9,
+                            "measured_s": r.measured.0,
+                            "gaps_s": r.gaps.0,
+                            "trimmed": r.trimmed,
+                            "laeq": num(r.laeq),
+                            "lceq": num(r.lceq),
+                            "lzeq": num(r.lzeq),
+                            "text": {
+                                "line": rt.line(),
+                                "clock": rt.clock,
+                                "since": rt.since,
+                                "gaps": rt.gaps,
+                            },
+                        })
+                    }),
                     "windows": windows,
                 }),
                 key,

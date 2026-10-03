@@ -20,7 +20,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   Impulse, Leq, LCpeak, Lmax / Lmin) with **rolling Leq windows**, limits, alarms and
   informational regulation presets (DIN 15905-5, Switzerland, WHO, France, Flanders,
   Brussels, the Dutch covenant), and a per-second log that keeps running whether or not
-  anyone watches.
+  anyone watches, with its run clock and total Leq on screen and a new log at show start.
 - **Calibration**: per-input sensitivity against an acoustic calibrator; a **mic library**
   with several labelled curves per mic (0°, 90° …) and an explicitly chosen active curve per
   input; a Calibrations view that shows what every input uses.

@@ -126,6 +126,8 @@ pub struct Shared {
     pub last_find: Option<(FinderBand, Option<Seconds>)>,
     /// Per-second log rows `spl.log_get` serves, per SPL meter (a test fills them).
     pub spl_rows: HashMap<MeasId, Vec<SplLogRow>>,
+    /// The rows `spl.log_new` ended last, per SPL meter (`spl.log_get` of the previous log).
+    pub spl_prev_rows: HashMap<MeasId, Vec<SplLogRow>>,
     traces: traces::FakeTraces,
     lease: Option<LeaseSlot>,
     dedup: HashMap<(Vec<u8>, u64), Vec<u8>>,
@@ -287,6 +289,7 @@ impl Shared {
             finding: FakeFinding::default(),
             last_find: None,
             spl_rows: HashMap::new(),
+            spl_prev_rows: HashMap::new(),
             traces: traces::FakeTraces::default(),
             lease: None,
             dedup: HashMap::new(),
@@ -550,6 +553,19 @@ impl Shared {
         if self.state.spl_logs.iter().find(|x| x.meas == m.id) != Some(&l) {
             self.commit(Change::SplLog(Patch::Set(l)));
         }
+    }
+
+    /// `invalid` unless `meas` is an SPL meter.
+    fn spl_meter(&self, meas: MeasId) -> Result<Measurement, ProtoError> {
+        let m = self.meas(meas)?;
+        if !matches!(m.config.kind, MeasKind::Spl { .. }) {
+            return Err(ProtoError {
+                code: ErrorCode::Invalid,
+                msg: format!("measurement {meas} is not an SPL meter"),
+                detail: None,
+            });
+        }
+        Ok(m)
     }
 
     fn execute(&mut self, client: &ClientId, cmd: Command) -> Result<ReplyBody, ProtoError> {
@@ -999,16 +1015,26 @@ impl Shared {
                 self.set_inputs(all);
                 ReplyBody::Inputs(self.state.inputs.clone())
             }
-            C::SplLogGet { meas, from, max } => {
-                let m = self.meas(meas)?;
-                if !matches!(m.config.kind, MeasKind::Spl { .. }) {
-                    return Err(ProtoError {
-                        code: ErrorCode::Invalid,
-                        msg: format!("measurement {meas} is not an SPL meter"),
-                        detail: None,
-                    });
-                }
-                let rows = self.spl_rows.get(&meas).cloned().unwrap_or_default();
+            C::SplLogGet {
+                meas,
+                log,
+                from,
+                max,
+            } => {
+                self.spl_meter(meas)?;
+                let rows = match log {
+                    SplLogWhich::Current => self.spl_rows.get(&meas).cloned().unwrap_or_default(),
+                    SplLogWhich::Previous => {
+                        self.spl_prev_rows
+                            .get(&meas)
+                            .cloned()
+                            .ok_or_else(|| ProtoError {
+                                code: ErrorCode::NotFound,
+                                msg: format!("SPL meter {meas} has no previous log"),
+                                detail: None,
+                            })?
+                    }
+                };
                 let total = rows.len() as u64;
                 let from = from.min(total);
                 let n = max.min(SplLogPage::MAX_ROWS) as usize;
@@ -1018,6 +1044,17 @@ impl Shared {
                     total,
                     rows: rows.into_iter().skip(from as usize).take(n).collect(),
                 })
+            }
+            C::SplLogNew { meas } => {
+                let m = self.spl_meter(meas)?;
+                let rows = self.spl_rows.remove(&meas).unwrap_or_default();
+                self.spl_prev_rows.insert(meas, rows);
+                // The entity starts over as for a new meter: initial states, no alarms.
+                if self.state.spl_logs.iter().any(|l| l.meas == meas) {
+                    self.commit(Change::SplLog(Patch::Deleted(meas)));
+                }
+                self.spl_log_for(&m);
+                ReplyBody::Ack { rev: self.rev }
             }
             C::StateSnapshot => ReplyBody::Snapshot(Box::new(StateSnapshot {
                 state: self.state.clone(),

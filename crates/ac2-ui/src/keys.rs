@@ -461,6 +461,7 @@ commands! {
     SplLeqView => "spl_leq_view", "SPL: meter / Leq windows", [Spl];
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
+    SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
 
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
     SweepIr => "sweep_ir", "Sweep: distortion / impulse response", [Distortion];
@@ -584,6 +585,9 @@ pub fn defaults() -> Vec<Binding> {
         // the other thing".
         (C::SplLeqStyle, S::Spl, k(K::B)),
         (C::SplLeqHistory, S::Spl, k(K::H)),
+        // R resets the meter's display; Shift+R, a step further, starts a new log (after a
+        // confirmation: it discards show data).
+        (C::SplNewLog, S::Spl, sh(K::R)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
         (C::IrMode, S::Distortion, k(K::G)),

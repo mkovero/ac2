@@ -209,6 +209,16 @@ def frames():
                 "mic_curve": False,
                 "horizon": 60.0,
                 "logged": 1800,
+                "run": {
+                    "started_at": 1_790_000_000_000_000_000,
+                    "until": 1_790_001_810_000_000_000,
+                    "measured": 1790.0,
+                    "gaps": 20.0,
+                    "trimmed": False,
+                    "laeq": 97.8,
+                    "lceq": 110.25,
+                    "lzeq": 112.5,
+                },
             },
             [
                 (arr("leq", "db_spl"), [96.5, 99.25]),
@@ -498,7 +508,12 @@ def requests():
                 "input": 1,
             },
         ),
-        req(33, "spl.log_get", {"meas": 4, "from": 120, "max": 3600}, mutation=False),
+        req(
+            33,
+            "spl.log_get",
+            {"meas": 4, "log": "previous", "from": 120, "max": 3600},
+            mutation=False,
+        ),
         req(
             34,
             "ir.capture",
@@ -537,6 +552,7 @@ def requests():
         ),
         req(46, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
         req(48, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(49, "spl.log_new", {"meas": 4}),
     ]
 
 

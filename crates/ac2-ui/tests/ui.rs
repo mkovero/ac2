@@ -1211,6 +1211,11 @@ impl Drop for LeqPublisher {
     }
 }
 
+/// 17:02 UTC on 3 October 2026.
+const SHOW_START_S: u64 = 1_791_046_920;
+/// The pictures' local time: UTC+2, so the show starts at 19:02 on any machine.
+const SHOW_ZONE: ac2_ui::scenes::LocalZone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 7200 };
+
 /// One `leq` frame of meter `meas`: a value per window, over / near as given, a one-minute
 /// horizon. Window order is the default one with DIN 15905-5 on 30 min and a typed limit on
 /// 1 min: 1, 5, 10, 30, 60 min.
@@ -1222,7 +1227,7 @@ fn leq_frame(
     elapsed: [f32; 5],
     calibrated_at: u64,
 ) -> ac2_proto::frame::LeqFrame {
-    use ac2_proto::frame::{LeqFlags, LeqFrame, LeqMeta};
+    use ac2_proto::frame::{LeqFlags, LeqFrame, LeqMeta, LeqRun};
     use ac2_proto::model::{CalStatus, LevelScale};
     use ac2_proto::units::{Seconds, WallNs};
     LeqFrame {
@@ -1234,7 +1239,18 @@ fn leq_frame(
             },
             mic_curve: false,
             horizon: Seconds(60.0),
-            logged: 3600,
+            logged: 2718,
+            // The show so far: 45:30 from 19:02 (UTC+2, [`SHOW_ZONE`]), 12 s of it lost.
+            run: Some(LeqRun {
+                started_at: WallNs(SHOW_START_S * 1_000_000_000),
+                until: WallNs((SHOW_START_S + 2730) * 1_000_000_000),
+                measured: Seconds(2718.0),
+                gaps: Seconds(12.0),
+                trimmed: false,
+                laeq: f64::from(leq[4]) + 0.4,
+                lceq: f64::from(leq[4]) + 6.0,
+                lzeq: f64::from(leq[4]) + 9.0,
+            }),
         },
         leq: leq.to_vec(),
         elapsed: elapsed.to_vec(),
@@ -1272,6 +1288,7 @@ fn leq_tiles_from_an_empty_daemon() {
     let _meters = Meters::start(Arc::clone(&fake));
     let leq = LeqPublisher::start(Arc::clone(&fake));
     let mut h = harness(options_at(Some(fake.endpoints())));
+    h.state_mut().state.local_zone = SHOW_ZONE;
     step_until(&mut h, "synced", |a| {
         a.state.mirror.as_ref().is_some_and(|m| m.synced())
     });
@@ -1484,6 +1501,7 @@ fn leq_tiles_from_an_empty_daemon() {
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     let pin = |a: &mut ac2_ui::App| {
         a.state.toasts.clear();
+        a.state.local_zone = SHOW_ZONE;
         a.state
             .leq_history
             .insert(meas, (u64::MAX, history.clone()));
@@ -1548,6 +1566,15 @@ fn leq_tiles_from_an_empty_daemon() {
         a.state.view.spl.layout == ac2_scene::view::LeqLayout::default()
     });
     snapshot_when(&mut h, "leq_columns_recovered", pin, first_is(false));
+
+    // Shift+R asks before a new log, naming the run that ends; N keeps it.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::R);
+    step_until(&mut h, "the new log confirmation", |a| {
+        matches!(a.state.overlay, Overlay::NewLog(_))
+    });
+    snapshot_when(&mut h, "leq_new_log_confirm", pin, first_is(false));
+    h.key_press(Key::N);
+    step_until(&mut h, "no dialog", |a| a.state.overlay == Overlay::None);
 
     // F11 with the pane maximised: the stage view, the columns alone; over again.
     leq.set(over_frame);

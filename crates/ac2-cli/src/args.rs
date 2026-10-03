@@ -680,6 +680,10 @@ pub enum LeqCmd {
     Set(LeqSet),
     /// Write the meter's per-second log (LAeq, LCeq, LZeq per second) as CSV.
     Export(LeqExport),
+    /// End the meter's log and start a new one (show start after a loud soundcheck): the
+    /// windows, their states, the alarms, the run clock and the total start over; windows
+    /// and limits are kept. Asks for `--yes`; `--export FILE` writes the ended log first.
+    New(LeqNew),
 }
 
 /// Which SPL meter: `--meas`, the one on `--input`, or the only one.
@@ -792,6 +796,22 @@ pub struct LeqExport {
     /// Write to this file (default: standard output).
     #[arg(long, short = 'o', value_name = "FILE")]
     pub out: Option<PathBuf>,
+    /// The log `spl leq new` ended last (kept until the next new log or a daemon restart).
+    #[arg(long)]
+    pub previous: bool,
+}
+
+/// `spl leq new`.
+#[derive(Debug, Args)]
+pub struct LeqNew {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// Write the ended log to this file as CSV (as `spl leq export`), all of it.
+    #[arg(long, value_name = "FILE")]
+    pub export: Option<PathBuf>,
+    /// Go ahead: the current log's windows, alarms, run clock and total are discarded.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// `spl watch`.

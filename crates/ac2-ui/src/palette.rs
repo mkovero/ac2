@@ -215,6 +215,7 @@ mod tests {
             ("leq columns", CommandId::SplLeqStyle),
             ("leq tiles", CommandId::SplLeqStyle),
             ("leq history", CommandId::SplLeqHistory),
+            ("new log", CommandId::SplNewLog),
             ("full screen", CommandId::Fullscreen),
         ] {
             let r = search(q, &k, Scope::Transfer);

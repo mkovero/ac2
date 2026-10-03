@@ -517,6 +517,59 @@ impl RollingLeq {
     }
 }
 
+/// The energy average over a whole log: per-weighting energy and measured time of every
+/// second added, less those removed (a log trimmed at its oldest end). Gaps add nothing,
+/// so the level is over the measured time, as a window's.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LogTotal {
+    sums: [Sum; 3],
+}
+
+impl LogTotal {
+    /// The exact total of `seconds`.
+    pub fn of<'a>(seconds: impl IntoIterator<Item = &'a Second>) -> Self {
+        let mut t = Self::default();
+        for s in seconds {
+            t.add(s);
+        }
+        t
+    }
+
+    /// Adds a second.
+    pub fn add(&mut self, s: &Second) {
+        for (w, sum) in self.sums.iter_mut().enumerate() {
+            sum.add(s.energy[w], s.measured);
+        }
+    }
+
+    /// Takes away a second added before.
+    pub fn remove(&mut self, s: &Second) {
+        for (w, sum) in self.sums.iter_mut().enumerate() {
+            sum.add(-s.energy[w], -s.measured);
+        }
+    }
+
+    /// Measured time, s.
+    pub fn measured(&self) -> f64 {
+        self.sums[0].measured()
+    }
+
+    /// Energy of weighting `w` (FS²·s).
+    pub fn energy(&self, w: Weighting) -> f64 {
+        self.sums[w_index(w)].energy()
+    }
+
+    /// Leq of weighting `w` over the measured time, dBFS; NaN when nothing was measured.
+    pub fn level_dbfs(&self, w: Weighting) -> f64 {
+        let m = self.measured();
+        if m > 0.0 {
+            power_dbfs(self.energy(w) / m)
+        } else {
+            f64::NAN
+        }
+    }
+}
+
 /// A window's state against its limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Judgement {

@@ -3730,7 +3730,7 @@ fn with_spl() -> State {
 /// A `leq` frame of meter 4 with `seq`, as the link delivers it.
 fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) -> ConnEvent {
     use ac2_client::{Latest, TopicFrame};
-    use ac2_proto::frame::{Frame, FrameData, LeqFrame, LeqMeta};
+    use ac2_proto::frame::{Frame, FrameData, LeqFrame, LeqMeta, LeqRun};
     let n = 5;
     let data = FrameData::Leq(LeqFrame {
         meas: MeasId(4),
@@ -3742,6 +3742,17 @@ fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) ->
             mic_curve: false,
             horizon: Seconds(60.0),
             logged: seq,
+            // A log of `seq` seconds up to `at_s`.
+            run: Some(LeqRun {
+                started_at: WallNs(at_s.saturating_sub(seq) * 1_000_000_000),
+                until: WallNs(at_s * 1_000_000_000),
+                measured: Seconds(seq as f64),
+                gaps: Seconds(0.0),
+                trimmed: false,
+                laeq: f64::from(leq),
+                lceq: f64::from(leq) + 3.0,
+                lzeq: f64::from(leq) + 5.0,
+            }),
         },
         leq: vec![leq; n],
         elapsed: vec![60.0; n],
@@ -3844,6 +3855,84 @@ fn leq_windows_from_the_keyboard() {
         panic!()
     };
     assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
+}
+
+/// Shift+R in the SPL pane (or "Start a new SPL log…" in Ctrl+K) asks first, naming the
+/// run that ends and what starts over; N keeps the log, Enter sends `spl.log_new`.
+#[test]
+fn new_spl_log_asks_first() {
+    let mut t = T::new();
+    t.st.local_zone = crate::scenes::LocalZone::Fixed { offset_s: 7200 };
+    t.key("Alt+4");
+    t.key("Shift+R");
+    assert!(
+        t.last_toast().contains("no SPL meter"),
+        "{}",
+        t.last_toast()
+    );
+    assert_eq!(t.st.overlay, Overlay::None);
+    t.conn(mirror(with_spl()));
+    // A log of 2:14:05.
+    t.conn(leq_data(
+        8045,
+        1_791_055_000,
+        97.84,
+        ac2_proto::frame::LeqFlags::NONE,
+    ));
+    let r = t.key("Shift+R");
+    assert!(r.is_empty(), "{r:?}");
+    let Overlay::NewLog(p) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay)
+    };
+    assert_eq!(p.meas, MeasId(4));
+    assert_eq!(p.confirm.title, "Start a new SPL log for FOH SPL?");
+    // 8045 s up to 19:16:40 UTC+2 on 3 October 2026: since 19:02.
+    assert_eq!(
+        p.confirm.lines[0],
+        "The current log ends: running 2:14:05 since 19:02 · LAeq total 97.8."
+    );
+    assert!(p.confirm.lines[1].contains("the 5 Leq windows and their states, the alarms"));
+    // N keeps the log: nothing sent.
+    let r = t.key("N");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    // Esc closes it too (and stops the stimulus, as always).
+    t.key("Shift+R");
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+    // From the palette, then Enter: spl.log_new for the pane's meter.
+    t.key("Ctrl+K");
+    t.text("new spl log");
+    t.key("Enter");
+    assert!(
+        matches!(t.st.overlay, Overlay::NewLog(_)),
+        "{:?}",
+        t.st.overlay
+    );
+    let r = t.key("Enter");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::Call { cmd: Command::SplLogNew { meas }, what }
+                if *meas == MeasId(4) && what == "FOH SPL: new SPL log started"
+        )),
+        "{r:?}"
+    );
+    // The mouse: "Keep the current log" sends nothing, "Start a new log" sends it.
+    t.key("Shift+R");
+    let r = t.st.update(Msg::NewLog(false), &t.keys);
+    assert!(r.is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    t.key("Shift+R");
+    let r = t.st.update(Msg::NewLog(true), &t.keys);
+    assert!(r.iter().any(|r| matches!(
+        r,
+        Request::Call {
+            cmd: Command::SplLogNew { .. },
+            ..
+        }
+    )));
 }
 
 /// The Leq view starts as columns without the history strip; B switches columns / tiles, H

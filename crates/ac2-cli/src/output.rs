@@ -482,6 +482,13 @@ pub fn sessions(l: &[SessionFile]) -> String {
     t.to_string()
 }
 
+/// The local UTC offset (s) in force at wall time `t`.
+pub fn local_offset_s(t: ac2_proto::units::WallNs) -> i32 {
+    use chrono::{Local, Offset, TimeZone};
+    let ns = i64::try_from(t.0).unwrap_or(i64::MAX);
+    Local.timestamp_nanos(ns).offset().fix().local_minus_utc()
+}
+
 /// `YYYY-MM-DD hh:mm` UTC of Unix nanoseconds (civil-from-days, proleptic Gregorian).
 pub fn utc(ns: u64) -> String {
     let secs = ns / 1_000_000_000;

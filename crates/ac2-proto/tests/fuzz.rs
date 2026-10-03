@@ -1,7 +1,7 @@
 //! Property tests: random frames round-trip; malformed input never panics.
 
 use ac2_proto::frame::{ClipFlags, LevelsFrame, LevelsMeta, ProtectionFlags, TfFrame, TfMeta};
-use ac2_proto::model::DelayPick;
+use ac2_proto::model::{DelayPick, SplLogWhich};
 use ac2_proto::units::*;
 use ac2_proto::*;
 use proptest::prelude::*;
@@ -226,7 +226,13 @@ proptest! {
             Command::GenRefresh { lease_token: LeaseToken(token) },
             Command::GenAcquire { force: flag },
             Command::Hello { client: name.clone() },
-            Command::SplLogGet { meas: m, from: u64::from(idx), max: u32::from(idx) },
+            Command::SplLogGet {
+                meas: m,
+                log: if flag { SplLogWhich::Previous } else { SplLogWhich::Current },
+                from: u64::from(idx),
+                max: u32::from(idx),
+            },
+            Command::SplLogNew { meas: m },
         ];
         for cmd in cmds {
             let mut req = Request::new(RequestId(u64::from(meas)), cmd);

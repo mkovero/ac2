@@ -15,7 +15,7 @@ use ac2_core::mic_curve::Correction;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
 use ac2_proto::frame::{
-    FrameData, LeqFlags, LeqFrame, LeqMeta, ProtectionFlags, SplFrame, SplMeta,
+    FrameData, LeqFlags, LeqFrame, LeqMeta, LeqRun, ProtectionFlags, SplFrame, SplMeta,
 };
 use ac2_proto::model::{
     LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, SplConfig, SplLogRow,
@@ -62,6 +62,8 @@ struct LeqWindows {
     /// Wall clock of `next` (ns), from the newest block.
     next_wall: u64,
     judgements: Vec<LeqJudgement>,
+    /// The log's epoch the windows and judgements belong to.
+    epoch: u64,
     done: Vec<Second>,
     /// A second completed since the last `leq` frame.
     fresh: bool,
@@ -103,6 +105,7 @@ impl LeqWindows {
         let n = cfg.windows.len();
         let mut judgements = setup.judgements;
         judgements.resize(n, LeqJudgement::NoLimit);
+        let epoch = leq_log::lock(&setup.log).epoch();
         Ok(Self {
             seconds: SecondIntegrator::new(fs).map_err(|e| e.to_string())?,
             ring: ring_for(&cfg),
@@ -113,6 +116,7 @@ impl LeqWindows {
             next: 0,
             next_wall: 0,
             judgements,
+            epoch,
             done: Vec::with_capacity(4),
             fresh: false,
         })
@@ -242,24 +246,38 @@ impl Spl {
             let start = self.leq.second_start.unwrap_or(0);
             let end = start + per;
             self.leq.second_start = Some(end);
-            self.leq.ring.push(*s);
-            if s.measured > 0.0 {
-                let row = SplLogRow {
-                    start: WallNs(self.leq.wall_of(start, fs)),
-                    measured: Seconds(s.measured),
-                    laeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::A)),
-                    lceq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::C)),
-                    lzeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::Z)),
-                    sensitivity: self.cal.sensitivity.map(ac2_proto::units::Db),
-                };
-                let first = {
-                    let mut log = leq_log::lock(&self.leq.log);
+            let row = (s.measured > 0.0).then(|| SplLogRow {
+                start: WallNs(self.leq.wall_of(start, fs)),
+                measured: Seconds(s.measured),
+                laeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::A)),
+                lceq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::C)),
+                lzeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::Z)),
+                sensitivity: self.cal.sensitivity.map(ac2_proto::units::Db),
+            });
+            let (epoch, first) = {
+                let mut log = leq_log::lock(&self.leq.log);
+                if let Some(row) = row {
                     log.push(row);
-                    log.total() == 1
-                };
-                if first {
-                    self.report(WallNs(self.leq.wall_of(end, fs)), Vec::new());
                 }
+                (log.epoch(), row.is_some() && log.total() == 1)
+            };
+            if epoch != self.leq.epoch {
+                // `spl.log_new` started a new log: the windows and their states start over
+                // with it (the control thread reset the entity to the same states).
+                self.leq.epoch = epoch;
+                self.leq.ring.clear();
+                let calibrated = self.cal.sensitivity.is_some();
+                self.leq.judgements = self
+                    .leq
+                    .cfg
+                    .windows
+                    .iter()
+                    .map(|w| leq_log::initial_judgement(w, calibrated))
+                    .collect();
+            }
+            self.leq.ring.push(*s);
+            if first {
+                self.report(WallNs(self.leq.wall_of(end, fs)), Vec::new());
             }
             self.judge(WallNs(self.leq.wall_of(end, fs)));
         }
@@ -317,6 +335,7 @@ impl Spl {
     fn report(&self, at: WallNs, alarms: Vec<LeqAlarm>) {
         let _ = self.leq.to_control.send(ControlMsg::Leq {
             meas: self.meas,
+            epoch: self.leq.epoch,
             config_rev: self.config_rev,
             at,
             judgements: self.leq.judgements.clone(),
@@ -328,6 +347,10 @@ impl Spl {
         let offset = self.cal.sensitivity;
         let o = offset.unwrap_or(0.0);
         let n = self.leq.cfg.windows.len();
+        let (logged, run) = {
+            let log = leq_log::lock(&self.leq.log);
+            (log.total(), log.run())
+        };
         let mut f = LeqFrame {
             meas: self.meas,
             meta: LeqMeta {
@@ -339,7 +362,18 @@ impl Spl {
                 cal: self.cal.status,
                 mic_curve: self.leq.seconds.has_correction(),
                 horizon: self.leq.cfg.horizon,
-                logged: leq_log::lock(&self.leq.log).total(),
+                logged,
+                run: run.map(|r| LeqRun {
+                    started_at: r.started_at,
+                    until: r.until,
+                    measured: Seconds(r.measured),
+                    gaps: Seconds(r.gaps),
+                    trimmed: r.trimmed,
+                    // In the meter's scale now, as the windows: the energies are dBFS.
+                    laeq: r.levels_dbfs[0] + o,
+                    lceq: r.levels_dbfs[1] + o,
+                    lzeq: r.levels_dbfs[2] + o,
+                }),
             },
             leq: Vec::with_capacity(n),
             elapsed: Vec::with_capacity(n),
