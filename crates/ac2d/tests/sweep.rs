@@ -178,12 +178,20 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let SweepStatus::Done { trace } = done.status else {
         panic!("sweep failed: {:?}", done.status);
     };
-    // Armed again, not firing.
+    // A finished sweep leaves the generator disarmed, never re-armed with the state from
+    // before it: the lease stays with its holder, and the next sweep needs an explicit arm.
     let st = match c.ok(Command::StateSnapshot) {
         ReplyBody::Snapshot(s) => s.state,
         other => panic!("{other:?}"),
     };
-    assert!(st.generator.armed && !st.generator.firing);
+    assert!(!st.generator.armed && !st.generator.firing);
+    assert!(st.generator.owner.is_some(), "the lease is still held");
+    let last = st.generator.last_action.as_ref().unwrap();
+    assert_eq!(last.action, ac2_proto::model::GenAction::Stop);
+    assert!(last.client.is_none(), "disarmed by the daemon");
+    let e = capture(&mut c, Some(LEVEL)).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+    assert!(e.msg.contains("arm"), "{}", e.msg);
 
     let data = match c.ok(Command::TraceGet { trace }) {
         ReplyBody::TraceData(t) => t,
@@ -298,4 +306,34 @@ fn stopping_or_losing_the_lease_discards_the_run() {
             ..
         }
     ));
+}
+
+/// A sweep that fails its analysis (played on an output nothing records) disarms like a
+/// finished one: nothing is left armed for the next Enter.
+#[test]
+fn a_failed_sweep_leaves_the_generator_disarmed() {
+    let (_h, _b, mut c, sub, mut d, token) = setup();
+    arm(&mut c, token);
+    let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
+        lease_token: token,
+        request: SweepRequest {
+            outputs: vec![1],
+            ..request(Some(LEVEL))
+        },
+        name: "unheard".into(),
+    }) else {
+        panic!("not a sweep");
+    };
+    let ended = run_until(&mut d, &mut c, &sub, token, |x| x.id == r.id && !x.active());
+    assert!(
+        matches!(ended.status, SweepStatus::Failed { .. }),
+        "{:?}",
+        ended.status
+    );
+    let st = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state,
+        other => panic!("{other:?}"),
+    };
+    assert!(!st.generator.armed && !st.generator.firing);
+    assert!(st.traces.is_empty(), "nothing stored");
 }

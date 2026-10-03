@@ -75,7 +75,8 @@ pub enum FieldId {
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
-/// by name (←/→ pick; the view shows its meter).
+/// by name (←/→ pick; the view shows its meter). ←/→ step through the options in order and
+/// stop at the ends.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Text(String),
@@ -83,11 +84,12 @@ pub enum Value {
         options: Vec<String>,
         index: usize,
     },
-    /// `channels[index]` is the zero-based device input; `options` their names.
+    /// `channels[index]` is the zero-based device input; `options` their names. `None`:
+    /// nothing chosen yet, where guessing could pick the wrong input.
     Channel {
         channels: Vec<u16>,
         options: Vec<String>,
-        index: usize,
+        index: Option<usize>,
     },
 }
 
@@ -126,16 +128,17 @@ impl Field {
         id: FieldId,
         label: &'static str,
         inputs: &[(u16, String)],
-        pick: u16,
+        pick: Option<u16>,
         hint: &str,
     ) -> Self {
+        let index = pick.map(|p| inputs.iter().position(|(c, _)| *c == p).unwrap_or(0));
         Self {
             id,
             label,
             value: Value::Channel {
                 channels: inputs.iter().map(|(c, _)| *c).collect(),
                 options: inputs.iter().map(|(_, n)| n.clone()).collect(),
-                index: inputs.iter().position(|(c, _)| *c == pick).unwrap_or(0),
+                index,
             },
             hint: hint.into(),
         }
@@ -145,8 +148,14 @@ impl Field {
     pub fn display(&self) -> String {
         match &self.value {
             Value::Text(t) => t.clone(),
-            Value::Choice { options, index } | Value::Channel { options, index, .. } => {
-                options.get(*index).cloned().unwrap_or_default()
+            Value::Choice { options, index } => options.get(*index).cloned().unwrap_or_default(),
+            Value::Channel {
+                options,
+                index: Some(i),
+                ..
+            } => options.get(*i).cloned().unwrap_or_default(),
+            Value::Channel { index: None, .. } => {
+                format!("choose the {}", self.label.to_lowercase())
             }
         }
     }
@@ -155,8 +164,10 @@ impl Field {
     pub fn channel_value(&self) -> Option<u16> {
         match &self.value {
             Value::Channel {
-                channels, index, ..
-            } => channels.get(*index).copied(),
+                channels,
+                index: Some(i),
+                ..
+            } => channels.get(*i).copied(),
             _ => None,
         }
     }
@@ -169,13 +180,15 @@ pub struct SweepPlan {
     pub name: String,
 }
 
-/// Sweep durations offered (the CLI's default, 3 s, first).
+/// Sweep durations offered, shortest first: → is longer, ← shorter.
 const DURATIONS: [(&str, f64); 4] = [
-    ("3 s", 3.0),
     ("1 s (quick look)", 1.0),
+    ("3 s", 3.0),
     ("6 s (lower floor, longer windows)", 6.0),
     ("12 s", 12.0),
 ];
+/// The CLI's default duration, 3 s.
+const DEFAULT_DURATION: usize = 1;
 const REPEATS: [(&str, u8); 4] = [("1", 1), ("2", 2), ("4", 4), ("8", 8)];
 
 /// `20`, `20 Hz`, `20k`, `1.5 kHz`.
@@ -206,6 +219,9 @@ pub struct Form {
     pub focus: usize,
     /// Why the last Enter was refused.
     pub error: Option<String>,
+    /// The focused text field's whole text is selected: typing replaces it, Backspace
+    /// clears it. A text field is selected when it gets the focus, and by Ctrl+A.
+    pub selected: bool,
 }
 
 /// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
@@ -287,6 +303,7 @@ impl Form {
             fields,
             focus: 0,
             error: None,
+            selected: false,
         }
     }
 
@@ -318,7 +335,7 @@ impl Form {
             .count()
             + 1;
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
-        let input_field = Field::channel(FieldId::Input, "Input", inputs, measurement, "");
+        let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
             // Built by [`Form::sweep`].
             FormKind::Sweep => Vec::new(),
@@ -327,14 +344,14 @@ impl Form {
                     FieldId::Reference,
                     "Reference",
                     inputs,
-                    reference,
+                    Some(reference),
                     "the loopback (stimulus copy)",
                 ),
                 Field::channel(
                     FieldId::Measurement,
                     "Measurement",
                     inputs,
-                    measurement,
+                    Some(measurement),
                     "the mic",
                 ),
                 name("TF"),
@@ -367,9 +384,12 @@ impl Form {
     }
 
     /// The sweep dialog over the session's captured `inputs` and its `outputs` (channel,
-    /// name). Reference, mic and the speaker output default as for a transfer measurement;
-    /// the loopback output (when the session has one) always plays the sweep too. `level` is
-    /// the operator's typed stimulus level, if any: there is no default.
+    /// name). The reference is the session's loopback input; without one it is left for the
+    /// operator to choose, because the analysis divides by it and an input picked by channel
+    /// order would give a plausible but meaningless result. Mic and speaker output default
+    /// as for a transfer measurement; the loopback output (when the session has one) always
+    /// plays the sweep too. `level` is the operator's typed stimulus level, if any: there is
+    /// no default.
     pub fn sweep(
         open: Option<&OpenSession>,
         sweeps: usize,
@@ -379,7 +399,9 @@ impl Form {
         level: Option<Dbfs>,
     ) -> Self {
         let base = Self::measurement(FormKind::Transfer, open, &[], inputs, mics);
-        let pick = |id| base.channel(id).unwrap_or(0);
+        let reference = open
+            .and_then(|o| o.config.loopback.map(|l| l.input))
+            .filter(|r| inputs.iter().any(|(c, _)| c == r));
         let loopback_out = open.and_then(|o| o.config.loopback.map(|l| l.output));
         let speaker = outputs
             .iter()
@@ -405,17 +427,17 @@ impl Form {
                 FieldId::Reference,
                 "Reference",
                 inputs,
-                pick(FieldId::Reference),
+                reference,
                 "the loopback (stimulus copy)",
             ),
             Field::channel(
                 FieldId::Measurement,
                 "Measurement",
                 inputs,
-                pick(FieldId::Measurement),
+                base.channel(FieldId::Measurement),
                 "the mic",
             ),
-            Field::channel(FieldId::Output, "Output", outputs, speaker, &hint_out),
+            Field::channel(FieldId::Output, "Output", outputs, Some(speaker), &hint_out),
             Field::text(
                 FieldId::Level,
                 "Level",
@@ -424,7 +446,12 @@ impl Form {
             ),
             Field::text(FieldId::From, "From", "20 Hz", ""),
             Field::text(FieldId::To, "To", "20 kHz", ""),
-            Field::choice(FieldId::Duration, "Duration", &DURATIONS.map(|d| d.0), 0),
+            Field::choice(
+                FieldId::Duration,
+                "Duration",
+                &DURATIONS.map(|d| d.0),
+                DEFAULT_DURATION,
+            ),
             Field::choice(FieldId::Repeats, "Repeats", &REPEATS.map(|r| r.0), 0),
             Field::text(FieldId::Name, "Name", format!("Sweep {}", sweeps + 1), ""),
         ];
@@ -449,6 +476,13 @@ impl Form {
                 Err(format!("{what} {} is not captured by the session", c + 1))
             }
         };
+        if self.channel(FieldId::Reference).is_none() {
+            return Err(
+                "choose the reference: the input that records the loopback (a copy of the \
+                 stimulus)"
+                    .into(),
+            );
+        }
         let reference = input(FieldId::Reference, "reference input")?;
         let measurement = input(FieldId::Measurement, "measurement input")?;
         if reference == measurement {
@@ -492,7 +526,10 @@ impl Form {
         {
             outputs.push(l.output);
         }
-        let duration = DURATIONS[self.choice_index(FieldId::Duration).unwrap_or(0)].1;
+        let duration = DURATIONS[self
+            .choice_index(FieldId::Duration)
+            .unwrap_or(DEFAULT_DURATION)]
+        .1;
         let repeats = REPEATS[self.choice_index(FieldId::Repeats).unwrap_or(0)].1;
         let name = self.text(FieldId::Name).trim();
         if name.is_empty() {
@@ -556,7 +593,7 @@ impl Form {
         }) = self.field_mut(id).map(|f| &mut f.value)
             && let Some(i) = channels.iter().position(|c| *c == channel)
         {
-            *index = i;
+            *index = Some(i);
             return true;
         }
         false
@@ -566,54 +603,86 @@ impl Form {
     pub fn move_focus(&mut self, d: i32) {
         let n = self.fields.len() as i32;
         if n > 0 {
-            self.focus = (self.focus as i32 + d).rem_euclid(n) as usize;
+            self.focus_field((self.focus as i32 + d).rem_euclid(n) as usize);
         }
     }
 
-    /// Focuses field `i`.
+    /// Focuses field `i`; a text field arrives with its text selected, so typing replaces a
+    /// default instead of appending to it.
     pub fn focus_field(&mut self, i: usize) {
-        if i < self.fields.len() {
+        if i < self.fields.len() && i != self.focus {
             self.focus = i;
+            self.select_all();
         }
     }
 
-    /// ←/→ on the focused choice or channel.
+    /// Ctrl+A: selects the focused text field's text.
+    pub fn select_all(&mut self) {
+        self.selected = matches!(
+            self.fields.get(self.focus).map(|f| &f.value),
+            Some(Value::Text(_))
+        );
+    }
+
+    /// ←/→ on the focused choice or channel: the next or previous option, stopping at the
+    /// ends. An unchosen channel takes the first option on →, the last on ←.
     pub fn cycle(&mut self, d: i32) {
         let Some(f) = self.fields.get_mut(self.focus) else {
             return;
         };
-        let (Value::Choice { options, index } | Value::Channel { options, index, .. }) =
-            &mut f.value
-        else {
-            return;
-        };
-        if options.is_empty() {
-            return;
+        let step = |i: usize, n: usize| (i as i64 + i64::from(d)).clamp(0, n as i64 - 1) as usize;
+        match &mut f.value {
+            Value::Text(_) => return,
+            Value::Choice { options, index } => {
+                if options.is_empty() {
+                    return;
+                }
+                *index = step(*index, options.len());
+            }
+            Value::Channel { options, index, .. } => {
+                let n = options.len();
+                if n == 0 {
+                    return;
+                }
+                *index = Some(match *index {
+                    None if d < 0 => n - 1,
+                    None => 0,
+                    Some(i) => step(i, n),
+                });
+            }
         }
-        let n = options.len() as i32;
-        *index = (*index as i32 + d).rem_euclid(n) as usize;
         self.error = None;
     }
 
-    /// Typed text into the focused text field.
+    /// Typed text into the focused text field; replaces a selected text.
     pub fn type_text(&mut self, s: &str) {
+        let selected = std::mem::take(&mut self.selected);
         if let Some(Field {
             value: Value::Text(t),
             ..
         }) = self.fields.get_mut(self.focus)
         {
+            if selected {
+                t.clear();
+            }
             t.push_str(s);
             self.error = None;
         }
     }
 
+    /// Deletes the last character, or the selected text.
     pub fn backspace(&mut self) {
+        let selected = std::mem::take(&mut self.selected);
         if let Some(Field {
             value: Value::Text(t),
             ..
         }) = self.fields.get_mut(self.focus)
         {
-            t.pop();
+            if selected {
+                t.clear();
+            } else {
+                t.pop();
+            }
             self.error = None;
         }
     }
@@ -852,12 +921,16 @@ mod tests {
         assert_eq!(f.channel(FieldId::Measurement), Some(3));
         let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
         assert_eq!(f.fields[at(&f, FieldId::Measurement)].display(), "In 4");
-        // ←/→ walks the captured inputs by name.
+        // ←/→ walks the captured inputs by name and stops at the ends.
         let mut f = f;
         f.focus = at(&f, FieldId::Measurement);
         f.cycle(1);
+        assert_eq!(f.channel(FieldId::Measurement), Some(3));
+        f.cycle(-3);
         assert_eq!(f.channel(FieldId::Measurement), Some(0));
         assert_eq!(f.fields[f.focus].display(), "In 1");
+        f.cycle(-1);
+        assert_eq!(f.channel(FieldId::Measurement), Some(0));
         // The same input twice is refused in plain words.
         f.cycle(1);
         f.cycle(1);
@@ -904,7 +977,10 @@ mod tests {
         f.focus = at(&f, FieldId::Weighting);
         f.cycle(1);
         f.focus = at(&f, FieldId::TimeWeighting);
+        // ← at the first choice stays there; → steps on and stops at the last.
         f.cycle(-1);
+        assert_eq!(f.fields[f.focus].display(), "fast (125 ms)");
+        f.cycle(5);
         let MeasKind::Spl { config } = f.meas_config(Some(&o)).expect("spl").kind else {
             panic!("kind");
         };
@@ -916,5 +992,129 @@ mod tests {
         assert_eq!(f.focus, 0);
         f.move_focus(-1);
         assert_eq!(f.focus, f.fields.len() - 1);
+    }
+
+    fn outs() -> Vec<(u16, String)> {
+        vec![(0, "Out 1".into()), (1, "Out 2".into())]
+    }
+
+    fn focus(f: &mut Form, id: FieldId) {
+        let i = f.fields.iter().position(|x| x.id == id).expect("field");
+        f.focus_field(i);
+    }
+
+    /// Duration and repeats step in order from the 3 s / 1× defaults and stop at the ends:
+    /// 6 s is one → away, and holding a key never wraps to the other end.
+    #[test]
+    fn sweep_steppers_are_sorted_and_stop_at_the_ends() {
+        let o = open(
+            vec![0, 1],
+            Some(LoopbackRoute {
+                output: 1,
+                input: 0,
+            }),
+        );
+        let mut f = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[], Some(Dbfs(-50.0)));
+        let duration = |f: &Form| f.sweep_plan(Some(&o), None).expect("plan").request.sweep;
+        let repeats = |f: &Form| f.sweep_plan(Some(&o), None).expect("plan").request.repeats;
+        assert_eq!(duration(&f).duration, Seconds(3.0));
+        assert_eq!(repeats(&f), 1);
+        focus(&mut f, FieldId::Duration);
+        f.cycle(1);
+        assert_eq!(duration(&f).duration, Seconds(6.0));
+        f.cycle(1);
+        f.cycle(1);
+        assert_eq!(duration(&f).duration, Seconds(12.0));
+        for _ in 0..3 {
+            f.cycle(-1);
+        }
+        assert_eq!(duration(&f).duration, Seconds(1.0));
+        f.cycle(-1);
+        assert_eq!(duration(&f).duration, Seconds(1.0));
+        let shown: Vec<f64> = DURATIONS.iter().map(|d| d.1).collect();
+        assert!(shown.is_sorted(), "{shown:?}");
+
+        focus(&mut f, FieldId::Repeats);
+        f.cycle(-1);
+        assert_eq!(repeats(&f), 1);
+        for want in [2, 4, 8, 8] {
+            f.cycle(1);
+            assert_eq!(repeats(&f), want);
+        }
+    }
+
+    /// Without a session loopback nothing guesses the reference: the dialog asks for it and
+    /// refuses to arm until it is chosen. With one, the loopback input is the default.
+    #[test]
+    fn sweep_reference_is_the_loopback_or_chosen() {
+        let o = open(vec![0, 1, 2], None);
+        let mut f = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[2], Some(Dbfs(-50.0)));
+        assert_eq!(f.channel(FieldId::Reference), None);
+        assert_eq!(f.fields[0].display(), "choose the reference");
+        let e = f.sweep_plan(Some(&o), None).expect_err("no reference");
+        assert!(e.contains("choose the reference"), "{e}");
+        // → takes the first input, ← from nothing the last.
+        f.focus_field(0);
+        f.cycle(-1);
+        assert_eq!(f.channel(FieldId::Reference), Some(2));
+        f.cycle(-1);
+        assert_eq!(f.channel(FieldId::Reference), Some(1));
+        let p = f.sweep_plan(Some(&o), None).expect("plan");
+        assert_eq!(
+            p.request.inputs,
+            SweepInputs::Channels {
+                reference: 1,
+                measurement: 2
+            }
+        );
+
+        let o = open(
+            vec![0, 1, 2],
+            Some(LoopbackRoute {
+                output: 1,
+                input: 2,
+            }),
+        );
+        let f = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[1], Some(Dbfs(-50.0)));
+        assert_eq!(f.channel(FieldId::Reference), Some(2));
+        assert_eq!(f.channel(FieldId::Measurement), Some(1));
+        assert!(f.sweep_plan(Some(&o), None).is_ok());
+    }
+
+    /// A text field gets its text selected with the focus (and by Ctrl+A): typing replaces
+    /// the default name or level instead of appending to it.
+    #[test]
+    fn typing_replaces_a_selected_default() {
+        let o = open(
+            vec![0, 1],
+            Some(LoopbackRoute {
+                output: 1,
+                input: 0,
+            }),
+        );
+        let mut f = Form::sweep(Some(&o), 2, &names(&o), &outs(), &[], Some(Dbfs(-50.0)));
+        assert_eq!(f.text(FieldId::Name), "Sweep 3");
+        focus(&mut f, FieldId::Name);
+        assert!(f.selected);
+        f.type_text("1083 ");
+        f.type_text("on axis");
+        assert_eq!(f.text(FieldId::Name), "1083 on axis");
+        // Ctrl+A then Backspace clears it; plain Backspace takes one character.
+        f.select_all();
+        f.backspace();
+        assert_eq!(f.text(FieldId::Name), "");
+        f.type_text("ab");
+        f.backspace();
+        assert_eq!(f.text(FieldId::Name), "a");
+
+        focus(&mut f, FieldId::Level);
+        assert_eq!(f.text(FieldId::Level), "-50.0");
+        f.type_text("-40");
+        assert_eq!(f.text(FieldId::Level), "-40");
+        // A choice is never "selected": Ctrl+A there changes nothing.
+        focus(&mut f, FieldId::Duration);
+        assert!(!f.selected);
+        f.select_all();
+        assert!(!f.selected);
     }
 }

@@ -426,14 +426,23 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                 ui.set_min_width(250.0);
                                 match &field.value {
                                     Value::Text(t) => {
-                                        let shown = if focused {
+                                        let selected = focused && f.selected && !t.is_empty();
+                                        let shown = if selected {
+                                            t.clone()
+                                        } else if focused {
                                             format!("{t}▏")
                                         } else if t.is_empty() {
                                             "—".to_owned()
                                         } else {
                                             t.clone()
                                         };
-                                        let text = RichText::new(shown).monospace().color(ch.text);
+                                        let mut text = RichText::new(shown).monospace();
+                                        // Selected: typing replaces it, shown inverted.
+                                        text = if selected {
+                                            text.color(ch.panel).background_color(ch.focus)
+                                        } else {
+                                            text.color(ch.text)
+                                        };
                                         if ui.add(egui::Button::selectable(focused, text)).clicked()
                                         {
                                             msg = Some(FormMsg::Focus(i));
@@ -452,7 +461,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                                         }
                                         let text = RichText::new(shown).color(ch.text);
                                         let b = egui::Button::selectable(focused, text);
-                                        let r = if field.channel_value().is_some() {
+                                        let r = if matches!(field.value, Value::Channel { .. }) {
                                             // Fixed width: the meters line up.
                                             ui.add_sized([170.0, 20.0], b)
                                         } else {

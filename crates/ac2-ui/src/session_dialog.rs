@@ -401,21 +401,23 @@ impl SessionDialog {
         }
     }
 
-    /// ←/→ on the backend or device row.
+    /// ←/→ on the backend or device row: the next or previous one, stopping at the ends like
+    /// every dialog stepper (an end press changes nothing, so the device is not reloaded).
     pub fn cycle(&mut self, d: i32, prefs: &UiPrefs) {
+        let step = |i: usize, n: usize| (i as i64 + i64::from(d)).clamp(0, n as i64 - 1) as usize;
         match self.focus {
             Row::Backend => {
-                let n = self.backends.as_ref().map_or(0, Vec::len) as i32;
-                if n > 0 {
-                    self.backend = (self.backend as i32 + d).rem_euclid(n) as usize;
+                let n = self.backends.as_ref().map_or(0, Vec::len);
+                if n > 0 && step(self.backend, n) != self.backend {
+                    self.backend = step(self.backend, n);
                     self.device = 0;
                     self.load_device(prefs);
                 }
             }
             Row::Device => {
-                let n = self.backend_info().map_or(0, |b| b.devices.len()) as i32;
-                if n > 0 {
-                    self.device = (self.device as i32 + d).rem_euclid(n) as usize;
+                let n = self.backend_info().map_or(0, |b| b.devices.len());
+                if n > 0 && step(self.device, n) != self.device {
+                    self.device = step(self.device, n);
                     self.load_device(prefs);
                 }
             }

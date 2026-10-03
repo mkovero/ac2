@@ -628,7 +628,8 @@ pub enum FormMsg {
 /// The sweep measurement as this client runs it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SweepUi {
-    /// The dialog's sweep: armed (or arming) with it, Enter plays it; cleared by a stop.
+    /// The dialog's sweep: armed (or arming) with it, Enter plays it; cleared by a stop
+    /// and once the run it started has ended.
     pub plan: Option<SweepPlan>,
     /// The run this client started, followed until it is stored or fails.
     pub run: Option<SweepId>,
@@ -636,6 +637,8 @@ pub struct SweepUi {
     pub seen: Option<SweepStatus>,
     /// The sweep trace the distortion pane shows; `None`: the newest.
     pub shown: Option<TraceId>,
+    /// The lease is being given back after a finished sweep: its stop is no operator stop.
+    pub releasing: bool,
 }
 
 /// Everything the UI holds.
@@ -1237,6 +1240,7 @@ impl AppState {
                     Key::ArrowDown | Key::Tab => f.move_focus(1),
                     Key::ArrowLeft => f.cycle(-1),
                     Key::ArrowRight => f.cycle(1),
+                    Key::A if chord.command => f.select_all(),
                     _ => self.swallow_text = swallow,
                 }
                 return;
@@ -1610,8 +1614,10 @@ impl AppState {
     }
 
     /// Acts on the run this client started as the mirror reports it: stored → the pane
-    /// shows it; failed → says why.
-    fn follow_sweep(&mut self) {
+    /// shows it; failed → says why. The daemon disarms once the sweep has played, so the
+    /// stimulus is off from then on; when the run ends the lease is given back and sweep
+    /// mode ends — the next sweep is armed from the dialog again.
+    fn follow_sweep(&mut self, out: &mut Vec<Request>) {
         let Some(id) = self.sweep.run else {
             return;
         };
@@ -1622,34 +1628,54 @@ impl AppState {
             return;
         }
         self.sweep.seen = Some(r.status.clone());
+        if !matches!(r.status, SweepStatus::Playing { .. })
+            && matches!(
+                self.stimulus.phase,
+                StimPhase::Firing | StimPhase::FireRequested
+            )
+        {
+            self.stimulus.phase = StimPhase::Idle;
+        }
         match r.status {
             SweepStatus::Playing { .. } => {}
             SweepStatus::Analysing => {
-                if self.stimulus.phase == StimPhase::Firing {
-                    self.stimulus.phase = StimPhase::Armed;
-                }
                 self.toast("sweep recorded: analysing");
             }
             SweepStatus::Done { trace } => {
                 self.sweep.run = None;
                 self.sweep.shown = Some(trace);
-                if self.stimulus.phase == StimPhase::Firing {
-                    self.stimulus.phase = StimPhase::Armed;
-                }
+                self.release_after_sweep(out);
                 self.layout.shown[PaneKind::Distortion.index()] = true;
                 self.layout.focus = PaneKind::Distortion;
                 self.toast(format!(
-                    "sweep stored as {:?}: U dB / %, H impulse response, Enter sweeps again",
+                    "sweep stored as {:?}: U dB / %, H impulse response, Shift+S sweeps again",
                     r.name
                 ));
             }
             SweepStatus::Failed { msg, .. } => {
                 self.sweep.run = None;
-                if self.stimulus.phase == StimPhase::Firing {
-                    self.stimulus.phase = StimPhase::Armed;
-                }
+                self.release_after_sweep(out);
                 self.error(format!("sweep failed: {msg}"));
             }
+        }
+    }
+
+    /// A finished run ends sweep mode and gives the lease back, unless the operator has
+    /// armed again meanwhile. Only a lease this client holds: a stop without one is the
+    /// universal stop and would silence whoever took the stimulus over.
+    fn release_after_sweep(&mut self, out: &mut Vec<Request>) {
+        if self.stimulus.phase != StimPhase::Idle {
+            return;
+        }
+        self.end_sweep_mode();
+        let mine = self
+            .daemon()
+            .and_then(|s| s.generator.owner.as_ref())
+            .is_some_and(|o| Some(o) == self.my_client_id());
+        if mine {
+            self.stimulus.phase = StimPhase::Stopping;
+            self.sweep.releasing = true;
+            out.push(Request::StimStop);
         }
     }
 
@@ -2625,7 +2651,7 @@ impl AppState {
                     self.view.tf.phase_reference = None;
                 }
                 self.follow_output_device();
-                self.follow_sweep();
+                self.follow_sweep(out);
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
                     if self.open_session().is_none() && self.overlay == Overlay::None {
@@ -3006,14 +3032,18 @@ impl AppState {
             StimEvent::Stopped => {
                 self.stimulus.phase = StimPhase::Idle;
                 self.end_sweep_mode();
-                self.toast("stimulus stopped");
+                if !std::mem::take(&mut self.sweep.releasing) {
+                    self.toast("stimulus stopped");
+                }
             }
             StimEvent::Lost(msg) => {
                 self.stimulus.phase = StimPhase::Idle;
+                self.sweep.releasing = false;
                 self.end_sweep_mode();
                 self.error(format!("stimulus lease lost: {msg}"));
             }
             StimEvent::Failed(msg) => {
+                self.sweep.releasing = false;
                 self.stimulus.phase = match self.stimulus.phase {
                     StimPhase::Arming => StimPhase::Idle,
                     StimPhase::FireRequested => StimPhase::Armed,

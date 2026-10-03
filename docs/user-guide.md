@@ -237,9 +237,15 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
 
 - **App:** **Shift+S** (or **Sweep measurement** in the palette) opens the dialog: reference,
   mic and the speaker's output by name (the session's loopback output always plays too), the
-  **level** (typed, no default), 20 Hz – 20 kHz, duration (3 s; 6 s and 12 s lower the noise
-  floor), repeats (each doubling lowers the floor by 3 dB), name. **Enter** arms the sweep,
-  **Enter** again plays it, **Esc** stops (and discards it). The result opens the
+  **level** (typed, no default), 20 Hz – 20 kHz, duration (1 s quick look, 3 s default; 6 s
+  and 12 s lower the noise floor), repeats (each doubling lowers the floor by 3 dB), name.
+  The reference is the session's loopback input; a session without a loopback mapping leaves
+  it as "choose the reference", and the sweep does not arm until one is picked. **←/→** step
+  a choice (→ longer / more) and stop at the ends; a text field's text is selected when it
+  gets the focus (**Ctrl+A** selects it again), so typing replaces it. **Enter** arms the
+  sweep, **Enter** again plays it, **Esc** stops (and discards it). Once the sweep has played
+  the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed, and
+  **Shift+S** sets up the next sweep. The result opens the
   **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
   below with the noise floor shaded. **U** switches dB re fundamental / percent, **H** shows the
   sweep's impulse response with the harmonics' impulses marked (**G**: linear / log / ETC),
@@ -247,7 +253,8 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
   trace, drawn in the transfer pane like any capture.
 - **CLI:** `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs` (`--from 20hz --to
   20khz --duration 3s --repeats 1 --gate 5ms --name …`). Like `gen`, it arms and waits:
-  **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. It then prints THD at 100 Hz, 1 kHz and
+  **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. The daemon disarms the generator as soon
+  as the sweep has played (or failed); any client arms again for the next one. It then prints THD at 100 Hz, 1 kHz and
   10 kHz and each order's highest point; `--json` gives the same as JSON lines.
   `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
   floor, THD).

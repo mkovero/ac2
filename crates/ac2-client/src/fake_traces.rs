@@ -179,6 +179,10 @@ impl Shared {
         self.traces.sweeps.insert(tid, sweep);
         run.status = SweepStatus::Done { trace: tid };
         self.commit(Change::Sweep(run));
+        // As the daemon: a sweep is one shot, the generator ends disarmed.
+        self.state.generator.armed = false;
+        self.state.generator.firing = false;
+        self.generator_changed(GenAction::Stop, None);
         Ok(ReplyBody::Sweep(started))
     }
 

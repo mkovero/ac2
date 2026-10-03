@@ -4,7 +4,8 @@
 //! and have armed the generator. The recorder job is attached to the capture fan-out before
 //! the sweep train is handed to the output, so the recording starts no later than the first
 //! sweep can arrive. While the train plays the generator is `firing`; once the recording is
-//! in, the output is released (armed again) and the analysis runs on its own thread. Anything
+//! in, the output is silenced and the generator disarmed — a sweep is one shot, and the
+//! operator arms again for the next — and the analysis runs on its own thread. Anything
 //! that stops the stimulus or the session — `gen.stop`, `gen.release`, a forced takeover,
 //! lease expiry, session close or reopen, `file.load` — aborts the run and discards its
 //! audio.
@@ -304,7 +305,8 @@ impl Control {
         }
     }
 
-    /// The recording is in: the output is released (still armed) and the analysis starts.
+    /// The recording is in: the output is silenced, the generator disarmed (the lease stays
+    /// with its holder) and the analysis starts.
     pub(super) fn sweep_recorded(&mut self, id: SweepId, result: Result<Recording, String>) {
         let Some(a) = self.active(id) else { return };
         let job = a.job.take();
@@ -313,13 +315,15 @@ impl Control {
         if let (Some(job), Some(rt)) = (job, &self.session) {
             rt.fanout.detach(job.fanout_id);
         }
-        // The train has played out: silence the source and say the stimulus is no longer
-        // firing, before the (longer) analysis.
+        // The train has played out: silence the source and disarm before the (longer)
+        // analysis. Staying armed would leave a sweep source one Enter away from playing
+        // again without the operator having armed it.
         self.stop_output();
         let mut g = self.store.state().generator.clone();
-        if g.firing {
+        if g.firing || g.armed {
             g.firing = false;
-            self.audit(&mut g, GenAction::Set, None);
+            g.armed = false;
+            self.audit(&mut g, GenAction::Stop, None);
             self.commit(Change::Generator(g));
         }
         let rec = match result {

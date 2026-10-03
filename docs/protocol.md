@@ -332,7 +332,9 @@ loopback's), `level: Dbfs | nil`, `sweep: EssSpec` {`start: Hz`, `end: Hz`, `dur
   followed by its silence (`post_roll`, ≥ 1 s), records both inputs, analyses on a job thread
   and stores a trace of `kind: sweep` (source `ir_capture` {`run`, `epoch`, `sweep`, `level`,
   `repeats`, `reference_input`, `measurement_input`}, `delay` = the arrival). While it plays
-  the generator is `firing` with the sweep as its settings; afterwards it is armed again.
+  the generator is `firing` with the sweep as its settings; once the recording is in it is
+  disarmed (`last_action` `stop` by the daemon; the lease stays with its holder), so the next
+  sweep or stimulus needs an explicit arm.
 - Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `owner`, `name`,
   `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
   (actual), `post_roll`, `repeats`, `gate`, `started_at`, `status` (`SweepStatus`, tagged by

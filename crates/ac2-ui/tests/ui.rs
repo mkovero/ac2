@@ -785,6 +785,14 @@ fn session_dialog() {
         a.state.layout.focus == PaneKind::Distortion && a.state.shown_sweep().is_some()
     });
     assert_eq!(fake.executions("ir.capture"), 1);
+    // The sweep left nothing armed: the stimulus is off (STIM OFF) and the lease was given
+    // back.
+    step_until(&mut h, "stimulus off and released", |a| {
+        !a.state.stimulus_live()
+            && a.state
+                .daemon()
+                .is_some_and(|s| s.generator.owner.is_none() && !s.generator.armed)
+    });
     // The focused pane alone, for the picture.
     h.key_press(Key::W);
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
@@ -805,10 +813,4 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     h.snapshot_options("sweep_ir", &snapshot_options());
-    h.key_press(Key::Escape);
-    step_until(&mut h, "stopped and released", |a| {
-        a.state
-            .daemon()
-            .is_some_and(|s| s.generator.owner.is_none() && !s.generator.armed)
-    });
 }

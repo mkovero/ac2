@@ -2712,11 +2712,16 @@ fn new_measurements_start_and_become_selected() {
         };
         assert_eq!(kind, (want, 1));
     }
-    // Inputs are picked by name among the captured ones: ←/→ walks them.
+    // Inputs are picked by name among the captured ones: ←/→ walks them, stopping at the
+    // ends.
     t.st.update(Msg::Command(CommandId::NewSpl), &t.keys);
     assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(1));
     assert_eq!(form(&t).fields[0].display(), "2 · Input 2");
     t.key("Right");
+    assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(1));
+    t.key("Left");
+    assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(0));
+    t.key("Left");
     assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(0));
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
@@ -2853,11 +2858,26 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         panic!("no dialog: {:?}", t.st.overlay);
     };
     assert_eq!(f.kind, FormKind::Sweep);
-    // Inputs by name, the mic as the measurement, the speaker output.
-    assert_eq!(f.channel(crate::forms::FieldId::Reference), Some(0));
+    // Inputs by name, the mic as the measurement, the speaker output. The session declares
+    // no loopback: the reference is not guessed.
+    assert_eq!(f.channel(crate::forms::FieldId::Reference), None);
     assert_eq!(f.channel(crate::forms::FieldId::Measurement), Some(1));
     assert_eq!(f.channel(crate::forms::FieldId::Output), Some(0));
     assert_eq!(f.text(crate::forms::FieldId::Name), "Sweep 1");
+    // No reference, no sweep: the dialog asks for it and stays.
+    assert!(t.key("Enter").is_empty());
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("dialog closed");
+    };
+    assert!(
+        f.error
+            .as_deref()
+            .is_some_and(|e| e.contains("choose the reference")),
+        "{:?}",
+        f.error
+    );
+    // The reference field has the focus: → picks the first input.
+    t.key("Right");
     // No level, no sweep: the dialog says so and stays.
     assert!(t.key("Enter").is_empty());
     let Overlay::Form(f) = &t.st.overlay else {
@@ -2922,14 +2942,47 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     ))));
     assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
 
-    // Stored: the pane appears with it, focused; armed again for another sweep.
+    // Recorded: the daemon has disarmed; the stimulus is off while the analysis runs.
     let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("c1".into()));
+    s.sweep = Some(sweep_run(SweepStatus::Analysing));
+    let r = t.conn(mirror(s.clone()));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert!(!t.st.stimulus_live(), "STIM OFF while analysing");
+    assert!(
+        !r.iter().any(|x| matches!(x, Request::StimStop)),
+        "a stop now would abort the analysis: {r:?}"
+    );
+    // Stored: the pane appears with it, focused. Nothing is armed again: the lease is given
+    // back quietly and sweep mode ends; Shift+S sets up the next one.
     s.traces = vec![sweep_meta(7)];
     s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(7) }));
-    t.conn(mirror(s));
+    let r = t.conn(mirror(s));
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
     assert!(t.st.layout.is_shown(PaneKind::Distortion));
     assert_eq!(t.st.layout.focus, PaneKind::Distortion);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert!(t.st.sweep.plan.is_none());
+    assert_eq!(t.st.stimulus.signal, Signal::Pink);
+    assert!(
+        t.last_toast().contains("Shift+S sweeps again"),
+        "{}",
+        t.last_toast()
+    );
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert!(!t.st.stimulus_live(), "STIM OFF after the sweep");
+    assert!(
+        t.last_toast().contains("sweep stored"),
+        "{}",
+        t.last_toast()
+    );
+    // Enter does not play anything: nothing is armed.
+    let r = t.key("Enter");
+    assert!(
+        !r.iter()
+            .any(|x| matches!(x, Request::Sweep { .. } | Request::StimSet(_))),
+        "{r:?}"
+    );
     assert_eq!(t.st.sweep.shown, Some(TraceId(7)));
     let (d, g) = sweep_data(7);
     t.conn(ConnEvent::Trace(d, g));
@@ -2943,12 +2996,6 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     t.key("G");
     assert_eq!(t.st.view.ir.mode, IrMode::Log);
 
-    // Esc stops and ends sweep mode: the next arm is noise again.
-    let r = t.key("Esc");
-    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert!(t.st.sweep.plan.is_none());
-    assert_eq!(t.st.stimulus.signal, Signal::Pink);
     // Shift+H hides the pane again.
     t.key("Shift+H");
     assert!(!t.st.layout.is_shown(PaneKind::Distortion));
@@ -2956,13 +3003,14 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
 }
 
 #[test]
-fn a_failed_sweep_says_why_and_stays_armed() {
+fn a_failed_sweep_says_why_and_disarms() {
     let mut t = T::new();
     t.type_key("Shift+S", "S");
     let Overlay::Form(f) = &mut t.st.overlay else {
         panic!("no dialog");
     };
     f.set_text(crate::forms::FieldId::Level, "-50");
+    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
     t.key("Enter");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("Enter");
@@ -2970,16 +3018,20 @@ fn a_failed_sweep_says_why_and_stays_armed() {
         sweep_run(SweepStatus::Playing { repeat: 1 }),
     ))));
     let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("c1".into()));
     s.sweep = Some(sweep_run(SweepStatus::Failed {
         reason: SweepFailure::NoReference,
         msg: "the reference input carries no sweep".into(),
     }));
-    t.conn(mirror(s));
+    let r = t.conn(mirror(s));
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     assert!(
         t.last_toast().contains("carries no sweep"),
         "{}",
         t.last_toast()
     );
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert!(!t.st.stimulus_live());
     assert!(!t.st.layout.is_shown(PaneKind::Distortion));
 }

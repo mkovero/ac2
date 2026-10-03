@@ -361,7 +361,7 @@ fn session_dialog_meters_return_every_round() -> R {
 /// From an empty daemon to a stored sweep using only the app, on the simulated rig whose
 /// "speaker" distorts (H2 −40 dB, H3 −50 dB at −20 dBFS): the session from the dialog,
 /// Shift+S, a typed level, Enter arms, Enter plays, the result opens the distortion pane
-/// with the rig's harmonics; Esc ends it.
+/// with the rig's harmonics, and the stimulus is off again: nothing re-arms after a sweep.
 #[test]
 fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     use ac2_scene::distortion::{Reading, reading_at};
@@ -389,7 +389,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
             .iter()
             .position(|x| x.id == FieldId::Duration)
             .ok_or("duration")?;
-        f.cycle(1);
+        f.cycle(-1);
         assert_eq!(f.fields[f.focus].display(), "1 s (quick look)");
     }
     d.key("Enter");
@@ -422,7 +422,13 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
             other => return Err(format!("H{order} at 1 kHz: {other:?}").into()),
         }
     }
-    d.stop()?;
+    d.until("the stimulus off and the lease given back", |s| {
+        s.stimulus.phase == StimPhase::Idle
+            && s.daemon().is_some_and(|x| {
+                !x.generator.armed && !x.generator.firing && x.generator.owner.is_none()
+            })
+    })?;
+    assert!(!d.st.stimulus_live(), "STIM OFF");
     assert!(d.st.sweep.plan.is_none());
     drop(d);
     drop(daemon);

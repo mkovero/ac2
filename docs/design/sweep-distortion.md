@@ -134,8 +134,10 @@ recorder → analysis, f32 audio):
 `ir.capture` (lease, generator armed, typed level) runs the repeats as one generator source,
 records reference and mic on a job thread, analyses there and stores a `sweep` trace
 (fundamental magnitude/phase on the log grid + per-order distortion and floors + IR). Progress
-and outcome are the mirrored `sweep` entity. Lease expiry, `gen.stop`/`gen.release`, a forced
-takeover or a closed session abort the capture and discard its audio. Sessions (format 4) save
+and outcome are the mirrored `sweep` entity. Once the recording is in, the generator is
+disarmed (the lease stays with its holder): a sweep is one shot, and nothing is left armed for
+a stray Enter. Lease expiry, `gen.stop`/`gen.release`, a forced takeover or a closed session
+abort the capture and discard its audio. Sessions (format 4) save
 the curves in the trace's CSV and the IR in a JSON sidecar.
 
 ## Running it on a speaker (pupu, Genelec 1083 at −50 dBFS)
