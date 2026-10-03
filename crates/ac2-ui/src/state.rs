@@ -662,6 +662,9 @@ pub struct SweepUi {
     pub shown: Option<TraceId>,
     /// The lease is being given back after a finished sweep: its stop is no operator stop.
     pub releasing: bool,
+    /// The dialog's sweep was submitted while a stop was in flight: it arms once the stop
+    /// has landed.
+    pub arm_after_stop: bool,
     /// The mirrored run's step (any client's run) and when this client first saw it, in
     /// `now_s`: the progress strip counts the time within a step from it.
     pub step_seen: Option<(SweepId, SweepStatus, f64)>,
@@ -931,24 +934,37 @@ impl AppState {
 
     /// What the transfer pane says when there is nothing to measure yet: no audio session,
     /// or a session without measurements. `None` once there is something (or no daemon).
-    pub fn empty_hint(&self, keymap: &Keymap) -> Option<String> {
+    /// Over stored curves it moves to the pane's title strip, out of their way.
+    pub fn empty_hint(&self, keymap: &Keymap) -> Option<EmptyHint> {
         if !self.connected() {
             return None;
         }
         let st = self.daemon()?;
-        if st.session.open.is_none() {
-            return Some(format!("No audio session — {}", open_session_hint(keymap)));
-        }
-        if st.measurements.is_empty() {
+        let text = if st.session.open.is_none() {
+            format!("No audio session — {}", open_session_hint(keymap))
+        } else if st.measurements.is_empty() {
             let palette = keymap
                 .chords(CommandId::Palette, Scope::Global)
                 .first()
                 .map_or_else(|| "Command palette".to_owned(), |c| c.label());
-            return Some(format!(
+            format!(
                 "No measurements — {palette} → New transfer measurement… (or New spectrum, RTA, SPL meter)"
-            ));
-        }
-        None
+            )
+        } else {
+            return None;
+        };
+        let place = if self.transfer_shows_stored() {
+            HintPlace::Title
+        } else {
+            HintPlace::Centre
+        };
+        Some(EmptyHint { text, place })
+    }
+
+    /// Whether the transfer pane draws any stored curve (a shown capture, target or sweep
+    /// whose data has arrived).
+    pub fn transfer_shows_stored(&self) -> bool {
+        self.traces.values().any(|(t, _)| on_transfer_pane(&t.meta))
     }
 
     pub fn connected(&self) -> bool {
@@ -1752,6 +1768,9 @@ impl AppState {
                 self.error("the stimulus is firing: Esc stops it, then arm the sweep");
                 self.sweep.plan = None;
             }
+            // The stop before it is still on its way (stop, then the lease given back): the
+            // sweep arms once it has landed, not into the lease that stop is releasing.
+            StimPhase::Stopping => self.sweep.arm_after_stop = true,
             _ => self.resend_stimulus(out),
         }
     }
@@ -3211,19 +3230,31 @@ impl AppState {
             }
             StimEvent::Stopped => {
                 self.stimulus.phase = StimPhase::Idle;
-                self.end_sweep_mode();
-                if !std::mem::take(&mut self.sweep.releasing) {
-                    self.toast("stimulus stopped");
+                let releasing = std::mem::take(&mut self.sweep.releasing);
+                let pending = std::mem::take(&mut self.sweep.arm_after_stop);
+                match self.sweep.plan.take() {
+                    Some(plan) if pending => self.arm_sweep(plan, out),
+                    plan => {
+                        self.sweep.plan = plan;
+                        self.end_sweep_mode();
+                        if !releasing {
+                            self.toast("stimulus stopped");
+                        }
+                    }
                 }
             }
             StimEvent::Lost(msg) => {
                 self.stimulus.phase = StimPhase::Idle;
                 self.sweep.releasing = false;
+                self.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
                 self.error(format!("stimulus lease lost: {msg}"));
             }
             StimEvent::Failed(msg) => {
                 self.sweep.releasing = false;
+                if std::mem::take(&mut self.sweep.arm_after_stop) {
+                    self.end_sweep_mode();
+                }
                 self.stimulus.phase = match self.stimulus.phase {
                     StimPhase::Arming => StimPhase::Idle,
                     StimPhase::FireRequested => StimPhase::Armed,
@@ -3360,6 +3391,31 @@ fn relabel(f: &mut Form, names: &[(u16, String)]) {
 }
 
 /// `press Shift+O (or Ctrl+K → Open audio session)`, from the keys actually bound.
+/// The transfer pane's first-run guidance and where it goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptyHint {
+    pub text: String,
+    pub place: HintPlace,
+}
+
+/// Where the empty-pane hint is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HintPlace {
+    /// Centred over the empty plot: nothing else to see there.
+    Centre,
+    /// One line in the pane's title strip: the plot shows stored curves.
+    Title,
+}
+
+/// A stored trace the transfer pane draws: shown, and a transfer-like curve.
+pub fn on_transfer_pane(t: &TraceMeta) -> bool {
+    t.edit.visible
+        && matches!(
+            t.kind,
+            TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
+        )
+}
+
 pub fn open_session_hint(keymap: &Keymap) -> String {
     let first = |c| {
         keymap

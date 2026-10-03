@@ -131,13 +131,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let mut stored: Vec<(&ac2_proto::model::TraceData, Vec<f64>)> = st
         .traces
         .values()
-        .filter(|(t, _)| {
-            t.meta.edit.visible
-                && matches!(
-                    t.meta.kind,
-                    TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
-                )
-        })
+        .filter(|(t, _)| crate::state::on_transfer_pane(&t.meta))
         .map(|(t, g)| (t.as_ref(), column_frequencies(g)))
         .collect();
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));

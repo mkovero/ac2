@@ -2058,6 +2058,52 @@ fn connected_to(t: &mut T, target: &str) {
     });
 }
 
+/// Stored curves on the transfer pane move the hint out of the plot into the title strip;
+/// hidden ones (or no data yet) leave it centred.
+#[test]
+fn empty_hint_yields_to_stored_traces() {
+    let mut t = T::disconnected();
+    connected_to(&mut t, "local daemon");
+    let meta = stored(10, Some(1), 2);
+    let mut s = no_session_state();
+    s.traces = vec![meta.clone()];
+    t.conn(mirror(s));
+    let place = |t: &T| t.st.empty_hint(&t.keys).map(|h| h.place);
+    // Listed, but its data has not arrived: nothing drawn yet.
+    assert_eq!(place(&t), Some(HintPlace::Centre));
+    let grid = Arc::new(GridDef::Log {
+        ppo: 1,
+        k_min: 0,
+        k_max: 3,
+    });
+    let data = |meta: &TraceMeta| {
+        Arc::new(TraceData {
+            meta: meta.clone(),
+            mag_db: vec![0.0; 4],
+            phase_deg: None,
+            coherence: None,
+            sweep: None,
+        })
+    };
+    t.conn(ConnEvent::Trace(data(&meta), grid.clone()));
+    assert!(t.st.transfer_shows_stored());
+    let hint = t.st.empty_hint(&t.keys).expect("hint");
+    assert_eq!(hint.place, HintPlace::Title);
+    assert!(
+        hint.text.starts_with("No audio session — "),
+        "{}",
+        hint.text
+    );
+    // Hidden: the plot is empty again and the hint goes back to its centre.
+    let mut hidden = meta.clone();
+    hidden.edit.visible = false;
+    let mut s = no_session_state();
+    s.traces = vec![hidden.clone()];
+    t.conn(mirror(s));
+    t.conn(ConnEvent::Trace(data(&hidden), grid));
+    assert_eq!(place(&t), Some(HintPlace::Centre));
+}
+
 #[test]
 fn empty_hints_guide_to_a_session_then_a_measurement() {
     let mut t = T::disconnected();
@@ -2067,7 +2113,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     assert_eq!(t.st.empty_hint(&t.keys), None);
     t.conn(mirror(no_session_state()));
     assert_eq!(
-        t.st.empty_hint(&t.keys).as_deref(),
+        t.st.empty_hint(&t.keys).map(|h| h.text).as_deref(),
         Some(format!(
             "No audio session — press {} (or {} → Open audio session)",
             open_key(),
@@ -2078,7 +2124,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     let mut s = daemon_state();
     s.measurements.clear();
     t.conn(mirror(s));
-    let hint = t.st.empty_hint(&t.keys).unwrap_or_default();
+    let hint = t.st.empty_hint(&t.keys).map(|h| h.text).unwrap_or_default();
     assert!(
         hint.starts_with(&format!(
             "No measurements — {} → New transfer measurement…",
@@ -2092,7 +2138,7 @@ fn empty_hints_guide_to_a_session_then_a_measurement() {
     let keys = Keymap::from_toml("[global]\nsession_open = []").expect("keys");
     t.conn(mirror(no_session_state()));
     assert_eq!(
-        t.st.empty_hint(&keys).as_deref(),
+        t.st.empty_hint(&keys).map(|h| h.text).as_deref(),
         Some(format!(
             "No audio session — {} → Open audio session",
             palette_key()
@@ -3232,6 +3278,50 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     t.key("Shift+H");
     assert!(!t.st.layout.is_shown(PaneKind::Distortion));
     assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+}
+
+/// A sweep submitted right after Esc, while that stop is still on its way, arms once the
+/// stop has landed instead of being dropped with it.
+#[test]
+fn a_sweep_submitted_during_a_stop_arms_after_it() {
+    let mut t = T::new();
+    t.st.stimulus.level = Some(Dbfs(-30.0));
+    let r = t.key("Space");
+    assert!(matches!(r.as_slice(), [Request::StimArm { .. }]), "{r:?}");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    let r = t.key("Esc");
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+
+    t.type_key("Shift+S", "S");
+    let Overlay::Form(f) = &mut t.st.overlay else {
+        panic!("no dialog");
+    };
+    f.set_text(crate::forms::FieldId::Level, "-50");
+    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
+    let r = t.key("Enter");
+    assert!(
+        !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
+        "nothing armed into the lease being released: {r:?}"
+    );
+    assert!(t.st.sweep.plan.is_some());
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    let settings = r
+        .iter()
+        .find_map(|x| match x {
+            Request::StimArm { settings, .. } => Some(settings.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no arm after the stop: {r:?}"));
+    assert!(matches!(settings.signal, Signal::Ess { .. }));
+    assert_eq!(settings.level, Dbfs(-50.0));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Arming);
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert!(
+        t.last_toast().contains("Enter plays the sweep"),
+        "{}",
+        t.last_toast()
+    );
 }
 
 #[test]

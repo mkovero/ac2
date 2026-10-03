@@ -14,7 +14,7 @@ use crate::app::{App, CachedScene};
 use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
-use crate::state::{Msg, Overlay, PaneKind};
+use crate::state::{HintPlace, Msg, Overlay, PaneKind};
 use crate::theme::Chrome;
 use ac2_proto::units::MeasId;
 
@@ -188,7 +188,10 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             && app.state.overlay == crate::state::Overlay::None
             && let Some(hint) = app.state.empty_hint(&app.keymap)
         {
-            empty_hint(ui, plot_rect, &hint, ch);
+            match hint.place {
+                HintPlace::Centre => empty_hint(ui, plot_rect, &hint.text, ch),
+                HintPlace::Title => title_hint(ui, title, label.right() + 16.0, &hint.text, ch),
+            }
         }
         navigate(app, ui, &resp, pane, plot_rect, built.and_then(|b| b.1));
     }
@@ -432,6 +435,29 @@ fn empty_hint(ui: &egui::Ui, plot_rect: egui::Rect, hint: &str, ch: &Chrome) {
         egui::StrokeKind::Inside,
     );
     painter.galley(rect.min + pad, galley, ch.text);
+}
+
+/// The same guidance as one line at the right of the pane's title strip, while the plot
+/// below shows stored curves: still in view, never over a curve. Elided when the strip is
+/// short.
+fn title_hint(ui: &egui::Ui, title: egui::Rect, left: f32, hint: &str, ch: &Chrome) {
+    let room = title.right() - 8.0 - left;
+    if room < 40.0 {
+        return;
+    }
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        hint.to_owned(),
+        egui::FontId::proportional(12.0),
+        ch.focus,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+    let painter = ui.painter();
+    let galley = painter.layout_job(job);
+    let pos = egui::pos2(
+        title.right() - 8.0 - galley.size().x,
+        title.center().y - galley.size().y / 2.0,
+    );
+    painter.galley(pos, galley, ch.focus);
 }
 
 /// Click focuses (and on a frequency axis places the cursor); wheel zooms about the
