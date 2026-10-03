@@ -3,11 +3,14 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
-## Flaky tests (seen on CI, passed on rerun)
+## Flaky tests
 
-- Pink-noise level check on Linux and a spectrum-smoothing check on Windows failed once each
-  during the sweep-distortion branch runs (2026-10-03), then passed. Find the timing/tolerance
-  cause before they mask a real failure.
+- **ac2d `traces::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
+  −6.37 dB (want −6.02 ± 0.3)**, once, in a full `cargo test --workspace` at load ~40 after
+  the capture-slot fix. Unloaded the error there is −0.002 ± 0.028 dB (300 runs, max 0.10);
+  200 runs of the traces suite at load 40–130 did not repeat it. Not queue overflow (no
+  capture-discontinuity warning in the output). Next: log `eff_avg` and the block count the
+  low-frequency stage averaged when the band check fails.
 
 ## Parked
 
@@ -17,13 +20,42 @@ the commit when it lands.
   off-axis, 2 m; listen during a burst;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
-## From the first rig session on pupu (2026-10-03)
-
-Open:
-- **"No audio session" hint covers stored traces** in the transfer pane; it should yield (or move
-  to the banner strip) when the pane has data to show.
-
 ## Done
+
+Flaky tests (seen on CI and under load, 2026-10-03), by cause:
+- **A capture could return the result before the one a client was shown** (ac2d
+  `traces::spectrum_smoothing_live_and_captured` "bin 1: live … vs ac2-core …",
+  `live_smoothing_and_resmoothed_captures` "301 Hz: … vs live …",
+  `capture_average_math_export_import` NaN average, `session_save_load_round_trip` "no result
+  to capture yet"; Windows CI). A job sent its frame to the I/O thread before storing it as the
+  capture slot, so a client that had already received the frame could capture the previous
+  result, or none. The slot is now filled first; a 20 ms pause in the old order reproduced
+  the CI messages exactly.
+- **Full-band pink over a 200–300 ms meter span** (ac2d `stimulus::lease_acquire_force_expiry_
+  and_universal_stop` "pink at -20 dBFS RMS on the loopback: -21.5"). Content down to 5 Hz
+  gives one or two cycles per span: +2.7/−1.6 dB from seed to seed, ~1 % beyond ±1.5 dB, and
+  the daemon seeds each generator afresh. The test plays pink high-passed at 50 Hz (±0.75 dB
+  over 3000 seeds).
+- **UI tests under load** (load 25–50 on 12 cores, lavapipe): `startup_first_frame` timed
+  shader compilation on a software rasteriser (3–4 s loaded); it now bounds the app's own
+  startup (App::new through its first UI pass, < 1 s; 1–65 ms measured loaded). Snapshots
+  caught wall-clock states ("not responding", STALE, a countdown second, a measurement created
+  but not yet started); they are taken from a pass laid out while the link was healthy, the
+  progress picture pins its clock, the transfer dialog waits for "running". A test process
+  starved past the fake daemon's 1.5 s lost its stimulus lease (fake `expiries` 1, 0–10
+  refreshes) and the flow stalled: the UI tests' fake grants 60 s. A sweep submitted while the
+  previous stop was in flight was dropped by the app (real bug, fixed: it arms after the
+  stop). Waits are condition-based with a 60 s ceiling and report state on timeout; the meters
+  round test freezes the reducer's clock instead of a 700 ms bound.
+- Evidence: ui + embedded suites 15× under 36 CPU burners (load 45–48): 0 failures (before:
+  5/12 and 3/12); ui, embedded, connect, conn and ac2d traces + stimulus 8× beside full
+  `cargo test --workspace` runs (load 16–62): 0 failures; full workspace 3×: all pass; ac2d traces + stimulus 20× under
+  36 burners: 0 failures.
+
+From the first rig session on pupu:
+- **"No audio session" hint covers stored traces**: while the transfer pane draws a stored
+  curve the hint is one line in the pane's title strip; over an empty plot it stays centred.
+
 
 Trace features (trace-mic-sweep-csv branch, protocol 7, session format 5):
 - **Mic curve on stored traces**: `trace.mic_curve` / `ac2 trace mic <t> <mic|none>` / palette
