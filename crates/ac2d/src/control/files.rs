@@ -276,7 +276,8 @@ impl Control {
         }
         for t in data.traces {
             self.register_grid(t.grid.clone());
-            self.traces.insert(t.meta.id, t.grid, t.columns, t.sweep);
+            self.traces
+                .insert(t.meta.id, t.grid, t.columns, t.sweep, t.mic_curve);
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
         Ok(epoch)

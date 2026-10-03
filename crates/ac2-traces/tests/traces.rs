@@ -53,6 +53,7 @@ fn meta(id: u32, source: TraceSource, delay: f64, kind: TraceKind, g: &GridDef) 
         depth: Some(DepthPolicy::EqualConfidence),
         cal: CalState::Uncalibrated,
         mic: None,
+        mic_curve: None,
         created_at: WallNs(1_790_000_000_000_000_000),
     }
 }
@@ -86,6 +87,7 @@ fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> Stored
         },
         grid: g,
         sweep: None,
+        mic_curve: None,
     }
 }
 
@@ -215,7 +217,7 @@ fn typed_refusals() {
     assert_eq!(e.problem, ImportProblem::NoData);
     let e = bad("20 1 0 1.5\n30 2 0 0.5\n");
     assert_eq!(e.problem, ImportProblem::BadCoherence);
-    let e = bad("# ac2 trace export v2\nfreq_hz,mag_db\n20,1\n30,2\n");
+    let e = bad("# ac2 trace export v3\nfreq_hz,mag_db\n20,1\n30,2\n");
     assert_eq!((e.line, e.problem), (Some(1), ImportProblem::BadHeader));
     let e = import(b"20 1\n30 2\n", ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
     assert_eq!(e.problem, ImportProblem::BadHeader);
@@ -232,7 +234,7 @@ fn ac2_csv_round_trips_bit_for_bit() {
     t.columns.mag_db[11] = -2.718_281_7e-3;
     t.meta.edit.name = "Main L, pre EQ".into();
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v1\n# name: Main L, pre EQ\n"));
+    assert!(csv.starts_with("# ac2 trace export v2\n# name: Main L, pre EQ\n"));
     assert!(csv.contains("# delay_ms: 12\n"));
     assert!(csv.contains("freq_hz,mag_db,phase_deg,coherence\n"));
     let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();
@@ -275,6 +277,7 @@ fn linear_grid_spectrum_round_trips_with_dc_bin() {
             coherence: None,
         },
         sweep: None,
+        mic_curve: None,
     };
     let back = import(
         export_csv(&t).as_bytes(),
@@ -419,6 +422,7 @@ fn a_minus_b() {
             TraceSource::Imported {
                 file_name: "house_curve.txt".into(),
                 format: ImportFormat::AnalyzerText,
+                notes: vec![],
             },
             0.0,
             TraceKind::Target,
@@ -427,6 +431,7 @@ fn a_minus_b() {
         grid: target.grid,
         columns: target.columns,
         sweep: None,
+        mic_curve: None,
     };
     let d = math(&a, &tt, MathOp::MagnitudeDifference).unwrap();
     let i = col(&d.grid, 1000.0);
@@ -449,6 +454,7 @@ fn level_trace(id: u32, kind: TraceKind, g: GridDef) -> StoredTrace {
         },
         grid: g,
         sweep: None,
+        mic_curve: None,
     }
 }
 
@@ -706,18 +712,18 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (no sweep traces) is refused with its version named,
-    // never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 4", "\"version\": 3")).unwrap();
+    // A session of the previous format (sweep sidecars, no mic curves on traces) is refused
+    // with its version named, never read best-effort.
+    std::fs::write(&m, text.replace("\"version\": 5", "\"version\": 4")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 3
+            found: 4
         }
     );
-    assert!(e.to_string().contains("reads version 4 only"), "{e}");
+    assert!(e.to_string().contains("reads version 5 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -796,16 +802,24 @@ fn sweep_trace(id: u32) -> StoredTrace {
                 clipped: false,
             },
         }),
+        mic_curve: None,
     }
 }
 
-/// A sweep export carries every distortion curve; it re-imports as its transfer function
-/// (the curves read back exactly), and a session keeps the whole sweep.
+/// A sweep export carries every distortion curve, its analysis facts and impulse response:
+/// it re-imports as the same sweep (bit for bit), with its delay; a session keeps it in the
+/// one CSV.
 #[test]
 fn sweep_csv_and_session_round_trip() {
     let t = sweep_trace(5);
     let csv = export_csv(&t);
     assert!(csv.contains("# kind: sweep"));
+    assert!(
+        csv.contains("# sweep_info: {\"sample_rate\":48000.0,"),
+        "{}",
+        &csv[..1500]
+    );
+    assert!(csv.contains("# sweep_ir: {\"t0\":-0.75,\"dt\":"));
     assert!(
         csv.contains(
             "freq_hz,mag_db,phase_deg,h2_db,h2_floor_db,h3_db,h3_floor_db,thd_db,thd_floor_db\n"
@@ -813,16 +827,24 @@ fn sweep_csv_and_session_round_trip() {
         "{}",
         &csv[..800]
     );
+    assert!(csv.contains("\nt_s,linear,etc_db\n-0.75,0,-200\n"));
     let imp = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
-    assert_eq!(imp.kind, TraceKind::Transfer);
+    assert_eq!(imp.kind, TraceKind::Sweep);
     assert_eq!(imp.grid, t.grid);
-    let (h, thd) = imp.distortion.unwrap();
+    assert_eq!(imp.delay, Some(Seconds(0.0033)));
+    assert!(imp.notes.is_empty());
     let s = t.sweep.as_ref().unwrap();
-    assert_eq!(h.len(), 2);
-    assert_eq!(h[1].order, 3);
-    assert_eq!(h[1].curve, s.harmonics[1].curve);
-    assert!(h[0].curve.level_db.last().unwrap().is_nan());
-    assert_eq!(thd, s.thd);
+    let back = imp.sweep.unwrap();
+    assert_eq!(back.harmonics.len(), 2);
+    assert_eq!(back.harmonics[1], s.harmonics[1]);
+    assert!(back.harmonics[0].curve.level_db.last().unwrap().is_nan());
+    assert_eq!(back.thd, s.thd);
+    assert_eq!(back.ir, s.ir);
+    assert_eq!(back.info, s.info);
+    // As a target it is a magnitude only, with nothing of the sweep.
+    let tgt = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Target).unwrap();
+    assert_eq!(tgt.kind, TraceKind::Target);
+    assert!(tgt.sweep.is_none() && tgt.delay.is_none());
 
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("sweep");
@@ -831,22 +853,211 @@ fn sweep_csv_and_session_round_trip() {
         measurements: vec![],
         traces: vec![t.clone()],
     };
-    let m = session::save(&dir, &sess).unwrap();
-    let side = m.traces[0].sweep_file.clone().unwrap();
-    assert!(side.ends_with(".sweep.json"));
+    session::save(&dir, &sess).unwrap();
+    let files: Vec<_> = std::fs::read_dir(dir.join("traces")).unwrap().collect();
+    assert_eq!(files.len(), 1, "one CSV per trace, no sidecar");
     let back = session::load(&dir).unwrap();
     let b = &back.traces[0];
     assert_eq!(b.meta, t.meta);
     let bs = b.sweep.as_ref().unwrap();
-    assert_eq!(bs.ir, s.ir);
-    assert_eq!(bs.info, s.info);
+    assert_eq!((&bs.ir, &bs.info, &bs.thd), (&s.ir, &s.info, &s.thd));
     assert_eq!(bs.harmonics[1], s.harmonics[1]);
     // The served data carries the sweep.
     assert!(b.data().sweep.is_some());
 
-    // A sweep trace whose sweep file went missing is damaged, not silently a transfer.
-    std::fs::remove_file(dir.join(side)).unwrap();
+    // A sweep trace whose CSV lost its impulse response is damaged, not silently a
+    // transfer.
+    let m = session::read_manifest(&dir).unwrap();
+    let p = dir.join(&m.traces[0].file);
+    let text = std::fs::read_to_string(&p).unwrap();
+    let cut: String = text[..text.find("# impulse response").unwrap()]
+        .lines()
+        .filter(|l| !l.starts_with("# sweep_ir"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&p, cut).unwrap();
     assert!(session::load(&dir).is_err());
+}
+
+/// Field exports written before the analysis facts were exported (v1): the transfer
+/// function with its delay, the distortion dropped with a note saying why.
+#[test]
+fn v1_sweep_export_imports_as_transfer_with_a_note() {
+    for (f, delay_ms) in [
+        ("ac2-v1-sweep1.csv", Some(3.333_333_333_333_333_5)),
+        ("ac2-v1-sweep3-94cm-8x.csv", None),
+    ] {
+        let imp = import(&fixture(f), ImportFormat::Auto, ImportRole::Trace).unwrap();
+        assert_eq!(imp.format, ImportFormat::Ac2Csv, "{f}");
+        assert_eq!(imp.kind, TraceKind::Transfer, "{f}");
+        assert!(imp.sweep.is_none());
+        assert_eq!(imp.notes, vec![ImportNote::SweepWithoutAnalysis], "{f}");
+        assert!(imp.columns.phase_deg.is_some());
+        let d = imp.delay.unwrap().0 * 1000.0;
+        assert!(d > 0.0, "{f}: delay {d} ms");
+        if let Some(want) = delay_ms {
+            assert!((d - want).abs() < 1e-12, "{f}: {d}");
+        }
+    }
+}
+
+/// An imported trace keeps the delay its export states, whatever its kind.
+#[test]
+fn import_keeps_the_delay_of_an_ac2_export() {
+    let t = delayed(7, 3, 0.0125, 0.0120, 0.97);
+    let imp = import(
+        export_csv(&t).as_bytes(),
+        ImportFormat::Auto,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    assert_eq!(imp.delay, Some(Seconds(0.012)));
+    let rew = import(
+        &fixture("rew_export.txt"),
+        ImportFormat::Auto,
+        ImportRole::Trace,
+    )
+    .unwrap();
+    assert_eq!(rew.delay, None);
+}
+
+fn curve_points() -> Vec<[f64; 2]> {
+    // A mic reading +3 dB at 10 kHz and −2 dB at 50 Hz, flat at 1 kHz.
+    vec![[50.0, -2.0], [1000.0, 0.0], [10_000.0, 3.0]]
+}
+
+fn with_curve(mut t: StoredTrace) -> StoredTrace {
+    t.mic_curve = Some(ac2_traces::mic::correction(&curve_points(), 1000.0).unwrap());
+    t.meta.mic_curve = Some(Box::new(TraceMicCurve {
+        mic: "MM1 34804".into(),
+        curve: MicCurveRef {
+            name: "MM1-34804".into(),
+            file_name: "MM1-34804.txt".into(),
+            content_hash: "0123456789abcdef".into(),
+            points: 3,
+            f_lo: Hz(50.0),
+            f_hi: Hz(10_000.0),
+            imported_at: WallNs(1),
+        },
+        f_norm: Hz(1000.0),
+    }));
+    t
+}
+
+/// A mic curve applied after capture is a display edit: the served magnitude is corrected
+/// (the curve's values at its points, 0 at f_norm), the stored columns, phase and coherence
+/// are not; exports state it; a session keeps it with its points.
+#[test]
+fn mic_curve_on_a_stored_trace_is_a_display_edit() {
+    let raw = delayed(4, 2, 0.0125, 0.0125, 0.95);
+    let t = with_curve(raw.clone());
+    let g = &t.grid;
+    let d = t.data();
+    // Flat 0 dB measured: the served magnitude is minus the curve, 0 at 1 kHz, −3 dB from
+    // 10 kHz up, +2 dB from 50 Hz down (held flat outside the points).
+    let k = t.mic_curve.clone().unwrap();
+    for (f, v) in frequencies(g).iter().zip(&d.mag_db) {
+        assert!((f64::from(*v) + k.db(*f)).abs() < 1e-5, "{f}: {v}");
+    }
+    assert_eq!(d.mag_db[col(g, 1000.0)], 0.0);
+    assert!((d.mag_db[col(g, 16_000.0)] + 3.0).abs() < 1e-5);
+    assert!((d.mag_db[col(g, 31.25)] - 2.0).abs() < 1e-5);
+    assert_eq!(t.columns, raw.columns);
+    assert_eq!(d.phase_deg, raw.data().phase_deg);
+    assert_eq!(d.coherence, raw.data().coherence);
+    // Export: raw columns, the curve named.
+    let csv = export_csv(&t);
+    assert!(
+        csv.contains(
+            "# mic: MM1 34804 (curve: MM1-34804, applied after capture as a display edit, \
+             not in the columns; 0 dB at 1000 Hz"
+        ),
+        "{}",
+        &csv[..1500]
+    );
+    let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();
+    assert_eq!(back.columns.mag_db, raw.columns.mag_db);
+    assert_eq!(back.notes, vec![ImportNote::MicCurveNotApplied]);
+    // Session: the curve and its points come back.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("mic");
+    session::save(
+        &dir,
+        &Session {
+            saved_at: WallNs(5),
+            measurements: vec![],
+            traces: vec![t.clone()],
+        },
+    )
+    .unwrap();
+    let l = session::load(&dir).unwrap();
+    assert_eq!(l.traces[0], t);
+    assert_eq!(l.traces[0].data(), d);
+    // Averages combine corrected columns.
+    let other = with_curve(delayed(5, 2, 0.0125, 0.0125, 0.95));
+    let avg = average(
+        &[&t, &other],
+        AverageMethod::Power,
+        DelayReference::Trace { trace: TraceId(4) },
+    )
+    .unwrap();
+    let i = col(g, 16_000.0);
+    assert!(
+        (avg.columns.mag_db[i] + 3.0).abs() < 1e-4,
+        "{}",
+        avg.columns.mag_db[i]
+    );
+    // ... and say which curve their columns carry.
+    let baked = ac2_traces::mic::bake(&t);
+    assert_eq!(baked.meta.mic.unwrap().curve.as_deref(), Some("MM1-34804"));
+    assert!(baked.meta.mic_curve.is_none());
+}
+
+/// A trace whose capture applied a curve, a target and a locked trace refuse a curve.
+#[test]
+fn mic_curve_refusals() {
+    use ac2_traces::mic::{MicCurveError, check};
+    let mut t = delayed(4, 2, 0.0125, 0.0125, 0.95).meta;
+    assert_eq!(check(&t), Ok(()));
+    t.mic = Some(MicState {
+        name: "MM1".into(),
+        curve: Some("MM1-34804".into()),
+    });
+    let e = check(&t).unwrap_err();
+    assert!(matches!(e, MicCurveError::InColumns { .. }));
+    assert!(e.to_string().contains("correct twice"), "{e}");
+    t.mic = None;
+    t.kind = TraceKind::Target;
+    assert_eq!(check(&t), Err(MicCurveError::Target));
+    t.kind = TraceKind::Transfer;
+    t.edit.locked = true;
+    assert_eq!(check(&t), Err(MicCurveError::Locked));
+}
+
+/// A sweep's distortion through the curve: order n at f moves by c(f) − c(n·f), and THD
+/// is the power sum of the corrected orders.
+#[test]
+fn mic_curve_corrects_sweep_distortion() {
+    let t = with_curve(sweep_trace(5));
+    let k = t.mic_curve.clone().unwrap();
+    let s = t.sweep.as_ref().unwrap();
+    let d = t.data().sweep.unwrap();
+    let f = frequencies(&t.grid);
+    let i = col(&t.grid, 1000.0);
+    for (h, raw) in d.harmonics.iter().zip(&s.harmonics) {
+        let n = f64::from(h.order);
+        let want = f64::from(raw.curve.level_db[i]) - (k.db(n * f[i]) - k.db(f[i]));
+        assert!((f64::from(h.curve.level_db[i]) - want).abs() < 1e-4);
+        assert!(h.curve.level_db[i] != raw.curve.level_db[i]);
+    }
+    let p: f64 = d
+        .harmonics
+        .iter()
+        .map(|h| 10f64.powf(f64::from(h.curve.level_db[i]) / 10.0))
+        .sum();
+    assert!((f64::from(d.thd.level_db[i]) - 10.0 * p.log10()).abs() < 1e-4);
+    // The impulse response is never touched.
+    assert_eq!(d.ir, s.ir);
 }
 
 /// A sweep's response averages and divides like a transfer function (same epoch: shared

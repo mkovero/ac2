@@ -261,7 +261,12 @@ impl Control {
             reference + 1
         );
         self.commit(Change::Sweep(run.clone()));
-        let mic = self.cal_and_mic(measurement).1;
+        // The sweep analysis works on the raw recordings: no curve is in its columns, so
+        // the trace names the mic only (`trace.mic_curve` applies a curve afterwards).
+        let mic = self
+            .cal_and_mic(measurement)
+            .1
+            .map(|m| ac2_proto::model::MicState { curve: None, ..m });
         self.sweep = Some(ActiveSweep {
             run: run.clone(),
             spec,
@@ -396,6 +401,7 @@ impl Control {
             // A ratio of two inputs: no calibration applies.
             cal: CalState::Uncalibrated,
             mic: active.mic.clone(),
+            mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
         tracing::info!(

@@ -3,11 +3,12 @@
 //! ```text
 //! <dir>/session.json                 manifest (format, version, measurements, trace metadata)
 //! <dir>/traces/<generation>-<id>.csv one ac2 CSV per trace (columns; header repeats metadata)
-//! <dir>/traces/<generation>-<id>.sweep.json  a sweep trace's IR and analysis facts
 //! ```
 //!
-//! A sweep trace's distortion curves are columns of its CSV; its impulse response and
-//! analysis facts (`SweepIr`, `SweepInfo`) are the JSON beside it.
+//! A sweep trace's CSV holds all of it: distortion curves as columns, analysis facts in its
+//! header and the impulse response as a second table ([`crate::text`]). A mic curve applied
+//! to a trace after capture keeps its points in the manifest (`mic_curve_points`), so the
+//! trace reads the same after the calibration store changed.
 //!
 //! The manifest names the trace files it belongs to, and every save writes its trace files
 //! under a new generation before it replaces the manifest (write to a temporary file, then
@@ -20,8 +21,9 @@
 //!
 //! What a session holds: measurement configurations (with their applied delay, tracking,
 //! running and frozen flags) and stored traces with all metadata, display edits and slots.
-//! Trace columns are saved unsmoothed; a trace's display smoothing is one of its edits
-//! (`edit.smoothing`), applied again when the loaded trace is served.
+//! Trace columns are saved unsmoothed and uncorrected; a trace's display smoothing
+//! (`edit.smoothing`) and applied mic curve (`mic_curve`) are applied again when the loaded
+//! trace is served.
 //! It never holds generator state: a loaded session is always disarmed with no owner.
 //! Calibrations are the calibration store's, not the session's.
 
@@ -30,9 +32,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
-use ac2_proto::model::{
-    ImportFormat, ImportRole, MeasConfig, SweepData, SweepInfo, SweepIr, TraceKind, TraceMeta,
-};
+use ac2_proto::model::{ImportFormat, ImportRole, MeasConfig, TraceKind, TraceMeta};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -43,7 +43,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 const TRACE_DIR: &str = "traces";
@@ -84,19 +84,8 @@ pub struct SavedTrace {
     pub grid: GridDef,
     /// Data file, relative to the session directory.
     pub file: String,
-    /// A sweep trace's impulse response and analysis facts, relative to the session
-    /// directory.
-    pub sweep_file: Option<String>,
-}
-
-/// What a sweep trace keeps beside its CSV.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SweepSidecar {
-    /// Impulse response.
-    pub ir: SweepIr,
-    /// Analysis facts.
-    pub info: SweepInfo,
+    /// Points (Hz, dB) of the mic curve applied after capture (`meta.mic_curve`).
+    pub mic_curve_points: Option<Vec<[f64; 2]>>,
 }
 
 /// The manifest.
@@ -231,27 +220,11 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     for t in &s.traces {
         let file = format!("{TRACE_DIR}/{generation}-{}.csv", t.meta.id.0);
         write_atomic(&dir.join(&file), export_csv(t).as_bytes())?;
-        let sweep_file = match &t.sweep {
-            Some(s) => {
-                let f = format!("{TRACE_DIR}/{generation}-{}.sweep.json", t.meta.id.0);
-                let side = SweepSidecar {
-                    ir: s.ir.clone(),
-                    info: s.info,
-                };
-                let json = serde_json::to_vec(&side).map_err(|e| SessionError::Corrupt {
-                    path: dir.join(&f),
-                    msg: e.to_string(),
-                })?;
-                write_atomic(&dir.join(&f), &json)?;
-                Some(f)
-            }
-            None => None,
-        };
         saved.push(SavedTrace {
             meta: t.meta.clone(),
             grid: t.grid.clone(),
             file,
-            sweep_file,
+            mic_curve_points: t.mic_curve.as_ref().map(crate::mic::points),
         });
     }
     let m = Manifest {
@@ -267,11 +240,7 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     })?;
     write_atomic(&dir.join(MANIFEST), &json)?;
     // Older generations are unreferenced now.
-    let keep: Vec<String> = m
-        .traces
-        .iter()
-        .flat_map(|t| std::iter::once(t.file.clone()).chain(t.sweep_file.clone()))
-        .collect();
+    let keep: Vec<String> = m.traces.iter().map(|t| t.file.clone()).collect();
     if let Ok(rd) = fs::read_dir(&traces_dir) {
         for e in rd.flatten() {
             let rel = format!("{TRACE_DIR}/{}", e.file_name().to_string_lossy());
@@ -327,13 +296,12 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
     let m = read_manifest(dir)?;
     let mut traces = Vec::with_capacity(m.traces.len());
     for t in &m.traces {
-        for f in std::iter::once(&t.file).chain(&t.sweep_file) {
-            if f.contains("..") || Path::new(f).is_absolute() {
-                return Err(SessionError::Corrupt {
-                    path: dir.join(MANIFEST),
-                    msg: format!("trace file {f:?} is outside the session"),
-                });
-            }
+        let f = &t.file;
+        if f.contains("..") || Path::new(f).is_absolute() {
+            return Err(SessionError::Corrupt {
+                path: dir.join(MANIFEST),
+                msg: format!("trace file {f:?} is outside the session"),
+            });
         }
         let p = dir.join(&t.file);
         let bytes = fs::read(&p).map_err(io(&p))?;
@@ -346,34 +314,34 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
         if imp.grid != t.grid || t.grid.id() != t.meta.grid_id {
             return Err(corrupt("data is not on the trace's grid".into()));
         }
-        let sweep = match (t.meta.kind, &t.sweep_file, imp.distortion) {
-            (TraceKind::Sweep, Some(f), Some((harmonics, thd))) => {
-                let sp = dir.join(f);
-                let b = fs::read(&sp).map_err(io(&sp))?;
-                let side: SweepSidecar =
-                    serde_json::from_slice(&b).map_err(|e| SessionError::Corrupt {
-                        path: sp.clone(),
-                        msg: e.to_string(),
-                    })?;
-                Some(SweepData {
-                    harmonics,
-                    thd,
-                    ir: side.ir,
-                    info: side.info,
-                })
+        if (t.meta.kind == TraceKind::Sweep) != imp.sweep.is_some() {
+            return Err(corrupt(
+                "a sweep trace without its distortion, analysis facts or impulse response".into(),
+            ));
+        }
+        let mic_curve = match (&t.meta.mic_curve, &t.mic_curve_points) {
+            (Some(mc), Some(p)) => {
+                Some(
+                    crate::mic::correction(p, mc.f_norm.0).map_err(|e| SessionError::Corrupt {
+                        path: dir.join(MANIFEST),
+                        msg: format!("trace {}: mic curve: {e}", t.meta.id),
+                    })?,
+                )
             }
-            (TraceKind::Sweep, _, _) => {
-                return Err(corrupt(
-                    "a sweep trace without its distortion columns or sweep file".into(),
-                ));
+            (None, None) => None,
+            _ => {
+                return Err(SessionError::Corrupt {
+                    path: dir.join(MANIFEST),
+                    msg: format!("trace {}: mic curve and its points disagree", t.meta.id),
+                });
             }
-            _ => None,
         };
         traces.push(StoredTrace {
             meta: t.meta.clone(),
             grid: t.grid.clone(),
             columns: imp.columns,
-            sweep,
+            sweep: imp.sweep,
+            mic_curve,
         });
     }
     Ok(Session {

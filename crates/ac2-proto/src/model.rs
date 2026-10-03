@@ -1243,6 +1243,8 @@ pub enum TraceSource {
         file_name: String,
         /// Format actually parsed (never `auto`).
         format: ImportFormat,
+        /// What the file held that the trace does not keep.
+        notes: Vec<ImportNote>,
     },
     /// Average of other traces.
     Average {
@@ -1279,6 +1281,21 @@ pub enum TraceSource {
         /// Measurement input.
         measurement_input: u16,
     },
+}
+
+/// Something an imported file held that the trace does not keep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportNote {
+    /// A sweep export without its analysis facts and impulse response (written before
+    /// they were exported): imported as its transfer function, the distortion dropped.
+    SweepWithoutAnalysis,
+    /// A sweep export whose rows are off the grid in its header: the response was
+    /// resampled, and distortion is never resampled, so it was dropped.
+    SweepOffGrid,
+    /// The export showed a mic curve applied afterwards as a display edit; its columns are
+    /// as measured, without the curve (apply it again with `trace.mic_curve`).
+    MicCurveNotApplied,
 }
 
 /// Display colour, 8-bit sRGB.
@@ -1318,6 +1335,22 @@ pub struct MicState {
     pub name: String,
     /// Mic curve applied (by name), `None` when switched off or absent.
     pub curve: Option<String>,
+}
+
+/// A mic curve applied to a stored trace after capture (`trace.mic_curve`): a display
+/// edit. The stored columns stay as measured; the daemon subtracts the curve, normalised to
+/// 0 dB at `f_norm`, when it serves the trace's data (after the display smoothing), and
+/// keeps the curve's points with the trace, so it survives a later change to the
+/// calibration store.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TraceMicCurve {
+    /// Mic name of the calibration entry the curve came from.
+    pub mic: String,
+    /// The curve as the calibration store had it.
+    pub curve: MicCurveRef,
+    /// Normalisation frequency: the correction is 0 dB here.
+    pub f_norm: Hz,
 }
 
 /// Operator-editable trace properties (`trace.update` replaces all of them).
@@ -1364,7 +1397,8 @@ pub struct TraceMeta {
     /// Grid of the stored data.
     pub grid_id: GridId,
     /// Delay the phase is referred to: the measured delay at capture; for an average the
-    /// common reference delay; 0 for imported traces.
+    /// common reference delay; for an import the delay its ac2 CSV header states (0 for
+    /// other files).
     pub delay: Seconds,
     /// Averaging depth policy at capture (transfer captures).
     pub depth: Option<DepthPolicy>,
@@ -1372,6 +1406,9 @@ pub struct TraceMeta {
     pub cal: CalState,
     /// Mic at capture.
     pub mic: Option<MicState>,
+    /// A mic curve applied after capture (display edit, [`TraceMicCurve`]); never set
+    /// while `mic.curve` is (the columns carry that curve already).
+    pub mic_curve: Option<Box<TraceMicCurve>>,
     /// When captured / created.
     pub created_at: WallNs,
 }
@@ -1409,7 +1446,9 @@ pub enum SessionRef {
 }
 
 /// Stored trace data (reply to `trace.get`): the stored columns with the trace's display
-/// smoothing (`meta.edit.smoothing`) applied. Column order = grid order.
+/// smoothing (`meta.edit.smoothing`) and then its mic curve (`meta.mic_curve`) applied; the
+/// curve also corrects a sweep's distortion levels and floors (each order re the
+/// fundamental at its own frequency). Column order = grid order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceData {

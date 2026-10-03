@@ -24,6 +24,10 @@ pub(super) struct FakeTraces {
     pub(super) data: HashMap<TraceId, (GridDef, Columns)>,
     pub(super) sweeps: HashMap<TraceId, SweepData>,
     pub(super) next_sweep: u32,
+    /// Mic curves applied to traces after capture.
+    pub(super) mic_curves: HashMap<TraceId, ac2_traces::mic::Correction>,
+    /// Points (Hz, dB) of the imported mic curves, by calibration entry.
+    pub(super) curve_points: HashMap<CalKey, Vec<[f64; 2]>>,
 }
 
 fn session_err(e: SessionError) -> ProtoError {
@@ -83,6 +87,7 @@ impl Shared {
             grid,
             columns,
             sweep: self.traces.sweeps.get(&id).cloned(),
+            mic_curve: self.traces.mic_curves.get(&id).cloned(),
         })
     }
 
@@ -211,6 +216,7 @@ impl Shared {
             depth: None,
             cal: CalState::Uncalibrated,
             mic: None,
+            mic_curve: None,
             created_at: WallNs(1_790_000_000_000_000_000),
         }
     }
@@ -284,6 +290,7 @@ impl Shared {
         }
         self.traces.data.remove(&id);
         self.traces.sweeps.remove(&id);
+        self.traces.mic_curves.remove(&id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
         Ok(ReplyBody::Ack { rev })
     }
@@ -366,11 +373,78 @@ impl Shared {
             TraceSource::Imported {
                 file_name,
                 format: imp.format,
+                notes: imp.notes,
             },
             &imp.grid,
-            Seconds(0.0),
+            imp.delay.unwrap_or(Seconds(0.0)),
         );
+        if let Some(sw) = imp.sweep {
+            self.traces.sweeps.insert(id, sw);
+        }
         Ok(self.add_trace(t, imp.grid, imp.columns))
+    }
+
+    /// `trace.mic_curve`, as the daemon: the newest curve imported for the mic, normalised
+    /// at its entry's calibrator frequency (1 kHz without one).
+    pub(super) fn trace_mic_curve(
+        &mut self,
+        id: TraceId,
+        mic: Option<String>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let mut t = self.trace(id)?.meta;
+        ac2_traces::mic::check(&t).map_err(|e| {
+            let code = match e {
+                ac2_traces::mic::MicCurveError::Target => ErrorCode::Invalid,
+                _ => ErrorCode::Refused,
+            };
+            err(code, format!("trace {id}: {e}"))
+        })?;
+        match mic {
+            None => {
+                if t.mic_curve.take().is_none() {
+                    return Err(err(
+                        ErrorCode::NotFound,
+                        format!("trace {id} has no mic curve applied after capture"),
+                    ));
+                }
+                self.traces.mic_curves.remove(&id);
+            }
+            Some(m) => {
+                let e = self
+                    .state
+                    .calibrations
+                    .iter()
+                    .filter(|e| e.key.mic == m && e.mic_curve.is_some())
+                    .max_by_key(|e| e.mic_curve.as_ref().map(|c| c.imported_at))
+                    .cloned()
+                    .ok_or_else(|| {
+                        err(
+                            ErrorCode::NotFound,
+                            format!("no mic curve for mic {m:?} in the calibration store"),
+                        )
+                    })?;
+                let points = self.traces.curve_points.get(&e.key).ok_or_else(|| {
+                    err(
+                        ErrorCode::Internal,
+                        format!("the mic curve of {m:?} has no points"),
+                    )
+                })?;
+                let f_norm = e.spl.map_or(1000.0, |s| s.calibrator_freq.0);
+                let k = ac2_traces::mic::correction(points, f_norm)
+                    .map_err(|x| err(ErrorCode::Internal, x))?;
+                t.mic_curve = Some(Box::new(TraceMicCurve {
+                    mic: m,
+                    curve: e
+                        .mic_curve
+                        .clone()
+                        .ok_or_else(|| err(ErrorCode::Internal, "no curve"))?,
+                    f_norm: Hz(f_norm),
+                }));
+                self.traces.mic_curves.insert(id, k);
+            }
+        }
+        self.commit(Change::Trace(Patch::Set(t.clone())));
+        Ok(ReplyBody::Trace(t))
     }
 
     pub(super) fn trace_export(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
@@ -470,6 +544,7 @@ impl Shared {
         }
         self.traces.data.clear();
         self.traces.sweeps.clear();
+        self.traces.mic_curves.clear();
         let newest = s
             .traces
             .iter()
@@ -522,6 +597,9 @@ impl Shared {
             self.grids.insert(t.grid.id(), t.grid.clone());
             if let Some(sw) = t.sweep {
                 self.traces.sweeps.insert(t.meta.id, sw);
+            }
+            if let Some(k) = t.mic_curve {
+                self.traces.mic_curves.insert(t.meta.id, k);
             }
             self.traces.data.insert(t.meta.id, (t.grid, t.columns));
             self.commit(Change::Trace(Patch::Set(t.meta)));

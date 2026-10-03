@@ -23,7 +23,7 @@ const VERSION: u32 = 1;
 /// Longest mic name, characters.
 pub(crate) const MAX_MIC_NAME: usize = 64;
 /// Normalisation frequency when no sensitivity calibration applies.
-const DEFAULT_F_NORM: f64 = 1000.0;
+pub(crate) const DEFAULT_F_NORM: f64 = 1000.0;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -330,6 +330,23 @@ pub(crate) fn input_setup(inputs: &[InputSetup], channel: u16) -> InputSetup {
         })
 }
 
+/// The entry whose mic curve applies to mic `mic` (Q7 §3): a curve is a property of the
+/// capsule, so it follows the mic name — the entry on `at` (device, input) when it holds
+/// one, else the newest curve imported for that mic anywhere.
+pub(crate) fn curve_entry<'a>(
+    entries: &'a [CalEntry],
+    mic: &str,
+    at: Option<(&DeviceId, u16)>,
+) -> Option<&'a CalEntry> {
+    let with_curve = || {
+        entries
+            .iter()
+            .filter(move |e| e.key.mic == mic && e.mic_curve.is_some())
+    };
+    at.and_then(|(d, c)| with_curve().find(|e| e.key.device == *d && e.key.channel == c))
+        .or_else(|| with_curve().max_by_key(|e| e.mic_curve.as_ref().map(|c| c.imported_at)))
+}
+
 /// Which calibration and mic curve a job on `channel` of `device` uses (Q7 §3).
 pub(crate) fn resolve(
     entries: &[CalEntry],
@@ -374,22 +391,10 @@ pub(crate) fn resolve(
     let spl = spl_entry.as_ref().map(|(_, s)| *s);
 
     let curve = match (mic, setup.mic_curve) {
-        (Some(m), true) => {
-            let with_curve = || {
-                entries
-                    .iter()
-                    .filter(move |e| e.key.mic == m && e.mic_curve.is_some())
-            };
-            with_curve()
-                .find(here)
-                .or_else(|| {
-                    with_curve().max_by_key(|e| e.mic_curve.as_ref().map(|c| c.imported_at))
-                })
-                .and_then(|e| {
-                    let name = e.mic_curve.as_ref().map(|r| r.name.clone())?;
-                    store.curve(&e.key).map(|c| (name, c))
-                })
-        }
+        (Some(m), true) => curve_entry(entries, m, Some((device, channel))).and_then(|e| {
+            let name = e.mic_curve.as_ref().map(|r| r.name.clone())?;
+            store.curve(&e.key).map(|c| (name, c))
+        }),
         _ => None,
     };
     let f_norm = spl.map_or(DEFAULT_F_NORM, |s| s.calibrator_freq.0);

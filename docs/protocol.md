@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 6`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 7`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -101,6 +101,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.math` | `a`, `b`, `op: magnitude_difference \| complex_division`, `name` | `trace` | |
 | `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| auto`, `role: trace \| target`, `content: bin` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
+| `trace.mic_curve` | `trace`, `mic: string \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
 | `cal.mic_curve` | `input`, `mic`, `action: import{file_name, content: bin} \| clear` | `calibration` (`import`), `ack` (`clear`) | |
 | `cal.list` | — | `calibrations` | |
@@ -259,8 +260,9 @@ again (a new finding that is not ambiguous clears it).
 
 A trace's metadata (`TraceMeta`, §4.1) is mirrored state; its columns leave the daemon only
 through `trace.get` (`TraceData`: `meta`, `mag_db`, `phase_deg` (nil = magnitude only),
-`coherence` (nil = unknown), column order = the trace's grid, NaN = no value), `trace.export`
-and `file.save`. Columns are stored as measured: offset, polarity, nudge and smoothing are
+`coherence` (nil = unknown), `sweep` (`SweepData` of a sweep trace, else nil), column order =
+the trace's grid, NaN = no value), `trace.export` and `file.save`. Columns are stored as
+measured: offset, polarity, nudge, smoothing and a mic curve applied after capture are
 display edits and are never applied to the stored data.
 
 - **Smoothing.** `TraceEdit.smoothing` (`Smoothing` \| nil; transfer and spectrum traces
@@ -271,6 +273,24 @@ display edits and are never applied to the stored data.
   CSV header), and `trace.average` / `trace.math` combine unsmoothed columns. A capture
   starts with the smoothing its measurement had; an average or A − B starts with the
   smoothing its inputs share (nil when they differ).
+- **Mic curve after capture.** `trace.mic_curve {trace, mic}` puts the mic curve the
+  calibration store holds for mic name `mic` on a stored trace — the entry on the trace's
+  calibrated device + input when it has one, else the newest curve imported for that mic
+  (the §Calibration curve rule) — or removes the applied one (`mic: nil`; `not_found` when
+  there is none). It is recorded as `TraceMeta.mic_curve` (`TraceMicCurve`: `mic`, `curve:
+  MicCurveRef`, `f_norm: Hz`) and is a display edit: `trace.get` subtracts the curve,
+  normalised to 0 dB at `f_norm`, from the magnitude after the smoothing — per column on
+  log and linear grids, as the band power average on IEC bands, phase and coherence never —
+  and corrects a sweep's distortion (order n at f by c(f) − c(n·f), floors alike, THD
+  re-summed from the corrected orders; the impulse response untouched). `f_norm` is the
+  calibrator frequency of the trace's sensitivity calibration, else of the curve entry's,
+  else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
+  calibration store does not change it. `trace.export` writes the uncorrected columns and
+  names the curve in its `# mic:` line; `trace.average` / `trace.math` combine corrected
+  columns, and the result's `mic.curve` names the curve its columns now carry. Refused:
+  a trace whose `mic.curve` is set (captured with the curve in its columns: a second
+  correction would count it twice) and a locked trace (`refused`), a target (`invalid`),
+  a mic without a curve in the store (`not_found`).
 
 - `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
   what clients were shown, for a `tf` or `spec` frame before its display smoothing — with
@@ -283,12 +303,15 @@ display edits and are never applied to the stored data.
   `cal` (spectrum / RTA: the calibration the measurement used, picked by the calibration
   matching rules below — its `key` names another mic or input when it was not this mic's;
   transfer functions are ratios and always `uncalibrated`), `mic` (the input setup's mic
-  name and the mic curve applied, nil without a mic name), `created_at`.
+  name and the mic curve applied to the captured columns, nil without a mic name; a sweep
+  names no curve, its analysis works on the raw recordings), `mic_curve` (nil: see
+  *Mic curve after capture*), `created_at`.
 - **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
-  `locked` (not `smoothing`); `trace.delete` of a locked trace is `refused`.
+  `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
+  `refused`.
 - **Time base (decisions 8a / 8b).** Captured traces share the time base of their session
   epoch; every other source (`imported`, `average`, `math`) is independent.
 - `trace.average`: ≥ 2 distinct traces of one kind (no targets). Transfer: `power` (RMS
@@ -309,7 +332,14 @@ display edits and are never applied to the stored data.
   on a known grid, resampled onto a log grid (48 points per octave, 96 when the file is
   denser) — magnitude and coherence linear over log frequency, phase unwrapped first.
   `role: target` keeps the magnitude only and makes `kind: target`. The name is the ac2
-  header's `name`, else the file name without extension. A refused file is `invalid` with
+  header's `name`, else the file name without extension; `delay` is the ac2 header's
+  `delay_ms` (0 for other files). An ac2 sweep export with its analysis facts and impulse
+  response imports as a `sweep` trace. `source.imported` {`file_name`, `format`, `notes`}:
+  `notes` lists what the file held that the trace does not keep (`ImportNote`:
+  `sweep_without_analysis` — a v1 sweep export, imported as its transfer function with the
+  distortion dropped; `sweep_off_grid` — distortion is never resampled;
+  `mic_curve_not_applied` — the export named a mic curve applied after capture, the
+  columns are without it). A refused file is `invalid` with
   `detail: {type: import, line (1-based) | nil, problem: ImportProblem}`.
   `ImportProblem`: `not_text`, `no_data`, `bad_number`, `column_count`, `too_few_columns`,
   `not_ascending`, `out_of_range`, `too_many_rows` (> 65536), `bad_header`,
@@ -451,7 +481,8 @@ The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported | average |
-math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `created_at`; `kind` one of
+math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
+`kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal | nil, `mic_curve`: MicCurveRef | nil),
@@ -609,16 +640,23 @@ columns) = `0x79ec3d16ae0e94d0`.
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
-`# ac2 trace export v1` (another version is `bad_header`); then `# key: value` lines with
-every metadata field (`name`, `kind`, `source`, `time_base`, `delay_ms`,
-`delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not applied),
-`depth`, `cal`, `mic`,
-`created_ns`, `note`, `grid` as the JSON `GridDef`); then the header
+`# ac2 trace export v2` (`v1` is read too; another version is `bad_header`); then
+`# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
+`delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
+applied), `depth`, `cal`, `mic` (`name (curve: …)`: in the columns for a capture with a
+curve, or applied after capture as a display edit, not in the columns), `mic_curve` (the
+JSON `TraceMicCurve`, only when one is applied after capture), `created_ns`, `note`, `grid`
+as the JSON `GridDef`); a sweep trace adds `sweep_info` (the JSON `SweepInfo`) and
+`sweep_ir` (JSON `{t0, dt, points}`). Then the header
 `freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column; a sweep trace
 (`kind: sweep`) adds `h2_db,h2_floor_db,…,h5_db,h5_floor_db,thd_db,thd_floor_db` after
-`phase_deg` (dB re the fundamental at the row's fundamental frequency). Values are written in
-their shortest exact form and gaps as `nan`, so an export re-imports bit for bit onto the
-grid named in its header. Import reads `name`, `kind` and `grid`.
+`phase_deg` (dB re the fundamental at the row's fundamental frequency), and after the
+frequency rows its impulse response: the header `t_s,linear,etc_db` and `points` rows
+(`t_s` = `t0 + i·dt`, for reading). Values are written in their shortest exact form and gaps
+as `nan`, so an export re-imports bit for bit onto the grid named in its header. Import
+reads `name`, `kind`, `grid`, `delay_ms` and, for a sweep, `sweep_info`, `sweep_ir`, the
+distortion columns and the impulse response; a v1 sweep export (no `sweep_info`) imports as
+its transfer function (note `sweep_without_analysis`).
 
 **Analyzer text** (`analyzer_text`): columns separated by `,`, `;` (decimal commas
 allowed), tabs or spaces; UTF-8 or Latin-1; comment lines starting with `#`, `*`, `;`,
@@ -634,22 +672,22 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 
 ```
 <dir>/session.json                  manifest
-<dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace
-<dir>/traces/<generation>-<id>.sweep.json  a sweep trace's IR and analysis facts
+<dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace (a sweep's whole data included)
 ```
 
-`session.json`: `{format: "ac2-session", version: 4, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 5, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], traces:
-[{meta: TraceMeta, grid: GridDef, file, sweep_file: string | null}]}` (JSON, field names as
-in this document; `*.sweep.json` is `{ir: SweepIr, info: SweepInfo}`, the distortion curves
-are in the CSV). A save
+[{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz, dB]] | null}]}` (JSON,
+field names as in this document; `mic_curve_points` are the points of `meta.mic_curve`, a
+curve applied after capture). A save
 writes the trace files of a new generation first, then replaces `session.json` atomically
 (temporary file + rename), then removes older generations: a reader sees the old session
 or the new one, never a mix. `format` and `version` are read first; any other version is
 refused (no migration). Trace files hold the unsmoothed columns; each trace's display
 smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
 hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
-spectrum smoothing, version 3 had no sweep traces — are refused). A directory that holds other files is never written into.
+spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impulse response
+in a `*.sweep.json` sidecar and had no mic curves on traces — are refused). A directory that holds other files is never written into.
 
 ### 7.3 Autosave
 

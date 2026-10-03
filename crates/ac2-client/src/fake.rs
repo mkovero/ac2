@@ -740,6 +740,7 @@ impl Shared {
                 content,
             } => self.trace_import(file_name, format, role, &content.0)?,
             C::TraceExport { trace, .. } => self.trace_export(trace)?,
+            C::TraceMicCurve { trace, mic } => self.trace_mic_curve(trace, mic)?,
             C::FileSave { session } => self.file_save(&session)?,
             C::FileLoad { session } => self.file_load(client, &session)?,
             C::FileList => self.file_list()?,
@@ -777,13 +778,17 @@ impl Shared {
                 match action {
                     MicCurveAction::Import { file_name, content } => {
                         // Data lines only; the real parser lives in ac2-core.
-                        let points = String::from_utf8_lossy(&content.0)
+                        let pts: Vec<[f64; 2]> = String::from_utf8_lossy(&content.0)
                             .lines()
-                            .filter(|l| {
+                            .filter_map(|l| {
                                 let mut f = l.split_whitespace().map(str::parse::<f64>);
-                                matches!((f.next(), f.next()), (Some(Ok(_)), Some(Ok(_))))
+                                match (f.next(), f.next()) {
+                                    (Some(Ok(a)), Some(Ok(b))) => Some([a, b]),
+                                    _ => None,
+                                }
                             })
-                            .count();
+                            .collect();
+                        let points = pts.len();
                         if points < 2 {
                             return Err(ProtoError {
                                 code: ErrorCode::Invalid,
@@ -810,6 +815,7 @@ impl Shared {
                             }),
                             key,
                         };
+                        self.traces.curve_points.insert(e.key.clone(), pts);
                         self.commit(Change::Calibration(Patch::Set(e.clone())));
                         self.set_mic(input, &mic);
                         ReplyBody::Calibration(e)

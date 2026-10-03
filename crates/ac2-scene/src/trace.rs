@@ -33,7 +33,9 @@
 //! `Δ = −ν`. The rotation changes phase only; magnitude and coherence are untouched.
 
 use ac2_proto::frame::{FrameStamp, TfFrame, ValidityMask};
-use ac2_proto::model::{Polarity, Smoothing, TraceData, TraceSource};
+use ac2_proto::model::{
+    ImportNote, MicState, Polarity, Smoothing, TraceData, TraceMicCurve, TraceSource,
+};
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
 use crate::primitives::Color;
@@ -417,9 +419,77 @@ pub fn display_traces(
     (reference, shown)
 }
 
+/// What an import note tells the operator.
+pub fn import_note(n: ImportNote) -> &'static str {
+    match n {
+        ImportNote::SweepWithoutAnalysis => {
+            "sweep export without its analysis facts and impulse response (written by an \
+             older ac2): imported as its transfer function, distortion dropped"
+        }
+        ImportNote::SweepOffGrid => {
+            "sweep export off the grid its header names: the response was resampled and \
+             the distortion (never resampled) dropped"
+        }
+        ImportNote::MicCurveNotApplied => {
+            "the export showed a mic curve applied after capture; the columns are without \
+             it (apply it again: ac2 trace mic)"
+        }
+    }
+}
+
+/// A trace's mic and curve, e.g. `MM1 (curve MM1-34804 in the columns)`,
+/// `MM1 (curve MM1-34804 applied after capture, 0 dB at 1000 Hz)`, `—`.
+pub fn mic_text(mic: Option<&MicState>, applied: Option<&TraceMicCurve>) -> String {
+    match (mic, applied) {
+        (_, Some(a)) => format!(
+            "{} (curve {} applied after capture, 0 dB at {} Hz)",
+            a.mic,
+            a.curve.name,
+            crate::format::fixed(a.f_norm.0, 0)
+        ),
+        (Some(m), None) => match &m.curve {
+            Some(c) => format!("{} (curve {c} in the columns)", m.name),
+            None => format!("{} (no curve)", m.name),
+        },
+        (None, None) => "—".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mic_wording() {
+        use ac2_proto::model::MicCurveRef;
+        use ac2_proto::units::{Hz, WallNs};
+        let m = MicState {
+            name: "MM1".into(),
+            curve: Some("MM1-34804".into()),
+        };
+        assert_eq!(
+            mic_text(Some(&m), None),
+            "MM1 (curve MM1-34804 in the columns)"
+        );
+        let a = TraceMicCurve {
+            mic: "MM1".into(),
+            curve: MicCurveRef {
+                name: "MM1-34804".into(),
+                file_name: "MM1-34804.txt".into(),
+                content_hash: "0".into(),
+                points: 2,
+                f_lo: Hz(20.0),
+                f_hi: Hz(20_000.0),
+                imported_at: WallNs(0),
+            },
+            f_norm: Hz(1000.0),
+        };
+        assert_eq!(
+            mic_text(None, Some(&a)),
+            "MM1 (curve MM1-34804 applied after capture, 0 dB at 1000 Hz)"
+        );
+        assert_eq!(mic_text(None, None), "—");
+    }
 
     const EPOCH: SessionEpoch = SessionEpoch(3);
 

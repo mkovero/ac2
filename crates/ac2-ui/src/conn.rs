@@ -18,7 +18,7 @@ use ac2_client::{
 use ac2_proto::model::{
     BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
     GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
-    Measurement, Preview, SessionConfig, Smoothing, TraceData, TraceMeta,
+    Measurement, Preview, SessionConfig, Smoothing, TraceData, TraceMeta, TraceMicCurve,
 };
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
@@ -486,8 +486,10 @@ async fn session(
     let mut responding = false;
     let mut last_push = Instant::now();
     let mut last_mirror = Instant::now();
-    // Served columns carry the trace's display smoothing: a new setting means new data.
-    let mut fetched: HashMap<TraceId, Option<Smoothing>> = HashMap::new();
+    // Served columns carry the trace's display smoothing and mic curve: a new setting means
+    // new data.
+    let mut fetched: HashMap<TraceId, (Option<Smoothing>, Option<Box<TraceMicCurve>>)> =
+        HashMap::new();
     let next = loop {
         tokio::select! {
             c = ctl.recv() => match c {
@@ -518,7 +520,8 @@ async fn session(
                 let v = mirror.borrow_and_update().clone();
                 if let Some(st) = &v.state {
                     for t in &st.traces {
-                        if fetched.insert(t.id, t.edit.smoothing) != Some(t.edit.smoothing) {
+                        let shown = (t.edit.smoothing, t.mic_curve.clone());
+                        if fetched.insert(t.id, shown.clone()) != Some(shown) {
                             tokio::spawn(fetch_trace(client.clone(), t.id, t.grid_id, out.clone()));
                         }
                     }

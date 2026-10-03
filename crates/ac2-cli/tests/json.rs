@@ -314,7 +314,7 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(csv.code, 0);
     assert!(
         csv.stdout
-            .starts_with("# ac2 trace export v1\n# name: l-pre-eq\n# kind: transfer\n"),
+            .starts_with("# ac2 trace export v2\n# name: l-pre-eq\n# kind: transfer\n"),
         "{}",
         csv.stdout
     );
@@ -611,6 +611,7 @@ async fn trace_commands_json() -> R {
             "depth": { "type": "equal_confidence" },
             "cal": { "type": "uncalibrated" },
             "mic": null,
+            "mic_curve": null,
             "created_at": 1790000000000000000u64
         })
     );
@@ -696,12 +697,86 @@ async fn trace_commands_json() -> R {
     .await?;
     assert_eq!(m["source"]["op"], "complex_division");
 
+    // Display smoothing from the command line: 1/N or N, the mode kept unless asked.
+    let sm = ok_json(&f, &["trace", "smooth", "a", "1/12", "--json"]).await?;
+    assert_eq!(
+        sm["edit"]["smoothing"],
+        json!({ "fraction": "twelfth", "mode": "magnitude_phase" })
+    );
+    let sm = ok_json(
+        &f,
+        &["trace", "smooth", "a", "6", "--magnitude-only", "--json"],
+    )
+    .await?;
+    assert_eq!(
+        sm["edit"]["smoothing"],
+        json!({ "fraction": "sixth", "mode": "magnitude" })
+    );
+    let sm = ok_json(&f, &["trace", "smooth", "a", "1/3", "--json"]).await?;
+    assert_eq!(sm["edit"]["smoothing"]["mode"], "magnitude");
+    let sm = ok_json(&f, &["trace", "smooth", "a", "1/3", "--phase", "--json"]).await?;
+    assert_eq!(sm["edit"]["smoothing"]["mode"], "magnitude_phase");
+    let sm = ok_json(&f, &["trace", "smooth", "a", "none", "--json"]).await?;
+    assert_eq!(sm["edit"]["smoothing"], json!(null));
+    assert!(Cli::try_parse_from(["ac2", "trace", "smooth", "a", "1/5"]).is_err());
+    let human = ac2(&f, &["trace", "smooth", "b", "1/24"]).await?;
+    assert!(
+        human.stdout.contains("1/24 octave, magnitude and phase"),
+        "{}",
+        human.stdout
+    );
+
+    // A mic curve on a stored trace: none in the store yet, then the imported one.
+    let r = ac2(&f, &["trace", "mic", "a", "M30", "--json"]).await?;
+    assert_eq!(r.json()?["error"]["code"], "not_found");
+    let curve = dir.path().join("M30.txt");
+    std::fs::write(
+        &curve,
+        "20 -1.5
+1000 0
+20000 2
+",
+    )?;
+    ok_json(
+        &f,
+        &[
+            "cal",
+            "mic-curve",
+            &curve.to_string_lossy(),
+            "--input",
+            "2",
+            "--mic",
+            "M30",
+            "--json",
+        ],
+    )
+    .await?;
+    let mc = ok_json(&f, &["trace", "mic", "a", "M30", "--json"]).await?;
+    assert_eq!(mc["mic_curve"]["mic"], "M30");
+    assert_eq!(mc["mic_curve"]["curve"]["name"], "M30");
+    assert_eq!(mc["mic_curve"]["f_norm"], 1000.0);
+    let human = ac2(&f, &["trace", "show", "a"]).await?;
+    assert!(
+        human
+            .stdout
+            .contains("M30 (curve M30 applied after capture, 0 dB at 1000 Hz)"),
+        "{}",
+        human.stdout
+    );
+    let off = ok_json(&f, &["trace", "mic", "a", "none", "--json"]).await?;
+    assert_eq!(off["mic_curve"], json!(null));
+
     let rew = fixture("rew_export.txt");
     let i = ok_json(&f, &["trace", "import", &rew, "--json"]).await?;
     assert_eq!(i["edit"]["name"], "rew_export");
     assert_eq!(
         i["source"],
-        json!({ "type": "imported", "file_name": "rew_export.txt", "format": "analyzer_text" })
+        json!({
+            "type": "imported",
+            "file_name": "rew_export.txt",
+            "format": "analyzer_text",
+            "notes": []
+        })
     );
     let house = fixture("house_curve.txt");
     let t = ok_json(

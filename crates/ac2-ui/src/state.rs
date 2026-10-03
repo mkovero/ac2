@@ -429,6 +429,22 @@ pub fn outputs_text(o: &[u16]) -> String {
         .join(", ")
 }
 
+/// The `trace.mic_curve` request of the trace mic-curve prompt: a mic name, or `none`.
+fn trace_mic_request(id: TraceId, text: &str) -> Result<Request, String> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Err("type the mic name (none removes the curve)".into());
+    }
+    let mic = (!t.eq_ignore_ascii_case("none")).then(|| t.to_owned());
+    Ok(Request::Call {
+        what: match &mic {
+            Some(m) => format!("trace {id}: mic curve of {m} applied"),
+            None => format!("trace {id}: mic curve removed"),
+        },
+        cmd: Command::TraceMicCurve { trace: id, mic },
+    })
+}
+
 /// What a text prompt sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptKind {
@@ -443,6 +459,8 @@ pub enum PromptKind {
     InputMics,
     /// `input=mic` of a calibration on the session's capture device to delete from.
     CalDelete(CalPart),
+    /// Mic whose curve goes on a stored trace (`none` removes the applied one).
+    TraceMicCurve(TraceId),
     /// Custom delay-finder band edges.
     FinderBand,
     /// Delay-finder observation.
@@ -469,6 +487,9 @@ impl PromptKind {
             }
             PromptKind::CalDelete(CalPart::MicCurve) => {
                 "Delete mic curve of input=mic on this device (e.g. 3=M30)"
+            }
+            PromptKind::TraceMicCurve(_) => {
+                "Mic curve for the selected trace: mic name as calibrated (none removes)"
             }
             PromptKind::FinderBand => "Delay finder band edges (Hz, e.g. 80-800)",
             PromptKind::FinderObservation => {
@@ -1502,6 +1523,7 @@ impl AppState {
                 self.resend_stimulus(out);
             }),
             PromptKind::CalDelete(part) => self.cal_delete(&text, part, out),
+            PromptKind::TraceMicCurve(id) => trace_mic_request(id, &text).map(|r| out.push(r)),
             PromptKind::FinderBand => parse_band(&text).map(|(lo, hi)| {
                 self.set_finder(FinderChoice {
                     band: FinderBand::Custom {
@@ -2476,6 +2498,20 @@ impl AppState {
                     .unwrap_or_default();
                 self.prompt(PromptKind::InputMics, mics_text(&rows));
             }
+            C::TraceMicCurve => match self.selected_trace_meta().cloned() {
+                Some(t) => {
+                    // Start from what the trace knows: the applied curve's mic, else the
+                    // mic it was captured with.
+                    let text = t
+                        .mic_curve
+                        .as_ref()
+                        .map(|m| m.mic.clone())
+                        .or_else(|| t.mic.as_ref().map(|m| m.name.clone()))
+                        .unwrap_or_default();
+                    self.prompt(PromptKind::TraceMicCurve(t.id), text);
+                }
+                None => self.error("select a stored trace first (V, or click it in the list)"),
+            },
             C::CalDelete | C::CalDeleteSensitivity | C::CalDeleteCurve => {
                 let part = match c {
                     C::CalDeleteSensitivity => CalPart::Sensitivity,

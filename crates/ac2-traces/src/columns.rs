@@ -1,5 +1,6 @@
 //! Column data of a stored trace and resampling between grids.
 
+use ac2_core::mic_curve::Correction;
 use ac2_proto::GridDef;
 use ac2_proto::model::{SweepData, TraceData, TraceMeta};
 
@@ -44,20 +45,38 @@ pub struct StoredTrace {
     pub columns: Columns,
     /// A sweep trace's distortion and impulse response (on the same grid as `columns`).
     pub sweep: Option<SweepData>,
+    /// The mic curve applied after capture (`meta.mic_curve`), normalised at its `f_norm`;
+    /// a display edit, never in `columns` ([`crate::mic`]).
+    pub mic_curve: Option<Correction>,
 }
 
 impl StoredTrace {
-    /// The columns as displayed: the stored ones with the trace's display smoothing.
+    /// The columns as displayed: the stored ones with the trace's display smoothing, then
+    /// its mic curve (the order the live transfer job applies them in).
     pub fn display_columns(&self) -> Columns {
-        match self.meta.edit.smoothing {
+        let mut c = match self.meta.edit.smoothing {
             Some(s) if crate::smooth::smoothable(self.meta.kind) => {
                 crate::smooth::smooth(&self.grid, &self.columns, s)
             }
             _ => self.columns.clone(),
+        };
+        if let Some(k) = &self.mic_curve {
+            crate::mic::correct(&self.grid, &mut c.mag_db, k);
         }
+        c
     }
 
-    /// The `trace.get` reply: display columns (smoothing applied).
+    /// The sweep data as displayed: its distortion corrected by the mic curve, when one is
+    /// applied.
+    pub fn display_sweep(&self) -> Option<SweepData> {
+        let s = self.sweep.as_ref()?;
+        Some(match &self.mic_curve {
+            Some(k) => crate::mic::correct_sweep(&self.grid, s, k),
+            None => s.clone(),
+        })
+    }
+
+    /// The `trace.get` reply: display columns and sweep (smoothing and mic curve applied).
     pub fn data(&self) -> TraceData {
         let c = self.display_columns();
         TraceData {
@@ -65,7 +84,7 @@ impl StoredTrace {
             mag_db: c.mag_db,
             phase_deg: c.phase_deg,
             coherence: c.coherence,
-            sweep: self.sweep.clone(),
+            sweep: self.display_sweep(),
         }
     }
 }

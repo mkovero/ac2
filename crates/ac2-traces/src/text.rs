@@ -3,7 +3,7 @@
 //! # ac2 CSV
 //!
 //! ```text
-//! # ac2 trace export v1
+//! # ac2 trace export v2
 //! # name: Main L pre EQ
 //! # kind: transfer
 //! # source: captured from "main-l" (measurement 1), session epoch 3, sample 480000
@@ -14,15 +14,29 @@
 //! 19.99700,-3.25,45.5,0.98
 //! ```
 //!
-//! Columns are as measured: offset, polarity, nudge and smoothing are display edits, listed
-//! in the header but not applied. `phase_deg` / `coherence` are present only when the trace has
-//! them. A gap is `nan`. Values are written in their shortest exact form, so an export
-//! re-imports bit-for-bit onto the grid named in the header.
+//! Columns are as measured: offset, polarity, nudge, smoothing and a mic curve applied after
+//! capture are display edits, listed in the header but not applied. `phase_deg` /
+//! `coherence` are present only when the trace has them. A gap is `nan`. Values are written
+//! in their shortest exact form, so an export re-imports bit-for-bit onto the grid named in
+//! the header. The import keeps the name, kind and `delay_ms` (the delay the phase is
+//! referred to); the other display edits start fresh.
 //!
 //! A sweep trace adds `h2_db,h2_floor_db,…,thd_db,thd_floor_db` after `phase_deg`: each
 //! harmonic order's level and noise floor in dB re the fundamental at the row's (fundamental)
-//! frequency, then the total. Imported as a trace, a sweep export is its transfer function;
-//! a session keeps the distortion with the trace ([`crate::session`]).
+//! frequency, then the total. Its analysis facts are one JSON header line
+//! (`# sweep_info: {…}`, [`SweepInfo`]), its decimated impulse response a second table after
+//! the frequency rows, announced by `# sweep_ir: {"t0":…,"dt":…,"points":n}`:
+//!
+//! ```text
+//! t_s,linear,etc_db
+//! -0.0021,0.0003,-71.5
+//! ```
+//!
+//! (`t_s` = `t0 + i·dt` re the arrival, written for reading; the import uses `t0`/`dt`).
+//! Such an export re-imports as the sweep trace it was. A version 1 export (written before
+//! the analysis facts were exported) is still read: a sweep among them imports as its
+//! transfer function with the distortion dropped and [`ImportNote::SweepWithoutAnalysis`]
+//! on the trace.
 //!
 //! # Analyzer text
 //!
@@ -41,15 +55,32 @@ use ac2_proto::GridDef;
 use ac2_proto::ImportProblem;
 use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{
-    CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportRole, Polarity,
-    SmoothingFraction, SmoothingMode, TraceKind, TraceSource,
+    CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportNote, ImportRole,
+    MicState, Polarity, SmoothingFraction, SmoothingMode, SweepData, SweepInfo, SweepIr, TraceKind,
+    TraceMicCurve, TraceSource,
 };
+use ac2_proto::units::Seconds;
+use serde::{Deserialize, Serialize};
 
 use crate::columns::{Columns, StoredTrace, frequencies, resample, wrap_deg};
 
 /// First line of an ac2 CSV file of this format version.
-pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v1";
+pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v2";
+/// First line of the previous version, still read: it has no sweep analysis facts and no
+/// impulse response (and nothing else differs).
+const AC2_CSV_MAGIC_V1: &str = "# ac2 trace export v1";
 const AC2_CSV_PREFIX: &str = "# ac2 trace export";
+/// Column header of a sweep export's impulse-response table.
+const IR_HEADER: &str = "t_s,linear,etc_db";
+
+/// The `# sweep_ir:` header line: where the impulse response's points sit in time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IrHeader {
+    t0: Seconds,
+    dt: Seconds,
+    points: u32,
+}
 
 /// A refused import.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,9 +127,14 @@ pub struct Imported {
     pub columns: Columns,
     /// Data rows read.
     pub rows: usize,
-    /// A sweep export's distortion columns (per order, then THD), when the data is on the
-    /// grid named in its header.
-    pub distortion: Option<(Vec<HarmonicCurve>, DistortionCurve)>,
+    /// Delay the phase is referred to (an ac2 CSV's `delay_ms`); `None` for files that do
+    /// not state one.
+    pub delay: Option<Seconds>,
+    /// A sweep export's distortion, impulse response and analysis facts (`kind` is then
+    /// `sweep`).
+    pub sweep: Option<SweepData>,
+    /// What the file held that the import does not keep.
+    pub notes: Vec<ImportNote>,
 }
 
 fn decode(content: &[u8]) -> Result<String, ImportError> {
@@ -497,11 +533,12 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         .iter()
         .find(|(_, l)| !l.trim().is_empty())
         .ok_or_else(|| fail(None, ImportProblem::NoData, "empty file"))?;
-    if first.1.trim() != AC2_CSV_MAGIC {
-        let msg = if first.1.trim().starts_with(AC2_CSV_PREFIX) {
+    let magic = first.1.trim();
+    if magic != AC2_CSV_MAGIC && magic != AC2_CSV_MAGIC_V1 {
+        let msg = if magic.starts_with(AC2_CSV_PREFIX) {
             format!(
-                "{:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?}",
-                first.1.trim()
+                "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?} and \
+                 {AC2_CSV_MAGIC_V1:?}"
             )
         } else {
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
@@ -511,21 +548,39 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     let mut name = None;
     let mut grid = None;
     let mut kind = TraceKind::Transfer;
+    let mut delay = None;
+    let mut info: Option<SweepInfo> = None;
+    let mut ir_head: Option<(usize, IrHeader)> = None;
+    let mut mic_curve = false;
     let mut header = None;
+    let bad = |no: usize, what: &str, e: &dyn std::fmt::Display| {
+        fail(Some(no), ImportProblem::BadHeader, format!("{what}: {e}"))
+    };
     for &(no, l) in lines {
         let l = l.trim();
         if let Some(m) = l.strip_prefix("# ") {
             if let Some(v) = m.strip_prefix("name: ") {
                 name = Some(v.to_owned());
             } else if let Some(v) = m.strip_prefix("grid: ") {
-                grid =
-                    Some(serde_json::from_str::<GridDef>(v).map_err(|e| {
-                        fail(Some(no), ImportProblem::BadHeader, format!("grid: {e}"))
-                    })?);
+                grid = Some(serde_json::from_str::<GridDef>(v).map_err(|e| bad(no, "grid", &e))?);
             } else if let Some(v) = m.strip_prefix("kind: ") {
                 kind = kind_from_header(v).ok_or_else(|| {
                     fail(Some(no), ImportProblem::BadHeader, format!("kind {v:?}"))
                 })?;
+            } else if let Some(v) = m.strip_prefix("delay_ms: ") {
+                let ms = number(v)
+                    .filter(|d| d.is_finite())
+                    .ok_or_else(|| bad(no, "delay_ms", &format!("{v:?} is not a number")))?;
+                delay = Some(Seconds(ms / 1000.0));
+            } else if let Some(v) = m.strip_prefix("sweep_info: ") {
+                info = Some(serde_json::from_str(v).map_err(|e| bad(no, "sweep_info", &e))?);
+            } else if let Some(v) = m.strip_prefix("sweep_ir: ") {
+                ir_head = Some((
+                    no,
+                    serde_json::from_str(v).map_err(|e| bad(no, "sweep_ir", &e))?,
+                ));
+            } else if m.starts_with("mic_curve: ") {
+                mic_curve = true;
             }
         } else if !l.is_empty() && header.is_none() {
             header = Some((no, split(l, Delim::Comma)));
@@ -565,7 +620,16 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
             ));
         }
     };
-    let body: Vec<(usize, &str)> = lines.iter().copied().filter(|(n, _)| *n > hno).collect();
+    // The impulse-response table, when there is one, follows the frequency rows.
+    let ir_at = lines
+        .iter()
+        .find(|(n, l)| *n > hno && l.trim() == IR_HEADER)
+        .map(|(n, _)| *n);
+    let body: Vec<(usize, &str)> = lines
+        .iter()
+        .copied()
+        .filter(|(n, _)| *n > hno && ir_at.is_none_or(|i| *n < i))
+        .collect();
     let mut t = table(&body, Some(Delim::Comma))?;
     if t.rows[0].1.len() != all.len() {
         return Err(fail(
@@ -593,17 +657,120 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
             .collect();
         (harmonics, curve(base + 2 * orders.len()))
     });
+    let ir = match (ir_head, ir_at) {
+        (Some((_, h)), Some(at)) => Some(ir_table(lines, at, h)?),
+        (Some((no, _)), None) => {
+            return Err(fail(
+                Some(no),
+                ImportProblem::NoData,
+                format!("sweep_ir announced but no {IR_HEADER:?} table follows"),
+            ));
+        }
+        (None, Some(at)) => {
+            return Err(fail(
+                Some(at),
+                ImportProblem::BadHeader,
+                "an impulse-response table without its sweep_ir line",
+            ));
+        }
+        (None, None) => None,
+    };
     let known = grid.clone();
     let (grid, columns) = on_import_grid(raw, grid)?;
+    let mut notes = Vec::new();
+    if mic_curve {
+        notes.push(ImportNote::MicCurveNotApplied);
+    }
+    let sweep = if kind == TraceKind::Sweep {
+        match (distortion, info, ir) {
+            // Distortion is kept only on the grid it was written on (it is not resampled).
+            _ if known.as_ref() != Some(&grid) => {
+                notes.push(ImportNote::SweepOffGrid);
+                None
+            }
+            (Some((harmonics, thd)), Some(info), Some(ir)) => Some(SweepData {
+                harmonics,
+                thd,
+                ir,
+                info,
+            }),
+            _ => {
+                notes.push(ImportNote::SweepWithoutAnalysis);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if kind == TraceKind::Sweep && sweep.is_none() {
+        kind = TraceKind::Transfer;
+    }
     Ok(Imported {
         name,
         format: ImportFormat::Ac2Csv,
         kind,
-        // Distortion is kept only on the grid it was written on (it is not resampled).
-        distortion: distortion.filter(|_| known.as_ref() == Some(&grid)),
         grid,
         columns,
         rows,
+        delay,
+        sweep,
+        notes,
+    })
+}
+
+/// The impulse-response table whose column header is line `at` (`t_s,linear,etc_db`).
+/// Exactly `h.points` rows; `inf` is accepted here, as a dB of an all-zero stretch.
+fn ir_table(lines: &[(usize, &str)], at: usize, h: IrHeader) -> Result<SweepIr, ImportError> {
+    let mut linear = Vec::with_capacity(h.points as usize);
+    let mut etc_db = Vec::with_capacity(h.points as usize);
+    for &(no, l) in lines.iter().filter(|(n, _)| *n > at) {
+        let l = l.trim();
+        if l.is_empty() || is_comment(l) {
+            continue;
+        }
+        let f: Vec<&str> = l.split(',').map(str::trim).collect();
+        if f.len() != 3 {
+            return Err(fail(
+                Some(no),
+                ImportProblem::ColumnCount,
+                format!("{} columns, the impulse response has 3", f.len()),
+            ));
+        }
+        let v = |s: &str| {
+            s.parse::<f32>().map_err(|_| {
+                fail(
+                    Some(no),
+                    ImportProblem::BadNumber,
+                    format!("{s:?} is not a number"),
+                )
+            })
+        };
+        linear.push(v(f[1])?);
+        etc_db.push(v(f[2])?);
+        if linear.len() > MAX_N as usize {
+            return Err(fail(
+                Some(no),
+                ImportProblem::TooManyRows,
+                format!("more than {MAX_N} impulse-response rows"),
+            ));
+        }
+    }
+    if linear.len() != h.points as usize {
+        return Err(fail(
+            Some(at),
+            ImportProblem::NoData,
+            format!(
+                "{} impulse-response rows, sweep_ir announces {}",
+                linear.len(),
+                h.points
+            ),
+        ));
+    }
+    Ok(SweepIr {
+        t0: h.t0,
+        dt: h.dt,
+        linear,
+        etc_db,
     })
 }
 
@@ -638,12 +805,15 @@ fn import_text(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         grid,
         columns,
         rows,
-        distortion: None,
+        delay: None,
+        sweep: None,
+        notes: Vec::new(),
     })
 }
 
-/// Parses an imported file. A target keeps the magnitude only; a sweep export is its
-/// transfer function (its distortion is in [`Imported::distortion`]).
+/// Parses an imported file. A target keeps the magnitude only; a sweep export with its
+/// analysis facts and impulse response is a sweep again, without them its transfer
+/// function ([`Imported::notes`] says why).
 pub fn import(
     content: &[u8],
     format: ImportFormat,
@@ -664,12 +834,15 @@ pub fn import(
         ImportFormat::Auto => import_text(&lines)?,
     };
     if role == ImportRole::Target {
+        // A target is a specified magnitude: nothing measured comes with it.
         imported.kind = TraceKind::Target;
         imported.columns.phase_deg = None;
         imported.columns.coherence = None;
-    } else if matches!(imported.kind, TraceKind::Target | TraceKind::Sweep) {
-        // A target exported and re-imported as a trace is a magnitude-only transfer curve;
-        // a sweep without its impulse response is its fundamental's transfer function.
+        imported.sweep = None;
+        imported.delay = None;
+        imported.notes.clear();
+    } else if imported.kind == TraceKind::Target {
+        // A target exported and re-imported as a trace is a magnitude-only transfer curve.
         imported.kind = TraceKind::Transfer;
     }
     Ok(imported)
@@ -706,8 +879,16 @@ fn source_text(s: &TraceSource) -> String {
             "captured from {meas_name:?} (measurement {meas}), session epoch {}, sample {}",
             epoch.0, at_sample.0
         ),
-        TraceSource::Imported { file_name, format } => {
-            format!("imported from {file_name:?} ({format:?})")
+        TraceSource::Imported {
+            file_name,
+            format,
+            notes,
+        } => {
+            if notes.is_empty() {
+                format!("imported from {file_name:?} ({format:?})")
+            } else {
+                format!("imported from {file_name:?} ({format:?}), notes {notes:?}")
+            }
         }
         TraceSource::Average {
             traces,
@@ -816,26 +997,39 @@ pub fn export_csv(t: &StoredTrace) -> String {
             ),
         },
     );
-    line(
-        "mic",
-        match &m.mic {
-            None => "none".into(),
-            Some(mic) => format!(
-                "{} (curve: {})",
-                mic.name,
-                mic.curve.as_deref().unwrap_or("none")
-            ),
-        },
-    );
+    line("mic", mic_text(m.mic.as_ref(), m.mic_curve.as_deref()));
+    if let Some(mc) = &m.mic_curve {
+        line(
+            "mic_curve",
+            serde_json::to_string(mc).unwrap_or_else(|_| "null".into()),
+        );
+    }
     line("created_ns", m.created_at.0.to_string());
     line(
         "note",
-        "columns are as measured; offset, polarity and nudge are display edits".into(),
+        "columns are as measured; offset, polarity, nudge, smoothing and a mic curve applied \
+         after capture are display edits"
+            .into(),
     );
     line(
         "grid",
         serde_json::to_string(&t.grid).unwrap_or_else(|_| "null".into()),
     );
+    if let Some(sw) = &t.sweep {
+        line(
+            "sweep_info",
+            serde_json::to_string(&sw.info).unwrap_or_else(|_| "null".into()),
+        );
+        let h = IrHeader {
+            t0: sw.ir.t0,
+            dt: sw.ir.dt,
+            points: u32::try_from(sw.ir.linear.len().min(sw.ir.etc_db.len())).unwrap_or(u32::MAX),
+        };
+        line(
+            "sweep_ir",
+            serde_json::to_string(&h).unwrap_or_else(|_| "null".into()),
+        );
+    }
     let mut out = format!("{AC2_CSV_MAGIC}\n{s}");
     let c = &t.columns;
     out.push_str("freq_hz,mag_db");
@@ -881,7 +1075,42 @@ pub fn export_csv(t: &StoredTrace) -> String {
         }
         out.push('\n');
     }
+    if let Some(sw) = &t.sweep {
+        out.push_str(
+            "# impulse response: time re the arrival (s), signed extreme re the reference, \
+             envelope (dB)\n",
+        );
+        out.push_str(IR_HEADER);
+        out.push('\n');
+        for (i, (l, e)) in sw.ir.linear.iter().zip(&sw.ir.etc_db).enumerate() {
+            let at = sw.ir.t0.0 + i as f64 * sw.ir.dt.0;
+            let _ = writeln!(out, "{at},{},{}", num32(*l), num32(*e));
+        }
+    }
     out
+}
+
+/// The `# mic:` header: the mic at capture with the curve its columns carry, or the curve
+/// applied afterwards as a display edit.
+fn mic_text(mic: Option<&MicState>, applied: Option<&TraceMicCurve>) -> String {
+    match (mic, applied) {
+        (_, Some(a)) => {
+            let captured = match mic {
+                Some(m) if m.name != a.mic => format!("; captured with mic {}", m.name),
+                _ => String::new(),
+            };
+            format!(
+                "{} (curve: {}, applied after capture as a display edit, not in the columns; \
+                 0 dB at {} Hz; file {:?}, hash {}{captured})",
+                a.mic, a.curve.name, a.f_norm.0, a.curve.file_name, a.curve.content_hash
+            )
+        }
+        (None, None) => "none".into(),
+        (Some(m), None) => match &m.curve {
+            Some(c) => format!("{} (curve: {c}, in the columns)", m.name),
+            None => format!("{} (curve: none)", m.name),
+        },
+    }
 }
 
 #[cfg(test)]

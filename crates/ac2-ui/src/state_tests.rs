@@ -970,8 +970,47 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         depth: Some(DepthPolicy::EqualConfidence),
         cal: CalState::Uncalibrated,
         mic: None,
+        mic_curve: None,
         created_at: WallNs(0),
     }
+}
+
+#[test]
+fn mic_curve_goes_on_the_selected_trace_from_the_palette() {
+    let mut t = T::new();
+    let mut a = stored(10, Some(3), 2);
+    a.mic = Some(MicState {
+        name: "MM1 34804".into(),
+        curve: None,
+    });
+    t.conn(with_traces(vec![a]));
+    // Nothing selected: refused with the way to select.
+    t.st.update(Msg::Command(CommandId::TraceMicCurve), &t.keys);
+    assert!(!matches!(&t.st.overlay, Overlay::Prompt(_)));
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    // Prefilled with the mic the trace was captured with.
+    t.st.update(Msg::Command(CommandId::TraceMicCurve), &t.keys);
+    assert!(matches!(
+        &t.st.overlay,
+        Overlay::Prompt(p) if p.kind == PromptKind::TraceMicCurve(TraceId(10))
+            && p.text == "MM1 34804"
+    ));
+    let call = |r: &[Request]| {
+        r.iter().find_map(|r| match r {
+            Request::Call {
+                cmd: Command::TraceMicCurve { trace, mic },
+                ..
+            } => Some((*trace, mic.clone())),
+            _ => None,
+        })
+    };
+    let r = t.key("Enter");
+    assert_eq!(call(&r), Some((TraceId(10), Some("MM1 34804".into()))));
+    let r = prompt_text(&mut t, CommandId::TraceMicCurve, "none");
+    assert_eq!(call(&r), Some((TraceId(10), None)));
+    let r = prompt_text(&mut t, CommandId::TraceMicCurve, " ");
+    assert!(call(&r).is_none());
+    assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
 }
 
 fn with_traces(traces: Vec<TraceMeta>) -> ConnEvent {

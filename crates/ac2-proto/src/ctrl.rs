@@ -303,6 +303,17 @@ pub enum Command {
         /// File content.
         content: Blob,
     },
+    /// Apply a mic curve from the calibration store to a stored trace, or remove the one
+    /// applied (`mic: None`). A display edit: the stored columns stay as measured
+    /// ([`TraceMeta::mic_curve`]). Refused for a trace whose columns already carry a curve
+    /// (captured with one) and for targets.
+    #[serde(rename = "trace.mic_curve")]
+    TraceMicCurve {
+        /// Trace.
+        trace: TraceId,
+        /// Mic name whose curve applies (as the calibration store keys it); `None` removes.
+        mic: Option<String>,
+    },
     /// Export a trace.
     #[serde(rename = "trace.export")]
     TraceExport {
@@ -450,6 +461,7 @@ impl Command {
             Self::TraceAverage { .. } => "trace.average",
             Self::TraceMath { .. } => "trace.math",
             Self::TraceImport { .. } => "trace.import",
+            Self::TraceMicCurve { .. } => "trace.mic_curve",
             Self::TraceExport { .. } => "trace.export",
             Self::CalSpl { .. } => "cal.spl",
             Self::CalMicCurve { .. } => "cal.mic_curve",

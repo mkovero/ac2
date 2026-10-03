@@ -196,6 +196,10 @@ curve.
   To go back to the live measurement press **Esc** (it also stops the stimulus, as always;
   with a dialog open the first Esc only closes it), step past the last slot with **V**,
   click the slot again, or select a measurement (**N**, **Alt+1 … Alt+4**, a click).
+- From the **command line**: `ac2 trace smooth <trace> 1/12` (also `1/3` … `1/48`, or just
+  `12`; `none` turns it off). A transfer or sweep trace keeps the mode it had — magnitude
+  and phase for one that was not smoothed — unless `--phase` (magnitude and phase) or
+  `--magnitude-only` says otherwise. Exports and `trace show --data` then carry the setting.
 
 Smoothing never changes stored data. A capture keeps the unsmoothed curve and starts with
 the smoothing its measurement had, so a trace can be re-smoothed at any time; averages and
@@ -249,6 +253,35 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **Z** loads a target curve; the command palette imports CSV and other analyzers' text
   exports. `ac2 trace export <name> --csv out.csv` exports.
 
+### Export and import
+
+`ac2 trace export <trace> --csv out.csv` (`-` for stdout) writes the ac2 CSV: a `#` header
+with every metadata field, then one row per column. The columns are always **as measured**:
+offset, polarity, nudge, smoothing and a mic curve put on afterwards are listed in the header
+but not applied, so an export re-imports exactly. `ac2 trace import out.csv` brings it back
+with its name, kind and **delay** (the delay the phase is referred to, `# delay_ms:`); the
+other display settings start fresh. A **sweep** export also holds the sweep's analysis facts
+and its impulse response, and imports as a sweep again — the Sweep / distortion pane and the
+IR view draw it as they drew the original. A sweep exported by an older ac2 (no
+`# sweep_info:` line) imports as its transfer function with the delay; the distortion is
+dropped and the import says why (`note:` in the CLI output, and in `ac2 trace show`).
+
+### Mic curve on a stored trace
+
+A trace captured before the mic was calibrated — or with no mic name, or with the input's
+mic curve switched off — can be corrected afterwards: `ac2 trace mic <trace> "MM1 34804"`
+applies the curve the calibration store holds for that mic (imported with `ac2 cal
+mic-curve`), and `ac2 trace mic <trace> none` takes it off again. In the app: select the
+trace's slot, then **Mic curve on the selected trace…** in the palette (`Ctrl+K`), prefilled
+with the trace's mic. Like smoothing it is a display setting: the stored curve stays as
+measured, the correction (0 dB at the calibrator frequency, else 1 kHz) is applied when the
+trace is shown, and `ac2 trace show` reads `mic  MM1 34804 (curve MM1-34804 applied after
+capture, 0 dB at 1000 Hz)`. The curve's points are kept with the trace, so deleting or
+replacing the curve in the store later does not change the trace. A sweep's distortion is
+corrected too (each harmonic is picked up at its own frequency). A trace captured **with**
+the curve already applied (`mic … (curve … in the columns)`) refuses a second one — it would
+correct twice. Averages and A − B combine the corrected curves.
+
 ## Sweep measurement: response and harmonic distortion
 
 A sweep measures a speaker's response and its **harmonic distortion** (H2 … H5 and THD vs
@@ -288,7 +321,9 @@ response. Design and accuracy: `docs/design/sweep-distortion.md`.
   as the sweep has played (or failed); any client arms again for the next one. It then prints THD at 100 Hz, 1 kHz and
   10 kHz and each order's highest point; `--json` gives the same as JSON lines.
   `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
-  floor, THD).
+  floor, THD), the analysis facts and the impulse response; `ac2 trace import` of that file
+  restores the sweep. The sweep's columns are uncorrected even when its mic has a curve:
+  `ac2 trace mic <sweep> <mic>` applies it.
 - A distortion value is only shown where it is at least 6 dB above the noise in its window;
   elsewhere it reads `< −72.0 dB` (`< 0.0251 %`: the floor). Lower the floor with repeats or
   a longer sweep, not with more level than the speaker should take.
@@ -344,7 +379,8 @@ another input, or plugging in another mic, is noticed:
   sensitivity.
 - **Mic curve**: `ac2 cal mic-curve --input 3 <file.frd>` imports the mic's magnitude
   response, which is then corrected on that input (switchable per measurement with the mic
-  curve command).
+  curve command). Traces captured before can be corrected afterwards with `ac2 trace mic`
+  (*Traces and slots*).
 - A calibration from another mic or input is shown as such; otherwise its age is shown.
   `ac2 cal list` lists everything.
 
@@ -520,6 +556,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Calibration: delete sensitivity and mic curve (input=mic)… | `cal_delete` |
 | Calibration: delete sensitivity only (input=mic)… | `cal_delete_sensitivity` |
 | Calibration: delete mic curve only (input=mic)… | `cal_delete_curve` |
+| Mic curve on the selected trace (mic name; none removes)… | `trace_mic_curve` |
 | Delay finder: auto band (full → mid → sub) | `finder_auto` |
 | Delay finder: full band (2–16 kHz) | `finder_full` |
 | Delay finder: mid band (300 Hz – 3 kHz) | `finder_mid` |

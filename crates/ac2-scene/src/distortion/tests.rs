@@ -63,6 +63,7 @@ fn data() -> TraceData {
             depth: None,
             cal: CalState::Uncalibrated,
             mic: None,
+            mic_curve: None,
             created_at: WallNs(0),
         },
         mag_db: vec![-6.0; n],

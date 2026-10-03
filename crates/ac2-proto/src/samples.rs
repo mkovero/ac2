@@ -320,6 +320,10 @@ pub fn commands() -> Vec<Command> {
             output: 0,
             level: Some(Dbfs(-30.0)),
         },
+        Command::TraceMicCurve {
+            trace: TraceId(8),
+            mic: Some("M30 #1234".into()),
+        },
     ]
 }
 
@@ -450,7 +454,31 @@ fn trace_meta() -> TraceMeta {
             name: "M30 #1234".into(),
             curve: Some("M30-1234".into()),
         }),
+        mic_curve: None,
         created_at: WallNs(1_790_000_000_000_000_000),
+    }
+}
+
+/// An imported trace with a mic curve applied afterwards.
+fn imported_trace_meta() -> TraceMeta {
+    TraceMeta {
+        id: TraceId(8),
+        kind: TraceKind::Transfer,
+        source: TraceSource::Imported {
+            file_name: "sweep1.csv".into(),
+            format: ImportFormat::Ac2Csv,
+            notes: vec![ImportNote::SweepWithoutAnalysis],
+        },
+        delay: Seconds(0.003_25),
+        depth: None,
+        cal: CalState::Uncalibrated,
+        mic: None,
+        mic_curve: Some(Box::new(TraceMicCurve {
+            mic: "M30 #1234".into(),
+            curve: mic_curve_ref(),
+            f_norm: Hz(1000.0),
+        })),
+        ..trace_meta()
     }
 }
 
@@ -567,15 +595,19 @@ fn cal_entry() -> CalEntry {
             measured: Dbfs(-26.5),
             calibrated_at: WallNs(1_789_000_000_000_000_000),
         }),
-        mic_curve: Some(MicCurveRef {
-            name: "M30-1234".into(),
-            file_name: "M30-1234.frd".into(),
-            content_hash: "af63bd4c8601b7df".into(),
-            points: 2,
-            f_lo: Hz(20.0),
-            f_hi: Hz(20_000.0),
-            imported_at: WallNs(1_788_000_000_000_000_000),
-        }),
+        mic_curve: Some(mic_curve_ref()),
+    }
+}
+
+fn mic_curve_ref() -> MicCurveRef {
+    MicCurveRef {
+        name: "M30-1234".into(),
+        file_name: "M30-1234.frd".into(),
+        content_hash: "af63bd4c8601b7df".into(),
+        points: 2,
+        f_lo: Hz(20.0),
+        f_hi: Hz(20_000.0),
+        imported_at: WallNs(1_788_000_000_000_000_000),
     }
 }
 
@@ -781,7 +813,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::DelayFinding(accepted_finding())),
         Ok(ReplyBody::DelayFinding(refused_finding())),
         Ok(ReplyBody::Trace(trace_meta())),
-        Ok(ReplyBody::Traces(vec![trace_meta()])),
+        Ok(ReplyBody::Traces(vec![trace_meta(), imported_trace_meta()])),
         Ok(ReplyBody::TraceData(TraceData {
             meta: trace_meta(),
             mag_db: vec![0.0, -3.0, f32::NAN],

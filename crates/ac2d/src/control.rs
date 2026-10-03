@@ -977,6 +977,7 @@ impl Control {
                 content,
             } => self.trace_import(file_name, format, role, &content.0),
             Command::TraceExport { trace, format } => self.trace_export(trace, format),
+            Command::TraceMicCurve { trace, mic } => self.trace_mic_curve(trace, mic),
 
             Command::CalSpl {
                 input,

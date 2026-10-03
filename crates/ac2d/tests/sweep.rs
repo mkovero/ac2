@@ -11,10 +11,10 @@ use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    EssSpec, GeneratorDesired, GeneratorSettings, Signal, SweepFailure, SweepInputs, SweepRequest,
-    SweepRun, SweepStatus, TraceKind, TraceSource,
+    EssSpec, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, Signal, SweepFailure,
+    SweepInputs, SweepRequest, SweepRun, SweepStatus, TraceKind, TraceSource,
 };
-use ac2_proto::units::{Dbfs, Hz, LeaseToken, Seconds, TraceId};
+use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, Seconds, TraceId};
 use ac2_proto::{Command, ErrorCode, ReplyBody};
 use ac2d::{Daemon, FAKE_RIG_DISTORTION};
 use common::*;
@@ -251,6 +251,27 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         &csv[..600]
     );
     assert_eq!(trace, TraceId(1));
+    // Re-imported, the export is the same sweep again: the distortion pane draws it, the
+    // delay readout reads the arrival.
+    let back = match c.ok(Command::TraceImport {
+        file_name: "sweep.csv".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Trace,
+        content: Blob(csv.into_bytes()),
+    }) {
+        ReplyBody::Trace(t) => t,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(back.kind, TraceKind::Sweep);
+    assert!((back.delay.0 - data.meta.delay.0).abs() < 1e-12);
+    assert!(matches!(&back.source, TraceSource::Imported { notes, .. } if notes.is_empty()));
+    let again = match c.ok(Command::TraceGet { trace: back.id }) {
+        ReplyBody::TraceData(t) => t,
+        other => panic!("{other:?}"),
+    };
+    let s2 = again.sweep.expect("sweep data after import");
+    assert_eq!((s2.ir, s2.info), (s.ir, s.info));
+    assert_eq!(s2.harmonics.len(), s.harmonics.len());
 }
 
 #[test]

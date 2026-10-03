@@ -3,15 +3,6 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
-## From the first sweep run on pupu (2026-10-03)
-
-- **A sweep CSV re-import cannot bring a sweep back.** `trace import` of a sweep export keeps
-  only its transfer function (and delay 0), because `SweepData` needs the IR and analysis info
-  that the CSV lacks (the parsed distortion in `Imported::distortion` is dropped). Options:
-  export the IR + info so a sweep CSV round-trips, or make the sweep pane draw a sweep without
-  its IR. (Losing sweeps on a daemon restart, e.g. a `--max-level` change, is addressed: the
-  daemon autosaves and restores measurements and traces, sweep data included.)
-
 ## Flaky tests (seen on CI, passed on rerun)
 
 - Pink-noise level check on Linux and a spectrum-smoothing check on Windows failed once each
@@ -29,15 +20,24 @@ the commit when it lands.
 ## From the first rig session on pupu (2026-10-03)
 
 Open:
-- **Mic curve on stored traces.** Apply (and remove) a mic correction curve to an already
-  captured trace, so captures taken before calibration can be corrected afterwards; recorded in
-  the trace metadata like smoothing. Today ac2 corrects only live measurement inputs.
-- **Set trace smoothing from the CLI** (`ac2 trace smooth <t> 1/12`, or `trace update
-  --smoothing`), so smoothed pictures and exports don't need the keyboard.
 - **"No audio session" hint covers stored traces** in the transfer pane; it should yield (or move
   to the banner strip) when the pane has data to show.
 
 ## Done
+
+Trace features (trace-mic-sweep-csv branch, protocol 7, session format 5):
+- **Mic curve on stored traces**: `trace.mic_curve` / `ac2 trace mic <t> <mic|none>` / palette
+  **Mic curve on the selected trace…** applies the store's curve for a mic to a captured trace
+  as a display edit (columns as measured, points kept with the trace, exports name it); a
+  capture that has the curve in its columns refuses a second (`q7-calibration.md` §9). Sweep
+  traces no longer claim the input's curve in `mic.curve` (their analysis never applied it).
+- **Trace smoothing from the CLI**: `ac2 trace smooth <t> 1/12 | none [--phase |
+  --magnitude-only]`.
+- **A sweep CSV re-import brings the sweep back**: the export (v2) carries `# sweep_info:` and
+  the decimated IR as a second table; `trace import` restores a sweep trace the distortion pane
+  draws. Imports keep the export's `delay_ms` (all kinds; it was 0.00 ms). A v1 sweep export
+  imports as its transfer function with a note (`sweep_without_analysis`). Sessions keep the
+  sweep in its one CSV (no `.sweep.json` sidecar).
 
 - **Top bar: ARMED badge overlapped the session text** ("2ARMED…") at 1290 px. The bar is now
   fitted before it is drawn: lower-priority texts (key help, next-key hint, autosave, the

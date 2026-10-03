@@ -4,12 +4,14 @@
 //!
 //! The daemon owns the trace store and calls into this crate; the client's fake daemon uses
 //! the same code so tests against it see real numbers. Display edits (offset, polarity,
-//! nudge, smoothing) are never baked into stored columns: columns stay as measured, and the
-//! display smoothing is applied only when a trace's data is served ([`smooth`]).
+//! nudge, smoothing, a mic curve applied after capture) are never baked into stored
+//! columns: columns stay as measured, and the display smoothing and mic curve are applied
+//! only when a trace's data is served ([`smooth`], [`mic`]).
 #![forbid(unsafe_code)]
 
 pub mod columns;
 pub mod meta;
+pub mod mic;
 pub mod ops;
 pub mod session;
 pub mod smooth;

@@ -169,7 +169,16 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 let r = c.call(Command::TraceUpdate { trace: t.id, edit }).await?;
                 t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
             }
-            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
+            out.emit(&t, || {
+                let mut s = output::traces(std::slice::from_ref(&t));
+                if let TraceSource::Imported { notes, .. } = &t.source {
+                    for n in notes {
+                        s.push_str("\nnote: ");
+                        s.push_str(ac2_scene::trace::import_note(*n));
+                    }
+                }
+                s
+            })?;
         }
         TraceCmd::Export { trace, csv } => {
             let s = state(&c).await?;
@@ -195,6 +204,39 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 &json!({ "trace": t.id, "file": csv, "bytes": n, "suggested_name": file_name }),
                 || format!("wrote {} ({n} bytes)", csv.display()),
             )?;
+        }
+        TraceCmd::Smooth {
+            trace,
+            fraction,
+            phase,
+            magnitude_only,
+        } => {
+            let s = state(&c).await?;
+            let t = find_trace(&s, trace)?.clone();
+            let mut edit = t.edit.clone();
+            edit.smoothing = fraction.0.map(|fraction| Smoothing {
+                fraction,
+                mode: if *phase {
+                    SmoothingMode::MagnitudePhase
+                } else if *magnitude_only {
+                    SmoothingMode::Magnitude
+                } else {
+                    t.edit
+                        .smoothing
+                        .map_or(SmoothingMode::MagnitudePhase, |s| s.mode)
+                },
+            });
+            let r = c.call(Command::TraceUpdate { trace: t.id, edit }).await?;
+            let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::trace_meta(&t))?;
+        }
+        TraceCmd::Mic { trace, mic } => {
+            let s = state(&c).await?;
+            let id = find_trace(&s, trace)?.id;
+            let mic = (!mic.trim().eq_ignore_ascii_case("none")).then(|| mic.clone());
+            let r = c.call(Command::TraceMicCurve { trace: id, mic }).await?;
+            let t = expect_body!("trace.mic_curve", r, ReplyBody::Trace(t) => t)?;
+            out.emit(&t, || output::trace_meta(&t))?;
         }
     }
     Ok(())

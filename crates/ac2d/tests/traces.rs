@@ -295,7 +295,7 @@ fn capture_average_math_export_import() {
     assert_eq!(file_name, "aligned.csv");
     let csv = String::from_utf8(content.0.clone()).unwrap();
     assert!(
-        csv.starts_with("# ac2 trace export v1\n# name: aligned\n"),
+        csv.starts_with("# ac2 trace export v2\n# name: aligned\n"),
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
@@ -870,7 +870,7 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 4", "\"version\": 7")).unwrap();
+    std::fs::write(&manifest, text.replace("\"version\": 5", "\"version\": 7")).unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -883,7 +883,7 @@ fn session_save_load_round_trip() {
         e.detail,
         Some(ErrorDetail::SessionVersion {
             found: 7,
-            supported: 4
+            supported: 5
         })
     );
     assert_eq!(traces(c).len(), n);
@@ -916,5 +916,147 @@ fn session_save_load_round_trip() {
         ReplyBody::SessionFile(f) => assert_eq!(f.name, "by-path"),
         other => panic!("{other:?}"),
     }
+    r.h.shutdown();
+}
+
+/// A mic curve put on a trace captured without one: the served magnitude is corrected by
+/// the store's curve (0 dB at 1 kHz), the columns stay as measured (export, removal), the
+/// curve survives a session reload; a capture that already has the curve refuses a second.
+#[test]
+fn mic_curve_on_a_stored_trace() {
+    // +6 dB above 8 kHz, flat up to 4 kHz.
+    const CURVE: &str = "* test mic\n20 0\n1000 0\n4000 0\n8000 6\n24000 6\n";
+    let mut r = rig("trace-mic");
+    let c = &mut r.c;
+    let raw = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "before cal".into(),
+        slot: None,
+    }));
+    assert_eq!(raw.mic, None);
+    let raw_data = data(c, raw.id);
+    // No curve for that mic yet.
+    let e = c
+        .call(Command::TraceMicCurve {
+            trace: raw.id,
+            mic: Some("M30".into()),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    c.ok(Command::CalMicCurve {
+        input: 1,
+        mic: "M30".into(),
+        action: MicCurveAction::Import {
+            file_name: "M30.frd".into(),
+            content: Blob(CURVE.as_bytes().to_vec()),
+        },
+    });
+    let t = trace(c.ok(Command::TraceMicCurve {
+        trace: raw.id,
+        mic: Some("M30".into()),
+    }));
+    let mc = t.mic_curve.clone().unwrap();
+    assert_eq!((mc.mic.as_str(), mc.curve.name.as_str()), ("M30", "M30"));
+    assert_eq!(mc.f_norm, Hz(1000.0));
+    let d = data(c, raw.id);
+    for i in 0..480 {
+        let f = grid_freq(i);
+        let want = if f <= 4000.0 {
+            0.0
+        } else if f >= 8000.0 {
+            6.0
+        } else {
+            6.0 * (f / 4000.0).log2()
+        };
+        let (a, b) = (raw_data.mag_db[i], d.mag_db[i]);
+        if a.is_finite() {
+            assert!((f64::from(a - b) - want).abs() < 1e-3, "{f} Hz: {a} → {b}");
+        }
+    }
+    let bits = |v: &Option<Vec<f32>>| {
+        v.as_ref()
+            .map(|v| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
+    };
+    assert_eq!(bits(&d.phase_deg), bits(&raw_data.phase_deg));
+    // The export keeps the measured columns and names the curve.
+    let csv = match c.ok(Command::TraceExport {
+        trace: raw.id,
+        format: ExportFormat::Ac2Csv,
+    }) {
+        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        csv.contains("# mic: M30 (curve: M30, applied after capture as a display edit"),
+        "{}",
+        &csv[..1200]
+    );
+    // A capture taken now has the curve in its columns: no second correction.
+    let with = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "after cal".into(),
+        slot: None,
+    }));
+    assert_eq!(with.mic.as_ref().unwrap().curve.as_deref(), Some("M30"));
+    let e = c
+        .call(Command::TraceMicCurve {
+            trace: with.id,
+            mic: Some("M30".into()),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    assert!(e.msg.contains("twice"), "{}", e.msg);
+    // Saved and loaded: the curve (with its points) comes back.
+    c.ok(Command::FileSave {
+        session: SessionRef::Name { name: "mic".into() },
+    });
+    c.ok(Command::FileLoad {
+        session: SessionRef::Name { name: "mic".into() },
+    });
+    let reloaded = traces(c).into_iter().find(|x| x.id == raw.id).unwrap();
+    assert_eq!(reloaded.mic_curve, t.mic_curve);
+    assert_eq!(
+        bits(&Some(data(c, raw.id).mag_db)),
+        bits(&Some(d.mag_db.clone()))
+    );
+    // Removed: the served data is the measured one again.
+    let off = trace(c.ok(Command::TraceMicCurve {
+        trace: raw.id,
+        mic: None,
+    }));
+    assert!(off.mic_curve.is_none());
+    assert_eq!(
+        bits(&Some(data(c, raw.id).mag_db)),
+        bits(&Some(raw_data.mag_db.clone()))
+    );
+    let e = c
+        .call(Command::TraceMicCurve {
+            trace: raw.id,
+            mic: None,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound);
+    r.h.shutdown();
+}
+
+/// A field sweep export from before the analysis facts were exported: its transfer
+/// function with the delay it states, and a note saying why the distortion is not there.
+#[test]
+fn old_sweep_export_imports_as_transfer_with_its_delay() {
+    let mut r = rig("trace-v1-sweep");
+    let c = &mut r.c;
+    let t = trace(c.ok(Command::TraceImport {
+        file_name: "ac2-v1-sweep1.csv".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Trace,
+        content: Blob(fixture("ac2-v1-sweep1.csv")),
+    }));
+    assert_eq!(t.kind, TraceKind::Transfer);
+    assert!((t.delay.0 * 1000.0 - 3.333_333_333_333_333_5).abs() < 1e-12);
+    assert!(matches!(
+        &t.source,
+        TraceSource::Imported { notes, .. } if notes == &[ImportNote::SweepWithoutAnalysis]
+    ));
+    assert!(data(c, t.id).sweep.is_none());
     r.h.shutdown();
 }

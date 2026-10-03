@@ -216,3 +216,54 @@ it by. The peak readout therefore never carries the curve; this is stated in the
 - `cal.delete`: daemon (part by part, persisted across a restart, refused on an unreadable
   store, `not_found`), client fake, CLI `cal rm`, UI palette prompt; spectrum / RTA caption
   age (`ac2-scene`).
+
+## 9. Mic curve on a stored trace
+
+A trace captured before the mic had a curve (or with no mic name, or the input's curve
+switched off) can be corrected afterwards: `trace.mic_curve {trace, mic}` (CLI
+`ac2 trace mic <trace> <mic|none>`, UI palette **Mic curve on the selected trace…**).
+
+**Choice: a display edit, like smoothing.** The stored columns stay as measured; the
+correction is applied when the trace is served (`trace.get`), after the display smoothing —
+the order the live transfer job applies them in. Reasons: the raw stays recoverable (`none`
+removes the curve exactly, with no rounding left behind), exports state what was done
+without changing the numbers (`# mic: … (curve: …, applied after capture as a display edit,
+not in the columns; 0 dB at … Hz; file …, hash …)` plus a machine-readable `# mic_curve:`
+JSON line), and the same rules hold for every display edit (offset, polarity, nudge,
+smoothing, mic curve: never in the columns). Baking the curve into the columns would have
+needed the curve's points kept anyway to undo it.
+
+- **Which curve.** The §3 rule: the curve follows the mic name — the entry on the trace's
+  calibrated device + input (`cal.key`) when it holds one, else the newest curve imported
+  for that mic on any device or input.
+- **Normalisation** (§3, §5.7): the calibrator frequency of the trace's sensitivity
+  calibration, else of the curve entry's own, else 1 kHz; recorded as `f_norm`.
+- **Recorded** in `TraceMeta.mic_curve` (`TraceMicCurve`: mic name, the `MicCurveRef` —
+  name, file, content hash, points, range, import time — and `f_norm`). The daemon keeps the
+  curve's **points** with the trace (and a session keeps them in its manifest,
+  `mic_curve_points`, session format 5), so deleting or replacing the curve in the store
+  later never changes a stored trace.
+- **Where it applies** (§5): transfer and sweep traces per log-grid column, spectra per
+  bin, RTA bands as the band power average; phase and coherence never. A sweep's
+  distortion is corrected too: order n at fundamental f is the ratio of what the mic picked
+  up at n·f to what it picked up at f, so level and floor move by c(f) − c(n·f); THD is
+  re-summed from the corrected orders (the analysis's power sum). The impulse response is
+  not corrected (a time-domain view; the curve is a magnitude-only display correction).
+- **No double correction.** `TraceMeta.mic.curve` set means the capture's columns carry a
+  curve already (the live job corrected them): `trace.mic_curve` is refused (`refused`,
+  "captured with mic curve … applied: it is in the columns already, a second curve would
+  correct twice"). The two fields are never set together. A sweep's analysis works on the
+  raw recordings, so a sweep trace never names a curve in `mic.curve` (the earlier capture
+  wrongly named the input's curve there) and can always take one afterwards. Targets are
+  refused (`invalid`), locked traces `refused`.
+- **Derived traces.** `trace.average` / `trace.math` combine the corrected columns; the
+  result names the curve in `mic.curve` (its columns carry it now).
+- **Import.** An export's columns are uncorrected, so an import of a trace that had a curve
+  applied comes back without it, with `ImportNote::MicCurveNotApplied` on its source (apply
+  it again with `trace.mic_curve`).
+
+Tests: `ac2-traces` (display correction against the curve at every column, export header,
+session round trip with points, averages of corrected columns, refusals, sweep distortion
+and THD), daemon (`mic_curve_on_a_stored_trace`: apply from the store, served magnitude,
+export, a capture with the curve refused, session reload, removal), CLI (`trace mic`,
+`trace show` wording), UI reducer (palette prompt prefilled with the trace's mic).

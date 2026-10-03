@@ -456,6 +456,7 @@ def requests():
             },
             mutation=False,
         ),
+        req(47, "trace.mic_curve", {"trace": 8, "mic": "M30 #1234"}),
     ]
 
 

@@ -206,6 +206,11 @@ pub fn average(
     if traces.len() < 2 {
         return Err(OpError::TooFewTraces);
     }
+    // A mic curve applied after capture corrects what was measured: combine corrected
+    // columns.
+    let baked: Vec<StoredTrace> = traces.iter().map(|t| crate::mic::bake(t)).collect();
+    let traces: Vec<&StoredTrace> = baked.iter().collect();
+    let traces = traces.as_slice();
     for (i, t) in traces.iter().enumerate() {
         if traces[..i].iter().any(|u| u.meta.id == t.meta.id) {
             return Err(OpError::Duplicate(t.meta.id));
@@ -414,6 +419,8 @@ fn average_tf(
 /// alignment. Transfer and target traces combine with each other; spectra and RTA only
 /// with their own kind on the same grid, and only by magnitude.
 pub fn math(a: &StoredTrace, b: &StoredTrace, op: MathOp) -> Result<Derived, OpError> {
+    // Applied mic curves are part of what each side measured.
+    let (a, b) = (&crate::mic::bake(a), &crate::mic::bake(b));
     let relative = |k: TraceKind| transfer_like(k) || k == TraceKind::Target;
     let (ka, kb) = (a.meta.kind, b.meta.kind);
     if !(relative(ka) && relative(kb)) && ka != kb {

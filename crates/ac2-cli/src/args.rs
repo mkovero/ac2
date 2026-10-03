@@ -813,6 +813,59 @@ pub enum TraceCmd {
         #[arg(long, value_name = "FILE")]
         csv: PathBuf,
     },
+    /// Set a trace's display smoothing (transfer, sweep and spectrum traces): the stored
+    /// columns stay as measured, so it can be changed or removed at any time.
+    Smooth {
+        /// Trace id or name.
+        trace: MeasRef,
+        /// 1/N octave: `1/3`, `1/6`, `1/12`, `1/24`, `1/48` (or just N), or `none`.
+        fraction: TraceSmoothing,
+        /// Smooth the phase too (complex smoothing). Default: the trace's current mode,
+        /// magnitude and phase for an unsmoothed trace.
+        #[arg(long, conflicts_with = "magnitude_only")]
+        phase: bool,
+        /// Smooth the magnitude only and keep the measured phase.
+        #[arg(long)]
+        magnitude_only: bool,
+    },
+    /// Apply the mic curve the calibration store holds for a mic to a stored trace (a
+    /// display edit: the columns stay as measured), or `none` to remove it. Refused for a
+    /// trace captured with a curve already in its columns.
+    Mic {
+        /// Trace id or name.
+        trace: MeasRef,
+        /// Mic name, as calibrated (e.g. "MM1 34804"), or `none`.
+        mic: String,
+    },
+}
+
+/// A trace smoothing argument: `1/N`, `N` or `none` (`off`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceSmoothing(pub Option<ac2_proto::model::SmoothingFraction>);
+
+impl FromStr for TraceSmoothing {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        use ac2_proto::model::SmoothingFraction;
+        let t = s.trim().to_ascii_lowercase();
+        if t == "none" || t == "off" {
+            return Ok(Self(None));
+        }
+        let n = t.strip_prefix("1/").unwrap_or(&t);
+        Ok(Self(Some(match n {
+            "3" => SmoothingFraction::Third,
+            "6" => SmoothingFraction::Sixth,
+            "12" => SmoothingFraction::Twelfth,
+            "24" => SmoothingFraction::TwentyFourth,
+            "48" => SmoothingFraction::FortyEighth,
+            _ => {
+                return Err(format!(
+                    "{s:?}: smoothing is 1/3, 1/6, 1/12, 1/24, 1/48 octave or none"
+                ));
+            }
+        })))
+    }
 }
 
 /// `ir …`.

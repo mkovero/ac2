@@ -166,8 +166,13 @@ records reference and mic on a job thread, analyses there and stores a `sweep` t
 and outcome are the mirrored `sweep` entity. Once the recording is in, the generator is
 disarmed (the lease stays with its holder): a sweep is one shot, and nothing is left armed for
 a stray Enter. Lease expiry, `gen.stop`/`gen.release`, a forced takeover or a closed session
-abort the capture and discard its audio. Sessions (format 4) save
-the curves in the trace's CSV and the IR in a JSON sidecar.
+abort the capture and discard its audio. The ac2 CSV export (v2) holds the whole sweep: the
+curves as columns, the analysis facts (`SweepInfo`) as a `# sweep_info:` JSON header line and
+the decimated IR as a second table (`t_s,linear,etc_db`, announced by `# sweep_ir:`), so
+`trace import` of an export restores the sweep trace with its delay; sessions (format 5) save
+that one CSV per trace. A v1 export (no analysis facts) imports as its transfer function, the
+distortion dropped with a note. The sweep's columns are never mic-corrected (the analysis
+uses the raw recordings); a curve can be applied afterwards (`q7-calibration.md` §9).
 
 ## Running it on a speaker (pupu, Genelec 1083 at −50 dBFS)
 

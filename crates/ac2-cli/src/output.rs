@@ -381,16 +381,14 @@ pub fn trace_meta(t: &TraceMeta) -> String {
             format::db_readout(sensitivity.0)
         ),
     };
-    let mic = t.mic.as_ref().map_or_else(
-        || "—".to_owned(),
-        |m| {
-            format!(
-                "{} (curve {})",
-                m.name,
-                m.curve.as_deref().unwrap_or("none")
-            )
-        },
-    );
+    let mic = ac2_scene::trace::mic_text(t.mic.as_ref(), t.mic_curve.as_deref());
+    let notes: String = match &t.source {
+        TraceSource::Imported { notes, .. } => notes
+            .iter()
+            .map(|n| format!("\n  note        {}", ac2_scene::trace::import_note(*n)))
+            .collect(),
+        _ => String::new(),
+    };
     let reference = match &t.source {
         TraceSource::Average {
             reference: DelayReference::Trace { trace },
@@ -410,7 +408,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         _ => String::new(),
     };
     format!(
-        "trace {} {:?}{}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  nudge       {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns",
+        "trace {} {:?}{}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  nudge       {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
         t.id,
         t.edit.name,
         t.edit

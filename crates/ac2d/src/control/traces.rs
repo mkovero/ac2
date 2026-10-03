@@ -6,16 +6,18 @@
 
 use std::collections::BTreeMap;
 
+use ac2_core::mic_curve::Correction;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathOp,
     MeasKind, MicState, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta,
-    TraceSource,
+    TraceMicCurve, TraceSource,
 };
-use ac2_proto::units::{MeasId, Seconds, TraceId, WallNs};
+use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
 use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::meta;
+use ac2_traces::mic::{self, MicCurveError};
 use ac2_traces::ops::{self, Derived, OpError};
 use ac2_traces::text::{self, ImportError};
 
@@ -28,6 +30,8 @@ pub(crate) struct TraceStore {
     data: BTreeMap<TraceId, (GridDef, Columns)>,
     /// Distortion and IR of sweep traces.
     sweeps: BTreeMap<TraceId, SweepData>,
+    /// Mic curves applied after capture.
+    mic_curves: BTreeMap<TraceId, Correction>,
     next_id: u32,
 }
 
@@ -45,6 +49,7 @@ impl TraceStore {
         grid: GridDef,
         columns: Columns,
         sweep: Option<SweepData>,
+        mic_curve: Option<Correction>,
     ) {
         self.next_id = self.next_id.max(id.0.saturating_add(1));
         self.data.insert(id, (grid, columns));
@@ -56,16 +61,30 @@ impl TraceStore {
                 self.sweeps.remove(&id);
             }
         }
+        self.set_mic_curve(id, mic_curve);
+    }
+
+    pub(crate) fn set_mic_curve(&mut self, id: TraceId, c: Option<Correction>) {
+        match c {
+            Some(c) => {
+                self.mic_curves.insert(id, c);
+            }
+            None => {
+                self.mic_curves.remove(&id);
+            }
+        }
     }
 
     pub(crate) fn remove(&mut self, id: TraceId) {
         self.data.remove(&id);
         self.sweeps.remove(&id);
+        self.mic_curves.remove(&id);
     }
 
     pub(crate) fn clear(&mut self) {
         self.data.clear();
         self.sweeps.clear();
+        self.mic_curves.clear();
     }
 
     pub(crate) fn get(&self, id: TraceId) -> Option<&(GridDef, Columns)> {
@@ -124,6 +143,7 @@ impl Control {
             grid,
             columns,
             sweep: self.traces.sweeps.get(&id).cloned(),
+            mic_curve: self.traces.mic_curves.get(&id).cloned(),
         })
     }
 
@@ -140,7 +160,7 @@ impl Control {
         for other in meta::take_slot(&self.store.state().traces, meta.id, meta.edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
-        self.traces.insert(meta.id, grid, columns, sweep);
+        self.traces.insert(meta.id, grid, columns, sweep, None);
         self.commit(Change::Trace(Patch::Set(meta.clone())));
         ReplyBody::Trace(meta)
     }
@@ -260,6 +280,7 @@ impl Control {
             depth,
             cal,
             mic,
+            mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} captured from measurement {meas}");
@@ -342,6 +363,7 @@ impl Control {
             depth: None,
             cal,
             mic,
+            mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
         Ok(self.add_trace(t, d.grid, d.columns, None))
@@ -354,9 +376,11 @@ impl Control {
         reference: DelayReference,
         name: String,
     ) -> Result<ReplyBody, ProtoError> {
+        // Applied mic curves go into the inputs' columns (and their `mic`), so the result
+        // says which curve its columns carry.
         let inputs = ids
             .iter()
-            .map(|id| self.stored(*id))
+            .map(|id| self.stored(*id).map(|t| mic::bake(&t)))
             .collect::<Result<Vec<_>, _>>()?;
         let refs: Vec<&StoredTrace> = inputs.iter().collect();
         let d = ops::average(&refs, method, reference).map_err(|e| op_err(&e))?;
@@ -409,16 +433,99 @@ impl Control {
             source: TraceSource::Imported {
                 file_name,
                 format: imp.format,
+                notes: imp.notes,
             },
             grid_id: imp.grid.id(),
-            delay: Seconds(0.0),
+            delay: imp.delay.unwrap_or(Seconds(0.0)),
             depth: None,
             cal: CalState::Uncalibrated,
             mic: None,
+            mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
-        Ok(self.add_trace(t, imp.grid, imp.columns, None))
+        Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep))
+    }
+
+    /// `trace.mic_curve`: puts the curve the calibration store holds for `mic` on the
+    /// trace (a display edit), or takes the applied one off (`None`).
+    pub(super) fn trace_mic_curve(
+        &mut self,
+        id: TraceId,
+        mic_name: Option<String>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let mut t = self.trace_meta(id)?.clone();
+        mic::check(&t).map_err(|e| {
+            let code = match e {
+                MicCurveError::Target => ErrorCode::Invalid,
+                MicCurveError::InColumns { .. } | MicCurveError::Locked => ErrorCode::Refused,
+            };
+            perr(code, format!("trace {id}: {e}"))
+        })?;
+        let Some(m) = mic_name else {
+            if t.mic_curve.is_none() {
+                return Err(perr(
+                    ErrorCode::NotFound,
+                    format!("trace {id} has no mic curve applied after capture"),
+                ));
+            }
+            t.mic_curve = None;
+            self.traces.set_mic_curve(id, None);
+            self.commit(Change::Trace(Patch::Set(t.clone())));
+            tracing::info!("trace {id}: mic curve removed");
+            return Ok(ReplyBody::Trace(t));
+        };
+        crate::calstore::check_mic_name(&m)?;
+        let st = self.store.state();
+        // The capture's input, when the trace knows it from its calibration.
+        let at = match &t.cal {
+            CalState::Calibrated { key, .. } => Some((&key.device, key.channel)),
+            CalState::Uncalibrated => None,
+        };
+        let entry = crate::calstore::curve_entry(&st.calibrations, &m, at)
+            .ok_or_else(|| {
+                perr(
+                    ErrorCode::NotFound,
+                    format!(
+                        "no mic curve for mic {m:?} in the calibration store \
+                         (import one with `ac2 cal mic-curve`)"
+                    ),
+                )
+            })?
+            .clone();
+        let (Some(curve_ref), Some(points)) =
+            (entry.mic_curve.clone(), self.cal.curve(&entry.key).cloned())
+        else {
+            return Err(perr(
+                ErrorCode::Internal,
+                format!("the mic curve of {m:?} has no points"),
+            ));
+        };
+        // Normalised where the trace's level calibration was read (the calibrator tone was
+        // read uncorrected, so 0 dB there counts nothing twice), else at the curve entry's
+        // own calibrator frequency, else 1 kHz — the live rule (Q7 §3).
+        let spl_of = |key: &ac2_proto::model::CalKey| {
+            st.calibrations
+                .iter()
+                .find(|e| e.key == *key)
+                .and_then(|e| e.spl)
+        };
+        let f_norm = match &t.cal {
+            CalState::Calibrated { key, .. } => spl_of(key),
+            CalState::Uncalibrated => None,
+        }
+        .or(entry.spl)
+        .map_or(crate::calstore::DEFAULT_F_NORM, |s| s.calibrator_freq.0);
+        t.mic_curve = Some(Box::new(TraceMicCurve {
+            mic: m.clone(),
+            curve: curve_ref,
+            f_norm: Hz(f_norm),
+        }));
+        self.traces
+            .set_mic_curve(id, Some(points.normalised(f_norm)));
+        self.commit(Change::Trace(Patch::Set(t.clone())));
+        tracing::info!("trace {id}: mic curve of {m:?} applied (0 dB at {f_norm} Hz)");
+        Ok(ReplyBody::Trace(t))
     }
 
     pub(super) fn trace_export(
