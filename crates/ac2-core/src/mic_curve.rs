@@ -427,52 +427,75 @@ pub fn dtft(h: &[f64], f: f64, fs: f64) -> Complex64 {
         .sum()
 }
 
-/// Uniformly partitioned overlap-save FIR convolution: partitions of `partition` samples,
-/// FFT size twice that. Output lags input by one partition. Allocates only at
-/// construction.
+/// Overlap-save FIR convolution partitioned in two sizes: the first taps in partitions of
+/// `partition` samples (FFT size twice that), which set the latency, and the rest in
+/// partitions `r` times longer. Output lags input by one short partition. Allocates only
+/// at construction.
+///
+/// Most of the work of a uniformly partitioned convolution is the spectral
+/// multiply-accumulate, one per partition and bin, so it grows with the filter length
+/// over the partition. The tail taps reach an output only `r` short partitions after the
+/// input that feeds them, which leaves time to transform the input in long blocks: with
+/// `r ≈ √(taps / partition)`, a 64-partition correction needs 8 short and 7 long
+/// partitions, about a quarter of the multiply-accumulates, and the output is the same
+/// convolution.
 ///
 /// The convolution runs in f32 with the spectra stored as separate real and imaginary
-/// arrays, so the multiply-accumulate over the partitions — nearly all of the work — runs
-/// on full SIMD lanes, and the partitioned spectra of a 96 kHz correction (64 × 513 bins
-/// × 2 × 4 B ≈ 260 kB, the same again for the delay line) fit a 1 MB L2 cache. The
-/// round-off this leaves is about 10⁻⁷ of the signal's RMS (−130 dB or lower), below the
-/// quantisation floor of a 24-bit converter, so it cannot move a level the meter shows at
-/// 0.1 dB. The output goes back to f64 before the weighting filters, whose poles near
-/// z = 1 need the precision.
+/// arrays, so the multiply-accumulate runs on full SIMD lanes; the spectra a short block
+/// touches (≈ 65 kB for a 96 kHz correction) stay in L1/L2 between blocks. The round-off this leaves is about 10⁻⁷ of the
+/// signal's RMS (−130 dB or lower), below the quantisation floor of a 24-bit converter,
+/// so it cannot move a level the meter shows at 0.1 dB. The output goes back to f64 before
+/// the weighting filters, whose poles near z = 1 need the precision.
 #[derive(Clone)]
 pub struct PartitionedFir {
     b: usize,
-    /// Bins per partition spectrum, `b + 1`.
-    bins: usize,
-    parts: usize,
-    fwd: Arc<dyn RealToComplex<f32>>,
-    inv: Arc<dyn ComplexToReal<f32>>,
-    /// Partition spectra, partition `i` at `i·bins..(i + 1)·bins`, scaled by the inverse
-    /// transform's 1 / 2b.
-    h_re: Vec<f32>,
-    h_im: Vec<f32>,
-    /// Spectra of the newest input blocks, same layout; slot `pos` is the newest.
-    x_re: Vec<f32>,
-    x_im: Vec<f32>,
-    pos: usize,
-    input: Vec<f32>,
+    head: Segment,
+    /// Taps from `head`'s end on, in long partitions; `None` when the head holds them all.
+    tail: Option<Segment>,
+    /// Input history: the newest `2·long` samples, `long` being the tail's partition (or
+    /// `b` without a tail); samples arrive at `long + fill`.
+    hist: Vec<f32>,
     fill: usize,
+    /// Output of the current short block.
     out: Vec<f32>,
-    time: Vec<f32>,
-    spec: Vec<Complex<f32>>,
-    acc_re: Vec<f32>,
-    acc_im: Vec<f32>,
-    scratch_fwd: Vec<Complex<f32>>,
-    scratch_inv: Vec<Complex<f32>>,
+    /// Tail output for the next `long` samples of the convolution.
+    tail_out: Vec<f32>,
 }
 
 impl fmt::Debug for PartitionedFir {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PartitionedFir")
             .field("partition", &self.b)
-            .field("partitions", &self.parts)
+            .field("head", &self.head.parts)
+            .field("tail", &self.tail.as_ref().map(|t| (t.n, t.parts)))
             .finish()
     }
+}
+
+/// Uniformly partitioned overlap-save convolution of one run of taps in partitions of
+/// `n` (FFT size `2n`), fed whole input frames.
+#[derive(Clone)]
+struct Segment {
+    n: usize,
+    /// Bins per spectrum, `n + 1`.
+    bins: usize,
+    parts: usize,
+    fwd: Arc<dyn RealToComplex<f32>>,
+    inv: Arc<dyn ComplexToReal<f32>>,
+    /// Partition spectra, partition `i` at `i·bins..(i + 1)·bins`, scaled by the inverse
+    /// transform's 1 / 2n.
+    h_re: Vec<f32>,
+    h_im: Vec<f32>,
+    /// Spectra of the newest input frames, same layout; slot `pos` is the newest.
+    x_re: Vec<f32>,
+    x_im: Vec<f32>,
+    pos: usize,
+    time: Vec<f32>,
+    spec: Vec<Complex<f32>>,
+    acc_re: Vec<f32>,
+    acc_im: Vec<f32>,
+    scratch_fwd: Vec<Complex<f32>>,
+    scratch_inv: Vec<Complex<f32>>,
 }
 
 /// `acc += x · h` over split complex arrays of equal length.
@@ -493,38 +516,35 @@ fn complex_mac(
     }
 }
 
-impl PartitionedFir {
-    /// Convolution with taps `h` (any non-zero length) in partitions of `partition`
-    /// samples (see [`fir_partition`]).
-    pub fn new(h: &[f64], partition: usize) -> Self {
-        let b = partition.max(1);
-        let n = 2 * b;
-        let bins = b + 1;
-        let mut planner = RealFftPlanner::<f32>::new();
-        let fwd = planner.plan_fft_forward(n);
-        let inv = planner.plan_fft_inverse(n);
-        let parts = h.len().div_ceil(b).max(1);
+impl Segment {
+    /// Taps `h` in partitions of `n`.
+    fn new(h: &[f64], n: usize, planner: &mut RealFftPlanner<f32>) -> Self {
+        let len = 2 * n;
+        let bins = n + 1;
+        let fwd = planner.plan_fft_forward(len);
+        let inv = planner.plan_fft_inverse(len);
+        let parts = h.len().div_ceil(n).max(1);
         let mut scratch_fwd = fwd.make_scratch_vec();
         let mut h_re = vec![0.0; parts * bins];
         let mut h_im = vec![0.0; parts * bins];
         let mut spec = fwd.make_output_vec();
-        let mut t = vec![0.0f32; n];
-        let scale = 1.0 / n as f64;
+        let mut time = vec![0.0f32; len];
+        let scale = 1.0 / len as f64;
         for i in 0..parts {
-            t.fill(0.0);
-            let src = &h[(i * b).min(h.len())..((i + 1) * b).min(h.len())];
-            for (d, &s) in t.iter_mut().zip(src) {
+            time.fill(0.0);
+            let src = &h[(i * n).min(h.len())..((i + 1) * n).min(h.len())];
+            for (d, &s) in time.iter_mut().zip(src) {
                 *d = (s * scale) as f32;
             }
             // Lengths come from the plan; the transform cannot fail.
-            let _ = fwd.process_with_scratch(&mut t, &mut spec, &mut scratch_fwd);
+            let _ = fwd.process_with_scratch(&mut time, &mut spec, &mut scratch_fwd);
             for (k, c) in spec.iter().enumerate() {
                 h_re[i * bins + k] = c.re;
                 h_im[i * bins + k] = c.im;
             }
         }
         Self {
-            b,
+            n,
             bins,
             parts,
             h_re,
@@ -532,10 +552,7 @@ impl PartitionedFir {
             x_re: vec![0.0; parts * bins],
             x_im: vec![0.0; parts * bins],
             pos: 0,
-            input: vec![0.0; n],
-            fill: 0,
-            out: vec![0.0; b],
-            time: t,
+            time,
             spec,
             acc_re: vec![0.0; bins],
             acc_im: vec![0.0; bins],
@@ -546,39 +563,11 @@ impl PartitionedFir {
         }
     }
 
-    /// Output delay relative to the input, samples.
-    pub fn latency(&self) -> usize {
-        self.b
-    }
-
-    /// Filters `x` into `y` (same length): `y[n] = (h ∗ x)[n − latency]`.
-    pub fn process(&mut self, x: &[f64], y: &mut [f64]) {
-        let n = x.len().min(y.len());
-        let mut i = 0;
-        while i < n {
-            let at = self.fill;
-            let k = (self.b - at).min(n - i);
-            for (d, &s) in self.input[self.b + at..self.b + at + k]
-                .iter_mut()
-                .zip(&x[i..i + k])
-            {
-                *d = s as f32;
-            }
-            for (d, &s) in y[i..i + k].iter_mut().zip(&self.out[at..at + k]) {
-                *d = f64::from(s);
-            }
-            self.fill += k;
-            i += k;
-            if self.fill == self.b {
-                self.block();
-                self.fill = 0;
-            }
-        }
-    }
-
-    fn block(&mut self) {
-        let (b, bins, p) = (self.b, self.bins, self.parts);
-        self.time.copy_from_slice(&self.input);
+    /// Takes the newest input frame (`2n` samples, the last `n` new) and returns the
+    /// segment's convolution over the frame's last `n` samples.
+    fn run(&mut self, frame: &[f32]) -> &[f32] {
+        let (n, bins, p) = (self.n, self.bins, self.parts);
+        self.time.copy_from_slice(frame);
         let _ =
             self.fwd
                 .process_with_scratch(&mut self.time, &mut self.spec, &mut self.scratch_fwd);
@@ -610,19 +599,116 @@ impl PartitionedFir {
         let _ =
             self.inv
                 .process_with_scratch(&mut self.spec, &mut self.time, &mut self.scratch_inv);
-        self.out.copy_from_slice(&self.time[b..]);
-        self.input.copy_within(b.., 0);
         self.pos = (self.pos + 1) % p;
+        &self.time[n..]
+    }
+
+    fn reset(&mut self) {
+        self.x_re.fill(0.0);
+        self.x_im.fill(0.0);
+        self.pos = 0;
+    }
+}
+
+impl PartitionedFir {
+    /// Convolution with taps `h` (any non-zero length) with a latency of `partition`
+    /// samples (see [`fir_partition`]).
+    pub fn new(h: &[f64], partition: usize) -> Self {
+        let b = partition.max(1);
+        let parts = h.len().div_ceil(b).max(1);
+        // Short and long partitions in balance: r short ones before the tail, and about
+        // parts / r long ones after.
+        let r = ((parts as f64).sqrt().round() as usize)
+            .next_power_of_two()
+            .max(1);
+        let mut planner = RealFftPlanner::<f32>::new();
+        let (head, tail, long) = if r > 1 && parts > r {
+            let long = r * b;
+            (
+                Segment::new(&h[..long], b, &mut planner),
+                Some(Segment::new(&h[long..], long, &mut planner)),
+                long,
+            )
+        } else {
+            (Segment::new(h, b, &mut planner), None, b)
+        };
+        Self {
+            b,
+            head,
+            tail,
+            hist: vec![0.0; 2 * long],
+            fill: 0,
+            out: vec![0.0; b],
+            tail_out: vec![0.0; long],
+        }
+    }
+
+    /// Output delay relative to the input, samples.
+    pub fn latency(&self) -> usize {
+        self.b
+    }
+
+    /// Filters `x` into `y` (same length): `y[n] = (h ∗ x)[n − latency]`.
+    pub fn process(&mut self, x: &[f64], y: &mut [f64]) {
+        let long = self.tail_out.len();
+        let n = x.len().min(y.len());
+        let mut i = 0;
+        while i < n {
+            let in_block = self.fill % self.b;
+            let k = (self.b - in_block).min(n - i);
+            let at = long + self.fill;
+            for (d, &s) in self.hist[at..at + k].iter_mut().zip(&x[i..i + k]) {
+                *d = s as f32;
+            }
+            for (d, &s) in y[i..i + k]
+                .iter_mut()
+                .zip(&self.out[in_block..in_block + k])
+            {
+                *d = f64::from(s);
+            }
+            self.fill += k;
+            i += k;
+            if self.fill.is_multiple_of(self.b) {
+                self.block();
+            }
+        }
+    }
+
+    /// One short block of input is complete: its convolution output (emitted over the next
+    /// block, hence the latency) is the head's plus the tail's computed earlier.
+    fn block(&mut self) {
+        let (b, long) = (self.b, self.tail_out.len());
+        let end = long + self.fill;
+        let head = self.head.run(&self.hist[end - 2 * b..end]);
+        self.out.copy_from_slice(head);
+        if self.tail.is_some() {
+            // The tail's output for this block was computed when its long block began.
+            let off = self.fill - b;
+            for (o, t) in self.out.iter_mut().zip(&self.tail_out[off..off + b]) {
+                *o += t;
+            }
+        }
+        if self.fill == long {
+            if let Some(tail) = &mut self.tail {
+                // The tail taps start `long` samples in, so the frame that ends now feeds
+                // the convolution over the next `long` samples.
+                self.tail_out.copy_from_slice(tail.run(&self.hist));
+            }
+            self.hist.copy_within(long.., 0);
+            self.fill = 0;
+        }
     }
 
     /// Back to silence.
     pub fn reset(&mut self) {
-        self.x_re.fill(0.0);
-        self.x_im.fill(0.0);
-        self.input.fill(0.0);
+        self.head.reset();
+        if let Some(t) = &mut self.tail {
+            t.reset();
+        }
+        self.hist.fill(0.0);
         self.out.fill(0.0);
+        self.tail_out.fill(0.0);
         self.fill = 0;
-        self.pos = 0;
     }
 }
 

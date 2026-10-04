@@ -173,11 +173,17 @@ roll-off at 30 Hz is held within 0.01 dB from 31.5 Hz up (85 ms left 0.2 dB and 
 0.04 dB at 31.5 Hz); the refgen mic model within 0.006 dB from 31.5 Hz to 16 kHz.
 Accuracy is a test (§8), not a hope.
 
-**Run time.** Uniformly partitioned overlap-save convolution, partition = the power of two
-≥ 5.3 ms (256 samples at 44.1/48 kHz, 512 at 96 kHz, 1024 at 192 kHz; FFT twice that):
-latency one partition, always 64 partitions, i.e. about 64 complex multiply-adds per input
-sample plus two FFTs per partition. No allocation after construction. This runs on the SPL
-job thread, never in the audio callback.
+**Run time.** Overlap-save convolution in two partition sizes: short partitions = the power
+of two ≥ 5.3 ms (256 samples at 44.1/48 kHz, 512 at 96 kHz, 1024 at 192 kHz; FFT twice
+that) set the latency of one short partition; the first 8 short partitions (L/64 · 8 taps)
+run per short block, the remaining taps in 7 partitions 8 times longer, transformed once
+per long block — the tail taps reach the output only after a long block, so this is the
+same convolution with about 15 instead of 64 complex multiply-adds per input sample. f32
+with split real/imaginary spectra (vectorised multiply-add; round-off ≈ −133 dB re the
+signal, below a 24-bit converter's floor); the weighting IIRs after it stay f64. One
+correction and one A/C chain per input feed the meter and the per-second Leq log alike.
+No allocation after construction. This runs on the SPL job thread, never in the audio
+callback.
 
 **Placement** (§5.3 / §5.7): raw → correction → A/C/Z → time weighting / Leq. Minimum
 phase puts the filter's energy at its start, so there is no pre-ringing: the 35 ms Impulse

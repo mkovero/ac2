@@ -244,9 +244,13 @@ fn partitioned_convolution_equals_direct() {
         (257, 256),
         (1000, 64),
         (4096, 512),
+        // Long enough for a tail of long partitions: 2, 8 and 4 of them.
+        (600, 64),
+        (4100, 64),
+        (5000, 64),
     ] {
         let h: Vec<f64> = (0..len).map(|_| rnd()).collect();
-        let x: Vec<f64> = (0..5000).map(|_| rnd()).collect();
+        let x: Vec<f64> = (0..12_000).map(|_| rnd()).collect();
         let mut fir = PartitionedFir::new(&h, part);
         let lat = fir.latency();
         let mut y = vec![0.0; x.len()];
