@@ -339,7 +339,7 @@ commands! {
     Help => "help", "Show / hide key bindings", [Global];
     Palette => "palette", "Command palette", [Global];
     Quit => "quit", "Quit", [Global];
-    Fullscreen => "fullscreen", "Full screen on / off", [Global];
+    Fullscreen => "fullscreen", "Window full screen on / off", [Global];
     KeyHints => "key_hints", "Key hints on / off", [Global];
 
     StimulusArm => "stimulus_arm", "Stimulus: arm (needs a typed level)", [Global];
@@ -360,7 +360,7 @@ commands! {
     FocusDistortion => "focus_distortion", "Focus (and show) the sweep / distortion pane", [Global];
     NextPane => "next_pane", "Focus next pane", [Global];
     PrevPane => "prev_pane", "Focus previous pane", [Global];
-    MaximizePane => "maximize_pane", "Focused pane only / split layout", [Global];
+    MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
     NextMeasurement => "next_measurement", "Select next measurement of the focused pane", [Global];
     PrevMeasurement => "prev_measurement", "Select previous measurement of the focused pane", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
@@ -431,6 +431,12 @@ commands! {
     TraceMicCurve => "trace_mic_curve", "Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)…", [Global];
     SweepNew => "sweep_new", "Sweep measurement: response and harmonic distortion…", [Global];
     LeqWindows => "leq_windows", "Leq windows and limits of the SPL meter…", [Global];
+    SplFast => "spl_fast", "SPL meter: Fast time weighting (125 ms)", [Global];
+    SplSlow => "spl_slow", "SPL meter: Slow time weighting (1 s)", [Global];
+    SplImpulse => "spl_impulse", "SPL meter: Impulse time weighting (35 ms / 1.5 s)", [Global];
+    SplA => "spl_a", "SPL meter: A weighting", [Global];
+    SplC => "spl_c", "SPL meter: C weighting", [Global];
+    SplZ => "spl_z", "SPL meter: Z weighting (flat)", [Global];
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
@@ -480,6 +486,8 @@ commands! {
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
     SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
+    SplTimeWeighting => "spl_time_weighting", "SPL meter: time weighting Fast → Slow → Impulse", [Spl];
+    SplWeighting => "spl_weighting", "SPL meter: frequency weighting A → C → Z", [Spl];
 
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
     SweepIr => "sweep_ir", "Sweep: distortion / impulse response", [Distortion];
@@ -647,6 +655,11 @@ pub fn defaults() -> Vec<Binding> {
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
         // confirmation: it discards show data).
         (C::SplNewLog, S::Spl, sh(K::R)),
+        // The meter's weightings: F for the time weighting (Fast → Slow → Impulse; there is
+        // nothing to freeze in this pane), Z for the frequency weighting (A → C → Z). Letters
+        // only: the same keys on every layout.
+        (C::SplTimeWeighting, S::Spl, k(K::F)),
+        (C::SplWeighting, S::Spl, k(K::Z)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
         (C::IrMode, S::Distortion, k(K::G)),
@@ -733,6 +746,8 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::SplLeqView, "meter/Leq", 90),
+                    hint(C::SplTimeWeighting, "F/S/I", 88),
+                    hint(C::SplWeighting, "A/C/Z", 86),
                     hint(C::SplLeqStyle, "columns/tiles", 70),
                     hint(C::SplLeqHistory, "history", 60),
                     hint(C::LeqWindows, "windows", 80),
@@ -1040,6 +1055,12 @@ mod tests {
             CommandId::PaneMeasurement,
             // Esc also deselects (when no dialog is open); this is its palette entry.
             CommandId::SelectLive,
+            CommandId::SplFast,
+            CommandId::SplSlow,
+            CommandId::SplImpulse,
+            CommandId::SplA,
+            CommandId::SplC,
+            CommandId::SplZ,
             CommandId::SmoothOff,
             CommandId::Smooth48,
             CommandId::Smooth24,
@@ -1112,6 +1133,13 @@ mod tests {
         );
         assert_eq!(m.lookup(Scope::Global, c("/")), None);
         assert_eq!(m.lookup(Scope::Spl, c("X")), None);
+        // The SPL meter's weightings; F freezes elsewhere, Z loads a target in transfer.
+        assert_eq!(
+            m.lookup(Scope::Spl, c("F")),
+            Some(CommandId::SplTimeWeighting)
+        );
+        assert_eq!(m.lookup(Scope::Spl, c("Z")), Some(CommandId::SplWeighting));
+        assert_eq!(m.lookup(Scope::Spectrum, c("F")), Some(CommandId::Freeze));
     }
 
     /// Offsets, the level axis and Delete: modifiers on the stimulus arrows (which stay the

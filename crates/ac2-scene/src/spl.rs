@@ -1,17 +1,18 @@
-//! SPL readout block: big number, unit, metric name, interval statistics and the
-//! calibration state (decisions 7a/7b).
+//! SPL meter: the held time-weighted level as a big centred number, its name and unit, a
+//! live level bar, interval statistics and the calibration state (decisions 7a/7b), and the
+//! display hold that keeps the number readable ([`SplHold`]).
 //!
 //! Metric names follow IEC 61672 notation: `L` + frequency weighting + time weighting
 //! (`LAF` = A-weighted, Fast), `LAeq`, `LCpeak`, `LAFmax`, `LAFmin`.
 
 use ac2_proto::frame::SplFrame;
 use ac2_proto::model::{CalStatus, LevelScale, PeakWeighting, TimeWeighting, Weighting};
-use ac2_proto::units::WallNs;
+use ac2_proto::units::{Rev, WallNs};
 
 use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, anchor, label};
 use crate::format;
-use crate::primitives::{HAlign, Rect, Scene, VAlign, Viewport};
+use crate::primitives::{FillRect, HAlign, Rect, Scene, VAlign, Viewport};
 use crate::theme::Theme;
 use crate::time::{self, ClockOffset, Freshness};
 
@@ -38,6 +39,88 @@ fn pw_letter(p: PeakWeighting) -> &'static str {
     }
 }
 
+/// `LAF`, `LCS`: L + frequency weighting + time weighting (IEC 61672-1).
+pub fn metric_name(w: Weighting, t: TimeWeighting) -> String {
+    format!("L{}{}", w_letter(w), tw_letter(t))
+}
+
+/// How long the meter's number holds one reading, in seconds: twice a second for F and I,
+/// once for S, as hand-held meters update their display. Faster, the last digit of a Fast
+/// level of music changes too often to be read; the time weighting already is the
+/// averaging, so the held number is the time-weighted level at the update, never an
+/// average of displayed levels. I needs no longer hold: its detector holds peaks itself
+/// (1.5 s fall).
+pub fn display_period_s(t: TimeWeighting) -> f64 {
+    match t {
+        TimeWeighting::Fast | TimeWeighting::Impulse => 0.5,
+        TimeWeighting::Slow => 1.0,
+    }
+}
+
+/// The reading an SPL meter's number shows: the frame taken at the last display update.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplHold {
+    pub frame: SplFrame,
+    /// Capture time of the frame's newest sample (daemon clock, ns) the hold counts from:
+    /// the update instants fall on a grid of display periods, so the number updates at its
+    /// rate however the frames arrive.
+    pub at_ns: u64,
+    /// The measurement's configuration the frame was made under.
+    pub rev: Rev,
+}
+
+impl SplHold {
+    /// Takes `next` (captured at `at_ns` under `rev`) when the display period since the
+    /// held reading has passed, or at once when the reading means something else now: a
+    /// new configuration (other weightings), another scale or calibration, the first frame,
+    /// a clock going backwards (another daemon). Returns whether the held reading changed.
+    pub fn update(
+        held: &mut Option<SplHold>,
+        next: &SplFrame,
+        at_ns: u64,
+        rev: Rev,
+        period_s: f64,
+    ) -> bool {
+        let period_ns = (period_s.max(0.0) * 1e9) as u64;
+        let same = |h: &SplHold| {
+            let (a, b) = (&h.frame.meta, &next.meta);
+            h.rev == rev
+                && h.frame.meas == next.meas
+                && a.scale == b.scale
+                && a.weighting == b.weighting
+                && a.time_weighting == b.time_weighting
+                && a.peak_weighting == b.peak_weighting
+                && a.cal == b.cal
+                && a.mic_curve == b.mic_curve
+        };
+        match held {
+            Some(h) if same(h) && at_ns >= h.at_ns => {
+                let since = at_ns - h.at_ns;
+                if since < period_ns.max(1) {
+                    return false;
+                }
+                let steps = since / period_ns.max(1);
+                // More than a period late (frames stopped for a while): start a new grid.
+                h.at_ns = if steps > 1 {
+                    at_ns
+                } else {
+                    h.at_ns + period_ns
+                };
+                h.frame = next.clone();
+                true
+            }
+            _ => {
+                *held = Some(SplHold {
+                    frame: next.clone(),
+                    at_ns,
+                    rev,
+                });
+                true
+            }
+        }
+    }
+}
+
 /// One secondary statistic.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplStat {
@@ -45,15 +128,48 @@ pub struct SplStat {
     pub value: String,
 }
 
+/// The slim level bar under the number: the live level (smooth, every frame) on a fixed
+/// 100 dB scale with 10 dB ticks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplBar {
+    /// Filled part, 0 … 1.
+    pub fill: f32,
+    /// Tick positions, 0 … 1.
+    pub ticks: Vec<f32>,
+}
+
+/// The bar's scale: 30 … 130 dB SPL, or −100 … 0 dBFS.
+fn bar_range(scale: LevelScale) -> (f64, f64) {
+    match scale {
+        LevelScale::DbSpl => (30.0, 130.0),
+        LevelScale::Dbfs => (-100.0, 0.0),
+    }
+}
+
+fn bar(scale: LevelScale, level: f64) -> SplBar {
+    let (lo, hi) = bar_range(scale);
+    let fill = if level.is_finite() {
+        ((level - lo) / (hi - lo)).clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
+    SplBar {
+        fill,
+        ticks: (1..10).map(|k| k as f32 / 10.0).collect(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplReadout {
     /// `LAF`.
     pub metric: String,
-    /// `94.0`.
+    /// `94.0`, the held reading.
     pub value: String,
     /// `dB SPL` or `dBFS`.
     pub unit: String,
-    /// LAeq, LCpeak, LAFmax, LAFmin.
+    /// `LAF · dB SPL`, under the number.
+    pub caption: String,
+    /// Leq, Lpeak, Lmax, Lmin in the meter's weightings.
     pub stats: Vec<SplStat>,
     /// `over 1 min 23 s`.
     pub interval: String,
@@ -62,6 +178,8 @@ pub struct SplReadout {
     pub cal: String,
     /// `STALE 3.2 s` when the frame is stale.
     pub stale: Option<String>,
+    /// The live level.
+    pub bar: SplBar,
 }
 
 /// Calibration text of a readout (decisions 7a/7b, `docs/design/q7-calibration.md` §3):
@@ -91,33 +209,43 @@ pub fn cal_text(
     }
 }
 
-pub fn spl_readout(frame: &SplFrame, cal: String, freshness: Option<Freshness>) -> SplReadout {
-    let m = &frame.meta;
+/// The readout of `held` (the reading the number shows, [`SplHold`]) with the bar at
+/// `live_level`, the newest frame's level in the same scale.
+pub fn spl_readout(
+    held: &SplFrame,
+    live_level: f64,
+    cal: String,
+    freshness: Option<Freshness>,
+) -> SplReadout {
+    let m = &held.meta;
     let w = w_letter(m.weighting);
-    let tw = tw_letter(m.time_weighting);
+    let metric = metric_name(m.weighting, m.time_weighting);
     let stat = |label: String, v: f64| SplStat {
         label,
         value: format::level(v),
     };
+    let unit = match m.scale {
+        LevelScale::Dbfs => "dBFS",
+        LevelScale::DbSpl => "dB SPL",
+    }
+    .to_string();
     SplReadout {
-        metric: format!("L{w}{tw}"),
+        caption: format!("{metric} · {unit}"),
         value: format::level(m.level),
-        unit: match m.scale {
-            LevelScale::Dbfs => "dBFS",
-            LevelScale::DbSpl => "dB SPL",
-        }
-        .to_string(),
+        unit,
         stats: vec![
             stat(format!("L{w}eq"), m.leq),
             stat(format!("L{}peak", pw_letter(m.peak_weighting)), m.lpeak),
-            stat(format!("L{w}{tw}max"), m.lmax),
-            stat(format!("L{w}{tw}min"), m.lmin),
+            stat(format!("{metric}max"), m.lmax),
+            stat(format!("{metric}min"), m.lmin),
         ],
+        metric,
         interval: format!("over {}", format::duration(m.duration.0)),
         cal,
         stale: freshness
             .filter(Freshness::is_stale)
             .map(|f| format!("STALE {}", format::age(f.age_s()))),
+        bar: bar(m.scale, live_level),
     }
 }
 
@@ -173,10 +301,54 @@ fn footer_rows(
         .collect()
 }
 
-/// Lays the readout out in `size` below the banner strip: metric top-left, big number with
-/// its unit, a row of statistics, interval and calibration at the bottom. Laid out from the
-/// bottom up, so on a small pane the footer wraps and the statistics and the number move up
-/// (the number shrinks if it must) rather than run into each other.
+/// Width, in em, the number is sized for: at least a typical reading's (`000.0`, `-00.0`),
+/// so the number keeps its size as its digits change.
+fn number_em(value: &str) -> f32 {
+    let typical = if value.starts_with('-') {
+        "-00.0"
+    } else {
+        "000.0"
+    };
+    canvas::text_width(value, 1.0).max(canvas::text_width(typical, 1.0))
+}
+
+/// The number's block, by the number's size: the number (1.25 em), its caption under it,
+/// and the bar under that when `bar`.
+struct Stack {
+    big: f32,
+    caption: f32,
+    gap: f32,
+    bar_gap: f32,
+    bar_h: f32,
+}
+
+impl Stack {
+    fn new(big: f32, fs: f32) -> Self {
+        Self {
+            big,
+            caption: (big * 0.14).max(fs),
+            gap: (big * 0.05).max(2.0),
+            bar_gap: (big * 0.12).max(4.0),
+            bar_h: (big * 0.06).clamp(4.0, 18.0),
+        }
+    }
+
+    fn height(&self, bar: bool) -> f32 {
+        let text = 1.25 * self.big + self.gap + 1.25 * self.caption;
+        if bar {
+            text + self.bar_gap + self.bar_h
+        } else {
+            text
+        }
+    }
+}
+
+/// Lays the meter out in `size` below the banner strip, to be read across a room: the held
+/// level as large as the pane allows, centred, its name and unit under it (`LAS · dB SPL`),
+/// the live level as a slim bar, then the statistics and, at the bottom, the interval and
+/// the calibration. Secondary text grows with the pane. Laid out from the bottom up, so on
+/// a small pane the footer wraps or is cut, the statistics wrap and the number shrinks
+/// rather than anything running into anything else.
 pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport) -> SplScene {
     let mut c = Canvas::new(size, theme);
     let pad = 12.0;
@@ -193,25 +365,21 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
     } else {
         theme.text
     };
-    c.overlay.labels.push(label(
-        r.metric.clone(),
-        [area.x, area.y],
-        anchor(HAlign::Left, VAlign::Top),
-        theme.font_size * 1.4,
-        theme.text_dim,
-    ));
+    let fs = theme.font_size;
+    let stat_size = (area.h.min(area.w * 0.6) * 0.045).clamp(fs, 2.6 * fs);
+    let small = (stat_size * 0.8).max(theme.small_font_size);
+    let mut room_top = area.y;
     if let Some(s) = &r.stale {
         c.overlay.labels.push(label(
             s.clone(),
             [area.right(), area.y],
             anchor(HAlign::Right, VAlign::Top),
-            theme.font_size,
+            stat_size,
             theme.banner_warning.background,
         ));
+        room_top += 1.25 * stat_size + 4.0;
     }
-    // Bottom up: the footer, the statistics above it, the number above them.
-    let small = theme.small_font_size;
-    let fs = theme.font_size;
+    // Bottom up: the footer, the statistics above it, the number's block above them.
     // A short pane spends fewer rows on the footer (cut instead) to keep the number large.
     let max_rows = match area.h {
         h if h >= 200.0 => 3,
@@ -221,8 +389,9 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
     let footer = footer_rows(&r.interval, &r.cal, area.w, small, max_rows);
     let line_h = 1.25 * small;
     let footer_top = area.bottom() - footer.len() as f32 * line_h;
-    let gap = 6.0;
-    // One row of statistics when every cell fits its share of the width, else two rows.
+    let gap = (0.5 * stat_size).max(6.0);
+    // Every statistic on one row when each fits its share of the width, else two per row,
+    // else one.
     let texts: Vec<String> = r
         .stats
         .iter()
@@ -230,54 +399,89 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         .collect();
     let widest = texts
         .iter()
-        .map(|t| canvas::text_width(t, theme.font_size))
+        .map(|t| canvas::text_width(t, stat_size))
         .fold(0.0, f32::max);
-    let per_row = if (widest + 12.0) * texts.len() as f32 <= area.w {
-        texts.len().max(1)
-    } else {
-        texts.len().div_ceil(2).max(1)
-    };
+    let n = texts.len().max(1);
+    let fits = |per: usize| widest + 6.0 <= area.w / per as f32;
+    let per_row = [n, n.div_ceil(2), 1]
+        .into_iter()
+        .find(|p| fits(*p))
+        .unwrap_or(1);
     let stat_rows = texts.len().div_ceil(per_row);
-    // Row centres 1.4 em apart; a row's text is 1.25 em tall.
-    let stats_span = (stat_rows.saturating_sub(1)) as f32 * 1.4 * fs;
-    let row = (area.y + area.h * 0.78).min(footer_top - gap - 0.625 * fs - stats_span);
-    let stats_top = row - 0.625 * fs;
-    // The number sits on its baseline with 0.3 em below it and 0.95 em above; it shrinks
-    // when the room between the metric name and the statistics is less than its size.
-    let metric_bottom = area.y + 1.25 * 1.4 * fs;
-    let room = stats_top - gap - (metric_bottom + gap);
-    let split = area.x + area.w * 0.66;
-    // Nor wider than the room left of the unit.
-    let per_em = canvas::text_width(&r.value, 1.0).max(1.0);
-    let big = (room / 1.25)
-        .min((split - area.x) / per_em)
-        .min(theme.big_font_size)
-        .max(1.6 * fs);
-    let base = (area.y + area.h * 0.62).min(stats_top - gap - 0.3 * big);
+    let row_h = 1.4 * stat_size;
+    let stats_top =
+        footer_top - gap - stat_rows.saturating_sub(1) as f32 * row_h - 1.25 * stat_size;
+    let room = (stats_top - gap - room_top).max(0.0);
+    // The number as wide as the pane allows, then as high as the room allows.
+    let mut s = Stack::new(area.w * 0.94 / number_em(&r.value), fs);
+    for _ in 0..4 {
+        let h = s.height(true);
+        if h <= room {
+            break;
+        }
+        s = Stack::new(s.big * room / h, fs);
+    }
+    let s = Stack::new(s.big.max(1.2 * fs), fs);
+    let with_bar = s.height(true) <= room + 0.5;
+    let y0 = room_top + ((room - s.height(with_bar)) / 2.0).max(0.0);
+    let cx = area.x + area.w / 2.0;
     c.overlay.labels.push(label(
         r.value.clone(),
-        [split, base],
-        anchor(HAlign::Right, VAlign::Baseline),
-        big,
+        [cx, y0],
+        anchor(HAlign::Center, VAlign::Top),
+        s.big,
         main,
     ));
+    let caption_y = y0 + 1.25 * s.big + s.gap;
     c.overlay.labels.push(label(
-        r.unit.clone(),
-        [split + 8.0, base],
-        anchor(HAlign::Left, VAlign::Baseline),
-        fs * 1.6,
-        main,
+        r.caption.clone(),
+        [cx, caption_y],
+        anchor(HAlign::Center, VAlign::Top),
+        s.caption,
+        theme.text_dim,
     ));
+    let bar_rect = with_bar.then(|| {
+        let w = (canvas::text_width("000.0", s.big)).min(area.w * 0.94);
+        Rect::new(
+            cx - w / 2.0,
+            caption_y + 1.25 * s.caption + s.bar_gap,
+            w,
+            s.bar_h,
+        )
+    });
+    if let Some(b) = bar_rect {
+        c.base.rects.push(FillRect {
+            rect: b,
+            color: theme.plot_background,
+            clip: None,
+        });
+        c.data.rects.push(FillRect {
+            rect: Rect::new(b.x, b.y, b.w * r.bar.fill, b.h),
+            color: if r.stale.is_some() {
+                theme.text_dim
+            } else {
+                theme.level_ok
+            },
+            clip: None,
+        });
+        for t in &r.bar.ticks {
+            c.overlay.rects.push(FillRect {
+                rect: Rect::new(b.x + b.w * t - 0.5, b.y, 1.0, b.h),
+                color: theme.background,
+                clip: None,
+            });
+        }
+    }
     for (i, t) in texts.into_iter().enumerate() {
         let (r_i, c_i) = (i / per_row, i % per_row);
         c.overlay.labels.push(label(
             t,
             [
                 area.x + area.w * (c_i as f32 + 0.5) / per_row as f32,
-                row + r_i as f32 * 1.4 * theme.font_size,
+                stats_top + 0.625 * stat_size + r_i as f32 * row_h,
             ],
             anchor(HAlign::Center, VAlign::Center),
-            theme.font_size,
+            stat_size,
             theme.text,
         ));
     }
@@ -302,6 +506,7 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         area,
         strip: strip.rect,
         banners: strip.rows,
+        bar: bar_rect,
     }
 }
 
@@ -314,11 +519,14 @@ pub struct SplScene {
     /// Banner strip above the readout; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+    /// The level bar, when the pane has room for it.
+    pub bar: Option<Rect>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::tests::{intersects, label_box};
     use ac2_proto::frame::SplMeta;
     use ac2_proto::units::{MeasId, Seconds};
 
@@ -349,16 +557,39 @@ mod tests {
         }
     }
 
+    fn readout(f: &SplFrame, cal: &str, age: Option<f64>) -> SplReadout {
+        spl_readout(f, f.meta.level, cal.into(), age.map(Freshness::from_age))
+    }
+
+    fn vp(w: f32, h: f32) -> Viewport {
+        Viewport {
+            width: w,
+            height: h,
+        }
+    }
+
+    fn texts(s: &Scene) -> Vec<&str> {
+        s.layers
+            .iter()
+            .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+            .collect()
+    }
+
+    fn number<'a>(s: &'a SplScene, r: &SplReadout) -> &'a crate::primitives::Label {
+        s.scene.layers[2]
+            .labels
+            .iter()
+            .find(|l| l.text == r.value)
+            .expect("number")
+    }
+
     #[test]
     fn readout_strings() {
-        let r = spl_readout(
-            &frame(LevelScale::DbSpl),
-            "cal 94 dB · 3 h ago".into(),
-            Some(Freshness::from_age(0.2)),
-        );
+        let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", Some(0.2));
         assert_eq!(r.metric, "LAF");
         assert_eq!(r.value, "94.0");
         assert_eq!(r.unit, "dB SPL");
+        assert_eq!(r.caption, "LAF · dB SPL");
         let stats: Vec<String> = r
             .stats
             .iter()
@@ -370,13 +601,29 @@ mod tests {
         );
         assert_eq!(r.interval, "over 1 min 23 s");
         assert_eq!(r.stale, None);
+        // 94 dB on the 30 … 130 dB SPL bar.
+        assert!((r.bar.fill - 0.6404).abs() < 1e-4, "{}", r.bar.fill);
+        assert_eq!(r.bar.ticks.len(), 9);
+        let mut f = frame(LevelScale::Dbfs);
+        f.meta.weighting = Weighting::C;
+        f.meta.time_weighting = TimeWeighting::Slow;
+        f.meta.peak_weighting = PeakWeighting::Z;
         let r = spl_readout(
-            &frame(LevelScale::Dbfs),
+            &f,
+            -23.4,
             "uncalibrated".into(),
             Some(Freshness::from_age(3.24)),
         );
         assert_eq!(r.unit, "dBFS");
+        assert_eq!(r.caption, "LCS · dBFS");
+        assert_eq!(r.stats[1].label, "LZpeak");
+        assert_eq!(r.stats[2].label, "LCSmax");
         assert_eq!(r.stale.as_deref(), Some("STALE 3.2 s"));
+        // The bar follows the live level, not the held one: −23.4 dBFS on −100 … 0.
+        assert!((r.bar.fill - 0.766).abs() < 1e-4, "{}", r.bar.fill);
+        let r = spl_readout(&f, f64::NEG_INFINITY, String::new(), None);
+        assert_eq!(r.bar.fill, 0.0);
+        assert_eq!(metric_name(Weighting::Z, TimeWeighting::Impulse), "LZI");
     }
 
     #[test]
@@ -437,66 +684,82 @@ mod tests {
 
     #[test]
     fn scene_carries_the_strings() {
-        let r = spl_readout(
-            &frame(LevelScale::DbSpl),
-            "cal 94 dB · 3 h ago".into(),
-            Some(Freshness::from_age(5.0)),
-        );
-        let s = spl_scene(
-            &r,
-            &Status::default(),
-            &Theme::dark(),
-            Viewport {
-                width: 400.0,
-                height: 200.0,
-            },
-        );
+        let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", Some(5.0));
+        let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(400.0, 200.0));
         assert!(s.banners.is_empty());
         assert_eq!(s.strip.h, 0.0);
         assert_eq!(s.area, Rect::new(12.0, 12.0, 376.0, 176.0));
-        let s = s.scene;
-        let texts: Vec<&str> = s
-            .layers
-            .iter()
-            .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
-            .collect();
+        let t = texts(&s.scene);
         for want in [
-            "LAF",
+            "LAF · dB SPL",
             "94.0",
-            "dB SPL",
             "LAeq 92.1",
             "LCpeak 110.3",
             "over 1 min 23 s",
             "cal 94 dB · 3 h ago",
             "STALE 5.0 s",
         ] {
-            assert!(texts.contains(&want), "{want} in {texts:?}");
+            assert!(t.contains(&want), "{want} in {t:?}");
         }
-        let big = s.layers[2]
+        let big = number(&s, &r);
+        assert_eq!(big.color, Theme::dark().text_dim);
+        assert!(big.size > 3.0 * Theme::dark().font_size, "{}", big.size);
+    }
+
+    /// The number is centred and grows with the pane, up to a stage-sized one; the
+    /// statistics grow too, and stay smaller than the number's caption never is.
+    #[test]
+    fn number_is_centred_and_grows_with_the_pane() {
+        let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", None);
+        let mut last = 0.0;
+        for (w, h) in [
+            (320.0, 200.0),
+            (640.0, 360.0),
+            (1000.0, 560.0),
+            (1280.0, 800.0),
+            (1920.0, 1080.0),
+        ] {
+            let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(w, h));
+            let n = number(&s, &r);
+            let b = label_box(n);
+            let cx = s.area.x + s.area.w / 2.0;
+            assert!((b.x + b.w / 2.0 - cx).abs() < 0.01, "{w}×{h}");
+            assert!(n.size > last, "{w}×{h}: {} after {last}", n.size);
+            last = n.size;
+            // The number dominates: it takes a large part of the pane's height.
+            assert!(b.h > 0.3 * h, "{w}×{h}: {} of {h}", b.h);
+            let bar = s.bar.expect("bar");
+            assert!((bar.x + bar.w / 2.0 - cx).abs() < 0.01);
+            assert!(bar.y > b.bottom());
+        }
+        // Full screen: read across a room.
+        assert!(last > 300.0, "{last}");
+        let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(1920.0, 1080.0));
+        let stat = s.scene.layers[2]
             .labels
             .iter()
-            .find(|l| l.text == "94.0")
-            .expect("value");
-        assert_eq!(big.size, Theme::dark().big_font_size);
-        assert_eq!(big.color, Theme::dark().text_dim);
+            .find(|l| l.text.starts_with("LAeq"))
+            .expect("stat");
+        assert!(stat.size > 1.5 * Theme::dark().font_size, "{}", stat.size);
+        // A reading of other width (100.0, 9.5) keeps the number's size.
+        for v in [100.04, 9.5] {
+            let mut f = frame(LevelScale::DbSpl);
+            f.meta.level = v;
+            let r2 = readout(&f, "cal 94 dB · 3 h ago", None);
+            let s2 = spl_scene(&r2, &Status::default(), &Theme::dark(), vp(1280.0, 800.0));
+            let s1 = spl_scene(&r, &Status::default(), &Theme::dark(), vp(1280.0, 800.0));
+            assert_eq!(number(&s2, &r2).size, number(&s1, &r).size, "{v}");
+        }
     }
 
     #[test]
     fn banners_push_the_readout_down() {
-        let r = spl_readout(
-            &frame(LevelScale::DbSpl),
-            "cal 94 dB · 3 h ago".into(),
-            None,
-        );
-        let size = Viewport {
-            width: 400.0,
-            height: 300.0,
-        };
+        let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", None);
         let s = spl_scene(
             &r,
             &crate::banner::tests::everything(),
             &Theme::dark(),
-            size,
+            vp(400.0, 300.0),
         );
         assert_eq!(s.banners.len(), crate::banner::MAX_BANNERS);
         assert!(s.strip.h > 0.0);
@@ -505,55 +768,61 @@ mod tests {
         crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.area]);
     }
 
-    /// On the small panes of a grid the footer (`over 6 min · MM1 34804 · uncalibrated · mic
-    /// curve: …`) wraps or is cut and everything above it moves up: no two labels overlap and
-    /// all stay inside the readout area, at every size from a narrow bottom-row pane up.
+    /// From the small panes of a grid (the footer `over 6 min · MM1 34804 · uncalibrated ·
+    /// mic curve: …` wraps or is cut, the statistics wrap) to a full-screen 1920×1080: no two
+    /// labels overlap, the bar overlaps none, and all stay inside the readout area.
     #[test]
-    fn small_meter_never_overlaps_its_footer() {
-        use crate::canvas::tests::{intersects, label_box};
+    fn meter_never_overlaps_at_any_size() {
         let mut f = frame(LevelScale::DbSpl);
         f.meta.weighting = Weighting::Z;
         f.meta.duration = Seconds(360.0);
         let cal = "MM1 34804 · uncalibrated · mic curve: MM1 34804 90°";
-        let r = spl_readout(&f, cal.into(), Some(Freshness::from_age(9.0)));
-        for w in (220..=900).step_by(20) {
-            for h in (150..=420).step_by(15) {
-                let size = Viewport {
-                    width: w as f32,
-                    height: h as f32,
-                };
-                let s = spl_scene(&r, &Status::default(), &Theme::dark(), size);
-                let labels = &s.scene.layers[2].labels;
-                // The unit beside the number may leave a very narrow pane; the rest may not.
-                let boxes: Vec<(&str, Rect)> = labels
-                    .iter()
-                    .filter(|l| l.text != r.unit)
-                    .map(|l| (l.text.as_str(), label_box(l)))
-                    .collect();
-                for (t, b) in &boxes {
-                    assert!(
-                        b.x >= s.area.x - 0.5
-                            && b.right() <= s.area.right() + 0.5
-                            && b.bottom() <= s.area.bottom() + 0.5
-                            && b.y >= s.area.y - 0.5,
-                        "{w}×{h}: {t:?} {b:?} outside {:?}",
-                        s.area
-                    );
-                }
-                for (i, (a, ab)) in boxes.iter().enumerate() {
-                    for (b, bb) in &boxes[i + 1..] {
-                        assert!(!intersects(*ab, *bb), "{w}×{h}: {a:?} overlaps {b:?}");
+        for stale in [Some(9.0), None] {
+            let r = readout(&f, cal, stale);
+            let widths = (220..=900).step_by(20).chain((960..=1920).step_by(96));
+            for w in widths {
+                let heights = (150..=420).step_by(15).chain((480..=1080).step_by(60));
+                for h in heights {
+                    let size = vp(w as f32, h as f32);
+                    let s = spl_scene(&r, &Status::default(), &Theme::dark(), size);
+                    let labels = &s.scene.layers[2].labels;
+                    let boxes: Vec<(&str, Rect)> = labels
+                        .iter()
+                        .map(|l| (l.text.as_str(), label_box(l)))
+                        .collect();
+                    for (t, b) in &boxes {
+                        assert!(
+                            b.x >= s.area.x - 0.5
+                                && b.right() <= s.area.right() + 0.5
+                                && b.bottom() <= s.area.bottom() + 0.5
+                                && b.y >= s.area.y - 0.5,
+                            "{w}×{h}: {t:?} {b:?} outside {:?}",
+                            s.area
+                        );
+                        if let Some(bar) = s.bar {
+                            assert!(!intersects(*b, bar), "{w}×{h}: bar over {t:?}");
+                        }
                     }
-                }
-                let texts: Vec<&str> = boxes.iter().map(|(t, _)| *t).collect();
-                assert!(texts.contains(&"LZeq 92.1"), "{w}×{h}: {texts:?}");
-                assert!(
-                    texts.iter().any(|t| t.contains("over 6 min")),
-                    "{w}×{h}: {texts:?}"
-                );
-                // Wide enough, the footer is one row: the interval left, the calibration right.
-                if w >= 600 {
-                    assert!(texts.contains(&cal), "{w}×{h}: {texts:?}");
+                    for (i, (a, ab)) in boxes.iter().enumerate() {
+                        for (b, bb) in &boxes[i + 1..] {
+                            assert!(!intersects(*ab, *bb), "{w}×{h}: {a:?} overlaps {b:?}");
+                        }
+                    }
+                    let texts: Vec<&str> = boxes.iter().map(|(t, _)| *t).collect();
+                    assert!(texts.contains(&"LZeq 92.1"), "{w}×{h}: {texts:?}");
+                    assert!(texts.contains(&"LZF · dB SPL"), "{w}×{h}: {texts:?}");
+                    assert!(
+                        texts.iter().any(|t| t.contains("over 6 min")),
+                        "{w}×{h}: {texts:?}"
+                    );
+                    // Wide enough, the footer is one row: the interval left, the calibration
+                    // right.
+                    if w >= 600 {
+                        assert!(texts.contains(&cal), "{w}×{h}: {texts:?}");
+                    }
+                    if h >= 240 {
+                        assert!(s.bar.is_some(), "{w}×{h}: no bar");
+                    }
                 }
             }
         }
@@ -584,22 +853,9 @@ mod tests {
 
     #[test]
     fn narrow_meter_wraps_the_statistics() {
-        use crate::canvas::tests::{intersects, label_box};
-        let r = spl_readout(
-            &frame(LevelScale::DbSpl),
-            "cal 94 dB · 3 h ago".into(),
-            None,
-        );
+        let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", None);
         let stats = |w: f32| {
-            let s = spl_scene(
-                &r,
-                &Status::default(),
-                &Theme::dark(),
-                Viewport {
-                    width: w,
-                    height: 260.0,
-                },
-            );
+            let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(w, 260.0));
             s.scene.layers[2]
                 .labels
                 .iter()
@@ -623,5 +879,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn display_periods() {
+        assert_eq!(display_period_s(TimeWeighting::Fast), 0.5);
+        assert_eq!(display_period_s(TimeWeighting::Slow), 1.0);
+        assert_eq!(display_period_s(TimeWeighting::Impulse), 0.5);
+    }
+
+    /// Frames every 100 ms: the held reading changes twice a second on a fixed grid, and is
+    /// the frame at the update, not an average; a new configuration or calibration shows at
+    /// once and starts a new grid.
+    #[test]
+    fn hold_updates_at_the_display_rate() {
+        const MS: u64 = 1_000_000;
+        let mut held = None;
+        let mut f = frame(LevelScale::DbSpl);
+        let rev = Rev(7);
+        let mut updates = Vec::new();
+        for k in 0..30u64 {
+            f.meta.level = 90.0 + k as f64;
+            let t = 1_000 * MS + k * 100 * MS;
+            if SplHold::update(&mut held, &f, t, rev, 0.5) {
+                updates.push(k);
+            }
+        }
+        assert_eq!(updates, [0, 5, 10, 15, 20, 25]);
+        let h = held.clone().expect("held");
+        assert_eq!(h.frame.meta.level, 115.0);
+        assert_eq!(h.at_ns, 3_500 * MS);
+        // Frames arriving off the grid (every 130 ms) still update on it, at the first frame
+        // past each half second.
+        let mut held = None;
+        let mut at = Vec::new();
+        for k in 0..40u64 {
+            let t = k * 130 * MS;
+            if SplHold::update(&mut held, &f, t, rev, 0.5) {
+                at.push(held.as_ref().expect("held").at_ns / MS);
+            }
+        }
+        assert_eq!(&at[..5], [0, 500, 1000, 1500, 2000]);
+        // Slow: once a second.
+        let mut held = None;
+        let n = (0..30u64)
+            .filter(|k| SplHold::update(&mut held, &f, k * 100 * MS, rev, 1.0))
+            .count();
+        assert_eq!(n, 3);
+        // Another weighting under a new rev shows at once.
+        let mut held = None;
+        assert!(SplHold::update(&mut held, &f, 0, rev, 0.5));
+        assert!(!SplHold::update(&mut held, &f, 100 * MS, rev, 0.5));
+        let mut g = f.clone();
+        g.meta.time_weighting = TimeWeighting::Slow;
+        assert!(SplHold::update(&mut held, &g, 200 * MS, Rev(8), 0.5));
+        assert_eq!(held.as_ref().expect("held").at_ns, 200 * MS);
+        assert!(!SplHold::update(&mut held, &g, 600 * MS, Rev(8), 1.0));
+        // Calibrated meanwhile (same rev): at once too.
+        let mut c = g.clone();
+        c.meta.scale = LevelScale::Dbfs;
+        assert!(SplHold::update(&mut held, &c, 650 * MS, Rev(8), 1.0));
+        // A clock going back (another daemon) starts over.
+        assert!(SplHold::update(&mut held, &c, 10 * MS, Rev(8), 1.0));
+        // Frames that stopped for a while: the next one shows and starts a new grid.
+        assert!(SplHold::update(&mut held, &c, 5_000 * MS, Rev(8), 1.0));
+        assert_eq!(held.as_ref().expect("held").at_ns, 5_000 * MS);
     }
 }

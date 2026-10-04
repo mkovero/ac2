@@ -1786,3 +1786,27 @@ fn key_hints() {
     }
     snapshot(&mut h, "key_hints_tooltip");
 }
+
+/// The SPL meter maximised (W): the held level large and centred with `LAF · dBFS` under
+/// it, the level bar, the statistics and the footer; W again, full screen: the stage view,
+/// the meter alone on the screen.
+#[test]
+fn spl_meter_big_and_stage() {
+    if !have_gpu("spl_meter_big_and_stage") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::ALT, Key::Num4);
+    h.key_press(Key::W);
+    step_until(&mut h, "the meter maximised", |a| {
+        a.state.layout.maximized
+            && a.state.layout.focus == PaneKind::Spl
+            && a.state.spl_hold.contains_key(&MeasId(4))
+    });
+    snapshot(&mut h, "spl_meter_big");
+    h.key_press(Key::W);
+    step_until(&mut h, "the stage view", |a| a.state.stage_view());
+    snapshot(&mut h, "spl_meter_stage");
+}

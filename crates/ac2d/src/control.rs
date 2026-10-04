@@ -374,17 +374,13 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     Ok(())
 }
 
-/// The new Leq windows when `new` is `old` with only them changed (an SPL meter); such an
-/// update is applied in place: the meter, its log and its windows carry on.
-fn leq_only(old: &MeasKind, new: &MeasKind) -> Option<ac2_proto::model::LeqConfig> {
+/// The new configuration when `new` is `old` on the same input (an SPL meter): its
+/// weightings and Leq windows change in place — the meter runs every weighting all along, so
+/// its interval, its log and its windows carry on.
+fn spl_in_place(old: &MeasKind, new: &MeasKind) -> Option<ac2_proto::model::SplConfig> {
     match (old, new) {
-        (MeasKind::Spl { config: a }, MeasKind::Spl { config: b })
-            if ac2_proto::model::SplConfig {
-                leq: b.leq.clone(),
-                ..a.clone()
-            } == *b =>
-        {
-            Some(b.leq.clone())
+        (MeasKind::Spl { config: a }, MeasKind::Spl { config: b }) if a.input == b.input => {
+            Some(b.clone())
         }
         _ => None,
     }
@@ -887,12 +883,12 @@ impl Control {
                     MeasKind::Spl { config } => Some(config.leq.clone()),
                     _ => None,
                 };
-                if let Some(leq) = leq_only(&m.config.kind, &config.kind) {
+                if let Some(spl) = spl_in_place(&m.config.kind, &config.kind) {
                     m.config = config;
                     m.config_rev = Rev(self.store.rev().0 + 1);
                     if let Some(j) = self.jobs.get(&meas) {
-                        j.send(JobCmd::Leq {
-                            config: leq,
+                        j.send(JobCmd::Spl {
+                            config: Box::new(spl),
                             rev: m.config_rev,
                         });
                     }

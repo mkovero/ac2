@@ -159,8 +159,14 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   frequency (`1/f`); DC and bins narrower than the kernel pass through, and bins below the
   floor (non-finite level) are gaps the kernel never crosses. A smoothed bin is no longer
   the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients label it.
-- **SPL** (`SplConfig.leq: LeqConfig`): a change to the Leq windows alone (and the name)
-  applies in place; the meter, its log and its windows go on (§3.2, SPL log).
+- **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
+  `peak_weighting`, the Leq windows (`leq: LeqConfig`), the name — applies in place; the
+  meter, its log and its windows go on (§3.2, SPL log). The meter runs every frequency
+  weighting with every time weighting (and the peak with C and Z) all the time and reports
+  the configured ones, so the first `spl` frame with the new `config_rev` reads the new
+  weighting settled, and its `lmax`, `lmin`, `leq`, `lpeak` and `duration` cover the same
+  interval as before the change (since the meter started or `meas.reset`). A new `input`
+  restarts the meter.
 
 #### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 

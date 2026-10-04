@@ -667,6 +667,23 @@ pub enum SplCmd {
         #[command(subcommand)]
         cmd: LeqCmd,
     },
+    /// Set a running meter's frequency and time weighting (`--weight c --time slow`): it
+    /// carries on, its Leq windows and log untouched.
+    Set(SplSet),
+}
+
+/// `spl set`.
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("what").required(true).multiple(true).args(["weight", "time"])))]
+pub struct SplSet {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// Frequency weighting.
+    #[arg(long, value_enum)]
+    pub weight: Option<WeightArg>,
+    /// Time weighting.
+    #[arg(long, value_enum)]
+    pub time: Option<TimeWeightArg>,
 }
 
 /// `spl leq …`.

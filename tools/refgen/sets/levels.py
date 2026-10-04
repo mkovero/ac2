@@ -330,9 +330,117 @@ def gen_spl_toneburst() -> g.VectorSet:
     return vs
 
 
+TB_I_MS = [1000, 500, 200, 100, 50, 20, 10, 5, 2]
+STEP_MS = [10, 35, 70, 125, 250, 500, 1000, 2000, 3000, 5000]
+DECAY_MS = [100, 250, 500, 1000, 1500, 2000, 3000]
+# Time constants: F and S average with one time constant; I averages with 35 ms and holds
+# the average's peaks, falling with 1.5 s.
+TAU = {"F": (0.125, 0.125), "S": (1.0, 1.0), "I": (0.035, 1.5)}
+
+
+def time_weighted(x2: np.ndarray, fs: float, rise: float, fall: float) -> np.ndarray:
+    """The detector on x^2: a one-pole average with `rise`; when `fall` differs, a peak
+    follower after it that takes a rising average at once and otherwise falls with `fall`."""
+    alpha = 1.0 - np.exp(-1.0 / (fs * rise))
+    avg = sig.lfilter([alpha], [1.0, -(1.0 - alpha)], x2)
+    if fall == rise:
+        return avg
+    d = np.exp(-1.0 / (fs * fall))
+    out = np.empty_like(avg)
+    ms = 0.0
+    for n, a in enumerate(avg):
+        ms = a if a >= ms else max(ms * d, a)
+        out[n] = ms
+    return out
+
+
+def gen_spl_time_weighting() -> g.VectorSet:
+    fs = 48000.0
+    f0 = 4000.0
+    amp = 0.5
+    steady = amp * amp / 2.0
+    pre = int(0.01 * fs)
+
+    def burst_i(tb_ms):
+        nb = int(round(tb_ms * 1e-3 * fs))
+        post = int(0.2 * fs)
+        x = np.zeros(pre + nb + post)
+        k = np.arange(nb)
+        x[pre:pre + nb] = amp * np.sin(2 * np.pi * f0 * k / fs)
+        rise, fall = TAU["I"]
+        return 10.0 * np.log10(np.max(time_weighted(x * x, fs, rise, fall)) / steady)
+
+    # A step of the mean square from 0 to 1 (x = 1 from sample 0): the level `t` after the
+    # step is read at sample round(t fs) - 1, the last of the first t seconds.
+    n_step = int(STEP_MS[-1] * 1e-3 * fs)
+    step_idx = np.array([int(round(t * 1e-3 * fs)) - 1 for t in STEP_MS])
+    # The fall: 10 s of x = 1, then silence; read `t` after the last sample of the step.
+    n_on = int(10 * fs)
+    n_off = int(DECAY_MS[-1] * 1e-3 * fs)
+    decay_idx = np.array([n_on - 1 + int(round(t * 1e-3 * fs)) for t in DECAY_MS])
+    resp = {}
+    for name, (rise, fall) in TAU.items():
+        up = time_weighted(np.ones(n_step), fs, rise, fall)
+        resp[f"step_{name.lower()}_db"] = 10.0 * np.log10(up[step_idx])
+        x2 = np.concatenate([np.ones(n_on), np.zeros(n_off)])
+        down = time_weighted(x2, fs, rise, fall)
+        resp[f"decay_{name.lower()}_db"] = 10.0 * np.log10(down[decay_idx] / down[n_on - 1])
+
+    vs = g.VectorSet(
+        name="spl_time_weighting",
+        description=(
+            "Time weightings F, S and I of a sound level meter on the squared signal: the "
+            "level after a step of the mean square, its fall after the signal stops, and the "
+            "maximum I-weighted level of isolated 4 kHz tonebursts relative to the steady "
+            "level (Z weighting)."
+        ),
+        function="gen_spl_time_weighting",
+        parameters={
+            "fs_hz": fs,
+            "tone_hz": f0,
+            "amplitude_fs": amp,
+            "tau_s": {k: {"rise": r, "fall": f} for k, (r, f) in TAU.items()},
+            "detector": ("avg[n] = avg[n-1] + alpha (x[n]^2 - avg[n-1]), "
+                         "alpha = 1 - exp(-1/(fs rise)); F, S: ms = avg; I: ms[n] = avg[n] "
+                         "if avg[n] >= ms[n-1], else max(ms[n-1] exp(-1/(fs fall)), avg[n])"),
+            "step": ("x = 1 from sample 0; level 10 log10(ms) at sample round(t fs) - 1 "
+                     "(analytically 10 log10(1 - exp(-t / rise)))"),
+            "decay": ("x = 1 for 10 s, then 0; level at sample 10 fs - 1 + round(t fs) "
+                      "relative to the level at the stop (analytically -10 lg(e) t / fall "
+                      "= -4.343 t / fall dB)"),
+            "burst": ("x = amp sin(2 pi f0 k / fs), k = 0..round(Tb fs)-1, after 10 ms of "
+                      "silence, then 200 ms of silence"),
+        },
+        references=[
+            "IEC 61672-1:2013 5.8 (F, S: 125 ms, 1 s; decay 34.7 and 4.3 dB/s)",
+            "IEC 60651:1979 (I: 35 ms rise, 1.5 s fall; single-burst responses "
+            "-3.6, -8.8, -12.6 dB at 20, 5, 2 ms)",
+        ],
+    )
+    vs.add("step_ms", np.array(STEP_MS, dtype=float), unit="ms",
+           description="time after the step")
+    for name in ("f", "s", "i"):
+        vs.add(f"step_{name}_db", resp[f"step_{name}_db"], unit="dB",
+               description=f"{name.upper()} level after a step to 0 dB",
+               tolerance=g.lin_tol(1e-9, 0.0), axis="step_ms")
+    vs.add("decay_ms", np.array(DECAY_MS, dtype=float), unit="ms",
+           description="time after the signal stops")
+    for name in ("f", "s", "i"):
+        vs.add(f"decay_{name}_db", resp[f"decay_{name}_db"], unit="dB",
+               description=f"{name.upper()} level after the stop, relative to the stop",
+               tolerance=g.lin_tol(1e-9, 0.0), axis="decay_ms")
+    vs.add("tb_i_ms", np.array(TB_I_MS, dtype=float), unit="ms",
+           description="toneburst durations, I")
+    vs.add("response_i_db", np.array([burst_i(tb) for tb in TB_I_MS]), unit="dB",
+           description="LImax - L, Z weighting",
+           tolerance=g.lin_tol(1e-9, 0.0), axis="tb_i_ms")
+    return vs
+
+
 GENERATORS = [
     gen_spectrum_offbin_windows,
     gen_fft_banding_noise,
     gen_rta_butterworth_bands,
     gen_spl_toneburst,
+    gen_spl_time_weighting,
 ]

@@ -437,10 +437,19 @@ impl Analysis for Spl {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.meter.reset_interval(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
-            JobCmd::Leq { config, rev } => {
+            JobCmd::Spl { config, rev } => {
                 self.config_rev = rev;
-                self.cfg.leq = config.clone();
-                self.leq.set_config(config, self.fs);
+                self.meter.select(
+                    conv::weighting(config.weighting),
+                    conv::time_weighting(config.time_weighting),
+                    conv::peak_weighting(config.peak_weighting),
+                );
+                let leq_changed = config.leq != self.cfg.leq;
+                self.cfg = *config;
+                if !leq_changed {
+                    return;
+                }
+                self.leq.set_config(self.cfg.leq.clone(), self.fs);
                 // The rebuilt windows are judged at once: a new limit below the level is
                 // an alarm now, not a second later, and the next frame carries the state.
                 let at = if self.wall > 0 {

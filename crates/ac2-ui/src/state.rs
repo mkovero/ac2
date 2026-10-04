@@ -889,6 +889,11 @@ pub struct AppState {
     pub leq_history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
     /// The newest over / recovered alarm of each meter already shown (`None`: none yet).
     leq_alarms_seen: BTreeMap<MeasId, Option<ac2_proto::model::LeqAlarm>>,
+    /// Each SPL meter's displayed reading, held for its display period.
+    pub spl_hold: BTreeMap<MeasId, ac2_scene::spl::SplHold>,
+    /// The measurement each pane showed when the app last ran, by name, until the daemon's
+    /// state is known.
+    pending_pane_meas: BTreeMap<PaneKind, String>,
 }
 
 impl Default for AppState {
@@ -948,6 +953,8 @@ impl AppState {
             devices_for: None,
             leq_history: BTreeMap::new(),
             leq_alarms_seen: BTreeMap::new(),
+            spl_hold: BTreeMap::new(),
+            pending_pane_meas: BTreeMap::new(),
         }
     }
 
@@ -1288,7 +1295,69 @@ impl AppState {
         self.update_inner(msg, keymap, &mut out);
         self.sync_meters(before, tick, &mut out);
         self.sync_session_watch(&mut out);
+        if !tick {
+            self.restore_pane_meas();
+            self.remember_layout();
+        }
         out
+    }
+
+    /// Once the daemon's state is known, each pane shows the measurement it showed when the
+    /// app last ran, if one of that name (and kind) still exists; else the pane's usual
+    /// choice, quietly.
+    fn restore_pane_meas(&mut self) {
+        if self.pending_pane_meas.is_empty() || self.daemon().is_none() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending_pane_meas);
+        for (pane, name) in pending {
+            let id = self
+                .measurements()
+                .iter()
+                .find(|m| m.config.name == name && PaneKind::for_kind(&m.config.kind) == pane)
+                .map(|m| m.id);
+            if let Some(id) = id {
+                self.pane_meas.insert(pane, id);
+                if self.layout.focus.owner() == pane {
+                    self.select(id);
+                }
+            }
+        }
+    }
+
+    /// The layout as it is now, as the preferences keep it.
+    pub fn layout_prefs(&self) -> crate::prefs::LayoutPrefs {
+        let mut measurements = BTreeMap::new();
+        for p in [PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Spl] {
+            // Unknown until the daemon's state is (and while a remembered one waits for
+            // it): keep what the preferences say.
+            let name = match (self.pending_pane_meas.get(&p), self.daemon()) {
+                (Some(n), _) => Some(n.clone()),
+                (None, None) => self.prefs.layout.measurements.get(&p).cloned(),
+                (None, Some(_)) => self.pane_meas(p).map(|m| m.config.name.clone()),
+            };
+            if let Some(n) = name {
+                measurements.insert(p, n);
+            }
+        }
+        crate::prefs::LayoutPrefs {
+            focus: self.layout.focus,
+            maximized: self.layout.maximized,
+            fullscreen: self.fullscreen,
+            spl_leq: self.view.spl.leq,
+            ir_mode: self.view.ir.mode,
+            distortion_unit: self.view.distortion.unit,
+            measurements,
+        }
+    }
+
+    /// Saves the layout with the preferences when it changed.
+    fn remember_layout(&mut self) {
+        let now = self.layout_prefs();
+        if now != self.prefs.layout {
+            self.prefs.layout = now;
+            self.prefs_dirty = true;
+        }
     }
 
     /// What needs metering: the session's input meters while a session is open (the
@@ -1346,21 +1415,43 @@ impl AppState {
         }
     }
 
-    /// Takes the preferences read at startup, and the view choices they hold.
+    /// Takes the preferences read at startup, and the view choices they hold: the layout as
+    /// last left (the measurements each pane showed come back once the daemon's state is
+    /// known). Nothing here arms or plays anything.
     pub fn set_prefs(&mut self, prefs: UiPrefs) {
         self.view.spl.layout = prefs.leq;
+        let l = &prefs.layout;
+        self.layout.shown[l.focus.index()] = true;
+        self.layout.focus = l.focus;
+        self.layout.maximized = l.maximized;
+        self.fullscreen = l.fullscreen;
+        self.view.spl.leq = l.spl_leq;
+        self.view.ir.mode = l.ir_mode;
+        self.view.distortion.unit = l.distortion_unit;
+        self.pending_pane_meas = l.measurements.clone();
         self.prefs = prefs;
     }
 
-    /// The stage view: full screen with the SPL pane maximised on its Leq windows, so the
-    /// window holds only them (no top bar, list or pane title). Whenever a stimulus may be
-    /// sounding or an operation runs, the top bar comes back: what is driving the speakers
-    /// is never hidden.
+    /// W: the split layout → the focused pane alone → the focused pane full screen (the
+    /// window too) → the split layout again.
+    fn cycle_layout(&mut self) {
+        if !self.layout.maximized {
+            self.layout.maximized = true;
+        } else if !self.fullscreen {
+            self.fullscreen = true;
+        } else {
+            self.layout.maximized = false;
+            self.fullscreen = false;
+        }
+    }
+
+    /// The stage view: the focused pane alone with the window full screen, so the screen
+    /// holds only the pane's picture (no top bar, list or pane title; the SPL meter and its
+    /// Leq windows read across a room). Whenever a stimulus may be sounding or an operation
+    /// runs, the top bar comes back: what is driving the speakers is never hidden.
     pub fn stage_view(&self) -> bool {
         self.fullscreen
             && self.layout.maximized
-            && self.layout.focus == PaneKind::Spl
-            && self.view.spl.leq
             && self.stimulus.phase == StimPhase::Idle
             && !self.daemon().is_some_and(|d| d.generator.firing)
             && self.operation().is_none()
@@ -2898,7 +2989,7 @@ impl AppState {
             }
             C::NextPane => self.cycle_pane(1),
             C::PrevPane => self.cycle_pane(-1),
-            C::MaximizePane => self.layout.maximized = !self.layout.maximized,
+            C::MaximizePane => self.cycle_layout(),
             C::NextMeasurement if self.layout.focus == PaneKind::Distortion => {
                 self.cycle_sweep(1);
             }
@@ -3473,6 +3564,14 @@ impl AppState {
                 }
                 None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
             },
+            C::SplTimeWeighting
+            | C::SplWeighting
+            | C::SplFast
+            | C::SplSlow
+            | C::SplImpulse
+            | C::SplA
+            | C::SplC
+            | C::SplZ => self.spl_weightings(c, out),
             C::LeqWindows => match self.pane_meas(PaneKind::Spl).cloned() {
                 Some(m) => {
                     let calibrated = self.leq_calibrated(m.id);
@@ -3482,6 +3581,89 @@ impl AppState {
                 }
                 None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
             },
+        }
+    }
+
+    /// F / Z in the SPL pane (or the palette's direct choices): the meter the pane shows
+    /// takes the next (or the named) time or frequency weighting, in place — its Leq
+    /// windows, log and interval carry on — and the pane shows the meter.
+    fn spl_weightings(&mut self, c: CommandId, out: &mut Vec<Request>) {
+        use CommandId as C;
+        use ac2_proto::model::{TimeWeighting as T, Weighting as W};
+        let Some(mut m) = self.pane_meas(PaneKind::Spl).cloned() else {
+            self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)");
+            return;
+        };
+        let MeasKind::Spl { config } = &mut m.config.kind else {
+            return;
+        };
+        match c {
+            C::SplTimeWeighting => {
+                config.time_weighting = match config.time_weighting {
+                    T::Fast => T::Slow,
+                    T::Slow => T::Impulse,
+                    T::Impulse => T::Fast,
+                }
+            }
+            C::SplWeighting => {
+                config.weighting = match config.weighting {
+                    W::A => W::C,
+                    W::C => W::Z,
+                    W::Z => W::A,
+                }
+            }
+            C::SplFast => config.time_weighting = T::Fast,
+            C::SplSlow => config.time_weighting = T::Slow,
+            C::SplImpulse => config.time_weighting = T::Impulse,
+            C::SplA => config.weighting = W::A,
+            C::SplC => config.weighting = W::C,
+            C::SplZ => config.weighting = W::Z,
+            _ => return,
+        }
+        let what = format!(
+            "{}: {}",
+            m.config.name,
+            ac2_scene::spl::metric_name(config.weighting, config.time_weighting)
+        );
+        self.view.spl.leq = false;
+        self.focus(PaneKind::Spl);
+        let (meas, config) = (m.id, m.config);
+        self.call(out, Command::MeasUpdate { meas, config }, what);
+    }
+
+    /// How long the SPL meter's number holds a reading under time weighting `t`: the
+    /// preference when set, else the time weighting's own display period.
+    pub fn spl_display_period_s(&self, t: ac2_proto::model::TimeWeighting) -> f64 {
+        self.prefs.spl_hold_ms.map_or_else(
+            || ac2_scene::spl::display_period_s(t),
+            |ms| f64::from(ms) / 1e3,
+        )
+    }
+
+    /// Takes each SPL meter's newest frame as its displayed reading when the display
+    /// period has passed ([`ac2_scene::spl::SplHold`]).
+    fn fold_spl(&mut self, d: &DataSnapshot) {
+        use ac2_proto::FrameData;
+        if let Some(st) = self.daemon() {
+            let ids: Vec<MeasId> = st.measurements.iter().map(|m| m.id).collect();
+            self.spl_hold.retain(|k, _| ids.contains(k));
+        }
+        for tf in d.latest.frames.values() {
+            let FrameData::Spl(f) = &tf.frame.data else {
+                continue;
+            };
+            let period = self.spl_display_period_s(f.meta.time_weighting);
+            let mut held = self.spl_hold.remove(&f.meas);
+            ac2_scene::spl::SplHold::update(
+                &mut held,
+                f,
+                tf.frame.stamp.capture_wall_ns.0,
+                tf.frame.stamp.config_rev,
+                period,
+            );
+            if let Some(h) = held {
+                self.spl_hold.insert(f.meas, h);
+            }
         }
     }
 
@@ -3782,6 +3964,7 @@ impl AppState {
                     self.fold_peaks(&d);
                 }
                 self.fold_leq(&d);
+                self.fold_spl(&d);
                 self.data = Some(d);
             }
             ConnEvent::Trace(mut t, g) => {

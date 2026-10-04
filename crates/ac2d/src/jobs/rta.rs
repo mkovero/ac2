@@ -171,7 +171,7 @@ impl Analysis for Rta {
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
             | JobCmd::Smoothing { .. }
-            | JobCmd::Leq { .. } => {}
+            | JobCmd::Spl { .. } => {}
         }
     }
 

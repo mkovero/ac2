@@ -539,8 +539,10 @@ pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Spl
         return None;
     };
     st.daemon()?;
-    let cal = spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now);
-    let r = spl_readout(f, cal, Some(freshness(tf)));
+    // The number shows the held reading; the bar and the freshness follow the newest frame.
+    let held = st.spl_hold.get(&m.id).map_or(f, |h| &h.frame);
+    let cal = spl_cal(st, config.input, held.meta.cal, held.meta.mic_curve, now);
+    let r = spl_readout(held, f.meta.level, cal, Some(freshness(tf)));
     let status = status(st, &[tf], None, now);
     Some(spl_scene(&r, &status, theme, size))
 }

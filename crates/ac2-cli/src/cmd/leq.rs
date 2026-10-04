@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::{connect, find_meas, state};
 use crate::CliError;
-use crate::args::{Cli, LeqCmd, LeqExport, LeqNew, LeqSet, LeqWatch, MeterRef, PresetArg};
+use crate::args::{Cli, LeqCmd, LeqExport, LeqNew, LeqSet, LeqWatch, MeterRef, PresetArg, SplSet};
 use crate::output::{self, Out};
 use crate::watch;
 
@@ -272,6 +272,47 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
             text.push_str(p);
         }
         text
+    })?;
+    Ok(())
+}
+
+/// `spl set`: the meter's weightings, changed in place.
+pub(crate) async fn set_weightings(
+    cli: &Cli,
+    s: &SplSet,
+    weighting: Option<Weighting>,
+    time_weighting: Option<TimeWeighting>,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let st = state(&c).await?;
+    let m = meter(&st, &s.meter)?.ok_or_else(|| {
+        CliError::Usage("no SPL meter on that input: make one with `ac2 meas new spl`".into())
+    })?;
+    let cfg = spl_config(m)?;
+    let config = SplConfig {
+        weighting: weighting.unwrap_or(cfg.weighting),
+        time_weighting: time_weighting.unwrap_or(cfg.time_weighting),
+        ..cfg.clone()
+    };
+    let r = c
+        .call(Command::MeasUpdate {
+            meas: m.id,
+            config: MeasConfig {
+                name: m.config.name.clone(),
+                kind: MeasKind::Spl {
+                    config: config.clone(),
+                },
+            },
+        })
+        .await?;
+    let m = expect_body!("meas.update", r, ReplyBody::Measurement(m) => m)?;
+    out.emit(&m, || {
+        format!(
+            "{}: {}",
+            m.config.name,
+            ac2_scene::spl::metric_name(config.weighting, config.time_weighting)
+        )
     })?;
     Ok(())
 }

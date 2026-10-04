@@ -147,6 +147,8 @@ mod tests {
             pc(Scope::Spl),
             [
                 "G meter/Leq",
+                "F F/S/I",
+                "Z A/C/Z",
                 "B columns/tiles",
                 "Shift+B history",
                 "Shift+L windows",

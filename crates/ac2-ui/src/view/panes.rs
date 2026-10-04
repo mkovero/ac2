@@ -65,6 +65,26 @@ pub(crate) fn layout(visible: &[PaneKind], area: egui::Rect) -> Vec<(PaneKind, e
     out
 }
 
+/// Height of a plot's caption in the stage view.
+const STAGE_CAPTION_H: f32 = 22.0;
+
+/// The stage view's caption of `pane`: `Transfer · Main L`; none for the SPL pane, whose
+/// meter and Leq windows name themselves.
+fn stage_caption(st: &crate::state::AppState, pane: PaneKind) -> Option<String> {
+    if pane == PaneKind::Spl {
+        return None;
+    }
+    let parts: Vec<String> = [
+        Some(pane.title().to_owned()),
+        st.pane_meas(pane).map(|m| m.config.name.clone()),
+        st.pane_caption(pane),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    Some(parts.join(" · "))
+}
+
 fn slot(p: PaneKind) -> PlotSlot {
     PlotSlot(p as u32)
 }
@@ -175,6 +195,28 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
     let stage = app.state.stage_view();
     for (pane, rect) in layout(&visible, area) {
         if stage {
+            // The SPL meter and its Leq windows carry their own captions; a plot gets a slim
+            // one naming the pane and its measurement, and nothing else.
+            let rect = match stage_caption(&app.state, pane) {
+                Some(text) => {
+                    let strip = egui::Rect::from_min_size(
+                        rect.min,
+                        egui::vec2(rect.width(), STAGE_CAPTION_H),
+                    );
+                    ui.painter().text(
+                        strip.left_center() + egui::vec2(10.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        text,
+                        egui::FontId::proportional(13.0),
+                        ch.dim,
+                    );
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x, rect.min.y + STAGE_CAPTION_H),
+                        rect.max,
+                    )
+                }
+                None => rect,
+            };
             let built = if app.plots {
                 scene_for(app, pane, rect.size(), theme)
             } else {

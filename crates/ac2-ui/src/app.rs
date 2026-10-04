@@ -92,6 +92,11 @@ pub struct App {
     /// A daemon hosted in this process, chosen in the connect dialog. Declared after `conn`
     /// so the link (and the stimulus it may hold) goes first.
     embedded: Option<Embedded>,
+    /// The window's size and position as last seen in a normal (not full-screen, not
+    /// maximised) state: saved with the preferences on exit.
+    window: Option<crate::prefs::WindowPrefs>,
+    /// Whether the restored window size was checked against the screen.
+    window_checked: bool,
 }
 
 impl std::fmt::Debug for App {
@@ -151,6 +156,55 @@ impl App {
             passes: 0,
             connect: None,
             embedded: None,
+            window: None,
+            window_checked: false,
+        }
+    }
+
+    /// Follows the window's geometry, and once, makes a restored window fit its screen
+    /// (the screen it was saved on may be gone or smaller now).
+    fn follow_window(&mut self, ctx: &egui::Context) {
+        let (inner, outer, fullscreen, maximized, monitor) = ctx.input(|i| {
+            let v = i.viewport();
+            (
+                v.inner_rect,
+                v.outer_rect,
+                v.fullscreen,
+                v.maximized,
+                v.monitor_size,
+            )
+        });
+        if !self.window_checked
+            && let (Some(m), Some(r)) = (monitor, inner)
+            && m.x > 0.0
+            && m.y > 0.0
+        {
+            self.window_checked = true;
+            if r.width() > m.x || r.height() > m.y {
+                let size = egui::vec2(
+                    (m.x * 0.9).max(crate::prefs::WindowPrefs::MIN.0 as f32),
+                    (m.y * 0.9).max(crate::prefs::WindowPrefs::MIN.1 as f32),
+                );
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+                    m.x * 0.05,
+                    m.y * 0.05,
+                )));
+            }
+        }
+        if fullscreen == Some(true) || maximized == Some(true) {
+            return;
+        }
+        if let Some(r) = inner {
+            let (w, h) = (r.width().round(), r.height().round());
+            let min = crate::prefs::WindowPrefs::MIN;
+            if w >= min.0 as f32 && h >= min.1 as f32 {
+                self.window = Some(crate::prefs::WindowPrefs {
+                    width: w as u32,
+                    height: h as u32,
+                    pos: outer.map(|o| (o.min.x.round() as i32, o.min.y.round() as i32)),
+                });
+            }
         }
     }
 
@@ -330,6 +384,19 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
 }
 
 impl eframe::App for App {
+    /// The window's geometry goes into the preferences on the way out (the layout already
+    /// did, whenever it changed).
+    fn on_exit(&mut self) {
+        if self.window.is_some() && self.window != self.state.prefs.window {
+            self.state.prefs.window = self.window;
+            if let Some(path) = &self.prefs_path
+                && let Err(e) = self.state.prefs.save(path)
+            {
+                eprintln!("ac2-ui: {e}");
+            }
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.passes += 1;
@@ -366,6 +433,7 @@ impl eframe::App for App {
         if self.state.quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        self.follow_window(&ctx);
         if self.applied_fullscreen != self.state.fullscreen {
             self.applied_fullscreen = self.state.fullscreen;
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.state.fullscreen));

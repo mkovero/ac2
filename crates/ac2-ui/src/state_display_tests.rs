@@ -500,8 +500,10 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     assert_eq!(t.st.selected_trace, Some(TraceId(13)));
     assert_eq!(t.st.layout.visible(), [PaneKind::Transfer]);
     assert!(t.st.layout.maximized);
-    // Split: the focus stays.
+    // Split (W: full screen, W: split): the focus stays.
     t.key("W");
+    t.key("W");
+    assert!(!t.st.layout.maximized);
     t.key("Alt+2");
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
     assert_eq!(t.st.layout.focus, PaneKind::Spectrum);

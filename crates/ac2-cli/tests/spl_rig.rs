@@ -2,7 +2,7 @@
 //! output 1 returns on input 1 (loopback, −20 dBFS) and input 2 (acoustic path, −6 dB).
 //! The watch reads the input it was asked for, on a meter of its own: an older meter on the
 //! same input (one a killed watch left behind, integrating since long before the tone)
-//! never stands in for it.
+//! never stands in for it. `spl set` changes a running meter's weightings in place.
 #![allow(clippy::unwrap_used)]
 
 use std::time::{Duration, Instant};
@@ -168,6 +168,103 @@ async fn spl_watch_reads_its_input_on_a_fresh_meter() {
     assert!(s.measurements[0].running);
 
     lease.end().await.unwrap();
+    drop(c);
+    h.shutdown();
+}
+
+/// `spl set` changes a running meter's weightings in place: the same meter (id, running),
+/// the new weightings in its configuration, the Leq windows as they were.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn spl_set_changes_the_weightings_in_place() {
+    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
+    let listen = Listen::Local {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+    };
+    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
+    let ep = Endpoints {
+        ctrl: h.ctrl_endpoint().to_owned(),
+        data: h.data_endpoint().to_owned(),
+    };
+    let c = Client::connect(ClientConfig::new(ep.clone(), "spl-set-test"))
+        .await
+        .unwrap();
+    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    c.call(Command::SessionOpen {
+        config: SessionConfig {
+            backend: None,
+            input_device: DeviceSelector::Default,
+            output_device: DeviceSelector::Default,
+            input_channels: vec![0, 1],
+            output_channels: 2,
+            sample_rate_hz: None,
+            buffer_frames: None,
+            loopback: None,
+        },
+    })
+    .await
+    .unwrap();
+    let ReplyBody::Measurement(m) = c
+        .call(Command::MeasCreate {
+            config: MeasConfig {
+                name: "FOH SPL".into(),
+                kind: MeasKind::Spl {
+                    config: SplConfig::on_input(1, Weighting::A, TimeWeighting::Fast),
+                },
+            },
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("measurement");
+    };
+    c.call(Command::MeasStart { meas: m.id }).await.unwrap();
+
+    let run = |args: &'static [&'static str]| {
+        let ep = ep.clone();
+        async move {
+            let argv: Vec<&str> = [
+                "ac2",
+                "--ctrl-endpoint",
+                &ep.ctrl,
+                "--data-endpoint",
+                &ep.data,
+                "spl",
+                "set",
+            ]
+            .into_iter()
+            .chain(args.iter().copied())
+            .collect();
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let (mut so, mut se) = (Vec::new(), Vec::new());
+            let code = {
+                let mut out = Out::new(false, &mut so);
+                run_reporting(&cli, &mut out, &mut se).await
+            };
+            (code, String::from_utf8(so).unwrap())
+        }
+    };
+    let (code, text) = run(&["--weight", "c", "--time", "slow"]).await;
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(text.trim(), "FOH SPL: LCS");
+    let s = c.snapshot().await.unwrap().state;
+    let after = &s.measurements[0];
+    assert_eq!(after.id, m.id);
+    assert!(after.running);
+    let MeasKind::Spl { config } = &after.config.kind else {
+        panic!()
+    };
+    assert_eq!(
+        (config.weighting, config.time_weighting),
+        (Weighting::C, TimeWeighting::Slow)
+    );
+    assert_eq!(config.leq, ac2_proto::model::LeqConfig::default_windows());
+    // One of them alone keeps the other.
+    let (code, text) = run(&["--input", "2", "--time", "impulse"]).await;
+    assert_eq!(code, 0, "{text}");
+    assert_eq!(text.trim(), "FOH SPL: LCI");
+    // Nothing to set is a usage error.
+    assert!(Cli::try_parse_from(["ac2", "spl", "set"]).is_err());
     drop(c);
     h.shutdown();
 }

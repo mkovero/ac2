@@ -9,10 +9,14 @@
 //! Signal chain of [`SplMeter`]:
 //!
 //! ```text
-//! raw ──┬── [mic-curve correction, §5.7] ── A/C/Z ── time weighting ── L, Lmax, Lmin
-//!       │                                        └── Leq (f64 energy)
-//!       └── C/Z (uncorrected) ── |x| max ── Lpeak
+//! raw ──┬── [mic-curve correction, §5.7] ──┬── A ──┬── F, S, I ── L, Lmax, Lmin
+//!       │                                   ├── C ──┤
+//!       │                                   └── Z ──┴── Leq (f64 energy)
+//!       └── C, Z (uncorrected) ── |x| max ── Lpeak
 //! ```
+//!
+//! Every weighting combination runs at once; the meter reports the chosen one, so the
+//! choice changes on a running meter without a restart or a settling detector.
 //!
 //! The mic-curve correction is a minimum-phase FIR ([`crate::mic_curve`]) normalised to
 //! 0 dB at the calibrator frequency. Lpeak stays on the uncorrected samples (§5.3): the
@@ -319,32 +323,77 @@ pub enum PeakWeighting {
     Z,
 }
 
-/// SPL meter configuration.
+/// SPL meter configuration: the rate and the weightings the meter reports.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SplMeterConfig {
     /// Sample rate in Hz.
     pub fs: f64,
-    /// Frequency weighting for L, Lmax, Lmin and Leq.
+    /// Frequency weighting reported for L, Lmax, Lmin and Leq.
     pub weighting: Weighting,
-    /// Time weighting for L, Lmax and Lmin.
+    /// Time weighting reported for L, Lmax and Lmin.
     pub time_weighting: TimeWeighting,
-    /// Frequency weighting for Lpeak.
+    /// Frequency weighting reported for Lpeak.
     pub peak_weighting: PeakWeighting,
 }
 
+const TIME_WEIGHTINGS: [TimeWeighting; 3] = [
+    TimeWeighting::Fast,
+    TimeWeighting::Slow,
+    TimeWeighting::Impulse,
+];
+
+fn w_index(w: Weighting) -> usize {
+    match w {
+        Weighting::A => 0,
+        Weighting::C => 1,
+        Weighting::Z => 2,
+    }
+}
+
+fn t_index(t: TimeWeighting) -> usize {
+    match t {
+        TimeWeighting::Fast => 0,
+        TimeWeighting::Slow => 1,
+        TimeWeighting::Impulse => 2,
+    }
+}
+
+fn p_index(p: PeakWeighting) -> usize {
+    match p {
+        PeakWeighting::C => 0,
+        PeakWeighting::Z => 1,
+    }
+}
+
+/// Lmin is meaningless while a detector rises from its silent initial state; five rise time
+/// constants bring it within 0.03 dB of a steady input.
+fn settle_samples(t: TimeWeighting, fs: f64) -> u64 {
+    (5.0 * t.rise_s() * fs).ceil() as u64
+}
+
 /// Sound level meter on one input: time-weighted level with Lmax/Lmin, Leq and Lpeak.
+///
+/// Every frequency weighting (A, C, Z) runs with every time weighting (F, S, I), and the
+/// peak with C and Z, all the time; [`SplMeter::select`] only chooses which are reported. A
+/// change of weighting therefore reads a settled detector at once (a Slow detector started
+/// at the switch would take 5 s to settle), and Lmax, Lmin, Leq and Lpeak of the newly
+/// chosen weighting cover the same interval as before the change.
 #[derive(Debug, Clone)]
 pub struct SplMeter {
     cfg: SplMeterConfig,
-    weight: WeightingFilter,
-    peak_weight: WeightingFilter,
-    detector: TimeWeightedDetector,
-    leq: Leq,
-    peak: PeakDetector,
-    max_ms: f64,
-    min_ms: f64,
-    settle_left: u64,
-    settle_samples: u64,
+    weight_a: WeightingFilter,
+    weight_c: WeightingFilter,
+    peak_c: WeightingFilter,
+    /// `[frequency weighting][time weighting]`.
+    detectors: [[TimeWeightedDetector; 3]; 3],
+    leq: [Leq; 3],
+    /// C, Z.
+    peak: [PeakDetector; 2],
+    max_ms: [[f64; 3]; 3],
+    min_ms: [[f64; 3]; 3],
+    /// Samples before each time weighting's Lmin counts.
+    settle_left: [u64; 3],
+    settle_samples: [u64; 3],
     correction: Option<PartitionedFir>,
     corrected: Vec<f64>,
 }
@@ -352,27 +401,37 @@ pub struct SplMeter {
 impl SplMeter {
     /// Builds the meter; fails if the rate is too low for A/C weighting.
     pub fn new(cfg: SplMeterConfig) -> Result<Self, WeightingError> {
-        let peak_w = match cfg.peak_weighting {
-            PeakWeighting::C => Weighting::C,
-            PeakWeighting::Z => Weighting::Z,
-        };
-        // Lmin is meaningless while the detector rises from its silent initial state; five
-        // rise time constants bring it within 0.03 dB of a steady input.
-        let settle_samples = (5.0 * cfg.time_weighting.rise_s() * cfg.fs).ceil() as u64;
+        let fs = cfg.fs;
+        let settle = TIME_WEIGHTINGS.map(|t| settle_samples(t, fs));
+        let row = || TIME_WEIGHTINGS.map(|t| TimeWeightedDetector::new(t, fs));
         Ok(Self {
-            weight: WeightingFilter::new(cfg.weighting, cfg.fs)?,
-            peak_weight: WeightingFilter::new(peak_w, cfg.fs)?,
-            detector: TimeWeightedDetector::new(cfg.time_weighting, cfg.fs),
-            leq: Leq::new(cfg.fs),
-            peak: PeakDetector::default(),
-            max_ms: 0.0,
-            min_ms: f64::INFINITY,
-            settle_left: settle_samples,
-            settle_samples,
+            weight_a: WeightingFilter::new(Weighting::A, fs)?,
+            weight_c: WeightingFilter::new(Weighting::C, fs)?,
+            peak_c: WeightingFilter::new(Weighting::C, fs)?,
+            detectors: [row(), row(), row()],
+            leq: [Leq::new(fs); 3],
+            peak: [PeakDetector::default(); 2],
+            max_ms: [[0.0; 3]; 3],
+            min_ms: [[f64::INFINITY; 3]; 3],
+            settle_left: settle,
+            settle_samples: settle,
             correction: None,
             corrected: Vec::new(),
             cfg,
         })
+    }
+
+    /// Chooses the weightings reported from now on. Nothing restarts: every combination has
+    /// been measuring all along, over the same interval.
+    pub fn select(
+        &mut self,
+        weighting: Weighting,
+        time_weighting: TimeWeighting,
+        peak_weighting: PeakWeighting,
+    ) {
+        self.cfg.weighting = weighting;
+        self.cfg.time_weighting = time_weighting;
+        self.cfg.peak_weighting = peak_weighting;
     }
 
     /// Runs the time-weighted, Lmax/Lmin and Leq paths through `taps` (a mic-curve
@@ -384,9 +443,10 @@ impl SplMeter {
         let lat = self.correction.as_ref().map_or(0, PartitionedFir::latency);
         self.corrected = vec![0.0; lat];
         // The corrected path starts one partition late: Lmin waits for it too.
-        let base = (5.0 * self.cfg.time_weighting.rise_s() * self.cfg.fs).ceil() as u64;
-        self.settle_samples = base + lat as u64;
-        self.settle_left = self.settle_left.max(self.settle_samples);
+        for (i, t) in TIME_WEIGHTINGS.into_iter().enumerate() {
+            self.settle_samples[i] = settle_samples(t, self.cfg.fs) + lat as u64;
+            self.settle_left[i] = self.settle_left[i].max(self.settle_samples[i]);
+        }
     }
 
     /// Whether a mic-curve correction filter is in the path.
@@ -394,7 +454,7 @@ impl SplMeter {
         self.correction.is_some()
     }
 
-    /// Configuration.
+    /// Configuration: the rate and the weightings reported.
     pub fn config(&self) -> &SplMeterConfig {
         &self.cfg
     }
@@ -402,8 +462,8 @@ impl SplMeter {
     /// Processes raw input samples (FS). Does not allocate.
     ///
     /// The mic-curve correction (PLAN.md §5.7), when set, goes on `x` immediately before
-    /// `self.weight` — so it feeds the time-weighted, Lmax/Lmin and Leq paths — and never
-    /// before `self.peak_weight`: LCpeak stays on the uncorrected samples (§5.3).
+    /// the frequency weightings — so it feeds the time-weighted, Lmax/Lmin and Leq paths —
+    /// and never before the peak path: LCpeak stays on the uncorrected samples (§5.3).
     pub fn process(&mut self, block: &[f64]) {
         let Some(mut fir) = self.correction.take() else {
             for &x in block {
@@ -426,59 +486,97 @@ impl SplMeter {
     /// One sample: `x` raw (peak path), `xc` mic-corrected (everything else).
     #[inline]
     fn step(&mut self, x: f64, xc: f64) {
-        let y = self.weight.process_sample(xc);
-        let ms = self.detector.push(y);
-        self.leq.push_sample(y);
-        self.peak.push(self.peak_weight.process_sample(x));
-        self.max_ms = self.max_ms.max(ms);
-        if self.settle_left > 0 {
-            self.settle_left -= 1;
-        } else {
-            self.min_ms = self.min_ms.min(ms);
+        let ys = [
+            self.weight_a.process_sample(xc),
+            self.weight_c.process_sample(xc),
+            xc,
+        ];
+        let settled = self.settle_left.map(|n| n == 0);
+        for (w, &y) in ys.iter().enumerate() {
+            self.leq[w].push_sample(y);
+            let (dets, maxs, mins) = (
+                &mut self.detectors[w],
+                &mut self.max_ms[w],
+                &mut self.min_ms[w],
+            );
+            for (((d, max), min), &ok) in dets.iter_mut().zip(maxs).zip(mins).zip(&settled) {
+                let ms = d.push(y);
+                *max = max.max(ms);
+                if ok {
+                    *min = min.min(ms);
+                }
+            }
         }
+        for n in &mut self.settle_left {
+            *n = n.saturating_sub(1);
+        }
+        self.peak[0].push(self.peak_c.process_sample(x));
+        self.peak[1].push(x);
     }
 
-    /// Current levels in dBFS.
+    /// Current levels in dBFS, in the weightings reported.
     pub fn levels(&self) -> Levels {
+        self.levels_of(
+            self.cfg.weighting,
+            self.cfg.time_weighting,
+            self.cfg.peak_weighting,
+        )
+    }
+
+    /// Current levels in dBFS in any weightings.
+    pub fn levels_of(&self, w: Weighting, t: TimeWeighting, p: PeakWeighting) -> Levels {
+        let (wi, ti) = (w_index(w), t_index(t));
+        let min = self.min_ms[wi][ti];
         Levels {
             scale: LevelScale::Dbfs,
-            level: self.detector.level_dbfs(),
-            lmax: power_dbfs(self.max_ms),
-            lmin: if self.min_ms.is_finite() {
-                power_dbfs(self.min_ms)
+            level: self.detectors[wi][ti].level_dbfs(),
+            lmax: power_dbfs(self.max_ms[wi][ti]),
+            lmin: if min.is_finite() {
+                power_dbfs(min)
             } else {
                 f64::NAN
             },
-            leq: self.leq.level_dbfs(),
-            lpeak: self.peak.level_dbfs(),
-            duration_s: self.leq.duration_s(),
+            leq: self.leq[wi].level_dbfs(),
+            lpeak: self.peak[p_index(p)].level_dbfs(),
+            duration_s: self.leq[wi].duration_s(),
         }
     }
 
-    /// The Leq accumulator of the current interval.
+    /// The Leq accumulator of the current interval, in the frequency weighting reported.
     pub fn leq(&self) -> &Leq {
-        &self.leq
+        &self.leq[w_index(self.cfg.weighting)]
     }
 
-    /// Starts a new interval for Leq, Lpeak, Lmax and Lmin. Filters and detector keep their
+    /// Starts a new interval for Leq, Lpeak, Lmax and Lmin. Filters and detectors keep their
     /// state, so the running level is continuous.
     pub fn reset_interval(&mut self) {
-        self.leq.reset();
-        self.peak.reset();
-        self.max_ms = self.detector.mean_square();
-        self.min_ms = f64::INFINITY;
+        for l in &mut self.leq {
+            l.reset();
+        }
+        for p in &mut self.peak {
+            p.reset();
+        }
+        for (w, row) in self.detectors.iter().enumerate() {
+            for (t, d) in row.iter().enumerate() {
+                self.max_ms[w][t] = d.mean_square();
+            }
+        }
+        self.min_ms = [[f64::INFINITY; 3]; 3];
     }
 
-    /// Back to the initial state: silent filters and detector, empty interval.
+    /// Back to the initial state: silent filters and detectors, empty interval.
     pub fn reset(&mut self) {
-        self.weight.reset();
-        self.peak_weight.reset();
+        self.weight_a.reset();
+        self.weight_c.reset();
+        self.peak_c.reset();
         if let Some(c) = &mut self.correction {
             c.reset();
         }
-        self.detector.reset();
+        for d in self.detectors.iter_mut().flatten() {
+            d.reset();
+        }
         self.reset_interval();
-        self.max_ms = 0.0;
+        self.max_ms = [[0.0; 3]; 3];
         self.settle_left = self.settle_samples;
     }
 }
@@ -542,6 +640,154 @@ mod tests {
                 })
                 .collect();
             g.assert_f64(key, &resp);
+        }
+    }
+
+    /// F, S and I against the analytic detector of `tools/refgen` (`spl_time_weighting`):
+    /// the level after a step of the mean square (10·lg(1 − e^(−t/τ)), τ = 125 ms, 1 s,
+    /// 35 ms), its fall after the signal stops (−4.343·t/τ dB, τ = 125 ms, 1 s, 1.5 s) and the
+    /// I-weighted maximum of 4 kHz tonebursts.
+    #[test]
+    fn time_weighting_matches_golden() {
+        let g = GoldenSet::load("spl_time_weighting").expect("golden");
+        let fs = g.parameter("fs_hz").and_then(|v| v.as_f64()).expect("fs");
+        let tws = [
+            ("f", TimeWeighting::Fast),
+            ("s", TimeWeighting::Slow),
+            ("i", TimeWeighting::Impulse),
+        ];
+        let step_ms = g.f64("step_ms").expect("step_ms");
+        let decay_ms = g.f64("decay_ms").expect("decay_ms");
+        // Feeds `x` until sample `upto` (exclusive) and returns the mean square there.
+        let run = |d: &mut TimeWeightedDetector, n: &mut usize, upto: usize, x: f64| {
+            let mut ms = d.mean_square();
+            while *n < upto {
+                ms = d.push(x);
+                *n += 1;
+            }
+            ms
+        };
+        for (name, tw) in tws {
+            // Step: x = 1 from sample 0, read at the last sample of the first t seconds.
+            let mut d = TimeWeightedDetector::new(tw, fs);
+            let mut n = 0usize;
+            let levels: Vec<f64> = step_ms
+                .iter()
+                .map(|&t| 10.0 * run(&mut d, &mut n, (t * 1e-3 * fs).round() as usize, 1.0).log10())
+                .collect();
+            g.assert_f64(&format!("step_{name}_db"), &levels);
+            // Fall: 10 s of x = 1, then silence.
+            let mut d = TimeWeightedDetector::new(tw, fs);
+            let mut n = 0usize;
+            let at_stop = run(&mut d, &mut n, (10.0 * fs) as usize, 1.0);
+            let mut n = 0usize;
+            let levels: Vec<f64> = decay_ms
+                .iter()
+                .map(|&t| {
+                    let ms = run(&mut d, &mut n, (t * 1e-3 * fs).round() as usize, 0.0);
+                    10.0 * (ms / at_stop).log10()
+                })
+                .collect();
+            g.assert_f64(&format!("decay_{name}_db"), &levels);
+            // The analytic fall the golden values follow, as a sanity bound.
+            for (&t, l) in decay_ms.iter().zip(&levels) {
+                let want = -10.0 * std::f64::consts::E.log10() * t * 1e-3 / tw.fall_s();
+                assert!(
+                    (l - want).abs() < 0.01,
+                    "{tw:?} fall at {t} ms: {l} vs {want}"
+                );
+            }
+        }
+        let tb = g.f64("tb_i_ms").expect("tb");
+        let amp = 0.5;
+        let resp: Vec<f64> = tb
+            .iter()
+            .map(|&ms| {
+                let x = burst(fs, amp, 0.01, ms * 1e-3, 0.2);
+                let mut d = TimeWeightedDetector::new(TimeWeighting::Impulse, fs);
+                let max = x.iter().fold(0.0f64, |m, &v| m.max(d.push(v)));
+                10.0 * (max / (amp * amp / 2.0)).log10()
+            })
+            .collect();
+        g.assert_f64("response_i_db", &resp);
+    }
+
+    /// IEC 60651 Impulse single-burst responses of an A-weighted 4 kHz tone (−3.6, −8.8 and
+    /// −12.6 dB at 20, 5 and 2 ms, type 1 tolerances ±1.5, ±2 and −4/+2 dB) at every rate, and
+    /// the held value: 1 s after a 5 ms burst LAI has fallen 2.9 dB, LAF some 35 dB.
+    #[test]
+    fn impulse_bursts_per_rate() {
+        let amp = 0.5;
+        for fs in RATES {
+            let mut m = meter(fs, Weighting::A, TimeWeighting::Impulse, PeakWeighting::Z);
+            m.process(&sine(4000.0, amp, fs, fs as usize));
+            m.reset_interval();
+            m.process(&sine(4000.0, amp, fs, fs as usize));
+            let steady = m.levels().leq;
+            for (tb_ms, dref, minus, plus) in [
+                (20.0, -3.6, 1.5, 1.5),
+                (5.0, -8.8, 2.0, 2.0),
+                (2.0, -12.6, 4.0, 2.0),
+            ] {
+                let x = burst(fs, amp, 0.01, tb_ms * 1e-3, 0.5);
+                let mut m = meter(fs, Weighting::A, TimeWeighting::Impulse, PeakWeighting::Z);
+                m.process(&x);
+                let d = m.levels().lmax - steady - dref;
+                assert!(d >= -minus && d <= plus, "{fs} Tb={tb_ms}: {d:.3} dB");
+                assert!(
+                    d.abs() < 0.15,
+                    "{fs} Tb={tb_ms}: {d:.3} dB off the analytic"
+                );
+            }
+            let x = burst(fs, amp, 0.01, 0.005, 1.0);
+            let mut m = meter(fs, Weighting::A, TimeWeighting::Impulse, PeakWeighting::Z);
+            m.process(&x);
+            let l = m.levels();
+            let fast = m.levels_of(Weighting::A, TimeWeighting::Fast, PeakWeighting::Z);
+            assert!(
+                (l.lmax - l.level - 2.9).abs() < 0.1,
+                "{fs}: {}",
+                l.lmax - l.level
+            );
+            assert!(
+                fast.lmax - fast.level > 30.0,
+                "{fs}: F {}",
+                fast.lmax - fast.level
+            );
+        }
+    }
+
+    /// A meter switched to other weightings mid-run reads exactly what a meter built with
+    /// them from the start reads: level, Lmax, Lmin, Leq and Lpeak over the same interval.
+    #[test]
+    fn select_reads_every_combination_of_the_same_interval() {
+        let fs = 48_000.0;
+        let mut x = sine(1000.0, 0.5, fs, (fs * 3.0) as usize);
+        x.extend(sine(63.0, 0.05, fs, (fs * 4.0) as usize));
+        x.extend(burst(fs, 0.3, 0.0, 0.2, 0.5));
+        let (a, b) = x.split_at(x.len() / 2);
+        let mut switched = meter(fs, Weighting::A, TimeWeighting::Fast, PeakWeighting::C);
+        switched.process(a);
+        let bits =
+            |v: Levels| [v.level, v.lmax, v.lmin, v.leq, v.lpeak, v.duration_s].map(f64::to_bits);
+        for w in [Weighting::A, Weighting::C, Weighting::Z] {
+            for tw in [
+                TimeWeighting::Fast,
+                TimeWeighting::Slow,
+                TimeWeighting::Impulse,
+            ] {
+                for pw in [PeakWeighting::C, PeakWeighting::Z] {
+                    let mut s = switched.clone();
+                    s.select(w, tw, pw);
+                    s.process(b);
+                    let mut fresh = meter(fs, w, tw, pw);
+                    fresh.process(&x);
+                    let (l, f) = (s.levels(), fresh.levels());
+                    assert_eq!(bits(l), bits(f), "{w:?} {tw:?} {pw:?}");
+                    assert_eq!(s.config().weighting, w);
+                    assert_eq!(s.leq().level_dbfs().to_bits(), f.leq.to_bits());
+                }
+            }
         }
     }
 

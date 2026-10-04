@@ -2057,11 +2057,13 @@ fn prompt_text(t: &mut T, c: CommandId, text: &str) -> Vec<Request> {
 
 #[test]
 fn stimulus_outputs_are_remembered_per_device() {
-    // First run: output 1, nothing to save.
+    // First run: output 1, no outputs to remember (the layout is, with the measurements
+    // the panes show).
     let mut t = T::new();
     assert_eq!(t.st.stimulus.outputs, vec![0]);
     assert!(t.st.stimulus.describe().ends_with("→ out 1"));
-    assert!(!t.st.prefs_dirty);
+    assert!(t.st.prefs.outputs.is_empty());
+    t.st.prefs_dirty = false;
     // Choosing outputs remembers them for the session's output device.
     prompt_text(&mut t, CommandId::StimulusOutputs, "2, 3");
     assert_eq!(t.st.stimulus.outputs, vec![1, 2]);
@@ -4381,8 +4383,12 @@ fn leq_layout_keys_and_prefs() {
     t.st.stimulus.phase = StimPhase::Armed;
     assert!(!t.st.stage_view());
     t.st.stimulus.phase = StimPhase::Idle;
+    // The meter is full screen as well; W goes back to the split layout.
     t.key("G");
+    assert!(t.st.stage_view());
+    t.key("W");
     assert!(!t.st.stage_view());
+    assert!(!t.st.layout.maximized && !t.st.fullscreen);
 }
 
 /// A resync (no daemon state for a moment) is not "every meter deleted": the history strip
@@ -4492,10 +4498,7 @@ fn key_hints_follow_the_focused_pane() {
     assert!(ir.contains(&"G linear/log/ETC".to_owned()), "{ir:?}");
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
-    assert_eq!(
-        spl[..3],
-        ["G meter/Leq", "B columns/tiles", "Shift+B history"]
-    );
+    assert_eq!(spl[..3], ["G meter/Leq", "F F/S/I", "Z A/C/Z"]);
     // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR.
     t.key("Alt+5");
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
@@ -4559,8 +4562,8 @@ fn key_hints_use_the_live_keymap_and_never_show_on_stage() {
     assert!(t.st.prefs.key_hints);
     assert!(!t.st.key_hints_shown());
     assert_eq!(hint_texts(&t, PaneKind::Spl), None);
-    // Out of it (back to the meter), the line is back.
-    t.key("G");
+    // Out of it (W: the split layout), the line is back.
+    t.key("W");
     assert!(!t.st.stage_view());
     assert!(hint_texts(&t, PaneKind::Spl).is_some());
 }
@@ -4602,3 +4605,311 @@ fn pane_caption_shortens_to_the_selected_trace() {
 
 #[path = "state_display_tests.rs"]
 mod display;
+
+/// An `spl` frame of meter 4 at `at_ms` (daemon clock) under `rev`.
+fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> ConnEvent {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{Frame, FrameData, SplFrame, SplMeta};
+    let data = FrameData::Spl(SplFrame {
+        meas: MeasId(4),
+        meta: SplMeta {
+            scale: LevelScale::DbSpl,
+            weighting: Weighting::A,
+            time_weighting: tw,
+            peak_weighting: PeakWeighting::C,
+            level,
+            lmax: 100.0,
+            lmin: 80.0,
+            leq: 90.0,
+            lpeak: 110.0,
+            duration: Seconds(60.0),
+            cal: CalStatus::Uncalibrated,
+            mic_curve: false,
+        },
+    });
+    let mut stamp = ac2_proto::samples::stamp(None);
+    stamp.seq = seq;
+    stamp.capture_wall_ns = WallNs(at_ms * 1_000_000);
+    stamp.config_rev = Rev(rev);
+    let f = TopicFrame {
+        topic: data.topic(),
+        frame: Arc::new(Frame { stamp, data }),
+        received: Instant::now(),
+        since_new: std::time::Duration::ZERO,
+        age: Some(0.0),
+        stale: false,
+    };
+    let mut latest = Latest::default();
+    latest.frames.insert(f.topic.to_string(), f);
+    ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids: Default::default(),
+        drained: Instant::now(),
+    }))
+}
+
+fn spl_update(r: &[Request]) -> Option<(SplConfig, String)> {
+    r.iter().find_map(|r| match r {
+        Request::Call {
+            cmd: Command::MeasUpdate { config, .. },
+            what,
+        } => match &config.kind {
+            MeasKind::Spl { config } => Some((config.clone(), what.clone())),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+/// F steps the meter's time weighting F → S → I → F, Z its frequency weighting A → C → Z →
+/// A, in place (`meas.update` of the same input, the Leq windows as they were); either shows
+/// the meter. The palette names each choice. Without a meter, it says so.
+#[test]
+fn spl_keys_cycle_the_weightings() {
+    let mut t = T::new();
+    assert!(
+        t.st.update(Msg::Command(CommandId::SplSlow), &t.keys)
+            .is_empty()
+    );
+    assert!(
+        t.last_toast().contains("no SPL meter"),
+        "{}",
+        t.last_toast()
+    );
+    let mut state = with_spl();
+    t.conn(mirror(state.clone()));
+    t.key("Alt+4");
+    t.key("G");
+    assert!(t.st.view.spl.leq);
+    let mut seen = Vec::new();
+    for key in ["F", "F", "F", "Z", "Z", "Z"] {
+        let (cfg, what) = spl_update(&t.key(key)).expect(key);
+        assert_eq!(cfg.input, 1);
+        assert_eq!(cfg.leq, LeqConfig::default_windows());
+        seen.push(what);
+        // The daemon applies it.
+        state.measurements[2].config.kind = MeasKind::Spl { config: cfg };
+        t.conn(mirror(state.clone()));
+    }
+    assert_eq!(
+        seen,
+        [
+            "FOH SPL: LAS",
+            "FOH SPL: LAI",
+            "FOH SPL: LAF",
+            "FOH SPL: LCF",
+            "FOH SPL: LZF",
+            "FOH SPL: LAF"
+        ]
+    );
+    assert!(!t.st.view.spl.leq, "the meter shows");
+    for (c, want) in [
+        (CommandId::SplSlow, "FOH SPL: LAS"),
+        (CommandId::SplImpulse, "FOH SPL: LAI"),
+        (CommandId::SplC, "FOH SPL: LCF"),
+        (CommandId::SplZ, "FOH SPL: LZF"),
+        (CommandId::SplFast, "FOH SPL: LAF"),
+        (CommandId::SplA, "FOH SPL: LAF"),
+    ] {
+        t.key("Alt+1");
+        let r = t.st.update(Msg::Command(c), &t.keys);
+        assert_eq!(spl_update(&r).map(|x| x.1).as_deref(), Some(want));
+        assert_eq!(t.st.layout.focus, PaneKind::Spl);
+    }
+}
+
+/// Frames every 100 ms: the number takes a new reading every 0.5 s with F and every 1 s with
+/// S (the reading at that instant, the bar live in between); a new weighting shows at once;
+/// the preference overrides the period.
+#[test]
+fn spl_number_holds_for_the_display_period() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    let theme = ac2_scene::theme::Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 800.0,
+        height: 500.0,
+    };
+    let now = crate::scenes::Now {
+        instant: Instant::now(),
+        wall: WallNs(0),
+    };
+    let held = |t: &T| t.st.spl_hold.get(&MeasId(4)).map(|h| h.frame.meta.level);
+    let mut changes = Vec::new();
+    let mut last = None;
+    for k in 0..20u64 {
+        t.conn(spl_data(
+            k + 1,
+            1000 + k * 100,
+            90.0 + k as f64,
+            TimeWeighting::Fast,
+            1,
+        ));
+        if held(&t) != last {
+            last = held(&t);
+            changes.push(k);
+        }
+        // The number is the held reading; the bar follows the newest frame.
+        let s = crate::scenes::spl(&t.st, &theme, size, now).expect("scene");
+        let texts: Vec<&str> = s.scene.layers[2]
+            .labels
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        let want = ac2_scene::format::level(last.expect("held"));
+        assert!(texts.contains(&want.as_str()), "{k}: {want} in {texts:?}");
+    }
+    assert_eq!(changes, [0, 5, 10, 15]);
+    // Slow under a new rev: at once, then once a second.
+    let mut changes = Vec::new();
+    for k in 20..50u64 {
+        t.conn(spl_data(
+            k + 1,
+            1000 + k * 100,
+            90.0 + k as f64,
+            TimeWeighting::Slow,
+            2,
+        ));
+        if held(&t) != last {
+            last = held(&t);
+            changes.push(k);
+        }
+    }
+    assert_eq!(changes, [20, 30, 40]);
+    // A display period of 200 ms from ui.toml.
+    t.st.prefs.spl_hold_ms = Some(200);
+    assert_eq!(t.st.spl_display_period_s(TimeWeighting::Slow), 0.2);
+    let mut n = 0;
+    for k in 50..60u64 {
+        t.conn(spl_data(
+            k + 1,
+            1000 + k * 100,
+            90.0 + k as f64,
+            TimeWeighting::Slow,
+            2,
+        ));
+        if held(&t) != last {
+            last = held(&t);
+            n += 1;
+        }
+    }
+    assert_eq!(n, 5);
+}
+
+/// W: split → the focused pane alone → full screen (the stage view, on any pane) → split.
+/// F11 alone is the window full screen in whatever layout; with one pane, the stage view.
+/// The top bar comes back whenever a stimulus is armed.
+#[test]
+fn w_cycles_split_maximised_full_screen() {
+    let mut t = T::new();
+    assert!(!t.st.layout.maximized && !t.st.fullscreen);
+    t.key("W");
+    assert!(t.st.layout.maximized && !t.st.fullscreen);
+    assert!(!t.st.stage_view());
+    t.key("W");
+    assert!(t.st.layout.maximized && t.st.fullscreen);
+    assert!(t.st.stage_view(), "the transfer pane full screen");
+    assert!(!t.st.key_hints_shown());
+    t.st.stimulus.phase = StimPhase::Armed;
+    assert!(!t.st.stage_view());
+    t.st.stimulus.phase = StimPhase::Idle;
+    t.key("W");
+    assert!(!t.st.layout.maximized && !t.st.fullscreen);
+    // F11 in the split layout: the window full screen, the layout as it was.
+    t.key("F11");
+    assert!(t.st.fullscreen && !t.st.layout.maximized && !t.st.stage_view());
+    t.key("W");
+    assert!(t.st.stage_view());
+    t.key("F11");
+    assert!(t.st.layout.maximized && !t.st.fullscreen && !t.st.stage_view());
+    t.key("F11");
+    assert!(t.st.stage_view());
+    t.key("W");
+    assert!(!t.st.layout.maximized && !t.st.fullscreen);
+}
+
+/// The layout goes into the preferences whenever it changes, measurements by name; the next
+/// start (preferences set before the link) comes back to it, the pane's measurement once
+/// the daemon's state is known. One that is gone falls back quietly.
+#[test]
+fn layout_is_remembered_and_restored() {
+    use ac2_scene::view::IrMode;
+    let mut state = with_spl();
+    state.measurements.push(meas(5, "Stage SPL", spl_meter()));
+    let mut t = T::new();
+    t.conn(mirror(state.clone()));
+    t.st.prefs_dirty = false;
+    t.key("Alt+3");
+    t.key("G");
+    assert_eq!(t.st.view.ir.mode, IrMode::Log);
+    t.key("Alt+4");
+    t.key("N");
+    assert_eq!(t.st.pane_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(5)));
+    t.key("G");
+    t.key("W");
+    t.key("W");
+    assert!(t.st.prefs_dirty);
+    let l = t.st.prefs.layout.clone();
+    assert_eq!(l.focus, PaneKind::Spl);
+    assert!(l.maximized && l.fullscreen && l.spl_leq);
+    assert_eq!(l.ir_mode, IrMode::Log);
+    assert_eq!(
+        l.measurements.get(&PaneKind::Spl).map(String::as_str),
+        Some("Stage SPL")
+    );
+    assert_eq!(
+        l.measurements.get(&PaneKind::Transfer).map(String::as_str),
+        Some("Main L")
+    );
+    // Ticks change nothing and write nothing.
+    t.st.prefs_dirty = false;
+    t.st.update(
+        Msg::Tick {
+            now_s: 5.0,
+            dt_s: 0.1,
+        },
+        &t.keys,
+    );
+    assert!(!t.st.prefs_dirty);
+
+    // The next start.
+    let prefs = t.st.prefs.clone();
+    let connected = ConnEvent::Connected {
+        target: "local daemon".into(),
+        server: "ac2d test".into(),
+        client_id: ClientId("c1".into()),
+    };
+    let mut u = T::disconnected();
+    u.st.set_prefs(prefs.clone());
+    assert_eq!(u.st.layout.focus, PaneKind::Spl);
+    assert!(u.st.layout.maximized && u.st.fullscreen && u.st.view.spl.leq);
+    assert_eq!(u.st.view.ir.mode, IrMode::Log);
+    assert_eq!(u.st.stimulus.phase, StimPhase::Idle);
+    // Before the daemon's state, the remembered names stay as they were.
+    assert_eq!(u.st.layout_prefs(), prefs.layout);
+    u.conn(connected.clone());
+    u.conn(mirror(state.clone()));
+    assert_eq!(u.st.pane_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(5)));
+    assert!(u.st.stage_view());
+    assert_eq!(u.st.layout_prefs(), prefs.layout);
+
+    // The remembered meter is gone: the pane shows its usual choice, nothing is said.
+    let mut gone = prefs.clone();
+    gone.layout
+        .measurements
+        .insert(PaneKind::Spl, "Gone SPL".into());
+    let mut v = T::disconnected();
+    v.st.set_prefs(gone);
+    v.conn(connected);
+    v.conn(mirror(state));
+    assert_eq!(v.st.pane_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(4)));
+    assert!(!v.st.toasts.iter().any(|t| t.error), "{:?}", v.st.toasts);
+    assert_eq!(
+        v.st.prefs
+            .layout
+            .measurements
+            .get(&PaneKind::Spl)
+            .map(String::as_str),
+        Some("FOH SPL")
+    );
+}

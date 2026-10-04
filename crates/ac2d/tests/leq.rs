@@ -578,3 +578,113 @@ async fn a_new_log_starts_over_and_keeps_the_windows() {
         .await
         .unwrap();
 }
+
+/// The newest `spl` frame (with its stamp's rev) once `ok` holds.
+async fn spl_until(
+    c: &Client,
+    what: &str,
+    ok: impl Fn(&ac2_proto::frame::SplFrame, ac2_proto::units::Rev) -> bool,
+) -> ac2_proto::frame::SplFrame {
+    let topic = Topic::Data {
+        meas: M,
+        stream: Stream::Spl,
+    };
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Some(f) = c.latest().unwrap().get(&topic)
+            && let FrameData::Spl(s) = &f.frame.data
+            && ok(s, f.frame.stamp.config_rev)
+        {
+            return s.clone();
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Weightings change on a running meter in place: the next frames read the new weighting
+/// at once at its settled level (Slow too: it ran all along), over the same interval; the
+/// Leq windows, their states and the per-second log carry on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn weightings_change_in_place_and_keep_the_log() {
+    init_log();
+    let h = Daemon::start(config(realtime_rig(), local_tcp())).unwrap();
+    let c = connect(&h).await;
+    c.call(Command::SessionOpen {
+        config: session(false),
+    })
+    .await
+    .unwrap();
+    c.call(Command::MeasCreate {
+        config: meter(vec![window(3.0, None), window(30.0, None)]),
+    })
+    .await
+    .unwrap();
+    c.call(Command::MeasStart { meas: M }).await.unwrap();
+    c.subscribe(Subscription::Meas(M)).unwrap();
+    let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
+    // −26.02 dBFS of 1 kHz at the input.
+    set_level(&lease, -20.0).await;
+    let before = spl_until(&c, "LAF of the tone over 4 s", |f, _| {
+        f.meta.duration.0 >= 4.0 && (f.meta.level + 26.02).abs() < 0.1
+    })
+    .await;
+    assert_eq!(
+        (before.meta.weighting, before.meta.time_weighting),
+        (Weighting::A, TimeWeighting::Fast)
+    );
+    let leq_before = leq_until(&c, "4 s in the 30 s window", |f| f.elapsed[1] >= 4.0).await;
+    let rows_before = page(&c, 0).await.total;
+    let entity = state(&c).await.spl_logs[0].clone();
+
+    let mut cfg = meter(vec![window(3.0, None), window(30.0, None)]);
+    let MeasKind::Spl { config } = &mut cfg.kind else {
+        unreachable!()
+    };
+    config.weighting = Weighting::C;
+    config.time_weighting = TimeWeighting::Slow;
+    config.peak_weighting = PeakWeighting::Z;
+    let ReplyBody::Measurement(m) = c
+        .call(Command::MeasUpdate {
+            meas: M,
+            config: cfg,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(m.running);
+    let after = spl_until(&c, "a frame under the new rev", |_, rev| {
+        rev >= m.config_rev
+    })
+    .await;
+    assert_eq!(
+        (
+            after.meta.weighting,
+            after.meta.time_weighting,
+            after.meta.peak_weighting
+        ),
+        (Weighting::C, TimeWeighting::Slow, PeakWeighting::Z)
+    );
+    // C at 1 kHz is −0.06 dB; LCS is settled on the first frame, and the interval did not
+    // restart.
+    assert!((after.meta.level + 26.08).abs() < 0.1, "{:?}", after.meta);
+    assert!(
+        after.meta.duration.0 >= before.meta.duration.0,
+        "{:?}",
+        after.meta
+    );
+    assert!((after.meta.leq + 26.08).abs() < 0.2, "{:?}", after.meta);
+    // The windows keep filling from where they were, the log goes on, the entity is as it was.
+    let f = leq_until(&c, "the 30 s window filling on", |f| {
+        f.elapsed[1] >= leq_before.elapsed[1] + 2.0
+    })
+    .await;
+    assert_eq!(f.leq.len(), 2);
+    assert!(page(&c, 0).await.total > rows_before);
+    let now = state(&c).await.spl_logs[0].clone();
+    assert_eq!(now.started_at, entity.started_at);
+    assert_eq!(now.windows, entity.windows);
+    drop(lease);
+}

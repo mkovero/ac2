@@ -168,14 +168,32 @@ measurement list does; selecting one in the list makes its pane show it and give
 the focus (unless the focused pane draws it already: the IR pane keeps it for a transfer
 measurement). Keys such as **F**, **R**, **S** and **X** act on the selected measurement.
 
-**One pane only (W).** With the focused pane maximised, picking a measurement in the list
-switches the one pane to the pane that shows it — a transfer measurement to the transfer
-pane, a spectrum or RTA to the spectrum / RTA pane, an SPL meter to the SPL pane — and the
-layout stays maximised; **W** goes back to the split layout. A stored trace selected while
-maximised (a click in the Traces list, **V**) does the same: a transfer capture or target
-brings up the transfer pane, a spectrum capture the spectrum pane, a sweep the sweep pane
-(unless the transfer pane is up: it draws sweeps too). In the split layout every pane is on
-screen and selecting a trace leaves the focus where it is.
+**One pane only, full screen (W).** **W** steps through three layouts: the split layout →
+the focused pane alone in the window → that pane **full screen** → the split layout again.
+Full screen is the **stage view**: the window fills the screen and holds the pane's picture
+alone — no top bar, measurement list or pane title; a plot keeps a one-line caption naming
+the pane and its measurement, the SPL meter and its Leq windows name themselves. Key hints
+are off there. Whenever a stimulus is armed or playing, or a sweep or another operation
+runs, the top bar comes back: what drives the speakers is never hidden. **F11** on its own
+puts the whole window full screen (or back) in whatever layout it is in — with one pane up,
+that is the same stage view. Esc stops the stimulus as anywhere else.
+
+With the focused pane maximised, picking a measurement in the list switches the one pane to
+the pane that shows it — a transfer measurement to the transfer pane, a spectrum or RTA to
+the spectrum / RTA pane, an SPL meter to the SPL pane — and the layout stays maximised. A
+stored trace selected while maximised (a click in the Traces list, **V**) does the same: a
+transfer capture or target brings up the transfer pane, a spectrum capture the spectrum
+pane, a sweep the sweep pane (unless the transfer pane is up: it draws sweeps too). In the
+split layout every pane is on screen and selecting a trace leaves the focus where it is.
+
+**The layout comes back.** The app remembers in `ui.toml` (written when the layout changes
+and on exit) which pane has the focus, whether it is maximised or full screen, the
+measurement each pane shows (by name), the SPL pane's meter or Leq view, the Leq windows'
+style, the IR mode, the sweep pane's dB / % and the window's size and position. The next
+start comes back to them — full screen too — without arming or playing anything; a
+measurement that is gone (deleted, another daemon) quietly leaves its pane on its usual
+choice, and a window larger than the screen it opens on is made to fit. On Wayland the
+system places the window.
 
 ### Zoom, pan and the level axis
 
@@ -571,11 +589,37 @@ A tone other than 1 kHz is accepted (`--freq 400hz`; a meter specified only to 4
 the sensitivity is still the capsule's at 1 kHz, so this assumes the preamp is flat between
 the two — ac2 notes it. The mic curve stays normalised at 1 kHz.
 
-The **SPL meter** shows Fast / Slow / Impulse levels with A, C or Z weighting, Leq, LAeq,
-LCeq, LCpeak, Lmax and Lmin, as a big-number display in the SPL pane or in the terminal:
-`ac2 spl watch --input 3 --weight a` (add `--json` for one JSON line per update, `--for 10s`
-to stop on its own). With `--input` the command runs its own meter for as long as it runs, so
-Leq, Lmax and Lmin cover exactly what it watched; `--meas` shows an existing meter instead.
+The **SPL meter** shows the sound level with Fast, Slow or Impulse time weighting and A, C
+or Z frequency weighting (IEC 61672-1: F and S are exponential averages of the squared
+signal with 125 ms and 1 s; I, from IEC 60651, averages with 35 ms and holds peaks, falling
+with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal.
+
+- **The number** is the current time-weighted level, centred and as large as the pane
+  allows; under it the level's name and unit, `LAF · dB SPL` (`dBFS` uncalibrated), then a
+  slim bar with the level live (30 … 130 dB SPL, or −100 … 0 dBFS, 10 dB ticks), the
+  statistics — `LAeq` and `LCpeak` over the meter's interval, `LAFmax` and `LAFmin` in the
+  meter's weightings — and at the bottom how long the interval is and the calibration.
+  The secondary figures grow with the pane: **W** twice (or W, then F11) makes the meter
+  full screen, to be read across the room.
+- **Readable, not flickering.** The number takes a new reading twice a second with F and I
+  and once a second with S, as a hand-held meter's display does; the bar moves with every
+  frame. The reading is the time-weighted level at that instant — the time weighting is
+  the averaging, displayed values are never averaged in dB. (I needs no longer hold: its
+  1.5 s fall holds peaks itself.) `spl_hold_ms = 250` in `ui.toml` sets another display
+  period (100 … 10000 ms) for every time weighting.
+- **F** in the SPL pane steps the time weighting Fast → Slow → Impulse, **Z** the frequency
+  weighting A → C → Z; the palette has each one by name ("SPL meter: Slow time
+  weighting", "SPL meter: C weighting"…). The change applies to the running meter at once
+  and is kept with it (sessions, autosave). Nothing restarts: the meter measures every
+  combination all the time, so the new one reads its settled level from the first frame
+  (a Slow meter started at the switch would need 5 s), and its Lmax, Lmin, Leq and Lpeak
+  cover the same interval as before — each combination keeps its own, from the meter's
+  start or the last **R**. The Leq windows and the per-second log carry on untouched.
+- `ac2 spl set --weight c --time slow` does the same from the terminal (`--meas` or
+  `--input` when there is more than one meter). `ac2 spl watch --input 3 --weight a` shows
+  a meter in the terminal (add `--json` for one JSON line per update, `--for 10s` to stop on
+  its own). With `--input` the command runs its own meter for as long as it runs, so Leq,
+  Lmax and Lmin cover exactly what it watched; `--meas` shows an existing meter instead.
 
 ### Leq windows and limits
 
@@ -600,9 +644,9 @@ the daemon restarts (the log is in the autosave and in saved sessions).
 - **B** switches between columns and **tiles** (a grid with every figure written out),
   **Shift+B** shows or hides the **history strip** below them: each window over time against its limit
   (dashed), red where it was over. The app remembers both. **W** gives the pane the whole
-  window, **F11** the whole screen; both together are the **stage view**: nothing but the
+  window, once more (or **F11**) the whole screen: the **stage view**, nothing but the
   columns and the caption with the meter's name, the run and its calibration (the top bar comes
-  back while a stimulus is armed or playing). F11 again leaves it.
+  back while a stimulus is armed or playing). W again goes back to the split layout.
 - Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
   steady level for the next minute that keeps the window at or below its limit ("next 1 min ≤
   101.5 dB"), or, over and unable to recover within the minute, how long it takes at the
@@ -713,7 +757,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `H` or `F1` | Show / hide key bindings | `help` |
 | `Ctrl+K` | Command palette | `palette` |
 | `Ctrl+Q` | Quit | `quit` |
-| `F11` | Full screen on / off | `fullscreen` |
+| `F11` | Window full screen on / off | `fullscreen` |
 | `Shift+H` | Key hints on / off | `key_hints` |
 | `Space` | Stimulus: arm (needs a typed level) | `stimulus_arm` |
 | `Enter` | Stimulus: fire (when armed) | `stimulus_fire` |
@@ -730,7 +774,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+5` | Focus (and show) the sweep / distortion pane | `focus_distortion` |
 | `Tab` | Focus next pane | `next_pane` |
 | `Shift+Tab` | Focus previous pane | `prev_pane` |
-| `W` | Focused pane only / split layout | `maximize_pane` |
+| `W` | Layout: split → one pane → full screen | `maximize_pane` |
 | `N` | Select next measurement of the focused pane | `next_measurement` |
 | `Shift+N` | Select previous measurement of the focused pane | `prev_measurement` |
 | `T` | Theme: dark → light → high contrast | `cycle_theme` |
@@ -838,6 +882,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | `Shift+B` | SPL Leq windows: history strip on / off | `spl_leq_history` |
 | `Shift+R` | Start a new SPL log… | `spl_new_log` |
+| `F` | SPL meter: time weighting Fast → Slow → Impulse | `spl_time_weighting` |
+| `Z` | SPL meter: frequency weighting A → C → Z | `spl_weighting` |
 
 #### Sweep / distortion
 
@@ -874,6 +920,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Mic curve on input N… (e.g. 2=90°, 2=off) | `mic_curve_input` |
 | Calibration: delete a sensitivity calibration (input=mic)… | `cal_delete` |
 | Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)… | `trace_mic_curve` |
+| SPL meter: Fast time weighting (125 ms) | `spl_fast` |
+| SPL meter: Slow time weighting (1 s) | `spl_slow` |
+| SPL meter: Impulse time weighting (35 ms / 1.5 s) | `spl_impulse` |
+| SPL meter: A weighting | `spl_a` |
+| SPL meter: C weighting | `spl_c` |
+| SPL meter: Z weighting (flat) | `spl_z` |
 | Delay finder: auto band (full → mid → sub) | `finder_auto` |
 | Delay finder: full band (2–16 kHz) | `finder_full` |
 | Delay finder: mid band (300 Hz – 3 kHz) | `finder_mid` |
@@ -900,7 +952,7 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `K` smoothing · `Shift+I` IR · `W` maximise · `Alt+↑` offset · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `K` smoothing · `B` bars/line · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
-| SPL | `G` meter/Leq · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| SPL | `G` meter/Leq · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` linear/log/ETC · `Shift+I` IR/distortion · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->
@@ -922,7 +974,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
 | `ac2 trace capture / list / show / rm / average / math / import / export / smooth / mic` | stored traces |
 | `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
-| `ac2 spl watch`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, calibration, Leq windows, the per-second log and a new log |
+| `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, calibration, Leq windows, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |
 | `ac2 state dump` | the daemon's whole state as JSON |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |

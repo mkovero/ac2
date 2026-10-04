@@ -1,0 +1,201 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "spl_time_weighting",
+  "description": "Time weightings F, S and I of a sound level meter on the squared signal: the level after a step of the mean square, its fall after the signal stops, and the maximum I-weighted level of isolated 4 kHz tonebursts relative to the steady level (Z weighting).",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_spl_time_weighting"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs_hz": 48000.0,
+    "tone_hz": 4000.0,
+    "amplitude_fs": 0.5,
+    "tau_s": {
+      "F": {
+        "rise": 0.125,
+        "fall": 0.125
+      },
+      "S": {
+        "rise": 1.0,
+        "fall": 1.0
+      },
+      "I": {
+        "rise": 0.035,
+        "fall": 1.5
+      }
+    },
+    "detector": "avg[n] = avg[n-1] + alpha (x[n]^2 - avg[n-1]), alpha = 1 - exp(-1/(fs rise)); F, S: ms = avg; I: ms[n] = avg[n] if avg[n] >= ms[n-1], else max(ms[n-1] exp(-1/(fs fall)), avg[n])",
+    "step": "x = 1 from sample 0; level 10 log10(ms) at sample round(t fs) - 1 (analytically 10 log10(1 - exp(-t / rise)))",
+    "decay": "x = 1 for 10 s, then 0; level at sample 10 fs - 1 + round(t fs) relative to the level at the stop (analytically -10 lg(e) t / fall = -4.343 t / fall dB)",
+    "burst": "x = amp sin(2 pi f0 k / fs), k = 0..round(Tb fs)-1, after 10 ms of silence, then 200 ms of silence"
+  },
+  "references": [
+    "IEC 61672-1:2013 5.8 (F, S: 125 ms, 1 s; decay 34.7 and 4.3 dB/s)",
+    "IEC 60651:1979 (I: 35 ms rise, 1.5 s fall; single-burst responses -3.6, -8.8, -12.6 dB at 20, 5, 2 ms)"
+  ],
+  "scalars": {},
+  "blob": {
+    "file": "spl_time_weighting.bin",
+    "nbytes": 688,
+    "sha256": "baed417a02e10cdab9a6ae5f829eaa45fc1e2f55f6cd4ff74463beea3af167be"
+  },
+  "arrays": [
+    {
+      "name": "step_ms",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 0,
+      "nbytes": 80,
+      "unit": "ms",
+      "description": "time after the step"
+    },
+    {
+      "name": "step_f_db",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 80,
+      "nbytes": 80,
+      "unit": "dB",
+      "description": "F level after a step to 0 dB",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "step_ms"
+    },
+    {
+      "name": "step_s_db",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 160,
+      "nbytes": 80,
+      "unit": "dB",
+      "description": "S level after a step to 0 dB",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "step_ms"
+    },
+    {
+      "name": "step_i_db",
+      "dtype": "f64",
+      "shape": [
+        10
+      ],
+      "offset": 240,
+      "nbytes": 80,
+      "unit": "dB",
+      "description": "I level after a step to 0 dB",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "step_ms"
+    },
+    {
+      "name": "decay_ms",
+      "dtype": "f64",
+      "shape": [
+        7
+      ],
+      "offset": 320,
+      "nbytes": 56,
+      "unit": "ms",
+      "description": "time after the signal stops"
+    },
+    {
+      "name": "decay_f_db",
+      "dtype": "f64",
+      "shape": [
+        7
+      ],
+      "offset": 376,
+      "nbytes": 56,
+      "unit": "dB",
+      "description": "F level after the stop, relative to the stop",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "decay_ms"
+    },
+    {
+      "name": "decay_s_db",
+      "dtype": "f64",
+      "shape": [
+        7
+      ],
+      "offset": 432,
+      "nbytes": 56,
+      "unit": "dB",
+      "description": "S level after the stop, relative to the stop",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "decay_ms"
+    },
+    {
+      "name": "decay_i_db",
+      "dtype": "f64",
+      "shape": [
+        7
+      ],
+      "offset": 488,
+      "nbytes": 56,
+      "unit": "dB",
+      "description": "I level after the stop, relative to the stop",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "decay_ms"
+    },
+    {
+      "name": "tb_i_ms",
+      "dtype": "f64",
+      "shape": [
+        9
+      ],
+      "offset": 544,
+      "nbytes": 72,
+      "unit": "ms",
+      "description": "toneburst durations, I"
+    },
+    {
+      "name": "response_i_db",
+      "dtype": "f64",
+      "shape": [
+        9
+      ],
+      "offset": 616,
+      "nbytes": 72,
+      "unit": "dB",
+      "description": "LImax - L, Z weighting",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-09,
+        "rel": 0.0
+      },
+      "axis": "tb_i_ms"
+    }
+  ]
+}

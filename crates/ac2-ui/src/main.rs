@@ -195,12 +195,24 @@ fn main() -> ExitCode {
         // starts measuring.
         open_session_dialog: embedded.is_some() && !matches!(args.backend, Some(BackendArg::Fake)),
     };
+    // The window as last left; the app makes it fit the screen if that changed.
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("ac2")
+        .with_app_id("ac2")
+        .with_inner_size(
+            opts.prefs
+                .window
+                .map_or([1280.0, 800.0], |w| [w.width as f32, w.height as f32]),
+        )
+        .with_min_inner_size([
+            ac2_ui::prefs::WindowPrefs::MIN.0 as f32,
+            ac2_ui::prefs::WindowPrefs::MIN.1 as f32,
+        ]);
+    if let Some((x, y)) = opts.prefs.window.and_then(|w| w.pos) {
+        viewport = viewport.with_position([x as f32, y as f32]);
+    }
     let native = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("ac2")
-            .with_app_id("ac2")
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([720.0, 480.0]),
+        viewport,
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
