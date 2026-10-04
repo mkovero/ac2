@@ -105,6 +105,9 @@ pub struct LeqTile {
     pub value: String,
     /// `dB SPL` or `dBFS`.
     pub unit: String,
+    /// The unit with the window's own weighting, shown with its value — `dB(A)`, `dBFS (C)` —
+    /// so a window is never read in the weighting of an SPL meter shown beside it.
+    pub weighted_unit: String,
     pub state: TileState,
     /// `OVER`, `NEAR`, `ON COURSE`, `OK`, `not calibrated`; none without a limit.
     pub state_text: Option<String>,
@@ -244,6 +247,10 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 name: window_name(w),
                 value: format::level(leq),
                 unit: unit.to_string(),
+                weighted_unit: match f.meta.scale {
+                    LevelScale::DbSpl => format!("dB({})", w_letter(w.weighting)),
+                    LevelScale::Dbfs => format!("dBFS ({})", w_letter(w.weighting)),
+                },
                 state,
                 state_text: match state {
                     TileState::NoLimit => None,
@@ -759,7 +766,7 @@ fn draw_tile(
     let base = body_top + (body_bottom - body_top) * 0.5 + big * 0.36;
     let unit_size = (big * 0.3).max(9.0);
     let value_w = canvas::text_width(&t.value, big);
-    let unit_w = canvas::text_width(&t.unit, unit_size);
+    let unit_w = canvas::text_width(&t.weighted_unit, unit_size);
     let x0 = r.x + (r.w - value_w - unit_w - 6.0) / 2.0 + value_w;
     push(
         t.value.clone(),
@@ -769,7 +776,7 @@ fn draw_tile(
         big,
     );
     push(
-        t.unit.clone(),
+        t.weighted_unit.clone(),
         [x0 + 6.0, base],
         HAlign::Left,
         VAlign::Baseline,

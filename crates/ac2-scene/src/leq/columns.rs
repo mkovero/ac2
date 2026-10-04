@@ -381,8 +381,16 @@ pub(super) fn draw_columns(
     let progress_size = small * 0.8;
     let mut with_progress = progress_size >= 7.5 && progress.iter().any(|p| !p.is_empty());
     let line_h = small * 1.3;
+    // The window's own unit and weighting (`dB(A)`) sits right under its value: never
+    // dropped, so a column can't be read in the weighting of an SPL meter shown beside it.
+    let unit_h = line_h;
     let top_of_track = |rows: &[bool; 3]| {
-        cols_area.y + pad + big * 1.25 + rows.iter().filter(|r| **r).count() as f32 * line_h + pad
+        cols_area.y
+            + pad
+            + big * 1.25
+            + unit_h
+            + rows.iter().filter(|r| **r).count() as f32 * line_h
+            + pad
     };
     let name_top = cols_area.bottom() - pad - name_size * 1.25;
     let bottom_of_track = |p: bool| name_top - pad - if p { progress_size * 1.3 } else { 0.0 };
@@ -501,7 +509,13 @@ pub(super) fn draw_columns(
             c.overlay.labels.push(l);
         };
         push(t.value.clone(), r.y + pad, VAlign::Top, big);
-        let mut y = r.y + pad + big * 1.25;
+        push(
+            t.weighted_unit.clone(),
+            r.y + pad + big * 1.25,
+            VAlign::Top,
+            small,
+        );
+        let mut y = r.y + pad + big * 1.25 + unit_h;
         for (row, cands) in lines[k].iter().enumerate() {
             if !rows[row] {
                 continue;

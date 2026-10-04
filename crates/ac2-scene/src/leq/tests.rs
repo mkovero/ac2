@@ -249,6 +249,8 @@ fn scene_lays_tiles_out_and_colours_them() {
         "FOH SPL · LAeq, dB SPL",
         "M30 · cal 3 h ago",
         "30 min",
+        // Each tile names its own weighting with its value.
+        "dB(A)",
         "97.8",
         "OVER",
         "NEAR",
@@ -807,6 +809,8 @@ fn column_texts() {
         "—",
         // One weighting: the caption names it once, the columns only their lengths.
         "15 min",
+        // …and each column still says its unit and weighting under its value.
+        "dB(A)",
     ] {
         assert!(all.contains(&want), "{want} in {all:?}");
     }
