@@ -44,6 +44,49 @@ fn rendering_is_repeatable() {
     assert_eq!(a, b, "same adapter, same scene must be bit-identical");
 }
 
+/// Labels kept from earlier frames (by text and size) land exactly where freshly shaped
+/// ones do when labels come and go around them, repeat, or change size; and renderers
+/// sharing one set of font caches do not disturb each other.
+#[test]
+fn kept_labels_match_freshly_shaped_ones() {
+    let Some(gpu) = gpu("kept_labels_match_freshly_shaped_ones") else {
+        return;
+    };
+    let labels = |texts: &[(&str, f32)]| {
+        one_layer(220.0, 120.0, |l| {
+            for (i, (t, size)) in texts.iter().enumerate() {
+                l.labels.push(Label {
+                    text: (*t).into(),
+                    pos: [6.0 + 30.0 * (i % 2) as f32, 6.0 + 18.0 * i as f32],
+                    anchor: Anchor::TOP_LEFT,
+                    size: *size,
+                    color: Color::WHITE,
+                    clip: None,
+                });
+            }
+        })
+    };
+    let frames = [
+        labels(&[("−12 dB", 12.0), ("1 kHz", 12.0), ("γ²", 13.0)]),
+        labels(&[
+            ("new first", 12.0),
+            ("−12 dB", 12.0),
+            ("1 kHz", 12.0),
+            ("γ²", 13.0),
+        ]),
+        labels(&[("1 kHz", 12.0), ("1 kHz", 12.0), ("1 kHz", 16.0)]),
+        labels(&[("−12 dB", 12.0), ("γ²", 13.0)]),
+    ];
+    let mut kept = renderer(gpu);
+    let mut other = renderer(gpu);
+    for (i, s) in frames.iter().enumerate() {
+        let got = render(gpu, &mut kept, s, 1.0);
+        render(gpu, &mut other, &frames[(i + 1) % frames.len()], 1.0);
+        let want = render(gpu, &mut renderer(gpu), s, 1.0);
+        assert_eq!(got, want, "frame {i}");
+    }
+}
+
 /// The join pixels of a straight half-alpha polyline must look like mid-segment pixels.
 #[test]
 fn translucent_joins_do_not_double_blend() {

@@ -2,6 +2,7 @@
 //! a caller-owned render pass (an egui-wgpu paint callback or the offscreen path).
 
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 
@@ -11,7 +12,7 @@ use crate::geometry::{
 };
 use crate::heatmap::{self, Heatmaps};
 use crate::scene::{HeatmapId, Rect, Scene};
-use crate::text::TextLayer;
+use crate::text::{Fonts, TextLayer};
 
 /// Where and how a scene lands in the render target.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,14 +128,36 @@ impl GrowBuffer {
     }
 }
 
-/// Paints [`Scene`]s. Build once per target format; reuse across frames.
-pub struct Renderer {
-    format: wgpu::TextureFormat,
-    globals: wgpu::Buffer,
-    globals_bg: wgpu::BindGroup,
+/// What every renderer of one target format shares: pipelines (compiled once — on a
+/// GLES driver each is a WGSL→GLSL translation and a link), the glyph pipelines, and the
+/// font and glyph rasterization caches. Per-renderer state (instance buffers, heatmaps,
+/// glyph atlas, laid-out text) stays with each [`Renderer`], so a renderer whose scene did
+/// not change keeps what it drew while another prepares.
+pub struct RenderShared {
+    pub(crate) format: wgpu::TextureFormat,
+    pub(crate) multisample: wgpu::MultisampleState,
+    globals_layout: wgpu::BindGroupLayout,
+    heatmap_layout: wgpu::BindGroupLayout,
     lines: wgpu::RenderPipeline,
     fill: wgpu::RenderPipeline,
     heatmap: wgpu::RenderPipeline,
+    pub(crate) glyphs: glyphon::Cache,
+    pub(crate) fonts: Mutex<Fonts>,
+}
+
+impl fmt::Debug for RenderShared {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RenderShared")
+            .field("format", &self.format)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Paints [`Scene`]s. Build once per target format; reuse across frames.
+pub struct Renderer {
+    shared: Arc<RenderShared>,
+    globals: wgpu::Buffer,
+    globals_bg: wgpu::BindGroup,
     heatmaps: Heatmaps,
     text: TextLayer,
     segments: Vec<SegmentInstance>,
@@ -149,7 +172,7 @@ pub struct Renderer {
 impl fmt::Debug for Renderer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Renderer")
-            .field("format", &self.format)
+            .field("format", &self.shared.format)
             .field("segments", &self.segments.len())
             .field("fills", &self.fills.len())
             .field("cmds", &self.cmds.len())
@@ -217,21 +240,14 @@ const FILL_ATTRS: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![
     0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Unorm8x4, 5 => Uint32
 ];
 
-impl Renderer {
+impl RenderShared {
     /// Pipelines for a `format` target with `multisample` (1 sample unless the host UI
     /// renders with MSAA; the line and fill shaders anti-alias analytically).
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         multisample: wgpu::MultisampleState,
-    ) -> Self {
-        let globals = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ac2-plot globals"),
-            size: std::mem::size_of::<Globals>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+    ) -> Arc<Self> {
         let globals_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ac2-plot globals"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -243,14 +259,6 @@ impl Renderer {
                     min_binding_size: None,
                 },
                 count: None,
-            }],
-        });
-        let globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ac2-plot globals"),
-            layout: &globals_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: globals.as_entire_binding(),
             }],
         });
         let heatmap_layout = heatmap::bind_group_layout(device);
@@ -321,15 +329,47 @@ impl Renderer {
                 instance: None,
             },
         );
-        Self {
+        Arc::new(Self {
             format,
-            globals,
-            globals_bg,
+            multisample,
+            globals_layout,
+            heatmap_layout,
             lines,
             fill,
             heatmap,
-            heatmaps: Heatmaps::new(heatmap_layout),
-            text: TextLayer::new(device, queue, format, multisample),
+            glyphs: glyphon::Cache::new(device),
+            fonts: Mutex::new(Fonts::new()),
+        })
+    }
+
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.format
+    }
+}
+
+impl Renderer {
+    /// A renderer drawing with `shared`'s pipelines into its own buffers.
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, shared: &Arc<RenderShared>) -> Self {
+        let globals = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ac2-plot globals"),
+            size: std::mem::size_of::<Globals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let globals_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ac2-plot globals"),
+            layout: &shared.globals_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: globals.as_entire_binding(),
+            }],
+        });
+        Self {
+            shared: Arc::clone(shared),
+            globals,
+            globals_bg,
+            heatmaps: Heatmaps::new(shared.heatmap_layout.clone()),
+            text: TextLayer::new(device, queue, shared),
             segments: Vec::new(),
             fills: Vec::new(),
             scratch: LineScratch::default(),
@@ -347,7 +387,12 @@ impl Renderer {
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.format
+        self.shared.format
+    }
+
+    /// The pipelines and caches this renderer draws with.
+    pub fn shared(&self) -> &Arc<RenderShared> {
+        &self.shared
     }
 
     /// Converts `scene` to instances and uploads them, heatmap columns and text. Steady
@@ -444,8 +489,18 @@ impl Renderer {
                 );
             }
             for g in &layer.grids {
+                let first_fill = self.fills.len();
                 let first = self.segments.len();
-                let clip = geometry::push_grid(&mut self.segments, g, &xf, base_clip);
+                let clip =
+                    geometry::push_grid(&mut self.fills, &mut self.segments, g, &xf, base_clip);
+                push_cmd(
+                    &mut self.cmds,
+                    Kind::Fill,
+                    first_fill,
+                    self.fills.len(),
+                    &clip,
+                    size,
+                );
                 push_cmd(
                     &mut self.cmds,
                     Kind::Lines,
@@ -483,7 +538,7 @@ impl Renderer {
                     .filter(visible)
                     .map(|l| (l, clip_of(&l.clip)));
                 self.text
-                    .prepare_layer(device, queue, text_layers, labels, &xf)
+                    .prepare_layer(&self.shared, device, queue, text_layers, labels, &xf)
                     .map_err(PrepareError::Text)?;
                 if let Some(scissor) = scissor_of(&base_clip, size) {
                     self.cmds.push(Cmd {
@@ -498,7 +553,7 @@ impl Renderer {
 
         let globals = Globals {
             target_size: [size[0] as f32, size[1] as f32],
-            srgb_target: u32::from(self.format.is_srgb()),
+            srgb_target: u32::from(self.shared.format.is_srgb()),
             _pad: 0,
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
@@ -526,7 +581,7 @@ impl Renderer {
                     let Some(buf) = &self.fill_buf.buffer else {
                         continue;
                     };
-                    pass.set_pipeline(&self.fill);
+                    pass.set_pipeline(&self.shared.fill);
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(0, buf.slice(..));
                     pass.draw(0..4, first..end);
@@ -535,7 +590,7 @@ impl Renderer {
                     let Some(buf) = &self.segment_buf.buffer else {
                         continue;
                     };
-                    pass.set_pipeline(&self.lines);
+                    pass.set_pipeline(&self.shared.lines);
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(0, buf.slice(..));
                     pass.draw(0..4, first..end);
@@ -544,7 +599,7 @@ impl Renderer {
                     let Some(bg) = self.heatmaps.bind_group(id) else {
                         continue;
                     };
-                    pass.set_pipeline(&self.heatmap);
+                    pass.set_pipeline(&self.shared.heatmap);
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw(0..4, 0..1);

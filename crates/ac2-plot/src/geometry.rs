@@ -261,8 +261,15 @@ pub(crate) fn snap(pos: f32, width_px: f32) -> f32 {
 /// Appends grid lines, snapped to the pixel grid, and returns the clip they use: `grid.rect`
 /// grown by half the widest stroke, so a line on the rect's edge (the plot frame) is drawn
 /// whole however the edge rounds, then intersected with `clip`.
+///
+/// A snapped solid line covers whole pixel columns (rows), so across it coverage is exactly
+/// 0 or 1 and it is a filled rectangle with a hard edge there: one fragment per covered
+/// pixel instead of a capsule's quad with an anti-aliasing margin and distance tests. Along
+/// it the ends ramp over a pixel as a capsule's ends do on the line's axis. Dashed lines
+/// stay strokes (`segments`).
 pub(crate) fn push_grid(
-    out: &mut Vec<SegmentInstance>,
+    fills: &mut Vec<FillInstance>,
+    segments: &mut Vec<SegmentInstance>,
     grid: &Grid,
     xf: &Xform,
     clip: ClipPx,
@@ -288,19 +295,47 @@ pub(crate) fn push_grid(
         if !l.pos.is_finite() {
             continue;
         }
-        let (p0, p1) = match l.axis {
-            GridAxis::X => {
-                let x = snap(xf.x(l.pos), s.half_width * 2.0);
-                ([x, r[1]], [x, r[3]])
-            }
-            GridAxis::Y => {
-                let y = snap(xf.y(l.pos), s.half_width * 2.0);
-                ([r[0], y], [r[2], y])
-            }
+        let hw = s.half_width;
+        let at = match l.axis {
+            GridAxis::X => snap(xf.x(l.pos), hw * 2.0),
+            GridAxis::Y => snap(xf.y(l.pos), hw * 2.0),
         };
-        emit_run(out, &[(p0, 1.0), (p1, 1.0)], &s, clip);
+        if s.dash_period > 0.0 {
+            let (p0, p1) = match l.axis {
+                GridAxis::X => ([at, r[1]], [at, r[3]]),
+                GridAxis::Y => ([r[0], at], [r[2], at]),
+            };
+            emit_run(segments, &[(p0, 1.0), (p1, 1.0)], &s, clip);
+            continue;
+        }
+        let color = scale_alpha(s.color, s.alpha);
+        fills.push(match l.axis {
+            GridAxis::X => FillInstance {
+                x: [at - hw, at + hw],
+                top: [r[1] - hw; 2],
+                bottom: [r[3] + hw; 2],
+                clip,
+                color,
+                flags: 0,
+            },
+            GridAxis::Y => FillInstance {
+                x: [r[0] - hw, r[2] + hw],
+                top: [at - hw; 2],
+                bottom: [at + hw; 2],
+                clip,
+                color,
+                flags: AA_LEFT | AA_RIGHT | CRISP_Y,
+            },
+        });
     }
     clip
+}
+
+/// A packed straight-alpha colour with its opacity multiplied by `a`.
+fn scale_alpha(c: u32, a: f32) -> u32 {
+    let [r, g, b, al] = c.to_le_bytes();
+    let al = (f32::from(al) * a.clamp(0.0, 1.0)).round() as u8;
+    u32::from_le_bytes([r, g, b, al])
 }
 
 /// Filled trapezoid between `x[0]` and `x[1]` with linear top and bottom edges. Layout
@@ -323,6 +358,9 @@ pub(crate) struct FillInstance {
 /// (pixel centre in `[x0, x1)`) and translucent bands do not double-blend at the seams.
 pub(crate) const AA_LEFT: u32 = 1;
 pub(crate) const AA_RIGHT: u32 = 2;
+/// Top and bottom lie on pixel edges and are hard: rows whose centre is inside are fully
+/// covered (snapped grid lines).
+pub(crate) const CRISP_Y: u32 = 4;
 
 pub(crate) fn push_rect(out: &mut Vec<FillInstance>, r: &FillRect, xf: &Xform, clip: ClipPx) {
     if !positive(r.color.a) {
@@ -507,18 +545,44 @@ mod tests {
             major: Stroke::solid(Color::WHITE, 1.0),
             minor: Stroke::solid(Color::WHITE, 0.5),
         };
-        let mut out = vec![];
+        let (mut fills, mut segs) = (vec![], vec![]);
         let xf = Xform {
             scale: 1.5,
             origin: [0.0, 0.0],
         };
-        push_grid(&mut out, &g, &xf, CLIP);
-        // 1.5 px major rounds to 2 px: on a pixel edge; 0.75 px minor is a faded hairline.
-        assert_eq!(out[0].p0, [30.0, 15.0]);
-        assert_eq!(out[0].half_width, 1.0);
-        assert_eq!(out[1].p0, [15.0, 46.5]);
-        assert_eq!(out[1].alpha, [0.75, 0.75]);
-        assert_eq!(out[0].clip, [14.0, 14.0, 91.0, 76.0]);
+        let clip = push_grid(&mut fills, &mut segs, &g, &xf, CLIP);
+        assert!(segs.is_empty());
+        // 1.5 px major rounds to 2 px: on a pixel edge, two whole columns, hard across and
+        // ramped at its ends.
+        assert_eq!(fills[0].x, [29.0, 31.0]);
+        assert_eq!(fills[0].top, [14.0, 14.0]);
+        assert_eq!(fills[0].bottom, [76.0, 76.0]);
+        assert_eq!(fills[0].flags, 0);
+        // 0.75 px minor is a faded hairline: one whole row at 3/4 opacity.
+        assert_eq!(fills[1].top, [46.0, 46.0]);
+        assert_eq!(fills[1].bottom, [47.0, 47.0]);
+        assert_eq!(fills[1].x, [14.5, 90.5]);
+        assert_eq!(fills[1].flags, AA_LEFT | AA_RIGHT | CRISP_Y);
+        assert_eq!(fills[1].color.to_le_bytes()[3], 191);
+        assert_eq!(clip, [14.0, 14.0, 91.0, 76.0]);
+        assert_eq!(fills[0].clip, clip);
+        // A dashed grid stays strokes.
+        let dashed = Grid {
+            major: Stroke {
+                dash: Some(Dash {
+                    on: 2.0,
+                    off: 2.0,
+                    offset: 0.0,
+                }),
+                ..g.major
+            },
+            ..g
+        };
+        let (mut fills, mut segs) = (vec![], vec![]);
+        push_grid(&mut fills, &mut segs, &dashed, &xf, CLIP);
+        assert_eq!((fills.len(), segs.len()), (1, 1));
+        assert_eq!(segs[0].p0, [30.0, 15.0]);
+        assert_eq!(segs[0].half_width, 1.0);
     }
 
     #[test]

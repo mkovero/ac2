@@ -2,16 +2,15 @@
 //! pass through an egui-wgpu paint callback.
 //!
 //! One [`Renderer`] per plot slot (one per pane), kept in egui-wgpu's `CallbackResources`.
-//! A renderer owns its instance buffers and text atlas and prepares one scene per frame, so
-//! per-slot renderers keep panes independent (a pane can skip `prepare` when its scene did
-//! not change) at the cost of one pipeline set and glyph atlas each — four panes, a few MB.
-//! A multi-slot renderer would share pipelines but re-upload every pane whenever one
-//! changes.
+//! A renderer owns its instance buffers and glyph atlas and prepares one scene per frame, so
+//! per-slot renderers keep panes independent (a pane skips `prepare` when its scene did not
+//! change). All of them draw with one [`RenderShared`]: the pipelines are compiled once, and
+//! a glyph is shaped and rasterized once for every pane.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ac2_plot::{FrameTarget, Renderer, Scene, wgpu};
+use ac2_plot::{FrameTarget, RenderShared, Renderer, Scene, wgpu};
 use eframe::egui;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 
@@ -22,6 +21,8 @@ pub struct PlotSlot(pub u32);
 /// Renderers by slot, created on first use for egui's target format.
 pub struct PlotRenderers {
     format: wgpu::TextureFormat,
+    /// Created with the first renderer (it needs the device).
+    shared: Option<Arc<RenderShared>>,
     slots: HashMap<PlotSlot, SlotState>,
 }
 
@@ -49,6 +50,7 @@ pub fn install(rs: &egui_wgpu::RenderState) {
         .callback_resources
         .insert(PlotRenderers {
             format: rs.target_format,
+            shared: None,
             slots: HashMap::new(),
         });
 }
@@ -74,8 +76,11 @@ impl CallbackTrait for PlotCallback {
             return Vec::new();
         };
         let format = map.format;
+        let shared = map.shared.get_or_insert_with(|| {
+            RenderShared::new(device, format, wgpu::MultisampleState::default())
+        });
         let s = map.slots.entry(self.slot).or_insert_with(|| SlotState {
-            renderer: Renderer::new(device, queue, format, wgpu::MultisampleState::default()),
+            renderer: Renderer::new(device, queue, shared),
             last: None,
             error: None,
         });

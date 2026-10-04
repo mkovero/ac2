@@ -2,9 +2,11 @@
 #![allow(dead_code)]
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
-use ac2_plot::{Color, Gpu, Layer, Renderer, Scene, Viewport, offscreen::OFFSCREEN_FORMAT, wgpu};
+use ac2_plot::{
+    Color, Gpu, Layer, RenderShared, Renderer, Scene, Viewport, offscreen::OFFSCREEN_FORMAT, wgpu,
+};
 use ac2_testkit::image::{GoldenOutcome, Image, ImageTolerance, check_golden, gpu_required};
 
 pub const BG: Color = Color::rgb(0.07, 0.08, 0.10);
@@ -29,13 +31,19 @@ pub fn gpu(test: &str) -> Option<&'static Gpu> {
     }
 }
 
+static SHARED: OnceLock<Arc<RenderShared>> = OnceLock::new();
+
+/// A renderer on the shared device; every test's renderer shares one set of pipelines and
+/// font caches, as the panes of the app do.
 pub fn renderer(gpu: &Gpu) -> Renderer {
-    Renderer::new(
-        &gpu.device,
-        &gpu.queue,
-        OFFSCREEN_FORMAT,
-        wgpu::MultisampleState::default(),
-    )
+    let shared = SHARED.get_or_init(|| {
+        RenderShared::new(
+            &gpu.device,
+            OFFSCREEN_FORMAT,
+            wgpu::MultisampleState::default(),
+        )
+    });
+    Renderer::new(&gpu.device, &gpu.queue, shared)
 }
 
 pub fn scene(w: f32, h: f32, layers: Vec<Layer>) -> Scene {
