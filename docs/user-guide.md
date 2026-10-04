@@ -313,9 +313,9 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   deselects); a click on its dot shows or hides it.
 - **V** / **Shift+V** select the next / previous **shown** trace in that order — sweep
   results and imports included — with the live measurement as the stop between the last and
-  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. *Deselect the stored
-  trace* in the palette goes straight back to the live measurement (Esc does not: it is the
-  stimulus stop). **A** shows or hides the selected trace. **Move the selected
+  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. **Esc** (with no window
+  open) goes back to the live measurement — it also stops the stimulus, as always — and
+  *Deselect the stored trace* in the palette does the same without touching the stimulus. **A** shows or hides the selected trace. **Move the selected
   trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
   gives it up; `none` frees its slot), so the digit keys reach it.
 - The trace keys act on the selected trace when its curve is on the transfer pane (else on
