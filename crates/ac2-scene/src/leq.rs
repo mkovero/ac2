@@ -23,8 +23,8 @@ use crate::view::{LeqLayout, LeqStyle};
 mod columns;
 mod run;
 pub use columns::{
-    ABOVE_LIMIT_DB, BELOW_LIMIT_DB, FREE_SPAN_DB, LeqColumn, LeqColumns, VALUE_RATIO, ValueLabel,
-    column_colors, column_range,
+    ABOVE_LIMIT_DB, BELOW_LIMIT_DB, Behind, FREE_SPAN_DB, LeqColumn, LeqColumns, NAME_RATIO,
+    VALUE_RATIO, ValueLabel, column_colors, column_range,
 };
 pub use run::{LeqRunText, NewLogConfirm, new_log_confirm, run_text};
 
@@ -298,7 +298,7 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
 }
 
 /// A tile's instruction is at most this many times its header's size.
-const TILE_INSTRUCTION_EM: f32 = 1.8;
+const TILE_INSTRUCTION_EM: f32 = 1.6;
 
 /// Background and text colour of a tile.
 pub fn tile_colors(state: TileState, theme: &Theme) -> (Color, Color) {
@@ -774,8 +774,6 @@ pub struct LeqView<'a> {
     pub stale: Option<String>,
     /// What the values are in (the columns' scale without limits starts from it).
     pub scale: LevelScale,
-    /// The headroom's horizon in words: `1 min`.
-    pub horizon: String,
     pub layout: LeqLayout,
     /// The log as a whole: run clock, start, total, gaps (`None` before its first second).
     pub run: Option<LeqRunText>,
@@ -836,19 +834,17 @@ fn tile_below(t: &LeqTile) -> Vec<String> {
     below
 }
 
-/// One tile: the name and state on top; in the middle, large, what to do (`next 1 min` over
-/// `stay ≤ 101.5 dB`, or how long it cools down) and under it the window's value, smaller
-/// — on stage the instruction is acted on, the value only explains it, and a meter's number
-/// shown above the tiles must stay the big one; below, the course, limit and progress, in
-/// room for `lines_below` of them.
-#[allow(clippy::too_many_arguments)]
+/// One tile: the name and state on top; in the middle, large, what to do (`stay ≤ 101.5 dB`,
+/// or how long it cools down); under it, at a fixed place low in the body and smaller than
+/// the name, the window's value — on stage the instruction is acted on, the value only
+/// explains it, and a meter's number shown above the tiles must stay the big one; below,
+/// the course, limit and progress, in room for `lines_below` of them.
 fn draw_tile(
     c: &mut Canvas,
     t: &LeqTile,
     r: Rect,
     stale: bool,
     shared: Option<&str>,
-    horizon: &str,
     lines_below: usize,
     theme: &Theme,
 ) {
@@ -903,41 +899,29 @@ fn draw_tile(
     }
     let body_top = r.y + pad + head * 1.3;
     let body_bottom = r.bottom() - pad - lines_below as f32 * small * 1.3;
-    let [_, qualifier, instruction, _] = columns::detail_lines(t, horizon);
+    let [_, instruction, _] = columns::detail_lines(t);
     // Every tile shares the shares of its body, so tiles of one grid show their values at
-    // one size whether or not they have an instruction above them. The instruction stays
-    // within [`TILE_INSTRUCTION_EM`] of the header's size and the value under it, so a meter's number above
-    // the tiles keeps the eye.
-    let avail = (body_bottom - body_top - small * 1.3).max(1.0);
+    // one size and place whether or not they have an instruction above them. The
+    // instruction stays within [`TILE_INSTRUCTION_EM`] of the header's size and the value
+    // under the name's, so a meter's number above the tiles keeps the eye.
+    let avail = (body_bottom - body_top).max(1.0);
     let instr = (avail * 0.5 / 1.25)
         .min(head * TILE_INSTRUCTION_EM)
         .max(1.0);
-    let value_h = (avail * 0.4 / 1.25).min(instr * columns::VALUE_RATIO);
-    let unit_ratio = 0.35;
+    let value_h = (avail * 0.35 / 1.25)
+        .min(instr * columns::VALUE_RATIO)
+        .min(head * columns::NAME_RATIO);
+    let unit_ratio = 0.55;
     let value_w =
         canvas::text_width(&t.value, 1.0) + 0.1 + canvas::text_width(&t.weighted_unit, unit_ratio);
     let value_size = value_h.min(width / value_w.max(1e-3)).max(8.0);
     let unit_size = value_size * unit_ratio;
-    let line = columns::fitting_shrunk(&instruction, width, instr, small);
     let cx = r.x + r.w / 2.0;
-    let value_block = value_size * 1.25;
-    let value_top = match line {
-        Some((text, size)) => {
-            let q = qualifier
-                .iter()
-                .find(|q| canvas::text_width(q, small) <= width)
-                .filter(|_| small >= 8.0);
-            let stack = q.map_or(0.0, |_| small * 1.3) + size * 1.25 + value_block;
-            let mut y = body_top + ((body_bottom - body_top) - stack).max(0.0) / 2.0;
-            if let Some(q) = q {
-                push(q.clone(), [cx, y], HAlign::Center, VAlign::Top, small);
-                y += small * 1.3;
-            }
-            push(text, [cx, y], HAlign::Center, VAlign::Top, size);
-            y + size * 1.25
-        }
-        None => body_top + ((body_bottom - body_top) - value_block).max(0.0) / 2.0,
-    };
+    let value_top = (body_bottom - value_size * 1.25).max(body_top);
+    if let Some((text, size)) = columns::fitting_shrunk(&instruction, width, instr, small) {
+        let y = body_top + ((value_top - body_top) - size * 1.25).max(0.0) / 2.0;
+        push(text, [cx, y], HAlign::Center, VAlign::Top, size);
+    }
     let base = value_top + 0.95 * value_size;
     let vw = canvas::text_width(&t.value, value_size);
     let uw = canvas::text_width(&t.weighted_unit, unit_size);
@@ -1109,7 +1093,6 @@ pub(crate) fn leq_scene_under<T>(
             &mut c,
             &v.tiles,
             range,
-            &v.horizon,
             tiles_area,
             v.stale.is_some(),
             theme,
@@ -1142,7 +1125,6 @@ pub(crate) fn leq_scene_under<T>(
                 r,
                 v.stale.is_some(),
                 shared.as_deref(),
-                &v.horizon,
                 lines_below,
                 theme,
             );
@@ -1171,7 +1153,7 @@ pub(crate) fn leq_scene_under<T>(
         c.overlay.labels.push(label(
             text.clone(),
             *pos,
-            anchor(HAlign::Left, VAlign::Top),
+            anchor(HAlign::Center, VAlign::Top),
             *size,
             if v.stale.is_some() {
                 theme.text_dim
@@ -1232,7 +1214,8 @@ fn caption_left(v: &LeqView<'_>, weighting: Option<&str>) -> String {
 /// Where the run goes in the caption.
 struct Caption {
     height: f32,
-    /// Text, top-left position, size.
+    /// Text, position of its top centre (the type's real width is narrower than the
+    /// estimate it is fitted with, so it is centred by the renderer), size.
     run: Option<(String, [f32; 2], f32)>,
 }
 
@@ -1263,6 +1246,10 @@ fn caption(
     let left_end = pad + canvas::text_width(left, theme.font_size);
     let right_start = size.width - pad - canvas::text_width(right, theme.font_size);
     let free = right_start - left_end - 2.0 * gap;
+    // Centred on the pane, the way the meter's number under it is; pushed aside only as far
+    // as the meter's name and the calibration need.
+    let centred =
+        |w: f32, lo: f32, hi: f32| (size.width / 2.0 - w / 2.0).clamp(lo, (hi - w).max(lo));
     // On the meter's row: down to the clock and the total, never the bare clock alone.
     let inline = variants.len().saturating_sub(1).max(1);
     if let Some(t) = variants
@@ -1271,7 +1258,7 @@ fn caption(
         .find(|t| canvas::text_width(t, big) <= free)
     {
         let w = canvas::text_width(t, big);
-        let x = left_end + gap + (free - w) / 2.0;
+        let x = centred(w, left_end + gap, right_start - gap) + w / 2.0;
         return Caption {
             height: (big * 1.35).max(base_h),
             run: Some((t.clone(), [x, top], big)),
@@ -1283,7 +1270,15 @@ fn caption(
         if let Some(t) = variants.iter().find(|t| canvas::text_width(t, s) <= width) {
             return Caption {
                 height: base_h + (s * 1.35).max(base_h),
-                run: Some((t.clone(), [pad, row_y], s)),
+                run: Some((
+                    t.clone(),
+                    [
+                        centred(canvas::text_width(t, s), pad, size.width - pad)
+                            + canvas::text_width(t, s) / 2.0,
+                        row_y,
+                    ],
+                    s,
+                )),
             };
         }
     }

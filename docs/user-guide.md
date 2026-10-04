@@ -728,7 +728,7 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   still keeps it under. Its bar shows the budget spent (the level the window would end at
   if the rest were silent), climbing to the limit line as the budget runs out, and its
   headroom is the level that would use up exactly what is left by the time the window is
-  full ("until full: stay ≤ 98.2 dB"). For example, 70 dB against 60 dB limits on a fresh log is
+  full ("stay ≤ 98.2 dB"; the CLI says "until full: …"). For example, 70 dB against 60 dB limits on a fresh log is
   ten times the limit's power: the 1 min window is red after about 6 s, the 60 min one
   after about 6 min, amber on course before then. Seconds not measured neither spend nor
   add to the budget. The regulations define their limits on full windows only; red only
@@ -748,20 +748,20 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   back while a stimulus is armed or playing). W again goes back to the split layout.
 - Each column (and tile) says, large, its **state** (OK, NEAR, OVER, or "over in 47 s" when a
   filling window is on course to go over) and the **headroom**: the highest steady level for
-  the next minute that keeps the window at or below its limit ("next 1 min" over "stay ≤
-  101.5 dB"; "until full" while it fills), or, over and unable to recover within the minute,
-  **"cooling down in" "7 min 30 s"**: the time until the window is back under its limit if
-  the level stays at the limit. Its limit is written small under them, and is the line
-  across the bar. The window's **Leq** is the smaller figure at the top of its bar — on the
-  bar in white or black, whichever reads on its colour, or just above a short bar in the
-  bar's colour — so the meter's own number above the windows stays the one big number; what
-  to do about a window is the headroom. While the window fills, how much of it there is;
+  the next minute that keeps the window at or below its limit (**"stay ≤ 101.5 dB"**; while
+  the window fills for longer than that, the level that keeps it under until it is full),
+  or, over and unable to recover within the minute, **"cooling down in 7 min 30 s"**: the
+  time until the window is back under its limit if the level stays at the limit. Its limit
+  is written small under them, and is the line across the bar. The window's **Leq** is a
+  small figure low on its bar that stays put while the bar moves — in white or black,
+  whichever reads on what is behind it — so the meter's own number above the windows stays
+  the one big number; what to do about a window is the headroom. While the window fills, how much of it there is;
   and **"offline for 1 min 20 s"** when part of it has no audio at all (the meter stopped,
   the daemon was down, the capture lost samples). Missing audio isn't counted as silence:
   the window's Leq is the average of what was measured, and offline time neither lowers it
   nor spends or earns budget. The note goes away once that time has slid out of the window.
   Narrow columns use the shorter wordings, or leave a line out.
-- The caption above the windows says how long the meter has been logging and the level of
+- The caption above the windows, centred, says how long the meter has been logging and the level of
   the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s`** — the
   time since the log's first second (it keeps counting when the app or the daemon is
   restarted: the log comes back with the autosave), its start in local time, the energy

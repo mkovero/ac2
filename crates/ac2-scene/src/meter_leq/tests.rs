@@ -115,7 +115,6 @@ fn view<'a>(
         history: h,
         stale: None,
         scale: f.meta.scale,
-        horizon: "1 min".into(),
         layout: l,
         run: f.meta.run.map(|r| run_text(&r, c, |_| 7200)),
     }

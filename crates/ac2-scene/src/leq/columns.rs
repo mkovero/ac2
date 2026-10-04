@@ -2,10 +2,10 @@
 //! full-height column per window, shortest window left, each a bar filling bottom → top
 //! with the window's Leq — like a meter that fills — the window's name at the bottom, and
 //! on top, large, what a performer acts on: the state (`OVER`) and how loud the next stretch
-//! may be (`next 1 min` / `stay ≤ 101.5 dB`). The window's value is a smaller figure at its
-//! bar's top, inked to read on the fill or coloured like the bar above it: the value of
-//! each window matters less on stage than whether to back off, and the meter's number above
-//! the windows stays the one big number.
+//! may be (`stay ≤ 101.5 dB`). The window's value is a small figure held still low on its
+//! bar, inked for what is behind it: the value of each window matters less on stage than
+//! whether to back off, a figure riding the bar's top draws the eye as it moves, and the
+//! meter's number above the windows stays the one big number.
 //!
 //! All columns share one scale so their bars compare: anchored to the limits when the
 //! windows are judged, else a range that follows the values in 10 dB steps with hysteresis
@@ -36,7 +36,7 @@ const NEAR_TINT: f32 = 0.18;
 /// visibly not a whole window yet.
 const FILLING_STRENGTH: f32 = 0.45;
 /// Size of the unit beside a column's value, as a fraction of the value's size.
-const UNIT_RATIO: f32 = 0.45;
+const UNIT_RATIO: f32 = 0.55;
 /// Gap between a column's value and its unit, as a fraction of the value's size.
 const UNIT_GAP: f32 = 0.08;
 /// Size of the state and the instruction, as a share of the area's height: read from the
@@ -44,11 +44,14 @@ const UNIT_GAP: f32 = 0.08;
 const LARGE_SHARE: f32 = 0.06;
 /// The value's size at most, as a fraction of the state's and instruction's.
 pub const VALUE_RATIO: f32 = 0.8;
+/// The value's size at most, as a fraction of the window's name under the column: the
+/// value explains the bar, the name says which window it is.
+pub const NAME_RATIO: f32 = 0.75;
 /// A large wording shrinks down to this fraction of its size before a shorter one is used.
-const SHRINK: f32 = 0.7;
+const SHRINK: f32 = 0.5;
 /// Text smaller than this is left out.
 const READABLE: f32 = 8.0;
-/// A value above its bar takes the bar's colour when it contrasts this much with the track
+/// A value on the track takes the bar's colour when it contrasts this much with the track
 /// (the WCAG minimum for large text).
 const INK_CONTRAST: f64 = 3.0;
 
@@ -263,15 +266,14 @@ fn shared_level(all: &[&Vec<String>], width: f32, size: f32, floor: f32) -> usiz
 enum Row {
     /// `OVER`, `NEAR`, `ON COURSE — over in 12 min`, `OK`: large.
     State,
-    /// What the instruction holds for: `next 1 min`, `until full`, `cooling down in`: small.
-    Qualifier,
     /// What to do: `stay ≤ 101.5 dB`, or how long until back under: large.
     Instruction,
-    /// `limit 99.0 dB`: small and dim, the line on the bar says it too.
+    /// `limit 99.0 dB`: small and dim, the line on the bar says it too; `not calibrated`
+    /// when nothing is judged.
     Limit,
 }
 
-const ROWS: [Row; 4] = [Row::State, Row::Qualifier, Row::Instruction, Row::Limit];
+const ROWS: [Row; 3] = [Row::State, Row::Instruction, Row::Limit];
 
 impl Row {
     fn large(self) -> bool {
@@ -280,9 +282,11 @@ impl Row {
 }
 
 /// A column's header wordings per [`Row`]: the state and what a performer acts on (stay
-/// under this level for the horizon, or how long it is cooling down) read from the stage;
-/// the limit is written small, its line across the bar shows where it is.
-pub(super) fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 4] {
+/// under this level, or how long it is cooling down) read from the stage; the limit is
+/// written small, its line across the bar shows where it is. The instruction leaves out
+/// what it holds for (the next minute, or until the window is full): the level to stay
+/// under is what is acted on, and a second line competes with it.
+pub(super) fn detail_lines(t: &LeqTile) -> [Vec<String>; 3] {
     let state = match t.state {
         TileState::Over => vec!["OVER".to_string()],
         TileState::Near if t.on_course => match t.over_in_s {
@@ -298,13 +302,16 @@ pub(super) fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 4] {
         },
         TileState::Near => vec!["NEAR".to_string()],
         TileState::Ok => vec!["OK".to_string()],
-        // Nothing judged: not a call to act on, so not large; said where the horizon goes.
+        // Nothing judged: not a call to act on, so not large; said where the limit goes.
         TileState::NotCalibrated | TileState::NoLimit => vec![],
     };
     let limit = match t.limit_db {
         Some(l) => {
             let l = format::level(l);
             vec![format!("limit {l} dB"), format!("limit {l}"), l]
+        }
+        None if t.state == TileState::NotCalibrated => {
+            vec!["not calibrated".to_string(), "uncal.".to_string()]
         }
         None => vec![],
     };
@@ -316,32 +323,22 @@ pub(super) fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 4] {
             format!("≤ {a}"),
         ]
     };
-    let (qualifier, instruction) = if let Some(a) = t.allowed_db
-        && t.allowed_until_full
-    {
-        (vec!["until full".to_string()], stay(a))
-    } else if let Some(a) = t.allowed_db {
-        (vec![format!("next {horizon}")], stay(a))
+    let instruction = if let Some(a) = t.allowed_db {
+        stay(a)
     } else if let Some(r) = t.recover_s {
         // The time back under the limit if the level stays at the limit.
-        (
-            vec!["cooling down in".to_string(), "cooling".to_string()],
-            vec![format::duration(r), super::clock(r)],
-        )
+        vec![
+            format!("cooling down in {}", format::duration(r)),
+            format!("cooling down in {}", super::clock(r)),
+            format!("cooling {}", super::clock(r)),
+            super::clock(r),
+        ]
     } else if t.recover.is_some() {
-        (
-            vec![],
-            vec!["cooling down".to_string(), "cooling".to_string()],
-        )
-    } else if t.state == TileState::NotCalibrated {
-        (
-            vec!["not calibrated".to_string(), "uncal.".to_string()],
-            vec![],
-        )
+        vec!["cooling down".to_string(), "cooling".to_string()]
     } else {
-        (vec![], vec![])
+        vec![]
     };
-    [state, qualifier, instruction, limit]
+    [state, instruction, limit]
 }
 
 /// The line above the name: how far a filling window is (its value is the Leq so far), or
@@ -377,6 +374,17 @@ fn progress_line(t: &LeqTile) -> Vec<String> {
     }
 }
 
+/// What is behind a column's value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Behind {
+    /// The bar's fill, all of the value's box.
+    Fill,
+    /// Only the track: the bar ends below the value, or there is none.
+    Track,
+    /// The fill's top edge runs through the value's box.
+    Both,
+}
+
 /// Where a column's value is drawn, and in what.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ValueLabel {
@@ -385,8 +393,7 @@ pub struct ValueLabel {
     /// The value's type size (the unit is smaller).
     pub size: f32,
     pub color: Color,
-    /// On the bar's fill (inked for it) rather than above it on the track.
-    pub on_bar: bool,
+    pub behind: Behind,
 }
 
 /// The colour of `candidates` that reads best on `bg`.
@@ -398,57 +405,42 @@ fn best_ink(bg: Color, candidates: &[Color]) -> Color {
         .unwrap_or(bg)
 }
 
-/// Places a value box of height `bh` in `track` by the bar (`bar`, none before anything was
-/// measured) clear of the limit line (`limit`: its y and half its width): on the fill under
-/// its top edge when the fill is tall enough, else on the track just above the fill. Either
-/// moves past the limit line rather than across it — a level near the limit is the one that
-/// matters, and a line through its digits would hide them. Returns the box's top and
-/// whether it is on the fill.
-fn place_value(track: Rect, bar: Option<Rect>, limit: Option<(f32, f32)>, bh: f32) -> (f32, bool) {
-    let gap = (bh * 0.15).max(2.0);
-    let fill_top = bar.map_or(track.bottom(), |b| b.y);
-    let clear = |top: f32| {
-        top >= track.y - 0.01
-            && top + bh <= track.bottom() + 0.01
-            && limit.is_none_or(|(y, w)| top > y + w || top + bh < y - w)
-    };
-    let on_fill = |top: f32| top >= fill_top - 0.01 && clear(top);
-    let mut tries: Vec<(f32, bool)> = vec![(fill_top + gap, true)];
-    if let Some((y, w)) = limit {
-        tries.push((y + w + gap, true));
-    }
-    tries.push((fill_top - gap - bh, false));
-    if let Some((y, w)) = limit {
-        tries.push((y - w - gap - bh, false));
-    }
-    tries
+/// The colour of `candidates` whose lower contrast against both `a` and `b` is highest:
+/// legible across an edge between them.
+fn best_ink_on_both(a: Color, b: Color, candidates: &[Color]) -> Color {
+    let worst = |c: Color| contrast_ratio(c, a).min(contrast_ratio(c, b));
+    candidates
         .iter()
         .copied()
-        .find(|&(top, fill)| {
-            if fill {
-                on_fill(top)
-            } else {
-                clear(top) && top + bh <= fill_top
-            }
-        })
-        .unwrap_or_else(|| {
-            // A track too short for the rules: as close above the fill as fits.
-            let top = (fill_top - gap - bh).clamp(track.y, (track.bottom() - bh).max(track.y));
-            (top, top >= fill_top)
-        })
+        .max_by(|x, y| worst(*x).total_cmp(&worst(*y)))
+        .unwrap_or(a)
 }
 
-/// Lays the columns out in `area` and draws them on the scale `range`. `horizon` is the
-/// headroom's horizon in words (`1 min`).
+/// The top of a value box of height `bh` in `track`: low in the track at a place that does
+/// not depend on the level, so the figure holds still while the bar moves (a moving figure
+/// draws the eye for nothing). The limit line (`limit`: its y and half its width) is
+/// always far above it on a judged scale (30 dB above its bottom); on a track too short
+/// for that the box goes just above the line rather than across it.
+fn value_top(track: Rect, limit: Option<(f32, f32)>, bh: f32) -> f32 {
+    let gap = (bh * 0.3).max(2.0);
+    let top = track.bottom() - gap - bh;
+    let top = match limit {
+        Some((y, w)) if top <= y + w && top + bh >= y - w => y - w - gap - bh,
+        _ => top,
+    };
+    top.max(track.y)
+}
+
+/// Lays the columns out in `area` and draws them on the scale `range`.
 ///
 /// What a column says large is what a performer acts on: its state and how loud the next
-/// stretch may be. The window's value is a figure on its bar — the bar is the level, and
-/// the meter's own number above the windows is the one big number of the stage.
+/// stretch may be. The window's value is a small figure held still low on its bar — the
+/// bar is the level, and the meter's own number above the windows is the one big number of
+/// the stage.
 pub(super) fn draw_columns(
     c: &mut Canvas,
     tiles: &[LeqTile],
     range: Range,
-    horizon: &str,
     area: Rect,
     stale: bool,
     theme: &Theme,
@@ -532,17 +524,17 @@ pub(super) fn draw_columns(
 
     // Header rows: which exist in any column, then drop the least important while the bar
     // would be too short. Unreadably small text is not drawn at all.
-    let lines: Vec<[Vec<String>; 4]> = sorted.iter().map(|t| detail_lines(t, horizon)).collect();
+    let lines: Vec<[Vec<String>; 3]> = sorted.iter().map(|t| detail_lines(t)).collect();
     let progress: Vec<Vec<String>> = sorted.iter().map(|t| progress_line(t)).collect();
     let readable = small >= READABLE;
-    let mut rows = [0, 1, 2, 3].map(|r| readable && lines.iter().any(|l| !l[r].is_empty()));
+    let mut rows = [0, 1, 2].map(|r| readable && lines.iter().any(|l| !l[r].is_empty()));
     // The progress line is the least of the figures: a little smaller.
     let progress_size = small * 0.8;
     let mut with_progress = progress_size >= 7.5 && progress.iter().any(|p| !p.is_empty());
     let row_h = |r: Row| {
-        if r.large() { large * 1.25 } else { small * 1.3 }
+        if r.large() { large * 1.3 } else { small * 1.3 }
     };
-    let top_of_track = |rows: &[bool; 4]| {
+    let top_of_track = |rows: &[bool; 3]| {
         let header: f32 = ROWS
             .iter()
             .zip(rows)
@@ -556,7 +548,6 @@ pub(super) fn draw_columns(
     let min_track = (h * 0.3).max(24.0);
     for shed in [
         Shed::Row(Row::Limit),
-        Shed::Row(Row::Qualifier),
         Shed::Progress,
         Shed::Row(Row::State),
         Shed::Row(Row::Instruction),
@@ -575,20 +566,32 @@ pub(super) fn draw_columns(
         let t = ((v - range.lo) / range.span()).clamp(0.0, 1.0) as f32;
         track_bottom - t * (track_bottom - track_top)
     };
-    // One wording level per large row for every column, so neighbours read alike
-    // (`stay ≤ 102.0` beside `stay ≤ 85.3`, not `≤ 102.0`).
-    let level = ROWS.map(|r| {
-        let all: Vec<&Vec<String>> = lines.iter().map(|l| &l[r as usize]).collect();
-        if r.large() {
-            shared_level(&all, inner, large, small)
-        } else {
-            0
-        }
-    });
-    // The value: smaller than the state and the instruction, and never more than a share
-    // of the track, so it can sit by the bar's top anywhere on the scale.
+    // One wording level per large row for every column saying the same kind of thing, so
+    // neighbours read alike (`stay ≤ 102.0` beside `stay ≤ 85.3`, not `≤ 102.0`); a
+    // cooling column's longer wording does not shorten the others'.
+    let kind = |t: &LeqTile| (t.allowed_db.is_some(), t.recover.is_some());
+    let level: Vec<[usize; 3]> = sorted
+        .iter()
+        .map(|me| {
+            ROWS.map(|r| {
+                if !r.large() {
+                    return 0;
+                }
+                let all: Vec<&Vec<String>> = sorted
+                    .iter()
+                    .zip(&lines)
+                    .filter(|(t, _)| r != Row::Instruction || kind(t) == kind(me))
+                    .map(|(_, l)| &l[r as usize])
+                    .collect();
+                shared_level(&all, inner, large, small)
+            })
+        })
+        .collect();
+    // The value: smaller than the state and the instruction and than the window's name, and
+    // never more than a share of the track.
     let value_size = value_fit
         .min(large * VALUE_RATIO)
+        .min(name_size * NAME_RATIO)
         .min((track_bottom - track_top) * 0.4 / 1.25)
         .max(4.0);
 
@@ -685,7 +688,7 @@ pub(super) fn draw_columns(
         };
         let cx = r.x + r.w / 2.0;
 
-        // The value and its unit on one baseline, centred together on the bar; the unit
+        // The value and its unit on one baseline, centred together low on the bar; the unit
         // never drops, so a column can't be read in the weighting of an SPL meter shown
         // beside it.
         let unit_size = value_size * UNIT_RATIO;
@@ -694,24 +697,32 @@ pub(super) fn draw_columns(
         let gap_w = value_size * UNIT_GAP;
         let total_w = value_w + gap_w + unit_w;
         let bh = value_size * 1.25;
-        let (top, on_bar) = place_value(track, bar, limit_y.map(|y| (y, limit_w / 2.0)), bh);
+        let top = value_top(track, limit_y.map(|y| (y, limit_w / 2.0)), bh);
+        let fill_top = bar.map_or(f32::INFINITY, |b| b.y);
+        let behind = if fill_top <= top {
+            Behind::Fill
+        } else if fill_top >= top + bh {
+            Behind::Track
+        } else {
+            Behind::Both
+        };
         let inks = [
             theme.text,
             theme.plot_background,
             theme.banner_fault.text,
             theme.banner_warning.text,
         ];
-        // On the fill: the ink that reads best on its colour (white on red, black on amber
-        // or green). Above it: the bar's own colour where that reads on the track, so the
-        // figure belongs to its bar; dim before anything was measured or while stale.
-        let value_color = if on_bar {
-            best_ink(bar_color, &inks)
-        } else if bar.is_none() || (stale && !alarm) {
-            theme.text_dim
-        } else if contrast_ratio(bar_color, track_color) >= INK_CONTRAST {
-            bar_color
-        } else {
-            best_ink(track_color, &inks)
+        // Judged on what is behind it. On the fill: the ink that reads best on its colour
+        // (white on red, black on amber or green). On the track (the level below it): the
+        // bar's own colour where that reads, so the figure belongs to its bar; dim before
+        // anything was measured or while stale. Across the fill's edge: the ink that reads
+        // on both.
+        let value_color = match behind {
+            Behind::Fill => best_ink(bar_color, &inks),
+            Behind::Both => best_ink_on_both(bar_color, track_color, &inks),
+            Behind::Track if bar.is_none() || (stale && !alarm) => theme.text_dim,
+            Behind::Track if contrast_ratio(bar_color, track_color) >= INK_CONTRAST => bar_color,
+            Behind::Track => best_ink(track_color, &inks),
         };
         let x0 = cx - total_w / 2.0 + value_w;
         let base = top + 0.95 * value_size;
@@ -733,7 +744,7 @@ pub(super) fn draw_columns(
             rect: Rect::new(cx - total_w / 2.0, top, total_w, bh),
             size: value_size,
             color: value_color,
-            on_bar,
+            behind,
         };
 
         let mut push = |text: String, y: f32, v: VAlign, size: f32, color: Color| {
@@ -752,7 +763,7 @@ pub(super) fn draw_columns(
                 fg
             };
             if row.large() {
-                if let Some(s) = cands.get(level[*row as usize].min(cands.len().max(1) - 1)) {
+                if let Some(s) = cands.get(level[k][*row as usize].min(cands.len().max(1) - 1)) {
                     let size = large.min(inner / canvas::text_width(s, 1.0).max(1e-3));
                     if size >= READABLE {
                         // Centred in the row, so a shrunk wording keeps its place.

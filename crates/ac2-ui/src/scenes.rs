@@ -547,7 +547,6 @@ fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqVie
             .is_stale()
             .then(|| format!("STALE {}", format::age(fresh.age_s()))),
         scale: f.meta.scale,
-        horizon: ac2_scene::leq::length(f.meta.horizon.0),
         layout: st.view.spl.layout,
         run: f
             .meta

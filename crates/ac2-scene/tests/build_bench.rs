@@ -120,7 +120,6 @@ fn leq_view_with_four_hours_of_four_windows() {
             history: Some(h),
             stale: None,
             scale: LevelScale::DbSpl,
-            horizon: "1 min".into(),
             layout: LeqLayout {
                 style: LeqStyle::Columns,
                 history: true,

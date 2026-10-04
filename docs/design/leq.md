@@ -147,7 +147,7 @@ and still end at the limit; `least` reaches the limit exactly when `E` reaches `
   under both rules, and stays flagged incomplete.
 - **Headroom while filling.** With at least the horizon left to fill, nothing leaves the
   window before it is full, so the headroom is the steady level that, held until it is
-  full, spends exactly what is left of the budget: `x = (B − E) / r` ("until full: stay ≤ 98.2
+  full, spends exactly what is left of the budget: `x = (B − E) / r` (the CLI: "until full: stay ≤ 98.2
   dB"); `x ≤ 0` means over (cannot recover; the time to recover at the limit is then at
   least `r`). With less than the horizon left, the rolling headroom below applies.
 
@@ -178,9 +178,10 @@ happens; then the daemon reports the time to recover when playing at the limit: 
 smallest t ≥ h with `E_(N−t) ≤ P·M_(N−t)` (the part still inside the window averages at or
 below the limit), found by one pass over the ring. The display words it **"cooling down in
 7 min 30 s"**: the time until the window is back under its limit if the level stays at the
-limit (columns and tiles: "cooling down in" over "7 min 30 s", narrow "7:30"); the headroom
-reads "next 1 min: stay ≤ 101.5 dB" (the CLI), "next 1 min" over "stay ≤ 101.5 dB" in the
-app (narrow: "stay ≤ 101.5", "≤ 101.5").
+limit (narrow "cooling down in 7:30", "cooling 7:30", "7:30"); the headroom reads "next 1
+min: stay ≤ 101.5 dB" in the CLI and just "stay ≤ 101.5 dB" in the app (narrow: "stay ≤
+101.5", "≤ 101.5"), where the level to stay under is what is acted on and a second line
+for what it holds for would compete with it.
 
 State changes go into the meter's `spl_log` entity: each window's state with the time it
 began, and an alarm list (window, over / recovered, time, Leq, limit; newest 100). The
@@ -280,33 +281,38 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   far · 12:30 / 30:00"). An ok one has its bar part way between the track and its colour, a
   level visibly not a whole window. On course, the state line says so with the time until
   the budget is spent ("ON COURSE — over in 12 min", then "over in 12 min", "ON COURSE" as
-  the column narrows), and the headroom holds until the window is full ("until full: stay ≤ 98.2
-  dB"). Tiles show the same texts. The limit is a line across the whole column.
+  the column narrows), and the headroom holds until the window is full (still worded
+  "stay ≤ 98.2 dB"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: what a performer acts on is large — the state (`OVER`, `NEAR`, `OK`, "over in
-  47 s" on course) and the instruction ("stay ≤ 101.5 dB", under a small "next 1 min" or
-  "until full"; "7 min 30 s" under "cooling down in" when it cannot recover within the
-  horizon) — each in the longest wording that fits every column, shrinking up to 30 % before a
-  shorter one is used, so neighbours read alike ("stay ≤ 102.0" beside "stay ≤ 85.3"); the limit small under them (dim unless the column is alarmed), as the
-  line across the bar shows it. The window's value is secondary: a figure at its bar's top,
-  at most 0.8 of the state's size (`VALUE_RATIO`) and well under the meter's number above the
-  windows (≤ 0.3 of it, tested), since on stage the value of each window matters less than
-  whether to back off, and two big numbers compete. It sits on the fill just under its top
-  edge when the fill is tall enough, inked for the fill (white on red, black on amber or
-  green: the theme ink of highest contrast, ≥ 4.5:1), else on the track just above it in
-  the bar's own colour where that reads (≥ 3:1) or plain text; a value whose box would cross
-  the limit line moves to the other side of it, since a level near the limit is the one
-  that matters. On its baseline, smaller, the window's own unit and weighting (`dB(A)`,
-  `dB(C)`, `dBFS (A)` uncalibrated; tiles the same), never dropped, since the SPL meter shown
-  above the windows may use another weighting. "not calibrated" takes the small row of the
-  horizon: nothing judged is nothing large. Rows are left out when the bar would get too
-  short (the limit first, the instruction last); the name at the bottom, shortened
+  47 s" on course) and the instruction ("stay ≤ 101.5 dB" alone, not what it holds for;
+  "cooling down in 7 min 30 s" when it cannot recover within the horizon) — each in the
+  longest wording that fits every column saying the same kind of thing, shrinking to half
+  its size before a shorter one is used, so neighbours read alike ("stay ≤ 102.0" beside
+  "stay ≤ 85.3"); the limit small under them (dim unless the column is alarmed), as the line
+  across the bar shows it; "not calibrated" in its place when nothing is judged (nothing
+  judged is nothing large). The window's value is secondary: a small figure **held still
+  low in the track** — the same place at any level, since a figure riding the bar's top
+  moves every second and draws the eye for nothing — smaller than the window's name under
+  the column (`NAME_RATIO`), at most 0.8 of the state's size (`VALUE_RATIO`) and well under
+  the meter's number above the windows (≤ 0.3 of it, tested). Its colour is judged on what
+  is behind it (`Behind`): on the fill (the usual case: the bar is above it) the theme ink
+  of highest contrast with the fill, ≥ 4.5:1 (white on red, black on amber or green, never
+  red on red); on the track (the level below it) the bar's own colour where that reads
+  (≥ 3:1), plain text otherwise, dim before anything was measured; across the fill's edge
+  the ink that reads on both. The limit line is 30 dB above the scale's bottom on a judged
+  scale, far above the figure; on a track too short for that the figure goes just above
+  the line. On its baseline, smaller, the window's own unit and weighting (`dB(A)`,
+  `dB(C)`, `dBFS (A)` uncalibrated; tiles the same), never dropped, since the SPL meter
+  shown above the windows may use another weighting. Rows are left out when the bar would
+  get too short (the limit first, the instruction last); the name at the bottom, shortened
   uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the
   weighting; mixed weightings keep their letter). Tested: 1–8 windows, 320–3840 px, no text
-  overlaps, every value inside its track at its bar's top and clear of the limit line.
+  overlaps, every value inside its track, low, at the same place from the bottom of the
+  scale to over its top, clear of the limit line and legible on what is behind it.
 - **Tiles** (B) keep every figure written out in a grid: the name and state on top, in the
-  middle the instruction large under its horizon and the value under it smaller (one size
-  in every tile of the grid, with an instruction or not), the course, limit and progress
-  below; over tiles fill red, near ones amber; the **history strip** (Shift+B) goes under
+  middle the instruction large, the value smaller than the name at a fixed place low in the
+  body (one size and place in every tile of the grid, with an instruction or not), the
+  course, limit and progress below; over tiles fill red, near ones amber; the **history strip** (Shift+B) goes under
   either. Defaults: columns, no strip.
 - **Stage view**: full screen with the SPL pane maximised on its windows draws only the
   scene — columns and the caption (meter, unit, run, calibration) — without the app's top bar,
