@@ -1197,6 +1197,36 @@ fn assert_caption_fits(s: &LeqScene, w: f32, at: &str) {
     }
 }
 
+/// A long calibration text (mic, data sheet, curve) on the right still leaves the run centred
+/// on the pane, as the meter's number under it is: a shorter wording centred beats a longer
+/// one pushed toward the meter's name.
+#[test]
+fn run_stays_centred_beside_a_long_calibration() {
+    let th = Theme::dark();
+    let (c, f) = many(5, false, LevelScale::DbSpl);
+    for (w, h) in [(1920.0, 1080.0), (1280.0, 720.0)] {
+        let v = LeqView {
+            cal: "MM1 34804 · electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 17 h ago · mic curve: MM1 34804 90°".into(),
+            ..columns_view(&c, &f, None)
+        };
+        let s = leq_scene(&v, &Status::default(), &th, size(w, h));
+        let run = s.run.clone().expect("run");
+        let l = s
+            .scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .find(|l| l.text == run)
+            .expect("run label");
+        let b = crate::canvas::tests::label_box(l);
+        assert!(
+            (b.x + b.w / 2.0 - w / 2.0).abs() < 0.5,
+            "{w}: {run:?} {b:?}"
+        );
+        assert_caption_fits(&s, w, &format!("{w}"));
+    }
+}
+
 /// The run in the caption at every width, in columns and tiles: the longest wording that
 /// fits, shortened to the clock and the total and then to the clock, never overlapping
 /// the meter or the calibration; large on a full-screen pane.

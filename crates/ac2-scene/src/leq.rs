@@ -1245,17 +1245,20 @@ fn caption(
     let variants = run.variants();
     let left_end = pad + canvas::text_width(left, theme.font_size);
     let right_start = size.width - pad - canvas::text_width(right, theme.font_size);
-    let free = right_start - left_end - 2.0 * gap;
     // Centred on the pane, the way the meter's number under it is; pushed aside only as far
     // as the meter's name and the calibration need.
     let centred =
         |w: f32, lo: f32, hi: f32| (size.width / 2.0 - w / 2.0).clamp(lo, (hi - w).max(lo));
-    // On the meter's row: down to the clock and the total, never the bare clock alone.
+    // On the meter's row: down to the clock and the total, never the bare clock alone, and
+    // only exactly centred, lined up with the meter's number under it; a shorter wording
+    // centred beats a longer one pushed aside. When nothing fits centred there, the run gets
+    // a row of its own below, centred too.
     let inline = variants.len().saturating_sub(1).max(1);
+    let half_room = (size.width / 2.0 - left_end - gap).min(right_start - gap - size.width / 2.0);
     if let Some(t) = variants
         .iter()
         .take(inline)
-        .find(|t| canvas::text_width(t, big) <= free)
+        .find(|t| canvas::text_width(t, big) <= 2.0 * half_room)
     {
         let w = canvas::text_width(t, big);
         let x = centred(w, left_end + gap, right_start - gap) + w / 2.0;
