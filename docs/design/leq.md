@@ -188,7 +188,8 @@ daemon logs each over and recovery. Clients toast them. There is no hysteresis b
 
 ## Where it shows
 
-- App: **G** switches the SPL pane between the meter and its windows; **B** lays the
+- App: **G** steps the SPL pane meter → windows → meter + windows (the meter's number over
+  the windows, the default; `ac2_scene::meter_leq`); **B** lays the
   windows out as columns or tiles, **Shift+B** shows the history strip (rebuilt from the
   log, *The history strip* below), both remembered in `ui.toml`; **W** maximises the pane, **F11**
   goes full screen, the two together are the stage view. **Shift+L** opens the windows

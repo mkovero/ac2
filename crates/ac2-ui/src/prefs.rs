@@ -28,7 +28,7 @@
 //! focus = "spl"
 //! maximized = true
 //! fullscreen = true
-//! spl_view = "meter"
+//! spl_view = "meter_leq"
 //! ir_mode = "etc"
 //! distortion_unit = "percent"
 //!
@@ -51,7 +51,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use ac2_scene::view::{DistortionUnit, IrMode, LeqLayout, LeqStyle};
+use ac2_scene::view::{DistortionUnit, IrMode, LeqLayout, LeqStyle, SplMode};
 use serde::{Deserialize, Serialize};
 
 use crate::state::PaneKind;
@@ -82,8 +82,8 @@ pub struct LayoutPrefs {
     pub maximized: bool,
     /// The window fills the screen (F11; with `maximized`, the full-screen pane).
     pub fullscreen: bool,
-    /// The SPL pane shows the Leq windows rather than the meter.
-    pub spl_leq: bool,
+    /// What the SPL pane shows: the meter, the Leq windows or both.
+    pub spl_view: SplMode,
     pub ir_mode: IrMode,
     pub distortion_unit: DistortionUnit,
     /// The measurement each pane shows, by name (transfer, spectrum, SPL).
@@ -96,7 +96,7 @@ impl Default for LayoutPrefs {
             focus: PaneKind::Transfer,
             maximized: false,
             fullscreen: false,
-            spl_leq: false,
+            spl_view: SplMode::MeterLeq,
             ir_mode: IrMode::Linear,
             distortion_unit: DistortionUnit::Db,
             measurements: BTreeMap::new(),
@@ -214,6 +214,7 @@ impl PaneFile {
 enum SplViewFile {
     Meter,
     Leq,
+    MeterLeq,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,7 +255,7 @@ struct LayoutFile {
     maximized: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     fullscreen: bool,
-    #[serde(default = "spl_meter")]
+    #[serde(default = "spl_meter_leq")]
     spl_view: SplViewFile,
     #[serde(default = "ir_linear")]
     ir_mode: IrModeFile,
@@ -265,8 +266,8 @@ struct LayoutFile {
     measurements: MeasurementsFile,
 }
 
-fn spl_meter() -> SplViewFile {
-    SplViewFile::Meter
+fn spl_meter_leq() -> SplViewFile {
+    SplViewFile::MeterLeq
 }
 
 fn ir_linear() -> IrModeFile {
@@ -293,7 +294,11 @@ impl LayoutFile {
             focus: self.focus.pane(),
             maximized: self.maximized,
             fullscreen: self.fullscreen,
-            spl_leq: self.spl_view == SplViewFile::Leq,
+            spl_view: match self.spl_view {
+                SplViewFile::Meter => SplMode::Meter,
+                SplViewFile::Leq => SplMode::Leq,
+                SplViewFile::MeterLeq => SplMode::MeterLeq,
+            },
             ir_mode: match self.ir_mode {
                 IrModeFile::Linear => IrMode::Linear,
                 IrModeFile::Log => IrMode::Log,
@@ -313,10 +318,10 @@ impl LayoutFile {
             focus: PaneFile::of(l.focus),
             maximized: l.maximized,
             fullscreen: l.fullscreen,
-            spl_view: if l.spl_leq {
-                SplViewFile::Leq
-            } else {
-                SplViewFile::Meter
+            spl_view: match l.spl_view {
+                SplMode::Meter => SplViewFile::Meter,
+                SplMode::Leq => SplViewFile::Leq,
+                SplMode::MeterLeq => SplViewFile::MeterLeq,
             },
             ir_mode: match l.ir_mode {
                 IrMode::Linear => IrModeFile::Linear,
@@ -663,7 +668,7 @@ mod tests {
             focus: PaneKind::Spl,
             maximized: true,
             fullscreen: true,
-            spl_leq: true,
+            spl_view: SplMode::Leq,
             ir_mode: IrMode::Etc,
             distortion_unit: DistortionUnit::Percent,
             measurements: [
@@ -719,6 +724,30 @@ mod tests {
             "[window]\nwidth = 100\nheight = 100\n",
         ] {
             assert!(UiPrefs::from_toml(bad).is_err(), "{bad}");
+        }
+    }
+
+    /// A new layout shows the meter with the Leq windows under it; a remembered choice
+    /// stays, each one written as its name.
+    #[test]
+    fn spl_view_defaults_to_meter_and_leq_and_keeps_a_choice() {
+        assert_eq!(LayoutPrefs::default().spl_view, SplMode::MeterLeq);
+        let q = UiPrefs::from_toml("[layout]\nfocus = \"spl\"\n").expect("parse");
+        assert_eq!(q.layout.spl_view, SplMode::MeterLeq);
+        for (mode, name) in [
+            (SplMode::Meter, "meter"),
+            (SplMode::Leq, "leq"),
+            (SplMode::MeterLeq, "meter_leq"),
+        ] {
+            let mut p = UiPrefs::default();
+            p.layout.spl_view = mode;
+            p.layout.focus = PaneKind::Spl;
+            let text = p.to_toml();
+            assert!(text.contains(&format!("spl_view = \"{name}\"")), "{text}");
+            assert_eq!(
+                UiPrefs::from_toml(&text).expect("parse").layout.spl_view,
+                mode
+            );
         }
     }
 

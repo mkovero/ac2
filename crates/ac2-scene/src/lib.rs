@@ -11,7 +11,8 @@
 //! and the clock offset ([`time`]).
 //!
 //! Builders: [`tf::transfer_scene`], [`spectrum::spectrum_scene`], [`ir::ir_scene`],
-//! [`spl::spl_scene`], [`distortion::distortion_scene`]. Strings without geometry: [`readout`], [`banner::banners`],
+//! [`spl::spl_scene`], [`leq::leq_scene`], [`meter_leq::meter_leq_scene`],
+//! [`distortion::distortion_scene`]. Strings without geometry: [`readout`], [`banner::banners`],
 //! [`spl::spl_readout`].
 #![forbid(unsafe_code)]
 
@@ -28,6 +29,7 @@ pub mod ir;
 pub mod leq;
 pub mod leq_preset;
 pub mod meter;
+pub mod meter_leq;
 pub mod primitives;
 pub mod progress;
 pub mod readout;

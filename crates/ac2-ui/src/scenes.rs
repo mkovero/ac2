@@ -16,13 +16,15 @@ use ac2_scene::format;
 use ac2_scene::grid::{column_edges, column_frequencies};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::leq::{LeqScene, LeqView, leq_scene, leq_tiles};
-use ac2_scene::primitives::Viewport;
+use ac2_scene::meter_leq::{MeterLeqScene, meter_leq_scene};
+use ac2_scene::primitives::{Scene, Viewport};
 use ac2_scene::spectrum::{Quantity, SpectrumScene, SpectrumTrace, spectrum_scene};
-use ac2_scene::spl::{SplScene, cal_text, spl_readout, spl_scene};
+use ac2_scene::spl::{SplReadout, SplScene, cal_text, spl_readout, spl_scene};
 use ac2_scene::tf::{TfScene, transfer_scene};
 use ac2_scene::theme::Theme;
 use ac2_scene::time::{ClockOffset, Freshness};
 use ac2_scene::trace::{TfTrace, TimeBase, TraceKey};
+use ac2_scene::view::SplMode;
 
 use crate::state::{AppState, PaneKind};
 
@@ -519,15 +521,17 @@ pub fn has_spl(st: &AppState) -> bool {
         .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
 }
 
-/// The Leq windows of the SPL meter the pane shows (else the first one with a `leq` frame).
-pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<LeqScene> {
-    let (m, tf) = pane_order(st, PaneKind::Spl)
+/// The SPL meters in the order the pane picks them: the one it shows first.
+fn spl_meters(st: &AppState) -> impl Iterator<Item = &Measurement> {
+    pane_order(st, PaneKind::Spl)
         .into_iter()
-        .find_map(|(_, m)| {
-            matches!(m.config.kind, MeasKind::Spl { .. })
-                .then(|| frame(st, m.id, Stream::Leq).map(|f| (m, f)))
-                .flatten()
-        })?;
+        .map(|(_, m)| m)
+        .filter(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+}
+
+/// What the Leq view shows of meter `m`, with its `leq` frame.
+fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqView<'a>> {
+    let tf = frame(st, m.id, Stream::Leq)?;
     let FrameData::Leq(f) = &tf.frame.data else {
         return None;
     };
@@ -537,7 +541,7 @@ pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Leq
     // The frame describes the windows of the configuration it was made under.
     let cfg = &config.leq;
     let fresh = freshness(tf);
-    let v = LeqView {
+    Some(LeqView {
         meter: m.config.name.clone(),
         cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
         cfg,
@@ -553,27 +557,18 @@ pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Leq
             .meta
             .run
             .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
-    };
-    let status = status(st, &[], None, now);
-    Some(leq_scene(&v, &status, theme, size))
+    })
 }
 
-/// The SPL measurement the pane shows (else the first one with a frame). `keymap` names the
-/// key that resets the meter's statistics.
-pub fn spl(
-    st: &AppState,
+/// The meter readout of meter `m` (the held reading, [`ac2_scene::spl::SplHold`]), with its
+/// newest `spl` frame. `keymap` names the key that resets the meter's statistics.
+fn spl_readout_of<'a>(
+    st: &'a AppState,
+    m: &Measurement,
     keymap: &crate::keys::Keymap,
-    theme: &Theme,
-    size: Viewport,
     now: Now,
-) -> Option<SplScene> {
-    let (m, tf) = pane_order(st, PaneKind::Spl)
-        .into_iter()
-        .find_map(|(_, m)| {
-            matches!(m.config.kind, MeasKind::Spl { .. })
-                .then(|| frame(st, m.id, Stream::Spl).map(|f| (m, f)))
-                .flatten()
-        })?;
+) -> Option<(SplReadout, &'a TopicFrame)> {
+    let tf = frame(st, m.id, Stream::Spl)?;
     let FrameData::Spl(f) = &tf.frame.data else {
         return None;
     };
@@ -603,6 +598,62 @@ pub fn spl(
         reset.as_deref(),
     );
     let r = spl_readout(held, f.meta.level, cal, Some(freshness(tf)), since);
+    Some((r, tf))
+}
+
+/// The Leq windows of the SPL meter the pane shows (else the first one with a `leq` frame).
+pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<LeqScene> {
+    let v = spl_meters(st).find_map(|m| leq_view(st, m, now))?;
+    let status = status(st, &[], None, now);
+    Some(leq_scene(&v, &status, theme, size))
+}
+
+/// The SPL measurement the pane shows (else the first one with a frame). `keymap` names the
+/// key that resets the meter's statistics.
+pub fn spl(
+    st: &AppState,
+    keymap: &crate::keys::Keymap,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<SplScene> {
+    let (r, tf) = spl_meters(st).find_map(|m| spl_readout_of(st, m, keymap, now))?;
     let status = status(st, &[tf], None, now);
     Some(spl_scene(&r, &status, theme, size))
+}
+
+/// The meter + Leq view of the SPL meter the pane shows (else the first one with both
+/// frames): its held number over its Leq windows.
+pub fn meter_leq(
+    st: &AppState,
+    keymap: &crate::keys::Keymap,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<MeterLeqScene> {
+    let (r, tf, v) = spl_meters(st).find_map(|m| {
+        let (r, tf) = spl_readout_of(st, m, keymap, now)?;
+        Some((r, tf, leq_view(st, m, now)?))
+    })?;
+    let status = status(st, &[tf], None, now);
+    Some(meter_leq_scene(&r, &v, &status, theme, size))
+}
+
+/// The SPL pane's picture in the chosen view ([`SplMode`]). The meter + Leq view shows
+/// whichever part has frames until both have (the windows' first second).
+pub fn spl_pane(
+    st: &AppState,
+    keymap: &crate::keys::Keymap,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<Scene> {
+    match st.view.spl.mode {
+        SplMode::Meter => spl(st, keymap, theme, size, now).map(|s| s.scene),
+        SplMode::Leq => leq(st, theme, size, now).map(|s| s.scene),
+        SplMode::MeterLeq => meter_leq(st, keymap, theme, size, now)
+            .map(|s| s.leq.scene)
+            .or_else(|| spl(st, keymap, theme, size, now).map(|s| s.scene))
+            .or_else(|| leq(st, theme, size, now).map(|s| s.scene)),
+    }
 }

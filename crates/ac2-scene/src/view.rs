@@ -353,11 +353,48 @@ pub struct LeqLayout {
     pub history: bool,
 }
 
+/// What the SPL pane shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SplMode {
+    /// The meter alone: its number, bar, statistics and calibration.
+    Meter,
+    /// The rolling Leq windows alone.
+    Leq,
+    /// The meter's number on top, the Leq windows below: the level now and the limits'
+    /// state on one screen.
+    #[default]
+    MeterLeq,
+}
+
+impl SplMode {
+    /// G: meter → Leq windows → meter + Leq → meter.
+    pub fn next(self) -> Self {
+        match self {
+            SplMode::Meter => SplMode::Leq,
+            SplMode::Leq => SplMode::MeterLeq,
+            SplMode::MeterLeq => SplMode::Meter,
+        }
+    }
+
+    /// The view with the Leq windows on screen: as it is when they are, else the meter
+    /// with the windows under it (the meter stays where it was asked for).
+    pub fn with_leq(self) -> Self {
+        match self {
+            SplMode::Meter => SplMode::MeterLeq,
+            m => m,
+        }
+    }
+
+    /// Whether the Leq windows are on screen.
+    pub fn shows_leq(self) -> bool {
+        matches!(self, SplMode::Leq | SplMode::MeterLeq)
+    }
+}
+
 /// The SPL pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct SplView {
-    /// The meter's rolling Leq windows instead of its readout.
-    pub leq: bool,
+    pub mode: SplMode,
     pub layout: LeqLayout,
 }
 

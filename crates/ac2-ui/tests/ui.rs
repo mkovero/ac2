@@ -1230,6 +1230,8 @@ fn top_bar_never_overlaps() {
 /// are); the test swaps the frame.
 struct LeqPublisher {
     frame: Arc<std::sync::Mutex<Option<ac2_proto::frame::LeqFrame>>>,
+    /// The meter's own frame, published alongside once set.
+    spl: Arc<std::sync::Mutex<Option<ac2_proto::frame::SplFrame>>>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -1239,8 +1241,10 @@ impl LeqPublisher {
         use ac2_proto::{Frame, FrameData};
         let frame: Arc<std::sync::Mutex<Option<ac2_proto::frame::LeqFrame>>> =
             Arc::new(std::sync::Mutex::new(None));
+        let spl: Arc<std::sync::Mutex<Option<ac2_proto::frame::SplFrame>>> =
+            Arc::new(std::sync::Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
-        let (f, s) = (Arc::clone(&frame), Arc::clone(&stop));
+        let (f, m, s) = (Arc::clone(&frame), Arc::clone(&spl), Arc::clone(&stop));
         let thread = std::thread::spawn(move || {
             let mut seq = 1;
             while !s.load(Ordering::Acquire) {
@@ -1254,11 +1258,22 @@ impl LeqPublisher {
                     st.publish(&frame);
                     seq += 1;
                 }
+                let meter = m.lock().ok().and_then(|g| g.clone());
+                if let Some(data) = meter {
+                    let mut st = fake.lock();
+                    let frame = Frame {
+                        stamp: st.stamp(seq, None),
+                        data: FrameData::Spl(data),
+                    };
+                    st.publish(&frame);
+                    seq += 1;
+                }
                 std::thread::sleep(Duration::from_millis(200));
             }
         });
         Self {
             frame,
+            spl,
             stop,
             thread: Some(thread),
         }
@@ -1266,6 +1281,12 @@ impl LeqPublisher {
 
     fn set(&self, f: ac2_proto::frame::LeqFrame) {
         if let Ok(mut g) = self.frame.lock() {
+            *g = Some(f);
+        }
+    }
+
+    fn set_spl(&self, f: ac2_proto::frame::SplFrame) {
+        if let Ok(mut g) = self.spl.lock() {
             *g = Some(f);
         }
     }
@@ -1496,7 +1517,7 @@ fn leq_tiles_from_an_empty_daemon() {
             })
     });
     assert_eq!(fake.executions("meas.update"), 1);
-    assert!(h.state().state.view.spl.leq);
+    assert!(h.state().state.view.spl.mode.shows_leq());
     assert_eq!(h.state().state.layout.focus, PaneKind::Spl);
     assert_eq!(
         h.state().state.view.spl.layout,
@@ -1591,6 +1612,16 @@ fn leq_tiles_from_an_empty_daemon() {
         }
         hist
     };
+    // G twice: from meter + Leq (the default) past the meter alone to the windows alone.
+    assert_eq!(
+        h.state().state.view.spl.mode,
+        ac2_scene::view::SplMode::MeterLeq
+    );
+    h.key_press(Key::G);
+    h.key_press(Key::G);
+    step_until(&mut h, "the windows alone", |a| {
+        a.state.view.spl.mode == ac2_scene::view::SplMode::Leq
+    });
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     let pin = |a: &mut ac2_ui::App| {
@@ -1675,7 +1706,51 @@ fn leq_tiles_from_an_empty_daemon() {
     h.key_press(Key::F11);
     step_until(&mut h, "the stage view", |a| a.state.stage_view());
     snapshot_when(&mut h, "leq_columns_fullscreen", pin, first_is(true));
+
+    // G: the meter's number over the windows, on the stage; F11 again, in the window.
+    leq.set_spl(spl_frame_at(meas, 101.84, cal_at));
+    h.key_press(Key::G);
+    let held = move |a: &ac2_ui::App| {
+        a.state.view.spl.mode == ac2_scene::view::SplMode::MeterLeq
+            && a.state.spl_hold.contains_key(&meas)
+            && first_is(true)(a)
+    };
+    snapshot_when(&mut h, "spl_meter_leq_stage", pin, held);
+    h.key_press(Key::F11);
+    step_until(&mut h, "maximised in the window", |a| {
+        a.state.layout.maximized && !a.state.stage_view()
+    });
+    snapshot_when(&mut h, "spl_meter_leq", pin, held);
     drop(leq);
+}
+
+/// The meter's frame for the Leq test's meter: LAF `level`, calibrated at `calibrated_at`.
+fn spl_frame_at(meas: MeasId, level: f64, calibrated_at: u64) -> ac2_proto::frame::SplFrame {
+    use ac2_proto::frame::{SplFrame, SplMeta};
+    use ac2_proto::model::{CalStatus, LevelScale, PeakWeighting, TimeWeighting, Weighting};
+    use ac2_proto::units::{Seconds, WallNs};
+    SplFrame {
+        meas,
+        meta: SplMeta {
+            scale: LevelScale::DbSpl,
+            weighting: Weighting::A,
+            time_weighting: TimeWeighting::Fast,
+            peak_weighting: PeakWeighting::C,
+            level,
+            lmax: level + 4.0,
+            lmin: level - 20.0,
+            leq: level - 1.5,
+            lpeak: level + 15.0,
+            duration: Seconds(2730.0),
+            cal: CalStatus::Verified {
+                calibrated_at: WallNs(calibrated_at),
+                basis: ac2_proto::model::CalBasis::Acoustic {
+                    calibrator_level: ac2_proto::units::DbSpl(94.0),
+                },
+            },
+            mic_curve: false,
+        },
+    }
 }
 
 /// The Traces list: every stored trace by name with what it is, its slot, shown or hidden
@@ -1824,9 +1899,12 @@ fn spl_meter_big_and_stage() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::ALT, Key::Num4);
+    // G: from meter + Leq (the default) to the meter alone.
+    h.key_press(Key::G);
     h.key_press(Key::W);
     step_until(&mut h, "the meter maximised", |a| {
-        a.state.layout.maximized
+        a.state.view.spl.mode == ac2_scene::view::SplMode::Meter
+            && a.state.layout.maximized
             && a.state.layout.focus == PaneKind::Spl
             && a.state.spl_hold.contains_key(&MeasId(4))
     });

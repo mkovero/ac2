@@ -4284,13 +4284,15 @@ fn leq_windows_from_the_keyboard() {
         [(1800.0, Some(DbSpl(99.0))), (3600.0, Some(DbSpl(100.0)))]
     );
     assert_eq!(config.input, 1);
-    assert!(t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
     assert_eq!(t.st.layout.focus, PaneKind::Spl);
-    // G: back to the meter, and again to the windows.
+    // G: the meter, the windows alone, both again.
     t.key("G");
-    assert!(!t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
     t.key("G");
-    assert!(t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
+    t.key("G");
+    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
     // A refused value keeps the dialog open and says why.
     t.type_key("Shift+L", "L");
     t.key("ArrowDown");
@@ -4400,12 +4402,14 @@ fn leq_layout_keys_and_prefs() {
             history: false
         }
     );
-    assert!(!t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
     t.key("Alt+4");
     assert_eq!(t.st.layout.focus, PaneKind::Spl);
-    // B from the meter: the windows, as tiles.
+    t.key("G");
+    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
+    // B from the meter: the windows, as tiles, under the meter.
     t.key("B");
-    assert!(t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::MeterLeq);
     assert_eq!(t.st.view.spl.layout.style, LeqStyle::Tiles);
     assert!(t.st.prefs_dirty);
     assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
@@ -4420,10 +4424,11 @@ fn leq_layout_keys_and_prefs() {
             history: true
         }
     );
-    // G still flips meter / windows and leaves the layout alone.
+    // G still steps the views and leaves the layout alone.
     t.key("G");
-    assert!(!t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
     t.key("G");
+    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
     assert_eq!(t.st.prefs.leq.style, LeqStyle::Tiles);
     t.key("B");
     t.key("Shift+B");
@@ -4447,7 +4452,7 @@ fn leq_layout_keys_and_prefs() {
     assert_eq!(u.st.view.spl.layout, prefs.leq);
     // The stage view: full screen, the SPL pane maximised on its windows.
     t.key("Alt+4");
-    assert!(t.st.view.spl.leq);
+    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
     assert!(!t.st.stage_view());
     t.key("W");
     assert!(!t.st.stage_view());
@@ -4710,7 +4715,7 @@ fn key_hints_follow_the_focused_pane() {
     assert!(ir.contains(&"G linear/log/ETC".to_owned()), "{ir:?}");
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
-    assert_eq!(spl[..3], ["G meter/Leq", "F F/S/I", "Z A/C/Z"]);
+    assert_eq!(spl[..3], ["G meter/Leq/both", "F F/S/I", "Z A/C/Z"]);
     // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR.
     t.key("Alt+5");
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
@@ -4896,7 +4901,8 @@ fn spl_keys_cycle_the_weightings() {
     t.conn(mirror(state.clone()));
     t.key("Alt+4");
     t.key("G");
-    assert!(t.st.view.spl.leq);
+    t.key("G");
+    assert_eq!(t.st.view.spl.mode, SplMode::Leq);
     let mut seen = Vec::new();
     for key in ["F", "F", "F", "Z", "Z", "Z"] {
         let (cfg, what) = spl_update(&t.key(key)).expect(key);
@@ -4918,8 +4924,9 @@ fn spl_keys_cycle_the_weightings() {
             "FOH SPL: LAF"
         ]
     );
-    assert!(
-        t.st.view.spl.leq,
+    assert_eq!(
+        t.st.view.spl.mode,
+        SplMode::Leq,
         "the Leq windows stay: they do not change"
     );
     // The reply names the meter's new metric over the Leq view.
@@ -4929,9 +4936,10 @@ fn spl_keys_cycle_the_weightings() {
     });
     assert_eq!(t.last_toast(), "FOH SPL: LCF");
     t.key("G");
-    assert!(!t.st.view.spl.leq);
+    t.key("G");
+    assert_eq!(t.st.view.spl.mode, SplMode::Meter);
     t.key("F");
-    assert!(!t.st.view.spl.leq, "the meter stays");
+    assert_eq!(t.st.view.spl.mode, SplMode::Meter, "the meter stays");
     for (c, want) in [
         (CommandId::SplSlow, "FOH SPL: LAS"),
         (CommandId::SplImpulse, "FOH SPL: LAI"),
@@ -5080,7 +5088,9 @@ fn layout_is_remembered_and_restored() {
     assert!(t.st.prefs_dirty);
     let l = t.st.prefs.layout.clone();
     assert_eq!(l.focus, PaneKind::Spl);
-    assert!(l.maximized && l.fullscreen && l.spl_leq);
+    assert!(l.maximized && l.fullscreen);
+    // G from the default meter + Leq: the meter alone, remembered.
+    assert_eq!(l.spl_view, SplMode::Meter);
     assert_eq!(l.ir_mode, IrMode::Log);
     assert_eq!(
         l.measurements.get(&PaneKind::Spl).map(String::as_str),
@@ -5111,7 +5121,8 @@ fn layout_is_remembered_and_restored() {
     let mut u = T::disconnected();
     u.st.set_prefs(prefs.clone());
     assert_eq!(u.st.layout.focus, PaneKind::Spl);
-    assert!(u.st.layout.maximized && u.st.fullscreen && u.st.view.spl.leq);
+    assert!(u.st.layout.maximized && u.st.fullscreen);
+    assert_eq!(u.st.view.spl.mode, SplMode::Meter);
     assert_eq!(u.st.view.ir.mode, IrMode::Log);
     assert_eq!(u.st.stimulus.phase, StimPhase::Idle);
     // Before the daemon's state, the remembered names stay as they were.

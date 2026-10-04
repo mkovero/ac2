@@ -274,7 +274,7 @@ pub fn spl_readout(
 const FOOTER_SEP: &str = " · ";
 
 /// `text` cut to `width` at `size` with a trailing `…` (whole characters).
-fn cut(text: &str, width: f32, size: f32) -> String {
+pub(crate) fn cut(text: &str, width: f32, size: f32) -> String {
     if canvas::text_width(text, size) <= width {
         return text.to_owned();
     }
@@ -374,11 +374,6 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         size.width - 2.0 * pad,
         (size.height - top - 2.0 * pad).max(1.0),
     );
-    let main = if r.stale.is_some() {
-        theme.text_dim
-    } else {
-        theme.text
-    };
     let fs = theme.font_size;
     let stat_size = (area.h.min(area.w * 0.6) * 0.045).clamp(fs, 2.6 * fs);
     let small = (stat_size * 0.8).max(theme.small_font_size);
@@ -428,66 +423,8 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
     // The statistics' heading sits right over them: it belongs to them, not to the number.
     let since_top = stats_top - 0.25 * stat_size - line_h;
     let room = (since_top - gap - room_top).max(0.0);
-    // The number as wide as the pane allows, then as high as the room allows.
-    let mut s = Stack::new(area.w * 0.94 / number_em(&r.value), fs);
-    for _ in 0..4 {
-        let h = s.height(true);
-        if h <= room {
-            break;
-        }
-        s = Stack::new(s.big * room / h, fs);
-    }
-    let s = Stack::new(s.big.max(1.2 * fs), fs);
-    let with_bar = s.height(true) <= room + 0.5;
-    let y0 = room_top + ((room - s.height(with_bar)) / 2.0).max(0.0);
+    let block = draw_number_block(&mut c, r, Rect::new(area.x, room_top, area.w, room), theme);
     let cx = area.x + area.w / 2.0;
-    c.overlay.labels.push(label(
-        r.value.clone(),
-        [cx, y0],
-        anchor(HAlign::Center, VAlign::Top),
-        s.big,
-        main,
-    ));
-    let caption_y = y0 + 1.25 * s.big + s.gap;
-    c.overlay.labels.push(label(
-        r.caption.clone(),
-        [cx, caption_y],
-        anchor(HAlign::Center, VAlign::Top),
-        s.caption,
-        theme.text_dim,
-    ));
-    let bar_rect = with_bar.then(|| {
-        let w = (canvas::text_width("000.0", s.big)).min(area.w * 0.94);
-        Rect::new(
-            cx - w / 2.0,
-            caption_y + 1.25 * s.caption + s.bar_gap,
-            w,
-            s.bar_h,
-        )
-    });
-    if let Some(b) = bar_rect {
-        c.base.rects.push(FillRect {
-            rect: b,
-            color: theme.plot_background,
-            clip: None,
-        });
-        c.data.rects.push(FillRect {
-            rect: Rect::new(b.x, b.y, b.w * r.bar.fill, b.h),
-            color: if r.stale.is_some() {
-                theme.text_dim
-            } else {
-                theme.level_ok
-            },
-            clip: None,
-        });
-        for t in &r.bar.ticks {
-            c.overlay.rects.push(FillRect {
-                rect: Rect::new(b.x + b.w * t - 0.5, b.y, 1.0, b.h),
-                color: theme.background,
-                clip: None,
-            });
-        }
-    }
     c.overlay.labels.push(label(
         cut(&r.since, area.w, small),
         [cx, since_top],
@@ -529,8 +466,151 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         area,
         strip: strip.rect,
         banners: strip.rows,
+        bar: block.bar,
+    }
+}
+
+/// Where the number's block went.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NumberBlock {
+    /// The number's type size.
+    pub size: f32,
+    /// The level bar, when there was room for it.
+    pub bar: Option<Rect>,
+}
+
+/// Draws the number's block in `room`: the held level as wide as `room` allows, then as
+/// high, its name and unit under it and the slim live bar under that when it fits, the
+/// whole centred. Dimmed while the frame is stale.
+pub(crate) fn draw_number_block(
+    c: &mut Canvas,
+    r: &SplReadout,
+    room: Rect,
+    theme: &Theme,
+) -> NumberBlock {
+    let main = if r.stale.is_some() {
+        theme.text_dim
+    } else {
+        theme.text
+    };
+    let s = fit_stack(&r.value, room, theme.font_size);
+    let with_bar = s.height(true) <= room.h + 0.5;
+    let y0 = room.y + ((room.h - s.height(with_bar)) / 2.0).max(0.0);
+    let cx = room.x + room.w / 2.0;
+    c.overlay.labels.push(label(
+        r.value.clone(),
+        [cx, y0],
+        anchor(HAlign::Center, VAlign::Top),
+        s.big,
+        main,
+    ));
+    let caption_y = y0 + 1.25 * s.big + s.gap;
+    c.overlay.labels.push(label(
+        r.caption.clone(),
+        [cx, caption_y],
+        anchor(HAlign::Center, VAlign::Top),
+        s.caption,
+        theme.text_dim,
+    ));
+    let bar_rect = with_bar.then(|| {
+        let w = (canvas::text_width("000.0", s.big)).min(room.w * 0.94);
+        Rect::new(
+            cx - w / 2.0,
+            caption_y + 1.25 * s.caption + s.bar_gap,
+            w,
+            s.bar_h,
+        )
+    });
+    if let Some(b) = bar_rect {
+        c.base.rects.push(FillRect {
+            rect: b,
+            color: theme.plot_background,
+            clip: None,
+        });
+        c.data.rects.push(FillRect {
+            rect: Rect::new(b.x, b.y, b.w * r.bar.fill, b.h),
+            color: if r.stale.is_some() {
+                theme.text_dim
+            } else {
+                theme.level_ok
+            },
+            clip: None,
+        });
+        for t in &r.bar.ticks {
+            c.overlay.rects.push(FillRect {
+                rect: Rect::new(b.x + b.w * t - 0.5, b.y, 1.0, b.h),
+                color: theme.background,
+                clip: None,
+            });
+        }
+    }
+    NumberBlock {
+        size: s.big,
         bar: bar_rect,
     }
+}
+
+/// The number's block as large as `room` allows: as wide as its width, then as high as its
+/// height; never under 1.2 em of the caption type.
+fn fit_stack(value: &str, room: Rect, fs: f32) -> Stack {
+    let mut s = Stack::new(room.w * 0.94 / number_em(value), fs);
+    for _ in 0..4 {
+        let h = s.height(true);
+        if h <= room.h {
+            break;
+        }
+        s = Stack::new(s.big * room.h / h, fs);
+    }
+    Stack::new(s.big.max(1.2 * fs), fs)
+}
+
+/// The number's type size [`draw_number_block`] gives in `room` with the bar, `None` when
+/// the bar does not fit.
+pub(crate) fn number_block_size(value: &str, room: Rect, fs: f32) -> Option<f32> {
+    let s = fit_stack(value, room, fs);
+    (s.height(true) <= room.h + 0.5).then_some(s.big)
+}
+
+/// Draws the number with its name and unit after it on the same baseline, centred
+/// together in `room` (a short pane), the number as large as the line allows. Returns the
+/// number's type size.
+pub(crate) fn draw_number_line(c: &mut Canvas, r: &SplReadout, room: Rect, theme: &Theme) -> f32 {
+    let fs = theme.font_size;
+    let main = if r.stale.is_some() {
+        theme.text_dim
+    } else {
+        theme.text
+    };
+    // The name at 0.4 of the number (at least the caption type), 0.3 em after it.
+    let em = number_em(&r.value);
+    let by_height = room.h / 1.25;
+    let by_width = room.w * 0.94 / (em + 0.3 + 0.4 * canvas::text_width(&r.caption, 1.0));
+    let big = by_height.min(by_width).max(fs);
+    let cap = (0.4 * big).max(fs).min(big);
+    let value_w = canvas::text_width(&r.value, big);
+    let caption = cut(
+        &r.caption,
+        (room.w * 0.94 - value_w - 0.3 * big).max(fs),
+        cap,
+    );
+    let total = value_w + 0.3 * big + canvas::text_width(&caption, cap);
+    let x0 = room.x + ((room.w - total) / 2.0).max(0.0);
+    let baseline = room.y + ((room.h - 1.25 * big) / 2.0).max(0.0) + 0.95 * big;
+    c.overlay.labels.push(label(
+        r.value.clone(),
+        [x0, baseline],
+        anchor(HAlign::Left, VAlign::Baseline),
+        big,
+        main,
+    ));
+    c.overlay.labels.push(label(
+        caption,
+        [x0 + value_w + 0.3 * big, baseline],
+        anchor(HAlign::Left, VAlign::Baseline),
+        cap,
+        theme.text_dim,
+    ));
+    big
 }
 
 /// The SPL meter as drawn.

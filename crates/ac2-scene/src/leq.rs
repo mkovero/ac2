@@ -858,6 +858,19 @@ fn draw_history(c: &mut Canvas, s: &HistoryStrip, shared: Option<&str>, theme: &
 /// line, the windows as columns or tiles, and the history strip below them when it is on
 /// and the pane is tall enough.
 pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport) -> LeqScene {
+    leq_scene_under(v, status, theme, size, |_, area| (area, ())).0
+}
+
+/// [`leq_scene`] with `head` given the area under the caption first: it draws what goes
+/// above the windows (the meter of the meter + Leq view) and returns the area it leaves
+/// them. The caption stays the one caption of the whole pane.
+pub(crate) fn leq_scene_under<T>(
+    v: &LeqView<'_>,
+    status: &Status,
+    theme: &Theme,
+    size: Viewport,
+    head: impl FnOnce(&mut Canvas, Rect) -> (Rect, T),
+) -> (LeqScene, T) {
     let mut c = Canvas::new(size, theme);
     let pad = 10.0;
     let strip = canvas::banner_strip(&mut c, status, pad, size.width - 2.0 * pad, size, theme);
@@ -875,9 +888,16 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
         Some(s) => format!("{s} · {}", v.cal),
         None => v.cal.clone(),
     };
+    // The meter and the calibration share a row: on a narrow pane the calibration gives
+    // way first (down to half the row, its STALE first), then the meter's name.
+    let row_w = (size.width - 2.0 * pad - theme.font_size).max(1.0);
+    let fs = theme.font_size;
+    let left_w = canvas::text_width(&caption_left(v, shared.as_deref()), fs);
+    let right = crate::spl::cut(&right, (row_w - left_w).max(row_w * 0.5), fs);
+    let left_room = row_w - canvas::text_width(&right, fs);
     let cap = caption(
         v,
-        &caption_left(v, shared.as_deref()),
+        &crate::spl::cut(&caption_left(v, shared.as_deref()), left_room, fs),
         &right,
         top,
         size,
@@ -889,6 +909,7 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
         (size.width - 2.0 * pad).max(1.0),
         (size.height - top - cap.height - pad).max(1.0),
     );
+    let (area, extra) = head(&mut c, area);
     // The strip takes a third of a tall pane; a short one is all windows.
     let show_history =
         v.layout.history && v.history.is_some() && area.h >= 300.0 && area.w >= 300.0;
@@ -955,10 +976,14 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
             rects.push(r);
         }
     }
-    let left = caption_left(
-        v,
-        cols.as_ref()
-            .map_or(shared.as_deref(), |k| k.weighting.as_deref()),
+    let left = crate::spl::cut(
+        &caption_left(
+            v,
+            cols.as_ref()
+                .map_or(shared.as_deref(), |k| k.weighting.as_deref()),
+        ),
+        left_room,
+        fs,
     );
     // The caption: the meter (with the unit, and the weighting the columns' names leave
     // out), the run, and the calibration.
@@ -1005,7 +1030,7 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
         }
         _ => None,
     };
-    LeqScene {
+    let scene = LeqScene {
         scene: c.into_scene(size),
         tiles: rects,
         columns: cols,
@@ -1014,7 +1039,8 @@ pub fn leq_scene(v: &LeqView<'_>, status: &Status, theme: &Theme, size: Viewport
         banners: strip.rows,
         caption: Rect::new(0.0, top, size.width, cap.height),
         run: cap.run.map(|(t, ..)| t),
-    }
+    };
+    (scene, extra)
 }
 
 /// The caption's left part: the meter, and for columns the unit and the `weighting` their

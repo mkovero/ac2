@@ -404,7 +404,14 @@ pub(super) fn draw_columns(
     };
 
     if let Some(g) = gutter {
-        for v in &ticks {
+        // A short track labels every second or fifth line, so the labels stay apart.
+        let per_step = (track_bottom - track_top) * step as f32 / range.span().max(1.0) as f32;
+        let every = [1.0, 2.0, 5.0, 10.0]
+            .into_iter()
+            .find(|k| per_step * *k as f32 >= 1.25 * small)
+            .unwrap_or(10.0);
+        let labelled = |v: f64| ((v / step).round() % every).abs() < 0.5;
+        for v in ticks.iter().filter(|v| labelled(**v)) {
             c.overlay.labels.push(label(
                 format::fixed(*v, 0),
                 [g.right() - 6.0, to_y(*v)],

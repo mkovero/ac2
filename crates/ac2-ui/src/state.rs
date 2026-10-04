@@ -27,7 +27,7 @@ use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
     CoherencePlacement, DistortionUnit, FreqRange, IrMode, LeqStyle, PhaseView, SpectrumStyle,
-    ViewState,
+    SplMode, ViewState,
 };
 use ac2_scene::{axis::Range, format};
 
@@ -1416,7 +1416,7 @@ impl AppState {
             focus: self.layout.focus,
             maximized: self.layout.maximized,
             fullscreen: self.fullscreen,
-            spl_leq: self.view.spl.leq,
+            spl_view: self.view.spl.mode,
             ir_mode: self.view.ir.mode,
             distortion_unit: self.view.distortion.unit,
             measurements,
@@ -1497,7 +1497,7 @@ impl AppState {
         self.layout.focus = l.focus;
         self.layout.maximized = l.maximized;
         self.fullscreen = l.fullscreen;
-        self.view.spl.leq = l.spl_leq;
+        self.view.spl.mode = l.spl_view;
         self.view.ir.mode = l.ir_mode;
         self.view.distortion.unit = l.distortion_unit;
         self.pending_pane_meas = l.measurements.clone();
@@ -3732,8 +3732,13 @@ impl AppState {
                     IrMode::Etc => IrMode::Linear,
                 };
             }
-            C::SplLeqView => {
-                self.view.spl.leq = !self.view.spl.leq;
+            C::SplLeqView | C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq => {
+                self.view.spl.mode = match c {
+                    C::SplShowMeter => SplMode::Meter,
+                    C::SplShowLeq => SplMode::Leq,
+                    C::SplShowMeterLeq => SplMode::MeterLeq,
+                    _ => self.view.spl.mode.next(),
+                };
                 self.focus(PaneKind::Spl);
             }
             // Either shows the windows (a layout change is about them) and is remembered.
@@ -3747,7 +3752,7 @@ impl AppState {
                 } else {
                     l.history = !l.history;
                 }
-                self.view.spl.leq = true;
+                self.view.spl.mode = self.view.spl.mode.with_leq();
                 self.focus(PaneKind::Spl);
                 self.prefs.leq = self.view.spl.layout;
                 self.prefs_dirty = true;
@@ -3946,7 +3951,7 @@ impl AppState {
             Ok(config) => {
                 let (meas, name) = (d.meas, d.name.clone());
                 self.overlay = Overlay::None;
-                self.view.spl.leq = true;
+                self.view.spl.mode = self.view.spl.mode.with_leq();
                 self.focus(PaneKind::Spl);
                 self.call(
                     out,

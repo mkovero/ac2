@@ -191,7 +191,7 @@ split layout every pane is on screen and selecting a trace leaves the focus wher
 
 **The layout comes back.** The app remembers in `ui.toml` (written when the layout changes
 and on exit) which pane has the focus, whether it is maximised or full screen, the
-measurement each pane shows (by name), the SPL pane's meter or Leq view, the Leq windows'
+measurement each pane shows (by name), the SPL pane's view (meter, Leq windows or both), the Leq windows'
 style, the IR mode, the sweep pane's dB / % and the window's size and position. The next
 start comes back to them — full screen too — without arming or playing anything; a
 measurement that is gone (deleted, another daemon) quietly leaves its pane on its usual
@@ -601,6 +601,18 @@ or Z frequency weighting (IEC 61672-1: F and S are exponential averages of the s
 signal with 125 ms and 1 s; I, from IEC 60651, averages with 35 ms and holds peaks, falling
 with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal.
 
+- **Three views, G steps them**: the **meter** (below), the **Leq windows** (next section)
+  and **meter + Leq**, where a new meter starts: the meter's number centred across the top
+  third of the pane — its name and unit (`LAF · dB SPL`) under it and the live bar, the same
+  number with the same hold as in the meter view, without its statistics — and the Leq
+  windows below it as columns or tiles (**B**, **Shift+B** as in the Leq view), under one
+  caption for both: the meter's name, the run and the calibration. G goes meter → Leq
+  windows → meter + Leq → meter; the palette has each by name ("SPL pane: meter + Leq
+  windows"), and the app remembers the choice. W twice (or W, then F11) makes it the stage
+  view: the number and the windows, nothing else (the top bar comes back while a stimulus is
+  armed or playing). On a short pane the number and its name share one line above the
+  windows; on a very short one (under about 170 px) the number gives way: the windows judge the
+  limits, the meter view still has it.
 - **The number** is the current time-weighted level, centred and as large as the pane
   allows; under it the level's name and unit, `LAF · dB SPL` (`dBFS` uncalibrated), then a
   slim bar with the level live (30 … 130 dB SPL, or −100 … 0 dBFS, 10 dB ticks), then the
@@ -641,7 +653,7 @@ Both run as long as the meter runs, whether or not any app or terminal is watchi
 on when the meter is stopped and started, its windows are changed, the session is reopened or
 the daemon restarts (the log is in the autosave and in saved sessions).
 
-- **G** in the SPL pane switches between the meter and its windows. The windows show as
+- **G** in the SPL pane steps meter → windows → meter + windows (above). The windows show as
   **columns**, made to be read from the stage or across the room: one full-height column per
   window, the shortest on the left, each a bar that fills from the bottom with the window's
   Leq, the value in large digits on top and the window's name at the bottom ("LAeq 30 min",
@@ -673,7 +685,8 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   from the meter's log as the meter computed it; a new log clears it. The app remembers
   both. **W** gives the pane the whole
   window, once more (or **F11**) the whole screen: the **stage view**, nothing but the
-  columns and the caption with the meter's name, the run and its calibration (the top bar comes
+  columns (in meter + Leq, the number above them) and the caption with the meter's name,
+  the run and its calibration (the top bar comes
   back while a stimulus is armed or playing). W again goes back to the split layout.
 - Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
   steady level for the next minute that keeps the window at or below its limit ("next 1 min:
@@ -929,7 +942,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
-| `G` | SPL: meter / Leq windows | `spl_leq_view` |
+| `G` | SPL: meter → Leq windows → meter + Leq | `spl_leq_view` |
 | `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | `Shift+B` | SPL Leq windows: history strip on / off | `spl_leq_history` |
 | `Shift+R` | Start a new SPL log… | `spl_new_log` |
@@ -993,6 +1006,9 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Smoothing: 1/12 oct | `smooth_12` |
 | Smoothing: 1/6 oct | `smooth_6` |
 | Smoothing: 1/3 oct | `smooth_3` |
+| SPL pane: the meter | `spl_show_meter` |
+| SPL pane: the Leq windows | `spl_show_leq` |
+| SPL pane: meter + Leq windows | `spl_show_meter_leq` |
 
 #### Key hint lines (`Shift+H` on / off)
 
@@ -1003,7 +1019,7 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `K` smoothing · `Shift+I` IR · `W` maximise · `Alt+↑` offset · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `K` smoothing · `B` bars/line · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
-| SPL | `G` meter/Leq · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| SPL | `G` meter/Leq/both · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` linear/log/ETC · `Shift+I` IR/distortion · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->

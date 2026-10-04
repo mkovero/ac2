@@ -1005,7 +1005,10 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     }
     d.key("Enter");
     assert_eq!(d.st.overlay, Overlay::None);
-    assert!(d.st.view.spl.leq, "the SPL pane shows the windows");
+    assert!(
+        d.st.view.spl.mode.shows_leq(),
+        "the SPL pane shows the windows"
+    );
     assert_eq!(d.st.layout.focus, PaneKind::Spl);
     assert_eq!(d.st.view.spl.layout.style, LeqStyle::Columns);
     let th = Theme::dark();
@@ -1348,7 +1351,7 @@ fn run_clock_and_a_new_log_from_the_app() -> R {
     // G: the windows, with the run in the caption.
     d.key("Alt+4");
     assert_eq!(d.st.layout.focus, PaneKind::Spl);
-    if !d.st.view.spl.leq {
+    if !d.st.view.spl.mode.shows_leq() {
         d.key("G");
     }
     d.until("the run clock past 4 s", |s| {
@@ -1480,7 +1483,7 @@ fn a_restarted_app_shows_the_history_from_the_log() -> R {
     d.synced()?;
     d.key("Alt+4");
     assert_eq!(d.st.layout.focus, PaneKind::Spl);
-    if !d.st.view.spl.leq {
+    if !d.st.view.spl.mode.shows_leq() {
         d.key("G");
     }
     if !d.st.view.spl.layout.history {
@@ -1841,7 +1844,7 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     assert_eq!(ir.first().map(String::as_str), Some("G linear/log/ETC"));
     d.key("Alt+4");
     let spl = hint_line(&d.st);
-    assert_eq!(spl.first().map(String::as_str), Some("G meter/Leq"));
+    assert_eq!(spl.first().map(String::as_str), Some("G meter/Leq/both"));
     d.key("Alt+5");
     let sw = hint_line(&d.st);
     assert_eq!(sw.first().map(String::as_str), Some("Shift+S new sweep"));
@@ -2323,7 +2326,11 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
             c.weighting == Weighting::C && c.time_weighting == TimeWeighting::Slow
         })
     })?;
-    assert!(!d.st.view.spl.leq, "the meter shows");
+    assert_eq!(
+        d.st.view.spl.mode,
+        ac2_scene::view::SplMode::MeterLeq,
+        "the view stays"
+    );
     let (id, cfg) = config(&d.st).ok_or("meter")?;
     assert_eq!(cfg.leq, ac2_proto::model::LeqConfig::default_windows());
     let size = ac2_scene::primitives::Viewport {
@@ -2382,6 +2389,78 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
             (w[1] - w[0]) / 1_000_000
         );
     }
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// A new SPL meter's pane, from an empty daemon: the meter's number over its Leq windows by
+/// default (one caption for both), in the split layout and, W twice, full screen; G steps
+/// meter → Leq windows → meter + Leq.
+#[test]
+fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
+    use ac2_scene::meter_leq::MeterForm;
+    use ac2_scene::primitives::Viewport;
+    use ac2_scene::view::SplMode;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+    d.key("Alt+4");
+    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    assert_eq!(d.st.view.spl.mode, SplMode::MeterLeq, "the default view");
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let keys = Keymap::default();
+    let both = |s: &AppState, width: f32, height: f32| {
+        let size = Viewport { width, height };
+        ac2_ui::scenes::meter_leq(s, &keys, &Theme::dark(), size, now()).filter(|x| {
+            let t = scene_texts(&x.leq.scene);
+            x.meter.form == MeterForm::Block
+                && x.leq.columns.as_ref().is_some_and(|k| k.columns.len() == 5)
+                && t.iter().filter(|l| l.starts_with("LAF · ")).count() == 1
+                && t.iter().filter(|l| l.starts_with("SPL 1 · ")).count() == 1
+                && !t.iter().any(|l| l.starts_with("meter since"))
+        })
+    };
+    // A pane of the split layout: the number over the windows.
+    d.until("the meter over its windows", |s| {
+        both(s, 640.0, 420.0).is_some()
+    })?;
+    // W twice: full screen, the same two parts.
+    d.key("W");
+    d.key("W");
+    assert!(d.st.stage_view(), "full screen");
+    let stage = both(&d.st, 1920.0, 1080.0).ok_or("both parts full screen")?;
+    let under = 1080.0 - stage.leq.caption.bottom();
+    assert!(
+        stage.meter.region.h > 0.25 * under && stage.meter.region.h < 0.4 * under,
+        "{:?} of {under}",
+        stage.meter.region
+    );
+    // G: the meter alone, the windows alone, both again.
+    d.key("G");
+    assert_eq!(d.st.view.spl.mode, SplMode::Meter);
+    d.key("G");
+    assert_eq!(d.st.view.spl.mode, SplMode::Leq);
+    d.key("G");
+    assert_eq!(d.st.view.spl.mode, SplMode::MeterLeq);
     drop(d);
     drop(daemon);
     Ok(())

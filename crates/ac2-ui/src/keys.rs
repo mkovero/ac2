@@ -486,7 +486,10 @@ commands! {
 
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
 
-    SplLeqView => "spl_leq_view", "SPL: meter / Leq windows", [Spl];
+    SplLeqView => "spl_leq_view", "SPL: meter → Leq windows → meter + Leq", [Spl];
+    SplShowMeter => "spl_show_meter", "SPL pane: the meter", [Spl];
+    SplShowLeq => "spl_show_leq", "SPL pane: the Leq windows", [Spl];
+    SplShowMeterLeq => "spl_show_meter_leq", "SPL pane: meter + Leq windows", [Spl];
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
     SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
@@ -758,7 +761,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Spl => {
             const {
                 &[
-                    hint(C::SplLeqView, "meter/Leq", 90),
+                    hint(C::SplLeqView, "meter/Leq/both", 90),
                     hint(C::SplTimeWeighting, "F/S/I", 88),
                     hint(C::SplWeighting, "A/C/Z", 86),
                     hint(C::SplLeqStyle, "columns/tiles", 70),
@@ -1092,6 +1095,9 @@ mod tests {
             CommandId::Smooth12,
             CommandId::Smooth6,
             CommandId::Smooth3,
+            CommandId::SplShowMeter,
+            CommandId::SplShowLeq,
+            CommandId::SplShowMeterLeq,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {

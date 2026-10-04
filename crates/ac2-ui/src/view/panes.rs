@@ -8,7 +8,7 @@ use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use eframe::egui;
 
-use ac2_scene::view::DistortionUnit;
+use ac2_scene::view::{DistortionUnit, SplMode};
 
 use crate::app::{App, CachedScene};
 use crate::hints::{self, KeyHint};
@@ -147,11 +147,8 @@ fn scene_for(
             )
         }
         PaneKind::Ir => (scenes::ir(st, theme, vp, now)?.scene, Axes::default()),
-        PaneKind::Spl if st.view.spl.leq => {
-            (scenes::leq(st, theme, vp, now)?.scene, Axes::default())
-        }
         PaneKind::Spl => (
-            scenes::spl(st, &app.keymap, theme, vp, now)?.scene,
+            scenes::spl_pane(st, &app.keymap, theme, vp, now)?,
             Axes::default(),
         ),
         PaneKind::Distortion => {
@@ -182,7 +179,7 @@ fn placeholder(pane: PaneKind, app: &App) -> &'static str {
     match pane {
         PaneKind::Ir if scenes::focus_tf(&app.state).is_none() => "no transfer measurement",
         PaneKind::Ir => "no IR frame yet",
-        PaneKind::Spl if app.state.view.spl.leq && scenes::has_spl(&app.state) => {
+        PaneKind::Spl if app.state.view.spl.mode == SplMode::Leq && scenes::has_spl(&app.state) => {
             "no Leq windows yet: they show once the meter has measured a second"
         }
         PaneKind::Spl if scenes::has_spl(&app.state) => "no SPL frame yet",
