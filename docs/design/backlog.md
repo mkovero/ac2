@@ -5,9 +5,6 @@ the commit when it lands.
 
 ## Leq windows and limits (left after the first version, `docs/design/leq.md`)
 
-- **History strip starts when the app connects**: the app draws what it received; a backfill
-  from the daemon's log (`spl.log_get`, windows recomputed from the rows) would show the show
-  so far after a reconnect.
 - **Peak limits not judged**: DIN 15905-5 also limits LCpeak (135 dB), V-NISSG LAFmax
   (125 dB). The meter shows LCpeak / LAFmax; no limit, state or alarm on them yet.
 - **No measuring-position correction**: a limit for the loudest audience position read from a
@@ -80,6 +77,13 @@ the commit when it lands.
   list highlights it; a thicker line or a marker in the legend would show it in the plot.
 
 ## Done
+
+Leq windows (field, 2026-10-04: "history seems to reset every time the client is
+restarted"):
+- **History strip started when the app connected** → the app gets each meter's history
+  from the daemon (`spl.history_get`: the log replayed as the job computed it) on connect,
+  reconnect, a new meter, changed windows and a new log from any client; live frames
+  continue it (`leq.md`, *The history strip*).
 
 Comparing curves (field, 2026-10-03: "offset/change gain of the selected
 trace/measurement/spectrum … spread traces a little … spectrum needs to focus on very low

@@ -337,6 +337,10 @@ pub fn commands() -> Vec<Command> {
             uncertainty: None,
             replace_acoustic: false,
         },
+        Command::SplHistoryGet {
+            meas: MeasId(4),
+            seconds: 14_400,
+        },
     ]
 }
 
@@ -812,6 +816,26 @@ fn spl_log() -> SplLog {
     }
 }
 
+fn spl_history() -> SplHistory {
+    SplHistory {
+        meas: MeasId(4),
+        windows: vec![
+            LeqWindow::minutes(1),
+            LeqWindow {
+                limit: Some(DbSpl(99.0)),
+                ..LeqWindow::minutes(30)
+            },
+        ],
+        scale: LevelScale::DbSpl,
+        at: vec![
+            WallNs(1_790_000_121_000_000_000),
+            WallNs(1_790_000_122_000_000_000),
+        ],
+        leq: vec![vec![98.5, 99.75], vec![99.0, 99.25]],
+        over: vec![vec![false, false], vec![false, true]],
+    }
+}
+
 fn spl_log_page() -> SplLogPage {
     SplLogPage {
         meas: MeasId(4),
@@ -1015,6 +1039,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Inputs(inputs())),
         Ok(ReplyBody::Mic(mic())),
         Ok(ReplyBody::SplLogPage(spl_log_page())),
+        Ok(ReplyBody::SplHistory(Box::new(spl_history()))),
         Ok(ReplyBody::Snapshot(Box::new(StateSnapshot {
             state: state(),
             rev: Rev(42),

@@ -482,6 +482,54 @@ impl RollingLeq {
         }
     }
 
+    /// Refills the windows with the logged seconds `newest_first` (each with the wall time
+    /// of its start, ns, newest first) that fall in the [`Self::capacity`] seconds before
+    /// `now_ns`, placed by wall time: logged seconds are a second apart and half a second
+    /// either way decides the slot, two in one slot add up, and slots without one are gaps.
+    /// The windows then count as elapsed from the oldest logged second inside that span —
+    /// what a meter's job does whenever it starts on a log it did not write itself.
+    pub fn refill(&mut self, newest_first: impl IntoIterator<Item = (u64, Second)>, now_ns: u64) {
+        self.clear();
+        let cap = u64::from(self.capacity());
+        let span_start = now_ns.saturating_sub(cap * NS);
+        let mut slots: Vec<Option<Second>> = vec![None; cap as usize];
+        for (start, s) in newest_first {
+            let Some(off) = (start + NS / 2).checked_sub(span_start) else {
+                break;
+            };
+            let k = off / NS;
+            if k >= cap {
+                continue;
+            }
+            let slot = &mut slots[k as usize];
+            *slot = Some(match slot {
+                Some(o) => Second {
+                    energy: [
+                        o.energy[0] + s.energy[0],
+                        o.energy[1] + s.energy[1],
+                        o.energy[2] + s.energy[2],
+                    ],
+                    measured: o.measured + s.measured,
+                },
+                None => s,
+            });
+        }
+        let Some(first) = slots.iter().position(Option::is_some) else {
+            return;
+        };
+        for s in &slots[first..] {
+            self.push(s.unwrap_or(Second::GAP));
+        }
+    }
+
+    /// Counts the windows as elapsed from `keep` slots back at most, as if they had been
+    /// refilled from those slots alone. Only for slots older than that which are gaps: their
+    /// sums are then unchanged and only the elapsed time (and with it the judgement of a
+    /// filling window) differs.
+    fn forget_before(&mut self, keep: u64) {
+        self.pushed = self.pushed.min(keep);
+    }
+
     /// Value of window `i`.
     ///
     /// # Panics
@@ -565,6 +613,101 @@ impl RollingLeq {
             }
         }
         best
+    }
+}
+
+/// Nanoseconds per second: logged seconds carry their wall time in ns.
+const NS: u64 = 1_000_000_000;
+
+/// The windows second by second as an SPL meter's job computed them, replayed from its log
+/// (each logged second's wall-time start and energy, oldest first), so a client that was
+/// not there when they were computed gets the same values and judgements.
+///
+/// The job pushes every second, logged or not; a second without a row (nothing measured
+/// in it) is a gap. A stretch of seconds without rows is where the meter was stopped or the
+/// daemon was down, and the job that starts after it [refills](RollingLeq::refill) its
+/// windows from the rows in its span: the slots before the oldest of those count as not
+/// elapsed. The replay does the same, cheaply: the slots it pushes for the stretch are gaps
+/// either way, so only the elapsed time changes ([`RollingLeq::forget_before`]); a stretch
+/// longer than the longest window empties the windows.
+#[derive(Debug, Clone)]
+pub struct LogReplay {
+    ring: RollingLeq,
+    /// Start of the previous row, ns.
+    prev: Option<u64>,
+    /// Slots pushed since the replay began (never reset).
+    slot: u64,
+    /// Slot numbers of the rows within the newest capacity slots, oldest first.
+    rows: std::collections::VecDeque<u64>,
+    /// The windows no longer depend on anything before the first row replayed.
+    settled: bool,
+}
+
+impl LogReplay {
+    /// Windows `specs` with headroom over `horizon` s, as [`RollingLeq::new`].
+    /// `from_log_start`: the first row given is the log's first, so nothing came before it.
+    pub fn new(specs: &[WindowSpec], horizon: u32, from_log_start: bool) -> Self {
+        Self {
+            ring: RollingLeq::new(specs, horizon),
+            prev: None,
+            slot: 0,
+            rows: std::collections::VecDeque::new(),
+            settled: from_log_start,
+        }
+    }
+
+    /// Adds the log's next row: a second that started at `start_ns` (wall time).
+    pub fn push(&mut self, start_ns: u64, s: Second) {
+        let cap = u64::from(self.ring.capacity());
+        if let Some(prev) = self.prev {
+            // Rows are a second apart; a longer step is seconds without a row.
+            let step = ((start_ns.saturating_sub(prev) + NS / 2) / NS).max(1);
+            let missing = step - 1;
+            if missing >= cap {
+                // Nothing logged within the longest window before this row: the job that
+                // logged it started on empty windows.
+                self.ring.clear();
+                self.rows.clear();
+                self.slot += missing;
+                self.settled = true;
+            } else if missing > 0 {
+                for _ in 0..missing {
+                    self.ring.push(Second::GAP);
+                }
+                self.slot += missing;
+                // The job restarted here and refilled its windows from the rows within
+                // its span; the slots before the oldest of them are gaps.
+                let span_start = self.slot.saturating_sub(cap);
+                while self.rows.front().is_some_and(|&r| r < span_start) {
+                    self.rows.pop_front();
+                }
+                if let Some(&first) = self.rows.front() {
+                    self.ring.forget_before(self.slot - first);
+                }
+            }
+        }
+        self.ring.push(s);
+        self.rows.push_back(self.slot);
+        self.slot += 1;
+        while self.rows.front().is_some_and(|&r| r + cap < self.slot) {
+            self.rows.pop_front();
+        }
+        if self.slot >= cap {
+            self.settled = true;
+        }
+        self.prev = Some(start_ns);
+    }
+
+    /// The windows as of the newest row.
+    pub fn windows(&self) -> &RollingLeq {
+        &self.ring
+    }
+
+    /// Whether the windows are what the job computed: true from the log's first row on,
+    /// or once the longest window holds only rows replayed (or was emptied by a stretch
+    /// without rows). Before that they lack what the log held before the first row given.
+    pub fn settled(&self) -> bool {
+        self.settled
     }
 }
 

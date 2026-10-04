@@ -1103,6 +1103,23 @@ impl Shared {
                     rows: rows.into_iter().skip(from as usize).take(n).collect(),
                 })
             }
+            C::SplHistoryGet { meas, .. } => {
+                // The fake computes no windows: its meters have no history to replay.
+                let m = self.spl_meter(meas)?;
+                let windows = match &m.config.kind {
+                    MeasKind::Spl { config } => config.leq.windows.clone(),
+                    _ => Vec::new(),
+                };
+                let n = windows.len();
+                ReplyBody::SplHistory(Box::new(SplHistory {
+                    meas,
+                    windows,
+                    scale: LevelScale::Dbfs,
+                    at: Vec::new(),
+                    leq: vec![Vec::new(); n],
+                    over: vec![Vec::new(); n],
+                }))
+            }
             C::SplLogNew { meas } => {
                 let m = self.spl_meter(meas)?;
                 let rows = self.spl_rows.remove(&meas).unwrap_or_default();

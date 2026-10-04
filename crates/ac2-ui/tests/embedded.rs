@@ -1400,6 +1400,156 @@ fn run_clock_and_a_new_log_from_the_app() -> R {
     Ok(())
 }
 
+/// The SPL meter's history: its id and the points of its first (1 min) window.
+fn history_points(s: &AppState) -> Option<(MeasId, Vec<ac2_scene::leq::HistoryPoint>)> {
+    let m = s
+        .measurements()
+        .into_iter()
+        .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))?;
+    let MeasKind::Spl { config } = &m.config.kind else {
+        return None;
+    };
+    let (_, h) = s.leq_history.get(&m.id)?;
+    let p = h.points(config.leq.windows.first()?)?;
+    Some((m.id, p.iter().copied().collect()))
+}
+
+/// The history strip as the SPL pane draws it (the pane at 1280 × 720), its first line.
+fn strip_line(s: &AppState) -> Vec<[f32; 2]> {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    ac2_ui::scenes::leq(s, &Theme::dark(), size, now)
+        .and_then(|x| x.history)
+        .and_then(|h| h.lines.into_iter().next())
+        .map(|l| l.points)
+        .unwrap_or_default()
+}
+
+/// The app restarted while an SPL meter runs: the history strip shows what the meter
+/// logged before, rebuilt from its log, the same as the app that was running then saw it
+/// (within 0.01 dB). From an empty daemon: the meter from the palette, the stimulus from
+/// the keys (−20 dBFS pink noise for some seconds, a level change the 1 min window follows),
+/// then a new app on the same daemon. A new log started from that app clears the history
+/// of another app watching the meter too.
+#[test]
+fn a_restarted_app_shows_the_history_from_the_log() -> R {
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("a few quiet seconds in the history", |s| {
+        history_points(s).is_some_and(|(_, p)| p.len() >= 4)
+    })?;
+    let quiet = history_points(&d.st).ok_or("history")?.1[1].leq;
+    // The level typed before is kept: Space arms, Enter fires.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("the 1 min window 10 dB up", |s| {
+        history_points(s).is_some_and(|(_, p)| p.last().is_some_and(|x| x.leq > quiet + 10.0))
+    })?;
+    d.stop()?;
+    let n = history_points(&d.st).ok_or("history")?.1.len();
+    d.until("a few more seconds", |s| {
+        history_points(s).is_some_and(|(_, p)| p.len() >= n + 3)
+    })?;
+    let (meas, before) = history_points(&d.st).ok_or("history")?;
+    drop(d);
+
+    // The app again, from nothing: the strip holds the seconds before it started.
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    d.synced()?;
+    d.key("Alt+4");
+    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    if !d.st.view.spl.leq {
+        d.key("G");
+    }
+    if !d.st.view.spl.layout.history {
+        d.send(Msg::Command(CommandId::SplLeqHistory));
+    }
+    assert!(d.st.view.spl.layout.history);
+    let first = before[0].t;
+    d.until("the history from before the restart", |s| {
+        history_points(s).is_some_and(|(_, p)| p.first().is_some_and(|x| x.t <= first + 0.5))
+    })?;
+    let (_, after) = history_points(&d.st).ok_or("history")?;
+    let mut matched = 0;
+    for b in &before {
+        let Some(a) = after.iter().find(|a| (a.t - b.t).abs() < 0.5) else {
+            continue;
+        };
+        matched += 1;
+        assert!(
+            (a.leq - b.leq).abs() < 0.01 || (a.leq.is_nan() && b.leq.is_nan()),
+            "{a:?} vs {b:?}"
+        );
+        assert_eq!(a.over, b.over);
+    }
+    assert!(
+        matched + 2 >= before.len(),
+        "{matched} of {} seconds",
+        before.len()
+    );
+    assert!(
+        after.iter().any(|p| p.leq > quiet + 10.0),
+        "the loud stretch"
+    );
+    // Live frames go on from there, one point a second.
+    let len = after.len();
+    d.until("live seconds after the rebuilt ones", |s| {
+        history_points(s).is_some_and(|(_, p)| p.len() >= len + 2)
+    })?;
+    let (_, now) = history_points(&d.st).ok_or("history")?;
+    let close: Vec<_> = now.windows(2).filter(|w| w[1].t - w[0].t <= 0.5).collect();
+    assert!(close.is_empty(), "no second twice: {close:?} of {now:?}");
+    assert!(strip_line(&d.st).len() >= now.len() - 1, "drawn");
+
+    // Another app on the meter; a new log from this one clears both histories.
+    let mut other = Driver::connect(ep.clone(), &daemon.describe())?;
+    other.synced()?;
+    other.until("the other app's history", |s| {
+        history_points(s).is_some_and(|(_, p)| p.first().is_some_and(|x| x.t <= first + 0.5))
+    })?;
+    d.key("Shift+R");
+    d.key("Enter");
+    d.until("the new log toasted", |s| {
+        s.toasts
+            .iter()
+            .any(|t| t.text.contains("new SPL log started"))
+    })?;
+    let newest = now.last().map_or(0.0, |p| p.t);
+    for x in [&mut d, &mut other] {
+        x.until("only the new log's seconds", |s| {
+            history_points(s).is_some_and(|(id, p)| {
+                id == meas && !p.is_empty() && p.iter().all(|x| x.t > newest)
+            })
+        })?;
+    }
+    drop(other);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// One short sweep from the dialog, played and stored (the simulated rig: no real audio).
 fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
     use ac2_ui::forms::FieldId;

@@ -1096,6 +1096,7 @@ impl Control {
                 max,
             } => self.spl_log_get(meas, log, from, max),
             Command::SplLogNew { meas } => self.spl_log_new(meas),
+            Command::SplHistoryGet { meas, seconds } => self.spl_history_get(meas, seconds),
 
             Command::IrCapture {
                 lease_token,

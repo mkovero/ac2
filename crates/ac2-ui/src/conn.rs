@@ -18,7 +18,8 @@ use ac2_client::{
 use ac2_proto::model::{
     BackendInfo, BackendKind, DelayFinding, DelayPick, DeviceId, FinderBand, GeneratorDesired,
     GeneratorSettings, ImportFormat, ImportRole, InputSetup, LoopbackDetection, MeasConfig,
-    Measurement, Preview, SessionConfig, Smoothing, TraceData, TraceMeta, TraceMicCurve,
+    Measurement, Preview, SessionConfig, Smoothing, SplHistory, TraceData, TraceMeta,
+    TraceMicCurve,
 };
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
@@ -96,6 +97,13 @@ pub enum ConnEvent {
     },
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
+    /// The Leq history of SPL meter `meas` as the daemon rebuilt it from the meter's log
+    /// ([`Request::LeqBackfill`] number `ask`).
+    LeqBackfill {
+        meas: MeasId,
+        ask: u64,
+        result: Result<Box<SplHistory>, String>,
+    },
 }
 
 /// Stimulus lease outcomes.
@@ -184,6 +192,9 @@ pub enum Request {
     DetectLoopback(crate::session_dialog::DetectRequest),
     /// `meas.create` then `meas.start` (as `ac2 meas new --start`).
     CreateMeas { config: MeasConfig },
+    /// `spl.history_get` of SPL meter `meas` over the history the strip keeps
+    /// ([`ConnEvent::LeqBackfill`]).
+    LeqBackfill { meas: MeasId, ask: u64 },
     /// Drop the connection and connect again now.
     Reconnect,
 }
@@ -414,6 +425,8 @@ async fn wait_retry(
                 }
                 // Applied on the next connection.
                 Some(Ctl::Req(Request::Meters(on))) => *meters = on,
+                // Asked again once connected: the history follows the daemon's log.
+                Some(Ctl::Req(Request::LeqBackfill { .. })) => {}
                 Some(Ctl::Req(Request::PreviewStop)) => {}
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
@@ -450,6 +463,7 @@ fn request_name(r: &Request) -> String {
         Request::Meters(_) => "meters".into(),
         Request::DetectLoopback(_) => "detect loopback".into(),
         Request::CreateMeas { config } => format!("new measurement {}", config.name),
+        Request::LeqBackfill { .. } => "SPL history".into(),
         Request::Reconnect => "reconnect".into(),
     }
 }
@@ -752,6 +766,20 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
         }
         Request::Sweep { request, name } => {
             let _ = stim.send(StimOp::Sweep { request, name });
+        }
+        Request::LeqBackfill { meas, ask } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call(Command::SplHistoryGet {
+                        meas,
+                        seconds: ac2_scene::leq::HISTORY_S as u32,
+                    })
+                    .await
+                    .and_then(|r| expect_body!("spl.history_get", r, ReplyBody::SplHistory(h) => h))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::LeqBackfill { meas, ask, result });
+            });
         }
         Request::Reconnect => {}
     }

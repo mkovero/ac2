@@ -4088,6 +4088,17 @@ fn with_spl() -> State {
 
 /// A `leq` frame of meter 4 with `seq`, as the link delivers it.
 fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) -> ConnEvent {
+    leq_data_logged(seq, seq, at_s, leq, flags)
+}
+
+/// A `leq` frame of meter 4 with `seq`, of a log of `logged` rows.
+fn leq_data_logged(
+    seq: u64,
+    logged: u64,
+    at_s: u64,
+    leq: f32,
+    flags: ac2_proto::frame::LeqFlags,
+) -> ConnEvent {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::frame::{Frame, FrameData, LeqFrame, LeqMeta, LeqRun};
     let n = 5;
@@ -4103,12 +4114,12 @@ fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) ->
             },
             mic_curve: false,
             horizon: Seconds(60.0),
-            logged: seq,
-            // A log of `seq` seconds up to `at_s`.
+            logged,
+            // A log of `logged` seconds up to `at_s`.
             run: Some(LeqRun {
-                started_at: WallNs(at_s.saturating_sub(seq) * 1_000_000_000),
+                started_at: WallNs(at_s.saturating_sub(logged) * 1_000_000_000),
                 until: WallNs(at_s * 1_000_000_000),
-                measured: Seconds(seq as f64),
+                measured: Seconds(logged as f64),
                 gaps: Seconds(0.0),
                 trimmed: false,
                 laeq: f64::from(leq),
@@ -4474,6 +4485,144 @@ fn leq_history_and_alarm_toasts() {
     assert_eq!(
         t.last_toast(),
         "FOH SPL: LAeq 30 min back within its limit — 98.9 dB"
+    );
+}
+
+/// The history rebuild the reducer asked for, if any: (meter, number).
+fn backfill_asked(r: &[Request]) -> Option<(MeasId, u64)> {
+    r.iter().find_map(|r| match r {
+        Request::LeqBackfill { meas, ask } => Some((*meas, *ask)),
+        _ => None,
+    })
+}
+
+/// The history the daemon rebuilt for meter 4's default windows: `seconds` seconds at
+/// 80 dB SPL ending at wall second `end_s`.
+fn rebuilt(seconds: u64, end_s: u64) -> SplHistory {
+    let windows = LeqConfig::default_windows().windows;
+    let n = windows.len();
+    SplHistory {
+        meas: MeasId(4),
+        windows,
+        scale: LevelScale::DbSpl,
+        at: (0..seconds)
+            .map(|k| WallNs((end_s - seconds + 1 + k) * 1_000_000_000))
+            .collect(),
+        leq: vec![vec![80.0; seconds as usize]; n],
+        over: vec![vec![false; seconds as usize]; n],
+    }
+}
+
+/// A restarted app (a new state) seeing a meter that has been logging: it asks for the
+/// history from the meter's log, puts it in the strip, and the frames it receives carry
+/// it on without a second twice. An answer to an earlier request is stale.
+#[test]
+fn a_restarted_app_rebuilds_the_history_from_the_log() {
+    let mut t = T::new();
+    let r = t.conn(mirror(with_spl()));
+    let (meas, ask) = backfill_asked(&r).expect("asked for the history");
+    assert_eq!(meas, MeasId(4));
+    let cfg = LeqConfig::default_windows();
+    // The same state again: nothing more to ask.
+    assert_eq!(backfill_asked(&t.conn(mirror(with_spl()))), None);
+    let b = rebuilt(600, 1000);
+    t.conn(ConnEvent::LeqBackfill {
+        meas,
+        ask: ask + 7,
+        result: Ok(Box::new(b.clone())),
+    });
+    assert!(!t.st.leq_history.contains_key(&meas), "stale: ignored");
+    t.conn(ConnEvent::LeqBackfill {
+        meas,
+        ask,
+        result: Ok(Box::new(b)),
+    });
+    let h = &t.st.leq_history[&meas].1;
+    let p = h.points(&cfg.windows[0]).expect("series");
+    assert_eq!(p.len(), 600);
+    assert_eq!(p[0].t, 401.0);
+    assert_eq!(p[599].t, 1000.0);
+    assert!((p[599].leq - 80.0).abs() < 1e-4, "{:?}", p[599]);
+    // Live frames: the one for the newest logged second is that point, the next one new.
+    let flags = ac2_proto::frame::LeqFlags::LIMIT;
+    t.conn(leq_data(601, 1000, 80.0, flags));
+    t.conn(leq_data(602, 1001, 80.0, flags));
+    let p = t.st.leq_history[&meas]
+        .1
+        .points(&cfg.windows[0])
+        .expect("series");
+    assert_eq!(p.len(), 601);
+    assert_eq!(p[600].t, 1001.0);
+}
+
+/// A new log started from anywhere (another client's `spl.log_new`): the log empties, or
+/// its rows are numbered from 0 again; the history clears and is rebuilt. New windows are
+/// rebuilt too.
+#[test]
+fn a_new_log_or_new_windows_rebuild_the_history() {
+    let flags = ac2_proto::frame::LeqFlags::LIMIT;
+    let mut t = T::new();
+    let mut s = with_spl();
+    s.spl_logs = vec![SplLog {
+        meas: MeasId(4),
+        started_at: Some(WallNs(400_000_000_000)),
+        windows: vec![],
+        alarms: vec![],
+    }];
+    t.conn(mirror(s.clone()));
+    t.conn(leq_data(600, 1000, 80.0, flags));
+    t.conn(leq_data(601, 1001, 80.0, flags));
+    assert!(!t.st.leq_history[&MeasId(4)].1.is_empty());
+    // Emptied by a new log.
+    s.spl_logs[0].started_at = None;
+    let r = t.conn(mirror(s.clone()));
+    assert!(backfill_asked(&r).is_some());
+    assert!(t.st.leq_history[&MeasId(4)].1.is_empty(), "cleared");
+    // Its first rows: the frames say so, nothing more to ask.
+    s.spl_logs[0].started_at = Some(WallNs(1_002_000_000_000));
+    assert_eq!(backfill_asked(&t.conn(mirror(s.clone()))), None);
+    assert_eq!(
+        backfill_asked(&t.conn(leq_data(602, 1003, 70.0, flags))),
+        None
+    );
+    t.conn(leq_data(603, 1004, 70.0, flags));
+    // Another new log seen only in the frames (the entity's moment missed): fewer rows.
+    let r = t.conn(leq_data_logged(604, 3, 1005, 60.0, flags));
+    assert!(backfill_asked(&r).is_some());
+    let h = &t.st.leq_history[&MeasId(4)].1;
+    let p = h
+        .points(&LeqConfig::default_windows().windows[0])
+        .expect("series");
+    assert_eq!(p.len(), 1, "only the new log's second: {p:?}");
+    // The windows changed (a preset): rebuilt for the new ones.
+    let mut m = with_spl();
+    if let MeasKind::Spl { config } = &mut m.measurements.last_mut().expect("spl").config.kind {
+        config.leq.windows = LeqPreset::Din15905.windows();
+    }
+    m.spl_logs = s.spl_logs.clone();
+    assert!(backfill_asked(&t.conn(mirror(m))).is_some(), "asked again");
+}
+
+/// Reconnected (the link dropped, or the daemon restarted), the history is asked for again;
+/// a failure says what it was for.
+#[test]
+fn a_reconnect_rebuilds_the_history_and_a_failure_is_shown() {
+    let mut t = T::new();
+    assert!(backfill_asked(&t.conn(mirror(with_spl()))).is_some());
+    t.conn(ConnEvent::Connected {
+        target: "local daemon".into(),
+        server: "ac2d test".into(),
+        client_id: ClientId("c1".into()),
+    });
+    let (meas, ask) = backfill_asked(&t.conn(mirror(with_spl()))).expect("asked again");
+    t.conn(ConnEvent::LeqBackfill {
+        meas,
+        ask,
+        result: Err("daemon did not answer `spl.log_get` (3 attempts)".into()),
+    });
+    assert_eq!(
+        t.last_toast(),
+        "FOH SPL: Leq history from the log: daemon did not answer `spl.log_get` (3 attempts)"
     );
 }
 

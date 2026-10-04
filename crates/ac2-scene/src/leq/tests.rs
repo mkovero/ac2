@@ -1203,3 +1203,78 @@ fn columns_keep_banners_and_history_clear() {
     let rects: Vec<Rect> = cols(&b).columns.iter().map(|x| x.rect).collect();
     crate::canvas::tests::assert_banners_clear(&b.scene, &b.banners, &rects);
 }
+
+/// The history the daemon rebuilt from the log of `cfg()`'s meter: `n` seconds ending at
+/// wall second `end_s`, each window at `leq`, the 15 min window over from the 5th second.
+fn rebuilt(n: u64, end_s: u64, leq: f32) -> SplHistory {
+    let c = cfg();
+    let at: Vec<WallNs> = (0..n)
+        .map(|k| WallNs((end_s - n + 1 + k) * 1_000_000_000))
+        .collect();
+    SplHistory {
+        meas: MeasId(4),
+        windows: c.windows.clone(),
+        scale: LevelScale::DbSpl,
+        leq: vec![vec![leq; at.len()]; c.windows.len()],
+        over: c
+            .windows
+            .iter()
+            .enumerate()
+            .map(|(i, _)| (0..n).map(|k| i == 1 && k >= 4).collect())
+            .collect(),
+        at,
+    }
+}
+
+/// An app restarted part way: the frames it received go on from the history rebuilt
+/// under them, no second twice (a frame stamped a few milliseconds after the end of its
+/// second is that second), none lost; a frame of the newest rebuilt second arriving after
+/// the rebuild replaces it.
+#[test]
+fn rebuilt_history_goes_under_the_live_frames() {
+    let c = cfg();
+    let mut h = LeqHistory::default();
+    let mut f = frame(LevelScale::DbSpl);
+    f.leq = vec![90.0; 4];
+    // Live from second 1000 (frames stamped 12 ms after the second's end).
+    for k in 0..3 {
+        h.push(&c, &f, 1000.012 + f64::from(k));
+    }
+    // The daemon's history up to the end of second 1001.
+    h.backfill(&rebuilt(600, 1001, 80.0));
+    let p = h.points(&c.windows[1]).expect("series");
+    let t: Vec<f64> = p.iter().map(|p| p.t).collect();
+    assert_eq!(p.len(), 601, "{:?}", &t[595..]);
+    assert_eq!(t[599], 1001.0);
+    assert_eq!(t[600], 1002.012);
+    assert!(t.windows(2).all(|w| w[1] - w[0] > 0.5));
+    assert!(p[4].over && !p[3].over);
+    assert_eq!(p[600].leq, 90.0);
+    // A late frame of the newest second: the same point.
+    let mut h = LeqHistory::default();
+    h.backfill(&rebuilt(10, 1001, 80.0));
+    h.push(&c, &f, 1001.012);
+    h.push(&c, &f, 1002.011);
+    let p = h.points(&c.windows[0]).expect("series");
+    assert_eq!(p.len(), 11);
+    assert_eq!(p[9].t, 1001.012);
+}
+
+/// A rebuilt history in another unit than the frames received since (the meter
+/// calibrated meanwhile) is dropped; an empty one changes nothing.
+#[test]
+fn rebuilt_history_of_another_unit_is_dropped() {
+    let c = cfg();
+    let mut h = LeqHistory::default();
+    let mut f = frame(LevelScale::DbSpl);
+    f.leq = vec![90.0; 4];
+    h.push(&c, &f, 2000.0);
+    let before = h.clone();
+    let mut r = rebuilt(10, 1001, -40.0);
+    r.scale = LevelScale::Dbfs;
+    h.backfill(&r);
+    assert_eq!(h, before);
+    r.at.clear();
+    h.backfill(&r);
+    assert_eq!(h, before);
+}

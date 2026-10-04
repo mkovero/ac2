@@ -1,13 +1,13 @@
 //! SPL logs and Leq windows on the control thread: one log per SPL measurement (kept
 //! across its job's restarts), the `spl_log` entity with each window's state and the
-//! alarms, `spl.log_get`, `spl.log_new` (`docs/design/leq.md`).
+//! alarms, `spl.log_get`, `spl.history_get`, `spl.log_new` (`docs/design/leq.md`).
 
 use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindowState, MeasKind, Measurement, SplLog,
-    SplLogWhich,
+    LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindowState, MeasKind, Measurement,
+    SplHistory, SplLog, SplLogWhich,
 };
 use ac2_proto::units::{MeasId, Rev, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -16,6 +16,7 @@ use ac2_traces::spl_log::SplLogInfo;
 
 use super::Control;
 use crate::jobs::spl::LeqSetup;
+use crate::leq_history;
 use crate::leq_log::{self, LeqLog};
 use crate::util::{perr, wall_ns};
 
@@ -237,6 +238,31 @@ impl Control {
                 .page(meas, from, max),
         };
         Ok(ReplyBody::SplLogPage(page))
+    }
+
+    /// `spl.history_get`: the meter's windows second by second over the newest `seconds`
+    /// of its current log, replayed from rows copied out of it (the job goes on logging).
+    pub(super) fn spl_history_get(
+        &self,
+        meas: MeasId,
+        seconds: u32,
+    ) -> Result<ReplyBody, ProtoError> {
+        let m = self.spl_meter(meas)?;
+        let MeasKind::Spl { config } = &m.config.kind else {
+            return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
+        };
+        let seconds = seconds.min(SplHistory::MAX_SECONDS);
+        let (rows, from_log_start) = match self.spl_logs.get(&meas) {
+            Some(l) => leq_log::lock(l).tail(leq_history::rows_needed(&config.leq, seconds)),
+            None => (Vec::new(), true),
+        };
+        Ok(ReplyBody::SplHistory(Box::new(leq_history::history(
+            meas,
+            &config.leq,
+            &rows,
+            from_log_start,
+            seconds,
+        ))))
     }
 
     /// `spl.log_new`: the current log becomes the previous one and an empty log starts;

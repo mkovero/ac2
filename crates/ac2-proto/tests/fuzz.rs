@@ -233,6 +233,7 @@ proptest! {
                 max: u32::from(idx),
             },
             Command::SplLogNew { meas: m },
+            Command::SplHistoryGet { meas: m, seconds: u32::from(idx) },
         ];
         for cmd in cmds {
             let mut req = Request::new(RequestId(u64::from(meas)), cmd);

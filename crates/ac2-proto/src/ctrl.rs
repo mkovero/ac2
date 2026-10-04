@@ -16,7 +16,8 @@ use crate::model::{
     DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MathOp,
     MeasConfig, Measurement, Mic, MicCurveId, Preview, Session, SessionConfig, SessionFile,
-    SessionRef, SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
+    SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit,
+    TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
@@ -418,6 +419,16 @@ pub enum Command {
         /// Most rows wanted.
         max: u32,
     },
+    /// Each Leq window of an SPL meter second by second over the newest `seconds` (at most
+    /// [`crate::model::SplHistory::MAX_SECONDS`]) of its current log, as the meter's job
+    /// computed them and its `leq` frames carried them.
+    #[serde(rename = "spl.history_get")]
+    SplHistoryGet {
+        /// SPL measurement.
+        meas: MeasId,
+        /// Seconds of history wanted.
+        seconds: u32,
+    },
     /// Ends an SPL meter's log and starts a new one: the windows, their states, the alarms,
     /// the run clock and the total start over; the windows and limits are kept. The ended
     /// log stays readable (`spl.log_get` with `log: previous`) until the next `spl.log_new`
@@ -525,6 +536,7 @@ impl Command {
             Self::CalDelete { .. } => "cal.delete",
             Self::SplLogGet { .. } => "spl.log_get",
             Self::SplLogNew { .. } => "spl.log_new",
+            Self::SplHistoryGet { .. } => "spl.history_get",
             Self::IrCapture { .. } => "ir.capture",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
@@ -555,6 +567,7 @@ impl Command {
                 | Self::DelayFind { .. }
                 | Self::FileSave { .. }
                 | Self::SplLogGet { .. }
+                | Self::SplHistoryGet { .. }
                 | Self::FileList
         )
     }
@@ -650,6 +663,8 @@ pub enum ReplyBody {
     Inputs(Vec<InputSetup>),
     /// `spl.log_get`.
     SplLogPage(SplLogPage),
+    /// `spl.history_get`.
+    SplHistory(Box<SplHistory>),
     /// `state.snapshot`.
     Snapshot(Box<StateSnapshot>),
     /// `state.since`.

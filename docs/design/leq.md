@@ -1,8 +1,9 @@
 # Rolling Leq windows, limits and alarms
 
-Status: implemented (`ac2_core::leq`, the SPL meter job, `spl.log_get`, `spl.log_new`, the
-SPL pane's Leq view, `ac2 spl leq`). Answers PLAN.md §3.6 "Rolling Leq windows, limits and alarms" and the
-log half of "Continuous crash-safe logging, export".
+Status: implemented (`ac2_core::leq`, the SPL meter job, `spl.log_get`, `spl.log_new`,
+`spl.history_get`, the SPL pane's Leq view, `ac2 spl leq`). Answers PLAN.md §3.6 "Rolling
+Leq windows, limits and alarms" and the log half of "Continuous crash-safe logging,
+export".
 
 ## What the operator gets
 
@@ -185,8 +186,8 @@ daemon logs each over and recovery. Clients toast them. There is no hysteresis b
 ## Where it shows
 
 - App: **G** switches the SPL pane between the meter and its windows; **B** lays the
-  windows out as columns or tiles, **H** shows the history strip (from the frames received
-  since the app connected), both remembered in `ui.toml`; **W** maximises the pane, **F11**
+  windows out as columns or tiles, **Shift+B** shows the history strip (rebuilt from the
+  log, *The history strip* below), both remembered in `ui.toml`; **W** maximises the pane, **F11**
   goes full screen, the two together are the stage view. **Shift+L** opens the windows
   dialog (lengths and weightings picked, limits typed, a preset row, the horizon). Over /
   recovered alarms are toasts. See *Display* below.
@@ -195,8 +196,58 @@ daemon logs each over and recovery. Clients toast them. There is no hysteresis b
   `--horizon`), `ac2 spl leq export` (the CSV; `--previous` the ended log), `ac2 spl leq
   new` (`--yes`, `--export FILE`).
 
-What is left: `docs/design/backlog.md` (history backfill, peak limits, position
-correction, alarm hysteresis).
+What is left: `docs/design/backlog.md` (peak limits, position correction, alarm
+hysteresis).
+
+## The history strip
+
+Each window's Leq over time, against its limit, red where the window was over: one point
+a second, the newest 4 h kept, the strip showing twice the longest window (2 min … 2 h).
+The points are what the `leq` frames carried, so a client that was not connected — the app
+restarted, another machine, a reconnect, a daemon restart — gets them from the daemon
+(`spl.history_get`) instead of starting empty. The daemon computes them: the app computes
+no measurement values (it does not link the DSP), and the daemon holds both the log and the
+code that made the frames.
+
+- **When**: the app asks whenever it first sees a meter (connected, resynced, a meter
+  created), when the meter's windows change (new windows get their past too) and when a new
+  log starts — from this app or any other client: the log empties (`spl_log.started_at`
+  back to none) or its rows are numbered from 0 again (the frame's `logged` falls). A new
+  log clears the history first. An answer to an earlier request is dropped.
+- **What**: the newest 4 h (`SplHistory::MAX_SECONDS`) of the *current* log, one point per
+  logged second: its end, and per window the Leq (f32 in the meter's unit, as the frame
+  carries it) and whether it was over. The daemon reads 4 h plus the longest window of rows
+  (at most 5 h of a log that keeps 48): the longest window before the first point is what
+  that point is computed over; the rest of a 48 h log would only make points the strip
+  drops.
+- **How**: `ac2_core::leq::LogReplay` replays the rows as the job computed them — a second
+  without a row while running is a gap pushed into the windows; a stretch without rows is
+  where the meter was stopped or the daemon was down, and the job that started after it
+  refilled its windows from the rows in its span (`RollingLeq::refill`, which the job
+  itself calls), so the windows count as elapsed from the oldest of those; a stretch longer
+  than the longest window empties them. Each second is judged with `judge_window` against
+  the window's limit and the row's sensitivity (a filling window on its budget), as the job
+  judged it. Begun part way through the log, the seconds before the longest window has
+  filled with replayed rows are left out: they lack what came before. Only the seconds
+  after the last change of unit (a calibration) are given, as the history starts over at
+  one live. The rows are copied out of the log under its lock; the replay runs outside it.
+- **Joining live**: the rebuilt points replace the series up to the newest of them; frames
+  received after that second continue it. A frame within half a second of the newest point
+  is the same second (a point is stamped at the end of its second, a frame a few
+  milliseconds later), so no second appears twice. A history in another unit than the
+  frames received since (calibrated meanwhile) is dropped.
+
+The only difference from the frames received live: a stretch of seconds without rows
+while the job ran (whole seconds lost to capture gaps) is taken as a restart, which can
+make a window count as filling a few seconds longer than the job did when such a stretch
+falls exactly at the start of its span. Tests: the replay against the job second by second
+over a log with lost seconds, short and long pauses (`ac2_core::leq`); the history bit for
+bit against frames built as the job builds them, from the log's start and part way, and
+across a change of unit (`ac2d` `leq_history`); a log longer than a page, paged and its
+4 h history (`crates/ac2d/tests/leq.rs`); the history joining live frames
+(`ac2_scene::leq`); the app's reducer (restart, a new log from elsewhere, changed windows,
+reconnect); and from an empty daemon, a restarted app shows the seconds before it started
+within 0.01 dB of what the first app received, and a new log from one app clears another's.
 
 ## Display
 
@@ -233,7 +284,7 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the
   weighting; mixed weightings keep their letter). Tested: 2–8 windows, 320–1920 px, no text
   overlaps.
-- **Tiles** (B) keep every figure written out in a grid; the **history strip** (H) goes under
+- **Tiles** (B) keep every figure written out in a grid; the **history strip** (Shift+B) goes under
   either. Defaults: columns, no strip.
 - **Stage view**: full screen with the SPL pane maximised on its windows draws only the
   scene — columns and the caption (meter, unit, run, calibration) — without the app's top bar,

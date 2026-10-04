@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 12`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 13`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -111,6 +111,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.delete` | `key: CalKey` | `ack` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
+| `spl.history_get` | `meas`, `seconds: u32` | `spl_history` | |
 | `ir.capture` | `lease_token`, `request: SweepRequest`, `name` | `sweep` (the run as started) | L (held for the capture), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
@@ -220,6 +221,22 @@ staying in the window, energy `E_K` and measured time `M_K`, the steady level al
 the horizon is `(P·(M_K + h) − E_K) / h` (the limit itself when `K ≤ 0`). Clients floor it
 to 0.1 dB; when it is ≤ 0 the window cannot recover within the horizon and `recover` gives
 the time to recover playing at the limit.
+
+`spl.history_get` returns `SplHistory` {`meas`, `windows`: [`LeqWindow`] (the meter's, in
+configuration order), `scale`: `LevelScale`, `at`: [WallNs], `leq`: [[f32]], `over`:
+[[bool]]}: each window second by second over the newest `seconds` (at most 14400, 4 h) of
+the meter's current log, as its `leq` frames carried them — `at` the end of each second
+(oldest first; a second without a row has no entry, as no frame was sent for it), `leq[w][k]`
+window `w`'s Leq at `at[k]` in `scale` (NaN when nothing was measured in it), `over[w][k]`
+whether it was over its limit then. The daemon replays the log as the meter's job computed
+it (`docs/design/leq.md`, *The history strip*): a second lost while running is a gap in the
+windows, a stretch without rows a restart whose windows were refilled from the rows in their
+span; each second judged with the window's limit and the row's sensitivity, a filling
+window on its budget. Only seconds after the last change of unit (a calibration) are
+returned; `scale` is theirs. The windows are the meter's current ones, also for seconds
+logged before they were set. Empty `at` for an empty log. `invalid` for a measurement that
+is not an SPL meter. A client that was not connected (an app restarted) draws the history
+from it and continues with the frames.
 
 The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
 `LeqWindowState` {`duration`, `weighting`, `judgement`, `since`}; `LeqJudgement`: `no_limit`
@@ -571,7 +588,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log_page`, `snapshot`, `events`,
+`export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log_page`, `spl_history`,
+`snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `sweep`.
 
 ### 3.4 Errors

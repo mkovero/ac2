@@ -154,6 +154,14 @@ impl LeqLog {
         self.rows.iter().copied().collect()
     }
 
+    /// The newest `n` rows held (or all), oldest first, and whether the first of them is
+    /// the log's first row (nothing was logged before it).
+    pub(crate) fn tail(&self, n: usize) -> (Vec<SplLogRow>, bool) {
+        let skip = self.rows.len().saturating_sub(n);
+        let first = self.total - self.rows.len() as u64 + skip as u64;
+        (self.rows.iter().skip(skip).copied().collect(), first == 0)
+    }
+
     /// Up to `max` rows from row number `from` (or the oldest held).
     pub(crate) fn page(&self, meas: MeasId, from: u64, max: u32) -> SplLogPage {
         let oldest = self.total - self.rows.len() as u64;
@@ -170,41 +178,13 @@ impl LeqLog {
 
     /// Refills `ring` with the seconds of the log that fall in the `ring.capacity()`
     /// seconds before `now`, placed by wall time; seconds without a row are gaps. The
-    /// windows then count as elapsed from the oldest row inside that span.
+    /// windows then count as elapsed from the oldest row inside that span
+    /// ([`RollingLeq::refill`], which a client's replay of the log follows too).
     pub(crate) fn rebuild(&self, ring: &mut RollingLeq, now: u64) {
-        ring.clear();
-        let cap = u64::from(ring.capacity());
-        let span_start = now.saturating_sub(cap * NS);
-        let mut slots: Vec<Option<Second>> = vec![None; cap as usize];
-        for r in self.rows.iter().rev() {
-            // Rows are a second apart; half a second either way decides the slot.
-            let Some(off) = (r.start.0 + NS / 2).checked_sub(span_start) else {
-                break;
-            };
-            let k = off / NS;
-            if k >= cap {
-                continue;
-            }
-            let s = row_second(r);
-            let slot = &mut slots[k as usize];
-            *slot = Some(match slot {
-                Some(o) => Second {
-                    energy: [
-                        o.energy[0] + s.energy[0],
-                        o.energy[1] + s.energy[1],
-                        o.energy[2] + s.energy[2],
-                    ],
-                    measured: o.measured + s.measured,
-                },
-                None => s,
-            });
-        }
-        let Some(first) = slots.iter().position(Option::is_some) else {
-            return;
-        };
-        for s in &slots[first..] {
-            ring.push(s.unwrap_or(Second::GAP));
-        }
+        ring.refill(
+            self.rows.iter().rev().map(|r| (r.start.0, row_second(r))),
+            now,
+        );
     }
 }
 
@@ -281,6 +261,10 @@ mod tests {
         assert_eq!(p.rows[0].start, WallNs(3 * NS));
         let p = l.page(MeasId(1), 50, 4);
         assert_eq!((p.from, p.rows.len()), (10, 0));
+        let (t, start) = l.tail(4);
+        assert_eq!((t.len(), t[0].start, start), (4, WallNs(6 * NS), false));
+        let (t, start) = l.tail(40);
+        assert_eq!((t.len(), start), (10, true));
         assert_eq!(l.started_at(), Some(WallNs(0)));
     }
 

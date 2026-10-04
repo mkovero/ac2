@@ -8,7 +8,7 @@
 use std::collections::VecDeque;
 
 use ac2_proto::frame::{LeqFlags, LeqFrame};
-use ac2_proto::model::{LeqConfig, LeqJudgement, LeqWindow, LevelScale, Weighting};
+use ac2_proto::model::{LeqConfig, LeqJudgement, LeqWindow, LevelScale, SplHistory, Weighting};
 
 use crate::axis::{self, Axis, Mapping, Range, Scale, Steps};
 use crate::banner::{BannerRow, Status};
@@ -358,13 +358,70 @@ impl LeqHistory {
             if s.back().is_some_and(|p| p.t >= t) {
                 continue;
             }
-            s.push_back(HistoryPoint {
+            let p = HistoryPoint {
                 t,
                 leq: f.leq[i],
                 over: f.flags[i].contains(LeqFlags::OVER),
-            });
+            };
+            // Frames come a second apart: one within half a second of the newest point is
+            // of the same second (that point rebuilt from the log, stamped at the second's
+            // end, or a frame sent again after a change of windows).
+            match s.back_mut() {
+                Some(b) if t - b.t < 0.5 => *b = p,
+                _ => s.push_back(p),
+            }
             while s.front().is_some_and(|p| p.t < t - HISTORY_S) {
                 s.pop_front();
+            }
+        }
+    }
+
+    /// Forgets every point (a new log).
+    pub fn clear(&mut self) {
+        self.series.clear();
+    }
+
+    /// Puts the history the daemon rebuilt from the meter's log (`spl.history_get`) under
+    /// what was received live: each of its windows' points replace the series up to the
+    /// newest of them, and the frames received after that second continue it. Ignored when
+    /// the frames received since are in another unit (the meter's calibration changed
+    /// meanwhile).
+    pub fn backfill(&mut self, h: &SplHistory) {
+        let Some(newest) = h.at.last().map(|t| t.0 as f64 / 1e9) else {
+            return;
+        };
+        if self.scale.is_some_and(|s| s != h.scale) && !self.is_empty() {
+            return;
+        }
+        self.scale = Some(h.scale);
+        for (i, w) in h.windows.iter().enumerate() {
+            let (Some(leq), Some(over)) = (h.leq.get(i), h.over.get(i)) else {
+                continue;
+            };
+            let k = key(w);
+            let live: Vec<HistoryPoint> = match self.series.iter().find(|(sk, _)| *sk == k) {
+                // A frame is stamped a little after the end of its second: one within half
+                // a second of the newest rebuilt point is that point.
+                Some((_, s)) => s.iter().filter(|p| p.t > newest + 0.5).copied().collect(),
+                None => Vec::new(),
+            };
+            let rebuilt =
+                h.at.iter()
+                    .zip(leq.iter().zip(over))
+                    .map(|(t, (l, o))| HistoryPoint {
+                        t: t.0 as f64 / 1e9,
+                        leq: *l,
+                        over: *o,
+                    });
+            let mut s: VecDeque<HistoryPoint> = rebuilt.chain(live).collect();
+            if let Some(n) = s.back().map(|p| p.t) {
+                while s.front().is_some_and(|p| p.t < n - HISTORY_S) {
+                    s.pop_front();
+                }
+            }
+            match self.series.iter_mut().find(|(sk, _)| *sk == k) {
+                Some((_, old)) => *old = s,
+                None => self.series.push((k, s)),
             }
         }
     }

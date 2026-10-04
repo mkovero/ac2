@@ -654,6 +654,19 @@ pub enum Overlay {
     DeleteTrace(Box<DeleteTracePrompt>),
 }
 
+/// What an SPL meter's history was rebuilt from its log for.
+#[derive(Clone, Debug, PartialEq)]
+struct LeqLogSeen {
+    /// The windows it was rebuilt for.
+    config: ac2_proto::model::LeqConfig,
+    /// Rows logged as of the newest `leq` frame: a new log numbers its rows from 0 again.
+    logged: u64,
+    /// The log held a second (the `spl_log` entity's `started_at`): `spl.log_new` empties it.
+    started: bool,
+    /// The rebuild asked for; an answer to an earlier one is stale.
+    ask: u64,
+}
+
 /// The confirmation before `spl.log_new`: which meter, and what it says.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewLogPrompt {
@@ -902,8 +915,12 @@ pub struct AppState {
     /// the always-on meters).
     devices_for: Option<ac2_proto::units::SessionEpoch>,
     /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
-    /// last `seq` folded in).
+    /// last `seq` folded in) over the history rebuilt from the meter's log.
     pub leq_history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
+    /// Which log and windows each SPL meter's history was last rebuilt for.
+    leq_logs: BTreeMap<MeasId, LeqLogSeen>,
+    /// Number of the newest history rebuild asked for.
+    leq_backfill_ask: u64,
     /// The newest over / recovered alarm of each meter already shown (`None`: none yet).
     leq_alarms_seen: BTreeMap<MeasId, Option<ac2_proto::model::LeqAlarm>>,
     /// Each SPL meter's displayed reading, held for its display period.
@@ -971,6 +988,8 @@ impl AppState {
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
             leq_history: BTreeMap::new(),
+            leq_logs: BTreeMap::new(),
+            leq_backfill_ask: 0,
             leq_alarms_seen: BTreeMap::new(),
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
@@ -3951,6 +3970,99 @@ impl AppState {
         }
     }
 
+    /// Rebuilds each SPL meter's history from its log when the app first sees the meter
+    /// (connected, resynced, created), when its windows change and when a new log starts
+    /// (from this app or any other client: the log empties, or its row count starts over);
+    /// a new log first clears the history. The frames received go on folding in meanwhile.
+    fn follow_leq_logs(&mut self, data: Option<&DataSnapshot>, out: &mut Vec<Request>) {
+        use ac2_proto::FrameData;
+        let Some(st) = self.daemon() else {
+            // Resyncing: the daemon may have restarted with other logs; ask again once synced.
+            self.leq_logs.clear();
+            return;
+        };
+        let mut logged: BTreeMap<MeasId, u64> = BTreeMap::new();
+        if let Some(d) = data {
+            for tf in d.latest.frames.values() {
+                if let FrameData::Leq(f) = &tf.frame.data {
+                    logged.insert(f.meas, f.meta.logged);
+                }
+            }
+        }
+        let meters: Vec<(MeasId, ac2_proto::model::LeqConfig, Option<bool>)> = st
+            .measurements
+            .iter()
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Spl { config } => Some((
+                    m.id,
+                    config.leq.clone(),
+                    st.spl_logs
+                        .iter()
+                        .find(|l| l.meas == m.id)
+                        .map(|l| l.started_at.is_some()),
+                )),
+                _ => None,
+            })
+            .collect();
+        self.leq_logs
+            .retain(|k, _| meters.iter().any(|(id, ..)| id == k));
+        for (meas, config, started) in meters {
+            let logged = logged.get(&meas).copied();
+            let seen = self.leq_logs.get(&meas);
+            let new_log = seen.is_some_and(|s| {
+                logged.is_some_and(|l| l < s.logged) || (s.started && started == Some(false))
+            });
+            if new_log && let Some((_, h)) = self.leq_history.get_mut(&meas) {
+                h.clear();
+            }
+            match self.leq_logs.get_mut(&meas) {
+                Some(s) if !new_log && s.config == config => {
+                    s.logged = logged.unwrap_or(s.logged).max(s.logged);
+                    s.started = started.unwrap_or(s.started);
+                }
+                _ => {
+                    self.leq_backfill_ask += 1;
+                    let ask = self.leq_backfill_ask;
+                    self.leq_logs.insert(
+                        meas,
+                        LeqLogSeen {
+                            config,
+                            logged: logged.unwrap_or(0),
+                            started: started.unwrap_or(false),
+                            ask,
+                        },
+                    );
+                    out.push(Request::LeqBackfill { meas, ask });
+                }
+            }
+        }
+    }
+
+    /// A meter's history rebuilt from its log: under the frames received, unless a newer
+    /// rebuild was asked for meanwhile.
+    fn leq_backfilled(
+        &mut self,
+        meas: MeasId,
+        ask: u64,
+        result: Result<Box<ac2_proto::model::SplHistory>, String>,
+    ) {
+        if self.leq_logs.get(&meas).is_none_or(|s| s.ask != ask) {
+            return;
+        }
+        match result {
+            Ok(h) => self.leq_history.entry(meas).or_default().1.backfill(&h),
+            Err(e) => {
+                let name = self
+                    .measurements()
+                    .iter()
+                    .find(|m| m.id == meas)
+                    .map(|m| m.config.name.clone())
+                    .unwrap_or_default();
+                self.error(format!("{name}: Leq history from the log: {e}"));
+            }
+        }
+    }
+
     /// Toasts each window that went over its limit or came back since the last mirror; the
     /// alarms already there when the app connected are history, not news.
     fn follow_leq_alarms(&mut self) {
@@ -4021,6 +4133,8 @@ impl AppState {
                 };
                 // A new connection holds no lease.
                 self.stimulus.phase = StimPhase::Idle;
+                // Nor has it rebuilt any history: the log may have moved on meanwhile.
+                self.leq_logs.clear();
             }
             ConnEvent::Failed { target, error, .. } => {
                 self.conn = ConnState::Failed { target, error };
@@ -4073,6 +4187,8 @@ impl AppState {
                 self.follow_output_device();
                 self.follow_sweep(out);
                 self.follow_leq_alarms();
+                let data = self.data.clone();
+                self.follow_leq_logs(data.as_deref(), out);
                 if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
                     self.open_session_when_empty = false;
                     if self.open_session().is_none() && self.overlay == Overlay::None {
@@ -4126,6 +4242,9 @@ impl AppState {
                     self.overlay = Overlay::Offer(Box::new(Offer { transfers }));
                 }
             }
+            ConnEvent::LeqBackfill { meas, ask, result } => {
+                self.leq_backfilled(meas, ask, result);
+            }
             ConnEvent::MeasCreated(m) => {
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);
@@ -4134,6 +4253,8 @@ impl AppState {
                 if self.view.spectrum.peak_hold {
                     self.fold_peaks(&d);
                 }
+                // A new log clears the history before its first frame goes in.
+                self.follow_leq_logs(Some(&d), out);
                 self.fold_leq(&d);
                 self.fold_spl(&d);
                 self.data = Some(d);

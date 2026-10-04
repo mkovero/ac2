@@ -668,7 +668,10 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   that follows the loudest window in 10 dB steps and stays put from second to second.
 - **B** switches between columns and **tiles** (a grid with every figure written out),
   **Shift+B** shows or hides the **history strip** below them: each window over time against its limit
-  (dashed), red where it was over. The app remembers both. **W** gives the pane the whole
+  (dashed), red where it was over. It holds the log's last 4 hours even when the app was
+  not running: a restarted (or reconnected, or second) app gets it from the daemon, rebuilt
+  from the meter's log as the meter computed it; a new log clears it. The app remembers
+  both. **W** gives the pane the whole
   window, once more (or **F11**) the whole screen: the **stage view**, nothing but the
   columns and the caption with the meter's name, the run and its calibration (the top bar comes
   back while a stimulus is armed or playing). W again goes back to the split layout.

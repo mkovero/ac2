@@ -591,6 +591,7 @@ def requests():
                 "replace_acoustic": False,
             },
         ),
+        req(51, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
     ]
 
 

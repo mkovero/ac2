@@ -718,3 +718,133 @@ fn over_while_filling_stays_over_until_full() {
     }
     assert_eq!(verdicts(&r, limit), [OK]);
 }
+
+/// A log with every kind of hole: seconds lost while running, short pauses (shorter than
+/// the longest window) and a long one, partial seconds; wall times jitter a little.
+fn holey_log() -> Vec<(u64, Second)> {
+    let t0 = 1_790_000_000 * NS;
+    let mut rng = Rng(0x1eb_0011);
+    let mut rows = Vec::new();
+    let mut t = t0;
+    for k in 0..4000u64 {
+        t += match k {
+            0 => 0,
+            // Pauses: 40 s, 80 s, 200 s (shorter than the 300 s window), 400 s (longer).
+            700 => 41 * NS,
+            1500 => 81 * NS,
+            1530 => 201 * NS,
+            2600 => 401 * NS,
+            _ if k % 211 == 0 => 2 * NS,
+            _ => NS,
+        };
+        let loud = if (1200..1400).contains(&k) { 20.0 } else { 0.0 };
+        let level = -40.0 + 25.0 * rng.next() + loud;
+        let measured = if k % 53 == 0 { 0.4 } else { 1.0 };
+        let jitter = (rng.next() * 0.02 * NS as f64) as u64;
+        rows.push((
+            t + jitter,
+            Second::from_levels([level, level + 3.0, level + 5.0], measured),
+        ));
+    }
+    rows
+}
+
+fn replay_specs() -> Vec<WindowSpec> {
+    [
+        (10, Weighting::A),
+        (60, Weighting::C),
+        (120, Weighting::A),
+        (300, Weighting::Z),
+    ]
+    .map(|(seconds, weighting)| WindowSpec { seconds, weighting })
+    .to_vec()
+}
+
+/// The job as the daemon runs it: started on the log at the first row and after every
+/// stretch without rows (the meter stopped), refilling its windows from the rows before;
+/// otherwise every second pushed, a lost one as a gap.
+fn job_values(rows: &[(u64, Second)], specs: &[WindowSpec]) -> Vec<Vec<WindowValue>> {
+    let mut ring = RollingLeq::new(specs, 30);
+    let mut out = Vec::new();
+    for (i, &(start, s)) in rows.iter().enumerate() {
+        let missing = (i > 0).then(|| {
+            let step = (start - rows[i - 1].0 + NS / 2) / NS;
+            step.max(1) - 1
+        });
+        if missing != Some(0) {
+            ring.refill(rows[..i].iter().rev().copied(), start);
+        }
+        ring.push(s);
+        out.push((0..specs.len()).map(|w| ring.value(w)).collect());
+    }
+    out
+}
+
+fn same_value(a: &WindowValue, b: &WindowValue) -> bool {
+    a.elapsed == b.elapsed
+        && a.seconds == b.seconds
+        && (a.measured - b.measured).abs() < 1e-9
+        && close_db(a.leq_dbfs, b.leq_dbfs, 1e-9)
+        && close_db(a.least_dbfs(), b.least_dbfs(), 1e-9)
+}
+
+/// Replayed from the log, every window reads what the job computed, second by second,
+/// through lost seconds, pauses shorter than the windows (refilled, their elapsed time
+/// counted from the oldest row in span) and a longer one (empty windows).
+#[test]
+fn replay_matches_the_job() {
+    let rows = holey_log();
+    let specs = replay_specs();
+    let job = job_values(&rows, &specs);
+    let mut r = LogReplay::new(&specs, 30, true);
+    for (i, &(start, s)) in rows.iter().enumerate() {
+        r.push(start, s);
+        assert!(r.settled());
+        for (w, want) in job[i].iter().enumerate() {
+            let got = r.windows().value(w);
+            assert!(
+                same_value(&got, want),
+                "row {i} window {w}: {got:?} vs {want:?}"
+            );
+            assert_eq!(
+                judge_window(&got, 0.0, -20.0, 3.0),
+                judge_window(want, 0.0, -20.0, 3.0),
+                "row {i} window {w}"
+            );
+        }
+    }
+    // After the 400 s pause every window fills again from nothing.
+    assert!(job[2600].iter().all(|v| v.elapsed == 1));
+    // The 200 s pause 30 s after an 80 s one: the 300 s window's span starts in the 80 s
+    // pause, so it counts as filling from the oldest row in it.
+    assert!(job[1530][3].elapsed < 300, "{:?}", job[1530][3]);
+    assert!(job[1530][3].filling());
+}
+
+/// Begun part way through a log, the replay is settled (and then equal to the job) once
+/// the longest window holds only rows it was given.
+#[test]
+fn replay_from_the_middle_settles_after_the_longest_window() {
+    let rows = holey_log();
+    let specs = replay_specs();
+    let job = job_values(&rows, &specs);
+    let from = 2000;
+    let mut r = LogReplay::new(&specs, 30, false);
+    let mut settled_at = None;
+    for (i, &(start, s)) in rows.iter().enumerate().skip(from) {
+        r.push(start, s);
+        if !r.settled() {
+            continue;
+        }
+        settled_at.get_or_insert(i);
+        for (w, want) in job[i].iter().enumerate() {
+            let got = r.windows().value(w);
+            assert!(
+                same_value(&got, want),
+                "row {i} window {w}: {got:?} vs {want:?}"
+            );
+        }
+    }
+    let at = settled_at.expect("settles");
+    assert!(at - from <= 300, "{at}");
+}

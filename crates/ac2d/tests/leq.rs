@@ -12,8 +12,8 @@ use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusL
 use ac2_proto::frame::{FrameData, LeqFlags, LeqFrame};
 use ac2_proto::model::{
     GeneratorDesired, GeneratorSettings, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindow,
-    LevelScale, MeasConfig, MeasKind, PeakWeighting, SessionRef, Signal, SplConfig, SplLog,
-    SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
+    LevelScale, MeasConfig, MeasKind, PeakWeighting, SessionRef, Signal, SplConfig, SplHistory,
+    SplLog, SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};
@@ -809,6 +809,110 @@ async fn a_filling_window_goes_over_when_its_budget_is_spent() {
     assert!(f.least[1] > 90.0 && f.elapsed[1] < 30.0, "{f:?}");
     assert!(f.over_in[1].is_nan());
     drop(lease);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}
+
+/// A log longer than a page (a loaded session's 45000 seconds): `spl.log_get` pages it,
+/// every row once; `spl.history_get` gives its windows second by second over the last
+/// 4 h, the first of those computed over the rows before them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_long_log_in_pages_and_its_history() {
+    use ac2_proto::model::SplLogRow;
+    use ac2_proto::units::WallNs;
+    use ac2_traces::session::{SavedMeasurement, SavedSplLog, Session};
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let h = Daemon::start(config(realtime_rig(), local_tcp())).unwrap();
+    let c = connect(&h).await;
+    let n = SplLogPage::MAX_ROWS as u64 * 2 + 5000;
+    let t0 = 1_790_000_000_000_000_000;
+    let rows: Vec<SplLogRow> = (0..n)
+        .map(|k| SplLogRow {
+            start: WallNs(t0 + k * 1_000_000_000),
+            measured: Seconds(1.0),
+            laeq: Dbfs(-30.0 - (k % 10) as f64),
+            lceq: Dbfs(-28.0),
+            lzeq: Dbfs(-27.0),
+            sensitivity: Some(Db(120.0)),
+        })
+        .collect();
+    let path = dir.path().join("long");
+    ac2_traces::session::save(
+        &path,
+        &Session {
+            saved_at: WallNs(t0),
+            measurements: vec![SavedMeasurement {
+                id: M,
+                config: meter(vec![window(60.0, Some(95.0))]),
+                running: false,
+                frozen: false,
+                delay: None,
+            }],
+            spl_logs: vec![SavedSplLog {
+                info: ac2_traces::spl_log::SplLogInfo {
+                    meas: M,
+                    name: "FOH SPL".into(),
+                    input: 1,
+                    mic: None,
+                },
+                rows: rows.clone(),
+            }],
+            traces: Vec::new(),
+        },
+    )
+    .unwrap();
+    c.call(Command::FileLoad {
+        session: SessionRef::Path {
+            path: path.to_string_lossy().into_owned(),
+        },
+    })
+    .await
+    .unwrap();
+    let starts = |r: &[SplLogRow]| r.iter().map(|r| r.start).collect::<Vec<_>>();
+    // Paged from the start: every row once, a page at most MAX_ROWS.
+    let mut got = Vec::new();
+    let mut from = 0;
+    loop {
+        let p = page(&c, from).await;
+        assert!(p.rows.len() <= SplLogPage::MAX_ROWS as usize);
+        assert_eq!((p.from, p.total), (from, n));
+        from += p.rows.len() as u64;
+        got.extend(p.rows);
+        if from >= n {
+            break;
+        }
+    }
+    assert_eq!(starts(&got), starts(&rows));
+    assert_eq!(got[17].laeq, rows[17].laeq);
+
+    // The history of its last 4 h, one point a second, replayed from the rows before too.
+    let r = c
+        .call(Command::SplHistoryGet {
+            meas: M,
+            seconds: 100_000,
+        })
+        .await
+        .unwrap();
+    let ReplyBody::SplHistory(hist) = r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(hist.scale, LevelScale::DbSpl);
+    assert_eq!(hist.windows, vec![window(60.0, Some(95.0))]);
+    assert_eq!(hist.at.len(), SplHistory::MAX_SECONDS as usize + 1);
+    assert_eq!(
+        hist.at.last().unwrap().0,
+        rows[rows.len() - 1].start.0 + 1_000_000_000
+    );
+    // A full minute of -30 … -39 dBFS at 120 dB SPL: about 85 dB, under its 95 dB limit.
+    let leq = &hist.leq[0];
+    assert!(
+        leq.iter().all(|l| (84.0..87.0).contains(l)),
+        "{:?}",
+        &leq[..5]
+    );
+    assert!(hist.over[0].iter().all(|o| !o));
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
         .unwrap();
