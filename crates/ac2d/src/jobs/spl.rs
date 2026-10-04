@@ -10,9 +10,7 @@
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use ac2_core::leq::{
-    Headroom, Judgement, RollingLeq, Second, SecondIntegrator, WindowSpec, judge_window,
-};
+use ac2_core::leq::{Headroom, Judgement, RollingLeq, Second, WindowSpec, judge_window};
 use ac2_core::mic_curve::Correction;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
@@ -40,7 +38,6 @@ pub(crate) struct Spl {
     idx: usize,
     meter: SplMeter,
     cal: InputCal,
-    frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
     levels: LevelsMeter,
@@ -52,7 +49,6 @@ pub(crate) struct Spl {
 
 /// The meter's one-second integration, its log and its rolling windows.
 struct LeqWindows {
-    seconds: SecondIntegrator,
     ring: RollingLeq,
     cfg: LeqConfig,
     log: SharedLog,
@@ -105,13 +101,12 @@ pub(crate) struct LeqSetup {
 }
 
 impl LeqWindows {
-    fn new(cfg: LeqConfig, fs: f64, setup: LeqSetup) -> Result<Self, String> {
+    fn new(cfg: LeqConfig, setup: LeqSetup) -> Self {
         let n = cfg.windows.len();
         let mut judgements = setup.judgements;
         judgements.resize(n, LeqJudgement::NoLimit);
         let epoch = leq_log::lock(&setup.log).epoch();
-        Ok(Self {
-            seconds: SecondIntegrator::new(fs).map_err(|e| e.to_string())?,
+        Self {
             ring: ring_for(&cfg),
             cfg,
             log: setup.log,
@@ -124,7 +119,7 @@ impl LeqWindows {
             epoch,
             done: Vec::with_capacity(4),
             fresh: false,
-        })
+        }
     }
 
     /// Wall clock of sample `s` (ns), from the newest block's.
@@ -181,12 +176,11 @@ impl Spl {
             peak_weighting: conv::peak_weighting(cfg.peak_weighting),
         })
         .map_err(|e| e.to_string())?;
-        let mut leq = LeqWindows::new(cfg.leq.clone(), fs, leq)?;
+        let leq = LeqWindows::new(cfg.leq.clone(), leq);
         if let Some(c) = &cal.correction {
-            let taps = c.design_fir(fs);
-            meter.set_correction(Some(&taps));
-            leq.seconds.set_correction(Some(&taps));
+            meter.set_correction(Some(&c.design_fir(fs)));
         }
+        meter.set_frozen(frozen);
         Ok(Self {
             levels: LevelsMeter::new(vec![idx], vec![cfg.input], sample_rate),
             meas,
@@ -195,7 +189,6 @@ impl Spl {
             idx,
             meter,
             cal,
-            frozen,
             config_rev,
             applied_at: None,
             buf: Vec::new(),
@@ -209,16 +202,16 @@ impl Spl {
         if !same_curve(self.cal.correction.as_ref(), cal.correction.as_ref()) {
             let taps = cal.correction.as_ref().map(|c| c.design_fir(self.fs));
             self.meter.set_correction(taps.as_deref());
-            self.leq.seconds.set_correction(taps.as_deref());
         }
         self.cal = cal;
     }
 
-    /// Feeds the block to the one-second integration; logs and judges every completed
-    /// second.
-    fn push_leq(&mut self, b: &Block) {
+    /// Feeds the block to the meter, whose weighted signal also makes the one-second
+    /// integration; logs and judges every completed second.
+    fn push_meter(&mut self, b: &Block) {
         let fs = self.fs;
         let l = &mut self.leq;
+        let meter = &mut self.meter;
         let block_wall = (b.wall_ns as f64 - f64::from(b.frames) / fs * NS).max(0.0) as u64;
         match l.second_start {
             None => {
@@ -233,20 +226,20 @@ impl Spl {
                 // Lost samples: the second grid moves on without energy or measured time.
                 let lost = b.start_sample - l.next;
                 let done = &mut l.done;
-                l.seconds.skip(lost, |s| done.push(s));
+                meter.skip(lost, |s| done.push(s));
             }
             Some(_) => {}
         }
         l.next = b.start_sample;
         l.next_wall = block_wall;
         let done = &mut l.done;
-        l.seconds.process(&self.buf, |s| done.push(s));
+        meter.process(&self.buf, |s| done.push(s));
         l.next = b.end_sample();
         l.next_wall = b.wall_ns;
         if l.done.is_empty() {
             return;
         }
-        let per = self.leq.seconds.samples_per_second();
+        let per = self.meter.seconds().samples_per_second();
         let seconds = std::mem::take(&mut self.leq.done);
         for s in &seconds {
             let start = self.leq.second_start.unwrap_or(0);
@@ -372,7 +365,7 @@ impl Spl {
                     LevelScale::Dbfs
                 },
                 cal: self.cal.status,
-                mic_curve: self.leq.seconds.has_correction(),
+                mic_curve: self.meter.has_correction(),
                 horizon: self.leq.cfg.horizon,
                 logged,
                 run: run.map(|r| LeqRun {
@@ -445,10 +438,7 @@ impl Analysis for Spl {
     fn push(&mut self, b: &Block) {
         self.applied_at.get_or_insert(b.start_sample);
         channel_f64(b, self.idx, &mut self.buf);
-        if !self.frozen {
-            self.meter.process(&self.buf);
-        }
-        self.push_leq(b);
+        self.push_meter(b);
         self.levels.push(b);
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;
@@ -456,7 +446,7 @@ impl Analysis for Spl {
 
     fn command(&mut self, c: JobCmd) {
         match c {
-            JobCmd::Freeze(f) => self.frozen = f,
+            JobCmd::Freeze(f) => self.meter.set_frozen(f),
             JobCmd::Reset => self.meter.reset_interval(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::Spl { config, rev } => {

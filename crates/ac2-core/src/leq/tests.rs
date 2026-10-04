@@ -404,12 +404,22 @@ fn sine(f: f64, amp: f64, fs: f64, from: usize, n: usize) -> Vec<f64> {
         .collect()
 }
 
+fn meter(fs: f64) -> crate::spl::SplMeter {
+    crate::spl::SplMeter::new(crate::spl::SplMeterConfig {
+        fs,
+        weighting: Weighting::A,
+        time_weighting: crate::spl::TimeWeighting::Fast,
+        peak_weighting: crate::spl::PeakWeighting::C,
+    })
+    .expect("rate")
+}
+
 /// A steady 1 kHz sine at −20 dBFS in blocks of any size: each second reads −20 dBFS in Z
 /// (whole cycles per second, exact) and in A and C (0 dB at 1 kHz by definition).
 #[test]
 fn steady_tone_reads_its_level_per_second() {
     for fs in [44_100.0, 48_000.0, 96_000.0] {
-        let mut g = SecondIntegrator::new(fs).expect("rate");
+        let mut g = meter(fs);
         let amp = 0.1; // −20 dBFS
         let mut out = Vec::new();
         let total = (3.0 * fs) as usize + 100;
@@ -423,7 +433,7 @@ fn steady_tone_reads_its_level_per_second() {
             at += n;
         }
         assert_eq!(out.len(), 3, "{fs}");
-        assert_eq!(g.position(), 100);
+        assert_eq!(g.seconds().position(), 100);
         for (k, s) in out.iter().enumerate() {
             assert_eq!(s.measured, 1.0);
             let z = s.level_dbfs(Weighting::Z);
@@ -444,7 +454,7 @@ fn steady_tone_reads_its_level_per_second() {
 #[test]
 fn skip_makes_partial_seconds() {
     let fs = 48_000.0;
-    let mut g = SecondIntegrator::new(fs).expect("rate");
+    let mut g = meter(fs);
     let mut out = Vec::new();
     g.process(&sine(1000.0, 0.1, fs, 0, 24_000), |s| out.push(s));
     g.skip(60_000, |s| out.push(s));
@@ -455,7 +465,7 @@ fn skip_makes_partial_seconds() {
     for s in &out {
         assert!((s.level_dbfs(Weighting::Z) + 20.0).abs() < 1e-6);
     }
-    assert_eq!(g.position(), 24_000);
+    assert_eq!(g.seconds().position(), 24_000);
     // Whole lost seconds come out as gaps.
     let mut out = Vec::new();
     g.skip(24_000 + 2 * 48_000, |s| out.push(s));
@@ -468,13 +478,13 @@ fn skip_makes_partial_seconds() {
 #[test]
 fn correction_in_the_path() {
     let fs = 48_000.0;
-    let mut g = SecondIntegrator::new(fs).expect("rate");
+    let mut g = meter(fs);
     g.set_correction(Some(&[1.0]));
     assert!(g.has_correction());
     let mut out = Vec::new();
     g.process(&sine(1000.0, 0.1, fs, 0, 2 * 48_000), |s| out.push(s));
     assert_eq!(out.len(), 2);
-    assert!((out[1].level_dbfs(Weighting::Z) + 20.0).abs() < 1e-6);
+    assert!((out[1].level_dbfs(Weighting::Z) + 20.0).abs() < 1e-5);
     g.set_correction(None);
     assert!(!g.has_correction());
 }

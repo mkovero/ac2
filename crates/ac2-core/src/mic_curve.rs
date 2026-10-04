@@ -19,7 +19,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use num_complex::Complex64;
+use num_complex::{Complex, Complex64};
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
 mod info;
@@ -430,48 +430,66 @@ pub fn dtft(h: &[f64], f: f64, fs: f64) -> Complex64 {
 /// Uniformly partitioned overlap-save FIR convolution: partitions of `partition` samples,
 /// FFT size twice that. Output lags input by one partition. Allocates only at
 /// construction.
+///
+/// The convolution runs in f32 with the spectra stored as separate real and imaginary
+/// arrays, so the multiply-accumulate over the partitions — nearly all of the work — runs
+/// on full SIMD lanes, and the partitioned spectra of a 96 kHz correction (64 × 513 bins
+/// × 2 × 4 B ≈ 260 kB, the same again for the delay line) fit a 1 MB L2 cache. The
+/// round-off this leaves is about 10⁻⁷ of the signal's RMS (−130 dB or lower), below the
+/// quantisation floor of a 24-bit converter, so it cannot move a level the meter shows at
+/// 0.1 dB. The output goes back to f64 before the weighting filters, whose poles near
+/// z = 1 need the precision.
+#[derive(Clone)]
 pub struct PartitionedFir {
     b: usize,
-    fwd: Arc<dyn RealToComplex<f64>>,
-    inv: Arc<dyn ComplexToReal<f64>>,
-    parts: Vec<Vec<Complex64>>,
-    fdl: Vec<Vec<Complex64>>,
+    /// Bins per partition spectrum, `b + 1`.
+    bins: usize,
+    parts: usize,
+    fwd: Arc<dyn RealToComplex<f32>>,
+    inv: Arc<dyn ComplexToReal<f32>>,
+    /// Partition spectra, partition `i` at `i·bins..(i + 1)·bins`, scaled by the inverse
+    /// transform's 1 / 2b.
+    h_re: Vec<f32>,
+    h_im: Vec<f32>,
+    /// Spectra of the newest input blocks, same layout; slot `pos` is the newest.
+    x_re: Vec<f32>,
+    x_im: Vec<f32>,
     pos: usize,
-    input: Vec<f64>,
+    input: Vec<f32>,
     fill: usize,
-    out: Vec<f64>,
-    time: Vec<f64>,
-    acc: Vec<Complex64>,
-    scratch_fwd: Vec<Complex64>,
-    scratch_inv: Vec<Complex64>,
+    out: Vec<f32>,
+    time: Vec<f32>,
+    spec: Vec<Complex<f32>>,
+    acc_re: Vec<f32>,
+    acc_im: Vec<f32>,
+    scratch_fwd: Vec<Complex<f32>>,
+    scratch_inv: Vec<Complex<f32>>,
 }
 
 impl fmt::Debug for PartitionedFir {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PartitionedFir")
             .field("partition", &self.b)
-            .field("partitions", &self.parts.len())
+            .field("partitions", &self.parts)
             .finish()
     }
 }
 
-impl Clone for PartitionedFir {
-    fn clone(&self) -> Self {
-        Self {
-            b: self.b,
-            fwd: Arc::clone(&self.fwd),
-            inv: Arc::clone(&self.inv),
-            parts: self.parts.clone(),
-            fdl: self.fdl.clone(),
-            pos: self.pos,
-            input: self.input.clone(),
-            fill: self.fill,
-            out: self.out.clone(),
-            time: self.time.clone(),
-            acc: self.acc.clone(),
-            scratch_fwd: self.scratch_fwd.clone(),
-            scratch_inv: self.scratch_inv.clone(),
-        }
+/// `acc += x · h` over split complex arrays of equal length.
+#[inline]
+fn complex_mac(
+    acc_re: &mut [f32],
+    acc_im: &mut [f32],
+    xr: &[f32],
+    xi: &[f32],
+    hr: &[f32],
+    hi: &[f32],
+) {
+    let n = acc_re.len();
+    let (acc_im, xr, xi, hr, hi) = (&mut acc_im[..n], &xr[..n], &xi[..n], &hr[..n], &hi[..n]);
+    for k in 0..n {
+        acc_re[k] += xr[k] * hr[k] - xi[k] * hi[k];
+        acc_im[k] += xr[k] * hi[k] + xi[k] * hr[k];
     }
 }
 
@@ -481,36 +499,50 @@ impl PartitionedFir {
     pub fn new(h: &[f64], partition: usize) -> Self {
         let b = partition.max(1);
         let n = 2 * b;
-        let mut planner = RealFftPlanner::<f64>::new();
+        let bins = b + 1;
+        let mut planner = RealFftPlanner::<f32>::new();
         let fwd = planner.plan_fft_forward(n);
         let inv = planner.plan_fft_inverse(n);
-        let p = h.len().div_ceil(b).max(1);
+        let parts = h.len().div_ceil(b).max(1);
         let mut scratch_fwd = fwd.make_scratch_vec();
-        let parts = (0..p)
-            .map(|i| {
-                let mut t = vec![0.0; n];
-                let src = &h[(i * b).min(h.len())..((i + 1) * b).min(h.len())];
-                t[..src.len()].copy_from_slice(src);
-                let mut s = fwd.make_output_vec();
-                // Lengths come from the plan; the transform cannot fail.
-                let _ = fwd.process_with_scratch(&mut t, &mut s, &mut scratch_fwd);
-                s
-            })
-            .collect();
+        let mut h_re = vec![0.0; parts * bins];
+        let mut h_im = vec![0.0; parts * bins];
+        let mut spec = fwd.make_output_vec();
+        let mut t = vec![0.0f32; n];
+        let scale = 1.0 / n as f64;
+        for i in 0..parts {
+            t.fill(0.0);
+            let src = &h[(i * b).min(h.len())..((i + 1) * b).min(h.len())];
+            for (d, &s) in t.iter_mut().zip(src) {
+                *d = (s * scale) as f32;
+            }
+            // Lengths come from the plan; the transform cannot fail.
+            let _ = fwd.process_with_scratch(&mut t, &mut spec, &mut scratch_fwd);
+            for (k, c) in spec.iter().enumerate() {
+                h_re[i * bins + k] = c.re;
+                h_im[i * bins + k] = c.im;
+            }
+        }
         Self {
-            fdl: vec![vec![Complex64::new(0.0, 0.0); b + 1]; p],
-            acc: fwd.make_output_vec(),
-            scratch_inv: inv.make_scratch_vec(),
-            scratch_fwd,
             b,
-            fwd,
-            inv,
+            bins,
             parts,
+            h_re,
+            h_im,
+            x_re: vec![0.0; parts * bins],
+            x_im: vec![0.0; parts * bins],
             pos: 0,
             input: vec![0.0; n],
             fill: 0,
             out: vec![0.0; b],
-            time: vec![0.0; n],
+            time: t,
+            spec,
+            acc_re: vec![0.0; bins],
+            acc_im: vec![0.0; bins],
+            scratch_inv: inv.make_scratch_vec(),
+            scratch_fwd,
+            fwd,
+            inv,
         }
     }
 
@@ -521,10 +553,22 @@ impl PartitionedFir {
 
     /// Filters `x` into `y` (same length): `y[n] = (h ∗ x)[n − latency]`.
     pub fn process(&mut self, x: &[f64], y: &mut [f64]) {
-        for (xi, yi) in x.iter().zip(y.iter_mut()) {
-            *yi = self.out[self.fill];
-            self.input[self.b + self.fill] = *xi;
-            self.fill += 1;
+        let n = x.len().min(y.len());
+        let mut i = 0;
+        while i < n {
+            let at = self.fill;
+            let k = (self.b - at).min(n - i);
+            for (d, &s) in self.input[self.b + at..self.b + at + k]
+                .iter_mut()
+                .zip(&x[i..i + k])
+            {
+                *d = s as f32;
+            }
+            for (d, &s) in y[i..i + k].iter_mut().zip(&self.out[at..at + k]) {
+                *d = f64::from(s);
+            }
+            self.fill += k;
+            i += k;
             if self.fill == self.b {
                 self.block();
                 self.fill = 0;
@@ -533,43 +577,50 @@ impl PartitionedFir {
     }
 
     fn block(&mut self) {
-        let b = self.b;
-        let p = self.parts.len();
+        let (b, bins, p) = (self.b, self.bins, self.parts);
         self.time.copy_from_slice(&self.input);
-        let slot = &mut self.fdl[self.pos];
-        let _ = self
-            .fwd
-            .process_with_scratch(&mut self.time, slot, &mut self.scratch_fwd);
-        for a in &mut self.acc {
-            *a = Complex64::new(0.0, 0.0);
+        let _ =
+            self.fwd
+                .process_with_scratch(&mut self.time, &mut self.spec, &mut self.scratch_fwd);
+        let slot = self.pos * bins;
+        for (k, c) in self.spec.iter().enumerate() {
+            self.x_re[slot + k] = c.re;
+            self.x_im[slot + k] = c.im;
         }
-        for (i, part) in self.parts.iter().enumerate() {
-            let x = &self.fdl[(self.pos + p - i) % p];
-            for ((a, xv), hv) in self.acc.iter_mut().zip(x).zip(part) {
-                *a += xv * hv;
-            }
+        self.acc_re.fill(0.0);
+        self.acc_im.fill(0.0);
+        for i in 0..p {
+            let s = ((self.pos + p - i) % p) * bins;
+            let h = i * bins;
+            complex_mac(
+                &mut self.acc_re,
+                &mut self.acc_im,
+                &self.x_re[s..s + bins],
+                &self.x_im[s..s + bins],
+                &self.h_re[h..h + bins],
+                &self.h_im[h..h + bins],
+            );
         }
-        let last = self.acc.len() - 1;
-        self.acc[0].im = 0.0;
-        self.acc[last].im = 0.0;
-        let _ = self
-            .inv
-            .process_with_scratch(&mut self.acc, &mut self.time, &mut self.scratch_inv);
-        let scale = 1.0 / (2 * b) as f64;
-        for (o, t) in self.out.iter_mut().zip(&self.time[b..]) {
-            *o = t * scale;
+        for ((c, &re), &im) in self.spec.iter_mut().zip(&self.acc_re).zip(&self.acc_im) {
+            *c = Complex::new(re, im);
         }
+        // The spectrum of a real signal is real at DC and Nyquist.
+        self.spec[0].im = 0.0;
+        self.spec[bins - 1].im = 0.0;
+        let _ =
+            self.inv
+                .process_with_scratch(&mut self.spec, &mut self.time, &mut self.scratch_inv);
+        self.out.copy_from_slice(&self.time[b..]);
         self.input.copy_within(b.., 0);
         self.pos = (self.pos + 1) % p;
     }
 
     /// Back to silence.
     pub fn reset(&mut self) {
-        for s in &mut self.fdl {
-            s.iter_mut().for_each(|v| *v = Complex64::new(0.0, 0.0));
-        }
-        self.input.iter_mut().for_each(|v| *v = 0.0);
-        self.out.iter_mut().for_each(|v| *v = 0.0);
+        self.x_re.fill(0.0);
+        self.x_im.fill(0.0);
+        self.input.fill(0.0);
+        self.out.fill(0.0);
         self.fill = 0;
         self.pos = 0;
     }

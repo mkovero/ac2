@@ -260,15 +260,30 @@ fn partitioned_convolution_equals_direct() {
             fir.process(&x[i..e], &mut y[i..e]);
             i = e;
         }
-        for (n, yn) in y.iter().enumerate() {
-            let want: f64 = if n < lat {
-                0.0
-            } else {
-                let m = n - lat;
-                (0..=m.min(len - 1)).map(|k| h[k] * x[m - k]).sum()
-            };
-            assert!((yn - want).abs() < 1e-10, "len {len} n {n}: {yn} vs {want}");
+        let want: Vec<f64> = (0..x.len())
+            .map(|n| {
+                if n < lat {
+                    0.0
+                } else {
+                    let m = n - lat;
+                    (0..=m.min(len - 1)).map(|k| h[k] * x[m - k]).sum()
+                }
+            })
+            .collect();
+        // The convolution runs in f32: its round-off scales with the output's RMS, and
+        // 2·10⁻⁶ of it (−114 dB) bounds every sample with margin.
+        let rms = (want.iter().map(|v| v * v).sum::<f64>() / want.len() as f64).sqrt();
+        let mut err2 = 0.0;
+        for (n, (yn, w)) in y.iter().zip(&want).enumerate() {
+            assert!(
+                (yn - w).abs() < 2e-6 * rms,
+                "len {len} n {n}: {yn} vs {w} (rms {rms})"
+            );
+            err2 += (yn - w) * (yn - w);
         }
+        let rel_db = 10.0 * (err2 / want.len() as f64 / (rms * rms)).log10();
+        eprintln!("len {len} part {part}: f32 round-off {rel_db:.1} dB re output RMS");
+        assert!(rel_db < -125.0, "len {len}: {rel_db} dB");
         fir.reset();
         let mut z = vec![1.0; 10];
         fir.process(&[0.0; 10], &mut z);

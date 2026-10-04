@@ -1,7 +1,8 @@
 //! Rolling Leq windows over one-second blocks, limits and headroom (`docs/design/leq.md`).
 //!
-//! [`SecondIntegrator`] turns raw input into one-second blocks of A-, C- and Z-weighted
-//! energy (each with its measured time, so a capture gap is never silence).
+//! [`SecondIntegrator`] sums an SPL meter's weighted signal into one-second blocks of A-,
+//! C- and Z-weighted energy (each with its measured time, so a capture gap is never
+//! silence).
 //! [`RollingLeq`] keeps the newest seconds in a ring sized for the longest window and
 //! answers, per window, the Leq over the window (over the elapsed time while it fills), the
 //! headroom for a horizon and the time to recover at a level. [`judge_window`] judges a
@@ -11,9 +12,8 @@
 //! Levels are dBFS on the scale of decision 4a (`10·lg(2·ms)`), as everywhere in
 //! [`crate::spl`]; a limit in dB SPL is converted by the caller with the sensitivity.
 
-use crate::mic_curve::PartitionedFir;
 use crate::spectrum::power_dbfs;
-use crate::weighting::{Weighting, WeightingError, WeightingFilter};
+use crate::weighting::Weighting;
 
 /// The weightings every second is integrated in, in this order.
 pub const WEIGHTINGS: [Weighting; 3] = [Weighting::A, Weighting::C, Weighting::Z];
@@ -75,16 +75,13 @@ impl Second {
     }
 }
 
-/// Integrates the input into one-second [`Second`]s of A-, C- and Z-weighted energy, on a
-/// grid of whole seconds from the first sample processed.
+/// Sums A-, C- and Z-weighted energy into one-second [`Second`]s on a grid of whole seconds
+/// from the first sample. The weighted samples come from the meter's own weighting chain
+/// ([`crate::spl::SplMeter::process`]), so the log and the meter read one filtered signal.
 #[derive(Debug, Clone)]
 pub struct SecondIntegrator {
     fs: f64,
     per_second: u64,
-    a: WeightingFilter,
-    c: WeightingFilter,
-    correction: Option<PartitionedFir>,
-    corrected: Vec<f64>,
     /// Samples of the current second passed (measured or skipped).
     pos: u64,
     measured: u64,
@@ -92,34 +89,15 @@ pub struct SecondIntegrator {
 }
 
 impl SecondIntegrator {
-    /// At `fs` Hz (a whole number of samples per second); fails if the rate is too low
-    /// for A/C weighting.
-    pub fn new(fs: f64) -> Result<Self, WeightingError> {
-        Ok(Self {
+    /// At `fs` Hz (a whole number of samples per second).
+    pub fn new(fs: f64) -> Self {
+        Self {
             fs,
             per_second: (fs.round() as u64).max(1),
-            a: WeightingFilter::new(Weighting::A, fs)?,
-            c: WeightingFilter::new(Weighting::C, fs)?,
-            correction: None,
-            corrected: Vec::new(),
             pos: 0,
             measured: 0,
             acc: [0.0; 3],
-        })
-    }
-
-    /// Runs the weighted paths through `taps` (a mic-curve correction FIR, as
-    /// [`crate::spl::SplMeter::set_correction`]); `None` removes it.
-    pub fn set_correction(&mut self, taps: Option<&[f64]>) {
-        let part = crate::mic_curve::fir_partition(self.fs);
-        self.correction = taps.map(|h| PartitionedFir::new(h, part));
-        let lat = self.correction.as_ref().map_or(0, PartitionedFir::latency);
-        self.corrected = vec![0.0; lat];
-    }
-
-    /// Whether a mic-curve correction is in the path.
-    pub fn has_correction(&self) -> bool {
-        self.correction.is_some()
+        }
     }
 
     /// Samples into the current second.
@@ -132,6 +110,26 @@ impl SecondIntegrator {
         self.per_second
     }
 
+    /// Samples left in the current second.
+    pub fn room(&self) -> u64 {
+        self.per_second - self.pos
+    }
+
+    /// Adds `n` measured samples (at most [`Self::room`]) whose Σy² per weighting of
+    /// [`WEIGHTINGS`] is `energy`; a completed second goes to `emit`.
+    #[inline]
+    pub fn add(&mut self, energy: [f64; 3], n: u64, emit: &mut impl FnMut(Second)) {
+        debug_assert!(n <= self.room());
+        for (a, e) in self.acc.iter_mut().zip(energy) {
+            *a += e;
+        }
+        self.measured += n;
+        self.pos += n;
+        if self.pos == self.per_second {
+            self.flush(emit);
+        }
+    }
+
     fn flush(&mut self, emit: &mut impl FnMut(Second)) {
         let fs = self.fs;
         emit(Second {
@@ -141,41 +139,6 @@ impl SecondIntegrator {
         self.acc = [0.0; 3];
         self.measured = 0;
         self.pos = 0;
-    }
-
-    #[inline]
-    fn step(&mut self, x: f64, emit: &mut impl FnMut(Second)) {
-        let ya = self.a.process_sample(x);
-        let yc = self.c.process_sample(x);
-        self.acc[0] += ya * ya;
-        self.acc[1] += yc * yc;
-        self.acc[2] += x * x;
-        self.measured += 1;
-        self.pos += 1;
-        if self.pos == self.per_second {
-            self.flush(emit);
-        }
-    }
-
-    /// Processes raw input samples (FS); `emit` receives every completed second. Does not
-    /// allocate.
-    pub fn process(&mut self, block: &[f64], mut emit: impl FnMut(Second)) {
-        let Some(mut fir) = self.correction.take() else {
-            for &x in block {
-                self.step(x, &mut emit);
-            }
-            return;
-        };
-        let mut corrected = std::mem::take(&mut self.corrected);
-        for chunk in block.chunks(corrected.len().max(1)) {
-            let c = &mut corrected[..chunk.len()];
-            fir.process(chunk, c);
-            for &x in c.iter() {
-                self.step(x, &mut emit);
-            }
-        }
-        self.corrected = corrected;
-        self.correction = Some(fir);
     }
 
     /// `samples` were lost (a capture discontinuity): the second grid moves on without
