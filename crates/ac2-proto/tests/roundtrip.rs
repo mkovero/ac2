@@ -379,9 +379,10 @@ fn version_mismatch_is_a_typed_refusal() {
 
     // A frame header at another version.
     let mut parts = bytes_of(&samples::frames().pop().expect("sample message"));
-    // `v` is the first key of the header map: fixmap marker, fixstr "v", positive fixint.
-    assert_eq!(&parts[1][1..3], b"\xa1v");
-    parts[1][3] = (PROTO_VERSION + 1) as u8;
+    // `v` is the first element of the header array: fixarray marker, positive fixint.
+    assert_eq!(parts[1][0] & 0xf0, 0x90);
+    assert_eq!(u16::from(parts[1][1]), PROTO_VERSION);
+    parts[1][1] = (PROTO_VERSION + 1) as u8;
     assert!(matches!(
         decode_parts(&parts),
         Err(DecodeError::VersionMismatch { .. })

@@ -534,7 +534,9 @@ impl FrameMeta {
     }
 }
 
-/// The msgpack header part.
+/// The msgpack header part: a msgpack array of these fields in this order (positional, as
+/// are the per-kind metadata structs inside it; enum variants keep their names). A frame
+/// goes out tens of times a second with a payload often smaller than its field names.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrameHeader {
@@ -1113,7 +1115,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
         arrays: cols.iter().map(|(d, _)| *d).collect(),
         meta,
     };
-    let hb = rmp_serde::to_vec_named(&header).map_err(|e| EncodeError::Msgpack(e.to_string()))?;
+    let hb = rmp_serde::to_vec(&header).map_err(|e| EncodeError::Msgpack(e.to_string()))?;
     if hb.len() > MAX_HEADER_BYTES {
         return Err(EncodeError::HeaderTooLarge(hb.len()));
     }
@@ -1237,6 +1239,24 @@ fn stream_kind(s: Stream) -> FrameKind {
     }
 }
 
+/// `v`, the first element of a header array: after the array marker (fixarray, array 16 or
+/// array 32), a positive fixint, uint 8 or uint 16. `None` if the bytes are not that.
+fn header_version(h: &[u8]) -> Option<u16> {
+    let skip = match *h.first()? {
+        0x90..=0x9f => 1,
+        0xdc => 3,
+        0xdd => 5,
+        _ => return None,
+    };
+    let v = h.get(skip..)?;
+    match *v.first()? {
+        x @ 0x00..=0x7f => Some(u16::from(x)),
+        0xcc => v.get(1).map(|x| u16::from(*x)),
+        0xcd => Some(u16::from_be_bytes([*v.get(1)?, *v.get(2)?])),
+        _ => None,
+    }
+}
+
 /// Decode a data frame from its parts. Sizes are validated before anything is parsed.
 pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
     if parts.len() < 2 || parts.len() > 2 + MAX_ARRAYS {
@@ -1249,6 +1269,16 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
     let topic = Topic::parse(parts[0])?;
     if parts[1].len() > MAX_HEADER_BYTES {
         return Err(DecodeError::HeaderTooLarge(parts[1].len()));
+    }
+    // The version comes first and is read on its own: another version may lay the rest of
+    // the header out differently, and must be refused as such, not as malformed.
+    if let Some(theirs) = header_version(parts[1])
+        && theirs != PROTO_VERSION
+    {
+        return Err(DecodeError::VersionMismatch {
+            ours: PROTO_VERSION,
+            theirs,
+        });
     }
     let h: FrameHeader =
         rmp_serde::from_slice(parts[1]).map_err(|e| DecodeError::Header(e.to_string()))?;

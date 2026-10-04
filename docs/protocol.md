@@ -11,8 +11,9 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 1. Encoding rules
 
-- Ctrl messages, events and frame headers are **msgpack maps with named fields**.
-  Field order carries no meaning.
+- Ctrl messages and events are **msgpack maps with named fields**; field order carries no
+  meaning. Frame headers are the exception: **msgpack arrays**, positional (§5.3), since a
+  frame goes out tens of times a second with a payload often smaller than its field names.
 - Unknown fields are refused everywhere (strict in both directions). Fields are never
   defaulted when missing, except that an absent optional field reads as `nil`.
 - Enums are snake_case strings (`"db_spl"`) when they carry no data. Enums with data are
@@ -675,7 +676,7 @@ topics). Longest topic: 32 bytes.
 
 ```
 part 0   topic (UTF-8)
-part 1   header (msgpack map, ≤ 1024 bytes)
+part 1   header (msgpack array, ≤ 1024 bytes)
 part 2…  arrays: each exactly n × 4 bytes, little-endian; f32 or u32 per header
 ```
 
@@ -683,6 +684,21 @@ Columns are in grid order. Invalid values are NaN; where the reason matters a `v
 bitmask array says why.
 
 ### 5.3 Header fields
+
+The header is an array of these fields in this order; `v` comes first so a frame of another
+version is recognised as such before the rest is read. Every struct inside it (array
+descriptors, the per-kind metadata of §5.4 and the types they hold) is likewise an array of
+its fields in the order listed; an enum with data is an array of its `type` name followed by
+its fields (`["verified", calibrated_at, ["acoustic", calibrator_level]]`); the `meta` key
+stays a one-entry map `{kind: [...]}`; enums without data stay strings. Nested orders:
+`Smoothing` [fraction, mode]; `CalStatus` `uncalibrated` \| `verified` /
+`other_mic_or_input` [calibrated_at, basis]; `CalBasis` `acoustic` [calibrator_level] \|
+`electrical` [connection, mic_sensitivity, data_sheet, uncertainty]; `LeqRun` [started_at,
+until, measured, gaps, trimmed, laeq, lceq, lzeq]; `TimingStatus` [epoch, state, last_lock,
+drift, internal_reference]; `TimingState` `no_stimulus` \| `acquiring` \| `locked`
+[offset] \| `jumped` [from, to] \| `lost`; `LastLock` [epoch, offset, at_sample, at];
+`Drift` [ppm, span, warning]. `tools/protocol/ac2proto.py` (`HEADER`, `META`) is the same
+layout as code.
 
 | field | type | meaning |
 |---|---|---|
@@ -698,8 +714,8 @@ bitmask array says why.
 | `grid_id` | u64 \| nil | column grid (`tf`, `rta`, `spec`); nil otherwise |
 | `protection` | u32 | protection bitmask (§5.5) |
 | `n` | u32 | elements per array, ≤ 65536 |
-| `arrays` | [{`name`, `unit`, `elem`}] | one descriptor per array part, in part order |
-| `meta` | {kind: {…}} | per-kind metadata (§5.4) |
+| `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array part, in part order |
+| `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 
 `elem` is `f32` or `u32`. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
@@ -758,12 +774,12 @@ A malformed frame is dropped and counted by the client; decoders never panic.
 
 ### 5.7 Sizes
 
-A 480-column `tf` frame: topic 6 B, header ≈ 390 B, four arrays (mag, phase, coh,
-validity) of 1920 B — ≈ 8.1 KB. At 60 fps ≈ 0.5–0.6 MB/s per
+A 480-column `tf` frame: topic 6 B, header ≈ 150 B, four arrays (mag, phase, coh,
+validity) of 1920 B — ≈ 7.8 KB. At 60 fps ≈ 0.47 MB/s per
 measurement locally, half that remote at 30 fps. A default `spec` frame (65 536 points at
-48 kHz: 897 `log_bins` columns of one f32) is ≈ 3.9 KB; it goes out with each new spectrum
+48 kHz: 897 `log_bins` columns of one f32) is ≈ 3.7 KB; it goes out with each new spectrum
 (every hop: `n/8`, ≈ 6 per second at 65 536 points; ≈ 30 per second for short FFTs) and is
-repeated every 0.25 s of audio while nothing changes (frozen), ≈ 23 KB/s.
+repeated every 0.25 s of audio while nothing changes (frozen), ≈ 22 KB/s.
 
 ## 6. Grids
 

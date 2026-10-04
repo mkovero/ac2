@@ -105,14 +105,125 @@ def grid_id(g: dict) -> int:
 
 
 # --------------------------------------------------------------------------------------
+# Frame header layout (docs/protocol.md §5.3): msgpack arrays, fields in this order. A type
+# is None (a plain value), ("opt", t), ("list", t), a list of (field, type) for a struct,
+# ("tagged", {variant: fields}) for a `type`-tagged enum (array: variant name, then its
+# fields), or ("meta", {kind: t}) for the one-key metadata map.
+
+_SMOOTHING = [("fraction", None), ("mode", None)]
+_CAL_BASIS = ("tagged", {
+    "acoustic": [("calibrator_level", None)],
+    "electrical": [("connection", None), ("mic_sensitivity", None), ("data_sheet", None),
+                   ("uncertainty", None)],
+})
+_CAL = ("tagged", {
+    "uncalibrated": [],
+    "verified": [("calibrated_at", None), ("basis", _CAL_BASIS)],
+    "other_mic_or_input": [("calibrated_at", None), ("basis", _CAL_BASIS)],
+})
+_TIMING_STATE = ("tagged", {
+    "no_stimulus": [],
+    "acquiring": [],
+    "locked": [("offset", None)],
+    "jumped": [("from", None), ("to", None)],
+    "lost": [],
+})
+_TIMING_STATUS = [
+    ("epoch", None),
+    ("state", _TIMING_STATE),
+    ("last_lock", ("opt", [("epoch", None), ("offset", None), ("at_sample", None), ("at", None)])),
+    ("drift", ("opt", [("ppm", None), ("span", None), ("warning", None)])),
+    ("internal_reference", None),
+]
+_LEVELS = [("channels", None)]
+META = {
+    "tf": [("delay", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None)],
+    "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
+    "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None)],
+    "spec": [("window", None), ("scale", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None)],
+    "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
+            ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
+            ("duration", None), ("cal", _CAL), ("mic_curve", None)],
+    "leq": [("scale", None), ("cal", _CAL), ("mic_curve", None), ("horizon", None), ("logged", None),
+            ("run", ("opt", [("started_at", None), ("until", None), ("measured", None), ("gaps", None),
+                             ("trimmed", None), ("laeq", None), ("lceq", None), ("lzeq", None)]))],
+    "levels": _LEVELS,
+    "session_levels": _LEVELS,
+    "preview_levels": [("backend", None), ("device", None), ("channels", None)],
+    "timing": [("status", _TIMING_STATUS),
+               ("window", ("opt", [("capture_start", None), ("offset", None), ("psr", None),
+                                   ("loopback", None), ("stimulus", None)]))],
+    "ka": [("rev", None), ("daemon_wall_ns", None), ("timing", _TIMING_STATE),
+           ("generator", [("owner", None), ("armed", None), ("firing", None)])],
+}
+HEADER = [
+    ("v", None), ("kind", None), ("seq", None), ("audio_sample", None), ("session_epoch", None),
+    ("daemon_incarnation", None), ("config_rev", None), ("config_applied_at", None),
+    ("capture_wall_ns", None), ("grid_id", None), ("protection", None), ("n", None),
+    ("arrays", ("list", [("name", None), ("unit", None), ("elem", None)])),
+    ("meta", ("meta", META)),
+]
+
+
+def positional(t, x):
+    """Named (dict) value → its wire layout."""
+    if t is None or x is None:
+        return x
+    if isinstance(t, list):
+        if set(x) != {f for f, _ in t}:
+            raise ValueError(f"fields {sorted(x)}")
+        return [positional(ft, x[f]) for f, ft in t]
+    tag, sub = t
+    if tag == "opt":
+        return positional(sub, x)
+    if tag == "list":
+        return [positional(sub, v) for v in x]
+    if tag == "tagged":
+        fields = sub[x["type"]]
+        return [x["type"]] + positional(fields, {k: v for k, v in x.items() if k != "type"})
+    if tag == "meta":
+        ((k, v),) = x.items()
+        return {k: positional(sub[k], v)}
+    raise ValueError(tag)
+
+
+def named(t, x):
+    """Wire layout → named (dict) value; DecodeError when it does not fit."""
+    if t is None or x is None:
+        return x
+    if isinstance(t, list):
+        if not isinstance(x, list) or len(x) != len(t):
+            raise DecodeError(f"expected {len(t)} fields, got {x!r}")
+        return {f: named(ft, v) for (f, ft), v in zip(t, x)}
+    tag, sub = t
+    if tag == "opt":
+        return named(sub, x)
+    if tag == "list":
+        if not isinstance(x, list):
+            raise DecodeError(f"expected a list, got {x!r}")
+        return [named(sub, v) for v in x]
+    if tag == "tagged":
+        if not isinstance(x, list) or not x or x[0] not in sub:
+            raise DecodeError(f"bad tagged value {x!r}")
+        return {"type": x[0], **named(sub[x[0]], x[1:])}
+    if tag == "meta":
+        if not isinstance(x, dict) or len(x) != 1 or next(iter(x)) not in sub:
+            raise DecodeError(f"bad meta {x!r}")
+        ((k, v),) = x.items()
+        return {k: named(sub[k], v)}
+    raise ValueError(tag)
+
+
+# --------------------------------------------------------------------------------------
 # Frames
 
 _ELEM = {"f32": "f", "u32": "I"}
 
 
 def encode_frame(topic: str, header: dict, arrays: list) -> list:
-    """`arrays` is a list of value lists in the order of header["arrays"]."""
-    parts = [topic.encode(), msgpack.packb(header, use_bin_type=True)]
+    """`header` is the named header; `arrays` a list of value lists in the order of
+    header["arrays"]."""
+    parts = [topic.encode(), msgpack.packb(positional(HEADER, header), use_bin_type=True)]
     for desc, values in zip(header["arrays"], arrays, strict=True):
         parts.append(struct.pack("<%d%s" % (len(values), _ELEM[desc["elem"]]), *values))
     return parts
@@ -127,9 +238,11 @@ def decode_frame(parts: list) -> dict:
     topic = parse_topic(parts[0])
     if len(parts[1]) > MAX_HEADER_BYTES:
         raise DecodeError("header too large")
-    h = msgpack.unpackb(parts[1], raw=False, strict_map_key=True)
-    if h.get("v") != PROTO_VERSION:
-        raise DecodeError(f"version {h.get('v')!r}")
+    raw = msgpack.unpackb(parts[1], raw=False, strict_map_key=True)
+    # `v` first, on its own: another version may lay out the rest differently.
+    if not isinstance(raw, list) or not raw or raw[0] != PROTO_VERSION:
+        raise DecodeError(f"version {raw[0] if isinstance(raw, list) and raw else raw!r}")
+    h = named(HEADER, raw)
     n = h["n"]
     if not isinstance(n, int) or n < 0 or n > MAX_N:
         raise DecodeError("n out of range")
