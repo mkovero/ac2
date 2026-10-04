@@ -374,8 +374,8 @@ commands! {
     LevelZoomOut => "level_zoom_out", "Zoom level axis out (vertical)", [Global];
     LevelPanUp => "level_pan_up", "Pan level axis up (towards higher levels)", [Global];
     LevelPanDown => "level_pan_down", "Pan level axis down (towards lower levels)", [Global];
-    LevelFit => "level_fit", "Fit level axis to the shown curves", [Global];
-    LevelReset => "level_reset", "Level axis back to the pane's default", [Global];
+    LevelFit => "level_fit", "Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz", [Global];
+    LevelReset => "level_reset", "Level and frequency axes back to the pane's default", [Global];
     ToggleCursor => "toggle_cursor", "Comparison cursor on / off", [Global];
     CursorLeft => "cursor_left", "Cursor 1/12 octave down", [Global];
     CursorRight => "cursor_right", "Cursor 1/12 octave up", [Global];

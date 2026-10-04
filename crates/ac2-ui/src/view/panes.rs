@@ -217,11 +217,17 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 }
                 None => rect,
             };
+            let resp = ui.interact(
+                rect,
+                ui.id().with(("stage", pane as u32)),
+                egui::Sense::click_and_drag(),
+            );
             let built = if app.plots {
                 scene_for(app, pane, rect.size(), theme)
             } else {
                 None
             };
+            let axes = built.as_ref().map(|b| b.1).unwrap_or_default();
             match built {
                 Some((scene, _)) => plot::paint(ui, slot(pane), rect, scene),
                 None => {
@@ -234,6 +240,9 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                     );
                 }
             }
+            // Full screen keeps the mouse: wheel zooms frequency, Ctrl/Shift+wheel the level
+            // axis, as in the split layout.
+            navigate(app, ui, &resp, pane, rect, axes);
             continue;
         }
         let focused = app.state.layout.focus == pane;
@@ -784,7 +793,12 @@ fn navigate(
         app.dispatch(Msg::FocusPane(pane));
     }
     if resp.hovered()
-        && crate::state::level_range(&app.state.view, pane).is_some()
+        && crate::state::level_range(
+            &app.state.view,
+            pane,
+            crate::scenes::spectrum_scale(&app.state),
+        )
+        .is_some()
         && !(pane == PaneKind::Distortion && app.state.view.distortion.show_ir)
     {
         // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
@@ -815,7 +829,11 @@ fn navigate(
         }
         if shift
             && dx != 0.0
-            && let Some(r) = crate::state::level_range(&app.state.view, pane)
+            && let Some(r) = crate::state::level_range(
+                &app.state.view,
+                pane,
+                crate::scenes::spectrum_scale(&app.state),
+            )
         {
             // Wheel up (positive delta) shows higher levels; about a tenth of the span per
             // notch (50 px of scroll).

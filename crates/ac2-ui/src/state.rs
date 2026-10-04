@@ -3064,7 +3064,14 @@ impl AppState {
             | C::LevelPanUp
             | C::LevelPanDown
             | C::LevelFit
-            | C::LevelReset => self.level_key(c),
+            | C::LevelReset => {
+                // Fit and reset frame the whole picture: frequency back to 20 Hz – 20 kHz
+                // too, as Home alone does.
+                if matches!(c, C::LevelFit | C::LevelReset) {
+                    self.nav.set_target(FreqRange::default());
+                }
+                self.level_key(c)
+            }
             C::ToggleCursor => {
                 let t = self.nav.target;
                 self.view.cursor_hz = match self.view.cursor_hz {

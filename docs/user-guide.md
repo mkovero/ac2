@@ -801,8 +801,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+O` | Zoom level axis out (vertical) | `level_zoom_out` |
 | `Ctrl+↑` | Pan level axis up (towards higher levels) | `level_pan_up` |
 | `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
-| `Shift+Home` | Fit level axis to the shown curves | `level_fit` |
-| `Ctrl+Home` | Level axis back to the pane's default | `level_reset` |
+| `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz | `level_fit` |
+| `Ctrl+Home` | Level and frequency axes back to the pane's default | `level_reset` |
 | `C` | Comparison cursor on / off | `toggle_cursor` |
 | `Shift+←` | Cursor 1/12 octave down | `cursor_left` |
 | `Shift+→` | Cursor 1/12 octave up | `cursor_right` |

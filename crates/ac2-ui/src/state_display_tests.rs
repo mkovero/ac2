@@ -214,7 +214,9 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
 fn level_axis_zooms_pans_fits_and_resets_per_pane() {
     let mut t = T::new();
     let d = ViewState::default();
-    let r = |t: &T, p| level_range(&t.st.view, p).expect("level axis");
+    let r = |t: &T, p| {
+        level_range(&t.st.view, p, crate::scenes::spectrum_scale(&t.st)).expect("level axis")
+    };
     // Transfer: Ctrl+I zooms in about the middle, Ctrl+↑ pans by a round step.
     t.key("Ctrl+I");
     assert_eq!(r(&t, PaneKind::Transfer), Range::new(-20.0, 20.0));

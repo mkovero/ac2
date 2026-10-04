@@ -240,8 +240,30 @@ pub enum SpectrumStyle {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpectrumView {
     pub style: SpectrumStyle,
+    /// Level axis while the pane shows dBFS.
     pub level: Range,
+    /// Level axis while the pane shows dB SPL (calibrated): the same zoom and pan keys act on
+    /// it, and each scale keeps its own range, so calibrating doesn't push the curves off
+    /// a dBFS-sized axis.
+    pub level_spl: Range,
     pub peak_hold: bool,
+}
+
+impl SpectrumView {
+    /// The level axis for curves shown in `scale`.
+    pub fn range(&self, scale: ac2_proto::model::LevelScale) -> Range {
+        match scale {
+            ac2_proto::model::LevelScale::Dbfs => self.level,
+            ac2_proto::model::LevelScale::DbSpl => self.level_spl,
+        }
+    }
+
+    pub fn range_mut(&mut self, scale: ac2_proto::model::LevelScale) -> &mut Range {
+        match scale {
+            ac2_proto::model::LevelScale::Dbfs => &mut self.level,
+            ac2_proto::model::LevelScale::DbSpl => &mut self.level_spl,
+        }
+    }
 }
 
 impl Default for SpectrumView {
@@ -249,6 +271,7 @@ impl Default for SpectrumView {
         Self {
             style: SpectrumStyle::Bars,
             level: Range::new(-100.0, 0.0),
+            level_spl: Range::new(20.0, 120.0),
             peak_hold: false,
         }
     }
@@ -371,6 +394,20 @@ impl Default for ViewState {
 
 #[cfg(test)]
 mod tests {
+
+    /// dBFS and dB SPL keep their own level ranges: a calibrated spectrum starts on a
+    /// dB SPL-sized axis, and zooming one scale leaves the other as it was.
+    #[test]
+    fn spectrum_level_range_per_scale() {
+        use ac2_proto::model::LevelScale;
+        let mut v = SpectrumView::default();
+        assert_eq!(v.range(LevelScale::Dbfs), Range::new(-100.0, 0.0));
+        assert_eq!(v.range(LevelScale::DbSpl), Range::new(20.0, 120.0));
+        *v.range_mut(LevelScale::DbSpl) = Range::new(40.0, 100.0);
+        assert_eq!(v.range(LevelScale::Dbfs), Range::new(-100.0, 0.0));
+        assert_eq!(v.range(LevelScale::DbSpl), Range::new(40.0, 100.0));
+    }
+
     use super::*;
 
     fn close(a: f64, b: f64) -> bool {

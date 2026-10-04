@@ -4,7 +4,7 @@
 //! applied to the stored columns.
 
 use ac2_proto::Command;
-use ac2_proto::model::{MeasKind, Measurement, TraceKind, TraceMeta};
+use ac2_proto::model::{LevelScale, MeasKind, Measurement, TraceKind, TraceMeta};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Db, MeasId, TraceId};
 use ac2_scene::axis::Range;
@@ -55,20 +55,21 @@ fn level_pane(p: PaneKind) -> Option<PaneKind> {
     }
 }
 
-/// The level range of `pane` in `view`.
-pub fn level_range(view: &ViewState, pane: PaneKind) -> Option<Range> {
+/// The level range of `pane` in `view`; the spectrum pane's is the one for `scale`, the
+/// scale its curves are shown in ([`crate::scenes::spectrum_scale`]).
+pub fn level_range(view: &ViewState, pane: PaneKind, scale: LevelScale) -> Option<Range> {
     match pane {
         PaneKind::Transfer => Some(view.tf.magnitude_db),
-        PaneKind::Spectrum => Some(view.spectrum.level),
+        PaneKind::Spectrum => Some(view.spectrum.range(scale)),
         PaneKind::Distortion => Some(view.distortion.range_db),
         PaneKind::Ir | PaneKind::Spl => None,
     }
 }
 
-fn level_range_mut(view: &mut ViewState, pane: PaneKind) -> Option<&mut Range> {
+fn level_range_mut(view: &mut ViewState, pane: PaneKind, scale: LevelScale) -> Option<&mut Range> {
     match pane {
         PaneKind::Transfer => Some(&mut view.tf.magnitude_db),
-        PaneKind::Spectrum => Some(&mut view.spectrum.level),
+        PaneKind::Spectrum => Some(view.spectrum.range_mut(scale)),
         PaneKind::Distortion => Some(&mut view.distortion.range_db),
         PaneKind::Ir | PaneKind::Spl => None,
     }
@@ -177,7 +178,8 @@ impl AppState {
     /// Zoom pane `pane`'s level axis by `factor` (> 1 in) about `about` (dB; `None`: the
     /// middle).
     pub(super) fn level_zoom(&mut self, pane: PaneKind, about: Option<f64>, factor: f64) {
-        if let Some(r) = level_range_mut(&mut self.view, pane) {
+        let scale = crate::scenes::spectrum_scale(self);
+        if let Some(r) = level_range_mut(&mut self.view, pane, scale) {
             let a = about.unwrap_or((r.lo + r.hi) / 2.0);
             *r = level::zoom(*r, a, factor);
         }
@@ -185,7 +187,8 @@ impl AppState {
 
     /// Pan pane `pane`'s level axis by `db`.
     pub(super) fn level_pan(&mut self, pane: PaneKind, db: f64) {
-        if let Some(r) = level_range_mut(&mut self.view, pane) {
+        let scale = crate::scenes::spectrum_scale(self);
+        if let Some(r) = level_range_mut(&mut self.view, pane, scale) {
             *r = level::pan(*r, db);
         }
     }
@@ -195,7 +198,8 @@ impl AppState {
         let Some(p) = self.level_target() else {
             return;
         };
-        let Some(r) = level_range(&self.view, p) else {
+        let scale = crate::scenes::spectrum_scale(self);
+        let Some(r) = level_range(&self.view, p, scale) else {
             return;
         };
         match c {
@@ -204,14 +208,14 @@ impl AppState {
             C::LevelPanUp => self.level_pan(p, level::pan_step(r)),
             C::LevelPanDown => self.level_pan(p, -level::pan_step(r)),
             C::LevelReset => {
-                let d = level_range(&ViewState::default(), p);
-                if let (Some(slot), Some(d)) = (level_range_mut(&mut self.view, p), d) {
+                let d = level_range(&ViewState::default(), p, scale);
+                if let (Some(slot), Some(d)) = (level_range_mut(&mut self.view, p, scale), d) {
                     *slot = d;
                 }
             }
             C::LevelFit => match level::fit(self.level_values(p)) {
                 Some(fit) => {
-                    if let Some(slot) = level_range_mut(&mut self.view, p) {
+                    if let Some(slot) = level_range_mut(&mut self.view, p, scale) {
                         *slot = fit;
                     }
                     self.toast(format!(

@@ -186,6 +186,38 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
 }
 
 /// The spectrum / RTA view.
+/// The scale the spectrum pane shows its curves in: dB SPL when every curve it draws (live
+/// and stored) is calibrated, else dBFS. Picks which of the pane's two level ranges applies.
+pub fn spectrum_scale(st: &AppState) -> LevelScale {
+    let mut scales = Vec::new();
+    for (_, m) in pane_order(st, PaneKind::Spectrum) {
+        let stream = match m.config.kind {
+            MeasKind::Spectrum { .. } => Stream::Spec,
+            MeasKind::Rta { .. } => Stream::Rta,
+            _ => continue,
+        };
+        match frame(st, m.id, stream).map(|tf| &tf.frame.data) {
+            Some(FrameData::Spec(f)) => scales.push(f.meta.scale),
+            Some(FrameData::Rta(f)) => scales.push(f.meta.scale),
+            _ => {}
+        }
+    }
+    for (t, _) in st.traces.values() {
+        if !t.meta.edit.visible {
+            continue;
+        }
+        match t.meta.kind {
+            TraceKind::Spectrum { scale } | TraceKind::Rta { scale } => scales.push(scale),
+            _ => {}
+        }
+    }
+    if !scales.is_empty() && scales.iter().all(|s| *s == LevelScale::DbSpl) {
+        LevelScale::DbSpl
+    } else {
+        LevelScale::Dbfs
+    }
+}
+
 pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SpectrumScene {
     let grids = st.data.as_ref().map(|d| &d.grids);
     struct Col<'a> {
@@ -329,7 +361,10 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
     }
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
     let status = status(st, &shown, None, now);
-    spectrum_scene(&traces, &status, &st.view, theme, size)
+    // The pane draws on the level range of the scale its curves are in.
+    let mut view = st.view;
+    view.spectrum.level = st.view.spectrum.range(spectrum_scale(st));
+    spectrum_scene(&traces, &status, &view, theme, size)
 }
 
 /// The IR of the focused transfer measurement; `None` without one or without its IR frame.

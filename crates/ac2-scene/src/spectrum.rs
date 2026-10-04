@@ -824,6 +824,7 @@ mod tests {
                 style: SpectrumStyle::Line,
                 level: Range::new(-60.0, 0.0),
                 peak_hold: false,
+                ..SpectrumView::default()
             },
             cursor_hz: Some(1000.0),
             ..ViewState::default()
@@ -857,6 +858,7 @@ mod tests {
                 style: SpectrumStyle::Line,
                 level: Range::new(-60.0, 0.0),
                 peak_hold: true,
+                ..SpectrumView::default()
             },
             cursor_hz: Some(1000.0),
             ..ViewState::default()
@@ -1016,6 +1018,7 @@ mod tests {
                 style: SpectrumStyle::Line,
                 level: Range::new(-100.0, 0.0),
                 peak_hold: true,
+                ..SpectrumView::default()
             },
             ..ViewState::default()
         };
