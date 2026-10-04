@@ -155,11 +155,12 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Feature | Pri | Src | Phase |
 |---|---|---|---|
 | Mic sensitivity cal against 94/114 dB calibrator; SPL from raw dBFS | P0 | ac | 5 |
-| Mic curve assignment / bypass per input, with provenance | P0 | ac | 5 |
+| Electrical sensitivity cal without a calibrator: voltmeter at the input + data-sheet sensitivity, stated uncertainty (done: `docs/design/q7-calibration.md` §11) | P1 | new | 5 |
+| Mic curve library (several labelled curves per mic) and an explicitly chosen curve per input, with provenance | P0 | ac | 5 |
 | Calibration tied to device + input channel + mic name; mismatch → "cal from other mic / input", otherwise cal age shown | P0 | ac (simplified) | 5 |
 | Fast / Slow / Impulse; Leq, LAeq, LCeq, LCpeak, Lmax/Lmin | P0 | ac (partly) | 5 |
-| Big-number SPL display + history | P0 | new | 5 |
-| Rolling Leq windows, limits and alarms (done: `docs/design/leq.md`) | P1 | new | 7 |
+| Big-number SPL display + history (meter, Leq windows, or both; history strip rebuilt from the log) | P0 | new | 5 |
+| Rolling Leq windows, limits and alarms; filling windows judged on their energy budget; informational regulation presets (done: `docs/design/leq.md`) | P1 | new | 7 |
 | Continuous crash-safe logging, export (done for the per-second LAeq/LCeq/LZeq log: autosaved, in sessions, CSV export) | P1 | new | 7 |
 | LUFS / true peak meter | P2 | ac | later |
 
@@ -201,18 +202,18 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 ```
 crates/
   ac2-core/    MTW ladder, smoothing, averaging, protection, delay finder, IR views,
-               spectrum, filterbank, weighting, SPL integrators, generator, ESS, ISO 3382.
-               No I/O.
+               spectrum, filterbank, weighting, SPL integrators, rolling Leq, mic curves,
+               generator, ESS sweep and distortion (ISO 3382 later). No I/O.
   ac2-audio/   Backend trait (open duplex: N in / M out, callback → sample-indexed blocks)
                + explicit capability set. Backends: jack, cpal (CoreAudio/WASAPI/ASIO), fake.
   ac2-proto/   Typed commands (serde enum), events, normative frame schema, topics, version.
   ac2-zmq/     The only crate linking libzmq (+libsodium): typed sockets, CURVE via SecureContext.
   ac2-client/  Async client: connect, call, subscribe, mirrored state.
   ac2-discovery/ mDNS advert and browse (names rigs, never trusts them).
-  ac2d/        Daemon: audio session, jobs, state store, sessions, autosave, SPL log,
-               calibration store, ZMQ server, CURVE/ZAP, mDNS.
+  ac2d/        Daemon: audio session, jobs, state store, sessions, autosave, SPL log and
+               Leq history, calibration store, ZMQ server, CURVE/ZAP, mDNS.
   ac2-cli/     `ac2` binary.
-  ac2-traces/  Stored traces, trace math, text import/export, session files.
+  ac2-traces/  Stored traces, trace math, text import/export, SPL log files, session files.
   ac2-paths/   Platform config / data directories, atomic writes.
   ac2-scene/   Pure display layer: traces → geometry, axes, ticks, readout strings,
                banners. No GPU, no windowing, no sockets.
@@ -220,7 +221,9 @@ crates/
   ac2-ui/      Desktop app; can host an embedded daemon (`--embedded`, local transports).
   ac2-testkit/ Golden-vector and golden-image comparison for tests.
 tools/refgen/  numpy/scipy scripts producing golden vectors
-fixtures/      raw captures from real rigs + synthetic scenario captures
+tools/protocol/ Python cross-language protocol fixtures
+fixtures/      golden vectors, mic-curve files, protocol fixtures (WIRE_LOCK)
+packaging/     per-OS packaging scripts and icon (run by .github/workflows/release.yml)
 ```
 
 ### 4.2 Key crates
@@ -414,8 +417,8 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
 - Command groups: `session` (devices, open, close, status), `gen` (acquire, release, arm,
   fire, set, stop), `meas` (create, update, delete, start, stop, freeze, reset), `delay`
   (find, insert, set, track), `trace` (capture, list, get, update, delete, average, math,
-  import, export, mic curve), `cal` (spl, curve import / rename / delete, list, delete),
-  `spl` (log get), `ir` (capture), `state` (snapshot, since), `grid` (get), `file` (save,
+  import, export, mic curve), `cal` (spl, spl electrical, curve import / rename / delete,
+  use, list, delete), `spl` (log get, log new, history get), `ir` (capture), `state` (snapshot, since), `grid` (get), `file` (save,
   load, list). `docs/protocol.md` is the normative list.
 - Mutations take an optional `expect_rev` precondition; stale → `conflict` error.
   The daemon commits state changes serially.
@@ -540,7 +543,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
 | 7 | Post-1.0 extras | ASIO, SPL logging/alarms, ESS IR + ISO 3382, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | per-feature criteria (room metrics vs published values; 24 h log clean; …) |
 
-### 9.0 Status (2026-10-03)
+### 9.0 Status (2026-10-04)
 
 | # | CI criteria | HW criteria |
 |---|---|---|
@@ -549,15 +552,16 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 2 | done (refgen + Q1 scenario acceptance) | — |
 | 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **done** on Linux (`docs/rigs/pupu.md`, network test) |
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
-| 5 | done (traces, sessions, calibration, SPL) | mains + sub + delay workflow per OS — **open** |
+| 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits and alarms with the per-second SPL log (`docs/design/leq.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | 24 h log clean — **open** |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | 24 h log clean — **open** |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
-transfer, delay finder, sweeps, remote CLI and app over CURVE, mDNS; `docs/rigs/pupu.md`);
-Windows only as an MSI install in a VM with the simulated rig (`docs/design/backlog.md`);
-macOS not yet on hardware. No GitHub release is published: installers are workflow
-artifacts of `release.yml` runs, unsigned.
+transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,
+mDNS; `docs/rigs/pupu.md`); Windows only as an MSI install in a VM with the simulated rig
+(`docs/design/backlog.md`); macOS built (universal disk image) but not yet on hardware. No
+GitHub release is published: installers are workflow artifacts of `release.yml` runs,
+unsigned. Protocol version 13.
 
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and
@@ -579,7 +583,7 @@ Q7 calibration store (phase 5), Q8 phase comparison time reference (phase 4).
 - GitHub issues + PRs, CI gates (test, clippy `-D warnings`, fmt, golden, loopback, finder scenarios, headless render, cross-language frame fixtures).
 - One AI review pass is fine; no label state machine, no out-of-tree handoffs. Design notes live in `docs/design/` in-tree.
 - Rig testing kept as a runbook (carry `ac`'s traps and emission limits: typed level, ≤ −40 dBFS for unattended runs, bounded commands only).
-- Standards references with verified citations kept in `docs/standards.md`; standard PDFs stay out of the repo.
+- Standards references with verified citations kept in the design notes that use them (e.g. `docs/design/leq.md` *Sources*); standard PDFs stay out of the repo.
 
 ---
 

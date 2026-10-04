@@ -199,7 +199,7 @@ disarms, stop is universal, CLI holds a lease only while a foreground command ru
 
 **Design:** [q7-calibration.md](q7-calibration.md) (implemented in phase 5, with K8's mic
 name per input in the session's input setup; several curves per mic and an active curve per
-input, §10).
+input, §10; electrical calibration without a calibrator, §11).
 
 **Question.** Calibration store details (decided: 7a/7b, 7c — device + channel + mic name,
 cal age, no gain/phantom fields).

@@ -13,8 +13,10 @@ the commit when it lands.
 - **No hysteresis on the alarms**: judged at 0.1 dB, a window hovering on its limit toggles
   over / recovered each time the rounded value crosses it.
 - **The app has no acoustic calibration flow**: an electrical calibration (DMM in-line or an
-  injected generator, `q7-calibration.md` §11) is in the app (**E** in the Calibrations
-  view); a calibrator dialog (`cal.spl`) is still CLI only.
+  injected generator, `q7-calibration.md` §11; 2a5d881) is in the app (**E** in the
+  Calibrations view); a calibrator dialog (`cal.spl`) is still CLI only.
+- **Autosave rewrites the whole session once a minute while a meter logs** (trace files
+  included); appending to the log file would cut that to the new rows.
 
 ## Electrical calibration (left after the first version, `q7-calibration.md` §11)
 
@@ -25,8 +27,6 @@ the commit when it lands.
   the input below full scale; the clip tracking is covered only by reading.
 - **No guided in-line tone**: the operator starts the 1 kHz tone (own source or the
   generator); the dialog could offer to arm a 1 kHz sine under the usual ceiling.
-- **Autosave rewrites the whole session once a minute while a meter logs** (trace files
-  included); appending to the log file would cut that to the new rows.
 
 ## UI focus (2026-10-03)
 
@@ -78,8 +78,37 @@ the commit when it lands.
 
 ## Done
 
+SPL meter and the stage view (field, 2026-10-03/04; 1f7337a, f2593e7, 0921351, 63f9bd1,
+ff82db7, a8c8cf9, 5a157e4):
+- **Weightings chosen only when a meter was created** → F / S / I and A / C / Z switched in place (the
+  meter runs every combination, so a switch reads settled at once), a held big number
+  centred in the pane, statistics headed "meter since … · R resets"; a new meter reads LAF.
+- **Meter or windows, not both** → a third view, meter + Leq (the default): the number over
+  the windows, one caption; each window names its own unit and weighting (`dB(A)`), since
+  the meter above may use another.
+- **A fresh log put every window over at once** → a filling window is judged on its energy
+  budget (`ON COURSE — over in 12 min`, "so far · 12:30 / 30:00").
+- **"can't recover within …" / "at the limit: back under in …" read badly** → "next 1 min:
+  stay ≤ …" and "cooling down in …".
+- **Layout** → W cycles split → one pane → full screen (the stage view on any pane), F11 the
+  window; the layout is remembered in `ui.toml`.
+
+Keyboard (field, 2026-10-03/04; 548e2c8, 8d15d70, 79fed56):
+- **`/` for help is Shift+7 on Nordic layouts** → H (and F1); the panes' H keys moved
+  (Shift+I IR, P peak hold, Shift+B history, Shift+W hide sweep). Per-pane key hints
+  (Shift+H) and tooltips naming keys.
+- **Esc in a window also stopped the noise** → an open window owns the keyboard; Esc closes
+  it only; Shift+Esc stops from anywhere (decision K9).
+- **S on the transfer pane stopped an SPL meter selected in the list** → S and R act on the
+  focused pane's own measurement.
+
+Smaller fixes from the field (2026-10-03/04): CHECK ROUTING flashing beside NO REFERENCE
+(e5e4161); a calibrated spectrum drawn above a dBFS-sized axis (ad3cfae: one level range per
+scale); renaming a stored trace (a14e1af: F2, double click, `ac2 trace rename`).
+
 Leq windows (field, 2026-10-04: "history seems to reset every time the client is
-restarted"; "presets … only show those limits that are stated by the standard"):
+restarted"; "presets … only show those limits that are stated by the standard"; 247346a,
+ef9dcc6):
 - **History strip started when the app connected** → the app gets each meter's history
   from the daemon (`spl.history_get`: the log replayed as the job computed it) on connect,
   reconnect, a new meter, changed windows and a new log from any client; live frames
@@ -90,7 +119,7 @@ restarted"; "presets … only show those limits that are stated by the standard"
 Comparing curves (field, 2026-10-03: "offset/change gain of the selected
 trace/measurement/spectrum … spread traces a little … spectrum needs to focus on very low
 signals"; "remove the selected trace by selecting it and pressing Delete"; "in show-one-pane
-mode I would expect the panel to change if I click a different measurement"):
+mode I would expect the panel to change if I click a different measurement"; a79fbf4):
 - **No quick offset** → **Alt+↑/↓** ±1 dB, **Alt+Shift+↑/↓** ±3 dB, **Alt+Home** 0 dB on the
   selected stored trace (any kind; `trace.update`, recorded with the trace) or the focused
   pane's live measurement (display only); **J** types it in the spectrum pane too. The plot
@@ -106,7 +135,7 @@ mode I would expect the panel to change if I click a different measurement"):
   No wire change.
 
 Choosing between stored traces (field, 2026-10-03: "in transfer view where there are several
-sweep traces, should I be able to choose between them?"):
+sweep traces, should I be able to choose between them?"; 80614e0):
 - **Only slots 1–9 could be selected or hidden** → the sidebar's **Traces** list holds every
   stored trace (name, kind, slot, hidden, its curve's colour; a click selects, a click on
   the dot shows / hides). **V** / **Shift+V** step through every shown trace, **Alt+V** /

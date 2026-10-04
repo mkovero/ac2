@@ -1,6 +1,6 @@
 # Q7 — Calibration store, mic curves and SPL correction
 
-Status: implemented (phase 5; several curves per mic and the active curve per input, §10). Answers Q7 in `open-questions.md` within decisions 7a/7b
+Status: implemented (phase 5; several curves per mic and the active curve per input, §10; electrical calibration, §11, verified on the pupu rig — `docs/rigs/pupu.md`). Answers Q7 in `open-questions.md` within decisions 7a/7b
 (calibration tied to device + input channel + mic name; mismatch → "cal from other mic /
 input", otherwise cal age; no gain/phantom fields, no prompts), 7c (mic curve: TF /
 spectrum / RTA subtract the file's dB from the displayed magnitude; SPL applies it as a
