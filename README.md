@@ -32,7 +32,8 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
 - **Sessions and autosave**: save and load by name; a stand-alone daemon autosaves
   measurements and traces and restores them on restart, always disarmed.
 - **Keyboard first**: one scoped binding table, a command palette, layout-safe defaults,
-  remappable keys. Safe stimulus: typed level, arm then fire, Esc always stops.
+  remappable keys; an open window owns ↑/↓, Enter and Esc and never touches the stimulus.
+  Safe stimulus: typed level, arm then fire, Esc stops, Shift+Esc stops from anywhere.
 - **Several clients at once**, FOH and stage, discovered over mDNS, paired with pinned keys.
 
 | | |

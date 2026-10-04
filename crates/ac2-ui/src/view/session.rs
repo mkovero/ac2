@@ -184,8 +184,7 @@ pub(super) fn session(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     RichText::new(
                         "↑↓ move · ←→ backend / device, a mic's curve (off / 0° / 90° …) · \
                          Space in session · R reference · M mic · S stimulus · N names the \
-                         mic · D detects the loopback · Enter opens · Esc closes (and stops \
-                         the stimulus)",
+                         mic · D detects the loopback · Enter opens · Esc closes",
                     )
                     .small()
                     .color(ch.dim),

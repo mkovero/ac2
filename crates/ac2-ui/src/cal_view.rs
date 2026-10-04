@@ -2,7 +2,7 @@
 //! (mic, mic curve, sensitivity calibration), every mic of the mic library with its curves,
 //! and every sensitivity calibration. Keyboard-first like the other dialogs:
 //!
-//! - ↑/↓ move between lines;
+//! - ↑/↓ move between lines, PageUp / PageDown a page, Home / End to the first / last;
 //! - ←/→ on an input steps its mic curve: off → 0° → 90° … (applied at once: the
 //!   correction is a display correction, so averages need no reset);
 //! - E on an input opens the electrical calibration dialog ([`crate::electrical_dialog`]);
@@ -148,6 +148,17 @@ impl CalView {
         let n = lines(s).len() as i32;
         if n > 0 {
             self.focus = (self.focus.min(n as usize - 1) as i32 + d).rem_euclid(n) as usize;
+        }
+    }
+
+    /// Moves the focus `d` lines without wrapping (PageUp / PageDown, Home / End).
+    pub fn jump_focus(&mut self, s: &State, d: i32) {
+        self.clear();
+        self.edit = None;
+        let n = lines(s).len();
+        if n > 0 {
+            let to = (self.focus.min(n - 1) as i64 + i64::from(d)).clamp(0, n as i64 - 1);
+            self.focus = to as usize;
         }
     }
 

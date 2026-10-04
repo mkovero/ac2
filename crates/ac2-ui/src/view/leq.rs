@@ -216,8 +216,7 @@ pub(super) fn leq(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.label(
                     RichText::new(
                         "Enter applies (the log and the windows carry on) · ↑↓ row · Tab cell · \
-                         ←→ choose · Insert adds a window · Delete removes it · Esc closes \
-                         (and stops stimulus)",
+                         ←→ choose · Insert adds a window · Delete removes it · Esc closes",
                     )
                     .small()
                     .color(ch.dim),

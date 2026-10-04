@@ -44,6 +44,18 @@ impl FormKind {
         }
     }
 
+    /// What closing the dialog does to the stimulus, for a dialog that arms one.
+    pub fn close_note(self) -> Option<String> {
+        match self {
+            FormKind::Sweep => Some(format!(
+                "Esc closes and disarms a stimulus armed but not playing · one that plays keeps \
+                 playing: {} or the strip's Stop stops it",
+                crate::keys::STOP_ANYWHERE.label()
+            )),
+            _ => None,
+        }
+    }
+
     /// The button that does it.
     pub fn verb(self) -> &'static str {
         match self {

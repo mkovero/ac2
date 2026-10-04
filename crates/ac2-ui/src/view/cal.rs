@@ -122,7 +122,7 @@ pub(super) fn calibrations(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(
-                        "↑↓ move · ←→ mic curve of an input (off / 0° / 90° …) · N names the \
+                        "↑↓ move (PgUp/PgDn, Home/End) · ←→ mic curve of an input (off / 0° / 90° …) · N names the \
                          mic · I imports a curve file · R renames a curve · E calibrates an \
                          input electrically (meter, no calibrator) · Delete deletes (twice) · \
                          Enter ends typing / closes · Esc closes",
@@ -240,7 +240,7 @@ fn electrical(app: &App, ctx: &egui::Context, ch: &Chrome, d: &ElectricalDialog)
                     RichText::new(
                         "Keep the gain you will measure with. ↑↓ field · ←→ in-line / \
                          injected · type the values · Enter reads the input and stores · \
-                         Esc closes",
+                         Esc closes (back to the calibrations)",
                     )
                     .small()
                     .color(ch.dim),

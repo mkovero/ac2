@@ -203,6 +203,77 @@ fn measure_from_empty(d: &mut Driver) -> R {
     d.stop()
 }
 
+/// An open window owns the keyboard: from an empty daemon, with the noise playing, the help
+/// and the input setup take ↑/↓, the page keys and Esc and the noise plays on at its level;
+/// the stop chord stops it from inside a window.
+#[test]
+fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    // The level typed there stays: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    let level = d.st.stimulus.level;
+    let playing = |s: &AppState| {
+        s.daemon()
+            .is_some_and(|x| x.generator.firing && x.generator.armed)
+    };
+
+    d.key("H");
+    assert_eq!(d.st.overlay, Overlay::Help);
+    for k in [
+        "ArrowDown",
+        "ArrowDown",
+        "PageDown",
+        "ArrowUp",
+        "End",
+        "Home",
+    ] {
+        d.key(k);
+    }
+    d.key("Escape");
+    assert_eq!(d.st.overlay, Overlay::None);
+
+    d.key("Ctrl+K");
+    d.send(Msg::Text("input setup".into()));
+    d.key("Enter");
+    assert!(
+        matches!(&d.st.overlay, Overlay::Calibrations(_)),
+        "{:?}",
+        d.st.overlay
+    );
+    for k in ["ArrowDown", "ArrowUp", "PageDown", "Home", "Shift+ArrowUp"] {
+        d.key(k);
+    }
+    d.key("Escape");
+    assert_eq!(d.st.overlay, Overlay::None);
+
+    // A while later the daemon still plays, at the level it was given.
+    let end = Instant::now() + Duration::from_millis(600);
+    while Instant::now() < end {
+        d.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(playing(&d.st), "the windows touched the stimulus");
+    assert_eq!(d.st.stimulus.level, level);
+    assert_eq!(d.st.stimulus.phase, StimPhase::Firing);
+
+    // The stop chord from inside a window: stopped, the window still open.
+    d.key("H");
+    d.key("Shift+Escape");
+    assert_eq!(d.st.overlay, Overlay::Help);
+    d.until("stopped by the stop chord", |s| {
+        s.daemon()
+            .is_some_and(|x| !x.generator.firing && !x.generator.armed)
+    })?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 #[test]
 fn simulated_rig_starts_measuring() -> R {
     let daemon = start_embedded(EmbeddedBackend::Fake)?;
@@ -739,6 +810,10 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     shows(&mut d, "0° again", "0°", "mic curve: MM1 34804 0°")?;
     d.key("ArrowLeft");
     shows(&mut d, "no curve", "curve off", "mic curve off")?;
+    // Esc closes the view and leaves the noise playing; the next Esc stops it.
+    d.key("Escape");
+    assert_eq!(d.st.overlay, Overlay::None);
+    assert!(d.st.daemon().is_some_and(|x| x.generator.firing));
     d.stop()?;
     drop(d);
     drop(daemon);

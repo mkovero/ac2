@@ -53,7 +53,7 @@ note at the start of the phase that implements them, within the decisions here.
 | D2 | Sub observation 4 s default, operator choice 2/4/8 s. |
 | D3 | Sub tracking agreement ±0.1 ms. |
 | D4 | GCC-PHAT is a diagnostic option, not a fallback. |
-| K1 | Esc is a universal panic stop, even when another client owns the generator. |
+| K1 | The stop is universal, even when another client owns the generator: Esc with no window open, Shift+Esc from anywhere (see K9). |
 | K2 | Enter applies an open prompt/palette selection instead of firing (fails safe). |
 | K3 | No key repeat on level; Shift+↑/↓ steps 3 dB; `L` types a value. |
 | K4 | Remember last stimulus outputs per device; first run defaults to output 1, shown in the top bar. |
@@ -61,6 +61,7 @@ note at the start of the phase that implements them, within the decisions here.
 | K6 | Quit waits at most 1 s for lease stop/release; daemon expiry is the safety net. |
 | K7 | Slots are UI-only until sessions; they persist in sessions from phase 5. |
 | K8 | Mic name per input in the session's input setup; calibration matches device + channel + mic name. |
+| K9 | An open window owns the keyboard (as desktop apps do): ↑/↓ move or scroll it, ←/→ change a choice, Enter confirms, Esc closes the topmost window only (a dialog over a view back to the view); no key routed to a window reaches the stimulus, and the wheel scrolls the window, not the plot behind it. Shift+Esc stops from anywhere (handled before any window; the stop key operators know, made deliberate by Shift; same keys on every layout; not taken by any desktop) and shows in the top bar while armed or playing. Closing the sweep dialog disarms a stimulus armed and not playing; a playing one keeps playing. Replaces "Esc always stops": a window's Esc that also stopped the noise surprised operators. |
 | T1 | Digits 1–9 show/hide trace slots (Ctrl+1–9 captures); pane focus on Alt+1–4, Tab cycles. (provisional) |
 | T2 | Calibrations stay in the per-machine store, not in sessions; traces record which calibration they used. (provisional) |
 | T3 | Spectrum/RTA trace math needs identical grids; refused with a clear error otherwise. (provisional) |

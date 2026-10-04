@@ -721,14 +721,21 @@ fn pane_menu(
                         }
                     }
                     ui.label(
-                        egui::RichText::new("↑/↓ · Enter shows · Esc closes")
+                        egui::RichText::new("↑/↓ · wheel · Enter shows · Esc closes")
                             .small()
                             .color(ch.dim),
                     );
                 });
         });
+    let wheel = area
+        .response
+        .contains_pointer()
+        .then(|| super::overlays::wheel_rows(ui.ctx()))
+        .flatten();
     if let Some(id) = picked {
         app.dispatch(Msg::PaneShow(pane, id));
+    } else if let Some(rows) = wheel {
+        app.dispatch(Msg::Wheel { rows });
     } else if area.response.clicked_elsewhere() && !chip.clicked() {
         app.dispatch(Msg::PaneMenu(pane));
     }
@@ -789,6 +796,11 @@ fn navigate(
     plot_rect: egui::Rect,
     axes: Axes,
 ) {
+    // A window over the panes owns the mouse: its wheel scrolls the window, never zooms a
+    // plot behind it.
+    if app.state.window_over_panes() {
+        return;
+    }
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(pane));
     }

@@ -6,7 +6,7 @@ use ac2_scene::format;
 use eframe::egui::{self, Color32, RichText};
 
 use crate::app::App;
-use crate::keys::{CommandId, Scope};
+use crate::keys::{CommandId, STOP_ANYWHERE, Scope};
 use crate::state::{ConnState, Msg, StimPhase, outputs_text};
 use crate::theme::Chrome;
 
@@ -328,15 +328,22 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         .and_then(|s| s.sweep.as_ref())
         .filter(|r| r.active());
     let sweep = st.sweep.plan.is_some();
-    // A running sweep's progress and Stop are on the strip below the bar.
+    // What the keys do next. With a window open the window has Space, Enter and Esc.
+    let window = st.overlay != crate::state::Overlay::None;
     let hint = match (run, st.stimulus.phase) {
-        (Some(_), _) => format!("{} stops", key_hint(app, CommandId::StimulusStop)),
-        (None, StimPhase::Idle) if st.stimulus.level.is_none() => "L types a level".to_string(),
-        (None, StimPhase::Idle) => "Space arms".to_string(),
-        (None, StimPhase::Armed) if sweep => "Enter plays the sweep · Esc stops".to_string(),
-        (None, StimPhase::Armed) => "Enter fires · Esc stops".to_string(),
-        _ => "Esc stops".to_string(),
+        (Some(_), _) => None,
+        (None, StimPhase::Idle) if st.stimulus.level.is_none() => Some(format!(
+            "{} types a level",
+            key_hint(app, CommandId::StimulusLevel)
+        )),
+        (None, StimPhase::Idle) if !window => Some("Space arms".to_string()),
+        (None, StimPhase::Armed) if sweep && !window => Some("Enter plays the sweep".to_string()),
+        (None, StimPhase::Armed) if !window => Some("Enter fires".to_string()),
+        _ => None,
     };
+    // While anything is armed or playing: the stop that works from anywhere, windows
+    // included (Esc stops too while no window is open).
+    let live = run.is_some() || st.stimulus_live();
     let off = badge == "STIM OFF";
     let badge_text = RichText::new(badge)
         .strong()
@@ -366,8 +373,28 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
             ],
         ));
     }
-    v.push(Item::new(20, vec![dim_text(hint, ch)]));
-    // From the bar's edge inwards: the hint is outermost, the badge innermost.
+    if let Some(h) = hint {
+        v.push(Item::new(20, vec![dim_text(h, ch)]));
+    }
+    if live {
+        let stop = STOP_ANYWHERE.label();
+        let mut it = Item::new(
+            95,
+            vec![
+                RichText::new(format!("■ Stop: {stop}"))
+                    .strong()
+                    .color(ch.fault),
+                RichText::new(format!("■ {stop}")).strong().color(ch.fault),
+            ],
+        )
+        .kept();
+        it.hover = Some(format!(
+            "{stop} stops and disarms the stimulus from anywhere, also with a window open; \
+             with no window open Esc does too"
+        ));
+        v.push(it);
+    }
+    // From the bar's edge inwards: the hints are outermost, the badge innermost.
     v.reverse();
     v
 }
@@ -383,7 +410,7 @@ pub(super) fn progress(
     ch: &Chrome,
     p: &ac2_scene::progress::Progress,
 ) {
-    let stop_key = key_hint(app, CommandId::StimulusStop);
+    let stop_key = STOP_ANYWHERE.label();
     let mut stop = false;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
@@ -409,7 +436,8 @@ pub(super) fn progress(
             if ui
                 .add(b)
                 .on_hover_text(format!(
-                    "Fades the output out, disarms and discards this run · {stop_key}"
+                    "Fades the output out, disarms and discards this run · {stop_key} from \
+                     anywhere (Esc too while no window is open)"
                 ))
                 .clicked()
             {

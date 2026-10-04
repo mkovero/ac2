@@ -35,7 +35,7 @@ use crate::anim::FreqNav;
 use crate::cal_view::{CalAction, CalView};
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
 use crate::forms::{Form, FormKind, SweepPlan};
-use crate::keys::{Chord, CommandId, Keymap, Scope};
+use crate::keys::{Chord, CommandId, Keymap, RESERVED, STOP_ANYWHERE, Scope};
 use crate::leq_dialog::LeqDialog;
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
@@ -614,6 +614,8 @@ pub struct DelayChoice {
     pub meas: MeasId,
     pub name: String,
     pub finding: DelayFinding,
+    /// The candidate ↑/↓ highlight and Enter inserts.
+    pub selected: usize,
 }
 
 impl DelayChoice {
@@ -630,8 +632,8 @@ pub enum Overlay {
     Help,
     Palette(Palette),
     Prompt(Prompt),
-    /// Candidate list of an ambiguous finding over the transfer pane. Keys other than 1–3
-    /// keep working; Esc closes it (and stops the stimulus, as always).
+    /// Candidate list of an ambiguous finding over the transfer pane. 1–3 or ↑/↓ and Enter
+    /// insert a candidate; other keys keep working except the stimulus's; Esc closes it.
     DelayPick(Box<DelayChoice>),
     /// A new-measurement dialog.
     Form(Box<Form>),
@@ -687,6 +689,12 @@ pub const PAN_OCTAVES: f64 = 1.0 / 3.0;
 pub const ZOOM_FACTOR: f64 = 1.5;
 /// Delay nudge step.
 pub const NUDGE_S: f64 = 0.000_1;
+/// How far ↑/↓ scroll the help overlay, points (about a row).
+pub const HELP_LINE: f32 = 20.0;
+/// PageUp / PageDown in the help overlay until the view has measured its page.
+pub const HELP_PAGE: f32 = 400.0;
+/// Lines PageUp / PageDown move in the calibrations view.
+pub const CAL_PAGE: i32 = 10;
 /// Lowest stimulus level the arrows go to.
 pub const LEVEL_FLOOR: f64 = -90.0;
 
@@ -698,6 +706,11 @@ pub enum Msg {
     /// Typed text (only used by the palette and prompts).
     Text(String),
     Backspace,
+    /// The mouse wheel over a window that lists rows (the palette, a pane's measurement
+    /// list): rows down (negative up), as ↑/↓ move.
+    Wheel {
+        rows: i32,
+    },
     Command(CommandId),
     Conn(Box<ConnEvent>),
     /// Frame tick: `now_s` monotonic seconds, `dt_s` since the previous tick.
@@ -862,6 +875,10 @@ pub struct AppState {
     /// Band and observation X / Shift+X run the finder with.
     pub finder: FinderChoice,
     pub overlay: Overlay,
+    /// How far the help overlay is scrolled, points from the top (the view clamps it).
+    pub help_scroll: f32,
+    /// The help overlay's visible height, points, as the view last measured it: a page.
+    pub help_page: f32,
     pub toasts: Vec<Toast>,
     pub now_s: f64,
     pub quit: bool,
@@ -940,6 +957,8 @@ impl AppState {
             stim_device: None,
             finder: FinderChoice::default(),
             overlay: Overlay::None,
+            help_scroll: 0.0,
+            help_page: HELP_PAGE,
             toasts: Vec::new(),
             now_s: 0.0,
             quit: false,
@@ -1279,6 +1298,15 @@ impl AppState {
     }
 
     /// Something may be emitting or armed: ours in flight, or the mirrored generator.
+    /// A window drawn over the panes (behind a backdrop) is open: it owns the keyboard and
+    /// the mouse. The delay candidates and a pane's measurement list stay out of the way.
+    pub fn window_over_panes(&self) -> bool {
+        !matches!(
+            self.overlay,
+            Overlay::None | Overlay::DelayPick(_) | Overlay::PaneMenu(_)
+        )
+    }
+
     pub fn stimulus_live(&self) -> bool {
         self.stimulus.phase != StimPhase::Idle
             || self
@@ -1745,6 +1773,7 @@ impl AppState {
                 }
                 _ => {}
             },
+            Msg::Wheel { rows } => self.wheel(rows, keymap),
             Msg::Command(c) => self.command(c, keymap, out),
             Msg::Conn(e) => self.conn_event(*e, keymap, out),
             Msg::Form(m) => self.form_msg(m, out),
@@ -1814,6 +1843,26 @@ impl AppState {
         }
     }
 
+    /// The wheel moves a list window's highlight; it never reaches what is behind it.
+    fn wheel(&mut self, rows: i32, keymap: &Keymap) {
+        let scope = self.layout.focus.scope();
+        match &mut self.overlay {
+            Overlay::Palette(p) => {
+                let n = p.entries(keymap, scope).len();
+                p.move_by(rows, n);
+            }
+            Overlay::PaneMenu(m) => {
+                let mut m = *m;
+                let n = self.pane_candidates(m.pane).len();
+                if n > 0 {
+                    m.index = (m.index as i64 + i64::from(rows)).clamp(0, n as i64 - 1) as usize;
+                    self.overlay = Overlay::PaneMenu(m);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn toast(&mut self, text: impl Into<String>) {
         self.toasts.push(Toast {
             text: text.into(),
@@ -1833,24 +1882,60 @@ impl AppState {
     fn key(&mut self, chord: Chord, keymap: &Keymap, out: &mut Vec<Request>) {
         use eframe::egui::Key;
         let swallow = self.swallow_text.take();
-        // Esc always stops, whatever is open; it also closes the overlay, or with nothing
-        // open hands the keys back from a selected slot to the live measurement.
+        // The stop that works from anywhere, before any window sees the key.
+        if chord == STOP_ANYWHERE {
+            self.command(CommandId::StopAnywhere, keymap, out);
+            return;
+        }
+        // An open window owns Esc: it closes the topmost window only. With nothing open Esc
+        // stops the stimulus and hands the keys back from a selected slot to the live
+        // measurement.
         if chord == Chord::key(Key::Escape) {
-            let closed = std::mem::replace(&mut self.overlay, Overlay::None) != Overlay::None;
-            self.command(CommandId::StimulusStop, keymap, out);
-            if !closed {
+            if self.overlay == Overlay::None {
+                self.command(CommandId::StimulusStop, keymap, out);
                 self.selected_trace = None;
+            } else {
+                self.close_overlay(out);
             }
             return;
         }
+        let plain = !(chord.command || chord.alt);
         match &mut self.overlay {
+            Overlay::Help => {
+                let page = self.help_page.max(HELP_LINE);
+                match chord.key {
+                    Key::ArrowDown | Key::ArrowUp if plain => {
+                        let d = if chord.key == Key::ArrowDown {
+                            HELP_LINE
+                        } else {
+                            -HELP_LINE
+                        };
+                        self.help_scroll = (self.help_scroll + d).max(0.0);
+                    }
+                    Key::PageDown if plain => self.help_scroll += page,
+                    Key::PageUp if plain => self.help_scroll = (self.help_scroll - page).max(0.0),
+                    Key::Home if plain => self.help_scroll = 0.0,
+                    // The view clamps it to the end.
+                    Key::End if plain => self.help_scroll = f32::MAX,
+                    Key::Enter => self.overlay = Overlay::None,
+                    // Other keys keep working with the keys shown (try them while reading),
+                    // except the stimulus's.
+                    _ => self.overlay_fallthrough(chord, keymap, out),
+                }
+                return;
+            }
             Overlay::Palette(p) => {
                 let scope = self.layout.focus.scope();
+                let n = p.entries(keymap, scope).len();
+                let page = crate::palette::PALETTE_ROWS as i32;
                 match chord.key {
                     Key::ArrowDown | Key::ArrowUp => {
-                        let n = p.entries(keymap, scope).len();
                         p.move_by(if chord.key == Key::ArrowDown { 1 } else { -1 }, n);
                     }
+                    Key::PageDown => p.move_by(page, n),
+                    Key::PageUp => p.move_by(-page, n),
+                    Key::Home => p.move_by(-(n as i32), n),
+                    Key::End => p.move_by(n as i32, n),
                     Key::Enter => {
                         let c = p.chosen(keymap, scope);
                         self.overlay = Overlay::None;
@@ -1936,14 +2021,27 @@ impl AppState {
                 return;
             }
             Overlay::DelayPick(choice) => {
+                let n = choice.rows().len();
+                if matches!(chord.key, Key::ArrowDown | Key::ArrowUp) && plain && !chord.shift {
+                    if n > 0 {
+                        let d = if chord.key == Key::ArrowDown {
+                            1
+                        } else {
+                            n - 1
+                        };
+                        choice.selected = (choice.selected + d) % n;
+                    }
+                    return;
+                }
                 let index = match chord {
                     c if c == Chord::key(Key::Num1) => Some(0u8),
                     c if c == Chord::key(Key::Num2) => Some(1),
                     c if c == Chord::key(Key::Num3) => Some(2),
+                    c if c == Chord::key(Key::Enter) => u8::try_from(choice.selected).ok(),
                     _ => None,
                 };
                 if let Some(index) = index
-                    && usize::from(index) < choice.rows().len()
+                    && usize::from(index) < n
                 {
                     let (meas, name) = (choice.meas, choice.name.clone());
                     self.overlay = Overlay::None;
@@ -1957,6 +2055,10 @@ impl AppState {
                     );
                     return;
                 }
+                // The list stays up over the plots and the other keys keep working, except
+                // the stimulus's.
+                self.overlay_fallthrough(chord, keymap, out);
+                return;
             }
             Overlay::PaneMenu(menu) => {
                 let mut menu = *menu;
@@ -1969,6 +2071,14 @@ impl AppState {
                             n - 1
                         };
                         menu.index = (menu.index + d) % n;
+                        self.overlay = Overlay::PaneMenu(menu);
+                    }
+                    Key::Home | Key::PageUp => {
+                        menu.index = 0;
+                        self.overlay = Overlay::PaneMenu(menu);
+                    }
+                    Key::End | Key::PageDown => {
+                        menu.index = n.saturating_sub(1);
                         self.overlay = Overlay::PaneMenu(menu);
                     }
                     Key::Enter => {
@@ -1985,22 +2095,71 @@ impl AppState {
                 }
                 return;
             }
-            Overlay::Help | Overlay::None => {}
+            Overlay::None => {}
         }
         if let Some(c) = keymap.lookup(self.scope(), chord) {
-            let before = std::mem::discriminant(&self.overlay);
-            self.command(c, keymap, out);
-            let opened_text = matches!(
-                self.overlay,
-                Overlay::Palette(_)
-                    | Overlay::Prompt(_)
-                    | Overlay::Form(_)
-                    | Overlay::Session(_)
-                    | Overlay::Leq(_)
-            );
-            if opened_text && std::mem::discriminant(&self.overlay) != before {
-                self.swallow_text = typed_char(&chord);
+            self.run_key_command(c, chord, keymap, out);
+        }
+    }
+
+    /// A key a window that stays out of the way (help, the delay candidates) does not use
+    /// runs its command, unless it is the stimulus's: with a window open the stimulus keys
+    /// never act.
+    fn overlay_fallthrough(&mut self, chord: Chord, keymap: &Keymap, out: &mut Vec<Request>) {
+        let Some(c) = keymap.lookup(self.scope(), chord) else {
+            return;
+        };
+        if RESERVED.iter().any(|(_, id)| *id == c) || c == CommandId::StimulusTakeOver {
+            return;
+        }
+        self.run_key_command(c, chord, keymap, out);
+    }
+
+    /// Runs the command of a key; a text window it opens does not also type the key.
+    fn run_key_command(
+        &mut self,
+        c: CommandId,
+        chord: Chord,
+        keymap: &Keymap,
+        out: &mut Vec<Request>,
+    ) {
+        let before = std::mem::discriminant(&self.overlay);
+        self.command(c, keymap, out);
+        let opened_text = matches!(
+            self.overlay,
+            Overlay::Palette(_)
+                | Overlay::Prompt(_)
+                | Overlay::Form(_)
+                | Overlay::Session(_)
+                | Overlay::Leq(_)
+        );
+        if opened_text && std::mem::discriminant(&self.overlay) != before {
+            self.swallow_text = typed_char(&chord);
+        }
+    }
+
+    /// Esc with a window open: the topmost window closes (a dialog over a view closes back
+    /// to the view) and the stimulus is left alone, except that the sweep dialog leaves
+    /// nothing armed behind it. A playing stimulus keeps playing: the stop chord or the
+    /// strip's Stop stops it.
+    fn close_overlay(&mut self, out: &mut Vec<Request>) {
+        match &mut self.overlay {
+            Overlay::Calibrations(v) if v.electrical.is_some() => v.electrical = None,
+            Overlay::Form(f) if f.kind == FormKind::Sweep => {
+                self.overlay = Overlay::None;
+                self.disarm_unfired(out);
             }
+            _ => self.overlay = Overlay::None,
+        }
+    }
+
+    /// Disarms a stimulus armed (or arming) that is not playing: nothing is left armed
+    /// behind a window that was closed. One that plays is left playing.
+    fn disarm_unfired(&mut self, out: &mut Vec<Request>) {
+        let firing = self.daemon().is_some_and(|s| s.generator.firing);
+        if matches!(self.stimulus.phase, StimPhase::Armed | StimPhase::Arming) && !firing {
+            self.stimulus.phase = StimPhase::Stopping;
+            out.push(Request::StimStop);
         }
     }
 
@@ -2355,7 +2514,9 @@ impl AppState {
                 }
             }
             StimPhase::Firing | StimPhase::FireRequested => {
-                self.error("the stimulus is firing: Esc stops it, then arm the sweep");
+                self.error(format!(
+                    "the stimulus is firing: {STOP_ANYWHERE} stops it, then arm the sweep"
+                ));
                 self.sweep.plan = None;
             }
             // The stop before it is still on its way (stop, then the lease given back): the
@@ -2904,6 +3065,7 @@ impl AppState {
                 self.overlay = if self.overlay == Overlay::Help {
                     Overlay::None
                 } else {
+                    self.help_scroll = 0.0;
                     Overlay::Help
                 };
             }
@@ -2945,7 +3107,7 @@ impl AppState {
                 StimPhase::Idle => self.error("not armed: Space arms first"),
                 _ => {}
             },
-            C::StimulusStop => {
+            C::StimulusStop | C::StopAnywhere => {
                 if self.stimulus_live() {
                     self.stimulus.phase = StimPhase::Stopping;
                     out.push(Request::StimStop);
@@ -4008,9 +4170,10 @@ impl AppState {
     fn form_msg(&mut self, m: FormMsg, out: &mut Vec<Request>) {
         match m {
             FormMsg::Submit => self.submit_form(out),
+            // As Esc: the sweep dialog leaves nothing armed behind it.
             FormMsg::Cancel => {
                 if matches!(self.overlay, Overlay::Form(_)) {
-                    self.overlay = Overlay::None;
+                    self.close_overlay(out);
                 }
             }
             FormMsg::Focus(i) => {
@@ -4059,8 +4222,8 @@ impl AppState {
         }
     }
 
-    /// Keys on the session dialog. Esc never gets here: it closes the dialog and stops the
-    /// stimulus like everywhere else.
+    /// Keys on the session dialog. Esc never gets here: it closes the dialog, as it closes
+    /// every window.
     fn session_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
         use eframe::egui::Key;
         let Overlay::Session(d) = &mut self.overlay else {
@@ -4166,6 +4329,16 @@ impl AppState {
             }
             Key::ArrowDown | Key::Tab => {
                 v.move_focus(&st, 1);
+                None
+            }
+            Key::PageUp | Key::PageDown | Key::Home | Key::End if v.edit.is_none() => {
+                let d = match chord.key {
+                    Key::PageUp => -CAL_PAGE,
+                    Key::PageDown => CAL_PAGE,
+                    Key::Home => i32::MIN / 2,
+                    _ => i32::MAX / 2,
+                };
+                v.jump_focus(&st, d);
                 None
             }
             Key::ArrowLeft | Key::ArrowRight if v.edit.is_none() => {
@@ -4385,6 +4558,7 @@ impl AppState {
                     meas,
                     name,
                     finding,
+                    selected: 0,
                 }));
             }
             _ => {

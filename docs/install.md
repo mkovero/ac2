@@ -204,7 +204,8 @@ The app's dialogs use the same defaults as these commands. Then in the app (or w
 2. Press **Space** to arm and **Enter** to fire: pink noise plays on output 1.
 3. Press **X** to find the delay and insert it. The phase trace flattens; coherence (the
    transparency of the trace) shows where the data is trustworthy.
-4. **Esc** stops the noise at any time.
+4. **Esc** stops the noise (with a window open, Esc closes the window first; **Shift+Esc**
+   stops from anywhere).
 
 No hardware at hand? Use the built-in simulated rig (output 1 → input 1 loopback, output 1
 → input 2 through a speaker-and-room model; it never touches real audio). In the app, choose

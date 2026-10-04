@@ -333,18 +333,21 @@ impl App {
                     modifiers,
                     ..
                 } => {
-                    let overlay = !matches!(self.state.overlay, Overlay::None | Overlay::Help);
+                    let open = self.state.overlay != Overlay::None;
+                    let overlay = open && self.state.overlay != Overlay::Help;
                     if overlay && key == Key::Backspace {
                         self.dispatch(Msg::Backspace);
                         continue;
                     }
                     // Auto-repeat only for navigation; never for stimulus or toggles, so a
-                    // held key cannot ramp the level or flicker a mode.
+                    // held key cannot ramp the level or flicker a mode. In an open window
+                    // ↑/↓ and the page keys only move or scroll it (the window owns them).
                     // Ctrl+↑/↓ move the level axis (never the stimulus level, which is ↑/↓
                     // without Ctrl).
                     let nav = matches!(key, Key::ArrowLeft | Key::ArrowRight)
+                        || (open && matches!(key, Key::PageUp | Key::PageDown))
                         || (matches!(key, Key::ArrowUp | Key::ArrowDown)
-                            && (overlay || (modifiers.command && !modifiers.alt)));
+                            && (open || (modifiers.command && !modifiers.alt)));
                     if repeat && !nav {
                         continue;
                     }

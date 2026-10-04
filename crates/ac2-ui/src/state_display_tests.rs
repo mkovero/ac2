@@ -364,7 +364,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
     assert_eq!(p.trace, TraceId(10));
     assert_eq!(p.confirm.title, "Delete t10?");
     assert_eq!(p.confirm.lines[0], "capture · slot 1 · no data yet");
-    // Esc keeps it (and stops the stimulus, as always); so do N and Backspace.
+    // Esc keeps it (the stimulus untouched); so do N and Backspace.
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(

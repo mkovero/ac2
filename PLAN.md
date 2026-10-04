@@ -506,7 +506,12 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
 - One binding table, scoped (global / transfer / spectrum / SPL / IR), test-enforced: no dead keys, no conflicts.
 - Layout-safe defaults: no `[ ] + -` (unreachable on Nordic layouts). Bindings user-configurable in TOML.
 - `H` (or `F1`) help overlay (`/` is Shift+7 on Nordic layouts); `Ctrl/Cmd+K` command palette (fuzzy, shows key per command); the focused pane's most used keys on a hint line (`Shift+H` on / off).
-- Stimulus cluster reserved: `Space` arm, `Enter` fire, `Esc` stop/cancel, `↑/↓` level.
+- Stimulus cluster reserved: `Space` arm, `Enter` fire, `Esc` stop, `↑/↓` level — with no
+  window open. An open window (help, palette, prompt, dialog, view) owns the keyboard:
+  `↑/↓` move or scroll it, `←/→` change a choice, `Enter` confirms, `Esc` closes the topmost
+  window only; none of them reaches the stimulus. `Shift+Esc` stops the stimulus from
+  anywhere, windows included (fixed, not remappable). Closing a dialog that arms (the sweep)
+  disarms what is armed and not playing; a playing stimulus keeps playing until stopped.
 - Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `B` coherence mask, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change (`H` IR became `Shift+I` when `H` became help).
 
 ### 8.3 Lightweight targets

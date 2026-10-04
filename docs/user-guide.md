@@ -81,8 +81,8 @@ Nothing in the dialog is a channel number to type. From the top:
   from your stimulus output*). The session's inputs, outputs and loopback follow from the
   roles; the roles and mic names are remembered per device (`ui.toml`) and come back next
   time. With a Reference, at least one mic and no measurements yet, one more **Enter**
-  creates *Reference → <mic>* transfer measurements. **Esc** closes the dialog — and, as
-  everywhere, stops the stimulus.
+  creates *Reference → <mic>* transfer measurements. **Esc** closes the dialog; the
+  stimulus is left as it was (**Shift+Esc** stops it).
 
 The measurement dialogs pick inputs the same way: by name, with their meters, **←/→**.
 
@@ -133,8 +133,10 @@ make it play by accident:
 
 - nothing plays without a typed **level** (`L` in the app, `--level` in the CLI); there is
   no default level;
-- **arm** (`Space`) and **fire** (`Enter`) are separate steps; **Esc** always stops, from any
-  client, without needing anything else;
+- **arm** (`Space`) and **fire** (`Enter`) are separate steps; **Esc** stops (with a window
+  open, Esc first closes the window), **Shift+Esc** stops from anywhere, windows included —
+  either from any client, without needing anything else. While anything is armed or
+  playing the top bar shows **■ Stop: Shift+Esc**;
 - one client holds the stimulus at a time (a lease it keeps refreshing). If that client
   disappears, the daemon fades the output out within 1.5 s;
 - the daemon has a global maximum level (`ac2d --max-level`, default −10 dBFS RMS);
@@ -176,7 +178,8 @@ the pane and its measurement, the SPL meter and its Leq windows name themselves.
 are off there. Whenever a stimulus is armed or playing, or a sweep or another operation
 runs, the top bar comes back: what drives the speakers is never hidden. **F11** on its own
 puts the whole window full screen (or back) in whatever layout it is in — with one pane up,
-that is the same stage view. Esc stops the stimulus as anywhere else.
+that is the same stage view. Esc stops the stimulus as anywhere else (Shift+Esc too, also
+with a window open).
 
 With the focused pane maximised, picking a measurement in the list switches the one pane to
 the pane that shows it — a transfer measurement to the transfer pane, a spectrum or RTA to
@@ -244,8 +247,8 @@ curve.
 - On a **stored trace**: select its slot — **V** steps through the shown slots in slot
   order and **Shift+V** backwards, or click it in the list. The slot is highlighted and the
   title of the pane it is drawn in says `slot 3 (…): smoothing …`; then **K** / **Shift+K**.
-  To go back to the live measurement press **Esc** (it also stops the stimulus, as always;
-  with a dialog open the first Esc only closes it), step past the last slot with **V**,
+  To go back to the live measurement press **Esc** with no window open (it also stops the
+  stimulus; with a window open Esc only closes the window), step past the last slot with **V**,
   click the slot again, or select a measurement (**N**, **Alt+1 … Alt+4**, a click).
 - From the **command line**: `ac2 trace smooth <trace> 1/12` (also `1/3` … `1/48`, or just
   `12`; `none` turns it off). A transfer or sweep trace keeps the mode it had — magnitude
@@ -328,7 +331,7 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   trace; a double click on a trace in the list selects it and asks for its name in one go.
   `ac2 trace rename <trace> <name>` does the same from the command line.
 - **Delete** asks before the selected stored trace goes (naming it); **Delete** again or
-  **Enter** deletes it, **N** or **Esc** keeps it (Esc also stops the stimulus, as always).
+  **Enter** deletes it, **N** or **Esc** keeps it.
   The selection moves to the next shown trace in the list (else the one before it, else the
   live measurement). A locked trace is not deleted, and Delete never deletes a live
   measurement (that is **Delete selected measurement** in the palette). The palette has
@@ -393,7 +396,10 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   it as "choose the reference", and the sweep does not arm until one is picked. **←/→** step
   a choice (→ longer / more) and stop at the ends; a text field's text is selected when it
   gets the focus (**Ctrl+A** selects it again), so typing replaces it. **Enter** arms the
-  sweep, **Enter** again plays it, **Esc** stops (and discards it). Once the sweep has played
+  sweep (the dialog closes), **Enter** again plays it, **Esc** stops (and discards it).
+  **Esc** in the dialog closes it; anything armed and not yet playing is disarmed with it,
+  so nothing stays armed behind a closed window, while a stimulus already playing keeps
+  playing (**Shift+Esc** or the strip's **Stop** stops it). Once the sweep has played
   the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed, and
   **Shift+S** sets up the next sweep. The result opens the
   **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
@@ -408,8 +414,9 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   under the top bar — visible whichever pane is maximised — shows its name and level,
   *sweep 1 of 2*, a bar and the time left (about the remaining repeats × (sweep + the
   silence after it), counted from when each repeat began), then *analysing…*. Its
-  **Stop (Esc)** button, like **Esc**, fades the output out, disarms the generator and
-  discards the run; nothing is stored.
+  **Stop (Shift+Esc)** button, like **Shift+Esc** (from anywhere) or **Esc** (with no window
+  open), fades the output out, disarms the generator and discards the run; nothing is
+  stored.
 - **CLI:** `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs` (`--from 20hz --to
   20khz --duration 3s --repeats 1 --gate 5ms --name …`). Like `gen`, it arms and waits:
   **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. The daemon disarms the generator as soon
@@ -730,6 +737,21 @@ layouts. The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** s
 level (±1 dB, with Shift ±3 dB). With **Alt** the arrows move the selected curve's display
 offset instead, with **Ctrl** they pan the focused pane's level axis.
 
+**An open window owns the keyboard.** With the help, the palette, a prompt, a dialog or the
+calibrations view open, **↑/↓** move the selection or scroll (**PageUp / PageDown**,
+**Home / End** where a list is long: the help, the palette, the calibrations view, a pane's
+measurement list), **←/→** change a choice, **Enter** confirms and **Esc** closes the
+topmost window only — the electrical calibration dialog closes back to the calibrations
+view. None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never
+stops while a window is open, and the mouse wheel scrolls the window rather than zooming the
+plot behind it. The help and the delay candidates leave the other keys working (try a key
+while reading), except the stimulus's. **Shift+Esc** stops the stimulus from anywhere,
+windows included; it is fixed, and cannot be rebound.
+
+*Changed keys:* Esc no longer stops the stimulus while a window is open — it only closes the
+window; press it again, or use **Shift+Esc**, which stops from anywhere. In the delay
+candidate list ↑/↓ and Enter choose a candidate (1–3 still pick directly).
+
 Change bindings in `keys.toml` in the ac2 config directory (`~/.config/ac2` on Linux,
 `~/Library/Application Support/ac2` on macOS, `%APPDATA%\ac2\config` on Windows):
 
@@ -775,7 +797,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+H` | Key hints on / off | `key_hints` |
 | `Space` | Stimulus: arm (needs a typed level) | `stimulus_arm` |
 | `Enter` | Stimulus: fire (when armed) | `stimulus_fire` |
-| `Esc` | Stimulus: stop and disarm | `stimulus_stop` |
+| `Esc` | Stimulus: stop and disarm (no window open) | `stimulus_stop` |
+| `Shift+Esc` | Stimulus: stop and disarm, also with a window open | `stimulus_stop_anywhere` |
 | `↑` | Stimulus level +1 dB | `level_up` |
 | `↓` | Stimulus level −1 dB | `level_down` |
 | `Shift+↑` | Stimulus level +3 dB | `level_up_coarse` |

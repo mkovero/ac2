@@ -127,6 +127,9 @@ pub fn search(query: &str, keymap: &Keymap, active: Scope) -> Vec<Entry> {
     rows.into_iter().map(|r| r.2).collect()
 }
 
+/// Commands the palette shows at once; PageUp / PageDown move by this many.
+pub const PALETTE_ROWS: usize = 12;
+
 /// Palette state: the query and the highlighted row.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Palette {

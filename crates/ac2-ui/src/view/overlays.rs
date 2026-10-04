@@ -4,11 +4,11 @@ use eframe::egui::{self, Color32, Key, RichText, text::LayoutJob};
 
 use crate::app::App;
 use crate::forms::Value;
-use crate::keys::{CommandId, Keymap, Scope};
-use crate::state::{FormMsg, Msg, Overlay};
+use crate::keys::{CommandId, Keymap, STOP_ANYWHERE, Scope};
+use crate::state::{FormMsg, HELP_LINE, Msg, Overlay};
 use crate::theme::Chrome;
 
-const PALETTE_ROWS: usize = 12;
+use crate::palette::PALETTE_ROWS;
 
 pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     match app.state.overlay.clone() {
@@ -323,7 +323,7 @@ pub(crate) fn columns(rows: Vec<HelpRow>, n: usize) -> Vec<Vec<HelpRow>> {
     out
 }
 
-fn help(app: &App, ctx: &egui::Context, ch: &Chrome) {
+fn help(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     backdrop(ctx);
     let active = app.state.scope();
     let screen = ctx.content_rect();
@@ -342,25 +342,38 @@ fn help(app: &App, ctx: &egui::Context, ch: &Chrome) {
                     ui.label(RichText::new("Keys").strong().size(16.0));
                     ui.label(
                         RichText::new(format!(
-                            "focused pane: {} · {} or Esc closes",
+                            "focused pane: {} · ↑↓ PgUp PgDn scroll · {} or Esc closes · {} \
+                             stops the stimulus from any window",
                             active.title(),
                             app.keymap
                                 .chords(CommandId::Help, Scope::Global)
                                 .first()
                                 .map(|k| k.label())
-                                .unwrap_or_default()
+                                .unwrap_or_default(),
+                            STOP_ANYWHERE.label()
                         ))
                         .color(ch.dim),
                     );
                 });
                 ui.add_space(6.0);
-                ui.columns(cols.len().max(1), |uis| {
-                    for (ui, col) in uis.iter_mut().zip(&cols) {
-                        for row in col {
-                            help_row(ui, row, ch);
-                        }
-                    }
-                });
+                // The keys scroll it (the window owns ↑/↓), the wheel too; the offset lives
+                // in the state so the reducer moves it and the view keeps it in range.
+                let out = egui::ScrollArea::vertical()
+                    .max_height((screen.height() - 170.0).max(120.0))
+                    .auto_shrink([false, true])
+                    .vertical_scroll_offset(app.state.help_scroll)
+                    .show(ui, |ui| {
+                        ui.columns(cols.len().max(1), |uis| {
+                            for (ui, col) in uis.iter_mut().zip(&cols) {
+                                for row in col {
+                                    help_row(ui, row, ch);
+                                }
+                            }
+                        });
+                    });
+                let max = (out.content_size.y - out.inner_rect.height()).max(0.0);
+                app.state.help_scroll = out.state.offset.y.clamp(0.0, max);
+                app.state.help_page = (out.inner_rect.height() - HELP_LINE).max(HELP_LINE);
                 ui.add_space(6.0);
                 let path = app
                     .keymap_path
@@ -478,12 +491,19 @@ fn palette(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 }
                 ui.separator();
                 ui.label(
-                    RichText::new("↑↓ choose · Enter runs · Esc closes (and stops stimulus)")
-                        .small()
-                        .color(ch.dim),
+                    RichText::new(format!(
+                        "↑↓ PgUp PgDn choose · Enter runs · Esc closes · {} stops the stimulus",
+                        STOP_ANYWHERE.label()
+                    ))
+                    .small()
+                    .color(ch.dim),
                 );
             });
         });
+    // The wheel moves the highlight as ↑/↓ do (the list shows a window of it).
+    if let Some(rows) = wheel_rows(ctx) {
+        app.dispatch(Msg::Wheel { rows });
+    }
     if let Some(c) = run {
         app.state.overlay = Overlay::None;
         app.dispatch(Msg::Command(c));
@@ -509,7 +529,7 @@ fn prompt(app: &App, ctx: &egui::Context, ch: &Chrome) {
                 }
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new("Enter applies · Esc cancels (and stops stimulus)")
+                    RichText::new("Enter applies · Esc cancels")
                         .small()
                         .color(ch.dim),
                 );
@@ -637,12 +657,15 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(format!(
-                        "{} · ↑↓ field · ←→ choose (inputs by name) · Esc closes (and stops stimulus)",
+                        "{} · ↑↓ field · ←→ choose (inputs by name) · Esc closes",
                         f.kind.submit()
                     ))
                     .small()
                     .color(ch.dim),
                 );
+                if let Some(note) = f.kind.close_note() {
+                    ui.label(RichText::new(note).small().color(ch.armed));
+                }
             });
         });
     if let Some(m) = msg {
@@ -674,10 +697,20 @@ fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
                 }
                 ui.add_space(6.0);
                 let rows = c.rows();
-                for r in &rows {
+                for (i, r) in rows.iter().enumerate() {
+                    let on = i == c.selected;
                     ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(if on { "▸" } else { " " })
+                                .monospace()
+                                .color(ch.focus),
+                        );
                         ui.label(RichText::new(&r.key).monospace().strong().color(ch.focus));
-                        ui.label(RichText::new(&r.text).monospace().color(ch.text));
+                        ui.label(RichText::new(&r.text).monospace().color(if on {
+                            ch.focus
+                        } else {
+                            ch.text
+                        }));
                     });
                 }
                 ui.add_space(4.0);
@@ -692,7 +725,7 @@ fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
                 );
                 ui.label(
                     RichText::new(format!(
-                        "{} inserts · Shift+X strongest · Esc closes (and stops stimulus)",
+                        "{} or ↑↓ Enter inserts · Shift+X strongest · Esc closes",
                         ac2_scene::finding::pick_keys(rows.len())
                     ))
                     .small()
@@ -700,6 +733,32 @@ fn delay_pick(app: &App, ctx: &egui::Context, ch: &Chrome) {
                 );
             });
         });
+}
+
+/// Whole rows the wheel moved this frame (down positive), for lists that show a window of
+/// their rows: a row per line of a wheel notch, at least one when it moved at all so a
+/// touchpad moves the list too.
+pub(super) fn wheel_rows(ctx: &egui::Context) -> Option<i32> {
+    let lines: f32 = ctx.input(|i| {
+        i.raw
+            .events
+            .iter()
+            .map(|e| match e {
+                egui::Event::MouseWheel { unit, delta, .. } => match unit {
+                    egui::MouseWheelUnit::Line => delta.y,
+                    egui::MouseWheelUnit::Point => delta.y / 50.0,
+                    egui::MouseWheelUnit::Page => delta.y * PALETTE_ROWS as f32,
+                },
+                _ => 0.0,
+            })
+            .sum()
+    });
+    if lines == 0.0 {
+        return None;
+    }
+    // Content moving down (positive) is the list scrolling up.
+    let rows = (lines.abs().round() as i32).max(1);
+    Some(if lines > 0.0 { -rows } else { rows })
 }
 
 /// Text followed by a caret.

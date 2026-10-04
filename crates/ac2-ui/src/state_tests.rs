@@ -292,17 +292,19 @@ fn arrows_without_level_send_nothing() {
 }
 
 #[test]
-fn escape_always_stops_and_closes() {
+fn escape_closes_a_window_or_stops() {
     let mut t = T::new();
     t.st.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    // Esc from inside the palette: closes it and stops.
+    // Esc from inside the palette only closes it; the next Esc, with nothing open, stops.
     t.key("Ctrl+K");
     assert!(matches!(t.st.overlay, Overlay::Palette(_)));
+    assert!(t.key("Esc").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
     let r = t.key("Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]));
-    assert_eq!(t.st.overlay, Overlay::None);
     // Another client's running generator: Esc stops it too (gen.stop is universal).
     let mut t = T::new();
     let mut s = daemon_state();
@@ -2822,12 +2824,13 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
 }
 
 #[test]
-fn esc_closes_the_dialog_stops_the_stimulus_and_the_preview() {
+fn esc_closes_the_dialog_and_the_preview_and_leaves_the_stimulus() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
     t.st.stimulus.phase = StimPhase::Firing;
     let r = t.key("Escape");
-    assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert!(!r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
+    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
     assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
     assert!(
         r.iter().any(|x| matches!(x, Request::Meters(false))),
@@ -4272,7 +4275,7 @@ fn new_spl_log_asks_first() {
     let r = t.key("N");
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
-    // Esc closes it too (and stops the stimulus, as always).
+    // Esc closes it too.
     t.key("Shift+R");
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
@@ -4607,6 +4610,9 @@ fn pane_caption_shortens_to_the_selected_trace() {
 
 #[path = "state_display_tests.rs"]
 mod display;
+
+#[path = "state_overlay_tests.rs"]
+mod overlay;
 
 /// An `spl` frame of meter 4 at `at_ms` (daemon clock) under `rev`.
 fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> ConnEvent {

@@ -9,7 +9,10 @@
 //! - A command is only bound in scopes where it means something ([`CommandId::scopes`]); the
 //!   reducer handles every command, so no key is dead.
 //! - The stimulus cluster is reserved: `Space` arm, `Enter` fire, `Esc` stop, `↑/↓` level.
-//!   Overrides may not give those chords another meaning, and `Esc` always stops.
+//!   Overrides may not give those chords another meaning. With a window (overlay) open the
+//!   window owns the keyboard: its arrows, Enter and Esc never reach the stimulus.
+//! - [`STOP_ANYWHERE`] (`Shift+Esc`) stops the stimulus from anywhere, windows included; it
+//!   is fixed, so no override can turn a key a dialog types into a stop.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -344,7 +347,8 @@ commands! {
 
     StimulusArm => "stimulus_arm", "Stimulus: arm (needs a typed level)", [Global];
     StimulusFire => "stimulus_fire", "Stimulus: fire (when armed)", [Global];
-    StimulusStop => "stimulus_stop", "Stimulus: stop and disarm", [Global];
+    StimulusStop => "stimulus_stop", "Stimulus: stop and disarm (no window open)", [Global];
+    StopAnywhere => "stimulus_stop_anywhere", "Stimulus: stop and disarm, also with a window open", [Global];
     LevelUp => "level_up", "Stimulus level +1 dB", [Global];
     LevelDown => "level_down", "Stimulus level −1 dB", [Global];
     LevelUpCoarse => "level_up_coarse", "Stimulus level +3 dB", [Global];
@@ -502,11 +506,20 @@ pub struct Binding {
     pub chord: Chord,
 }
 
+/// The stop that works from anywhere: handled before an open window gets the key. Esc with
+/// Shift: the stop key operators already know, made deliberate by the held Shift so that
+/// closing a window never stops by accident; the same two keys on every layout (no AltGr,
+/// no dead key), never typed text, and taken by no desktop (Ctrl+Esc opens the Windows Start
+/// menu, Ctrl/⌘+Space switches input methods or opens Spotlight, F-keys are media keys on
+/// many laptops).
+pub const STOP_ANYWHERE: Chord = Chord::shift(Key::Escape);
+
 /// The stimulus cluster: these chords mean exactly these commands, in every keymap.
-pub const RESERVED: [(Chord, CommandId); 7] = [
+pub const RESERVED: [(Chord, CommandId); 8] = [
     (Chord::key(Key::Space), CommandId::StimulusArm),
     (Chord::key(Key::Enter), CommandId::StimulusFire),
     (Chord::key(Key::Escape), CommandId::StimulusStop),
+    (STOP_ANYWHERE, CommandId::StopAnywhere),
     (Chord::key(Key::ArrowUp), CommandId::LevelUp),
     (Chord::key(Key::ArrowDown), CommandId::LevelDown),
     (Chord::shift(Key::ArrowUp), CommandId::LevelUpCoarse),
@@ -896,6 +909,18 @@ impl Keymap {
         {
             return Err("Esc must stay bound to stimulus_stop".into());
         }
+        let anywhere: Vec<Chord> = self
+            .bindings
+            .iter()
+            .filter(|b| b.command == CommandId::StopAnywhere)
+            .map(|b| b.chord)
+            .collect();
+        if anywhere != [STOP_ANYWHERE] {
+            return Err(format!(
+                "stimulus_stop_anywhere is fixed to {STOP_ANYWHERE}: it works inside dialogs, \
+                 so it may not be a key they use"
+            ));
+        }
         for scope in Scope::ALL {
             let mut seen: std::collections::HashMap<Chord, CommandId> =
                 std::collections::HashMap::new();
@@ -1098,6 +1123,7 @@ mod tests {
             ("Space", CommandId::StimulusArm),
             ("Enter", CommandId::StimulusFire),
             ("Esc", CommandId::StimulusStop),
+            ("Shift+Esc", CommandId::StopAnywhere),
             ("Up", CommandId::LevelUp),
             ("Down", CommandId::LevelDown),
             ("H", CommandId::Help),
@@ -1268,6 +1294,12 @@ mod tests {
             ("[transfer]\ninsert_delay = \"U\"", "bound to both"),
             ("[global]\nhelp = \"Space\"", "reserved"),
             ("[global]\nstimulus_stop = \"Q\"", "Esc must stay"),
+            ("[global]\nstimulus_stop_anywhere = \"Q\"", "is fixed"),
+            (
+                "[global]\nstimulus_stop_anywhere = [\"Shift+Esc\", \"Ctrl+S\"]",
+                "is fixed",
+            ),
+            ("[global]\nhelp = \"Shift+Esc\"", "reserved"),
             ("[spectrum]\ninsert_delay = \"Q\"", "does nothing"),
             ("[nowhere]\nhelp = \"Q\"", "unknown scope"),
             ("[global]\nfly = \"Q\"", "unknown command"),
@@ -1358,5 +1390,38 @@ mod tests {
             cmds.dedup();
             assert_eq!(cmds.len(), h.len(), "{scope:?} lists a command twice");
         }
+    }
+
+    /// The stop chord: the same in every scope, unique, layout-safe and never typed text.
+    #[test]
+    fn stop_anywhere_is_safe_on_every_layout() {
+        let m = Keymap::default();
+        assert_eq!(Chord::parse("Shift+Esc"), Ok(STOP_ANYWHERE));
+        assert!(!layout_unsafe(STOP_ANYWHERE.key) && !is_symbol(STOP_ANYWHERE.key));
+        const { assert!(!(STOP_ANYWHERE.command || STOP_ANYWHERE.alt)) };
+        for scope in Scope::ALL {
+            assert_eq!(
+                m.lookup(scope, STOP_ANYWHERE),
+                Some(CommandId::StopAnywhere),
+                "{scope:?}"
+            );
+            let holders: Vec<_> = m
+                .bindings()
+                .iter()
+                .filter(|b| {
+                    (b.scope == Scope::Global || b.scope == scope) && b.chord == STOP_ANYWHERE
+                })
+                .collect();
+            assert_eq!(holders.len(), 1, "{scope:?}");
+        }
+        // Nordic layouts send Esc and Shift as such: the chord of the event is the stop.
+        let shifted = Modifiers {
+            shift: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(Chord::from_event(Key::Escape, shifted), STOP_ANYWHERE);
+        assert_eq!(STOP_ANYWHERE.label_in(LabelStyle::Pc), "Shift+Esc");
+        // Keeping it and adding nothing is fine.
+        Keymap::from_toml("[global]\nstimulus_stop_anywhere = \"Shift+Esc\"").expect("valid");
     }
 }
