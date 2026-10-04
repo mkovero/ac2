@@ -13,7 +13,7 @@ use crate::primitives::{Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, V
 use crate::readout::{self, CursorReadout};
 use crate::theme::Theme;
 use crate::trace::{
-    DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
+    DisplayCache, DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
 };
 use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
 
@@ -241,13 +241,15 @@ fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme
 /// Builds the transfer view.
 pub fn transfer_scene(
     traces: &[TfTrace<'_>],
+    cache: &DisplayCache,
     status: &Status,
     view: &ViewState,
     theme: &Theme,
     size: Viewport,
 ) -> TfScene {
     let mut c = Canvas::new(size, theme);
-    let (reference, shown) = display_traces(traces, view.tf.phase_reference, &view.tf.coherence);
+    let (reference, shown) =
+        display_traces(traces, cache, view.tf.phase_reference, &view.tf.coherence);
     let overlay = overlaid(view);
     let right = if overlay {
         OVERLAY_MARGIN_RIGHT
@@ -582,6 +584,7 @@ mod tests {
             },
             freshness: Some(Freshness::from_age(0.1)),
             smoothing: None,
+            stored: None,
         }
     }
 
@@ -590,6 +593,7 @@ mod tests {
         let c = cols(100);
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
@@ -638,6 +642,7 @@ mod tests {
         c.mag[70] = f32::NAN;
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
@@ -665,6 +670,7 @@ mod tests {
         }
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
@@ -688,6 +694,7 @@ mod tests {
         c.coh[10] = 0.0;
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
@@ -753,7 +760,14 @@ mod tests {
             frame_age_s: Some(3.24),
             ..Status::default()
         };
-        let s = transfer_scene(&[ta, tb, ti], &status, &view, &Theme::dark(), SIZE);
+        let s = transfer_scene(
+            &[ta, tb, ti],
+            &DisplayCache::default(),
+            &status,
+            &view,
+            &Theme::dark(),
+            SIZE,
+        );
         let texts: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(
             texts,
@@ -809,6 +823,7 @@ mod tests {
         };
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &view,
             &Theme::dark(),
@@ -849,7 +864,14 @@ mod tests {
             cursor_hz: Some(1000.0),
             ..*view
         };
-        transfer_scene(&[ta, tb], status, &view, &Theme::dark(), SIZE)
+        transfer_scene(
+            &[ta, tb],
+            &DisplayCache::default(),
+            status,
+            &view,
+            &Theme::dark(),
+            SIZE,
+        )
     }
 
     #[test]
@@ -893,6 +915,7 @@ mod tests {
         let t = [trace(&c, TraceKey::Live(MeasId(1)), 0.0)];
         let pane = transfer_scene(
             &t,
+            &DisplayCache::default(),
             &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
@@ -901,6 +924,7 @@ mod tests {
         assert!(pane.coherence_overlay.is_none());
         let s = transfer_scene(
             &t,
+            &DisplayCache::default(),
             &Status::default(),
             &overlay_view(),
             &Theme::dark(),
@@ -977,9 +1001,16 @@ mod tests {
         };
         let t = [trace(&c, TraceKey::Live(MeasId(1)), 0.0)];
         let build = |v: &ViewState| {
-            transfer_scene(&t, &Status::default(), v, &Theme::dark(), SIZE)
-                .scene
-                .layers[1]
+            transfer_scene(
+                &t,
+                &DisplayCache::default(),
+                &Status::default(),
+                v,
+                &Theme::dark(),
+                SIZE,
+            )
+            .scene
+            .layers[1]
                 .polylines
                 .clone()
         };
@@ -1006,6 +1037,7 @@ mod tests {
         view.tf.show_magnitude = false;
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &view,
             &Theme::dark(),
@@ -1019,6 +1051,7 @@ mod tests {
         view.tf.show_coherence = false;
         let s = transfer_scene(
             &[trace(&c, TraceKey::Live(MeasId(1)), 0.0)],
+            &DisplayCache::default(),
             &Status::default(),
             &view,
             &Theme::dark(),
@@ -1086,6 +1119,7 @@ mod tests {
             };
             transfer_scene(
                 &[ta.clone(), tb.clone()],
+                &DisplayCache::default(),
                 &Status::default(),
                 &view,
                 &Theme::dark(),

@@ -859,6 +859,8 @@ pub struct AppState {
     pub data: Option<Arc<DataSnapshot>>,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
+    /// The transfer view's stored-trace display math, kept between frames.
+    pub tf_display: ac2_scene::trace::DisplayCache,
     pub theme: ThemeName,
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
@@ -990,6 +992,7 @@ impl AppState {
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
             leq_history: BTreeMap::new(),
+            tf_display: Default::default(),
             leq_logs: BTreeMap::new(),
             leq_backfill_ask: 0,
             leq_alarms_seen: BTreeMap::new(),

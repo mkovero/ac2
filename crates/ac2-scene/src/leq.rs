@@ -326,13 +326,50 @@ pub struct HistoryPoint {
 
 /// Each window's value over time, as received (one point per `leq` frame), keyed by the
 /// window's length and weighting so a changed configuration keeps the windows it kept.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct LeqHistory {
     series: Vec<((u64, Weighting), VecDeque<HistoryPoint>)>,
     scale: Option<LevelScale>,
     /// The columns' scale as of the newest frame ([`column_range`] keeps it while the
     /// levels allow).
     range: Option<Range>,
+    /// Bumped by every change of the points, so a laid-out strip is reused until the next
+    /// frame arrives however often the view is rebuilt.
+    generation: u64,
+    strip: StripCache,
+}
+
+impl PartialEq for LeqHistory {
+    fn eq(&self, o: &Self) -> bool {
+        self.series == o.series && self.scale == o.scale && self.range == o.range
+    }
+}
+
+/// What a laid-out strip was made from.
+#[derive(Clone, Debug, PartialEq)]
+struct StripKey {
+    generation: u64,
+    windows: Vec<LeqWindow>,
+    judged: bool,
+    plot: Rect,
+    theme: Theme,
+}
+
+/// The last strip laid out from a history. A clone starts empty: it belongs to the
+/// instance whose points it was made from.
+#[derive(Default)]
+struct StripCache(std::sync::Mutex<Option<(StripKey, HistoryStrip)>>);
+
+impl Clone for StripCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for StripCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StripCache")
+    }
 }
 
 fn key(w: &LeqWindow) -> (u64, Weighting) {
@@ -351,6 +388,7 @@ impl LeqHistory {
             self.scale = Some(f.meta.scale);
             self.range = None;
         }
+        self.generation += 1;
         let (limits, values) = scale_inputs(cfg, f);
         self.range = Some(column_range(&limits, &values, f.meta.scale, self.range));
         for (i, w) in cfg.windows.iter().enumerate() {
@@ -386,6 +424,7 @@ impl LeqHistory {
 
     /// Forgets every point (a new log).
     pub fn clear(&mut self) {
+        self.generation += 1;
         self.series.clear();
     }
 
@@ -402,6 +441,7 @@ impl LeqHistory {
             return;
         }
         self.scale = Some(h.scale);
+        self.generation += 1;
         for (i, w) in h.windows.iter().enumerate() {
             let (Some(leq), Some(over)) = (h.leq.get(i), h.over.get(i)) else {
                 continue;
@@ -511,8 +551,84 @@ pub struct HistoryStrip {
     pub lines: Vec<HistoryLine>,
 }
 
-/// Lays the history out in `plot`.
+/// Lays the history out in `plot`. The strip is kept with the history and laid out again
+/// only when a frame arrives or the inputs change.
 pub fn history_strip(
+    cfg: &LeqConfig,
+    h: &LeqHistory,
+    judged: bool,
+    plot: Rect,
+    theme: &Theme,
+) -> HistoryStrip {
+    let key = StripKey {
+        generation: h.generation,
+        windows: cfg.windows.clone(),
+        judged,
+        plot,
+        theme: theme.clone(),
+    };
+    let mut cache = h.strip.0.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, s)) = cache.as_ref()
+        && *k == key
+    {
+        return s.clone();
+    }
+    let s = lay_out_strip(cfg, h, judged, plot, theme);
+    *cache = Some((key, s.clone()));
+    s
+}
+
+/// The points of `ps` from time `from` on (they are in time order).
+fn since(ps: &VecDeque<HistoryPoint>, from: f64) -> impl Iterator<Item = &HistoryPoint> {
+    ps.range(ps.partition_point(|p| p.t < from)..)
+}
+
+/// `points` (NaN breaks between runs) thinned to what a stroke wider than a pixel shows:
+/// within each pixel column of a run only its lowest and highest point, in time order, plus
+/// each run's ends. The line still reaches every peak and dip and every column's whole
+/// vertical extent, while hours of one-second points draw as a few points per column.
+fn decimate(points: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    let mut out = Vec::with_capacity(points.len().min(4096));
+    for run in points.split(|p| !p[0].is_finite() || !p[1].is_finite()) {
+        if run.is_empty() {
+            continue;
+        }
+        if out.last().is_some_and(|q: &[f32; 2]| q[0].is_finite()) {
+            out.push([f32::NAN, f32::NAN]);
+        }
+        let last = run.len() - 1;
+        let mut i = 0;
+        while i < run.len() {
+            let col = run[i][0].floor();
+            let mut j = i;
+            let (mut lo, mut hi) = (i, i);
+            while j < run.len() && run[j][0].floor() == col {
+                if run[j][1] < run[lo][1] {
+                    lo = j;
+                }
+                if run[j][1] > run[hi][1] {
+                    hi = j;
+                }
+                j += 1;
+            }
+            // Beyond the extremes only a run's own ends are needed.
+            let first = if i == 0 { i } else { lo.min(hi) };
+            let end = if j - 1 == last { j - 1 } else { lo.max(hi) };
+            let keep = [first, lo.min(hi), lo.max(hi), end];
+            let mut prev = usize::MAX;
+            for k in keep {
+                if k != prev {
+                    out.push(run[k]);
+                    prev = k;
+                }
+            }
+            i = j;
+        }
+    }
+    out
+}
+
+fn lay_out_strip(
     cfg: &LeqConfig,
     h: &LeqHistory,
     judged: bool,
@@ -541,7 +657,7 @@ pub fn history_strip(
     let mut hi = f64::NEG_INFINITY;
     for w in &cfg.windows {
         if let Some(ps) = h.points(w) {
-            for p in ps.iter().filter(|p| p.t >= now - span) {
+            for p in since(ps, now - span) {
                 let v = f64::from(p.leq);
                 if v.is_finite() {
                     lo = lo.min(v);
@@ -575,10 +691,11 @@ pub fn history_strip(
             let mut over: Vec<Vec<[f32; 2]>> = Vec::new();
             let mut run: Vec<[f32; 2]> = Vec::new();
             let mut last_t: Option<f64> = None;
-            for p in h.points(w).into_iter().flatten() {
-                if p.t < now - span - 1.0 {
-                    continue;
-                }
+            for p in h
+                .points(w)
+                .into_iter()
+                .flat_map(|ps| since(ps, now - span - 1.0))
+            {
                 // More than two seconds without a frame: a break, not a line across.
                 if last_t.is_some_and(|lt| p.t - lt > 2.5)
                     && pts.last().is_some_and(|q| q[0].is_finite())
@@ -628,8 +745,8 @@ pub fn history_strip(
             HistoryLine {
                 name: window_name(w),
                 color,
-                points: pts,
-                over,
+                points: decimate(&pts),
+                over: over.iter().map(|r| decimate(r)).collect(),
                 limit_y: w.limit.filter(|_| judged).map(|l| y.mapping.to_px(l.0)),
             }
         })

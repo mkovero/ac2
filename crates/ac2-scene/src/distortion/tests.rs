@@ -11,7 +11,7 @@ const SIZE: Viewport = Viewport {
     height: 500.0,
 };
 
-fn grid() -> GridDef {
+pub(crate) fn grid() -> GridDef {
     GridDef::Log {
         ppo: 12,
         k_min: -60,
@@ -20,7 +20,7 @@ fn grid() -> GridDef {
 }
 
 /// H2 at −40 dB (valid) up to 2 kHz, H3 within the noise, nothing above f2/k.
-fn data() -> TraceData {
+pub(crate) fn data() -> TraceData {
     let f = column_frequencies(&grid());
     let n = f.len();
     let curve = |level: f32, floor: f32, top: f64| DistortionCurve {

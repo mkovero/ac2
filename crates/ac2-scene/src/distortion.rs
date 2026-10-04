@@ -764,4 +764,4 @@ pub fn harmonic_marks(s: &SweepData) -> Vec<(f64, String)> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

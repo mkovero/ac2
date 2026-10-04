@@ -1526,7 +1526,15 @@ fn a_restarted_app_shows_the_history_from_the_log() -> R {
     let (_, now) = history_points(&d.st).ok_or("history")?;
     let close: Vec<_> = now.windows(2).filter(|w| w[1].t - w[0].t <= 0.5).collect();
     assert!(close.is_empty(), "no second twice: {close:?} of {now:?}");
-    assert!(strip_line(&d.st).len() >= now.len() - 1, "drawn");
+    // Drawn: seconds sharing a pixel column of the strip are thinned to its extremes, so
+    // the line has at most a point per second, and it runs from the oldest to the newest.
+    let line = strip_line(&d.st);
+    let xs = line.iter().filter(|p| p[0].is_finite()).map(|p| p[0]);
+    let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(a, b), x| (a.min(x), b.max(x)));
+    assert!(
+        line.len() >= 2 && line.len() <= now.len() && hi > lo,
+        "drawn: {line:?}"
+    );
 
     // Another app on the meter; a new log from this one clears both histories.
     let mut other = Driver::connect(ep.clone(), &daemon.describe())?;

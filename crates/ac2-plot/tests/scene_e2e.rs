@@ -86,6 +86,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         },
         freshness: Some(Freshness::from_age(0.1)),
         smoothing: None,
+        stored: None,
     }
 }
 
@@ -107,7 +108,14 @@ fn transfer_golden(name: &str, view: ViewState, status: Status) {
         width: 560.0,
         height: 360.0,
     };
-    let s = ac2_scene::tf::transfer_scene(&traces, &status, &view, &theme, size);
+    let s = ac2_scene::tf::transfer_scene(
+        &traces,
+        &ac2_scene::trace::DisplayCache::default(),
+        &status,
+        &view,
+        &theme,
+        size,
+    );
     assert_eq!(s.banners[0].text, "STALE · 2.4 s");
     // The strip sits above every pane.
     assert!(s.panes.iter().all(|p| p.plot.y > s.strip.bottom()));

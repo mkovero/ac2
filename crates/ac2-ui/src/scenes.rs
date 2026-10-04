@@ -137,11 +137,11 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             color: i,
         });
     }
-    let mut stored: Vec<(&ac2_proto::model::TraceData, Arc<GridColumns>)> = st
+    let mut stored: Vec<(&Arc<ac2_proto::model::TraceData>, Arc<GridColumns>)> = st
         .traces
         .values()
         .filter(|(t, _)| crate::state::on_transfer_pane(&t.meta))
-        .map(|(t, g)| (t.as_ref(), columns(g)))
+        .map(|(t, g)| (t, columns(g)))
         .collect();
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
 
@@ -185,7 +185,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     }
     let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
     let status = status(st, &shown, focus_tf(st), now);
-    transfer_scene(&traces, &status, &st.view, theme, size)
+    transfer_scene(&traces, &st.tf_display, &status, &st.view, theme, size)
 }
 
 /// The spectrum / RTA view.

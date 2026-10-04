@@ -37,6 +37,7 @@ use ac2_proto::model::{
     ImportNote, MicState, Polarity, Smoothing, TraceData, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
+use std::sync::{Arc, Mutex};
 
 use crate::primitives::Color;
 use crate::time::Freshness;
@@ -81,6 +82,9 @@ pub struct TfTrace<'a> {
     pub freshness: Option<Freshness>,
     /// Display smoothing the columns arrived with (the daemon applied it).
     pub smoothing: Option<Smoothing>,
+    /// The stored trace the columns are borrowed from: they are then fixed for as long as
+    /// it lives, so its display math can be kept between frames ([`DisplayCache`]).
+    pub stored: Option<&'a Arc<TraceData>>,
 }
 
 impl<'a> TfTrace<'a> {
@@ -111,13 +115,14 @@ impl<'a> TfTrace<'a> {
             },
             freshness: Some(freshness),
             smoothing: frame.meta.smoothing,
+            stored: None,
         }
     }
 
     /// A stored trace; colour, offset, polarity and nudge come from its edit record.
     /// Captured traces keep their epoch's shared time base; every other source is
     /// independent (decision 8a).
-    pub fn stored(data: &'a TraceData, freqs: &'a [f64]) -> Self {
+    pub fn stored(data: &'a Arc<TraceData>, freqs: &'a [f64]) -> Self {
         let m = &data.meta;
         let time_base = match m.source {
             TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
@@ -144,6 +149,7 @@ impl<'a> TfTrace<'a> {
             time_base,
             freshness: None,
             smoothing: m.edit.smoothing,
+            stored: Some(data),
         }
     }
 }
@@ -405,17 +411,122 @@ pub fn display_trace(
     }
 }
 
-/// Display math for every trace against the resolved reference.
+/// What a stored trace's display math depends on beyond its name and colour.
+#[derive(Debug)]
+struct CacheKey {
+    data: Arc<TraceData>,
+    freqs: Vec<f64>,
+    offset_db: f64,
+    polarity: Polarity,
+    shift_s: f64,
+    relation: PhaseRelation,
+    style: CoherenceStyle,
+}
+
+impl CacheKey {
+    fn matches(
+        &self,
+        t: &TfTrace<'_>,
+        data: &Arc<TraceData>,
+        shift: (f64, PhaseRelation),
+        style: &CoherenceStyle,
+    ) -> bool {
+        // The entry holds its `Arc`, so an equal pointer is the same, unchanged columns.
+        Arc::ptr_eq(&self.data, data)
+            && self.freqs == t.freqs
+            && self.offset_db.to_bits() == t.offset_db.to_bits()
+            && self.polarity == t.polarity
+            && self.shift_s.to_bits() == shift.0.to_bits()
+            && self.relation == shift.1
+            && self.style == *style
+    }
+}
+
+/// The trace's columns are its stored data's own (only then can they be keyed by it).
+fn columns_of_stored(t: &TfTrace<'_>, data: &TraceData) -> bool {
+    t.validity.is_none()
+        && std::ptr::eq(t.mag_db, data.mag_db.as_slice())
+        && t.phase_deg.map(<[f32]>::as_ptr) == data.phase_deg.as_deref().map(<[f32]>::as_ptr)
+        && t.coherence.map(<[f32]>::as_ptr) == data.coherence.as_deref().map(<[f32]>::as_ptr)
+}
+
+/// Stored traces' display math from the previous scene. A stored trace's columns do not
+/// change, so its unwrap, group delay and coherence opacity are worked out again only when
+/// its data, edits, reference or the coherence style change — not on every frame a live
+/// trace beside it moves. Entries not used by a scene are dropped. A clone starts empty.
+#[derive(Default)]
+pub struct DisplayCache(Mutex<Vec<(CacheKey, DisplayTrace)>>);
+
+impl Clone for DisplayCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for DisplayCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = self.0.lock().map_or(0, |v| v.len());
+        write!(f, "DisplayCache({n})")
+    }
+}
+
+impl DisplayCache {
+    /// Stored traces whose display math is kept.
+    pub fn len(&self) -> usize {
+        self.0.lock().map_or(0, |v| v.len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Display math for every trace against the resolved reference; stored traces come from
+/// `cache` when nothing they depend on changed.
 pub fn display_traces(
     traces: &[TfTrace<'_>],
+    cache: &DisplayCache,
     wanted_reference: Option<TraceKey>,
     style: &CoherenceStyle,
 ) -> (Option<PhaseReference>, Vec<DisplayTrace>) {
     let reference = resolve_reference(traces, wanted_reference);
+    let mut old = cache.0.lock().unwrap_or_else(|e| e.into_inner());
+    let mut kept = Vec::new();
     let shown = traces
         .iter()
-        .map(|t| display_trace(t, reference.as_ref(), style))
+        .map(|t| {
+            let Some(data) = t.stored.filter(|d| columns_of_stored(t, d)) else {
+                return display_trace(t, reference.as_ref(), style);
+            };
+            let shift = phase_shift(t, reference.as_ref());
+            let hit = old
+                .iter()
+                .position(|(k, _)| k.matches(t, data, shift, style));
+            let (key, mut d) = match hit {
+                Some(i) => old.swap_remove(i),
+                None => (
+                    CacheKey {
+                        data: Arc::clone(data),
+                        freqs: t.freqs.to_vec(),
+                        offset_db: t.offset_db,
+                        polarity: t.polarity,
+                        shift_s: shift.0,
+                        relation: shift.1,
+                        style: *style,
+                    },
+                    display_trace(t, reference.as_ref(), style),
+                ),
+            };
+            d.key = t.key;
+            d.name.clone_from(&t.name);
+            d.color = t.color;
+            d.freshness = t.freshness;
+            d.smoothing = t.smoothing;
+            kept.push((key, d.clone()));
+            d
+        })
         .collect();
+    *old = kept;
     (reference, shown)
 }
 
@@ -580,6 +691,7 @@ mod tests {
                 time_base,
                 freshness: None,
                 smoothing: None,
+                stored: None,
             }
         }
     }
@@ -611,7 +723,12 @@ mod tests {
         // Each trace on its own is flat: perfectly compensated.
         assert!(a.phase.iter().chain(&b.phase).all(|p| p.abs() < 1e-3));
         let traces = [a.trace(1, shared(t1)), b.trace(2, shared(t2))];
-        let (r, d) = display_traces(&traces, None, &CoherenceStyle::default());
+        let (r, d) = display_traces(
+            &traces,
+            &DisplayCache::default(),
+            None,
+            &CoherenceStyle::default(),
+        );
         assert_eq!(r.map(|r| r.key), Some(TraceKey::Live(MeasId(1))));
         assert_eq!(d[0].relation, PhaseRelation::Reference);
         assert_eq!(d[1].relation, PhaseRelation::Relative);
@@ -632,6 +749,7 @@ mod tests {
         // Picking the other trace as reference flips the sign.
         let (_, d) = display_traces(
             &traces,
+            &DisplayCache::default(),
             Some(TraceKey::Live(MeasId(2))),
             &CoherenceStyle::default(),
         );
@@ -647,13 +765,23 @@ mod tests {
         let mut tb = b.trace(2, shared(0.02));
         tb.nudge = Seconds(0.0005);
         let ta = a.trace(1, shared(0.01));
-        let (_, d) = display_traces(&[ta.clone(), tb], None, &CoherenceStyle::default());
+        let (_, d) = display_traces(
+            &[ta.clone(), tb],
+            &DisplayCache::default(),
+            None,
+            &CoherenceStyle::default(),
+        );
         // Δ = τ_k − τ_ref − ν = 10 ms − 0.5 ms.
         assert!((d[1].shift_s - 0.0095).abs() < 1e-12);
         // Independent (imported) trace keeps its own alignment, nudge only.
         let mut ti = b.trace(3, TimeBase::Independent);
         ti.nudge = Seconds(0.001);
-        let (_, d) = display_traces(&[ta.clone(), ti], None, &CoherenceStyle::default());
+        let (_, d) = display_traces(
+            &[ta.clone(), ti],
+            &DisplayCache::default(),
+            None,
+            &CoherenceStyle::default(),
+        );
         assert_eq!(d[1].relation, PhaseRelation::Independent);
         assert!((d[1].shift_s + 0.001).abs() < 1e-12);
         assert!((d[1].group_delay_s[10] + 0.001).abs() < 1e-6);
@@ -665,7 +793,12 @@ mod tests {
                 delay: Seconds(0.02),
             },
         );
-        let (_, d) = display_traces(&[ta, to], None, &CoherenceStyle::default());
+        let (_, d) = display_traces(
+            &[ta, to],
+            &DisplayCache::default(),
+            None,
+            &CoherenceStyle::default(),
+        );
         assert_eq!(d[1].relation, PhaseRelation::Independent);
         assert_eq!(d[1].shift_s, 0.0);
     }
@@ -697,6 +830,66 @@ mod tests {
                 .all(|p| (p.abs() - 180.0).abs() < 1e-3)
         );
         assert!(d.inverted);
+    }
+
+    #[test]
+    fn stored_display_math_is_kept_until_what_it_depends_on_changes() {
+        let mut raw = crate::distortion::tests::data();
+        let n = raw.mag_db.len();
+        raw.phase_deg = Some((0..n).map(|i| (i as f32 * 37.0) % 360.0 - 180.0).collect());
+        raw.coherence = Some((0..n).map(|i| (i % 10) as f32 / 10.0).collect());
+        let data = Arc::new(raw);
+        let freqs = crate::grid::column_frequencies(&crate::distortion::tests::grid());
+        let live = Data::delay(n, 0.001, 0.001);
+        let cache = DisplayCache::default();
+        let style = CoherenceStyle {
+            blank_below: Some(0.3),
+            ..CoherenceStyle::default()
+        };
+        // NaN gaps make `==` useless on whole traces; their debug text compares them.
+        let fresh = |traces: &[TfTrace<'_>], style: &CoherenceStyle| {
+            format!(
+                "{:?}",
+                display_traces(traces, &DisplayCache::default(), None, style)
+            )
+        };
+        let kept = |traces: &[TfTrace<'_>], style: &CoherenceStyle| {
+            format!("{:?}", display_traces(traces, &cache, None, style))
+        };
+        let mut traces = vec![live.trace(1, shared(0.001)), TfTrace::stored(&data, &freqs)];
+        let first = kept(&traces, &style);
+        assert_eq!(first, fresh(&traces, &style));
+        assert_eq!(cache.len(), 1);
+        // Unchanged: the kept result, identical to working it out again.
+        assert_eq!(kept(&traces, &style), first);
+        // Every input it depends on lays it out again.
+        traces[1].offset_db = 3.0;
+        traces[1].name = "renamed".into();
+        let edited = kept(&traces, &style);
+        assert_ne!(edited, first);
+        assert_eq!(edited, fresh(&traces, &style));
+        assert!(edited.contains("renamed"));
+        traces[1].polarity = Polarity::Inverted;
+        traces[1].nudge = Seconds(0.0005);
+        assert_eq!(kept(&traces, &style), fresh(&traces, &style));
+        // The reference moves: its delay changes the stored trace's rotation.
+        traces[0] = live.trace(1, shared(0.002));
+        assert_eq!(kept(&traces, &style), fresh(&traces, &style));
+        let other = CoherenceStyle::default();
+        assert_eq!(kept(&traces, &other), fresh(&traces, &other));
+        // New data for the trace (a re-fetch) replaces the kept result.
+        let mut refetched = (*data).clone();
+        refetched.mag_db[9] = 12.0;
+        let refetched = Arc::new(refetched);
+        traces[1] = TfTrace::stored(&refetched, &freqs);
+        assert_eq!(kept(&traces, &other), fresh(&traces, &other));
+        let (_, d) = display_traces(&traces, &cache, None, &other);
+        assert_eq!(d[1].magnitude_db[9], 12.0);
+        assert_eq!(cache.len(), 1);
+        // A trace no longer shown is forgotten.
+        traces.pop();
+        display_traces(&traces, &cache, None, &other);
+        assert!(cache.is_empty());
     }
 
     #[test]

@@ -379,6 +379,104 @@ fn history_marks_over_segments_and_limits() {
     assert_eq!(h.points(&c.windows[0]).expect("series").len(), 1);
 }
 
+#[test]
+fn decimation_keeps_ends_breaks_and_each_columns_extremes() {
+    // Sparse: at most two points per pixel column, nothing goes.
+    let sparse: Vec<[f32; 2]> = (0..50).map(|i| [i as f32 * 0.6, (i % 7) as f32]).collect();
+    assert_eq!(decimate(&sparse), sparse);
+    // Dense: 40 points per column over 100 columns, a break in the middle.
+    let y = |i: usize| ((i as f32) * 0.37).sin() * 50.0 + if i == 1234 { 80.0 } else { 0.0 };
+    let mut dense: Vec<[f32; 2]> = (0..4000).map(|i| [i as f32 / 40.0, y(i)]).collect();
+    dense[2000] = [f32::NAN, f32::NAN];
+    let d = decimate(&dense);
+    assert!(d.len() <= 2 * 100 + 5, "{} points", d.len());
+    assert_eq!(d.iter().filter(|p| p[0].is_nan()).count(), 1);
+    for run in [&dense[..2000], &dense[2001..]] {
+        assert!(d.contains(&run[0]) && d.contains(&run[run.len() - 1]));
+    }
+    for col in 0..100 {
+        let ys = dense
+            .iter()
+            .filter(|p| p[0].is_finite() && p[0].floor() == col as f32)
+            .map(|p| p[1]);
+        let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(v), b.max(v)));
+        let kept: Vec<f32> = d
+            .iter()
+            .filter(|p| p[0].is_finite() && p[0].floor() == col as f32)
+            .map(|p| p[1])
+            .collect();
+        assert!(kept.contains(&lo) && kept.contains(&hi), "column {col}");
+    }
+    // Time order is kept: x never goes back within a run.
+    assert!(
+        d.windows(2)
+            .all(|w| !(w[0][0].is_finite() && w[1][0].is_finite()) || w[1][0] >= w[0][0])
+    );
+}
+
+#[test]
+fn hours_of_history_draw_a_few_points_per_column_and_are_laid_out_once_per_frame() {
+    let c = LeqConfig {
+        windows: vec![w(60.0, Some(95.0))],
+        horizon: Seconds(60.0),
+    };
+    let mk = |leq: f32| LeqFrame {
+        leq: vec![leq],
+        elapsed: vec![3600.0],
+        measured: vec![3600.0],
+        allowed: vec![f32::NAN],
+        recover: vec![f32::NAN],
+        least: vec![leq],
+        over_in: vec![f32::NAN],
+        flags: vec![if leq > 95.0 {
+            judged(LeqFlags::OVER)
+        } else {
+            judged(LeqFlags::NONE)
+        }],
+        ..frame(LevelScale::DbSpl)
+    };
+    let level = |k: u32| 90.0 + 4.0 * (f64::from(k) * 0.05).sin() as f32;
+    let mut h = LeqHistory::default();
+    // Four hours, one point a second; a single loud second an hour before the end.
+    let n = 4 * 3600;
+    for k in 0..n {
+        let v = if k == n - 3600 { 104.0 } else { level(k) };
+        h.push(&c, &mk(v), f64::from(k));
+    }
+    let plot = Rect::new(40.0, 10.0, 600.0, 160.0);
+    let th = Theme::dark();
+    let s = history_strip(&c, &h, true, plot, &th);
+    let l = &s.lines[0];
+    assert!(l.points.len() <= 2 * 600 + 4, "{} points", l.points.len());
+    // The peak is drawn, at its height and time.
+    let peak = [s.x.mapping.to_px(-3600.0 / 60.0), s.y.mapping.to_px(104.0)];
+    assert!(
+        l.points
+            .iter()
+            .any(|p| (p[0] - peak[0]).abs() < 0.5 && (p[1] - peak[1]).abs() < 1e-3)
+    );
+    // Every over run still starts at its first over second and ends back under.
+    assert!(
+        l.over
+            .iter()
+            .any(|r| r.iter().any(|p| (p[1] - peak[1]).abs() < 1e-3))
+    );
+    for r in &l.over {
+        assert!(r.len() >= 2);
+    }
+    // The same inputs reuse the strip; a new frame lays it out again.
+    assert_eq!(history_strip(&c, &h, true, plot, &th), s);
+    h.push(&c, &mk(99.0), f64::from(n));
+    let s2 = history_strip(&c, &h, true, plot, &th);
+    assert_ne!(s2, s);
+    assert_eq!(s2, lay_out_strip(&c, &h, true, plot, &th));
+    let wider = Rect::new(40.0, 10.0, 700.0, 160.0);
+    assert_eq!(
+        history_strip(&c, &h, true, wider, &th),
+        lay_out_strip(&c, &h, true, wider, &th)
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Columns
 
