@@ -110,6 +110,67 @@ impl Message {
     }
 }
 
+/// Kernel-level dead-peer detection on a socket's TCP connections; see
+/// [`Socket::set_tcp_liveness`].
+///
+/// A peer that vanishes without closing its connection (a laptop lid closed, Wi-Fi gone, a
+/// power cut) leaves the connection open for as long as the kernel keeps retransmitting,
+/// about a quarter of an hour, with its queue and subscriptions alive. Two kernel timers
+/// close it sooner: keepalive probes an idle connection, and the retransmission limit ends
+/// one whose sent data goes unacknowledged (a queue towards a dead peer is never idle, so
+/// keepalive alone would not fire there).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TcpLiveness {
+    /// Keepalive probing starts after this long with nothing received.
+    pub idle: Duration,
+    /// Between keepalive probes.
+    pub interval: Duration,
+    /// Unanswered keepalive probes before the connection is closed (ignored on Windows).
+    pub count: u32,
+    /// Longest time sent data may stay unacknowledged before the connection is closed
+    /// (`TCP_USER_TIMEOUT` on Linux, `TCP_MAXRT` on Windows; whole milliseconds).
+    pub max_unacked: Duration,
+}
+
+/// One message part whose content libzmq holds without copying it: received parts stay in
+/// the buffer libzmq read them into, parts made with [`Part::from_vec`] keep the `Vec`'s
+/// buffer, and [`Part::share`] only adds a reference. Reads as bytes through `Deref`.
+///
+/// `Send` but not `Sync`.
+#[derive(Debug)]
+pub struct Part(raw::RawMsg);
+
+impl Part {
+    /// A part owning `data`, not copied (libzmq frees it once the last queued share has
+    /// been sent).
+    pub fn from_vec(data: Vec<u8>) -> Result<Self> {
+        zmq(raw::RawMsg::from_vec(data)).map(Self)
+    }
+
+    /// A part holding a copy of `data` (for small parts such as tags and topics).
+    pub fn copy_from(data: &[u8]) -> Result<Self> {
+        zmq(raw::RawMsg::copy_from(data)).map(Self)
+    }
+
+    /// Another part with the same content, without copying large content.
+    pub fn share(&self) -> Result<Self> {
+        zmq(self.0.share()).map(Self)
+    }
+}
+
+impl std::ops::Deref for Part {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.0.bytes()
+    }
+}
+
+impl AsRef<[u8]> for Part {
+    fn as_ref(&self) -> &[u8] {
+        self.0.bytes()
+    }
+}
+
 /// A libzmq socket.
 ///
 /// `Send` but not `Sync`: a socket may move to another thread but is used by one thread at a
@@ -230,6 +291,81 @@ impl Socket {
         self.set_int(raw::ZMQ_RECONNECT_IVL, v)
     }
 
+    /// Upper bound of the reconnect back-off: after each failed attempt the delay doubles
+    /// from [`Socket::set_reconnect_interval`] up to `max`. `None` = no back-off (every retry
+    /// after the base interval), libzmq's default.
+    pub fn set_reconnect_interval_max(&self, max: Option<Duration>) -> Result<()> {
+        let v = max.map_or(Ok(0), |d| {
+            millis(d, "reconnect interval max exceeds i32 milliseconds")
+        })?;
+        self.set_int(raw::ZMQ_RECONNECT_IVL_MAX, v)
+    }
+
+    /// The reconnect back-off bound; see [`Socket::set_reconnect_interval_max`].
+    pub fn reconnect_interval_max(&self) -> Result<Option<Duration>> {
+        let v = zmq(self.raw.get_int(raw::ZMQ_RECONNECT_IVL_MAX))?;
+        Ok((v > 0).then(|| Duration::from_millis(v.unsigned_abs().into())))
+    }
+
+    /// Kernel dead-peer detection on this socket's TCP connections, set before
+    /// `bind`/`connect` (listeners pass it to every accepted connection); `None` leaves the
+    /// OS defaults. Not used on ipc or inproc, whose peers cannot vanish unnoticed.
+    ///
+    /// This, not libzmq's ZMTP heartbeats, is how ac2 finds dead peers: libzmq 4.3.5's
+    /// heartbeat code trips assertions in its stream engine (on a connection whose reads are
+    /// paused by a full receive queue, and when a heartbeat timer fires after the connection
+    /// failed), which aborts the process.
+    pub fn set_tcp_liveness(&self, l: Option<TcpLiveness>) -> Result<()> {
+        let Some(l) = l else {
+            self.set_int(raw::ZMQ_TCP_KEEPALIVE, -1)?;
+            return self.set_int(raw::ZMQ_TCP_MAXRT, 0);
+        };
+        let secs = |d: Duration, what| {
+            c_int::try_from(d.as_secs())
+                .ok()
+                .filter(|s| *s > 0)
+                .ok_or(Error::InvalidArgument(what))
+        };
+        let idle = secs(l.idle, "keepalive idle must be 1 s to i32 seconds")?;
+        let interval = secs(l.interval, "keepalive interval must be 1 s to i32 seconds")?;
+        let maxrt = millis(l.max_unacked, "max unacked exceeds i32 milliseconds")?;
+        if maxrt <= 0 {
+            return Err(Error::InvalidArgument("max unacked must be positive"));
+        }
+        self.set_int(raw::ZMQ_TCP_KEEPALIVE, 1)?;
+        self.set_int(raw::ZMQ_TCP_KEEPALIVE_IDLE, idle)?;
+        self.set_int(raw::ZMQ_TCP_KEEPALIVE_INTVL, interval)?;
+        self.set_int(
+            raw::ZMQ_TCP_KEEPALIVE_CNT,
+            count(l.count.max(1), "keepalive count exceeds i32")?,
+        )?;
+        self.set_int(raw::ZMQ_TCP_MAXRT, maxrt)
+    }
+
+    /// The dead-peer detection settings; `None` when left to the OS.
+    pub fn tcp_liveness(&self) -> Result<Option<TcpLiveness>> {
+        if zmq(self.raw.get_int(raw::ZMQ_TCP_KEEPALIVE))? != 1 {
+            return Ok(None);
+        }
+        let get = |opt| zmq(self.raw.get_int(opt)).map(c_int::unsigned_abs);
+        Ok(Some(TcpLiveness {
+            idle: Duration::from_secs(get(raw::ZMQ_TCP_KEEPALIVE_IDLE)?.into()),
+            interval: Duration::from_secs(get(raw::ZMQ_TCP_KEEPALIVE_INTVL)?.into()),
+            count: get(raw::ZMQ_TCP_KEEPALIVE_CNT)?,
+            max_unacked: Duration::from_millis(get(raw::ZMQ_TCP_MAXRT)?.into()),
+        }))
+    }
+
+    /// The outgoing queue limit per peer; see [`Socket::set_send_hwm`].
+    pub fn send_hwm(&self) -> Result<u32> {
+        zmq(self.raw.get_int(raw::ZMQ_SNDHWM)).map(c_int::unsigned_abs)
+    }
+
+    /// The incoming queue limit per peer; see [`Socket::set_recv_hwm`].
+    pub fn recv_hwm(&self) -> Result<u32> {
+        zmq(self.raw.get_int(raw::ZMQ_RCVHWM)).map(c_int::unsigned_abs)
+    }
+
     /// Maximum time for the ZMTP (and CURVE) handshake; `None` = no limit.
     pub fn set_handshake_interval(&self, interval: Option<Duration>) -> Result<()> {
         let v = interval.map_or(Ok(0), |d| {
@@ -342,6 +478,40 @@ impl Socket {
         Ok(())
     }
 
+    /// Sends `parts` as one atomic multipart message without blocking and without copying
+    /// their content: each is shared ([`Part::share`]), so the caller keeps them (to send
+    /// again, or to retry after [`Error::WouldBlock`], when nothing was queued).
+    pub fn try_send_parts(&self, parts: &[Part]) -> Result<()> {
+        let Some(last) = parts.len().checked_sub(1) else {
+            return Err(Error::InvalidArgument("a message has at least one frame"));
+        };
+        for (i, p) in parts.iter().enumerate() {
+            let more = if i < last { raw::ZMQ_SNDMORE } else { 0 };
+            let mut m = zmq(p.0.share())?;
+            // As in `send_with`: only the first part can hit the high-water mark.
+            zmq(self.raw.send_msg(&mut m, raw::ZMQ_DONTWAIT | more))?;
+        }
+        Ok(())
+    }
+
+    /// Receives one whole multipart message if one is queued, its parts left in libzmq's
+    /// buffers (no copy, no connection metadata); `Ok(None)` otherwise.
+    pub fn try_recv_parts(&self) -> Result<Option<Vec<Part>>> {
+        let (first, mut more) = match zmq(self.raw.recv_msg(raw::ZMQ_DONTWAIT)) {
+            Ok(m) => m,
+            Err(Error::WouldBlock) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let mut parts = vec![Part(first)];
+        while more {
+            // The remaining parts of a multipart message arrive atomically with the first.
+            let (p, m) = zmq(self.raw.recv_msg(0))?;
+            more = m;
+            parts.push(Part(p));
+        }
+        Ok(Some(parts))
+    }
+
     /// Receives one whole multipart message, blocking until one arrives.
     pub fn recv(&self) -> Result<Message> {
         self.recv_with(0)
@@ -370,6 +540,24 @@ impl Socket {
         let mut items = [PollItem::readable(self)];
         poll(&mut items, Some(timeout))?;
         Ok(items[0].is_readable())
+    }
+
+    /// Whether a message is queued now (`ZMQ_EVENTS`). Also clears the pending signal of
+    /// [`Socket::notify_fd`], so it must be checked before every wait on that descriptor.
+    pub fn has_message(&self) -> Result<bool> {
+        let ev = zmq(self.raw.get_int(raw::ZMQ_EVENTS))?;
+        Ok(ev & c_int::from(raw::ZMQ_POLLIN) != 0)
+    }
+
+    /// The descriptor libzmq signals when this socket's state may have changed (`ZMQ_FD`),
+    /// for waiting in an event loop instead of in [`Socket::wait_readable`]. It is
+    /// edge-triggered and says nothing by itself: a waiter checks
+    /// [`Socket::has_message`] first, waits for the descriptor to become readable only when
+    /// that is `false`, and checks again after every wake. Never read from or closed by the
+    /// caller; valid as long as the socket.
+    #[cfg(unix)]
+    pub fn notify_fd(&self) -> Result<std::os::fd::RawFd> {
+        zmq(self.raw.get_int(raw::ZMQ_FD))
     }
 
     fn recv_with(&self, flags: c_int) -> Result<Message> {

@@ -116,7 +116,7 @@ impl Emitter {
         let topic = data.topic();
         let frame = self.frame(s, self.env.seqs.next(topic), data);
         match ac2_proto::encode_frame(&frame) {
-            Ok(parts) => self.outbox.frame(&parts),
+            Ok(parts) => self.outbox.frame(parts),
             Err(e) => {
                 tracing::error!("{topic}: frame not encodable: {e}");
                 false

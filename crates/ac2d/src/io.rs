@@ -19,7 +19,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_zmq::{
-    Error as ZmqError, Message, PollItem, SecureContext, Socket, SubscriptionTracker, poll,
+    Error as ZmqError, Message, Part, PollItem, SecureContext, Socket, SubscriptionTracker, poll,
 };
 
 use crate::control::ControlMsg;
@@ -68,7 +68,8 @@ pub(crate) struct IoSockets {
 }
 
 struct Slot {
-    parts: Vec<Vec<u8>>,
+    /// Shared with libzmq, never copied: every send of the slot adds a reference.
+    parts: Vec<Part>,
     dirty: bool,
     last_sent: Option<Instant>,
 }
@@ -81,12 +82,21 @@ const ZAP_CHECK: Duration = Duration::from_millis(100);
 /// Longest poll in local mode with nothing held back: every input wakes the poll anyway.
 const IDLE_POLL: Duration = Duration::from_secs(1);
 
-/// Per-peer send queue of the data socket, set once before it binds: three frames per topic
-/// for a full desk (about 40 topics). It is never changed on the live socket: libzmq applies
+/// Per-peer send queue of the data socket, in messages.
+///
+/// The latest slots already conflate per topic, so the queue only has to hold one burst:
+/// every slot a late joiner is sent at once, or one publish round of a full desk (about 40
+/// topics) plus events and keepalives. Within such a burst libzmq does not yet see what the
+/// peer has read, so a smaller queue would drop part of every round even for a fast local
+/// peer. Anything above one burst only adds latency for a peer slower than the publish rate
+/// (a Wi-Fi link): its queue stays full and every frame waits behind all the others, so the
+/// standing delay is this many frames divided by what the link carries per second.
+///
+/// Set once before the socket binds. It is never changed on the live socket: libzmq applies
 /// a new SNDHWM to existing pipes by sending commands to their peers, and such a command
 /// racing with a disconnecting peer's pipe teardown is a use-after-free in libzmq 4.3.5's
 /// I/O thread (it crashed the daemon at shutdown after a client with many subscriptions left).
-pub(crate) const DATA_SNDHWM: u32 = 128;
+pub(crate) const DATA_SNDHWM: u32 = 48;
 
 pub(crate) fn spawn(
     sockets: IoSockets,
@@ -114,6 +124,14 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
     // its own for nothing a reader could see.
     let min_gap = period - period / 4;
     let mut slots: HashMap<Vec<u8>, Slot> = HashMap::new();
+    let evt_topic = match Part::copy_from(b"evt") {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("io thread cannot start: {e}");
+            let _ = to_control.send(ControlMsg::Fatal(e.to_string()));
+            return;
+        }
+    };
     loop {
         if let Some(sc) = &secure
             && net.is_some()
@@ -206,7 +224,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         let mut stop = false;
         if p_ready {
             for _ in 0..(4 * BATCH) {
-                let m = match pull.try_recv() {
+                let mut frames = match pull.try_recv_parts() {
                     Ok(Some(m)) => m,
                     Ok(None) => break,
                     Err(e) => {
@@ -214,15 +232,17 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         break;
                     }
                 };
-                let mut frames = m.into_frames();
                 if frames.is_empty() || frames[0].len() != 1 {
                     continue;
                 }
                 let tag = frames.remove(0)[0];
                 match tag {
                     TAG_REPLY => {
-                        if let (Some((router, _)), [rid, body]) = (&net, frames.as_slice()) {
-                            match router.try_send(&[rid, body]) {
+                        // [routing id, reply]
+                        if let Some((router, _)) = &net
+                            && frames.len() == 2
+                        {
+                            match router.try_send_parts(&frames) {
                                 Ok(()) => {}
                                 Err(ZmqError::HostUnreachable) => {
                                     tracing::debug!("reply to a departed client dropped");
@@ -233,7 +253,10 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                     }
                     TAG_EVENT => {
                         if let (Some((_, xpub)), [body]) = (&net, frames.as_slice()) {
-                            send_data(xpub, &[b"evt".to_vec(), body.clone()]);
+                            match (evt_topic.share(), body.share()) {
+                                (Ok(t), Ok(b)) => send_data(xpub, &[t, b]),
+                                (Err(e), _) | (_, Err(e)) => tracing::warn!("event not sent: {e}"),
+                            }
                         }
                     }
                     TAG_KA => {
@@ -248,9 +271,9 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         let now = Instant::now();
                         // Topics repeat every frame; the key is allocated only the first
                         // time a topic is seen.
-                        let slot = match slots.get_mut(&frames[0]) {
+                        let slot = match slots.get_mut(&*frames[0]) {
                             Some(slot) => slot,
-                            None => slots.entry(frames[0].clone()).or_insert(Slot {
+                            None => slots.entry(frames[0].to_vec()).or_insert(Slot {
                                 parts: Vec::new(),
                                 dirty: false,
                                 last_sent: None,
@@ -324,10 +347,10 @@ fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
     });
 }
 
-fn send_data(xpub: &Socket, parts: &[Vec<u8>]) {
+fn send_data(xpub: &Socket, parts: &[Part]) {
     // XPUB never blocks: a peer at its high-water mark misses this message, and the next
     // newer one per topic supersedes it.
-    match xpub.try_send(parts) {
+    match xpub.try_send_parts(parts) {
         Ok(()) | Err(ZmqError::WouldBlock) => {}
         Err(e) => tracing::warn!("data send: {e}"),
     }

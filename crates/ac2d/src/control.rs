@@ -644,7 +644,7 @@ impl Control {
             }),
         };
         match ac2_proto::encode_frame(&frame) {
-            Ok(parts) => self.s.outbox.ka(&parts),
+            Ok(parts) => self.s.outbox.ka(parts),
             Err(e) => tracing::error!("keepalive not encodable: {e}"),
         }
     }

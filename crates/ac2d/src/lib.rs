@@ -57,9 +57,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use ac2_proto::units::DaemonIncarnation;
-use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType};
+use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType, TcpLiveness};
 
 pub use config::{
     Advertise, AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError,
@@ -76,6 +77,19 @@ const ZAP_DOMAIN: &str = "ac2";
 /// Kernel send buffer of the data socket in network mode (Q2): a small buffer keeps the
 /// backlog in front of a slow link short, so the latest-slot publisher stays fresh.
 const NETWORK_SNDBUF: u32 = 64 * 1024;
+/// Dead-peer detection on both client-facing sockets (TCP only). A client that vanishes
+/// without closing its connection (lid closed, out of Wi-Fi range) would otherwise keep its
+/// queue full of frames, its subscriptions (and so the optional work done for them) and its
+/// pipe for as long as the kernel retransmits, about a quarter of an hour. With these an
+/// idle connection is probed after 5 s and closed after three unanswered probes, and one
+/// whose frames go unacknowledged for 15 s is closed; the limits leave room for a Wi-Fi
+/// link that stalls for a few seconds.
+const PEER_LIVENESS: TcpLiveness = TcpLiveness {
+    idle: Duration::from_secs(5),
+    interval: Duration::from_secs(1),
+    count: 3,
+    max_unacked: Duration::from_secs(15),
+};
 
 /// Why the daemon did not start.
 #[derive(Debug)]
@@ -259,6 +273,8 @@ fn prepare_ipc(_endpoint: &str) -> Result<(), StartError> {
 fn data_socket_options(xpub: &Socket, network: bool) -> Result<(), StartError> {
     xpub.set_xpub_verbose(true).map_err(zerr("XPUB_VERBOSE"))?;
     xpub.set_send_hwm(io::DATA_SNDHWM).map_err(zerr("SNDHWM"))?;
+    xpub.set_tcp_liveness(Some(PEER_LIVENESS))
+        .map_err(zerr("XPUB liveness"))?;
     if network {
         xpub.set_send_buffer(Some(NETWORK_SNDBUF))
             .map_err(zerr("SNDBUF"))?;
@@ -332,6 +348,9 @@ impl Daemon {
         router
             .set_router_mandatory(true)
             .map_err(zerr("ROUTER_MANDATORY"))?;
+        router
+            .set_tcp_liveness(Some(PEER_LIVENESS))
+            .map_err(zerr("ROUTER liveness"))?;
         data_socket_options(&xpub, network)?;
         let (ctrl_ep, data_ep) = match &config.listen {
             Listen::Inproc { name } => (

@@ -338,6 +338,23 @@ impl Mirror {
         self.request(Need::Snapshot, now)
     }
 
+    /// Whether [`Mirror::on_tick`] can do anything now or soon: a snapshot or `since` is
+    /// outstanding, or a keepalive announced a rev not applied yet. While mirroring with
+    /// nothing outstanding the tick has nothing to check, and the sync task can sleep until
+    /// the next message.
+    pub fn needs_tick(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match self.phase {
+            Phase::AwaitKa => false,
+            Phase::NeedSnapshot => true,
+            Phase::Live => {
+                !self.pending.is_empty() || self.ka.as_ref().is_some_and(|k| k.rev > self.rev)
+            }
+        }
+    }
+
     /// Periodic check: retries failed requests, and the 1 s missed-patch rule.
     pub fn on_tick(&mut self, now: Instant) -> Option<Need> {
         if !self.enabled {
@@ -523,6 +540,22 @@ mod tests {
         assert!(m.view().state.is_none());
         assert_eq!(m.view().incarnation_changes, 1);
         assert_eq!(m.on_resync_required(t1), Some(Need::Snapshot));
+    }
+
+    #[test]
+    fn ticks_only_while_something_is_outstanding() {
+        let t0 = Instant::now();
+        let mut m = Mirror::new(true);
+        assert!(!m.needs_tick(), "waiting for the first ka");
+        let (s, k) = ka(1, 5);
+        assert_eq!(m.on_ka(&s, k, t0, 0), Some(Need::Snapshot));
+        assert!(m.needs_tick(), "snapshot outstanding");
+        assert_eq!(m.on_snapshot(snap(1, 5), t0), None);
+        assert!(!m.needs_tick(), "mirroring, nothing outstanding");
+        let (s, k) = ka(1, 6);
+        assert_eq!(m.on_ka(&s, k, t0, 0), None);
+        assert!(m.needs_tick(), "ka announced rev 6, not applied");
+        assert!(!Mirror::new(false).needs_tick());
     }
 
     #[test]

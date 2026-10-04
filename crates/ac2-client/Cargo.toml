@@ -22,7 +22,7 @@ ac2-paths = { path = "../ac2-paths" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-traces = { path = "../ac2-traces", optional = true }
 ac2-zmq = { path = "../ac2-zmq" }
-tokio = { version = "1.53", features = ["rt", "sync", "time", "macros"] }
+tokio = { version = "1.53", features = ["rt", "sync", "time", "macros", "net"] }
 thiserror = "2"
 getrandom = "0.3"
 

@@ -3016,7 +3016,7 @@ fn input_meters_follow_the_dialog() {
             clip: vec![ClipFlags::NONE; 4],
         })),
     ] {
-        latest.frames.insert(f.topic.to_string(), f);
+        latest.frames.insert(f.topic.to_string().into(), f);
     }
     assert!(latest.get(&Topic::PreviewLevels).is_some());
     t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
@@ -3121,7 +3121,7 @@ fn sidebar_meters_name_every_session_input_by_role() {
         age: Some(0.0),
         stale: false,
     };
-    latest.frames.insert(f.topic.to_string(), f);
+    latest.frames.insert(f.topic.to_string().into(), f);
     t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids: Default::default(),
@@ -4195,7 +4195,7 @@ fn leq_data_logged(
         stale: false,
     };
     let mut latest = Latest::default();
-    latest.frames.insert(f.topic.to_string(), f);
+    latest.frames.insert(f.topic.to_string().into(), f);
     ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids: Default::default(),
@@ -4860,7 +4860,7 @@ fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> Co
         stale: false,
     };
     let mut latest = Latest::default();
-    latest.frames.insert(f.topic.to_string(), f);
+    latest.frames.insert(f.topic.to_string().into(), f);
     ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids: Default::default(),

@@ -30,6 +30,7 @@ use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
 type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 const DEADLINE: Duration = Duration::from_secs(30);
+const NAME: &str = "ac2-ui e2e test";
 
 /// The app without its window: messages through the reducer, its requests to the link.
 struct Driver {
@@ -39,10 +40,10 @@ struct Driver {
 }
 
 impl Driver {
-    fn connect(endpoints: Endpoints, describe: &str) -> R<Self> {
+    fn connect(config: ClientConfig, describe: &str) -> R<Self> {
         let conn = Conn::start(
             Target {
-                config: ClientConfig::new(endpoints, "ac2-ui e2e test"),
+                config,
                 describe: describe.into(),
             },
             Arc::new(|| {}),
@@ -211,7 +212,7 @@ fn measure_from_empty(d: &mut Driver) -> R {
 #[test]
 fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     // The level typed there stays: arm and fire.
     d.key("Space");
@@ -280,13 +281,12 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
 fn simulated_rig_starts_measuring() -> R {
     let daemon = start_embedded(EmbeddedBackend::Fake)?;
     assert_eq!(daemon.describe(), "embedded daemon (fake rig)");
-    let ep = daemon.endpoints();
-    #[cfg(unix)]
-    assert!(ep.ctrl.starts_with("ipc://"), "{ep:?}");
-    #[cfg(not(unix))]
-    assert!(ep.ctrl.starts_with("tcp://127.0.0.1:"), "{ep:?}");
+    let config = daemon.client_config(NAME);
+    // In-process: inproc endpoints in the daemon's own context.
+    assert!(config.endpoints.ctrl.starts_with("inproc://"), "{config:?}");
+    assert!(config.context.is_some());
 
-    let mut d = Driver::connect(ep, &daemon.describe())?;
+    let mut d = Driver::connect(config, &daemon.describe())?;
     d.synced()?;
     // Session open as the rig is wired, "demo" running and selected: nothing to set up.
     let open = d.st.open_session().cloned().ok_or("no session")?;
@@ -317,7 +317,7 @@ fn simulated_rig_starts_measuring() -> R {
 fn empty_embedded_daemon_measures_from_the_app() -> R {
     // As on real audio (no setup), but on the simulated rig.
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     drop(d);
     drop(daemon);
@@ -346,7 +346,7 @@ fn empty_local_daemon_measures_from_the_app() -> R {
         ctrl: handle.ctrl_endpoint().to_owned(),
         data: handle.data_endpoint().to_owned(),
     };
-    let mut d = Driver::connect(ep, "local daemon")?;
+    let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
     measure_from_empty(&mut d)?;
     drop(d);
     handle.shutdown();
@@ -388,7 +388,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
     };
     let dir = tempfile::tempdir()?;
     let (handle, ep) = autosaving_daemon(dir.path())?;
-    let mut d = Driver::connect(ep, "local daemon")?;
+    let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
     d.synced()?;
     assert_eq!(
         d.st.autosave_label(now()).map(|l| l.text),
@@ -413,7 +413,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
     handle.shutdown();
 
     let (handle, ep) = autosaving_daemon(dir.path())?;
-    let mut d = Driver::connect(ep, "local daemon")?;
+    let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
     d.synced()?;
     let st = d.st.daemon().ok_or("state")?;
     assert_eq!(st.traces, traces);
@@ -466,7 +466,7 @@ fn the_platform_audio_is_the_only_real_backend() {
 #[test]
 fn session_dialog_meters_return_every_round() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.synced()?;
     let tick = |d: &mut Driver| {
         d.send(Msg::Tick {
@@ -523,7 +523,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     use ac2_ui::forms::FieldId;
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
 
     d.key("Shift+S");
@@ -600,7 +600,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     use ac2_scene::meter::{InputUse, MeterState};
     use ac2_ui::forms::FieldId;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
 
     // Every captured input, named with its role, metering the rig's signal.
@@ -727,7 +727,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     use ac2_proto::model::CurveChoice;
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
@@ -826,14 +826,16 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
 /// app has no calibration flow of its own): a client of its own takes the stimulus lease,
 /// plays the tone at −20 dBFS and asks for 94 dB until the reading is steady, then gives
 /// the lease back.
-fn calibrate(ep: &Endpoints) -> R {
+fn calibrate(config: &ClientConfig) -> R {
     use ac2_client::{Client, ClientError, OnDrop};
     use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
     use ac2_proto::units::{DbSpl, Dbfs, Hz};
     use ac2_proto::{Command, ReplyBody};
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let c = Client::connect(ClientConfig::new(ep.clone(), "ac2-ui e2e calibrator")).await?;
+        let mut config = config.clone();
+        config.name = "ac2-ui e2e calibrator".into();
+        let c = Client::connect(config).await?;
         c.wait_synced(Duration::from_secs(10)).await?;
         let lease = c.acquire_lease(false, OnDrop::Release).await?;
         lease
@@ -946,7 +948,7 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     use ac2_scene::leq::TileState;
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
 
@@ -1146,7 +1148,7 @@ fn filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     use ac2_scene::leq::TileState;
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.key("Ctrl+K");
@@ -1333,7 +1335,7 @@ fn run_seconds(s: &AppState) -> Option<u64> {
 fn run_clock_and_a_new_log_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.stop()?;
@@ -1450,7 +1452,7 @@ fn strip_line(s: &AppState) -> Vec<[f32; 2]> {
 fn a_restarted_app_shows_the_history_from_the_log() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.key("Ctrl+K");
@@ -1587,7 +1589,7 @@ fn a_preset_replaces_the_windows_from_the_app() -> R {
     use ac2_proto::model::LeqPreset;
     use ac2_proto::units::DbSpl;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.key("Ctrl+K");
@@ -1690,7 +1692,7 @@ fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
 fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let first = sweep_from_the_dialog(&mut d)?;
     let second = sweep_from_the_dialog(&mut d)?;
@@ -1825,7 +1827,7 @@ fn hint_line(s: &AppState) -> Vec<String> {
 #[test]
 fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.synced()?;
     // Nothing set up yet: the transfer pane has the focus and its hints.
     let tf = hint_line(&d.st);
@@ -1896,7 +1898,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     use ac2_scene::trace::TraceKey;
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
@@ -2059,13 +2061,15 @@ struct Tone {
 }
 
 impl Tone {
-    fn start(ep: &Endpoints) -> R<Self> {
+    fn start(config: &ClientConfig) -> R<Self> {
         use ac2_client::{Client, OnDrop};
         use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
         use ac2_proto::units::{Dbfs, Hz};
         let rt = tokio::runtime::Runtime::new()?;
         let (client, lease) = rt.block_on(async {
-            let c = Client::connect(ClientConfig::new(ep.clone(), "ac2-ui e2e tone")).await?;
+            let mut config = config.clone();
+            config.name = "ac2-ui e2e tone".into();
+            let c = Client::connect(config).await?;
             c.wait_synced(Duration::from_secs(10)).await?;
             let lease = c.acquire_lease(false, OnDrop::Release).await?;
             lease
@@ -2117,7 +2121,7 @@ fn electrical_calibration_from_the_app() -> R {
     use ac2_proto::model::{CalBasis, CalStatus, LevelScale};
     use ac2_ui::cal_view::{CalLine, lines};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
 
@@ -2290,7 +2294,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
     use ac2_proto::model::{TimeWeighting, Weighting};
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.key("Ctrl+K");
@@ -2414,7 +2418,7 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
     use ac2_scene::view::SplMode;
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.key("Ctrl+K");
@@ -2486,7 +2490,7 @@ fn a_restart_comes_back_to_the_same_pane() -> R {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("ui.toml");
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let ep = daemon.endpoints();
+    let ep = daemon.client_config(NAME);
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     d.key("Ctrl+K");
@@ -2555,7 +2559,7 @@ fn streams_of(s: &AppState, meas: MeasId) -> Vec<Stream> {
 #[test]
 fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
-    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?.id;
     // The level typed there stays: arm and fire.

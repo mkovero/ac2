@@ -116,7 +116,7 @@ fn target(
         // another daemon (the operator asked for this one, on this backend).
         let e = start_embedded(backend).map_err(|e| format!("embedded daemon: {e}"))?;
         let t = Target {
-            config: ClientConfig::new(e.endpoints(), NAME),
+            config: e.client_config(NAME),
             describe: e.describe(),
         };
         notices.push(format!("{} running in this process", e.describe()));

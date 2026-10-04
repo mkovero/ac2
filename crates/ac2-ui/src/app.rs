@@ -235,7 +235,7 @@ impl App {
             Choice::Embedded(b) => match start_embedded(b) {
                 Ok(e) => {
                     let t = Target {
-                        config: ac2_client::ClientConfig::new(e.endpoints(), dialog.client_name()),
+                        config: e.client_config(dialog.client_name()),
                         describe: e.describe(),
                     };
                     self.conn = None;
@@ -721,7 +721,7 @@ mod tests {
             latest: Latest {
                 frames: frames
                     .iter()
-                    .map(|f| (f.topic.to_string(), f.clone()))
+                    .map(|f| (f.topic.to_string().into(), f.clone()))
                     .collect(),
                 ..Latest::default()
             },

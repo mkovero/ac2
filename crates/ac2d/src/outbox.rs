@@ -6,7 +6,7 @@
 //! and keepalives through the same socket, so an event always reaches the data socket before
 //! the reply to the command that caused it and before a keepalive carrying its rev.
 
-use ac2_zmq::{Context, Error as ZmqError, Socket, SocketType};
+use ac2_zmq::{Context, Error as ZmqError, Part, Socket, SocketType};
 
 /// Reply: `[R][routing id][reply]`.
 pub(crate) const TAG_REPLY: u8 = b'R';
@@ -68,9 +68,23 @@ impl Outbox {
         self.send(TAG_EVENT, &[body]);
     }
 
-    pub(crate) fn ka(&self, parts: &[Vec<u8>]) {
-        let v: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
-        self.send(TAG_KA, &v);
+    pub(crate) fn ka(&self, parts: Vec<Vec<u8>>) {
+        let Some(parts) = tagged(TAG_KA, parts) else {
+            return;
+        };
+        for _ in 0..1000 {
+            match self.sock.try_send_parts(&parts) {
+                Ok(()) => return,
+                Err(ZmqError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(1))
+                }
+                Err(e) => {
+                    tracing::warn!("internal pipe send failed: {e}");
+                    return;
+                }
+            }
+        }
+        tracing::warn!("internal pipe full for 1 s; keepalive dropped");
     }
 
     pub(crate) fn clear(&self, prefix: &[u8]) {
@@ -83,18 +97,37 @@ impl Outbox {
 
     /// Queues a frame without blocking. A full pipe drops it: frames are latest-wins and the
     /// next one supersedes it.
-    pub(crate) fn frame(&self, parts: &[Vec<u8>]) -> bool {
-        let t = [TAG_FRAME];
-        let mut v: Vec<&[u8]> = Vec::with_capacity(parts.len() + 1);
-        v.push(&t);
-        v.extend(parts.iter().map(Vec::as_slice));
-        match self.sock.try_send(&v) {
+    pub(crate) fn frame(&self, parts: Vec<Vec<u8>>) -> bool {
+        let Some(parts) = tagged(TAG_FRAME, parts) else {
+            return false;
+        };
+        match self.sock.try_send_parts(&parts) {
             Ok(()) => true,
             Err(ZmqError::WouldBlock) => false,
             Err(e) => {
                 tracing::warn!("internal pipe frame send failed: {e}");
                 false
             }
+        }
+    }
+}
+
+/// `[tag, parts…]` as zero-copy parts: the encoded arrays (up to megabytes per frame) pass
+/// through the pipe, the latest slot and the data socket in the buffers they were encoded
+/// into, never copied.
+fn tagged(tag: u8, parts: Vec<Vec<u8>>) -> Option<Vec<Part>> {
+    let mut out = Vec::with_capacity(parts.len() + 1);
+    let built = Part::copy_from(&[tag]).and_then(|t| {
+        out.push(t);
+        parts
+            .into_iter()
+            .try_for_each(|p| Part::from_vec(p).map(|p| out.push(p)))
+    });
+    match built {
+        Ok(()) => Some(out),
+        Err(e) => {
+            tracing::warn!("internal pipe message not built: {e}");
+            None
         }
     }
 }

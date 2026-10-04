@@ -2,12 +2,11 @@
 //! no separate daemon. The UI talks to it through the same client and protocol as to any
 //! other daemon; only the endpoints differ.
 //!
-//! Transport: the client opens its own ZeroMQ context, so `inproc://` (which needs the
-//! daemon's context) is not used. On Unix the daemon listens on `ipc://` sockets in a
-//! private per-process directory (mode 0700, removed on drop) — the same user boundary as
-//! the local daemon, nothing on the network. On Windows it listens on `tcp://127.0.0.1`
-//! with OS-assigned ports, like the local daemon there. The audio backend is always named
-//! by the caller; the fake rig runs only when chosen.
+//! Transport: the daemon listens on `inproc://` endpoints and the UI's client shares its
+//! ZeroMQ context ([`Embedded::client_config`]), so frames reach the UI as in-process queue
+//! entries: no socket, no kernel crossing and no copy per frame, and nothing reachable from
+//! outside the process. The audio backend is always named by the caller; the fake rig runs
+//! only when chosen.
 //!
 //! The simulated rig starts ready to use: its session is opened (in 1–2, out 1, the loopback
 //! out 1 → in 1 as the rig is wired) and a transfer measurement "demo" (ref 1 → meas 2) is
@@ -16,7 +15,7 @@
 
 use std::fmt;
 
-use ac2_client::Endpoints;
+use ac2_client::{ClientConfig, Endpoints};
 use ac2_proto::model::{
     DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, SessionConfig, TransferConfig,
 };
@@ -108,14 +107,12 @@ impl fmt::Display for EmbeddedError {
 impl std::error::Error for EmbeddedError {}
 
 /// A running embedded daemon. Dropping it shuts the daemon down (output faded, stream
-/// closed) and removes its socket directory.
+/// closed).
 pub struct Embedded {
     endpoints: Endpoints,
     backend: EmbeddedBackend,
     #[cfg(feature = "embedded")]
     handle: Option<ac2d::Handle>,
-    #[cfg(feature = "embedded")]
-    dir: Option<std::path::PathBuf>,
 }
 
 impl fmt::Debug for Embedded {
@@ -128,9 +125,16 @@ impl fmt::Debug for Embedded {
 }
 
 impl Embedded {
-    /// Where the daemon listens.
-    pub fn endpoints(&self) -> Endpoints {
-        self.endpoints.clone()
+    /// Settings for a client of this daemon named `name`: its `inproc://` endpoints and the
+    /// daemon's context, the only one they can be reached from.
+    pub fn client_config(&self, name: impl Into<String>) -> ClientConfig {
+        #[allow(unused_mut, reason = "only the embedded build has a daemon context")]
+        let mut c = ClientConfig::new(self.endpoints.clone(), name);
+        #[cfg(feature = "embedded")]
+        {
+            c.context = self.handle.as_ref().map(|h| h.context().clone());
+        }
+        c
     }
 
     /// `embedded daemon (fake rig)`, for the top bar.
@@ -148,9 +152,6 @@ impl Drop for Embedded {
     fn drop(&mut self) {
         if let Some(h) = self.handle.take() {
             h.shutdown();
-        }
-        if let Some(d) = self.dir.take() {
-            let _ = std::fs::remove_dir_all(d);
         }
     }
 }
@@ -184,19 +185,14 @@ pub fn start_embedded_with(
         EmbeddedBackend::Fake => BackendChoice::Fake,
     };
     let audio = ac2d::backends(choice).map_err(EmbeddedError::Backend)?;
-    let (listen, dir) = listen();
+    let listen = listen();
     // The same global maximum as a stand-alone `ac2d` without `--max-level`.
     let mut config = DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
     config.backends = audio;
     // Calibrations of real devices persist in the same store a stand-alone `ac2d` uses; a
     // simulated rig's stay in memory.
     config.cal_store = (backend != EmbeddedBackend::Fake).then(ac2_paths::cal_store);
-    let handle = Daemon::start(config).map_err(|e| {
-        if let Some(d) = &dir {
-            let _ = std::fs::remove_dir_all(d);
-        }
-        EmbeddedError::Start(e.to_string())
-    })?;
+    let handle = Daemon::start(config).map_err(|e| EmbeddedError::Start(e.to_string()))?;
     let endpoints = Endpoints {
         ctrl: handle.ctrl_endpoint().to_owned(),
         data: handle.data_endpoint().to_owned(),
@@ -205,11 +201,10 @@ pub fn start_embedded_with(
         endpoints,
         backend,
         handle: Some(handle),
-        dir,
     };
     if setup == Setup::Demo {
         // Dropping `e` on failure shuts the daemon down again.
-        set_up_demo(e.endpoints())?;
+        set_up_demo(e.client_config("ac2-ui embedded setup"))?;
     }
     Ok(e)
 }
@@ -217,8 +212,8 @@ pub fn start_embedded_with(
 /// Opens the simulated rig's session and starts "demo", as a client of the daemon. Runs on
 /// its own thread and runtime, so it works whether or not the caller is inside one.
 #[cfg(feature = "embedded")]
-fn set_up_demo(endpoints: Endpoints) -> Result<(), EmbeddedError> {
-    use ac2_client::{Client, ClientConfig, expect_body};
+fn set_up_demo(config: ClientConfig) -> Result<(), EmbeddedError> {
+    use ac2_client::{Client, expect_body};
     use ac2_proto::{Command, ReplyBody};
     const DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
     let run = move || -> Result<(), String> {
@@ -228,8 +223,7 @@ fn set_up_demo(endpoints: Endpoints) -> Result<(), EmbeddedError> {
             .map_err(|e| e.to_string())?;
         rt.block_on(async move {
             let work = async {
-                let c =
-                    Client::connect(ClientConfig::new(endpoints, "ac2-ui embedded setup")).await?;
+                let c = Client::connect(config).await?;
                 c.call(Command::SessionOpen {
                     config: demo_session(),
                 })
@@ -258,29 +252,15 @@ fn set_up_demo(endpoints: Endpoints) -> Result<(), EmbeddedError> {
         .map_err(EmbeddedError::Setup)
 }
 
-#[cfg(all(feature = "embedded", unix))]
-fn listen() -> (ac2d::Listen, Option<std::path::PathBuf>) {
+/// A process-unique `inproc://` name: several embedded daemons may run in one process
+/// (tests do), each in its own context but named apart for the logs.
+#[cfg(feature = "embedded")]
+fn listen() -> ac2d::Listen {
     use std::sync::atomic::{AtomicU32, Ordering};
     static SEQ: AtomicU32 = AtomicU32::new(0);
-    let dir = ac2d::runtime_dir().join(format!(
-        "embedded-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    let listen = ac2d::Listen::Local {
-        ctrl: format!("ipc://{}", dir.join("ctrl.sock").display()),
-        data: format!("ipc://{}", dir.join("data.sock").display()),
-    };
-    (listen, Some(dir))
-}
-
-#[cfg(all(feature = "embedded", not(unix)))]
-fn listen() -> (ac2d::Listen, Option<std::path::PathBuf>) {
-    let listen = ac2d::Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    (listen, None)
+    ac2d::Listen::Inproc {
+        name: format!("ac2-ui-embedded-{}", SEQ.fetch_add(1, Ordering::Relaxed)),
+    }
 }
 
 /// Starts the embedded daemon on `backend` with `setup`.

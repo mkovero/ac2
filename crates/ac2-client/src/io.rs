@@ -5,6 +5,9 @@
 //! polls together with the DEALER and the SUB. Replies are routed to the waiting caller by
 //! request id; `evt` and `ka` go to the sync task over an unbounded channel, because a lost
 //! event would desynchronise the mirror (they are small and paced by the daemon).
+//!
+//! The thread sleeps in `zmq_poll` without a timeout: until a socket is readable it has
+//! nothing to do, and an idle client should not wake the CPU.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -149,7 +152,7 @@ impl Worker {
                 PollItem::readable(&self.sub),
                 PollItem::readable(&self.pull),
             ];
-            match poll(&mut items, Some(Duration::from_millis(200))) {
+            match poll(&mut items, None) {
                 Ok(_) => {}
                 Err(ac2_zmq::Error::ContextTerminated) => return,
                 Err(_) => {

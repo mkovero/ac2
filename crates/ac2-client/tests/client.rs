@@ -1,6 +1,7 @@
 //! Client against the in-process fake daemon. Every wait is a poll with a deadline.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ac2_client::fake::{FakeDaemon, FakeOptions};
@@ -499,23 +500,30 @@ async fn latest_keeps_newest_and_discards_old_epochs() -> R {
     let mut seq = 0;
     wait_frame(&c, &f, &mut seq).await?;
     let base = seq;
-    // A backlog in mixed order, an older epoch with a higher seq, another incarnation.
-    for s in [base + 3, base + 1, base + 5, base + 2] {
+    // A backlog: only the newest of it is decoded, the others are superseded unread.
+    for s in base + 1..=base + 5 {
         let fr = tf_with(&f, s, None);
         f.lock().publish(&fr);
     }
+    until("backlog", || async {
+        c.latest()
+            .is_ok_and(|l| l.get(&TF1).map(|t| t.frame.stamp.seq) == Some(base + 5))
+    })
+    .await?;
+    // An older epoch with a higher seq, then another incarnation: discarded, the kept frame
+    // stays.
     let mut old = tf_with(&f, base + 100, None);
     old.stamp.session_epoch = SessionEpoch(0);
+    f.lock().publish(&old);
+    until("old epoch", || async {
+        c.latest().is_ok_and(|l| l.discarded_total >= 1)
+    })
+    .await?;
     let mut other = tf_with(&f, base + 200, None);
     other.stamp.daemon_incarnation = DaemonIncarnation(1);
-    f.lock().publish(&old);
     f.lock().publish(&other);
-    let probe = tf_with(&f, base + 4, None);
-    f.lock().publish(&probe);
-    until("backlog", || async {
-        c.latest().is_ok_and(|l| {
-            l.discarded_total >= 2 && l.get(&TF1).map(|t| t.frame.stamp.seq) == Some(base + 5)
-        })
+    until("other incarnation", || async {
+        c.latest().is_ok_and(|l| l.discarded_total >= 2)
     })
     .await?;
     let l = c.latest()?;
@@ -533,6 +541,51 @@ async fn latest_keeps_newest_and_discards_old_epochs() -> R {
     // Unsubscribing drops the topic.
     c.unsubscribe(Subscription::Meas(MeasId(1)))?;
     assert!(c.latest()?.get(&TF1).is_none());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn consumers_wait_for_data_and_reuse_their_view() -> R {
+    let f = fake()?;
+    let c = connect(&f).await?;
+    c.wait_synced(DEADLINE).await?;
+    c.subscribe(Subscription::Topic(TF1))?;
+    let mut seq = 0;
+    wait_frame(&c, &f, &mut seq).await?;
+    let mut view = ac2_client::Latest::default();
+    // Frames published while `wait_frame` polled may still be in flight.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    c.latest_into(&mut view)?;
+    let name = view.frames.keys().next().cloned().ok_or("no topic")?;
+
+    // Nothing new: the wait times out, the async wait does not resolve.
+    assert!(!c.wait_data(Duration::from_millis(100)));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), c.data_changed())
+            .await
+            .is_err()
+    );
+
+    // A frame wakes both, and stays pending until drained.
+    let waiter = {
+        let c = c.clone();
+        tokio::spawn(async move { c.data_changed().await })
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    seq += 1;
+    let fr = tf_with(&f, seq, None);
+    f.lock().publish(&fr);
+    tokio::time::timeout(DEADLINE, waiter).await??;
+    assert!(c.wait_data(Duration::ZERO));
+    c.latest_into(&mut view)?;
+    assert!(!c.wait_data(Duration::ZERO));
+    let tf = view.get(&TF1).ok_or("no tf")?;
+    assert_eq!(tf.frame.stamp.seq, seq);
+    assert_eq!(view.read, 1);
+    // The view is updated in place: the topic's name is the same allocation.
+    assert_eq!(view.frames.len(), 1);
+    let again = view.frames.keys().next().ok_or("no topic")?;
+    assert!(Arc::ptr_eq(&name, again));
     Ok(())
 }
 

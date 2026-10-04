@@ -25,7 +25,7 @@ async fn main() {
         let l = c.latest().expect("latest");
         for (t, f) in &l.frames {
             let seq = f.frame.stamp.seq;
-            let e = last_seq.entry(t.clone()).or_insert((seq, f.received));
+            let e = last_seq.entry(t.to_string()).or_insert((seq, f.received));
             if seq != e.0 {
                 let gap = f.received.duration_since(e.1);
                 if gap > Duration::from_millis(250) {
@@ -38,15 +38,15 @@ async fn main() {
                         f.age
                     );
                 }
-                let m = max_gap.entry(t.clone()).or_default();
+                let m = max_gap.entry(t.to_string()).or_default();
                 if gap > *m {
                     *m = gap;
                 }
-                *frames.entry(t.clone()).or_default() += 1;
+                *frames.entry(t.to_string()).or_default() += 1;
                 *e = (seq, f.received);
             }
             if f.stale {
-                *stale_count.entry(t.clone()).or_default() += 1;
+                *stale_count.entry(t.to_string()).or_default() += 1;
                 println!(
                     "{:7.3}s {t}: STALE since_new {:?} age {:?} responding {}",
                     start.elapsed().as_secs_f64(),

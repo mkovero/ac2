@@ -1,18 +1,25 @@
-//! Data subscriptions and the drain-based latest-frame view (Q2).
+//! Data subscriptions and the latest-frame view (Q2).
 //!
 //! The data SUB is never read frame by frame. [`DataState::drain`] reads everything queued
-//! (until EAGAIN, bounded), keeps the highest `seq` per topic, counts malformed frames and
-//! discards frames of older session epochs or another daemon incarnation. Because a
-//! publisher drops the *newest* messages for a stalled subscriber, only a drain gets back to
-//! fresh data in one pass.
+//! (until EAGAIN, bounded) without copying it and keeps the newest message per topic: frames
+//! of one topic arrive in publish order over the one connection, so that is the last one
+//! read. Only those are decoded; superseded messages never are. Malformed frames are
+//! counted, frames of older session epochs or another daemon incarnation discarded. Because
+//! a publisher drops the *newest* messages for a stalled subscriber, only a drain gets back
+//! to fresh data in one pass.
+//!
+//! A consumer can sleep until data is queued instead of polling: see
+//! [`crate::Client::data_changed`] and [`crate::Client::wait_data`].
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ac2_proto::frame::MAX_ARRAYS;
 use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
 use ac2_proto::{Frame, GridId, Topic, decode_frame};
-use ac2_zmq::{Socket, drain_latest};
+use ac2_zmq::{Part, Socket};
 
 use crate::error::ClientError;
 use crate::mirror::MirrorView;
@@ -32,17 +39,20 @@ pub fn stale_after(t: &Topic) -> Duration {
         _ => STALE_AFTER,
     }
 }
+
 /// Most messages read by one drain; bounds the time spent when the publisher outpaces us.
 pub const DRAIN_LIMIT: usize = 4096;
 
 #[derive(Debug, Clone)]
 struct Kept {
+    /// Topic text, made once per topic and shared with every [`Latest`] built from it.
+    name: Arc<str>,
     frame: Arc<Frame>,
     /// When this seq first arrived.
     received: Instant,
 }
 
-/// Owner of the data SUB.
+/// Owner of the data SUB, the subscriptions and the decoded frames.
 #[derive(Debug)]
 pub(crate) struct DataState {
     sub: Socket,
@@ -50,6 +60,9 @@ pub(crate) struct DataState {
     kept: HashMap<Topic, Kept>,
     malformed: u64,
     discarded: u64,
+    /// Newest undecoded message per topic during a drain. Keys persist once seen, so a
+    /// steady-state drain allocates nothing here.
+    newest: HashMap<Box<[u8]>, Option<Vec<Part>>>,
 }
 
 /// The newest frame of one topic.
@@ -75,8 +88,8 @@ pub struct TopicFrame {
 #[derive(Debug, Clone, Default)]
 pub struct Latest {
     /// Newest frame per topic, by topic text.
-    pub frames: BTreeMap<String, TopicFrame>,
-    /// Messages read by this drain (including superseded and discarded ones).
+    pub frames: BTreeMap<Arc<str>, TopicFrame>,
+    /// Messages read by this drain (including superseded ones, which are never decoded).
     pub read: usize,
     /// Malformed frames dropped since the client started.
     pub malformed_total: u64,
@@ -86,10 +99,35 @@ pub struct Latest {
     pub responding: bool,
 }
 
+/// Topic text without a heap allocation (every topic is far shorter than the buffer).
+struct TopicText {
+    buf: [u8; 64],
+    len: usize,
+}
+
+impl std::fmt::Write for TopicText {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.len + s.len();
+        let dst = self.buf.get_mut(self.len..end).ok_or(std::fmt::Error)?;
+        dst.copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
 impl Latest {
     /// The frame of `topic`.
     pub fn get(&self, topic: &Topic) -> Option<&TopicFrame> {
-        self.frames.get(&topic.to_string())
+        let mut t = TopicText {
+            buf: [0; 64],
+            len: 0,
+        };
+        if write!(t, "{topic}").is_ok() {
+            let s = std::str::from_utf8(&t.buf[..t.len]).ok()?;
+            self.frames.get(s)
+        } else {
+            self.frames.get(topic.to_string().as_str())
+        }
     }
 
     /// Every grid referenced by a kept frame.
@@ -113,6 +151,17 @@ pub fn frame_age(f: &Frame, now_wall_ns: i128, offset_ns: Option<i128>) -> Optio
     Some(age_ns as f64 / 1e9)
 }
 
+fn decode(parts: &[Part]) -> Option<Frame> {
+    let mut refs: [&[u8]; 2 + MAX_ARRAYS] = [&[]; 2 + MAX_ARRAYS];
+    if parts.len() > refs.len() {
+        return None;
+    }
+    for (r, p) in refs.iter_mut().zip(parts) {
+        *r = p;
+    }
+    decode_frame(&refs[..parts.len()]).ok()
+}
+
 impl DataState {
     pub(crate) fn new(sub: Socket) -> Self {
         Self {
@@ -121,7 +170,13 @@ impl DataState {
             kept: HashMap::new(),
             malformed: 0,
             discarded: 0,
+            newest: HashMap::new(),
         }
+    }
+
+    /// The data SUB, for waiting on it.
+    pub(crate) fn socket(&self) -> &Socket {
+        &self.sub
     }
 
     pub(crate) fn subscribe(&mut self, prefix: &[u8]) -> Result<(), ClientError> {
@@ -141,104 +196,114 @@ impl DataState {
             )));
         };
         *n -= 1;
-        if *n == 0 {
-            self.prefixes.remove(prefix);
-            self.sub.unsubscribe(prefix)?;
-            let still = |t: &Topic| {
-                let b = t.to_bytes();
-                self.prefixes.keys().any(|p| b.starts_with(p))
-            };
-            let keep: Vec<Topic> = self.kept.keys().copied().filter(still).collect();
-            self.kept.retain(|t, _| keep.contains(t));
+        if *n > 0 {
+            return Ok(());
         }
+        self.prefixes.remove(prefix);
+        // The SUB filters what is still queued under the prefix as it is read.
+        self.sub.unsubscribe(prefix)?;
+        let prefixes = &self.prefixes;
+        self.kept.retain(|t, _| subscribed(prefixes, &t.to_bytes()));
+        self.newest.retain(|t, _| subscribed(prefixes, t));
         Ok(())
     }
 
+    /// Drains the SUB into `out`: decodes the newest message per topic, and recomputes age
+    /// and STALE of every kept frame at `now`. `out` is updated in place, so a caller that
+    /// keeps it reuses its map and topic names.
     pub(crate) fn drain(
         &mut self,
         view: &MirrorView,
         now: Instant,
         now_wall_ns: i128,
-    ) -> Result<Latest, ClientError> {
+        out: &mut Latest,
+    ) -> Result<(), ClientError> {
         let inc = view.incarnation;
         let epoch = view.session_epoch;
-        let mut fresh: HashMap<Topic, Frame> = HashMap::new();
-        let mut discarded = 0u64;
-        let drained = drain_latest(&self.sub, DRAIN_LIMIT, |m| {
-            let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-            let f = decode_frame(&parts).ok()?;
-            let seq = f.stamp.seq;
-            if !current(&f, inc, epoch) {
-                discarded += 1;
-                return Some(seq);
-            }
-            let topic = f.topic();
-            match fresh.get(&topic) {
-                Some(k) if k.stamp.seq >= seq => {}
-                _ => {
-                    fresh.insert(topic, f);
+        let mut read = 0;
+        while read < DRAIN_LIMIT {
+            let Some(parts) = self.sub.try_recv_parts()? else {
+                break;
+            };
+            read += 1;
+            let Some(topic) = parts.first() else { continue };
+            match self.newest.get_mut(&**topic) {
+                Some(slot) => *slot = Some(parts),
+                None => {
+                    self.newest.insert(Box::from(&**topic), Some(parts));
                 }
             }
-            Some(seq)
-        })?;
-        self.malformed += drained.malformed as u64;
-        self.discarded += discarded;
+        }
+
+        for parts in self.newest.values_mut().filter_map(Option::take) {
+            let Some(f) = decode(&parts) else {
+                self.malformed += 1;
+                continue;
+            };
+            if !current(&f, inc, epoch) {
+                self.discarded += 1;
+                continue;
+            }
+            let topic = f.topic();
+            match self.kept.get_mut(&topic) {
+                Some(k) => {
+                    let newer = k.frame.stamp.daemon_incarnation != f.stamp.daemon_incarnation
+                        || k.frame.stamp.session_epoch != f.stamp.session_epoch
+                        || f.stamp.seq > k.frame.stamp.seq;
+                    if newer {
+                        k.frame = Arc::new(f);
+                        k.received = now;
+                    }
+                }
+                None => {
+                    self.kept.insert(
+                        topic,
+                        Kept {
+                            name: Arc::from(topic.to_string()),
+                            frame: Arc::new(f),
+                            received: now,
+                        },
+                    );
+                }
+            }
+        }
 
         // Kept frames from an older epoch or another incarnation go too.
         let before = self.kept.len();
         self.kept.retain(|_, k| current(&k.frame, inc, epoch));
         self.discarded += (before - self.kept.len()) as u64;
 
-        for (topic, f) in fresh {
-            let newer = match self.kept.get(&topic) {
-                Some(k) => {
-                    k.frame.stamp.daemon_incarnation != f.stamp.daemon_incarnation
-                        || k.frame.stamp.session_epoch != f.stamp.session_epoch
-                        || f.stamp.seq > k.frame.stamp.seq
-                }
-                None => true,
+        let responding = view.responding(now);
+        out.frames.retain(|_, tf| self.kept.contains_key(&tf.topic));
+        for (topic, k) in &self.kept {
+            let since_new = now.saturating_duration_since(k.received);
+            let age = frame_age(&k.frame, now_wall_ns, view.clock_offset_ns);
+            let after = stale_after(topic);
+            let stale =
+                !responding || since_new > after || age.is_some_and(|a| a > after.as_secs_f64());
+            let tf = TopicFrame {
+                topic: *topic,
+                frame: k.frame.clone(),
+                received: k.received,
+                since_new,
+                age,
+                stale,
             };
-            if newer {
-                self.kept.insert(
-                    topic,
-                    Kept {
-                        frame: Arc::new(f),
-                        received: now,
-                    },
-                );
+            match out.frames.get_mut(&*k.name) {
+                Some(slot) => *slot = tf,
+                None => {
+                    out.frames.insert(k.name.clone(), tf);
+                }
             }
         }
-
-        let responding = view.responding(now);
-        let frames = self
-            .kept
-            .iter()
-            .map(|(topic, k)| {
-                let since_new = now.saturating_duration_since(k.received);
-                let age = frame_age(&k.frame, now_wall_ns, view.clock_offset_ns);
-                let after = stale_after(topic);
-                let stale = !responding
-                    || since_new > after
-                    || age.is_some_and(|a| a > after.as_secs_f64());
-                (
-                    topic.to_string(),
-                    TopicFrame {
-                        topic: *topic,
-                        frame: k.frame.clone(),
-                        received: k.received,
-                        since_new,
-                        age,
-                        stale,
-                    },
-                )
-            })
-            .collect();
-        Ok(Latest {
-            frames,
-            read: drained.read,
-            malformed_total: self.malformed,
-            discarded_total: self.discarded,
-            responding,
-        })
+        out.read = read;
+        out.malformed_total = self.malformed;
+        out.discarded_total = self.discarded;
+        out.responding = responding;
+        Ok(())
     }
+}
+
+fn subscribed(prefixes: &BTreeMap<Vec<u8>, usize>, topic: &[u8]) -> bool {
+    prefixes.keys().any(|p| topic.starts_with(p))
 }

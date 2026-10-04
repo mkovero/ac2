@@ -198,7 +198,7 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
         stale: false,
     };
     let mut latest = Latest::default();
-    latest.frames.insert(f.topic.to_string(), f);
+    latest.frames.insert(f.topic.to_string().into(), f);
     let mut grids = std::collections::BTreeMap::new();
     grids.insert(grid.id(), Arc::new(grid));
     t.conn(ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {

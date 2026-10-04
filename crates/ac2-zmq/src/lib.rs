@@ -41,7 +41,7 @@ pub use error::{Error, Result};
 pub use monitor::{Monitor, MonitorEvent, SocketEvent};
 pub use pattern::{Drained, Latest, SubscriptionEvent, SubscriptionTracker, drain_latest};
 pub use poll::{Interest, PollItem, poll};
-pub use socket::{Context, Message, Socket, SocketType};
+pub use socket::{Context, Message, Part, Socket, SocketType, TcpLiveness};
 pub use zap::{DenyReason, Mechanism, SecureContext, Verdict, ZapDecision, ZapExit};
 
 /// Version `(major, minor, patch)` of the linked libzmq.

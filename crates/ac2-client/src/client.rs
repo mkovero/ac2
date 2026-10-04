@@ -11,7 +11,7 @@ use ac2_proto::{
     Command, ErrorCode, GridDef, GridId, ReplyBody, Request, StateSnapshot, Subscription, Welcome,
     encode_request,
 };
-use ac2_zmq::{Context, CurveClient, SocketType};
+use ac2_zmq::{Context, CurveClient, Socket, SocketType, TcpLiveness};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
@@ -54,6 +54,55 @@ pub struct ClientConfig {
     /// Mirror the daemon state (snapshot + events). Keepalives (liveness, clock offset,
     /// incarnation) are always tracked.
     pub mirror: bool,
+    /// The ZeroMQ context to create the sockets in; `None` = a context of the client's own.
+    /// An `inproc://` daemon (embedded in this process) is reachable only through its own
+    /// context, and then nothing crosses the kernel.
+    pub context: Option<Context>,
+}
+
+/// First retry after a lost or refused connection.
+const RECONNECT_FIRST: Duration = Duration::from_millis(100);
+/// Upper bound of the reconnect back-off: an unreachable daemon (a Pi switched off, out of
+/// Wi-Fi range) costs one attempt per socket every 2 s instead of ten a second, while a
+/// daemon that restarts is found again within that.
+const RECONNECT_MAX: Duration = Duration::from_secs(2);
+/// Dead-peer detection towards the daemon (TCP only): a daemon host that vanished without
+/// closing the connection (power cut, network gone) leaves it open for as long as the
+/// kernel retransmits, and a SUB, which never sends, would not notice even then. With
+/// these an idle connection is probed after 5 s and closed after three unanswered probes,
+/// one with unacknowledged data after 15 s, and the reconnect loop takes over, so a daemon
+/// that comes back is reached again.
+const DAEMON_LIVENESS: TcpLiveness = TcpLiveness {
+    idle: Duration::from_secs(5),
+    interval: Duration::from_secs(1),
+    count: 3,
+    max_unacked: Duration::from_secs(15),
+};
+/// Receive queue of the data SUB, in messages. It is drained whole on each `latest()`, so it
+/// must hold what arrives between two drains (a publish round of every subscribed topic);
+/// a smaller queue would stop libzmq reading the connection mid-round and push the backlog
+/// back into the daemon's queue, where it ages.
+const DATA_RCVHWM: u32 = 64;
+
+/// The data SUB's `ZMQ_FD`, owned by libzmq: registered with the runtime for readiness only,
+/// never read or closed here.
+#[cfg(unix)]
+#[derive(Debug)]
+struct NotifyFd(std::os::fd::RawFd);
+
+#[cfg(unix)]
+impl std::os::fd::AsRawFd for NotifyFd {
+    fn as_raw_fd(&self) -> std::os::fd::RawFd {
+        self.0
+    }
+}
+
+/// Reconnect back-off and dead-peer detection, shared by every client socket.
+fn liveness(s: &Socket) -> Result<(), ClientError> {
+    s.set_reconnect_interval(RECONNECT_FIRST)?;
+    s.set_reconnect_interval_max(Some(RECONNECT_MAX))?;
+    s.set_tcp_liveness(Some(DAEMON_LIVENESS))?;
+    Ok(())
 }
 
 impl ClientConfig {
@@ -70,6 +119,7 @@ impl ClientConfig {
             name: name.into(),
             retry: Retry::default(),
             mirror: true,
+            context: None,
         }
     }
 
@@ -208,6 +258,11 @@ struct Inner {
     core: Arc<CallCore>,
     welcome: Arc<Mutex<Welcome>>,
     view: watch::Receiver<Arc<MirrorView>>,
+    /// Registration of the data SUB's notification descriptor with the runtime, made on the
+    /// first [`Client::data_changed`]. Declared before `data` so it is deregistered before
+    /// the socket (and its descriptor) closes.
+    #[cfg(unix)]
+    data_fd: std::sync::OnceLock<tokio::io::unix::AsyncFd<NotifyFd>>,
     data: Mutex<DataState>,
     grids: Mutex<HashMap<GridId, Arc<GridDef>>>,
     sync_task: JoinHandle<()>,
@@ -243,12 +298,15 @@ impl Client {
     /// Connects, says `hello` (refusing another protocol version) and starts the sync task.
     /// Must be called inside a tokio runtime.
     pub async fn connect(cfg: ClientConfig) -> Result<Self, ClientError> {
-        let ctx = Context::new()?;
+        let ctx = match &cfg.context {
+            Some(c) => c.clone(),
+            None => Context::new()?,
+        };
         let curve = cfg.curve.as_ref();
         let dealer = ctx.socket(SocketType::Dealer)?;
         // A lease release queued on shutdown still leaves.
         dealer.set_linger(Some(Duration::from_millis(500)))?;
-        dealer.set_reconnect_interval(Duration::from_millis(100))?;
+        liveness(&dealer)?;
         if let Some(c) = curve {
             dealer.set_curve_client(c)?;
         }
@@ -256,7 +314,7 @@ impl Client {
 
         // Q5 step 1: evt and ka are subscribed before anything else is asked.
         let sync_sub = ctx.socket(SocketType::Sub)?;
-        sync_sub.set_reconnect_interval(Duration::from_millis(100))?;
+        liveness(&sync_sub)?;
         if let Some(c) = curve {
             sync_sub.set_curve_client(c)?;
         }
@@ -265,12 +323,10 @@ impl Client {
         }
         sync_sub.connect(&cfg.endpoints.data)?;
 
-        // Data frames get their own SUB so that `latest()` can drain it on demand.
+        // Data frames get their own SUB so that a burst of frames never delays an event.
         let data_sub = ctx.socket(SocketType::Sub)?;
-        data_sub.set_reconnect_interval(Duration::from_millis(100))?;
-        // Small queue: a reader that drains at render rate never needs more, and a short
-        // queue keeps a stalled reader's backlog short.
-        data_sub.set_recv_hwm(64)?;
+        liveness(&data_sub)?;
+        data_sub.set_recv_hwm(DATA_RCVHWM)?;
         if let Some(c) = curve {
             data_sub.set_curve_client(c)?;
         }
@@ -301,6 +357,8 @@ impl Client {
             core,
             welcome,
             view: view_rx,
+            #[cfg(unix)]
+            data_fd: std::sync::OnceLock::new(),
             data: Mutex::new(DataState::new(data_sub)),
             grids: Mutex::new(HashMap::new()),
             sync_task,
@@ -418,12 +476,91 @@ impl Client {
         self.lock_data()?.unsubscribe(&sub.prefix())
     }
 
-    /// Drains the data socket and returns the newest frame per topic (by `seq`), with age
-    /// and STALE computed now. Frames of an older session epoch or another incarnation
-    /// are discarded.
+    /// The newest frame per topic, with age and STALE computed now. Only the newest
+    /// message per topic received since the previous call is decoded. Frames of an older
+    /// session epoch or another incarnation are discarded.
     pub fn latest(&self) -> Result<crate::data::Latest, ClientError> {
+        let mut out = crate::data::Latest::default();
+        self.latest_into(&mut out)?;
+        Ok(out)
+    }
+
+    /// [`Client::latest`] into `out`, updated in place: a caller that keeps one `Latest`
+    /// across frames reuses its map, and its topic names are shared, never rebuilt.
+    pub fn latest_into(&self, out: &mut crate::data::Latest) -> Result<(), ClientError> {
         let view = self.view();
-        self.lock_data()?.drain(&view, Instant::now(), wall_ns())
+        self.lock_data()?
+            .drain(&view, Instant::now(), wall_ns(), out)
+    }
+
+    /// Waits until a data frame is queued that [`Client::latest`] has not read yet (at once
+    /// if one already is), so a consumer sleeps instead of polling:
+    ///
+    /// ```text
+    /// loop {
+    ///     client.data_changed().await;
+    ///     client.latest_into(&mut latest)?;
+    ///     // render; a consumer that wants fewer wake-ups than frames waits for its next
+    ///     // frame time here before draining again.
+    /// }
+    /// ```
+    ///
+    /// Nothing wakes in between: on Unix the runtime watches the data socket's descriptor,
+    /// no thread of the client is involved. Cancellation-safe. Ages and STALE still need a
+    /// refresh of their own while no frame arrives. Returns at once on a socket error, which
+    /// `latest` then reports.
+    pub async fn data_changed(&self) {
+        #[cfg(unix)]
+        loop {
+            // The descriptor only signals changes; the queue itself is checked first and
+            // after every wake.
+            let fd = match self.data_has_message() {
+                Ok(true) | Err(_) => return,
+                Ok(false) => match self.data_notify_fd() {
+                    Ok(fd) => fd,
+                    Err(_) => return,
+                },
+            };
+            match fd.readable().await {
+                Ok(mut ready) => ready.clear_ready(),
+                Err(_) => return,
+            }
+        }
+        #[cfg(not(unix))]
+        loop {
+            // No descriptor to hand the runtime (a Winsock handle): look at the frame rate
+            // of the fastest display, the most a consumer can use.
+            match self.data_has_message() {
+                Ok(true) | Err(_) => return,
+                Ok(false) => tokio::time::sleep(Duration::from_millis(8)).await,
+            }
+        }
+    }
+
+    /// Blocking form of [`Client::data_changed`] for threads outside a runtime; `false`
+    /// when `timeout` passed first. Holds the data lock while it waits.
+    pub fn wait_data(&self, timeout: Duration) -> bool {
+        self.lock_data()
+            .and_then(|d| Ok(d.socket().wait_readable(timeout)?))
+            .unwrap_or(true)
+    }
+
+    fn data_has_message(&self) -> Result<bool, ClientError> {
+        Ok(self.lock_data()?.socket().has_message()?)
+    }
+
+    #[cfg(unix)]
+    fn data_notify_fd(&self) -> Result<&tokio::io::unix::AsyncFd<NotifyFd>, ClientError> {
+        if let Some(fd) = self.inner.data_fd.get() {
+            return Ok(fd);
+        }
+        let raw = self.lock_data()?.socket().notify_fd()?;
+        let fd =
+            tokio::io::unix::AsyncFd::with_interest(NotifyFd(raw), tokio::io::Interest::READABLE)
+                .map_err(|e| ClientError::Invalid(format!("data socket descriptor: {e}")))?;
+        // A concurrent first call may have registered it already; keep that one.
+        let _ = self.inner.data_fd.set(fd);
+        self.inner.data_fd.get().ok_or(ClientError::Closed)
     }
 
     /// [`Client::latest`] plus the grid of every frame (fetched once per id).
@@ -510,6 +647,9 @@ async fn run_sync(
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
+        // Ticks only while the mirror has something to retry or check; otherwise the task
+        // sleeps until the next keepalive or event.
+        let ticking = mirror.needs_tick();
         let now = Instant::now();
         let (mut need, received) = tokio::select! {
             msg = rx.recv() => match msg {
@@ -519,7 +659,7 @@ async fn run_sync(
                     (mirror.on_ka(&stamp, meta, at, local_wall_ns), true)
                 }
             },
-            _ = tick.tick() => (mirror.on_tick(now), false),
+            _ = tick.tick(), if ticking => (mirror.on_tick(Instant::now()), false),
         };
         if !received && need.is_none() {
             continue;

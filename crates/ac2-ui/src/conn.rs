@@ -463,7 +463,7 @@ impl Out {
 /// `old`'s `leq` frames that `new` replaces with a newer one or drops, as a snapshot of
 /// their own; `None` when every one of them is still in `new`.
 fn leq_only(old: &DataSnapshot, new: &DataSnapshot) -> Option<DataSnapshot> {
-    let frames: BTreeMap<String, ac2_client::TopicFrame> = old
+    let frames: BTreeMap<Arc<str>, ac2_client::TopicFrame> = old
         .latest
         .frames
         .iter()
@@ -681,6 +681,11 @@ async fn session(
     let mut shown_mirror: Option<Arc<MirrorView>> = None;
     let mut poll = DataPoll::default();
     let mut next_poll = tokio::time::Instant::now();
+    let mut last_poll = next_poll;
+    // While polling at the idle period, a frame arriving cuts the wait short (the display
+    // period still bounds how often the UI is fed); while frames flow, the display period
+    // paces the drains and nothing else wakes the link.
+    let mut idle = false;
     // Served columns carry the trace's display smoothing and mic curve: a new setting means
     // new data.
     let mut fetched: HashMap<TraceId, (Option<Smoothing>, Option<Box<TraceMicCurve>>)> =
@@ -740,7 +745,13 @@ async fn session(
             () = tokio::time::sleep_until(next_poll) => {
                 let active = poll.poll(&client, out).await;
                 let every = if active && !out.ui_behind() { wants.period } else { IDLE_POLL };
-                next_poll = tokio::time::Instant::now() + every;
+                last_poll = tokio::time::Instant::now();
+                next_poll = last_poll + every;
+                idle = every == IDLE_POLL && !out.ui_behind();
+            },
+            () = client.data_changed(), if idle => {
+                idle = false;
+                next_poll = next_poll.min(last_poll + wants.period);
             },
         }
     };
@@ -851,7 +862,7 @@ fn meter_period(prev: &ac2_proto::Frame, new: &ac2_proto::Frame) -> Option<Durat
 /// The data poll: what the UI was last given, per topic.
 #[derive(Default)]
 struct DataPoll {
-    seen: HashMap<String, (u64, bool, Arc<ac2_proto::Frame>)>,
+    seen: HashMap<Arc<str>, (u64, bool, Arc<ac2_proto::Frame>)>,
     responding: bool,
     /// When a frame with a new `seq` last arrived.
     last_new: Option<Instant>,
@@ -1451,7 +1462,7 @@ mod tests {
             latest: Latest {
                 frames: frames
                     .iter()
-                    .map(|f| (f.topic.to_string(), f.clone()))
+                    .map(|f| (f.topic.to_string().into(), f.clone()))
                     .collect(),
                 ..Latest::default()
             },

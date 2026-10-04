@@ -37,12 +37,19 @@ pub(crate) const ZMQ_SUBSCRIBE: c_int = 6;
 pub(crate) const ZMQ_UNSUBSCRIBE: c_int = 7;
 pub(crate) const ZMQ_SNDBUF: c_int = 11;
 pub(crate) const ZMQ_RCVBUF: c_int = 12;
+pub(crate) const ZMQ_FD: c_int = 14;
+pub(crate) const ZMQ_EVENTS: c_int = 15;
 pub(crate) const ZMQ_LINGER: c_int = 17;
 pub(crate) const ZMQ_RECONNECT_IVL: c_int = 18;
+pub(crate) const ZMQ_RECONNECT_IVL_MAX: c_int = 21;
 pub(crate) const ZMQ_SNDHWM: c_int = 23;
 pub(crate) const ZMQ_RCVHWM: c_int = 24;
 pub(crate) const ZMQ_LAST_ENDPOINT: c_int = 32;
 pub(crate) const ZMQ_ROUTER_MANDATORY: c_int = 33;
+pub(crate) const ZMQ_TCP_KEEPALIVE: c_int = 34;
+pub(crate) const ZMQ_TCP_KEEPALIVE_CNT: c_int = 35;
+pub(crate) const ZMQ_TCP_KEEPALIVE_IDLE: c_int = 36;
+pub(crate) const ZMQ_TCP_KEEPALIVE_INTVL: c_int = 37;
 pub(crate) const ZMQ_XPUB_VERBOSE: c_int = 40;
 pub(crate) const ZMQ_CURVE_SERVER: c_int = 47;
 pub(crate) const ZMQ_CURVE_PUBLICKEY: c_int = 48;
@@ -50,6 +57,7 @@ pub(crate) const ZMQ_CURVE_SECRETKEY: c_int = 49;
 pub(crate) const ZMQ_CURVE_SERVERKEY: c_int = 50;
 pub(crate) const ZMQ_ZAP_DOMAIN: c_int = 55;
 pub(crate) const ZMQ_HANDSHAKE_IVL: c_int = 66;
+pub(crate) const ZMQ_TCP_MAXRT: c_int = 80;
 
 pub(crate) const ZMQ_DONTWAIT: c_int = 1;
 pub(crate) const ZMQ_SNDMORE: c_int = 2;
@@ -97,6 +105,14 @@ unsafe extern "C" {
 
     fn zmq_msg_init(msg: *mut zmq_msg_t) -> c_int;
     fn zmq_msg_init_size(msg: *mut zmq_msg_t, size: usize) -> c_int;
+    fn zmq_msg_init_data(
+        msg: *mut zmq_msg_t,
+        data: *mut c_void,
+        size: usize,
+        ffn: Option<unsafe extern "C" fn(data: *mut c_void, hint: *mut c_void)>,
+        hint: *mut c_void,
+    ) -> c_int;
+    fn zmq_msg_copy(dest: *mut zmq_msg_t, src: *mut zmq_msg_t) -> c_int;
     fn zmq_msg_data(msg: *mut zmq_msg_t) -> *mut c_void;
     fn zmq_msg_size(msg: *const zmq_msg_t) -> usize;
     fn zmq_msg_more(msg: *const zmq_msg_t) -> c_int;
@@ -232,6 +248,16 @@ impl RawSocket {
             .map(drop)
     }
 
+    pub(crate) fn get_int(&self, opt: c_int) -> RawResult<c_int> {
+        let mut value: c_int = 0;
+        let mut len = size_of::<c_int>();
+        // SAFETY: pointer and in/out length describe a live, writable c_int.
+        check(unsafe {
+            zmq_getsockopt(self.ptr.as_ptr(), opt, (&raw mut value).cast(), &mut len)
+        })?;
+        Ok(value)
+    }
+
     /// Reads a string option into `buf`; returns the number of bytes libzmq wrote (including
     /// the trailing NUL for string options).
     pub(crate) fn get_bytes(&self, opt: c_int, buf: &mut [u8]) -> RawResult<usize> {
@@ -321,6 +347,149 @@ impl RawSocket {
                 peer_address,
             })
         }
+    }
+}
+
+impl RawSocket {
+    /// Sends one message part. On success libzmq has taken the content (the part is left an
+    /// empty message); on failure the part is unchanged.
+    pub(crate) fn send_msg(&self, part: &mut RawMsg, flags: c_int) -> RawResult<()> {
+        // SAFETY: `part` owns an initialised message; zmq_msg_send either takes the content
+        // (re-initialising the message empty) or fails leaving it untouched.
+        check(unsafe { zmq_msg_send(part.msg.get(), self.ptr.as_ptr(), flags) }).map(drop)
+    }
+
+    /// Receives one message part without copying its content; also whether more parts of
+    /// the same message follow.
+    pub(crate) fn recv_msg(&self, flags: c_int) -> RawResult<(RawMsg, bool)> {
+        let part = RawMsg::empty();
+        // SAFETY: `part` is initialised; on failure it stays an empty message closed by Drop.
+        check(unsafe { zmq_msg_recv(part.msg.get(), self.ptr.as_ptr(), flags) })?;
+        // SAFETY: initialised message.
+        let more = unsafe { zmq_msg_more(part.msg.get()) } == 1;
+        Ok((part, more))
+    }
+}
+
+/// An owned, initialised `zmq_msg_t`, closed on drop: one message part whose content stays
+/// where libzmq (or the `Vec` it was made from) put it.
+///
+/// `Send` but not `Sync`: sharing the content goes through libzmq's atomic reference count,
+/// so shares may live on different threads, but making a share writes the source message's
+/// flags, which must not race with another thread using that same message.
+pub(crate) struct RawMsg {
+    msg: std::cell::UnsafeCell<zmq_msg_t>,
+}
+
+// SAFETY: a zmq_msg_t has no thread affinity; shared content is reference counted atomically
+// by libzmq, and the free function used here (dropping a Vec) may run on any thread.
+unsafe impl Send for RawMsg {}
+
+impl std::fmt::Debug for RawMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawMsg").field("len", &self.len()).finish()
+    }
+}
+
+/// Free function of [`RawMsg::from_vec`] content.
+unsafe extern "C" fn free_boxed_vec(_data: *mut c_void, hint: *mut c_void) {
+    // SAFETY: `hint` is the Box<Vec<u8>> leaked in `RawMsg::from_vec`; libzmq calls this
+    // exactly once, when the last reference to the content is released.
+    drop(unsafe { Box::from_raw(hint.cast::<Vec<u8>>()) });
+}
+
+impl RawMsg {
+    /// Wraps a blob that a successful `zmq_msg_init*` call initialised.
+    fn wrap(msg: zmq_msg_t) -> Self {
+        Self {
+            msg: std::cell::UnsafeCell::new(msg),
+        }
+    }
+
+    /// An empty message.
+    pub(crate) fn empty() -> Self {
+        let mut msg = zmq_msg_t { _opaque: [0; 64] };
+        // SAFETY: zmq_msg_init only writes the blob and always succeeds.
+        unsafe { zmq_msg_init(&mut msg) };
+        Self::wrap(msg)
+    }
+
+    /// A message owning `data` without copying it; libzmq frees the Vec when the last
+    /// reference (queued shares included) is released.
+    pub(crate) fn from_vec(data: Vec<u8>) -> RawResult<Self> {
+        if data.is_empty() {
+            return Ok(Self::empty());
+        }
+        let mut msg = zmq_msg_t { _opaque: [0; 64] };
+        let mut boxed = Box::new(data);
+        let ptr = boxed.as_mut_ptr().cast::<c_void>();
+        let len = boxed.len();
+        let hint = Box::into_raw(boxed);
+        // SAFETY: `ptr`/`len` describe the Vec's buffer, which stays put while the Box owning
+        // the Vec lives; ownership of that Box passes to libzmq, which frees it through
+        // `free_boxed_vec`. zmq_msg_init_data fails only before taking ownership, and then
+        // the Box is reclaimed here.
+        let rc =
+            unsafe { zmq_msg_init_data(&mut msg, ptr, len, Some(free_boxed_vec), hint.cast()) };
+        if rc < 0 {
+            let e = errno();
+            // SAFETY: never handed to libzmq (init failed); reclaimed exactly once.
+            drop(unsafe { Box::from_raw(hint) });
+            return Err(e);
+        }
+        Ok(Self::wrap(msg))
+    }
+
+    /// A message holding a copy of `data`.
+    pub(crate) fn copy_from(data: &[u8]) -> RawResult<Self> {
+        let mut msg = zmq_msg_t { _opaque: [0; 64] };
+        // SAFETY: init_size allocates `data.len()` bytes owned by the message, then filled
+        // from a live slice of exactly that length.
+        unsafe {
+            check(zmq_msg_init_size(&mut msg, data.len()))?;
+            if !data.is_empty() {
+                std::ptr::copy_nonoverlapping(
+                    data.as_ptr(),
+                    zmq_msg_data(&mut msg).cast::<u8>(),
+                    data.len(),
+                );
+            }
+        }
+        Ok(Self::wrap(msg))
+    }
+
+    /// Another message with the same content: a reference-count increment for large parts,
+    /// a copy of a few dozen bytes for the small ones libzmq stores inline.
+    pub(crate) fn share(&self) -> RawResult<Self> {
+        let m = Self::empty();
+        // SAFETY: both messages are initialised and distinct. `self` is not Sync, so no other
+        // thread uses its blob while zmq_msg_copy updates its flags.
+        check(unsafe { zmq_msg_copy(m.msg.get(), self.msg.get()) })?;
+        Ok(m)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        // SAFETY: initialised message.
+        unsafe { zmq_msg_size(self.msg.get()) }
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        let len = self.len();
+        if len == 0 {
+            return &[];
+        }
+        // SAFETY: data pointer and size describe the message's content, which is valid and
+        // never written while the message lives; the slice borrows `self`. (Inline content of
+        // small messages lives in the blob itself, which does not move while borrowed.)
+        unsafe { std::slice::from_raw_parts(zmq_msg_data(self.msg.get()).cast::<u8>(), len) }
+    }
+}
+
+impl Drop for RawMsg {
+    fn drop(&mut self) {
+        // SAFETY: every RawMsg is initialised (constructed only after a successful init) and
+        // closed exactly once, here.
+        unsafe { zmq_msg_close(self.msg.get()) };
     }
 }
 
