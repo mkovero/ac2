@@ -3,7 +3,10 @@
 //! The scene works from the grid definition the daemon publishes (`grid.get`), so column
 //! positions on screen are exactly the frequencies the DSP used.
 
-use ac2_proto::GridDef;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use ac2_proto::{BinColumns, GridDef, GridId};
 
 /// IEC 61260-1 base-10 octave ratio G = 10^(3/10); IEC band edges are `fm · G^(±1/(2b))`.
 fn iec_g() -> f64 {
@@ -20,6 +23,7 @@ pub fn column_frequencies(g: &GridDef) -> Vec<f64> {
         GridDef::Linear { fs, n } => (0..=*n / 2)
             .map(|k| f64::from(k) * fs.0 / f64::from(*n))
             .collect(),
+        GridDef::LogBins { fs, n, ppo } => BinColumns::new(fs.0, *n, *ppo).centres,
     }
 }
 
@@ -27,23 +31,64 @@ pub fn column_frequencies(g: &GridDef) -> Vec<f64> {
 ///
 /// Log grids: geometric midpoints to the neighbours (`f · 2^(±1/(2·ppo))`). IEC bands: the
 /// standard band edges. Linear (FFT) grids: half a bin either side, the lowest edge clamped
-/// at 0 Hz.
+/// at 0 Hz. Log-bin grids: the edges the bins were gathered by.
 pub fn column_edges(g: &GridDef) -> Vec<(f64, f64)> {
-    let f = column_frequencies(g);
+    let around = |h: f64| -> Vec<(f64, f64)> {
+        column_frequencies(g)
+            .iter()
+            .map(|&c| (c / h, c * h))
+            .collect()
+    };
     match g {
-        GridDef::Log { ppo, .. } => {
-            let h = 2f64.powf(0.5 / f64::from(*ppo));
-            f.iter().map(|&c| (c / h, c * h)).collect()
-        }
-        GridDef::IecBands { fraction, .. } => {
-            let h = iec_g().powf(0.5 / f64::from(fraction.b()));
-            f.iter().map(|&c| (c / h, c * h)).collect()
-        }
+        GridDef::Log { ppo, .. } => around(2f64.powf(0.5 / f64::from(*ppo))),
+        GridDef::IecBands { fraction, .. } => around(iec_g().powf(0.5 / f64::from(fraction.b()))),
         GridDef::Linear { fs, n } => {
             let half = fs.0 / f64::from(*n) / 2.0;
-            f.iter().map(|&c| ((c - half).max(0.0), c + half)).collect()
+            column_frequencies(g)
+                .iter()
+                .map(|&c| ((c - half).max(0.0), c + half))
+                .collect()
         }
+        GridDef::LogBins { fs, n, ppo } => BinColumns::new(fs.0, *n, *ppo)
+            .edges
+            .windows(2)
+            .map(|w| (w[0], w[1]))
+            .collect(),
     }
+}
+
+/// Frequencies and edges of a grid's columns, computed once per grid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GridColumns {
+    /// [`column_frequencies`].
+    pub freqs: Vec<f64>,
+    /// [`column_edges`].
+    pub edges: Vec<(f64, f64)>,
+}
+
+/// Most grids [`columns`] remembers: a session has a handful (one per measurement kind and
+/// FFT length, plus imported traces' grids).
+const COLUMN_CACHE: usize = 64;
+
+/// The columns of `g`, shared: a view repainted every frame asks for the same few grids
+/// over and over, and a 65 536-point FFT grid has 32 769 columns.
+pub fn columns(g: &GridDef) -> Arc<GridColumns> {
+    static CACHE: Mutex<Option<HashMap<GridId, Arc<GridColumns>>>> = Mutex::new(None);
+    let id = g.id();
+    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    let map = cache.get_or_insert_with(HashMap::new);
+    if let Some(c) = map.get(&id) {
+        return Arc::clone(c);
+    }
+    if map.len() >= COLUMN_CACHE {
+        map.clear();
+    }
+    let c = Arc::new(GridColumns {
+        freqs: column_frequencies(g),
+        edges: column_edges(g),
+    });
+    map.insert(id, Arc::clone(&c));
+    c
 }
 
 /// Index of the column nearest to `hz` on a log scale (the way the axis shows distance).
@@ -106,6 +151,29 @@ mod tests {
             [0.0, 6000.0, 12000.0, 18000.0, 24000.0]
         );
         assert_eq!(column_edges(&g)[0], (0.0, 3000.0));
+    }
+
+    #[test]
+    fn log_bins_columns_follow_the_bins() {
+        let g = GridDef::LogBins {
+            fs: Hz(48_000.0),
+            n: 65_536,
+            ppo: 96,
+        };
+        let f = column_frequencies(&g);
+        let e = column_edges(&g);
+        assert_eq!(f.len(), g.len());
+        assert_eq!(e.len(), g.len());
+        // Single bins at the bottom, at their own frequency.
+        assert!((f[10] - 10.0 * 48_000.0 / 65_536.0).abs() < 1e-12);
+        // Every centre inside its column; columns tile the axis.
+        for (c, (lo, hi)) in f.iter().zip(&e) {
+            assert!(lo <= c && c < hi);
+        }
+        assert!(e.windows(2).all(|w| w[0].1 == w[1].0));
+        let shared = columns(&g);
+        assert_eq!(shared.freqs, f);
+        assert!(Arc::ptr_eq(&shared, &columns(&g)));
     }
 
     #[test]

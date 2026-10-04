@@ -74,7 +74,8 @@ pub(crate) struct StampArgs {
 
 /// The newest `tf` / `spec` / `rta` frame a job published, for `trace.capture`: a capture
 /// stores what clients were shown, never a separately computed result — for a transfer
-/// function the same frame before display smoothing, so a stored trace can be re-smoothed.
+/// function the same frame before display smoothing, so a stored trace can be re-smoothed;
+/// for a spectrum the same result before smoothing with every bin, not its display columns.
 pub(crate) type LatestFrame = Arc<Mutex<Option<Frame>>>;
 
 /// A job's way out.
@@ -107,10 +108,22 @@ impl Emitter {
     /// Publishes `data`, keeping `capture` (the same result before display smoothing) as
     /// what `trace.capture` stores.
     pub(crate) fn send_with_capture(&self, s: StampArgs, data: FrameData, capture: FrameData) {
-        self.publish(s, data, Some(capture));
+        self.publish(s, data, Some((capture, s.grid_id)));
     }
 
-    fn publish(&self, s: StampArgs, data: FrameData, capture: Option<FrameData>) {
+    /// Publishes `data`, keeping `capture` — the same result at full resolution, on
+    /// `capture_grid` — as what `trace.capture` stores.
+    pub(crate) fn send_with_capture_on(
+        &self,
+        s: StampArgs,
+        data: FrameData,
+        capture: FrameData,
+        capture_grid: GridId,
+    ) {
+        self.publish(s, data, Some((capture, Some(capture_grid))));
+    }
+
+    fn publish(&self, s: StampArgs, data: FrameData, capture: Option<(FrameData, Option<GridId>)>) {
         let topic = data.topic();
         let mut frame = Frame {
             stamp: FrameStamp {
@@ -136,8 +149,9 @@ impl Emitter {
         // The capture slot is filled before the frame leaves: a client that has seen this
         // frame and asks for a capture must get this result (or a newer one), never the
         // one before it.
-        if let Some(c) = capture {
+        if let Some((c, grid)) = capture {
             frame.data = c;
+            frame.stamp.grid_id = grid;
         }
         if matches!(
             frame.data,

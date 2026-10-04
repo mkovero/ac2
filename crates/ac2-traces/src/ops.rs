@@ -118,7 +118,7 @@ pub struct Derived {
 
 /// What a trace stores of a published frame: transfer (magnitude, phase, coherence),
 /// spectrum or RTA level. A column whose validity mask is not clear is stored as NaN, so a
-/// gap stays a gap. `None` for frame kinds that are not traces.
+/// gap stays a gap (a spectrum has no mask: its gaps are NaN on the wire). `None` for frame kinds that are not traces.
 pub fn capture_columns(data: &FrameData) -> Option<(TraceKind, Columns)> {
     let gate = |v: &[f32], m: &[ValidityMask]| -> Vec<f32> {
         v.iter()
@@ -143,7 +143,7 @@ pub fn capture_columns(data: &FrameData) -> Option<(TraceKind, Columns)> {
                 scale: f.meta.scale,
             },
             Columns {
-                mag_db: gate(&f.level, &f.validity),
+                mag_db: f.level.clone(),
                 phase_deg: None,
                 coherence: None,
             },

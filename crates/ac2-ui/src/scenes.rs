@@ -2,6 +2,7 @@
 //! operator's display choices, and calls the builders. Bookkeeping only: which frames go to
 //! which pane, names, colours, freshness. Every displayed number is made by `ac2-scene`.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use ac2_client::TopicFrame;
@@ -13,7 +14,7 @@ use ac2_proto::units::{MeasId, Seconds, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::format;
-use ac2_scene::grid::{column_edges, column_frequencies};
+use ac2_scene::grid::{GridColumns, column_frequencies, columns};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::leq::{LeqScene, LeqView, leq_scene, leq_tiles};
 use ac2_scene::meter_leq::{MeterLeqScene, meter_leq_scene};
@@ -106,7 +107,7 @@ fn pane_order(st: &AppState, p: PaneKind) -> Vec<(usize, &Measurement)> {
 struct LiveTf<'a> {
     meas: &'a Measurement,
     tf: &'a TopicFrame,
-    freqs: Vec<f64>,
+    cols: Arc<GridColumns>,
     color: usize,
 }
 
@@ -132,15 +133,15 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         live.push(LiveTf {
             meas: m,
             tf,
-            freqs: column_frequencies(grid),
+            cols: columns(grid),
             color: i,
         });
     }
-    let mut stored: Vec<(&ac2_proto::model::TraceData, Vec<f64>)> = st
+    let mut stored: Vec<(&ac2_proto::model::TraceData, Arc<GridColumns>)> = st
         .traces
         .values()
         .filter(|(t, _)| crate::state::on_transfer_pane(&t.meta))
-        .map(|(t, g)| (t.as_ref(), column_frequencies(g)))
+        .map(|(t, g)| (t.as_ref(), columns(g)))
         .collect();
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
 
@@ -152,7 +153,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         let mut t = TfTrace::live(
             f,
             &l.tf.frame.stamp,
-            &l.freqs,
+            &l.cols.freqs,
             l.meas.config.name.clone(),
             theme.trace_color(l.color),
             freshness(l.tf),
@@ -167,8 +168,8 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         t.nudge = Seconds(e.nudge_s);
         traces.push(t);
     }
-    for (data, freqs) in &stored {
-        let mut t = TfTrace::stored(data, freqs);
+    for (data, cols) in &stored {
+        let mut t = TfTrace::stored(data, &cols.freqs);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (
             TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. },
@@ -225,8 +226,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
     struct Col<'a> {
         meas: &'a Measurement,
         tf: &'a TopicFrame,
-        freqs: Vec<f64>,
-        edges: Vec<(f64, f64)>,
+        cols: Arc<GridColumns>,
         color: usize,
     }
     let mut cols = Vec::new();
@@ -250,8 +250,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         cols.push(Col {
             meas: m,
             tf,
-            freqs: column_frequencies(g),
-            edges: column_edges(g),
+            cols: columns(g),
             color: i,
         });
     }
@@ -275,8 +274,8 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
                 f,
                 c.tf.frame.stamp.capture_wall_ns,
                 note.as_deref(),
-                &c.freqs,
-                &c.edges,
+                &c.cols.freqs,
+                &c.cols.edges,
                 name,
                 color,
                 freshness(c.tf),
@@ -285,8 +284,8 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
                 f,
                 c.tf.frame.stamp.capture_wall_ns,
                 note.as_deref(),
-                &c.freqs,
-                &c.edges,
+                &c.cols.freqs,
+                &c.cols.edges,
                 name,
                 color,
                 freshness(c.tf),
@@ -304,8 +303,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         data: &'a ac2_proto::model::TraceData,
         scale: LevelScale,
         quantity: Quantity,
-        freqs: Vec<f64>,
-        edges: Vec<(f64, f64)>,
+        cols: Arc<GridColumns>,
     }
     let stored: Vec<Stored<'_>> = st
         .traces
@@ -325,8 +323,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
                 data: t.as_ref(),
                 scale,
                 quantity: q,
-                freqs: column_frequencies(g),
-                edges: column_edges(g),
+                cols: columns(g),
             })
         })
         .collect();
@@ -334,8 +331,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
         data,
         scale,
         quantity,
-        freqs,
-        edges,
+        cols,
     } in &stored
     {
         let c = data.meta.edit.color;
@@ -343,8 +339,8 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
             key: TraceKey::Stored(data.meta.id),
             name: data.meta.edit.name.clone(),
             color: ac2_scene::primitives::Color::from_rgba8([c.r, c.g, c.b, 255]),
-            freqs,
-            edges,
+            freqs: &cols.freqs,
+            edges: &cols.edges,
             level: &data.mag_db,
             validity: None,
             peak: None,

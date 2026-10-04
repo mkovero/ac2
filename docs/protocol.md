@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 13`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 14`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -157,9 +157,11 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   10 kHz) cannot be followed: set the delay first. `magnitude` keeps the measured phase.
 - **Spectrum** (`SpectrumConfig.smoothing`: `SmoothingFraction` \| nil). Bin power is
   averaged over the kernel on the linear FFT bins, each bin weighted by its width in log
-  frequency (`1/f`); DC and bins narrower than the kernel pass through, and bins below the
-  floor (non-finite level) are gaps the kernel never crosses. A smoothed bin is no longer
-  the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients label it.
+  frequency (`1/f`); DC and bins narrower than the kernel pass through, and bins without
+  power (no finite level) are gaps the kernel never crosses. Smoothing runs on every bin,
+  before the bins are gathered into the frame's display columns (§5.4). A smoothed bin is
+  no longer the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients
+  label it.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
   `peak_weighting`, the Leq windows (`leq: LeqConfig`), the name — applies in place; the
   meter, its log and its windows go on (§3.2, SPL log). The meter runs every frequency
@@ -388,9 +390,9 @@ display edits and are never applied to the stored data.
   a curve not in the mic library (`not_found`).
 
 - `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
-  what clients were shown, for a `tf` or `spec` frame before its display smoothing — with
-  columns
-  whose validity mask is set stored as NaN.
+  what clients were shown, for a `tf` or `spec` frame before its display smoothing, for a
+  `spec` frame with every FFT bin (grid `linear`) where the live frame has display columns
+  (grid `log_bins`) — with columns whose validity mask is set stored as NaN.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
@@ -710,7 +712,7 @@ bitmask array says why.
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `eff_avg`: count (optional — presence = listed), `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve` |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
-| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
+| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log) |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
@@ -758,7 +760,10 @@ A malformed frame is dropped and counted by the client; decoders never panic.
 
 A 480-column `tf` frame: topic 6 B, header ≈ 390 B, four arrays (mag, phase, coh,
 validity) of 1920 B — ≈ 8.1 KB; ≈ 10.0 KB with `eff_avg`. At 60 fps ≈ 0.5–0.6 MB/s per
-measurement locally, half that remote at 30 fps.
+measurement locally, half that remote at 30 fps. A default `spec` frame (65 536 points at
+48 kHz: 897 `log_bins` columns of one f32) is ≈ 3.9 KB; it goes out with each new spectrum
+(every hop: `n/8`, ≈ 6 per second at 65 536 points; ≈ 30 per second for short FFTs) and is
+repeated every 0.25 s of audio while nothing changes (frozen), ≈ 23 KB/s.
 
 ## 6. Grids
 
@@ -767,11 +772,21 @@ measurement locally, half that remote at 30 fps.
 - `{type: "log", ppo, k_min, k_max}`: columns `1000 · 2^(k/ppo)` Hz, `k = k_min…k_max`.
 - `{type: "iec_bands", fraction, centres: [Hz]}`: exact IEC mid-band frequencies.
 - `{type: "linear", fs, n}`: FFT bins `k · fs / n`, `k = 0…n/2`.
+- `{type: "log_bins", fs, n, ppo}`: the bins of an `n`-point FFT at `fs` gathered into
+  display columns (the live `spec` frame; the daemon uses `ppo` 96). With `df = fs / n`
+  and `r = 2^(1/ppo)`: bins `k < K = ceil(1 / (r − 1))` are one column each (centre
+  `k · df`, edges `(k ± ½)·df`, the lowest clamped at 0); from `e = (K − ½)·df` on, a
+  column spans `[e, e·r^j)` for the smallest `j ≥ 1` whose span holds at least one bin
+  centre not yet taken (`j = 1` except for rounding), holds the bins `k` with `k · df` in
+  it, and is centred at the geometric mean of its edges; the last column ends at
+  `(n/2 + ½)·df`. Every bin is in exactly one column. 65 536 points at 48 kHz: 897
+  columns for 32 769 bins.
 
 `grid_id` = FNV-1a 64 (offset 0xcbf29ce484222325, prime 0x100000001b3) over canonical
-bytes: tag byte (1 log, 2 iec_bands, 3 linear), then little-endian fields — log: `ppo`
-u32, `k_min` i32, `k_max` i32; iec_bands: band designator b u32 (1, 3, 6, 12, 24), centre
-count u32, each centre f64; linear: `fs` f64, `n` u32. Example: log 48/−240/239 (480
+bytes: tag byte (1 log, 2 iec_bands, 3 linear, 4 log_bins), then little-endian fields —
+log: `ppo` u32, `k_min` i32, `k_max` i32; iec_bands: band designator b u32 (1, 3, 6, 12,
+24), centre count u32, each centre f64; linear: `fs` f64, `n` u32; log_bins: `fs` f64, `n`
+u32, `ppo` u32. Example: log 48/−240/239 (480
 columns) = `0x79ec3d16ae0e94d0`.
 
 ## 7. Files

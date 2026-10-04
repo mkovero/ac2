@@ -39,6 +39,11 @@ pub fn grids() -> Vec<GridDef> {
             fs: Hz(48_000.0),
             n: 65_536,
         },
+        GridDef::LogBins {
+            fs: Hz(48_000.0),
+            n: 65_536,
+            ppo: 96,
+        },
     ]
 }
 
@@ -1165,7 +1170,7 @@ pub fn tf_frame(eff_avg: bool) -> Frame {
 /// One frame of every kind.
 pub fn frames() -> Vec<Frame> {
     let mut g = grids();
-    let linear = g.remove(2);
+    let log_bins = g.remove(3);
     let bands = g.remove(1);
     vec![
         tf_frame(true),
@@ -1208,7 +1213,7 @@ pub fn frames() -> Vec<Frame> {
             }),
         },
         Frame {
-            stamp: stamp(Some(linear)),
+            stamp: stamp(Some(log_bins)),
             data: FrameData::Spec(SpecFrame {
                 meas: MeasId(5),
                 meta: SpecMeta {
@@ -1218,8 +1223,7 @@ pub fn frames() -> Vec<Frame> {
                     mic_curve: false,
                     smoothing: Some(SmoothingFraction::Sixth),
                 },
-                level: vec![-120.0, -20.0, f32::INFINITY, f32::NEG_INFINITY],
-                validity: vec![ValidityMask::NONE; 4],
+                level: vec![-120.0, -20.0, f32::INFINITY, f32::NAN],
             }),
         },
         Frame {

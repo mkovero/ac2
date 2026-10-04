@@ -689,6 +689,12 @@ fn spectrum_smoothing_live_and_captured() {
         mode: SmoothingMode::Magnitude,
     };
     assert_eq!(t.edit.smoothing, Some(power));
+    // Every bin, on the FFT's own grid.
+    let bins = ac2_proto::GridDef::Linear {
+        fs: Hz(f64::from(FS)),
+        n: 4096,
+    };
+    assert_eq!(t.grid_id, bins.id());
     let served = data(&mut c2, t.id);
     let t = set_smoothing(&mut c2, &t, None);
     let raw = data(&mut c2, t.id);
@@ -703,21 +709,42 @@ fn spectrum_smoothing_live_and_captured() {
         ac2_core::smoothing::SmoothingFraction::Sixth,
     )
     .smooth(&p, &valid);
-    let (mut rough_raw, mut rough_live) = (0.0, 0.0);
-    for k in 1..raw.mag_db.len() {
-        if !valid[k] {
+    // The live frame is the smoothed bins gathered into display columns, each the highest
+    // level among its bins; the capture keeps every bin and smooths to the same curve.
+    let cols = ac2_proto::BinColumns::new(f64::from(FS), 4096, 96);
+    let log_bins = ac2_proto::GridDef::LogBins {
+        fs: Hz(f64::from(FS)),
+        n: 4096,
+        ppo: 96,
+    };
+    assert_eq!(f.stamp.grid_id, Some(log_bins.id()));
+    assert_eq!(live.level.len(), cols.len());
+    assert_eq!(raw.mag_db.len(), 2049);
+    for (c, w) in cols.first_bin.windows(2).enumerate() {
+        let bins = w[0] as usize..w[1] as usize;
+        let top = |v: &dyn Fn(usize) -> f64| {
+            bins.clone()
+                .filter(|&k| k > 0 && valid[k])
+                .map(v)
+                .fold(f64::NAN, f64::max)
+        };
+        let want_c = top(&|k| 10.0 * want[k].log10());
+        if want_c.is_nan() {
             continue;
         }
-        let w = 10.0 * want[k].log10();
         assert!(
-            (f64::from(live.level[k]) - w).abs() < 1e-3,
-            "bin {k}: live {} vs ac2-core {w}",
-            live.level[k]
+            (f64::from(live.level[c]) - want_c).abs() < 1e-3,
+            "column {c}: live {} vs ac2-core {want_c}",
+            live.level[c]
         );
-        assert!((served.mag_db[k] - live.level[k]).abs() < 1e-3, "bin {k}");
-        if k > 100 && valid[k - 1] {
+        let served_c = top(&|k| f64::from(served.mag_db[k]));
+        assert!((served_c - want_c).abs() < 1e-3, "column {c}");
+    }
+    let (mut rough_raw, mut rough_live) = (0.0, 0.0);
+    for k in 101..raw.mag_db.len() {
+        if valid[k] && valid[k - 1] {
             rough_raw += f64::from(raw.mag_db[k] - raw.mag_db[k - 1]).powi(2);
-            rough_live += f64::from(live.level[k] - live.level[k - 1]).powi(2);
+            rough_live += f64::from(served.mag_db[k] - served.mag_db[k - 1]).powi(2);
         }
     }
     assert!(rough_live * 10.0 < rough_raw, "{rough_live} vs {rough_raw}");
@@ -729,6 +756,79 @@ fn spectrum_smoothing_live_and_captured() {
     };
     let t = set_smoothing(&mut c2, &t, Some(third));
     assert_ne!(data(&mut c2, t.id).mag_db, served.mag_db);
+    drop(r.backend);
+    r.h.shutdown();
+}
+
+/// A default 65 536-point spectrum publishes display columns, each the highest bin level in
+/// it, and captures every bin: the capture of the last frame holds exactly the bins the
+/// frame's columns were gathered from, and a tone between bins keeps its level live.
+#[test]
+fn spectrum_live_columns_are_the_captured_bins_maxima() {
+    let mut r = rig("spec-columns");
+    let (mut c2, sub) = connect(&r.h, &[b"d/2/spec"]);
+    r.c.ok(Command::GenSet {
+        lease_token: r.tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Sine { freq: Hz(1234.5) },
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
+    c2.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "fft".into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig::on_input(1),
+            },
+        },
+    });
+    c2.ok(Command::MeasStart { meas: MeasId(2) });
+    for _ in 0..4 {
+        run(&mut r.d, 0.5);
+        r.c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    // No more audio: the last frame published is the one a capture stores.
+    let mut last = None;
+    while let Some(f) = sub.frame(Duration::from_millis(500), |f| {
+        matches!(f.data, FrameData::Spec(_))
+    }) {
+        last = Some(f);
+    }
+    let f = last.expect("spec frame");
+    let FrameData::Spec(live) = f.data else {
+        unreachable!()
+    };
+    let t = trace(c2.ok(Command::TraceCapture {
+        meas: MeasId(2),
+        name: "fft".into(),
+        slot: None,
+    }));
+    let bins = data(&mut c2, t.id).mag_db;
+    assert_eq!(bins.len(), 32_769);
+    let cols = ac2_proto::BinColumns::new(f64::from(FS), 65_536, 96);
+    assert_eq!(live.level.len(), cols.len());
+    for (c, w) in cols.first_bin.windows(2).enumerate() {
+        let top = bins[w[0] as usize..w[1] as usize]
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .fold(f32::NAN, f32::max);
+        assert!(
+            live.level[c] == top || (live.level[c].is_nan() && top.is_nan()),
+            "column {c}: {} vs {top}",
+            live.level[c]
+        );
+    }
+    // The tone: its peak bin, half a bin off centre, reads the same live.
+    let peak = |v: &[f32]| v.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    assert_eq!(peak(&live.level), peak(&bins));
+    assert!(peak(&bins) > -40.0, "{}", peak(&bins));
     drop(r.backend);
     r.h.shutdown();
 }

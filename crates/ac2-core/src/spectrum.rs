@@ -150,6 +150,13 @@ impl<'a> PowerSpectrum<'a> {
         rms_dbfs(self.amplitude_rms(k))
     }
 
+    /// The factor `2 / S₁²` that turns folded power into tone power: `10·lg(factor · F_k)`
+    /// is [`PowerSpectrum::amplitude_dbfs`], one logarithm per bin instead of a root and a
+    /// logarithm, and the tone power can be summed, smoothed and compared as power first.
+    pub fn tone_power_factor(&self) -> f64 {
+        2.0 / (self.gains.sum * self.gains.sum)
+    }
+
     /// One-sided PSD of bin `k` in FS²/Hz.
     pub fn psd(&self, k: usize) -> f64 {
         self.folded[k] / (self.fs * self.gains.sum_sq)
@@ -204,6 +211,22 @@ pub enum BandStatus {
     InsufficientResolution,
     /// The band extends above Nyquist.
     AboveNyquist,
+}
+
+/// Largest finite value in each column of bins, NaN for a column without one: column `c`
+/// covers `values[first[c] .. first[c + 1]]` (`first` ascending, one entry more than there
+/// are columns). Gathering bins for display by their maximum, not their mean, keeps a tone
+/// narrower than its column at its level.
+pub fn column_max<'a>(values: &'a [f64], first: &'a [u32]) -> impl Iterator<Item = f64> + 'a {
+    first.windows(2).map(|w| {
+        let (a, b) = (w[0] as usize, (w[1] as usize).min(values.len()));
+        values
+            .get(a..b)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|v| v.is_finite())
+            .fold(f64::NAN, |m, &v| if v > m || m.is_nan() { v } else { m })
+    })
 }
 
 /// One band of an FFT banding.
@@ -459,6 +482,11 @@ impl SpectrumAnalyzer {
         self.avg.len()
     }
 
+    /// [`PowerSpectrum::tone_power_factor`] of this analyzer's spectra.
+    pub fn tone_power_factor(&self) -> f64 {
+        2.0 / (self.gains.sum * self.gains.sum)
+    }
+
     /// Frames analysed since the averaging was last reset.
     pub fn frames(&self) -> u64 {
         self.frames_averaged
@@ -654,6 +682,38 @@ mod tests {
         fn gauss(&mut self) -> f64 {
             let (u1, u2) = (self.uniform(), self.uniform());
             (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
+        }
+    }
+
+    #[test]
+    fn column_max_keeps_a_narrow_peak() {
+        // A one-bin tone 40 dB over a flat floor, in a column of 50 bins: the column reads
+        // the tone, where a mean would read ~23 dB under it.
+        let mut p = vec![1e-6; 200];
+        p[123] = 1e-2;
+        p[7] = f64::NAN;
+        let first = [0, 1, 100, 150, 200];
+        let cols: Vec<f64> = column_max(&p, &first).collect();
+        assert_eq!(cols, [1e-6, 1e-6, 1e-2, 1e-6]);
+        // A column of gaps is a gap.
+        let cols: Vec<f64> = column_max(&[f64::NAN, 1.0], &[0, 1, 2]).collect();
+        assert!(cols[0].is_nan());
+        assert_eq!(cols[1], 1.0);
+    }
+
+    #[test]
+    fn tone_power_factor_matches_amplitude_dbfs() {
+        let fs = 48_000.0;
+        let n = 4096;
+        let mut a = analyzer(fs, n, Window::Hann, Averaging::Off);
+        let x: Vec<f64> = (0..n)
+            .map(|i| 0.5 * (TAU * 1000.0 * i as f64 / fs).sin())
+            .collect();
+        a.push(&x);
+        let ps = a.average().expect("one frame");
+        for k in [10, 85, 86, 400] {
+            let via = 10.0 * (ps.tone_power_factor() * ps.folded()[k]).log10();
+            assert!((via - ps.amplitude_dbfs(k)).abs() < 1e-9, "{k}");
         }
     }
 

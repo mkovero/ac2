@@ -45,6 +45,7 @@ BAND_GRID = {
     "centres": [19.952623149688797, 1000.0, 20000.0],
 }
 LIN_GRID = {"type": "linear", "fs": 48000.0, "n": 65536}
+LOG_BINS_GRID = {"type": "log_bins", "fs": 48000.0, "n": 65536, "ppo": 96}
 
 WEAK_REFERENCE = 1 << 3
 THINNED, OUT_OF_BAND, INSUFFICIENT_RESOLUTION = 1 << 0, 1 << 1, 1 << 7
@@ -170,7 +171,7 @@ def frames():
         "spec": frame(
             "d/5/spec",
             "spec",
-            LIN_GRID,
+            LOG_BINS_GRID,
             {
                 "window": "hann",
                 "scale": "dbfs",
@@ -179,8 +180,7 @@ def frames():
                 "smoothing": "sixth",
             },
             [
-                (arr("level", "dbfs"), [-120.0, -20.0, INF, -INF]),
-                (arr("validity", "bitmask", "u32"), [0, 0, 0, 0]),
+                (arr("level", "dbfs"), [-120.0, -20.0, INF, NAN]),
             ],
         ),
         "spl": frame(
@@ -672,7 +672,7 @@ def generate(out):
     _dump(os.path.join(exp, "requests.json"), requests())
     p.write_container(os.path.join(out, "py_events.bin"), [_pack(e) for e in events()])
     _dump(os.path.join(exp, "events.json"), events())
-    grids = [LOG_GRID, BAND_GRID, LIN_GRID]
+    grids = [LOG_GRID, BAND_GRID, LIN_GRID, LOG_BINS_GRID]
     _dump(
         os.path.join(exp, "grids.json"),
         [{"grid": g, "grid_id": p.grid_id(g)} for g in grids],

@@ -301,8 +301,8 @@ impl Smoother {
 ///
 /// Bin `k` is at `k·fs/n`; only ratios of bin frequencies enter the kernel, so the weights
 /// depend on the bin count and the fraction, not on `fs`. Build once per (bin count,
-/// fraction) and reuse.
-#[derive(Debug, Clone, PartialEq)]
+/// fraction) and reuse; [`LinearSmoother::smooth_into`] also reuses its working memory.
+#[derive(Debug, Clone)]
 pub struct LinearSmoother {
     fraction: SmoothingFraction,
     /// Kernel half-width, octaves.
@@ -311,6 +311,19 @@ pub struct LinearSmoother {
     window: Vec<(u32, u32)>,
     /// `cos θ_k`, `sin θ_k` with `θ_k = π·log2(k)/half_oct` (0 for DC).
     phase: Vec<(f64, f64)>,
+    /// Working memory of [`LinearSmoother::smooth_into`].
+    scratch: Scratch,
+}
+
+/// Working memory of one smoothing pass, sized to the bin count on first use.
+#[derive(Debug, Clone, Default)]
+struct Scratch {
+    /// Bin is valid (and finite).
+    ok: Vec<bool>,
+    /// Half-open run of valid bins each valid bin belongs to.
+    run: Vec<(u32, u32)>,
+    /// Range-sum tree over the per-bin terms.
+    tree: SumTree,
 }
 
 /// Per-bin terms summed over a kernel: `[u, u·cos θ, u·sin θ, u·P, u·P·cos θ, u·P·sin θ]`.
@@ -342,6 +355,7 @@ impl LinearSmoother {
             half_oct,
             window,
             phase,
+            scratch: Scratch::default(),
         }
     }
 
@@ -377,45 +391,83 @@ impl LinearSmoother {
             power.len() == n && valid.len() == n,
             "power and validity must be {n} bins long"
         );
-        let ok: Vec<bool> = valid
-            .iter()
-            .zip(power)
-            .map(|(v, p)| *v && p.is_finite())
-            .collect();
-        // Run bounds per valid bin.
-        let mut run = vec![(0usize, 0usize); n];
-        for (a, b) in valid_runs(&ok) {
-            run[a..b].fill((a, b));
-        }
-        let tree = SumTree::new(
-            (0..n)
-                .map(|j| {
-                    if j == 0 || !ok[j] {
-                        return [0.0; 6];
-                    }
-                    let u = 1.0 / j as f64;
-                    let (c, s) = self.phase[j];
-                    let p = power[j];
-                    [u, u * c, u * s, u * p, u * p * c, u * p * s]
-                })
-                .collect(),
+        let mut out = vec![0.0; n];
+        self.smooth_with(&mut Scratch::default(), power, |j| valid[j], &mut out);
+        out
+    }
+
+    /// [`LinearSmoother::smooth`] with every finite bin valid, written to `out`. Its working
+    /// memory stays in the smoother, so a live spectrum smoothed every frame allocates only
+    /// on the first.
+    ///
+    /// # Panics
+    /// If the slices are not `bins()` long.
+    pub fn smooth_into(&mut self, power: &[f64], out: &mut [f64]) {
+        let n = self.bins();
+        assert!(
+            power.len() == n && out.len() == n,
+            "power and output must be {n} bins long"
         );
-        (0..n)
-            .map(|k| {
-                if k == 0 || !ok[k] {
-                    return power[k];
-                }
-                let (lo, hi) = self.window[k];
-                let (a, b) = run[k];
-                let t = tree.sum((lo as usize).max(a), (hi as usize).min(b));
-                let (c, s) = self.phase[k];
-                // Σ u·w·(·) with w = ½(1 + cos θ_j cos θ_k + sin θ_j sin θ_k).
-                let den = t[0] + c * t[1] + s * t[2];
-                let num = t[3] + c * t[4] + s * t[5];
-                // Rounding can leave a hair below zero where every weighted bin is silent.
-                (num / den).max(0.0)
-            })
-            .collect()
+        let mut scratch = std::mem::take(&mut self.scratch);
+        self.smooth_with(&mut scratch, power, |_| true, out);
+        self.scratch = scratch;
+    }
+
+    fn smooth_with(
+        &self,
+        s: &mut Scratch,
+        power: &[f64],
+        valid: impl Fn(usize) -> bool,
+        out: &mut [f64],
+    ) {
+        let n = self.bins();
+        s.ok.clear();
+        s.ok.extend(
+            power
+                .iter()
+                .enumerate()
+                .map(|(j, p)| valid(j) && p.is_finite()),
+        );
+        // Run bounds per valid bin.
+        s.run.clear();
+        s.run.resize(n, (0, 0));
+        let mut a = 0;
+        while a < n {
+            if !s.ok[a] {
+                a += 1;
+                continue;
+            }
+            let mut b = a;
+            while b < n && s.ok[b] {
+                b += 1;
+            }
+            s.run[a..b].fill((a as u32, b as u32));
+            a = b;
+        }
+        s.tree.build(n, |j| {
+            if j == 0 || !s.ok[j] {
+                return [0.0; 6];
+            }
+            let u = 1.0 / j as f64;
+            let (c, si) = self.phase[j];
+            let p = power[j];
+            [u, u * c, u * si, u * p, u * p * c, u * p * si]
+        });
+        for (k, o) in out.iter_mut().enumerate() {
+            if k == 0 || !s.ok[k] {
+                *o = power[k];
+                continue;
+            }
+            let (lo, hi) = self.window[k];
+            let (a, b) = s.run[k];
+            let t = s.tree.sum(lo.max(a) as usize, hi.min(b) as usize);
+            let (c, si) = self.phase[k];
+            // Σ u·w·(·) with w = ½(1 + cos θ_j cos θ_k + sin θ_j sin θ_k).
+            let den = t[0] + c * t[1] + si * t[2];
+            let num = t[3] + c * t[4] + si * t[5];
+            // Rounding can leave a hair below zero where every weighted bin is silent.
+            *o = (num / den).max(0.0);
+        }
     }
 }
 
@@ -427,21 +479,25 @@ pub fn smooth_linear_bins(power: &[f64], fraction: SmoothingFraction) -> Vec<f64
 
 /// Range sums over per-bin terms. A query adds only nodes inside the range, so a sum never
 /// contains — and never loses digits to — values outside it.
+#[derive(Debug, Clone, Default)]
 struct SumTree {
     n: usize,
     node: Vec<Terms>,
 }
 
 impl SumTree {
-    fn new(leaves: Vec<Terms>) -> Self {
-        let n = leaves.len();
-        let mut node = vec![[0.0; 6]; n];
-        node.extend(leaves);
-        for i in (1..n).rev() {
-            let (a, b) = (node[2 * i], node[2 * i + 1]);
-            node[i] = std::array::from_fn(|t| a[t] + b[t]);
+    /// Rebuilds the tree over `n` leaves `leaf(0) … leaf(n − 1)`, reusing its memory.
+    fn build(&mut self, n: usize, leaf: impl Fn(usize) -> Terms) {
+        self.n = n;
+        self.node.clear();
+        self.node.resize(2 * n, [0.0; 6]);
+        for j in 0..n {
+            self.node[n + j] = leaf(j);
         }
-        Self { n, node }
+        for i in (1..n).rev() {
+            let (a, b) = (self.node[2 * i], self.node[2 * i + 1]);
+            self.node[i] = std::array::from_fn(|t| a[t] + b[t]);
+        }
     }
 
     /// Sum over leaves `[lo, hi)`.

@@ -643,17 +643,18 @@ pub struct RtaFrame {
     pub validity: Vec<ValidityMask>,
 }
 
-/// Spectrum frame.
+/// Spectrum frame. Live, its columns are the FFT bins gathered for display
+/// ([`crate::grid::GridDef::LogBins`]), each the highest tone level among its bins; a
+/// capture keeps every bin ([`crate::grid::GridDef::Linear`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpecFrame {
     /// Measurement.
     pub meas: MeasId,
     /// Metadata.
     pub meta: SpecMeta,
-    /// Tone level per bin in `meta.scale`.
+    /// Tone level per column in `meta.scale`; NaN where there is none (a bin without
+    /// power).
     pub level: Vec<f32>,
-    /// Validity per bin.
-    pub validity: Vec<ValidityMask>,
 }
 
 /// SPL frame (no arrays).
@@ -1030,10 +1031,6 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                 desc(ArrayName::Level, level_unit(f.meta.scale)),
                 Col::F(&f.level),
             ));
-            cols.push((
-                desc(ArrayName::Validity, Unit::Bitmask),
-                Col::U(mask_slice(&f.validity)),
-            ));
             FrameMeta::Spec(f.meta)
         }
         FrameData::Spl(f) => FrameMeta::Spl(f.meta),
@@ -1340,7 +1337,6 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             meas,
             meta,
             level: a.f32(ArrayName::Level, level_unit(meta.scale))?,
-            validity: a.mask(ArrayName::Validity)?,
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
         FrameMeta::Leq(meta) => {

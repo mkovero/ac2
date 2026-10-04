@@ -225,6 +225,16 @@ distortion) is its own and is kept while the app runs:
   on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
+A live **narrowband spectrum** is drawn from display columns, not from every FFT bin: each
+bin is its own column while bins are wider than 1/96 octave (up to about 100 Hz at the
+default 65 536 points and 48 kHz), above that a column spans 1/96 octave and shows the
+highest bin in it. A tone keeps its level, and the cursor reads its frequency to within
+1/96 octave; that is one column every pixel or two over 20 Hz – 20 kHz, and keeps the
+spectrum small enough for a laptop on WiFi. For finer detail, zoom in on a **capture**
+(**Ctrl+1**): a stored spectrum keeps every bin. A long FFT updates every eighth of its
+window — about 6 times a second at 65 536 points — since windows overlapping more than that
+add work but no new information; short FFTs update about 30 times a second.
+
 ### Smoothing
 
 **K** makes the smoothing coarser and **Shift+K** finer, through off, 1/48, 1/24, 1/12, 1/6

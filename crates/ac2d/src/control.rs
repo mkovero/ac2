@@ -1533,6 +1533,12 @@ impl Control {
             return Ok(None);
         }
         let mut leq = matches!(m.config.kind, MeasKind::Spl { .. }).then(|| self.leq_setup(m.id));
+        // A spectrum publishes display columns but captures every bin: `trace.capture`
+        // looks the capture's grid up by id.
+        if let (MeasKind::Spectrum { config }, Some(rt)) = (&m.config.kind, &self.session) {
+            let g = jobs::spectrum::capture_grid(config, rt.sample_rate);
+            self.register_grid(g);
+        }
         let Some(rt) = self.session.as_ref() else {
             return Ok(None);
         };

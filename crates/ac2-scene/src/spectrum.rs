@@ -172,7 +172,8 @@ impl<'a> SpectrumTrace<'a> {
     }
 
     /// A live narrowband spectrum; `captured` is the frame's capture time, `curve` the
-    /// mic-curve note of its input.
+    /// mic-curve note of its input. Its columns are display columns of FFT bins, each the
+    /// highest tone level among its bins; a gap is NaN.
     #[allow(clippy::too_many_arguments)]
     pub fn spectrum(
         frame: &'a SpecFrame,
@@ -191,7 +192,7 @@ impl<'a> SpectrumTrace<'a> {
             freqs,
             edges,
             level: &frame.level,
-            validity: Some(&frame.validity),
+            validity: None,
             peak: None,
             scale: frame.meta.scale,
             quantity: Quantity::tone(frame.meta.smoothing),
@@ -722,7 +723,6 @@ mod tests {
                 smoothing: None,
             },
             level: vec![],
-            validity: vec![],
         };
         let t = SpectrumTrace::spectrum(
             &spec,

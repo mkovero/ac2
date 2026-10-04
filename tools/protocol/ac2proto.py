@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 13
+PROTO_VERSION = 14
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -94,6 +94,8 @@ def grid_id(g: dict) -> int:
         b += b"".join(struct.pack("<d", float(c)) for c in g["centres"])
     elif t == "linear":
         b = b"\x03" + struct.pack("<dI", float(g["fs"]), g["n"])
+    elif t == "log_bins":
+        b = b"\x04" + struct.pack("<dII", float(g["fs"]), g["n"], g["ppo"])
     else:
         raise ValueError(t)
     h = 0xCBF29CE484222325

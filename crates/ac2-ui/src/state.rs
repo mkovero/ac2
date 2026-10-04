@@ -4870,8 +4870,8 @@ impl AppState {
         use ac2_proto::FrameData;
         for tf in d.latest.frames.values() {
             let (meas, level, validity) = match &tf.frame.data {
-                FrameData::Spec(f) => (f.meas, &f.level, &f.validity),
-                FrameData::Rta(f) => (f.meas, &f.level, &f.validity),
+                FrameData::Spec(f) => (f.meas, &f.level, None),
+                FrameData::Rta(f) => (f.meas, &f.level, Some(f.validity.as_slice())),
                 _ => continue,
             };
             let seq = tf.frame.stamp.seq;
@@ -4882,7 +4882,7 @@ impl AppState {
                 .or_insert_with(|| (0, at, PeakHold::new(0.0)));
             if e.2.values().is_empty() || seq > e.0 {
                 let dt = (at.saturating_sub(e.1)) as f32 / 1e9;
-                e.2.update(level, Some(validity), dt);
+                e.2.update(level, validity, dt);
                 e.0 = seq;
                 e.1 = at;
             }

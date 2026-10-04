@@ -1,12 +1,16 @@
-//! Narrowband spectrum job: tone level per FFT bin (`spec` frames) and input meters. A
-//! calibrated input reads dB SPL; its mic curve, when on, is subtracted per bin. Display
-//! smoothing, when set, power-averages the bins over a fractional-octave kernel; the
-//! unsmoothed result is what a capture stores.
+//! Narrowband spectrum job: tone level per FFT bin and input meters. A calibrated input
+//! reads dB SPL; its mic curve, when on, is subtracted per bin. Display smoothing, when set,
+//! power-averages the bins over a fractional-octave kernel.
+//!
+//! The live `spec` frame gathers the bins into display columns ([`GridDef::LogBins`]), each
+//! the highest level among its bins, so a 65 536-point spectrum is under a thousand columns
+//! on the wire and a single-bin tone keeps its level. The capture slot keeps every bin,
+//! unsmoothed, on the FFT's own grid: that is what `trace.capture` stores.
 
 use ac2_core::smoothing::LinearSmoother;
-use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig};
-use ac2_proto::frame::{FrameData, ProtectionFlags, SpecFrame, SpecMeta, ValidityMask};
-use ac2_proto::grid::{GridDef, GridId};
+use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig, column_max};
+use ac2_proto::frame::{FrameData, ProtectionFlags, SpecFrame, SpecMeta};
+use ac2_proto::grid::{BinColumns, GridDef, GridId};
 use ac2_proto::model::{LevelScale, SpectrumConfig as WireConfig};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
@@ -15,17 +19,36 @@ use crate::calstore::InputCal;
 use crate::conv;
 use crate::fanout::Block;
 
+/// Display columns per octave above the single-bin columns. The default 20 Hz – 20 kHz view
+/// spans 10 octaves over roughly 1000–2000 pixels: 96 columns per octave is one every one
+/// or two pixels, so the drawn line is the one every bin would give (the plot keeps the
+/// highest point per pixel either way). Zoomed in further, or for an exact bin, a capture
+/// has every bin.
+pub(crate) const DISPLAY_PPO: u32 = 96;
+
 pub(crate) struct Spectrum {
     meas: MeasId,
     cfg: WireConfig,
     idx: usize,
     analyzer: SpectrumAnalyzer,
     grid_id: GridId,
+    capture_grid_id: GridId,
+    /// First bin of each display column, then the bin count.
+    first_bin: Vec<u32>,
     cal: InputCal,
-    /// Mic-curve correction per bin (dB subtracted).
-    corr: Option<Vec<f64>>,
+    /// Per bin: folded power → tone power in the frame's scale (window gain, sensitivity
+    /// and mic-curve correction as one factor).
+    gain: Vec<f64>,
     /// Display smoothing kernel for `cfg.smoothing`, built for the spectrum's bin count.
     smoother: Option<LinearSmoother>,
+    /// Tone power per bin.
+    power: Vec<f64>,
+    /// Smoothed tone power per bin (smoothing on).
+    smoothed: Vec<f64>,
+    /// Something new to show since the last `spec` frame: a spectrum, or a setting.
+    fresh: bool,
+    /// End sample at the last `spec` frame.
+    last_spec: Option<u64>,
     frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
@@ -35,27 +58,45 @@ pub(crate) struct Spectrum {
     wall: u64,
 }
 
-/// The grid of a spectrum at `fs`.
+/// The live (display) grid of a spectrum at `fs`.
 pub(crate) fn grid(cfg: &WireConfig, fs: u32) -> GridDef {
+    GridDef::LogBins {
+        fs: Hz(f64::from(fs)),
+        n: cfg.fft_len,
+        ppo: DISPLAY_PPO,
+    }
+}
+
+/// The grid of a spectrum's capture: every FFT bin.
+pub(crate) fn capture_grid(cfg: &WireConfig, fs: u32) -> GridDef {
     GridDef::Linear {
         fs: Hz(f64::from(fs)),
         n: cfg.fft_len,
     }
 }
 
-/// Updates per second the spectrum aims for. The FFT length sets frequency resolution; the
-/// hop sets how often a new spectrum appears. Tying the hop to the length (n/2) made a
-/// 65 536-point spectrum update only every ~0.7 s, so the hop is chosen for a fluid display
-/// instead: heavily overlapped windows, about this many per second.
+/// Updates per second the spectrum aims for when the window is short enough to allow it.
 const SPECTRUM_UPDATES_PER_S: u32 = 30;
 
+/// Most audio between two `spec` frames, seconds. A frame goes out when there is a new
+/// spectrum (every hop) or a setting changed; while nothing changes (frozen, or a long hop)
+/// it is repeated this often, well inside the second after which a client calls it stale.
+const SPEC_REPEAT_S: f64 = 0.25;
+
 /// Hop for an `n`-point spectrum at `fs`: the largest power of two at or below
-/// `fs / SPECTRUM_UPDATES_PER_S`, never more than half a window (overlap ≥ 50 %) and at least
-/// 64 samples.
+/// `fs / SPECTRUM_UPDATES_PER_S`, kept between `n / 8` and `n / 2` (overlap 50 – 87.5 %).
+///
+/// Frames closer than `n / 8` cost FFTs without adding information: the power estimates of
+/// windows overlapping by more than ~75 % (Hann; the narrower flat-top and Blackman-Harris
+/// windows by a little more) are almost fully correlated, so an average over a given time
+/// is no steadier for having more of them. The exponential averaging's time constant is in
+/// seconds and stays what it is. A 65 536-point window spans 1.37 s at 48 kHz; a new
+/// spectrum every eighth of it (0.17 s) follows it closely, at an eighth of the FFT work a
+/// 1024-sample hop costs. Short windows keep updating about 30 times a second.
 fn display_hop(n: usize, fs: u32) -> usize {
     let target = (fs / SPECTRUM_UPDATES_PER_S).max(64) as usize;
     let pow2 = 1usize << (usize::BITS - 1 - target.leading_zeros());
-    pow2.min((n / 2).max(1)).max(1)
+    pow2.clamp((n / 8).max(1), (n / 2).max(1))
 }
 
 impl Spectrum {
@@ -78,18 +119,26 @@ impl Spectrum {
             peak_hold: None,
         })
         .map_err(|e| e.to_string())?;
+        let bins = analyzer.bins();
         let smoother = cfg
             .smoothing
-            .map(|f| LinearSmoother::new(n / 2 + 1, conv::smoothing_fraction(f)));
+            .map(|f| LinearSmoother::new(bins, conv::smoothing_fraction(f)));
+        let columns = BinColumns::new(f64::from(sample_rate), cfg.fft_len, DISPLAY_PPO);
         Ok(Self {
             grid_id: grid(&cfg, sample_rate).id(),
+            capture_grid_id: capture_grid(&cfg, sample_rate).id(),
+            first_bin: columns.first_bin,
             levels: LevelsMeter::new(vec![idx], vec![cfg.input], sample_rate),
             meas,
             cfg,
             idx,
             analyzer,
-            corr: None,
+            gain: Vec::new(),
             smoother,
+            power: vec![0.0; bins],
+            smoothed: Vec::new(),
+            fresh: true,
+            last_spec: None,
             cal: InputCal::none(),
             frozen,
             config_rev,
@@ -109,11 +158,25 @@ impl Spectrum {
     fn set_cal(&mut self, cal: InputCal) {
         let n = self.cfg.fft_len as usize;
         let df = self.analyzer.config().fs / n as f64;
-        self.corr = cal
-            .correction
-            .as_ref()
-            .map(|c| (0..=n / 2).map(|k| c.db(k as f64 * df)).collect());
+        let off = cal.sensitivity.unwrap_or(0.0);
+        let tone = self.analyzer.tone_power_factor();
+        self.gain = (0..self.analyzer.bins())
+            .map(|k| {
+                let c = cal.correction.as_ref().map_or(0.0, |c| c.db(k as f64 * df));
+                tone * 10f64.powf((off - c) / 10.0)
+            })
+            .collect();
         self.cal = cal;
+        self.fresh = true;
+    }
+}
+
+/// Tone power as a level; a bin without power (or a gap) has none.
+fn db(p: f64) -> f32 {
+    if p > 0.0 && p.is_finite() {
+        (10.0 * p.log10()) as f32
+    } else {
+        f32::NAN
     }
 }
 
@@ -127,7 +190,9 @@ impl Analysis for Spectrum {
         }
         if !self.frozen {
             channel_f64(b, self.idx, &mut self.buf);
-            self.analyzer.push(&self.buf);
+            if self.analyzer.push(&self.buf) > 0 {
+                self.fresh = true;
+            }
         }
         self.levels.push(b);
         self.end = Some(b.end_sample());
@@ -136,7 +201,10 @@ impl Analysis for Spectrum {
 
     fn command(&mut self, c: JobCmd) {
         match c {
-            JobCmd::Freeze(f) => self.frozen = f,
+            JobCmd::Freeze(f) => {
+                self.frozen = f;
+                self.fresh = true;
+            }
             JobCmd::Reset => self.analyzer.reset_average(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::Smoothing {
@@ -144,12 +212,13 @@ impl Analysis for Spectrum {
                 rev,
             } => {
                 self.cfg.smoothing = smoothing;
-                let bins = self.cfg.fft_len as usize / 2 + 1;
+                let bins = self.analyzer.bins();
                 self.smoother =
                     smoothing.map(|f| LinearSmoother::new(bins, conv::smoothing_fraction(f)));
                 // Frames under the new rev carry the new setting from the next block on.
                 self.config_rev = rev;
                 self.applied_at = None;
+                self.fresh = true;
             }
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
@@ -175,15 +244,21 @@ impl Analysis for Spectrum {
                 ProtectionFlags::NONE
             },
         };
-        if let Some(ps) = self.analyzer.average() {
-            let off = self.cal.sensitivity.unwrap_or(0.0);
-            let corr = self.corr.as_deref();
-            let level: Vec<f32> = (0..ps.bins())
-                .map(|k| {
-                    let c = corr.and_then(|c| c.get(k)).copied().unwrap_or(0.0);
-                    (ps.amplitude_dbfs(k) + off - c) as f32
-                })
-                .collect();
+        let repeat = (SPEC_REPEAT_S * self.analyzer.config().fs) as u64;
+        let due = self.fresh
+            || self
+                .last_spec
+                .is_none_or(|t| end.saturating_sub(t) >= repeat);
+        if let Some(ps) = self.analyzer.average().filter(|_| due) {
+            self.fresh = false;
+            self.last_spec = Some(end);
+            // A bin without power is a gap (−∞ dB has no place on a dB axis), as it is in a
+            // captured trace; smoothing never crosses a gap, so a capture re-smoothed at
+            // this setting reads the same as this frame.
+            for ((p, f), g) in self.power.iter_mut().zip(ps.folded()).zip(&self.gain) {
+                let x = f * g;
+                *p = if x > 0.0 { x } else { f64::NAN };
+            }
             let meta = SpecMeta {
                 window: self.cfg.window,
                 scale: if self.cal.sensitivity.is_some() {
@@ -192,31 +267,34 @@ impl Analysis for Spectrum {
                     LevelScale::Dbfs
                 },
                 cal: self.cal.status,
-                mic_curve: self.corr.is_some(),
+                mic_curve: self.cal.correction.is_some(),
                 smoothing: self.cfg.smoothing,
             };
-            let raw = SpecFrame {
+            let bins = self.power.len();
+            let shown = match self.smoother.as_mut().filter(|s| s.bins() == bins) {
+                Some(sm) => {
+                    self.smoothed.resize(bins, 0.0);
+                    sm.smooth_into(&self.power, &mut self.smoothed);
+                    &self.smoothed
+                }
+                None => &self.power,
+            };
+            let live = SpecFrame {
                 meas: self.meas,
                 meta,
-                validity: validity(&level),
-                level,
+                level: column_max(shown, &self.first_bin).map(db).collect(),
             };
-            match self
-                .smoother
-                .as_ref()
-                .filter(|s| s.bins() == raw.level.len())
-            {
-                None => e.send(stamp, FrameData::Spec(raw)),
-                Some(sm) => {
-                    let level = smooth_levels(sm, &raw.level);
-                    let shown = SpecFrame {
-                        validity: validity(&level),
-                        level,
-                        ..raw.clone()
-                    };
-                    e.send_with_capture(stamp, FrameData::Spec(shown), FrameData::Spec(raw));
-                }
-            }
+            let capture = SpecFrame {
+                meas: self.meas,
+                meta,
+                level: self.power.iter().map(|p| db(*p)).collect(),
+            };
+            e.send_with_capture_on(
+                stamp,
+                FrameData::Spec(live),
+                FrameData::Spec(capture),
+                self.capture_grid_id,
+            );
         }
         if let Some(l) = self.levels.take(self.meas) {
             e.send(
@@ -230,56 +308,21 @@ impl Analysis for Spectrum {
     }
 }
 
-/// A bin without a finite level is below the analyser's floor.
-fn validity(level: &[f32]) -> Vec<ValidityMask> {
-    level
-        .iter()
-        .map(|v| {
-            if v.is_finite() {
-                ValidityMask::NONE
-            } else {
-                ValidityMask::BELOW_FLOOR
-            }
-        })
-        .collect()
-}
-
-/// Tone levels (dB) smoothed as power. Bins below the floor are gaps, as they are in a
-/// captured trace (whose columns hold them as NaN), so a capture re-smoothed at this
-/// setting reads the same as this frame.
-pub(crate) fn smooth_levels(sm: &LinearSmoother, level: &[f32]) -> Vec<f32> {
-    let power: Vec<f64> = level
-        .iter()
-        .map(|l| 10f64.powf(f64::from(*l) / 10.0))
-        .collect();
-    let valid: Vec<bool> = level.iter().map(|l| l.is_finite()).collect();
-    sm.smooth(&power, &valid)
-        .iter()
-        .zip(level)
-        .map(|(p, l)| {
-            if l.is_finite() {
-                (10.0 * p.log10()) as f32
-            } else {
-                *l
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod hop_tests {
     use super::display_hop;
 
     #[test]
-    fn hop_gives_a_fluid_update_rate_independent_of_fft_length() {
-        // 48 kHz: 1024-sample hop ≈ 47 updates/s for every FFT length that allows it.
-        assert_eq!(display_hop(65_536, 48_000), 1024);
-        assert_eq!(display_hop(16_384, 48_000), 1024);
-        // Short windows keep at least 50 % overlap.
+    fn hop_overlaps_between_half_and_seven_eighths() {
+        // 48 kHz: long windows step by n/8 (87.5 % overlap) …
+        assert_eq!(display_hop(65_536, 48_000), 8192);
+        assert_eq!(display_hop(16_384, 48_000), 2048);
+        // … short ones by a 1024-sample hop (~47 updates/s) while that is at most n/2.
+        assert_eq!(display_hop(4096, 48_000), 1024);
         assert_eq!(display_hop(1024, 48_000), 512);
         assert_eq!(display_hop(256, 48_000), 128);
         // Other rates scale.
-        assert_eq!(display_hop(65_536, 96_000), 2048);
-        assert_eq!(display_hop(65_536, 44_100), 1024);
+        assert_eq!(display_hop(4096, 96_000), 2048);
+        assert_eq!(display_hop(65_536, 44_100), 8192);
     }
 }

@@ -17,7 +17,7 @@ pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 13;
+pub const PROTO_VERSION: u16 = 14;
 
 pub use ctrl::{
     Command, CtrlError, Envelope, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason,
@@ -29,5 +29,5 @@ pub use frame::{
     DataMessage, DecodeError, EncodeError, Frame, FrameData, FrameHeader, FrameKind, FrameStamp,
     decode_data_message, decode_frame, encode_event_message, encode_frame,
 };
-pub use grid::{GridDef, GridId};
+pub use grid::{BinColumns, GridDef, GridId};
 pub use topic::{Stream, Subscription, Topic};

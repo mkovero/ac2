@@ -99,6 +99,7 @@ pub fn frequencies(g: &GridDef) -> Vec<f64> {
         GridDef::Linear { fs, n } => (0..=*n / 2)
             .map(|k| f64::from(k) * fs.0 / f64::from(*n))
             .collect(),
+        GridDef::LogBins { fs, n, ppo } => ac2_proto::BinColumns::new(fs.0, *n, *ppo).centres,
     }
 }
 

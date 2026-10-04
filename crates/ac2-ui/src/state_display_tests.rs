@@ -172,12 +172,11 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::Frame;
     use ac2_proto::FrameData;
-    use ac2_proto::frame::{SpecFrame, SpecMeta, ValidityMask};
+    use ac2_proto::frame::{SpecFrame, SpecMeta};
     let grid = GridDef::Linear {
         fs: Hz(48_000.0),
         n: (level.len() as u32 - 1) * 2,
     };
-    let n = level.len();
     let data = FrameData::Spec(SpecFrame {
         meas: MeasId(meas),
         meta: SpecMeta {
@@ -188,7 +187,6 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
             smoothing: None,
         },
         level,
-        validity: vec![ValidityMask::NONE; n],
     });
     let stamp = ac2_proto::samples::stamp(Some(grid.clone()));
     let f = TopicFrame {

@@ -193,7 +193,8 @@ pub enum TfAveraging {
 pub enum SpecAveraging {
     /// Each frame replaces the previous one.
     Off,
-    /// Mean of the last `frames` frames.
+    /// Mean of the last `frames` frames (a spectrum computes one per hop: `n / 8` for long
+    /// FFTs, a 1024-sample hop at 48 kHz for short ones; never more than `n / 2`).
     Fifo {
         /// Frames.
         frames: u32,

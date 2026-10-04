@@ -213,7 +213,6 @@ fn spec_frame(meas: u32) -> SpecFrame {
             smoothing: None,
         },
         level,
-        validity: vec![ValidityMask::NONE; freqs.len()],
     }
 }
 
