@@ -4171,8 +4171,9 @@ fn leq_frame_a_little_over_a_second_old_is_fresh() {
     assert!(crate::scenes::freshness(&f).is_stale());
 }
 
-/// Shift+L opens the SPL meter's Leq windows by name; a preset and a typed limit, Enter
-/// sends the meter's configuration with the new windows and the SPL pane shows them. G
+/// Shift+L opens the SPL meter's Leq windows by name; a preset (its windows replace the
+/// meter's), a window added and its limit typed, Enter sends the meter's configuration with
+/// the new windows and the SPL pane shows them. G
 /// switches the pane between the meter and its windows.
 #[test]
 fn leq_windows_from_the_keyboard() {
@@ -4193,19 +4194,21 @@ fn leq_windows_from_the_keyboard() {
     assert_eq!(d.name, "FOH SPL");
     assert!(d.calibrated);
     assert_eq!(d.rows.len(), 5);
-    // → on the preset: DIN 15905-5 limits the 30 min window.
+    // → on the preset: DIN 15905-5, its LAeq 30 min window alone.
     t.key("ArrowRight");
-    // ↓ ↓ to the 1 min window, Tab Tab to its limit, typed.
+    // ↓ ↓ to it, Insert adds a longer one, Tab Tab to its limit, typed.
     t.key("ArrowDown");
     t.key("ArrowDown");
+    t.key("Insert");
     t.key("Tab");
     t.key("Tab");
     t.text("100");
     let Overlay::Leq(d) = &t.st.overlay else {
         panic!()
     };
-    assert_eq!(d.rows[0].limit, "100");
-    assert_eq!(d.rows[3].limit, "99");
+    assert_eq!(d.rows.len(), 2);
+    assert_eq!(d.rows[0].limit, "99");
+    assert_eq!(d.rows[1].limit, "100");
     let r = t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     let sent = r
@@ -4223,8 +4226,16 @@ fn leq_windows_from_the_keyboard() {
     let MeasKind::Spl { config } = sent.1.kind else {
         panic!()
     };
-    assert_eq!(config.leq.windows[0].limit, Some(DbSpl(100.0)));
-    assert_eq!(config.leq.windows[3].limit, Some(DbSpl(99.0)));
+    let windows: Vec<(f64, Option<DbSpl>)> = config
+        .leq
+        .windows
+        .iter()
+        .map(|w| (w.duration.0, w.limit))
+        .collect();
+    assert_eq!(
+        windows,
+        [(1800.0, Some(DbSpl(99.0))), (3600.0, Some(DbSpl(100.0)))]
+    );
     assert_eq!(config.input, 1);
     assert!(t.st.view.spl.leq);
     assert_eq!(t.st.layout.focus, PaneKind::Spl);

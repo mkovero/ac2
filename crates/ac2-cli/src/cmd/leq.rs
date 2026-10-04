@@ -149,31 +149,42 @@ fn preset(p: PresetArg) -> LeqPreset {
     }
 }
 
-/// The windows `s` asks for, from the meter's `cur`.
+/// The windows `s` asks for, from the meter's `cur`. Presets replace the windows with
+/// theirs (several: the union, a shared window at the lower limit); `--windows` with them
+/// adds windows to the preset's, without limits; then `--limit`, `--warn`, `--horizon`.
 pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> {
     let mut cfg = cur.clone();
-    if let Some(ws) = &s.windows {
+    let blank = |w: &crate::units::LeqWindowArg| LeqWindow {
+        duration: Seconds(f64::from(w.seconds)),
+        weighting: w.weighting(),
+        limit: None,
+        warn_margin: Db(LeqWindow::DEFAULT_WARN_MARGIN_DB),
+    };
+    if !s.preset.is_empty() {
+        let presets: Vec<LeqPreset> = s.preset.iter().map(|p| preset(*p)).collect();
+        let mut ws = LeqPreset::windows_of(&presets);
+        for w in s.windows.iter().flatten().map(blank) {
+            if !ws
+                .iter()
+                .any(|p| p.duration == w.duration && p.weighting == w.weighting)
+            {
+                ws.push(w);
+            }
+        }
+        LeqWindow::sort(&mut ws);
+        cfg.windows = ws;
+    } else if let Some(ws) = &s.windows {
         cfg.windows = ws
             .iter()
             .map(|w| {
-                let d = Seconds(f64::from(w.seconds));
+                let b = blank(w);
                 cur.windows
                     .iter()
-                    .find(|o| o.duration == d && o.weighting == w.weighting())
+                    .find(|o| o.duration == b.duration && o.weighting == b.weighting)
                     .copied()
-                    .unwrap_or(LeqWindow {
-                        duration: d,
-                        weighting: w.weighting(),
-                        limit: None,
-                        warn_margin: Db(LeqWindow::DEFAULT_WARN_MARGIN_DB),
-                    })
+                    .unwrap_or(b)
             })
             .collect();
-    }
-    for p in &s.preset {
-        preset(*p)
-            .apply(&mut cfg.windows)
-            .map_err(CliError::Usage)?;
     }
     for l in &s.limits {
         let d = Seconds(f64::from(l.window.seconds));
@@ -530,70 +541,72 @@ mod tests {
         assert_eq!(r[1], "▀▀▀ ");
     }
 
+    fn names(c: &LeqConfig) -> Vec<String> {
+        c.windows
+            .iter()
+            .map(|w| {
+                let l = w.limit.map_or_else(String::new, |l| format!(" ≤ {}", l.0));
+                format!("{}{l}", ac2_scene::leq::window_name(w))
+            })
+            .collect()
+    }
+
     #[test]
-    fn set_windows_presets_and_limits() {
+    fn set_windows_and_limits() {
         let cur = LeqConfig::default_windows();
-        let s = set_args(&[
-            "--preset",
-            "din15905",
-            "--limit",
-            "1min=102db",
-            "--warn",
-            "2db",
-        ]);
+        let s = set_args(&["--limit", "1min=102db", "--warn", "2db"]);
         let c = apply(&cur, &s).expect("valid");
         assert_eq!(c.windows.len(), 5);
         assert_eq!(c.windows[0].limit.map(|l| l.0), Some(102.0));
-        assert_eq!(c.windows[3].limit.map(|l| l.0), Some(99.0));
         assert!(c.windows.iter().all(|w| w.warn_margin == Db(2.0)));
         // New windows; ones kept keep their limits.
         let s = set_args(&["--windows", "5s,c:10s,1min", "--horizon", "2s"]);
         let d = apply(&c, &s).expect("valid");
-        let names: Vec<String> = d.windows.iter().map(ac2_scene::leq::window_name).collect();
-        assert_eq!(names, ["LAeq 5 s", "LCeq 10 s", "LAeq 1 min"]);
-        assert_eq!(d.windows[2].limit.map(|l| l.0), Some(102.0));
+        assert_eq!(names(&d), ["LAeq 5 s", "LCeq 10 s", "LAeq 1 min ≤ 102"]);
         assert_eq!(d.horizon, Seconds(2.0));
-        // WHO adds its 15 min window in order of length.
-        let s = set_args(&["--preset", "who", "--limit", "60min=none"]);
-        let e = apply(&cur, &s).expect("valid");
-        assert_eq!(e.windows.len(), 6);
-        assert_eq!(e.windows[3].duration, Seconds(900.0));
-        // France sets two windows, A and C, added in order of length.
-        let s = set_args(&["--preset", "france"]);
-        let f = apply(&cur, &s).expect("valid");
-        let names: Vec<String> = f.windows.iter().map(ac2_scene::leq::window_name).collect();
-        assert_eq!(
-            names,
-            [
-                "LAeq 1 min",
-                "LAeq 5 min",
-                "LAeq 10 min",
-                "LAeq 15 min",
-                "LCeq 15 min",
-                "LAeq 30 min",
-                "LAeq 60 min"
-            ]
-        );
-        assert_eq!(f.windows[3].limit.map(|l| l.0), Some(102.0));
-        assert_eq!(f.windows[4].limit.map(|l| l.0), Some(118.0));
-        // A window the meter lacks and that would pass the most windows: refused, named.
-        let s = set_args(&["--preset", "france", "--preset", "brussels-100"]);
-        let g = apply(&cur, &s).expect("eight windows");
-        assert_eq!(g.windows.len(), LeqConfig::MAX_WINDOWS);
-        let s = set_args(&[
-            "--preset",
-            "who",
-            "--windows",
-            "5s,10s,30s,1min,5min,10min,30min",
-        ]);
-        let full = apply(&cur, &s).expect("eight windows");
-        let s = set_args(&["--preset", "france"]);
-        assert!(
-            matches!(apply(&full, &s), Err(CliError::Usage(m)) if m.contains("France R1336-1 needs 1 more window")),
-        );
         // A limit on a window the meter does not have.
         let s = set_args(&["--limit", "15min=100db"]);
         assert!(matches!(apply(&cur, &s), Err(CliError::Usage(m)) if m.contains("no LAeq 15 min")));
+    }
+
+    /// A preset replaces the windows with exactly its own; the meter's limits on others go.
+    #[test]
+    fn a_preset_replaces_the_windows() {
+        let mut cur = LeqConfig::default_windows();
+        cur.windows[0].limit = Some(ac2_proto::units::DbSpl(110.0));
+        let c = apply(&cur, &set_args(&["--preset", "din15905"])).expect("valid");
+        assert_eq!(names(&c), ["LAeq 30 min ≤ 99"]);
+        assert_eq!(c.horizon, cur.horizon);
+        let c = apply(&cur, &set_args(&["--preset", "france"])).expect("valid");
+        assert_eq!(names(&c), ["LAeq 15 min ≤ 102", "LCeq 15 min ≤ 118"]);
+        let c = apply(&cur, &set_args(&["--preset", "flanders-100"])).expect("valid");
+        assert_eq!(names(&c), ["LAeq 15 min", "LAeq 60 min ≤ 100"]);
+        // Then a limit and the warn margin on its windows.
+        let s = set_args(&["--preset", "who", "--limit", "15min=98db", "--warn", "2db"]);
+        let c = apply(&cur, &s).expect("valid");
+        assert_eq!(names(&c), ["LAeq 15 min ≤ 98"]);
+        assert_eq!(c.windows[0].warn_margin, Db(2.0));
+        // A window the preset lacks: refused, named.
+        let s = set_args(&["--preset", "who", "--limit", "60min=none"]);
+        assert!(matches!(apply(&cur, &s), Err(CliError::Usage(m)) if m.contains("no LAeq 60 min")));
+    }
+
+    /// Several presets: the windows of all, a shared window at the lower limit; `--windows`
+    /// adds windows to them, without limits, shortest first.
+    #[test]
+    fn presets_together_and_extra_windows() {
+        let cur = LeqConfig::default_windows();
+        let s = set_args(&[
+            "--preset", "france", "--preset", "who", "--preset", "swiss96",
+        ]);
+        let c = apply(&cur, &s).expect("valid");
+        assert_eq!(
+            names(&c),
+            ["LAeq 15 min ≤ 100", "LCeq 15 min ≤ 118", "LAeq 60 min ≤ 96"]
+        );
+        let s = set_args(&["--preset", "din15905", "--windows", "60min,1min,30min"]);
+        let c = apply(&cur, &s).expect("valid");
+        assert_eq!(names(&c), ["LAeq 1 min", "LAeq 30 min ≤ 99", "LAeq 60 min"]);
     }
 
     /// Every preset has a `--preset` name, in the app's order.

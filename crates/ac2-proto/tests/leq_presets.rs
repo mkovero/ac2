@@ -1,5 +1,5 @@
 //! Leq limit presets: the windows and limits each sets (`docs/design/leq.md`, where each
-//! figure's source is listed), and how they land on a meter's windows.
+//! figure's source is listed), and how they replace a meter's windows.
 
 use ac2_proto::model::{LeqConfig, LeqPreset, LeqWindow, Weighting};
 use ac2_proto::units::{DbSpl, Seconds};
@@ -28,22 +28,23 @@ fn table(p: LeqPreset) -> Vec<(u32, Weighting, Option<f64>)> {
     }
 }
 
+fn rows(w: &[LeqWindow]) -> Vec<(u32, Weighting, Option<f64>)> {
+    w.iter()
+        .map(|w| {
+            (
+                w.seconds().expect("whole seconds") / 60,
+                w.weighting,
+                w.limit.map(|l| l.0),
+            )
+        })
+        .collect()
+}
+
 #[test]
 fn every_preset_sets_its_published_windows() {
     for p in LeqPreset::ALL {
-        let got: Vec<(u32, Weighting, Option<f64>)> = p
-            .windows()
-            .iter()
-            .map(|w| {
-                assert!(w.is_valid(), "{p:?}");
-                (
-                    w.seconds().expect("whole seconds") / 60,
-                    w.weighting,
-                    w.limit.map(|l| l.0),
-                )
-            })
-            .collect();
-        assert_eq!(got, table(p), "{p:?}");
+        assert!(p.windows().iter().all(LeqWindow::is_valid), "{p:?}");
+        assert_eq!(rows(&p.windows()), table(p), "{p:?}");
         assert!(!p.name().is_empty() && !p.source().is_empty());
     }
     let mut names: Vec<&str> = LeqPreset::ALL.iter().map(|p| p.name()).collect();
@@ -52,73 +53,68 @@ fn every_preset_sets_its_published_windows() {
     assert_eq!(names.len(), LeqPreset::ALL.len(), "names are distinct");
 }
 
-/// Every preset fits on the default windows, and the result is a valid configuration.
+/// Applied, a preset is the meter's windows: exactly the rule's, shortest first, each with
+/// the rule's limit, whatever the meter had before; a valid configuration.
 #[test]
-fn every_preset_fits_the_default_windows() {
+fn every_preset_replaces_the_windows_with_its_own() {
     for p in LeqPreset::ALL {
-        let mut cfg = LeqConfig::default_windows();
-        p.apply(&mut cfg.windows).expect("fits");
+        let w = LeqPreset::windows_of(&[p]);
+        assert_eq!(rows(&w), table(p), "{p:?}");
+        let lengths: Vec<f64> = w.iter().map(|w| w.duration.0).collect();
+        assert!(lengths.is_sorted(), "{p:?}: shortest first");
+        let cfg = LeqConfig {
+            windows: w,
+            ..LeqConfig::default_windows()
+        };
         cfg.check().expect("valid");
-        let lengths: Vec<f64> = cfg.windows.iter().map(|w| w.duration.0).collect();
-        assert!(lengths.is_sorted(), "{p:?}: in order of length");
     }
 }
 
-/// France: both windows, A then C at 15 min, between 10 and 30 min.
+/// Two rules at once: the windows of both; a window both have gets the lower limit (both
+/// met), and a limit wins over a window only shown. France and Flanders 100 dB: LAeq 15 min
+/// at most 102 (Flanders only shows it), LCeq 15 min at most 118, LAeq 60 min at most 100.
 #[test]
-fn a_two_window_preset_adds_both() {
-    let mut w = LeqConfig::default_windows().windows;
-    LeqPreset::France.apply(&mut w).expect("fits");
-    let got: Vec<(f64, Weighting, Option<f64>)> = w
-        .iter()
-        .map(|w| (w.duration.0, w.weighting, w.limit.map(|l| l.0)))
-        .collect();
+fn presets_together_are_the_union_with_the_lower_limit() {
+    let w = LeqPreset::windows_of(&[LeqPreset::Flanders100, LeqPreset::France]);
+    assert_eq!(
+        rows(&w),
+        [
+            (15, Weighting::A, Some(102.0)),
+            (15, Weighting::C, Some(118.0)),
+            (60, Weighting::A, Some(100.0)),
+        ]
+    );
+    let w = LeqPreset::windows_of(&[LeqPreset::France, LeqPreset::Who]);
+    assert_eq!(w[0].limit, Some(DbSpl(100.0)), "the WHO limit is the lower");
+    let all = LeqPreset::windows_of(&LeqPreset::ALL);
+    assert!(all.len() <= LeqConfig::MAX_WINDOWS, "{}", all.len());
+    assert_eq!(LeqPreset::windows_of(&[]), Vec::<LeqWindow>::new());
+}
+
+/// Display order of windows: by length, equal lengths A, C, Z.
+#[test]
+fn windows_sort_shortest_first() {
+    let with = |weighting, w: LeqWindow| LeqWindow { weighting, ..w };
+    let mut w = vec![
+        with(Weighting::Z, LeqWindow::minutes(15)),
+        LeqWindow::minutes(60),
+        with(Weighting::C, LeqWindow::minutes(15)),
+        LeqWindow::minutes(15),
+        LeqWindow {
+            duration: Seconds(10.0),
+            ..LeqWindow::minutes(1)
+        },
+    ];
+    LeqWindow::sort(&mut w);
+    let got: Vec<(f64, Weighting)> = w.iter().map(|w| (w.duration.0, w.weighting)).collect();
     assert_eq!(
         got,
         [
-            (60.0, Weighting::A, None),
-            (300.0, Weighting::A, None),
-            (600.0, Weighting::A, None),
-            (900.0, Weighting::A, Some(102.0)),
-            (900.0, Weighting::C, Some(118.0)),
-            (1800.0, Weighting::A, None),
-            (3600.0, Weighting::A, None),
+            (10.0, Weighting::A),
+            (900.0, Weighting::A),
+            (900.0, Weighting::C),
+            (900.0, Weighting::Z),
+            (3600.0, Weighting::A),
         ]
     );
-    // Again, for children: the same windows, lower limits, nothing added.
-    LeqPreset::FranceChildren.apply(&mut w).expect("fits");
-    assert_eq!(w.len(), 7);
-    assert_eq!(w[3].limit, Some(DbSpl(94.0)));
-    assert_eq!(w[4].limit, Some(DbSpl(104.0)));
-}
-
-/// A window a rule wants shown without a limit is added bare, and an existing one keeps
-/// its own limit.
-#[test]
-fn a_shown_window_keeps_its_limit() {
-    let mut w = LeqConfig::default_windows().windows;
-    LeqPreset::Flanders100.apply(&mut w).expect("fits");
-    assert_eq!(w[3].duration, Seconds(900.0));
-    assert_eq!(w[3].limit, None);
-    assert_eq!(w[5].limit, Some(DbSpl(100.0)));
-    LeqPreset::Flanders95.apply(&mut w).expect("fits");
-    LeqPreset::Flanders100.apply(&mut w).expect("fits");
-    assert_eq!(w[3].limit, Some(DbSpl(95.0)), "kept");
-}
-
-/// No room: refused with the count, the windows unchanged.
-#[test]
-fn a_full_meter_refuses_a_preset_that_adds() {
-    let mut w: Vec<LeqWindow> = [1, 2, 5, 10, 20, 30, 60, 120]
-        .map(LeqWindow::minutes)
-        .to_vec();
-    assert_eq!(w.len(), LeqConfig::MAX_WINDOWS);
-    let before = w.clone();
-    let e = LeqPreset::Brussels95.apply(&mut w).expect_err("no room");
-    assert!(e.contains("Brussels 95 dB needs 2 more windows"), "{e}");
-    assert_eq!(w, before);
-    assert_eq!(LeqPreset::Who.missing(&w), 1);
-    // A preset on windows the meter has still applies.
-    LeqPreset::Swiss100.apply(&mut w).expect("has 60 min");
-    assert_eq!(w[6].limit, Some(DbSpl(100.0)));
 }

@@ -1349,8 +1349,9 @@ fn leq_frame(
 }
 
 /// From an empty fake daemon, using the app: the session from its dialog, an SPL meter from
-/// the palette, Shift+L for its Leq windows — a preset (DIN 15905-5 on LAeq 30 min) and a
-/// typed limit on LAeq 1 min — Enter sends them and the SPL pane shows them as columns. The
+/// the palette, Shift+L for its Leq windows — a preset shown (DIN 15905-5: its LAeq 30 min
+/// window alone) and left, typed limits on LAeq 1 min and 30 min — Enter sends them and the
+/// SPL pane shows them as columns. The
 /// daemon (here the test, through the fake) then reports the 1 min and 30 min windows over:
 /// their columns turn red and the alarms toast; maximised, the columns fill the screen. B and
 /// H switch to tiles with the history strip below. Then they recover, and back on columns,
@@ -1416,29 +1417,40 @@ fn leq_tiles_from_an_empty_daemon() {
         .map(|m| m.id)
         .expect("meter");
 
-    // Shift+L: → the DIN preset; ↓↓ the 1 min window, Tab Tab its limit, 102.
+    // Shift+L: → the DIN preset, its one window; ← back to the meter's windows. ↓↓ the
+    // 1 min window, Tab Tab its limit, 102; ↓↓↓ the 30 min one's, 99.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog", |a| {
         matches!(a.state.overlay, Overlay::Leq(_))
     });
     h.key_press(Key::ArrowRight);
+    step_until(
+        &mut h,
+        "the DIN preset alone",
+        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(0) && d.rows.len() == 1),
+    );
+    h.key_press(Key::ArrowLeft);
     h.key_press(Key::ArrowDown);
     h.key_press(Key::ArrowDown);
     h.key_press(Key::Tab);
     h.key_press(Key::Tab);
     h.event(Event::Text("102".into()));
-    step_until(
-        &mut h,
-        "the limit typed",
-        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.rows[0].limit == "102"),
-    );
+    for _ in 0..3 {
+        h.key_press(Key::ArrowDown);
+    }
+    h.event(Event::Text("99".into()));
+    step_until(&mut h, "the limits typed", |a| {
+        matches!(&a.state.overlay, Overlay::Leq(d)
+            if d.preset.is_none() && d.rows.len() == 5
+                && d.rows[0].limit == "102" && d.rows[3].limit == "99")
+    });
     h.event(Event::PointerGone);
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "leq_dialog");
-    // ↑↑ to the preset row, → to the French preset for children (two windows, the
-    // longest name and source), then ← back to DIN over the same windows.
-    let din_rows = match &h.state().state.overlay {
+    // ↑ ×5 to the preset row, → to the French preset for children (its two windows, the
+    // longest name and source), then ← back to "none": the windows as typed.
+    let typed = match &h.state().state.overlay {
         Overlay::Leq(d) => d.rows.clone(),
         _ => panic!("the Leq dialog"),
     };
@@ -1446,24 +1458,25 @@ fn leq_tiles_from_an_empty_daemon() {
         .iter()
         .position(|p| *p == ac2_proto::model::LeqPreset::FranceChildren)
         .expect("listed");
-    h.key_press(Key::ArrowUp);
-    h.key_press(Key::ArrowUp);
-    for _ in 0..to {
+    for _ in 0..5 {
+        h.key_press(Key::ArrowUp);
+    }
+    for _ in 0..=to {
         h.key_press(Key::ArrowRight);
     }
     step_until(
         &mut h,
         "two windows from one preset",
-        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(to) && d.rows.len() == 7),
+        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(to) && d.rows.len() == 2),
     );
     snapshot(&mut h, "leq_dialog_two_window_preset");
-    for _ in 0..to {
+    for _ in 0..=to {
         h.key_press(Key::ArrowLeft);
     }
     step_until(
         &mut h,
-        "back to DIN",
-        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(0) && d.rows == din_rows),
+        "back to the windows as typed",
+        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset.is_none() && d.rows == typed),
     );
     // egui walks its own widget focus on arrow keys too; the app's keys never need it.
     h.ctx.memory_mut(|m| {

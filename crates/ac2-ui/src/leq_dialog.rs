@@ -1,6 +1,6 @@
 //! The Leq windows dialog of an SPL meter (`docs/design/leq.md`): one row per window —
 //! its length and weighting picked from named choices, its limit and warn margin typed in
-//! dB — a preset row that sets a published rule's limits on its windows, and the headroom
+//! dB — a preset row that replaces the windows with a published rule's, and the headroom
 //! horizon.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
@@ -144,11 +144,10 @@ pub struct LeqDialog {
     pub rows: Vec<Row>,
     /// Index into [`HORIZONS`] (a horizon outside the list: the nearest).
     pub horizon: usize,
-    /// Index into [`LeqPreset::ALL`], or `None`: "keep these limits".
+    /// Index into [`LeqPreset::ALL`], or `None`: "keep these windows".
     pub preset: Option<usize>,
-    /// The windows before the preset row was first changed: moving through the presets
-    /// shows each one over these, not over the one before. Dropped on any edit of a
-    /// window, which keeps what the preset set.
+    /// The windows before the preset row was first changed: back at "none" they return.
+    /// Dropped on any edit of a window, which keeps what the preset set.
     before_preset: Option<Vec<Row>>,
     pub focus: Focus,
     /// The focused text cell's text is selected: typing replaces it.
@@ -193,9 +192,15 @@ impl LeqDialog {
     /// The preset chosen, as shown.
     pub fn preset_text(&self) -> String {
         match self.preset.and_then(|i| LeqPreset::ALL.get(i)) {
-            None => "none (keep these limits)".into(),
+            None => "none (keep these windows)".into(),
             Some(p) => ac2_scene::leq_preset::summary(*p),
         }
+    }
+
+    /// What choosing a preset does, shown under the preset row.
+    pub fn preset_note(&self) -> &'static str {
+        "A preset replaces the windows with the rule's own (its limits only); Insert adds \
+         more after."
     }
 
     /// Where the chosen preset's figures come from.
@@ -281,18 +286,18 @@ impl LeqDialog {
                 let cur = self.preset.map_or(0, |i| i + 1);
                 let next = step(cur, n);
                 self.preset = next.checked_sub(1);
-                let base = self
+                let before = self
                     .before_preset
                     .get_or_insert_with(|| self.rows.clone())
                     .clone();
-                self.rows = base;
                 match self.preset.and_then(|i| LeqPreset::ALL.get(i)) {
                     Some(p) => {
-                        let refused = self.apply_preset(*p).err();
-                        self.error = refused;
-                        return;
+                        self.rows = LeqPreset::windows_of(&[*p]).iter().map(Row::of).collect();
                     }
-                    None => self.before_preset = None,
+                    None => {
+                        self.rows = before;
+                        self.before_preset = None;
+                    }
                 }
             }
             Focus::Horizon => self.horizon = step(self.horizon, HORIZONS.len()),
@@ -330,43 +335,6 @@ impl LeqDialog {
             }
         }
         self.error = None;
-    }
-
-    /// Sets the preset's limits on the rows, adding the windows it lacks as
-    /// [`LeqPreset::apply`] does; refused, rows unchanged, when that passes the most windows.
-    fn apply_preset(&mut self, p: LeqPreset) -> Result<(), String> {
-        let mut have: Vec<LeqWindow> = self
-            .rows
-            .iter()
-            .map(|r| LeqWindow {
-                duration: Seconds(f64::from(r.seconds)),
-                weighting: r.weighting,
-                limit: None,
-                warn_margin: Db(LeqWindow::DEFAULT_WARN_MARGIN_DB),
-            })
-            .collect();
-        // Checked on the windows as they stand: the rows' typed limits play no part.
-        p.apply(&mut have)?;
-        for w in p.windows() {
-            let secs = w.seconds().unwrap_or(60);
-            if let Some(r) = self
-                .rows
-                .iter_mut()
-                .find(|r| r.seconds == secs && r.weighting == w.weighting)
-            {
-                if let Some(l) = w.limit {
-                    r.limit = number_text(l.0);
-                }
-                continue;
-            }
-            let at = self
-                .rows
-                .iter()
-                .position(|r| r.seconds > secs)
-                .unwrap_or(self.rows.len());
-            self.rows.insert(at, Row::of(&w));
-        }
-        Ok(())
     }
 
     fn text_mut(&mut self) -> Option<&mut String> {
@@ -542,7 +510,7 @@ mod tests {
             ]
         );
         assert_eq!(d.horizon_s(), 60);
-        assert_eq!(d.preset_text(), "none (keep these limits)");
+        assert_eq!(d.preset_text(), "none (keep these windows)");
         assert_eq!(d.leq_config().expect("valid"), LeqConfig::default_windows());
         let mut tf = meter();
         tf.config.kind = MeasKind::Transfer {
@@ -551,11 +519,12 @@ mod tests {
         assert!(LeqDialog::new(&tf, true).is_none());
     }
 
-    /// Keys only: a preset, a typed limit on another window, a new window, a removal.
+    /// Keys only: a preset, a typed limit, a new window, a removal.
     #[test]
     fn keyboard_flow() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
-        // → on the preset row: DIN 15905-5 limits the 30 min window.
+        assert!(d.preset_note().contains("replaces the windows"));
+        // → on the preset row: DIN 15905-5 is its 30 min window, nothing else.
         d.cycle(1);
         assert_eq!(d.preset_text(), "DIN 15905-5: LAeq 30 min ≤ 99 dB");
         assert!(
@@ -563,18 +532,14 @@ mod tests {
                 .expect("source")
                 .contains("not legal advice")
         );
-        assert_eq!(d.rows[3].limit, "99");
-        // → → → → : WHO adds a 15 min window between 10 and 30 min, over the windows as
-        // they were before the first preset (DIN's limit goes).
+        assert_eq!(names(&d), ["LAeq 30 min 99"]);
+        // → → → → : WHO, its 15 min window only.
         for _ in 0..4 {
             d.cycle(1);
         }
         assert_eq!(d.preset_text(), "WHO safe listening: LAeq 15 min ≤ 100 dB");
-        assert_eq!(d.rows.len(), 6);
-        assert_eq!(d.rows[3].cell(Col::Length), "LAeq 15 min");
-        assert_eq!(d.rows[3].limit, "100");
-        assert_eq!(d.rows[4].limit, "");
-        // ↓ ↓ to the first window; Tab Tab to its limit; type 102.
+        assert_eq!(names(&d), ["LAeq 15 min 100"]);
+        // ↓ ↓ to the window; Insert adds a longer one after it, without a limit.
         d.move_row(1);
         d.move_row(1);
         assert_eq!(
@@ -584,38 +549,39 @@ mod tests {
                 col: Col::Length
             }
         );
+        d.add_window();
+        assert_eq!(names(&d), ["LAeq 15 min 100", "LAeq 30 min "]);
+        // Tab Tab to its limit; type 102.
         d.move_cell(1);
         d.move_cell(1);
         assert_eq!(
             d.focus,
             Focus::Window {
-                row: 0,
+                row: 1,
                 col: Col::Limit
             }
         );
         assert!(d.selected, "a text cell arrives selected");
         d.type_text("102 dB");
-        // ← on the length: shorter, down to 30 s.
+        // → on the length: longer, 60 min.
         d.move_cell(-1);
         d.move_cell(-1);
-        d.cycle(-1);
-        assert_eq!(d.rows[0].cell(Col::Length), "LAeq 30 s");
+        d.cycle(1);
+        assert_eq!(d.rows[1].cell(Col::Length), "LAeq 60 min");
         // Weighting → C.
         d.move_cell(1);
         d.cycle(1);
-        assert_eq!(d.rows[0].cell(Col::Length), "LCeq 30 s");
-        // Insert adds a longer window after it; Delete removes the focused one.
+        assert_eq!(d.rows[1].cell(Col::Length), "LCeq 60 min");
+        // Another, and Delete removes it again.
         d.add_window();
-        assert_eq!(d.rows.len(), 7);
-        assert_eq!(d.rows[1].cell(Col::Length), "LCeq 1 min");
+        assert_eq!(d.rows.len(), 3);
         d.remove_window();
-        assert_eq!(d.rows.len(), 6);
+        assert_eq!(d.rows.len(), 2);
         let c = d.leq_config().expect("valid");
-        assert_eq!(c.windows[0].limit, Some(DbSpl(102.0)));
-        assert_eq!(c.windows[0].weighting, Weighting::C);
-        assert_eq!(c.windows[0].duration, Seconds(30.0));
-        assert_eq!(c.windows[3].limit, Some(DbSpl(100.0)));
-        assert_eq!(c.windows[4].limit, None);
+        assert_eq!(c.windows[0].limit, Some(DbSpl(100.0)));
+        assert_eq!(c.windows[1].limit, Some(DbSpl(102.0)));
+        assert_eq!(c.windows[1].weighting, Weighting::C);
+        assert_eq!(c.windows[1].duration, Seconds(3600.0));
         // The horizon row: ← to 30 s.
         d.focus = Focus::Horizon;
         d.cycle(-1);
@@ -628,65 +594,36 @@ mod tests {
         assert_eq!(config.leq.horizon, Seconds(30.0));
     }
 
-    /// → through every preset: each shows over the windows as they were, two-window rules
-    /// set both, and back to "none" restores the meter's windows.
+    fn names(d: &LeqDialog) -> Vec<String> {
+        d.rows
+            .iter()
+            .map(|r| format!("{} {}", r.cell(Col::Length), r.limit))
+            .collect()
+    }
+
+    /// → through every preset: each shows exactly its own windows and limits, shortest
+    /// first; back to "none" the meter's windows return as they were.
     #[test]
     fn cycles_through_every_preset() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
         d.rows[0].limit = "110".into();
         let start = d.rows.clone();
-        let names = |d: &LeqDialog| -> Vec<String> {
-            d.rows
-                .iter()
-                .map(|r| format!("{} {}", r.cell(Col::Length), r.limit))
-                .collect()
-        };
         for (i, p) in LeqPreset::ALL.iter().enumerate() {
             d.cycle(1);
             assert_eq!(d.preset, Some(i));
             assert_eq!(d.error, None, "{p:?}");
             assert_eq!(d.preset_text(), ac2_scene::leq_preset::summary(*p));
             let c = d.leq_config().expect("valid");
-            for w in p.windows() {
-                let got = c
-                    .windows
-                    .iter()
-                    .find(|x| x.duration == w.duration && x.weighting == w.weighting)
-                    .unwrap_or_else(|| panic!("{p:?} {w:?}"));
-                assert_eq!(got.limit, w.limit, "{p:?}");
-            }
-            // Nothing of an earlier preset stays: the windows are the meter's plus this one's.
-            assert_eq!(
-                c.windows.len(),
-                5 + p.missing(&LeqConfig::default_windows().windows)
-            );
-            assert_eq!(d.rows[0].limit, "110");
+            assert_eq!(c.windows, LeqPreset::windows_of(&[*p]), "{p:?}");
             match p {
-                LeqPreset::France => assert_eq!(
-                    names(&d),
-                    [
-                        "LAeq 1 min 110",
-                        "LAeq 5 min ",
-                        "LAeq 10 min ",
-                        "LAeq 15 min 102",
-                        "LCeq 15 min 118",
-                        "LAeq 30 min ",
-                        "LAeq 60 min "
-                    ]
-                ),
-                LeqPreset::Flanders100 => assert_eq!(
-                    names(&d),
-                    [
-                        "LAeq 1 min 110",
-                        "LAeq 5 min ",
-                        "LAeq 10 min ",
-                        "LAeq 15 min ",
-                        "LAeq 30 min ",
-                        "LAeq 60 min 100"
-                    ]
-                ),
+                LeqPreset::France => {
+                    assert_eq!(names(&d), ["LAeq 15 min 102", "LCeq 15 min 118"]);
+                }
+                LeqPreset::Flanders100 => {
+                    assert_eq!(names(&d), ["LAeq 15 min ", "LAeq 60 min 100"]);
+                }
                 LeqPreset::Brussels100 => {
-                    assert_eq!(names(&d)[4..], ["LAeq 60 min 100", "LCeq 60 min 115"])
+                    assert_eq!(names(&d), ["LAeq 60 min 100", "LCeq 60 min 115"]);
                 }
                 _ => {}
             }
@@ -698,50 +635,29 @@ mod tests {
             d.cycle(-1);
         }
         assert_eq!(d.preset, None);
+        assert_eq!(d.preset_text(), "none (keep these windows)");
         assert_eq!(d.rows, start);
     }
 
-    /// A preset that needs windows the dialog has no room for is refused, rows unchanged;
-    /// an edit after a preset keeps it.
+    /// An edit after a preset keeps it: the windows it set stay when the preset row moves
+    /// back to "none", and the next preset replaces them in turn.
     #[test]
-    fn preset_on_full_windows_is_refused() {
+    fn an_edit_keeps_the_preset() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
-        d.focus_cell(4, Col::Length);
-        for _ in 0..3 {
-            d.add_window();
-        }
-        assert_eq!(d.rows.len(), LeqConfig::MAX_WINDOWS);
-        let full = d.rows.clone();
-        d.focus = Focus::Preset;
-        let france = LeqPreset::ALL
-            .iter()
-            .position(|p| *p == LeqPreset::France)
-            .expect("listed");
-        for _ in 0..=france {
-            d.cycle(1);
-        }
-        assert_eq!(d.preset, Some(france));
-        assert!(
-            d.error
-                .as_deref()
-                .is_some_and(|e| e.contains("France R1336-1 needs 2 more windows")),
-            "{:?}",
-            d.error
-        );
-        assert_eq!(d.rows, full);
-        // DIN 15905-5 has its 30 min window: applies; a typed edit then keeps it when the
-        // preset row moves on.
-        d.preset = None;
-        d.before_preset = None;
         d.cycle(1);
-        assert_eq!(d.error, None);
-        assert_eq!(d.rows[3].limit, "99");
+        assert_eq!(names(&d), ["LAeq 30 min 99"]);
         d.focus_cell(0, Col::Limit);
         d.type_text("101");
         d.focus = Focus::Preset;
         d.cycle(-1);
-        assert_eq!(d.rows[3].limit, "99");
-        assert_eq!(d.rows[0].limit, "101");
+        assert_eq!(d.preset, None);
+        assert_eq!(names(&d), ["LAeq 30 min 101"]);
+        d.cycle(1);
+        d.cycle(1);
+        assert_eq!(names(&d), ["LAeq 60 min 93"]);
+        d.cycle(-1);
+        d.cycle(-1);
+        assert_eq!(names(&d), ["LAeq 30 min 101"], "the edited windows return");
     }
 
     #[test]

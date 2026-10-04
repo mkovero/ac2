@@ -787,11 +787,13 @@ pub struct LeqSet {
     #[command(flatten)]
     pub meter: MeterRef,
     /// The windows, replacing the meter's: `1min,5min,10min,30min,60min` (A-weighted;
-    /// `c:30s` for C). Windows kept keep their limits.
+    /// `c:30s` for C). Windows kept keep their limits. With `--preset`: windows added to
+    /// the preset's, without limits.
     #[arg(long, value_delimiter = ',', value_name = "WINDOWS")]
     pub windows: Option<Vec<LeqWindowArg>>,
-    /// A preset's limits on its windows (each added if missing, other windows kept);
-    /// repeatable. Informational, not legal advice.
+    /// Replace the windows with exactly a preset's, with its limits (the meter's other
+    /// windows and limits go); repeatable: the windows of all, a window two share at the
+    /// lower limit. Informational, not legal advice.
     #[arg(long, value_enum)]
     pub preset: Vec<PresetArg>,
     /// A window's limit: `30min=99db`, `30min=none` removes it; repeatable.

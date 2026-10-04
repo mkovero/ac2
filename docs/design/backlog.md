@@ -79,11 +79,13 @@ the commit when it lands.
 ## Done
 
 Leq windows (field, 2026-10-04: "history seems to reset every time the client is
-restarted"):
+restarted"; "presets … only show those limits that are stated by the standard"):
 - **History strip started when the app connected** → the app gets each meter's history
   from the daemon (`spl.history_get`: the log replayed as the job computed it) on connect,
   reconnect, a new meter, changed windows and a new log from any client; live frames
   continue it (`leq.md`, *The history strip*).
+- **Presets kept whatever windows were there** → a preset replaces the windows with exactly
+  its own (`leq.md`, *Presets*); Insert / `--windows` add more.
 
 Comparing curves (field, 2026-10-03: "offset/change gain of the selected
 trace/measurement/spectrum … spread traces a little … spectrum needs to focus on very low

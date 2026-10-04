@@ -293,14 +293,20 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
 
 ## Presets (informational, not legal advice)
 
-A preset sets the limits of one published rule on its windows, adding each window the
-meter lacks before the first longer one; other windows and their limits are kept. A
-preset window without a limit is one the rule wants shown (added if missing, left as it
-is otherwise). When the added windows would pass `LeqConfig::MAX_WINDOWS` (8) the preset
-is refused and nothing changes; the defaults (5 windows) leave room for any preset. In the
-app, ←/→ on the preset row shows each preset over the windows as they were before the
-row was first changed, so presets do not pile up; an edit to a window keeps what the
-preset set. `ac2 spl leq set --preset` applies each given preset in turn.
+A preset **replaces** the meter's windows with exactly the rule's: its windows with their
+weightings and limits, plus any window the rule wants shown without a limit (Flanders 100
+dB shows LAeq 15 min), shortest first (equal lengths A, C, Z). Windows and limits the rule
+does not state go: left in place they would read as part of it. The windows change in
+place (`meas.update`): the log carries on and the new windows are rebuilt from it, as for
+any change of windows. Windows can be added afterwards (Insert in the dialog, `--windows`
+with `--preset`). In the app, ←/→ on the preset row shows each preset's windows in the
+table, and back at "none" the windows as they were before the row was first changed
+return; an edit to a window keeps what the preset set. A note under the row says the
+preset replaces the windows. `ac2 spl leq set --preset` replaces them likewise; several
+`--preset` give the windows of all of them, a window two share with the lower of their
+limits (both rules met) and a limit winning over a window only shown — at most five
+distinct windows across all presets, within the eight a meter may have. `--windows` with
+`--preset` adds windows (without limits) to the preset's.
 
 Every preset is a starting point for the operator, who owns the rest of the rule:
 ac2 judges only the Leq windows below, with no position correction, and is not a

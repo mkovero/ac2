@@ -113,6 +113,12 @@ pub(super) fn leq(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                             ui.add(egui::Label::new(RichText::new(s).small().color(ch.dim)).wrap());
                             ui.end_row();
                         }
+                        ui.label("");
+                        ui.add(
+                            egui::Label::new(RichText::new(d.preset_note()).small().color(ch.dim))
+                                .wrap(),
+                        );
+                        ui.end_row();
                         let f = d.focus == Focus::Horizon;
                         ui.label(RichText::new("Headroom over").color(if f {
                             ch.text

@@ -1550,6 +1550,86 @@ fn a_restarted_app_shows_the_history_from_the_log() -> R {
     Ok(())
 }
 
+/// Rows logged as of the newest `leq` frame of the SPL meter.
+fn logged(s: &AppState) -> Option<u64> {
+    let m = s
+        .measurements()
+        .into_iter()
+        .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))?;
+    let topic = Topic::Data {
+        meas: m.id,
+        stream: Stream::Leq,
+    };
+    match s.data.as_ref()?.latest.get(&topic).map(|f| &f.frame.data) {
+        Some(FrameData::Leq(f)) => Some(f.meta.logged),
+        _ => None,
+    }
+}
+
+/// A preset chosen in the Leq dialog replaces the meter's windows: DIN 15905-5 from the
+/// preset row, Enter, and the meter has only LAeq 30 min ≤ 99 dB. The log carries on (in
+/// place, not a new log), and the history of the new window is rebuilt from it.
+#[test]
+fn a_preset_replaces_the_windows_from_the_app() -> R {
+    use ac2_proto::model::LeqPreset;
+    use ac2_proto::units::DbSpl;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("a few seconds logged", |s| {
+        logged(s).is_some_and(|n| n >= 4)
+    })?;
+    let before = logged(&d.st).ok_or("logged")?;
+
+    // Shift+L; → on the preset row: DIN 15905-5, its one window in the dialog; Enter.
+    d.key("Shift+L");
+    d.send(Msg::Text("L".into()));
+    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    d.key("ArrowRight");
+    let Overlay::Leq(x) = &d.st.overlay else {
+        return Err("the Leq dialog".into());
+    };
+    assert_eq!(x.preset_text(), "DIN 15905-5: LAeq 30 min ≤ 99 dB");
+    assert!(x.preset_note().contains("replaces the windows"));
+    let shown: Vec<(String, String)> = x
+        .rows
+        .iter()
+        .map(|r| (r.cell(ac2_ui::leq_dialog::Col::Length), r.limit.clone()))
+        .collect();
+    assert_eq!(shown, [("LAeq 30 min".to_owned(), "99".to_owned())]);
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    d.until("only LAeq 30 min ≤ 99 dB", |s| {
+        s.measurements().iter().any(|m| match &m.config.kind {
+            MeasKind::Spl { config } => config.leq.windows == LeqPreset::Din15905.windows(),
+            _ => false,
+        })
+    })?;
+    let w = LeqPreset::Din15905.windows();
+    assert_eq!(w.len(), 1);
+    assert_eq!(w[0].limit, Some(DbSpl(99.0)));
+    // The same log: its rows go on counting from where they were.
+    d.until("the log going on", |s| {
+        logged(s).is_some_and(|n| n >= before + 2)
+    })?;
+    // The new window's history reaches back over the seconds logged before the change.
+    d.until("the 30 min window's history from the log", |s| {
+        history_points(s).is_some_and(|(_, p)| p.len() as u64 >= before)
+    })?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// One short sweep from the dialog, played and stored (the simulated rig: no real audio).
 fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
     use ac2_ui::forms::FieldId;

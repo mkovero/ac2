@@ -700,11 +700,13 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
   **preset** row and the headroom horizon. ↑/↓ moves between rows, Tab between cells,
   **Insert** adds a window, **Delete** removes one, Enter applies.
-- Presets set a published rule's limits on its windows (adding the windows the meter
-  lacks), informational only — not legal advice: each rule also has peak limits, a
+- A preset **replaces the windows** with exactly the rule's — its windows and limits, and a
+  window it wants shown without a limit — shortest first; windows and limits the rule does
+  not state go. Informational only — not legal advice: each rule also has peak limits, a
   measuring position and duties of its own (`docs/design/leq.md` lists them). ←/→ on the
-  preset row shows each preset over the windows as they were; editing a window keeps it.
-  A preset that would need more than 8 windows is refused: remove one first.
+  preset row shows each preset's windows; back at "none" the windows return as they were;
+  editing a window keeps the preset's. **Insert** adds more windows afterwards. The log
+  carries on: the new windows are rebuilt from it.
 
   | preset (`--preset`) | windows and limits |
   |---|---|
@@ -728,7 +730,9 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   shows its windows in dBFS, marked "not calibrated".
 
 In the terminal: `ac2 spl leq watch` (big numbers; `--json` for one line per second),
-`ac2 spl leq set --preset france --limit 1min=102db` (also `--windows 1min,5min,c:30s`,
+`ac2 spl leq set --preset france --windows 1min --limit 1min=102db` (the preset's windows
+and an LAeq 1 min of your own; several `--preset` give the windows of all, a shared window
+at the lower limit; without `--preset`, `--windows 1min,5min,c:30s` sets the windows; also
 `--warn 3db`, `--horizon 1min`), `ac2 spl leq export -o show.csv` (the per-second log as
 CSV, for the record), `ac2 spl leq new --yes --export soundcheck.csv` (a new log, the ended
 one written first; without `--yes` it only says what would end). Each takes `--meas` or

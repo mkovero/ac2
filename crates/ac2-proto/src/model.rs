@@ -821,6 +821,21 @@ impl LeqWindow {
             .then_some(s as u32)
     }
 
+    /// Puts `windows` in display order: shorter first, equal lengths A, C, Z.
+    pub fn sort(windows: &mut [LeqWindow]) {
+        let rank = |w: Weighting| match w {
+            Weighting::A => 0,
+            Weighting::C => 1,
+            Weighting::Z => 2,
+        };
+        windows.sort_by(|a, b| {
+            a.duration
+                .0
+                .total_cmp(&b.duration.0)
+                .then(rank(a.weighting).cmp(&rank(b.weighting)))
+        });
+    }
+
     /// Whether the window is well formed: whole seconds in range, a finite limit and a
     /// finite margin ≥ 0.
     pub fn is_valid(&self) -> bool {
@@ -968,9 +983,8 @@ impl LeqPreset {
         }
     }
 
-    /// The windows the preset sets, in order of length. A window with a limit gets that
-    /// limit; one without is a window the rule wants shown, added if missing and otherwise
-    /// left as it is.
+    /// The windows the preset sets, shortest first (equal lengths A, C, Z), each with the
+    /// rule's limit; one without a limit is a window the rule wants shown.
     pub fn windows(self) -> Vec<LeqWindow> {
         use Weighting::{A, C};
         let w = |minutes: u32, weighting: Weighting, limit: Option<f64>| LeqWindow {
@@ -999,48 +1013,30 @@ impl LeqPreset {
         }
     }
 
-    /// How many of the preset's windows `windows` lacks.
-    pub fn missing(self, windows: &[LeqWindow]) -> usize {
-        self.windows()
-            .iter()
-            .filter(|p| {
-                !windows
-                    .iter()
-                    .any(|w| w.duration == p.duration && w.weighting == p.weighting)
-            })
-            .count()
-    }
-
-    /// Sets the preset's limits on its windows in `windows`, adding each window it lacks
-    /// before the first longer one. Other windows are kept. Refused, with `windows`
-    /// unchanged, when the added windows would pass [`LeqConfig::MAX_WINDOWS`].
-    pub fn apply(self, windows: &mut Vec<LeqWindow>) -> Result<(), String> {
-        let add = self.missing(windows);
-        if windows.len() + add > LeqConfig::MAX_WINDOWS {
-            return Err(format!(
-                "{} needs {add} more window{}: at most {} per meter, remove one first",
-                self.name(),
-                if add == 1 { "" } else { "s" },
-                LeqConfig::MAX_WINDOWS
-            ));
-        }
-        for p in self.windows() {
-            if let Some(w) = windows
+    /// The windows a meter has once `presets` are applied: exactly theirs, shortest first
+    /// (equal lengths A, C, Z), whatever it had before — a rule's limits on windows it does
+    /// not define would read as part of it. A window two presets share gets the lower of
+    /// their limits, so both rules are met, and a limit wins over a window shown without
+    /// one. At most five distinct windows occur across all presets, well within
+    /// [`LeqConfig::MAX_WINDOWS`].
+    pub fn windows_of(presets: &[LeqPreset]) -> Vec<LeqWindow> {
+        let mut out: Vec<LeqWindow> = Vec::new();
+        for p in presets.iter().flat_map(|p| p.windows()) {
+            match out
                 .iter_mut()
                 .find(|w| w.duration == p.duration && w.weighting == p.weighting)
             {
-                if p.limit.is_some() {
-                    w.limit = p.limit;
+                Some(w) => {
+                    w.limit = match (w.limit, p.limit) {
+                        (Some(a), Some(b)) => Some(if b.0 < a.0 { b } else { a }),
+                        (a, b) => a.or(b),
+                    }
                 }
-                continue;
+                None => out.push(p),
             }
-            let at = windows
-                .iter()
-                .position(|w| w.duration.0 > p.duration.0)
-                .unwrap_or(windows.len());
-            windows.insert(at, p);
         }
-        Ok(())
+        LeqWindow::sort(&mut out);
+        out
     }
 }
 
