@@ -371,7 +371,9 @@ impl Form {
             FormKind::Spl => vec![
                 input_field,
                 name("SPL"),
-                Field::choice(FieldId::Weighting, "Weighting", &WEIGHTINGS.map(|w| w.0), 0),
+                // An SPL meter reads A-weighted Fast by default: the level hearing limits and
+                // venue rules are written in.
+                Field::choice(FieldId::Weighting, "Weighting", &WEIGHTINGS.map(|w| w.0), 1),
                 Field::choice(
                     FieldId::TimeWeighting,
                     "Time weighting",
@@ -898,7 +900,7 @@ mod tests {
             MeasKind::Spl {
                 config: SplConfig {
                     input: 1,
-                    weighting: Weighting::Z,
+                    weighting: Weighting::A,
                     time_weighting: TimeWeighting::Fast,
                     peak_weighting: PeakWeighting::C,
                     leq: ac2_proto::model::LeqConfig::default_windows(),
@@ -975,6 +977,7 @@ mod tests {
         assert!(f.meas_config(Some(&o)).is_err());
 
         let mut f = Form::measurement(FormKind::Spl, Some(&o), &[], &names(&o), &[]);
+        // A by default; → steps on to C.
         f.focus = at(&f, FieldId::Weighting);
         f.cycle(1);
         f.focus = at(&f, FieldId::TimeWeighting);
@@ -985,7 +988,7 @@ mod tests {
         let MeasKind::Spl { config } = f.meas_config(Some(&o)).expect("spl").kind else {
             panic!("kind");
         };
-        assert_eq!(config.weighting, Weighting::A);
+        assert_eq!(config.weighting, Weighting::C);
         assert_eq!(config.time_weighting, TimeWeighting::Impulse);
         // Typing into a choice does nothing; focus wraps.
         f.type_text("x");

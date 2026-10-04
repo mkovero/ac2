@@ -520,9 +520,9 @@ pub struct MeasNew {
     /// RTA highest band.
     #[arg(long, default_value = "20khz")]
     pub to: Freq,
-    /// Frequency weighting (rta, spl).
-    #[arg(long, value_enum, default_value = "z")]
-    pub weight: WeightArg,
+    /// Frequency weighting (rta: default z; spl: default a).
+    #[arg(long, value_enum)]
+    pub weight: Option<WeightArg>,
     /// Time weighting (spl).
     #[arg(long, value_enum, default_value = "fast")]
     pub time: TimeWeightArg,

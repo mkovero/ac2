@@ -300,13 +300,17 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         config: RtaConfig {
                             f_lo: n.from.0,
                             f_hi: n.to.0,
-                            weighting: weighting(n.weight),
+                            weighting: weighting(n.weight.unwrap_or(WeightArg::Z)),
                             ..RtaConfig::on_input(input, band_fraction(n.fraction)?)
                         },
                     }
                 }
                 _ => MeasKind::Spl {
-                    config: SplConfig::on_input(input, weighting(n.weight), time_weighting(n.time)),
+                    config: SplConfig::on_input(
+                        input,
+                        weighting(n.weight.unwrap_or(WeightArg::A)),
+                        time_weighting(n.time),
+                    ),
                 },
             }
         }
