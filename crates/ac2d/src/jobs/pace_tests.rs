@@ -2,8 +2,9 @@
 //! refresh that keeps a steady result fresh, captures whether or not anyone receives, and
 //! every SPL peak at the reduced SPL frame rate.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ac2_audio::BlockFlags;
 use ac2_proto::frame::{Frame, FrameData};
@@ -18,7 +19,7 @@ use ac2_zmq::{Context, Socket, SocketType};
 use super::rta::Rta;
 use super::spectrum::Spectrum;
 use super::spl::{LeqSetup, SPL_FPS, Spl};
-use super::{Analysis, Emitter, Flush, JobCmd, JobEnv, REFRESH, Seqs};
+use super::{Analysis, Emitter, Flush, JobCmd, JobEnv, JobMsg, REFRESH, Seqs, StampArgs};
 use crate::calstore::InputCal;
 use crate::fanout::Block;
 use crate::io::Interest;
@@ -26,15 +27,15 @@ use crate::io::Interest;
 const FS: u32 = 48_000;
 const BLOCK: u32 = 256;
 
-struct Rig {
+pub(super) struct Rig {
     pull: Socket,
     env: JobEnv,
-    em: Emitter,
+    pub(super) em: Emitter,
     _ctx: Context,
 }
 
 impl Rig {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let ctx = Context::new().expect("context");
         let endpoint = format!("inproc://pace-{name}");
         let pull = ctx.socket(SocketType::Pull).expect("pull");
@@ -57,7 +58,7 @@ impl Rig {
         }
     }
 
-    fn subscribe(&self, t: Topic) {
+    pub(super) fn subscribe(&self, t: Topic) {
         self.env.interest.subscribe(&t.to_bytes());
     }
 
@@ -66,7 +67,7 @@ impl Rig {
     }
 
     /// Frames that reached the I/O end since the last call.
-    fn frames(&self) -> Vec<Frame> {
+    pub(super) fn frames(&self) -> Vec<Frame> {
         let mut out = Vec::new();
         while let Some(m) = self
             .pull
@@ -396,4 +397,46 @@ fn spl_frame_rate_is_capped() {
     let n = spl_frames(&r).len();
     let max = (0.5 * f64::from(SPL_FPS)).ceil() as usize + 1;
     assert!((5..=max).contains(&n), "{n} frames in 0.5 s");
+}
+
+/// A job that has nothing to do until much more audio has arrived.
+struct Sleepy;
+
+impl Analysis for Sleepy {
+    fn push(&mut self, _b: &Block) {}
+    fn command(&mut self, _c: JobCmd) {}
+    fn emit(&mut self, _e: &Emitter) -> Flush {
+        Flush::Done
+    }
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
+        None
+    }
+    fn frames_needed(&self) -> Option<u64> {
+        Some(u64::MAX)
+    }
+}
+
+/// A job sleeping through hand-offs still answers a capture and stops at once.
+#[test]
+fn an_idle_job_wakes_for_anything_but_audio() {
+    let r = Rig::new("idle");
+    let (h, feed) = super::spawn("idle".into(), r.env.clone(), 1, Box::new(Sleepy)).expect("job");
+    let block = Block::new(0, BLOCK, 1, BlockFlags::NONE, 0, vec![0.0; BLOCK as usize]);
+    feed.queue
+        .frames
+        .fetch_add(u64::from(BLOCK), Ordering::AcqRel);
+    feed.tx
+        .send(JobMsg::Blocks(Arc::new(vec![block])))
+        .expect("send");
+    // The job takes the batch, then parks for its idle time.
+    let t = Instant::now();
+    while feed.queue.frames.load(Ordering::Acquire) > 0 {
+        assert!(t.elapsed() < Duration::from_secs(5), "batch never taken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    std::thread::sleep(Duration::from_millis(50));
+    let t = Instant::now();
+    assert!(h.capture().is_none());
+    drop(h);
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
 }

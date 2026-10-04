@@ -8,7 +8,7 @@
 //! publish rate; between frames it only accumulates.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
@@ -22,7 +22,7 @@ use ac2_proto::topic::Topic;
 use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
 use ac2_zmq::Context;
 
-use crate::fanout::{Batch, Block, JobFeed};
+use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
 use crate::outbox::Outbox;
 
@@ -318,6 +318,13 @@ pub(crate) trait Analysis: Send {
     /// carry it but before display smoothing (a stored trace is re-smoothed); `None` for
     /// analyses without one, or before the first result.
     fn capture(&mut self) -> Option<(StampArgs, FrameData)>;
+    /// Frames of further audio without which the job can form nothing new, so it sleeps
+    /// through the hand-offs until that much is queued and takes them together; commands and
+    /// stop wake it at once. `None`: every hand-off may change the result, so the job wakes
+    /// for each.
+    fn frames_needed(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// Longest `trace.capture` waits for a job to form its result. The request wakes the job like
@@ -336,6 +343,14 @@ pub(crate) struct JobHandle {
 impl JobHandle {
     pub(crate) fn send(&self, c: JobCmd) {
         let _ = self.tx.send(JobMsg::Cmd(c));
+        self.wake();
+    }
+
+    /// Ends an [`Analysis::frames_needed`] sleep: anything but audio is handled at once.
+    fn wake(&self) {
+        if let Some(t) = &self.thread {
+            t.thread().unpark();
+        }
     }
 
     /// The job's current curve result, formed on request: results are built for clients
@@ -344,11 +359,13 @@ impl JobHandle {
     pub(crate) fn capture(&self) -> Option<Frame> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.tx.send(JobMsg::Capture(tx)).ok()?;
+        self.wake();
         rx.recv_timeout(CAPTURE_WAIT).ok().flatten()
     }
 
     fn stop_inner(&mut self) {
         let _ = self.tx.send(JobMsg::Stop);
+        self.wake();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -370,8 +387,8 @@ pub(crate) fn spawn(
     mut analysis: Box<dyn Analysis>,
 ) -> std::io::Result<(JobHandle, JobFeed)> {
     let (tx, rx) = std::sync::mpsc::channel::<JobMsg>();
-    let queued = Arc::new(AtomicU64::new(0));
-    let q = Arc::clone(&queued);
+    let queue = Arc::new(Queue::default());
+    let q = Arc::clone(&queue);
     let thread = std::thread::Builder::new()
         .name(name.clone())
         .spawn(move || {
@@ -385,20 +402,25 @@ pub(crate) fn spawn(
             let em = Emitter { outbox, env };
             run(&mut *analysis, &rx, &q, &em);
         })?;
+    let feed = JobFeed {
+        tx: tx.clone(),
+        queue,
+        thread: thread.thread().clone(),
+    };
     Ok((
         JobHandle {
-            tx: tx.clone(),
+            tx,
             thread: Some(thread),
             fanout_id,
         },
-        JobFeed { tx, queued },
+        feed,
     ))
 }
 
 /// Messages handled per wakeup before the job looks at its publish schedule again.
 const DRAIN_MAX: usize = 64;
 
-fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emitter) {
+fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter) {
     let period = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
     // Audio arrives once per fan-out hand-off, about one publish period apart give or take
     // scheduling jitter. A frame may go this much early, so jitter neither costs a separate
@@ -433,7 +455,7 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emi
                         a.push(b);
                         frames += u64::from(b.frames);
                     }
-                    queued.fetch_sub(frames, Ordering::AcqRel);
+                    queue.frames.fetch_sub(frames, Ordering::AcqRel);
                     true
                 }
                 JobMsg::Cmd(c) => {
@@ -461,7 +483,26 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emi
             dirty = a.emit(em) == Flush::Pending;
             last_emit = Some(Instant::now());
         }
+        if !dirty && let Some(n) = a.frames_needed().filter(|&n| n > 0) {
+            park_until_queued(queue, n);
+        }
     }
+}
+
+/// Longest a job sleeps for audio it is waiting for; only a stopped stream lets it run out.
+const PARK_MAX: Duration = Duration::from_secs(1);
+
+/// Sleeps until `n` frames are queued. Parked rather than blocked in a receive, the thread
+/// is not woken by each hand-off (a send wakes only a waiting receiver): the fan-out unparks
+/// it once enough has arrived, and `JobHandle` for anything else.
+fn park_until_queued(queue: &Queue, n: u64) {
+    // Announced before the queue is looked at, and the fan-out adds to the queue before it
+    // reads this, so one of the two always sees the other: a hand-off is never missed.
+    queue.wake_at.store(n, Ordering::SeqCst);
+    if queue.frames.load(Ordering::SeqCst) < n {
+        std::thread::park_timeout(PARK_MAX);
+    }
+    queue.wake_at.store(0, Ordering::SeqCst);
 }
 
 /// Clip threshold for meters, matching the protection default (−0.1 dBFS sample peak).

@@ -395,6 +395,53 @@ fn stimulus_stop_goes_to_no_stimulus_without_jump() {
     );
 }
 
+/// Judging a window from its newest W history samples first, and measuring it in full only
+/// when the stimulus is present, gives exactly the measurements, events and states of full
+/// windows throughout a stop and restart.
+#[test]
+fn no_stimulus_judged_from_newest_samples_matches_full_windows() {
+    let cfg = TimingConfig::for_rate(FS);
+    let mut full = LoopbackTiming::new(cfg);
+    let mut cheap = LoopbackTiming::new(cfg);
+    let d = 4800;
+    let mut sim = Sim::new(Signal::Pink, 10.0, constant(d as f64));
+    sim.stop_at = Some((3.0 * FS) as u64);
+    sim.restart_at = Some((5.5 * FS) as u64);
+    let first = cfg.window as u64 + d as u64;
+    let mut quiet = 0;
+    for k in 0..34 {
+        let start = first + (k * cfg.hop) as u64;
+        let range = full.search_range();
+        assert_eq!(range, cheap.search_range());
+        let (capture, reference) = sim.window(&cfg, start, range);
+        let a = full
+            .process_window(start, &capture, &reference, range)
+            .expect("window");
+        let newest = &reference[range.span()..];
+        assert_eq!(newest.len(), cfg.window);
+        let b = match cheap
+            .process_if_no_stimulus(start, &capture, newest)
+            .expect("window")
+        {
+            Some(b) => {
+                quiet += 1;
+                b
+            }
+            None => cheap
+                .process_window(start, &capture, &reference, range)
+                .expect("window"),
+        };
+        assert_eq!(a, b, "window {k}");
+        assert_eq!(full.tracker().state(), cheap.tracker().state());
+        assert_eq!(full.tracker().last_lock(), cheap.tracker().last_lock());
+    }
+    assert!(quiet >= 4, "only {quiet} windows without stimulus");
+    let m = cheap
+        .process_if_no_stimulus(0, &vec![0.0; cfg.window], &[0.0; 16])
+        .err();
+    assert_eq!(m, Some(TimingError::ReferenceLength));
+}
+
 #[test]
 fn new_epoch_reacquires_without_jump() {
     let cfg = TimingConfig::for_rate(FS);

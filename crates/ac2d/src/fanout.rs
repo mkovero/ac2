@@ -178,11 +178,22 @@ pub(crate) fn pop_block(stream: &mut DuplexStream) -> Option<Block> {
     pop_block_into(stream, None)
 }
 
+/// What a job and the fan-out share about the job's queue.
+#[derive(Debug, Default)]
+pub(crate) struct Queue {
+    /// Frames sent and not yet consumed by the job.
+    pub(crate) frames: AtomicU64,
+    /// Queued frames at which a job sleeping through hand-offs is woken
+    /// ([`crate::jobs::Analysis::frames_needed`]); 0 while it wakes for every hand-off.
+    pub(crate) wake_at: AtomicU64,
+}
+
 /// What the fan-out feeds one job through.
 pub(crate) struct JobFeed {
     pub(crate) tx: Sender<JobMsg>,
-    /// Frames sent and not yet consumed by the job.
-    pub(crate) queued: Arc<AtomicU64>,
+    pub(crate) queue: Arc<Queue>,
+    /// The job's thread, unparked once `queue.wake_at` frames are queued.
+    pub(crate) thread: std::thread::Thread,
 }
 
 pub(crate) enum FanoutMsg {
@@ -501,13 +512,17 @@ fn run(
         } else {
             let batch: Batch = Arc::new(batch);
             jobs.retain(|id, feed| {
-                let q = feed.queued.load(Ordering::Acquire);
+                let q = feed.queue.frames.load(Ordering::Acquire);
                 if q > 0 && q + frames > queue_limit {
                     // The job is behind; it sees the gap and restarts.
                     return true;
                 }
-                feed.queued.fetch_add(frames, Ordering::AcqRel);
+                let queued = feed.queue.frames.fetch_add(frames, Ordering::SeqCst) + frames;
                 if feed.tx.send(JobMsg::Blocks(Arc::clone(&batch))).is_ok() {
+                    let wake_at = feed.queue.wake_at.load(Ordering::SeqCst);
+                    if wake_at != 0 && queued >= wake_at {
+                        feed.thread.unpark();
+                    }
                     true
                 } else {
                     tracing::debug!("job {id} detached");

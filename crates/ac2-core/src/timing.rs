@@ -58,6 +58,12 @@ impl LagRange {
     pub fn reference_start(&self, capture_start: u64) -> i64 {
         capture_start as i64 - self.max
     }
+
+    /// Output index of the first of the newest `window` samples of that slice, the ones
+    /// stimulus presence is judged on: `capture_start − min`.
+    pub fn newest_start(&self, capture_start: u64) -> i64 {
+        capture_start as i64 - self.min
+    }
 }
 
 /// Parameters of the monitor. [`TimingConfig::for_rate`] gives the Q3 defaults.
@@ -388,21 +394,21 @@ impl GccPhat {
         reference: &[f32],
         range: LagRange,
     ) -> Result<WindowMeasurement, TimingError> {
-        // Stimulus presence is judged on the newest W history samples: a wide search range
-        // reaches up to a second back and would otherwise see a generator that has stopped.
-        let newest = reference.len().saturating_sub(self.window);
+        if capture.len() != self.window {
+            return Err(TimingError::CaptureLength);
+        }
+        if reference.len() != range.reference_len(self.window) {
+            return Err(TimingError::ReferenceLength);
+        }
+        let newest = range.span();
+        if let Some(m) =
+            self.measure_no_stimulus(cfg, capture_start, capture, &reference[newest..])?
+        {
+            return Ok(m);
+        }
         let stimulus_dbfs = level_dbfs(&reference[newest..]);
         let loopback_dbfs = level_dbfs(capture);
-        let outcome = if stimulus_dbfs < cfg.stimulus_floor_dbfs {
-            // Lengths are still checked so a caller bug is never masked by silence.
-            if capture.len() != self.window {
-                return Err(TimingError::CaptureLength);
-            }
-            if reference.len() != range.reference_len(self.window) {
-                return Err(TimingError::ReferenceLength);
-            }
-            Outcome::NoStimulus
-        } else if loopback_dbfs < cfg.loopback_floor_dbfs {
+        let outcome = if loopback_dbfs < cfg.loopback_floor_dbfs {
             Outcome::NoEstimate(NoEstimate::LowLoopbackLevel)
         } else {
             match self.correlate(capture, reference, range)? {
@@ -416,6 +422,37 @@ impl GccPhat {
             loopback_dbfs,
             stimulus_dbfs,
         })
+    }
+
+    /// The window's measurement if its stimulus is below the floor, judged from `newest`
+    /// alone: the W history samples from `range.newest_start(capture_start)`. A wide search
+    /// range reaches up to a second back and would otherwise see a generator that has
+    /// stopped, so presence never depends on the older part of the slice, and a window
+    /// without stimulus needs nothing else. `None`: the stimulus is present and the window
+    /// needs [`Self::measure`] with its whole slice.
+    pub fn measure_no_stimulus(
+        &self,
+        cfg: &TimingConfig,
+        capture_start: u64,
+        capture: &[f32],
+        newest: &[f32],
+    ) -> Result<Option<WindowMeasurement>, TimingError> {
+        // Lengths are checked even in silence so a caller bug is never masked by it.
+        if capture.len() != self.window {
+            return Err(TimingError::CaptureLength);
+        }
+        if newest.len() != self.window {
+            return Err(TimingError::ReferenceLength);
+        }
+        let stimulus_dbfs = level_dbfs(newest);
+        Ok(
+            (stimulus_dbfs < cfg.stimulus_floor_dbfs).then(|| WindowMeasurement {
+                capture_start,
+                outcome: Outcome::NoStimulus,
+                loopback_dbfs: level_dbfs(capture),
+                stimulus_dbfs,
+            }),
+        )
     }
 }
 
@@ -908,6 +945,23 @@ impl LoopbackTiming {
             .estimator
             .measure(&self.cfg, capture_start, capture, reference, range)?;
         Ok((m, self.tracker.observe(&m)))
+    }
+
+    /// Feeds the tracker a window whose stimulus is below the floor, judged from only the
+    /// newest W history samples (see [`GccPhat::measure_no_stimulus`]); the outcome, levels
+    /// and events are exactly those [`Self::process_window`] gives for the same window.
+    /// `None`, with nothing fed: the stimulus is present, so the window needs
+    /// [`Self::process_window`] with its whole history slice.
+    pub fn process_if_no_stimulus(
+        &mut self,
+        capture_start: u64,
+        capture: &[f32],
+        newest: &[f32],
+    ) -> Result<Option<(WindowMeasurement, TimingEvents)>, TimingError> {
+        let m = self
+            .estimator
+            .measure_no_stimulus(&self.cfg, capture_start, capture, newest)?;
+        Ok(m.map(|m| (m, self.tracker.observe(&m))))
     }
 }
 

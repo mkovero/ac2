@@ -1,17 +1,24 @@
 //! Loopback timing monitor job (Q3): correlates the generator history with the loopback
 //! input every hop, publishes `timing` frames and reports state changes (lock, jump, loss,
 //! drift warning) to control, which commits them as `timing` events.
+//!
+//! Most of the time the generator is off. A window without stimulus is judged from its
+//! newest W history samples alone, which is all the presence check looks at, so the full
+//! reference slice (window plus search range, up to a second further back) is read only
+//! while there is something to correlate. Between hops the job has nothing to do with the
+//! audio, so it sleeps through hand-offs until its next window is complete.
 
-use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use ac2_audio::{HistoryError, HistoryReader};
 use ac2_core::timing::{LoopbackTiming, Outcome, TimingConfig, TimingEvent};
 use ac2_proto::frame::{FrameData, ProtectionFlags, TimingMeta, TimingWindow};
 use ac2_proto::model::{Drift, TimingStatus};
+use ac2_proto::topic::Topic;
 use ac2_proto::units::{Db, Dbfs, Rev, SampleIndex, Samples, Seconds, SessionEpoch, WallNs};
 
-use super::{Analysis, Emitter, Flush, JobCmd, StampArgs};
+use super::{Analysis, Due, Emitter, Flush, JobCmd, Pace, StampArgs};
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Block;
@@ -22,21 +29,24 @@ pub(crate) struct Timing {
     idx: usize,
     window: usize,
     hop: usize,
-    /// Loopback samples from capture index `ring_start`.
-    ring: VecDeque<f32>,
+    /// Loopback samples from capture index `ring_start`, contiguous so a window is a slice.
+    ring: Vec<f32>,
     ring_start: u64,
     next_start: Option<u64>,
     end: Option<u64>,
     wall: u64,
-    capture: Vec<f32>,
     reference: Vec<f32>,
+    /// Windows that needed the whole reference slice (stimulus present).
+    full_reads: u64,
     status: TimingStatus,
     reported: Option<TimingStatus>,
     last_window: Option<TimingWindow>,
     last_lock_wall: u64,
     to_control: Sender<ControlMsg>,
     epoch: SessionEpoch,
-    dirty: bool,
+    /// Windows measured; the `timing` result changes with each.
+    generation: u64,
+    pace: Pace,
 }
 
 impl Timing {
@@ -55,20 +65,21 @@ impl Timing {
             mon: LoopbackTiming::new(cfg),
             history,
             idx,
-            ring: VecDeque::new(),
+            ring: Vec::new(),
             ring_start: 0,
             next_start: None,
             end: None,
             wall: 0,
-            capture: Vec::new(),
             reference: Vec::new(),
+            full_reads: 0,
             status: initial,
             reported: Some(initial),
             last_window: None,
             last_lock_wall: initial.last_lock.map_or(0, |l| l.at.0),
             to_control,
             epoch,
-            dirty: false,
+            generation: 0,
+            pace: Pace::new(Duration::ZERO),
         }
     }
 
@@ -95,9 +106,10 @@ impl Timing {
             if self.ring_start + (self.ring.len() as u64) < need_end || start < self.ring_start {
                 break;
             }
+            let off = (start - self.ring_start) as usize;
             let range = self.mon.search_range();
-            let ref_len = range.reference_len(self.window);
-            match self.read_history(range.reference_start(start), ref_len) {
+            // Presence first, from the newest W samples only.
+            match self.read_history(range.newest_start(start), self.window) {
                 Ok(()) => {}
                 Err(HistoryError::NotYetWritten { .. }) => break,
                 Err(e @ HistoryError::Overwritten { .. }) => {
@@ -106,14 +118,31 @@ impl Timing {
                     continue;
                 }
             }
-            let off = (start - self.ring_start) as usize;
-            self.capture.clear();
-            self.capture
-                .extend(self.ring.iter().skip(off).take(self.window).copied());
-            match self
+            let capture = &self.ring[off..off + self.window];
+            let quiet = self
                 .mon
-                .process_window(start, &self.capture, &self.reference, range)
-            {
+                .process_if_no_stimulus(start, capture, &self.reference);
+            let result = match quiet {
+                Ok(Some(r)) => Ok(r),
+                Err(e) => Err(e),
+                Ok(None) => {
+                    self.full_reads += 1;
+                    let ref_len = range.reference_len(self.window);
+                    match self.read_history(range.reference_start(start), ref_len) {
+                        Ok(()) => {}
+                        Err(HistoryError::NotYetWritten { .. }) => break,
+                        Err(e @ HistoryError::Overwritten { .. }) => {
+                            tracing::debug!("timing window skipped: {e}");
+                            self.advance(start);
+                            continue;
+                        }
+                    }
+                    let capture = &self.ring[off..off + self.window];
+                    self.mon
+                        .process_window(start, capture, &self.reference, range)
+                }
+            };
+            match result {
                 Ok((m, events)) => {
                     for ev in events.iter() {
                         log_event(ev);
@@ -130,7 +159,7 @@ impl Timing {
                         stimulus: Dbfs(m.stimulus_dbfs),
                     });
                     self.update_status();
-                    self.dirty = true;
+                    self.generation += 1;
                 }
                 Err(e) => tracing::error!("timing window: {e:?}"),
             }
@@ -141,10 +170,11 @@ impl Timing {
     fn advance(&mut self, start: u64) {
         let next = start + self.hop as u64;
         self.next_start = Some(next);
-        while self.ring_start < next && !self.ring.is_empty() {
-            self.ring.pop_front();
-            self.ring_start += 1;
-        }
+        let drop = usize::try_from(next.saturating_sub(self.ring_start))
+            .unwrap_or(usize::MAX)
+            .min(self.ring.len());
+        self.ring.drain(..drop);
+        self.ring_start += drop as u64;
     }
 
     fn update_status(&mut self) {
@@ -238,28 +268,48 @@ impl Analysis for Timing {
         let Some(end) = self.end else {
             return Flush::Done;
         };
-        if !self.dirty {
+        if self.generation == 0 {
+            // Nothing measured yet: the committed status in `state` is all there is.
             return Flush::Done;
         }
-        self.dirty = false;
-        e.send(
-            StampArgs {
-                audio_sample: end.saturating_sub(1),
-                config_rev: Rev(0),
-                applied_at: 0,
-                wall_ns: self.wall,
-                grid_id: None,
-                protection: ProtectionFlags::NONE,
-            },
-            FrameData::Timing(TimingMeta {
-                status: self.status,
-                window: self.last_window,
-            }),
-        );
-        Flush::Done
+        let stamp = StampArgs {
+            audio_sample: end.saturating_sub(1),
+            config_rev: Rev(0),
+            applied_at: 0,
+            wall_ns: self.wall,
+            grid_id: None,
+            protection: ProtectionFlags::NONE,
+        };
+        let due = self
+            .pace
+            .due(e, Topic::Timing, self.generation, &stamp, Instant::now());
+        if due == Due::Send
+            && !e.send(
+                stamp,
+                FrameData::Timing(TimingMeta {
+                    status: self.status,
+                    window: self.last_window,
+                }),
+            )
+        {
+            self.pace.unsent();
+        }
+        Flush::from_due(due)
+    }
+
+    fn frames_needed(&self) -> Option<u64> {
+        // The next window needs audio up to `next_start + W`; until then hand-offs only add
+        // samples to the ring.
+        let need = self.next_start? + self.window as u64;
+        let have = self.ring_start + self.ring.len() as u64;
+        need.checked_sub(have).filter(|&m| m > 0)
     }
 
     fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
         None
     }
 }
+
+#[cfg(test)]
+#[path = "timing_tests.rs"]
+mod tests;
