@@ -207,6 +207,9 @@ The app's dialogs use the same defaults as these commands. Then in the app (or w
 4. **Esc** stops the noise (with a window open, Esc closes the window first; **Shift+Esc**
    stops from anywhere).
 
+**H** lists every key, and the line under the focused pane shows its most used ones. Next:
+calibrate the mic for dB SPL and set up Leq windows ([user guide](user-guide.md#calibration-and-spl)).
+
 No hardware at hand? Use the built-in simulated rig (output 1 → input 1 loopback, output 1
 → input 2 through a speaker-and-room model; it never touches real audio). In the app, choose
 *Simulated rig* in the connect dialog: its session is already open (inputs 1–2, output 1,
@@ -229,8 +232,9 @@ transfer measurement after 0.4 s, delay found and inserted and a first trace cap
 6.4 s (4 s of that is the noise averaging before the finder runs). The rest of the
 two-minute budget is the person: downloading, typing five commands (or, in the app, **L**, a
 level, **Space**, **Enter**, **X**) and wiring the loopback cable. On macOS and Windows the
-installer replaces `install.sh`; the CI release job runs the same commands on each OS after
-installing the artifact.
+installer replaces `install.sh`; the Release workflow installs each OS's artifact (the MSI
+on Windows, the zip on macOS) and runs a shorter version there: daemon on the simulated rig,
+session, transfer measurement.
 
 ## Remote use (FOH ↔ stage)
 

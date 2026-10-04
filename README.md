@@ -5,7 +5,7 @@ PipeWire through pipewire-jack), macOS (Core Audio), Windows (WASAPI). A Rust da
 the audio interface; a GPU desktop app, a CLI and your own scripts connect to it over
 ZeroMQ, on the same machine or across the network (encrypted and paired).
 
-![Transfer function with stored traces](crates/ac2-ui/tests/snapshots/transfer_stored_traces.png)
+![Transfer function with stored traces, the Traces list and key hints](crates/ac2-ui/tests/snapshots/traces_list.png)
 
 - **Transfer function** with coherence (multi-time-window FFT ladder, 48 points per octave),
   averaging, freeze, magnitude and phase smoothing, fault banners that say what is wrong
@@ -13,34 +13,45 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
 - **Delay finder** that targets the first arrival, reports confidence and candidates, and
   says "no estimate" rather than guessing; delay tracking.
 - **Sweep measurement**: a synchronised exponential sweep gives the response, harmonic
-  distortion H2 … H5 and THD vs frequency (in dB re fundamental or in %, each order drawn
-  against its own noise floor) and the impulse response; a progress strip with **Stop** while
-  it runs.
-- **Spectrum, RTA** (1/1 … 1/24 octave, A/C/Z) and a **calibrated SPL meter** (Fast / Slow /
-  Impulse, Leq, LCpeak, Lmax / Lmin) with **rolling Leq windows**, limits, alarms and
-  informational regulation presets (DIN 15905-5, Switzerland, WHO, France, Flanders,
-  Brussels, the Dutch covenant), and a per-second log that keeps running whether or not
-  anyone watches, with its run clock and total Leq on screen and a new log at show start.
-- **Calibration**: per-input sensitivity against an acoustic calibrator; a **mic library**
-  with several labelled curves per mic (0°, 90° …) and an explicitly chosen active curve per
-  input; a Calibrations view that shows what every input uses.
+  distortion H2 … H5 and THD vs frequency (dB re fundamental or %, each order against its
+  own noise floor) and the impulse response, with a progress strip and **Stop**.
+- **Spectrum and RTA** (1/1 … 1/24 octave, A/C/Z), on a dBFS or, calibrated, a dB SPL axis.
+- **SPL meter**: Fast / Slow / Impulse and A / C / Z switched in place (A-weighted Fast by
+  default), a held big number, Leq, LCpeak, Lmax / Lmin; three views — meter, Leq windows,
+  or both, made to be read from the stage.
+- **Rolling Leq windows and limits**: columns or tiles, each in its own weighting (dB(A),
+  dB(C)), judged against their limits, a
+  filling window judged on its energy budget ("ON COURSE — over in 12 min"), headroom
+  ("next 1 min: stay ≤ 101.5 dB") and "cooling down in …"; a per-second log that runs
+  whether or not anyone watches, with its run clock, total Leq and gaps (missing audio is
+  never counted as silence), a history strip that survives an app restart, a new log at show
+  start; informational presets that replace the windows with a rule's (DIN 15905-5,
+  Switzerland, WHO, France, Flanders, Brussels, the Dutch covenant).
+- **Calibration**: per input against an acoustic calibrator, or **electrically** without
+  one (a voltmeter across the mic's pins 2–3 and its data-sheet sensitivity, ±1 dB); a **mic
+  library** with labelled curves per mic (0°, 90° …) and an explicitly chosen curve per
+  input; a Calibrations view; every readout names what its dB SPL rests on.
 - **Named, metered inputs**: the session dialog and an always-on meter strip show every
   input by name with its role (reference, mic) and level, before and during measuring.
-- **Traces**: capture to slots with full metadata, comparison cursor, averaging, A − B, target
-  curves, smoothing and a mic curve applied after capture (from the app or the CLI), CSV
-  import / export (a sweep round-trips with its distortion and impulse response).
-- **Sessions and autosave**: save and load by name; a stand-alone daemon autosaves
-  measurements and traces and restores them on restart, always disarmed.
-- **Keyboard first**: one scoped binding table, a command palette, layout-safe defaults,
-  remappable keys; an open window owns ↑/↓, Enter and Esc and never touches the stimulus.
-  Safe stimulus: typed level, arm then fire, Esc stops, Shift+Esc stops from anywhere.
-- **Several clients at once**, FOH and stage, discovered over mDNS, paired with pinned keys.
+- **Traces**: every capture, sweep, import, average and A − B in one selectable list; rename,
+  delete, show / hide, slots, display offsets to spread curves apart, a comparison cursor,
+  target curves, smoothing and a mic curve applied after capture, CSV import / export (a
+  sweep round-trips with its distortion and impulse response).
+- **Sessions and autosave**: save and load by name; a stand-alone daemon autosaves and
+  restores on restart, always disarmed.
+- **Keyboard first**: one remappable binding table, layout-safe defaults, a command palette,
+  **H** for every key, per-pane key hints and tooltips; per-pane level-axis zoom / pan / fit;
+  layouts split → one pane → full screen (**W**), remembered between runs.
+- **Safe stimulus**: typed level, arm then fire, Esc stops, **Shift+Esc** stops from
+  anywhere; an open window owns the keyboard and never touches the stimulus.
+- **Several clients at once**, FOH and stage, discovered over mDNS, paired with pinned keys;
+  a CLI and a documented protocol for scripts.
 
 | | |
 |---|---|
-| ![Sweep distortion in percent](crates/ac2-ui/tests/snapshots/sweep_distortion_percent.png) | ![Sweep progress strip with Stop](crates/ac2-ui/tests/snapshots/sweep_progress.png) |
-| ![Session dialog: named inputs with meters and roles](crates/ac2-ui/tests/snapshots/session_dialog.png) | ![Calibrations view: mic library and active curves](crates/ac2-ui/tests/snapshots/calibrations_view.png) |
-| ![Delay finder candidates](crates/ac2-ui/tests/snapshots/delay_pick_candidates.png) | ![Command palette](crates/ac2-ui/tests/snapshots/command_palette.png) |
+| ![Meter + Leq windows in the stage view](crates/ac2-ui/tests/snapshots/spl_meter_leq_stage.png) | ![Leq windows as columns, full screen](crates/ac2-ui/tests/snapshots/leq_columns_fullscreen.png) |
+| ![Sweep distortion in percent](crates/ac2-ui/tests/snapshots/sweep_distortion_percent.png) | ![Calibrations view: mic library, active curves, sensitivity calibrations](crates/ac2-ui/tests/snapshots/calibrations_view.png) |
+| ![Session dialog: named inputs with meters and roles](crates/ac2-ui/tests/snapshots/session_dialog.png) | ![Key hints under the focused pane](crates/ac2-ui/tests/snapshots/key_hints.png) |
 
 ## Get it
 
@@ -71,22 +82,25 @@ function in about two minutes, with or without hardware (a simulated rig is buil
 
 ## Status
 
-Pre-1.0 (version 0.0.0; no compatibility promised between builds: protocol, session and
-calibration-store versions are checked and a mismatch is refused or set aside, never
-guessed). Phases 0–6 of [PLAN.md](PLAN.md#9-phases) — audio, DSP, daemon and protocol, UI,
-calibration / SPL / sessions, packaging and documentation — meet their CI criteria, and from
-phase 7 the sweep with harmonic distortion and impulse response and the rolling Leq windows
-with the per-second SPL log are done.
+Pre-1.0 (version 0.0.0, protocol 13; no compatibility promised between builds: protocol,
+session and calibration-store versions are checked and a mismatch is refused or set aside,
+never guessed). Phases 0–6 of [PLAN.md](PLAN.md#9-phases) — audio, DSP, daemon and
+protocol, UI, calibration / SPL / sessions, packaging and documentation — meet their CI
+criteria; of phase 7, the sweep with harmonic distortion and impulse response and the
+rolling Leq windows with the per-second SPL log are done.
 
-The hardware acceptance runs are still open ([status table](PLAN.md#90-status-2026-10-03)):
+The hardware acceptance runs are still open ([status table](PLAN.md#90-status-2026-10-04)):
 
-- **Linux**: in use on a real rig (JACK, RME Fireface 400): transfer, delay finder, sweeps,
-  remote use over CURVE and mDNS ([docs/rigs/pupu.md](docs/rigs/pupu.md)).
+- **Linux**: verified on a real rig (JACK, RME Fireface 400): transfer, delay finder, sweeps,
+  electrical SPL calibration, remote use over CURVE and mDNS
+  ([docs/rigs/pupu.md](docs/rigs/pupu.md)).
 - **Windows**: the MSI installs and the app runs the simulated rig (checked in a VM); WASAPI
   on a real interface is untested.
-- **macOS**: untested on hardware (CI builds and renders headless).
-- Installers are not code-signed. ASIO, room metrics (ISO 3382) and the spectrograph come
-  later.
+- **macOS**: the disk image is built and the UI renders headless in CI; untested on
+  hardware.
+- Builds are not code-signed, and there are no GitHub Releases: installers are artifacts of
+  the Release workflow ([Get it](#get-it)). ASIO, room metrics (ISO 3382) and the
+  spectrograph come later.
 
 ## Building from source
 
