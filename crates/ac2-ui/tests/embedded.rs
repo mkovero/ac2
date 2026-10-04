@@ -55,7 +55,9 @@ impl Driver {
     }
 
     fn send(&mut self, m: Msg) {
-        for r in self.st.update(m, &self.keys) {
+        let mut reqs = self.st.update(m, &self.keys);
+        reqs.extend(self.st.sync_link());
+        for r in reqs {
             self.conn.send(r);
         }
     }
@@ -2516,6 +2518,81 @@ fn a_restart_comes_back_to_the_same_pane() -> R {
         Some(name)
     );
     assert!(d.st.daemon().is_some_and(|s| !s.generator.armed));
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// The streams of `meas` the app holds frames of now.
+fn streams_of(s: &AppState, meas: MeasId) -> Vec<Stream> {
+    s.data
+        .as_ref()
+        .map(|d| {
+            d.latest
+                .frames
+                .values()
+                .filter_map(|f| match f.topic {
+                    Topic::Data { meas: m, stream } if m == meas => Some(stream),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// From an empty daemon: the app receives the streams its panes draw and no others. The IR
+/// arrives while its pane is shown and stops when it is hidden (the daemon derives it only
+/// for subscribers); a maximised spectrum pane drops the transfer function; the
+/// measurement's input levels, which no pane draws, never arrive.
+#[test]
+fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.endpoints(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?.id;
+    // The level typed there stays: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    let has = |s: &AppState, st: Stream| streams_of(s, m).contains(&st);
+    d.until("the IR, its pane shown", |s| {
+        has(s, Stream::Tf) && has(s, Stream::Ir)
+    })?;
+    assert!(!has(&d.st, Stream::Levels));
+
+    d.key("Shift+I");
+    assert!(!d.st.layout.is_shown(ac2_ui::state::PaneKind::Ir));
+    d.until("no IR, its pane hidden", |s| {
+        has(s, Stream::Tf) && !has(s, Stream::Ir)
+    })?;
+    // Still none a while later: nothing subscribes to it.
+    let end = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < end {
+        d.pump();
+        assert!(!has(&d.st, Stream::Ir));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // The spectrum pane alone: no transfer function either.
+    d.key("Alt+2");
+    d.key("W");
+    assert!(d.st.layout.maximized);
+    d.until("nothing of the transfer measurement", |s| {
+        streams_of(s, m).is_empty()
+    })?;
+    // Back to the panes (W cycles maximised, full screen, back), and the IR shown again:
+    // both arrive again.
+    d.key("W");
+    d.key("W");
+    assert!(!d.st.layout.maximized);
+    d.key("Alt+1");
+    d.key("Shift+I");
+    d.until("the TF and the IR again", |s| {
+        has(s, Stream::Tf) && has(s, Stream::Ir)
+    })?;
+    assert!(!has(&d.st, Stream::Levels));
+    d.stop()?;
     drop(d);
     drop(daemon);
     Ok(())

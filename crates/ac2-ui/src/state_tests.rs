@@ -5153,3 +5153,65 @@ fn layout_is_remembered_and_restored() {
         Some("FOH SPL")
     );
 }
+
+/// The link receives the streams the visible panes draw: the TF of every transfer
+/// measurement with the transfer pane shown, the IR of the one the IR pane follows, spectra
+/// with the spectrum pane shown or peak hold on, SPL meters always; and frames reach the UI
+/// less often when only the SPL pane is in view.
+#[test]
+fn the_link_receives_what_the_panes_draw() {
+    use ac2_proto::topic::{Stream, Topic};
+    let mut t = T::new();
+    let mut s = four();
+    s.measurements.push(meas(5, "SPL", spl_meter()));
+    t.conn(mirror(s));
+    let topic = |m: u32, stream| Topic::Data {
+        meas: MeasId(m),
+        stream,
+    };
+    let want = |v: &[(u32, Stream)]| -> std::collections::HashSet<Topic> {
+        v.iter().map(|&(m, s)| topic(m, s)).collect()
+    };
+    let r = t.st.sync_link();
+    assert!(
+        r.iter()
+            .any(|r| matches!(r, Request::Topics(x) if *x == t.st.wanted_topics())),
+        "{r:?}"
+    );
+    assert!(t.st.sync_link().is_empty(), "sent once");
+    let ir_of = crate::scenes::focus_tf(&t.st).map_or(0, |m| m.id.0);
+    assert_eq!(
+        t.st.wanted_topics(),
+        want(&[
+            (1, Stream::Tf),
+            (3, Stream::Tf),
+            (ir_of, Stream::Ir),
+            (2, Stream::Spec),
+            (4, Stream::Rta),
+            (5, Stream::Spl),
+            (5, Stream::Leq),
+        ])
+    );
+    assert_eq!(t.st.display_period(), crate::conn::DISPLAY_PERIOD);
+    // The IR pane hidden: no IR.
+    t.key("Shift+I");
+    assert!(!t.st.wanted_topics().contains(&topic(ir_of, Stream::Ir)));
+    assert!(
+        t.st.sync_link()
+            .iter()
+            .any(|r| matches!(r, Request::Topics(_)))
+    );
+    // The SPL pane alone: only the meter, and frames at its own rate.
+    t.key("Alt+4");
+    t.key("W");
+    assert!(t.st.layout.maximized);
+    assert_eq!(
+        t.st.wanted_topics(),
+        want(&[(5, Stream::Spl), (5, Stream::Leq)])
+    );
+    assert_eq!(t.st.display_period(), crate::link_wants::SPL_ONLY_PERIOD);
+    // Peak hold folds every spectrum frame, shown or not.
+    t.st.view.spectrum.peak_hold = true;
+    assert!(t.st.wanted_topics().contains(&topic(2, Stream::Spec)));
+    assert!(t.st.wanted_topics().contains(&topic(4, Stream::Rta)));
+}

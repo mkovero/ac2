@@ -4,7 +4,8 @@
 //! - [`state`]: the pure reducer (keys, commands, link events → state + requests).
 //! - [`keys`]: the one scoped binding table, `keys.toml` overrides; [`hints`]: the panes'
 //!   key-hint lines; [`palette`]: fuzzy command search.
-//! - [`conn`]: the link thread (client, data drain, stimulus lease).
+//! - [`conn`]: the link thread (client, data drain, stimulus lease); [`link_wants`]: which
+//!   streams it receives and how often.
 //! - [`scenes`]: frames + state → `ac2-scene` builders; [`plot`]: scene → pixels inside
 //!   egui's pass.
 //! - [`app`] / `view`: the eframe app and its drawing.
@@ -20,9 +21,11 @@ pub mod connect;
 pub mod electrical_dialog;
 pub mod embedded;
 pub mod forms;
+pub mod gpu;
 pub mod hints;
 pub mod keys;
 pub mod leq_dialog;
+pub mod link_wants;
 pub mod palette;
 pub mod plot;
 pub mod prefs;

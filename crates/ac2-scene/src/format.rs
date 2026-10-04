@@ -199,6 +199,44 @@ pub fn age(seconds: f64) -> String {
     }
 }
 
+/// Seconds until [`age`] of an age growing from `seconds` reads differently: a counting
+/// `STALE · 4.2 s` needs redrawing ten times a second, `STALE · 3 min` once a minute.
+pub fn age_changes_in(seconds: f64) -> f64 {
+    if seconds.is_nan() || seconds == f64::INFINITY {
+        return f64::INFINITY;
+    }
+    if seconds < 0.0 {
+        return -seconds;
+    }
+    let next = if seconds < 9.95 {
+        (((seconds * 10.0).round() + 0.5) / 10.0).min(9.95)
+    } else if seconds < 59.5 {
+        (seconds.round() + 0.5).min(59.5)
+    } else if seconds < 3600.0 {
+        (((seconds / 60.0).floor().max(1.0) + 1.0) * 60.0).min(3600.0)
+    } else if seconds < 86_400.0 {
+        (((seconds / 3600.0).floor() + 1.0) * 3600.0).min(86_400.0)
+    } else {
+        ((seconds / 86_400.0).floor() + 1.0) * 86_400.0
+    };
+    (next - seconds).max(0.0)
+}
+
+/// The step [`age`] counts in at `seconds`: 0.1 s, 1 s, a minute, an hour, a day.
+pub fn age_step(seconds: f64) -> f64 {
+    if seconds < 9.95 {
+        0.1
+    } else if seconds < 59.5 {
+        1.0
+    } else if seconds < 3600.0 {
+        60.0
+    } else if seconds < 86_400.0 {
+        3600.0
+    } else {
+        86_400.0
+    }
+}
+
 /// How long ago something happened, coarse: `just now`, `5 min ago`, `3 h ago`, `2 d ago`.
 pub fn ago(seconds: f64) -> String {
     if !seconds.is_finite() || seconds < 0.0 {
@@ -302,6 +340,25 @@ mod tests {
         assert_eq!(celsius(20.0), "20 °C");
         assert_eq!(celsius(22.5), "22.5 °C");
         assert_eq!(celsius(-5.0), "−5 °C");
+    }
+
+    /// The text stays the same up to the predicted change and differs just after it, over
+    /// every format band.
+    #[test]
+    fn age_changes_when_predicted() {
+        let mut s = 0.0;
+        while s < 3.0 * 86_400.0 {
+            let d = age_changes_in(s);
+            assert!(d > 0.0, "{s}");
+            assert_eq!(age(s + d - 1e-6), age(s), "{s} + {d}");
+            assert_ne!(age(s + d + 1e-6), age(s), "{s} + {d}");
+            s += if s < 70.0 { 0.037 } else { 97.3 };
+        }
+        assert_eq!(age_changes_in(f64::INFINITY), f64::INFINITY);
+        assert_eq!(age_step(4.0), 0.1);
+        assert_eq!(age_step(30.0), 1.0);
+        assert_eq!(age_step(600.0), 60.0);
+        assert!((age_changes_in(-0.5) - 0.5).abs() < 1e-12);
     }
 
     #[test]

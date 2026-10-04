@@ -10,7 +10,9 @@ use ac2_plot::Scene;
 use ac2_scene::theme::{Theme, ThemeName};
 use eframe::egui::{self, Event, Key};
 
-use crate::conn::{Conn, Target};
+use ac2_proto::topic::{Stream, Topic};
+
+use crate::conn::{Conn, DataSnapshot, Target};
 use crate::connect::{Choice, ConnectDialog};
 use crate::embedded::{Embedded, EmbeddedBackend, start_embedded};
 use crate::keys::{Chord, Keymap};
@@ -57,7 +59,8 @@ pub struct StartupTiming {
     pub first_frame: Option<Duration>,
 }
 
-/// Cached pane scene: rebuilt when the state generation, size or theme changes.
+/// Cached pane scene: rebuilt when its pane's generation ([`App::pane_generation`]), size or
+/// theme changes.
 pub(crate) struct CachedScene {
     pub generation: u64,
     pub size: egui::Vec2,
@@ -83,7 +86,11 @@ pub struct App {
     applied_theme: Option<ThemeName>,
     /// The full-screen state last sent to the window.
     applied_fullscreen: bool,
-    pub(crate) generation: u64,
+    /// Counts state changes; each pane remembers the count of the last change it shows.
+    generation: u64,
+    pane_generations: HashMap<PaneKind, u64>,
+    /// The time-driven texts the panes were last built with ([`ClockTexts`]).
+    clock: ClockTexts,
     pub(crate) scenes: HashMap<PaneKind, CachedScene>,
     pub(crate) plots: bool,
     passes: u64,
@@ -122,10 +129,9 @@ impl App {
             .target
             .as_ref()
             .map_or_else(|| "no daemon".to_string(), |t| t.describe.clone());
-        let conn = opts.target.and_then(|t| {
-            let wake = Arc::new(move || ctx.request_repaint());
-            Conn::start(t, wake).ok()
-        });
+        let conn = opts
+            .target
+            .and_then(|t| Conn::start(t, link_wake(ctx)).ok());
         let mut state = AppState::new(opts.theme, describe);
         state.set_prefs(opts.prefs);
         state.open_session_when_empty = opts.open_session_dialog;
@@ -151,6 +157,8 @@ impl App {
             applied_theme: None,
             applied_fullscreen: false,
             generation: 0,
+            pane_generations: HashMap::new(),
+            clock: ClockTexts::default(),
             scenes: HashMap::new(),
             plots,
             passes: 0,
@@ -252,10 +260,8 @@ impl App {
                 }
             },
         };
-        let wake_ctx = ctx.clone();
-        let wake = Arc::new(move || wake_ctx.request_repaint());
         self.conn = None;
-        match Conn::start(target, wake) {
+        match Conn::start(target, link_wake(ctx.clone())) {
             Ok(c) => {
                 self.conn = Some(c);
                 self.connect = None;
@@ -267,17 +273,48 @@ impl App {
     /// Marks the state as changed, so cached pane scenes are rebuilt on the next pass. Only
     /// needed after editing `state` directly instead of through [`App::dispatch`].
     pub fn state_edited(&mut self) {
+        self.touch(&PaneKind::ALL);
+    }
+
+    /// The count of the last state change pane `p` shows.
+    pub(crate) fn pane_generation(&self, p: PaneKind) -> u64 {
+        self.pane_generations.get(&p).copied().unwrap_or(0)
+    }
+
+    /// Marks `panes` as changed: their scenes are rebuilt on the next pass.
+    fn touch(&mut self, panes: &[PaneKind]) {
+        if panes.is_empty() {
+            return;
+        }
         self.generation += 1;
+        for p in panes {
+            self.pane_generations.insert(*p, self.generation);
+        }
     }
 
     /// Feeds one message through the reducer and forwards its requests.
     pub fn dispatch(&mut self, msg: Msg) {
-        let is_tick = matches!(msg, Msg::Tick { .. });
+        let what = Touches::of(&msg);
         let animating = self.state.animating();
-        let reqs = self.state.update(msg, &self.keymap);
-        if !is_tick || animating {
-            self.generation += 1;
-        }
+        let data = self.state.data.clone();
+        let mirror = self.state.mirror.clone();
+        let mut reqs = self.state.update(msg, &self.keymap);
+        reqs.extend(self.state.sync_link());
+        let panes = match what {
+            // The frequency axis moves while navigation settles; the last step settles it.
+            Touches::Tick if animating || self.state.animating() => {
+                vec![PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
+            }
+            Touches::Tick => Vec::new(),
+            Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
+            Touches::Mirror => match (&mirror, &self.state.mirror) {
+                (Some(a), Some(b)) if !crate::conn::mirror_differs(a, b) => Vec::new(),
+                _ => PaneKind::ALL.to_vec(),
+            },
+            Touches::Spl => vec![PaneKind::Spl],
+            Touches::All => PaneKind::ALL.to_vec(),
+        };
+        self.touch(&panes);
         if let Some(c) = &self.conn {
             for r in reqs {
                 c.send(r);
@@ -364,6 +401,157 @@ impl App {
     }
 }
 
+/// Which panes a message can change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Touches {
+    /// The frame clock: only navigation in motion.
+    Tick,
+    /// New frames: the panes drawing the topics whose picture changed.
+    Data,
+    /// A mirror view: every pane, unless only keepalive time moved.
+    Mirror,
+    /// The SPL meter's Leq history.
+    Spl,
+    /// Keys, commands, replies: anything may change.
+    All,
+}
+
+impl Touches {
+    fn of(msg: &Msg) -> Self {
+        use crate::conn::ConnEvent;
+        match msg {
+            Msg::Tick { .. } => Self::Tick,
+            Msg::Conn(e) => match **e {
+                ConnEvent::Data(_) => Self::Data,
+                ConnEvent::Mirror(_) => Self::Mirror,
+                ConnEvent::LeqBackfill { .. } => Self::Spl,
+                _ => Self::All,
+            },
+            _ => Self::All,
+        }
+    }
+}
+
+/// The panes that draw `topic`. Input meters are drawn by the chrome, outside any pane.
+fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
+    match topic {
+        Topic::Data { stream, .. } => match stream {
+            Stream::Tf => &[PaneKind::Transfer],
+            Stream::Ir => &[PaneKind::Ir],
+            Stream::Spec | Stream::Rta => &[PaneKind::Spectrum],
+            Stream::Spl | Stream::Leq => &[PaneKind::Spl],
+            Stream::Levels => &[],
+        },
+        _ => &[],
+    }
+}
+
+/// The panes whose picture differs between snapshots `old` and `new`: a topic coming or
+/// going, new content, a STALE flip; every pane when the daemon's liveness flips.
+fn data_touches(old: Option<&DataSnapshot>, new: Option<&DataSnapshot>) -> Vec<PaneKind> {
+    let (Some(old), Some(new)) = (old, new) else {
+        return PaneKind::ALL.to_vec();
+    };
+    if old.latest.responding != new.latest.responding {
+        return PaneKind::ALL.to_vec();
+    }
+    let mut out: Vec<PaneKind> = Vec::new();
+    let mut add = |t: &Topic| {
+        for p in topic_panes(t) {
+            if !out.contains(p) {
+                out.push(*p);
+            }
+        }
+    };
+    for (k, n) in &new.latest.frames {
+        let changed = old.latest.frames.get(k).is_none_or(|o| {
+            o.stale != n.stale
+                || (o.frame.stamp.seq != n.frame.stamp.seq
+                    && !crate::conn::same_picture(&o.frame, &n.frame))
+        });
+        if changed {
+            add(&n.topic);
+        }
+    }
+    for (k, o) in &old.latest.frames {
+        if !new.latest.frames.contains_key(k) {
+            add(&o.topic);
+        }
+    }
+    out
+}
+
+/// The panes' texts that change with time alone: the age of each STALE frame and how long
+/// the daemon has been silent. Panes are rebuilt when these change, and the UI wakes when
+/// they will.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ClockTexts {
+    texts: Vec<String>,
+}
+
+impl ClockTexts {
+    /// The texts as of `now`, with how long until one of them changes.
+    fn at(st: &AppState, now: Instant) -> (Self, Option<Duration>) {
+        use ac2_scene::format::{age, age_changes_in, age_step};
+        let mut texts = Vec::new();
+        let mut changes: Vec<(f64, f64)> = Vec::new();
+        let mut count = |a: f64, texts: &mut Vec<String>| {
+            texts.push(age(a));
+            changes.push((age_changes_in(a), age_step(a)));
+        };
+        if let Some(d) = &st.data {
+            for f in d.latest.frames.values() {
+                if f.stale && matches!(f.topic, Topic::Data { .. }) {
+                    count(crate::scenes::freshness(f).age_s(), &mut texts);
+                }
+            }
+        }
+        // A calibration's age in the SPL readout counts in minutes: ten-second steps keep
+        // it within a sixth of its last digit.
+        if st.layout.visible().contains(&PaneKind::Spl) {
+            texts.push(format!(
+                "{}",
+                (st.now_s / SLOW_REFRESH.as_secs_f64()).floor()
+            ));
+        }
+        if let Some(t) = st.mirror.as_ref().and_then(|m| m.last_ka) {
+            let silence = now.saturating_duration_since(t).as_secs_f64();
+            if silence > ac2_scene::time::DAEMON_SILENT_AFTER_S {
+                count(silence, &mut texts);
+            }
+        }
+        // Frames stopped at different moments (a once-a-second Leq frame, say) count their
+        // ages out of step: one pass takes every change due within half a step of the
+        // first, so each text is at most half its last digit late. Just past the last of
+        // them, so the pass that wakes reads the new texts.
+        let (first, step) = changes
+            .iter()
+            .copied()
+            .fold((f64::INFINITY, 0.0), |a, c| if c.0 < a.0 { c } else { a });
+        let last = changes
+            .iter()
+            .map(|c| c.0)
+            .filter(|c| *c <= first + step / 2.0)
+            .fold(first, f64::max);
+        let wait = last
+            .is_finite()
+            .then(|| Duration::from_secs_f64(last) + Duration::from_millis(2));
+        (Self { texts }, wait)
+    }
+}
+
+/// Repaint at least this often while connected, for the coarse clock texts outside the
+/// panes' banners ("saved 3 min ago", a calibration's age).
+const SLOW_REFRESH: Duration = Duration::from_secs(10);
+
+/// Wakes the UI for what the link reports: one pass. egui answers a plain
+/// `request_repaint` with two passes (for responses that land a frame late), which on a
+/// software rasteriser doubles the cost of every data frame; a delayed request is painted
+/// once, and a nanosecond is no delay at all.
+fn link_wake(ctx: egui::Context) -> crate::conn::Wake {
+    Arc::new(move || ctx.request_repaint_after(Duration::from_nanos(1)))
+}
+
 fn dialog_error(d: &mut Option<ConnectDialog>, msg: String) {
     if let Some(d) = d {
         d.error = Some(msg);
@@ -429,6 +617,18 @@ impl eframe::App for App {
             dt_s: dt,
         });
         self.pump_link();
+        // Ages keep counting between the link's snapshots.
+        let now = Instant::now();
+        if let Some(d) = &self.state.data
+            && d.drained < now
+        {
+            self.state.data = Some(Arc::new(d.aged(now)));
+        }
+        let (clock, clock_wait) = ClockTexts::at(&self.state, now);
+        if clock != self.clock {
+            self.clock = clock;
+            self.state_edited();
+        }
         // The dialog owns the keyboard while open (text entry); there is no link to drive.
         if self.connect.is_none() {
             self.input(&ctx);
@@ -454,6 +654,14 @@ impl eframe::App for App {
             self.connect_to(&ctx, choice);
         }
 
+        if let Some(w) = clock_wait {
+            // egui wakes a predicted frame time early; the texts must have changed by then.
+            let early = Duration::from_secs_f32(ctx.input(|i| i.predicted_dt).max(0.0));
+            ctx.request_repaint_after(w + early);
+        }
+        if self.conn.is_some() {
+            ctx.request_repaint_after(SLOW_REFRESH);
+        }
         if self.state.animating() || self.startup.first_frame.is_none() {
             ctx.request_repaint();
         } else if matches!(self.state.overlay, Overlay::Session(_)) {
@@ -473,5 +681,93 @@ impl eframe::App for App {
             let wait = (next - self.state.now_s).max(0.0);
             ctx.request_repaint_after(Duration::from_secs_f64(wait));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{ClipFlags, LevelsMeta, SessionLevelsFrame};
+    use ac2_proto::units::MeasId;
+    use ac2_proto::{Frame, FrameData};
+
+    use super::*;
+
+    fn frame(topic: Topic, seq: u64, peak: f32, stale: bool) -> TopicFrame {
+        let mut stamp = ac2_proto::samples::stamp(None);
+        stamp.seq = seq;
+        TopicFrame {
+            topic,
+            frame: Arc::new(Frame {
+                stamp,
+                data: FrameData::SessionLevels(SessionLevelsFrame {
+                    meta: LevelsMeta { channels: vec![0] },
+                    peak: vec![peak],
+                    rms: vec![-30.0],
+                    clip: vec![ClipFlags::NONE],
+                }),
+            }),
+            received: Instant::now(),
+            since_new: Duration::ZERO,
+            age: Some(0.0),
+            stale,
+        }
+    }
+
+    fn snap(frames: &[TopicFrame]) -> DataSnapshot {
+        DataSnapshot {
+            latest: Latest {
+                frames: frames
+                    .iter()
+                    .map(|f| (f.topic.to_string(), f.clone()))
+                    .collect(),
+                ..Latest::default()
+            },
+            grids: BTreeMap::new(),
+            drained: Instant::now(),
+        }
+    }
+
+    fn data(meas: u32, stream: Stream) -> Topic {
+        Topic::Data {
+            meas: MeasId(meas),
+            stream,
+        }
+    }
+
+    /// Only the panes drawing a changed topic are rebuilt: new content, a STALE flip, a
+    /// topic gone; a new `seq` with the same content, and the input meters, rebuild none.
+    #[test]
+    fn new_frames_touch_the_panes_that_draw_them() {
+        let tf = data(1, Stream::Tf);
+        let spl = data(4, Stream::Spl);
+        let old = snap(&[
+            frame(tf, 1, -10.0, false),
+            frame(spl, 1, -10.0, false),
+            frame(Topic::SessionLevels, 1, -10.0, false),
+        ]);
+        let same = snap(&[
+            frame(tf, 2, -10.0, false),
+            frame(spl, 2, -10.0, false),
+            frame(Topic::SessionLevels, 2, -11.0, false),
+        ]);
+        assert!(data_touches(Some(&old), Some(&same)).is_empty());
+        let tf_new = snap(&[
+            frame(tf, 2, -12.0, false),
+            frame(spl, 1, -10.0, false),
+            frame(Topic::SessionLevels, 1, -10.0, false),
+        ]);
+        assert_eq!(
+            data_touches(Some(&old), Some(&tf_new)),
+            vec![PaneKind::Transfer]
+        );
+        let spl_stale = snap(&[frame(tf, 1, -10.0, false), frame(spl, 1, -10.0, true)]);
+        assert_eq!(
+            data_touches(Some(&old), Some(&spl_stale)),
+            vec![PaneKind::Spl]
+        );
+        assert_eq!(data_touches(None, Some(&old)), PaneKind::ALL.to_vec());
     }
 }

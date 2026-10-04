@@ -928,6 +928,8 @@ pub struct AppState {
     /// The measurement each pane showed when the app last ran, by name, until the daemon's
     /// state is known.
     pending_pane_meas: BTreeMap<PaneKind, String>,
+    /// What the link was last asked to receive, and how often ([`crate::link_wants`]).
+    pub(crate) link_wants: crate::link_wants::Sent,
 }
 
 impl Default for AppState {
@@ -993,6 +995,7 @@ impl AppState {
             leq_alarms_seen: BTreeMap::new(),
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
+            link_wants: crate::link_wants::Sent::default(),
         }
     }
 

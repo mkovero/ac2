@@ -214,6 +214,7 @@ fn main() -> ExitCode {
     let native = eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options: ac2_ui::gpu::wgpu_options(),
         ..Default::default()
     };
     let r = eframe::run_native(

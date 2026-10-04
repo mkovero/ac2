@@ -104,7 +104,7 @@ fn scene_for(
     theme: &Theme,
 ) -> Option<(Arc<ac2_plot::Scene>, Axes)> {
     if let Some(c) = app.scenes.get(&pane)
-        && c.generation == app.generation
+        && c.generation == app.pane_generation(pane)
         && c.size == size
         && c.theme == app.state.theme
     {
@@ -164,7 +164,7 @@ fn scene_for(
     app.scenes.insert(
         pane,
         CachedScene {
-            generation: app.generation,
+            generation: app.pane_generation(pane),
             size,
             theme: app.state.theme,
             scene: scene.clone(),

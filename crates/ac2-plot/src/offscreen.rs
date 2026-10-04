@@ -65,7 +65,9 @@ impl Gpu {
         let forced_fallback = std::env::var(FALLBACK_ENV).is_ok_and(|v| v == "1");
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::from_env().unwrap_or_default(),
+                // The integrated GPU of a two-GPU laptop, as the app's window uses.
+                power_preference: wgpu::PowerPreference::from_env()
+                    .unwrap_or(wgpu::PowerPreference::LowPower),
                 force_fallback_adapter: forced_fallback,
                 compatible_surface: None,
                 ..Default::default()
@@ -75,10 +77,17 @@ impl Gpu {
                 reason: e.to_string(),
                 forced_fallback,
             })?;
+        // GLES (a Raspberry Pi's V3D) grants only the WebGL2-class limits, which the
+        // renderer stays within.
+        let limits = if adapter.get_info().backend == wgpu::Backend::Gl {
+            wgpu::Limits::downlevel_webgl2_defaults()
+        } else {
+            wgpu::Limits::downlevel_defaults()
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("ac2-plot headless"),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_limits: limits,
                 ..Default::default()
             })
             .await

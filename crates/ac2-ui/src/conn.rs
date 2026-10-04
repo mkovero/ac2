@@ -2,13 +2,18 @@
 //! [`Client`], the data subscription and the stimulus lease.
 //!
 //! The UI thread never awaits. It sends [`Request`]s and drains [`ConnEvent`]s once per
-//! frame; the thread wakes the UI (`request_repaint`) whenever it sends something, so the
-//! UI renders on change: a new frame `seq`, a mirror change, a reply — plus a 4 Hz refresh
-//! while live data is shown, so frame ages and STALE keep counting when frames stop.
+//! frame. What supersedes itself (the mirror, the newest frames) waits in a slot holding
+//! only the newest, so a UI that stops drawing (minimised, occluded) never piles up
+//! snapshots; replies and other events queue in order. The thread wakes the UI
+//! (`request_repaint`) only for what changes the picture: new frame content, a stale or
+//! liveness flip, a mirror change beyond a keepalive, a reply. Frames are polled at the
+//! display period while they flow and slower when idle or when the UI is not drawing, so
+//! data never repaints faster than the display period. Ages between pushes are the UI's
+//! to count ([`DataSnapshot::aged`]).
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -21,6 +26,7 @@ use ac2_proto::model::{
     Measurement, Preview, SessionConfig, Smoothing, SplHistory, TraceData, TraceMeta,
     TraceMicCurve,
 };
+use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
 use tokio::sync::mpsc;
@@ -40,6 +46,24 @@ pub struct DataSnapshot {
     pub latest: Latest,
     pub grids: BTreeMap<GridId, Arc<GridDef>>,
     pub drained: Instant,
+}
+
+impl DataSnapshot {
+    /// The same frames with their ages as of `now`: the link pushes a snapshot when frame
+    /// content or a STALE flag changes, and in between the ages shown keep counting.
+    pub fn aged(&self, now: Instant) -> Self {
+        let dt = now.saturating_duration_since(self.drained);
+        let mut latest = self.latest.clone();
+        for f in latest.frames.values_mut() {
+            f.since_new += dt;
+            f.age = f.age.map(|a| a + dt.as_secs_f64());
+        }
+        Self {
+            latest,
+            grids: self.grids.clone(),
+            drained: now.max(self.drained),
+        }
+    }
 }
 
 /// What the link reports.
@@ -195,6 +219,12 @@ pub enum Request {
     /// `spl.history_get` of SPL meter `meas` over the history the strip keeps
     /// ([`ConnEvent::LeqBackfill`]).
     LeqBackfill { meas: MeasId, ask: u64 },
+    /// The measurement streams to receive: what the visible panes draw and what the
+    /// reducer folds (an IR nobody shows is never computed, since the daemon derives it
+    /// only for subscribers). Kept across reconnects.
+    Topics(HashSet<Topic>),
+    /// How often new frames may reach the UI: what the visible panes can show.
+    DisplayPeriod(Duration),
     /// Drop the connection and connect again now.
     Reconnect,
 }
@@ -207,11 +237,51 @@ enum Ctl {
 /// Wakes the UI thread.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
 
+/// What the link has reported and the UI not yet taken.
+#[derive(Default)]
+struct Inbox {
+    /// Ordered events (connection, replies, stimulus): each one matters.
+    events: Vec<ConnEvent>,
+    /// The newest mirror view.
+    mirror: Option<Arc<MirrorView>>,
+    /// The newest frames.
+    data: Option<Arc<DataSnapshot>>,
+    /// `leq` frames a newer snapshot replaced before the UI took them: the Leq history folds
+    /// every second, so these are delivered (in order, before the newest) and never dropped
+    /// while the UI is not drawing. Each holds only `leq` topics.
+    leq: VecDeque<Arc<DataSnapshot>>,
+    /// When the UI was woken without draining since: another wake adds nothing, and one
+    /// long unanswered means the UI is not drawing (minimised, occluded).
+    woken: Option<Instant>,
+}
+
+impl Inbox {
+    /// Everything, in delivery order; the UI is awake again.
+    fn take(&mut self) -> Vec<ConnEvent> {
+        self.woken = None;
+        let mut out = std::mem::take(&mut self.events);
+        out.extend(self.leq.drain(..).map(ConnEvent::Data));
+        out.extend(self.mirror.take().map(ConnEvent::Mirror));
+        out.extend(self.data.take().map(ConnEvent::Data));
+        out
+    }
+}
+
+/// Most `leq` backlog snapshots kept for a UI that is not drawing: the Leq history's span
+/// at one a second, beyond which the history is rebuilt from the meter's log anyway.
+const LEQ_BACKLOG: usize = ac2_scene::leq::HISTORY_S as usize;
+
+type Shared = Arc<Mutex<Inbox>>;
+
+fn lock(s: &Shared) -> std::sync::MutexGuard<'_, Inbox> {
+    s.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Handle to the link thread. Dropping it stops the stimulus (if held) and releases the
 /// lease, waiting at most [`QUIT_GRACE`] for that.
 pub struct Conn {
     tx: mpsc::UnboundedSender<Ctl>,
-    rx: std_mpsc::Receiver<ConnEvent>,
+    inbox: Shared,
     thread: Option<JoinHandle<()>>,
     /// Signalled (or dropped) when the link thread is done.
     done: std_mpsc::Receiver<()>,
@@ -232,17 +302,25 @@ pub const QUIT_GRACE: Duration = Duration::from_secs(1);
 pub const RETRY_EVERY: Duration = Duration::from_secs(2);
 /// Deadline of one connect attempt (`hello` round trip).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-/// Data drain period.
-const POLL_EVERY: Duration = Duration::from_millis(8);
-/// Refresh of ages / STALE while live data is shown and no new frame arrives.
-const AGE_REFRESH: Duration = Duration::from_millis(250);
-/// Re-send of an unchanged mirror view, for the keepalive age.
-const MIRROR_REFRESH: Duration = Duration::from_millis(500);
+/// Display period until the UI says otherwise: 30 frames a second.
+pub const DISPLAY_PERIOD: Duration = Duration::from_millis(33);
+/// Data poll period while no frame content changes or the UI is not drawing: still often
+/// enough to see a STALE flag flip or a measurement start within a quarter second.
+const IDLE_POLL: Duration = Duration::from_millis(250);
+/// A UI that has not drained this long after a wake is not drawing (minimised, occluded):
+/// the link polls at [`IDLE_POLL`] until it drains again.
+const UI_AWAY: Duration = Duration::from_secs(1);
+/// How long after the last new frame the link keeps polling at the display period.
+const ACTIVE_HOLD: Duration = Duration::from_secs(1);
 
 impl Conn {
     pub fn start(target: Target, wake: Wake) -> std::io::Result<Self> {
         let (tx, ctl_rx) = mpsc::unbounded_channel();
-        let (ev_tx, rx) = std_mpsc::channel();
+        let inbox = Shared::default();
+        let out = Out {
+            inbox: inbox.clone(),
+            wake,
+        };
         let (done_tx, done) = std_mpsc::channel();
         let thread = std::thread::Builder::new()
             .name("ac2-ui link".into())
@@ -257,20 +335,19 @@ impl Conn {
                 {
                     Ok(rt) => rt,
                     Err(e) => {
-                        let _ = ev_tx.send(ConnEvent::Failed {
+                        out.send(ConnEvent::Failed {
                             target: target.describe.clone(),
                             error: format!("runtime: {e}"),
                             retry_in: Duration::MAX,
                         });
-                        wake();
                         return;
                     }
                 };
-                rt.block_on(run(target, ctl_rx, Out { tx: ev_tx, wake }));
+                rt.block_on(run(target, ctl_rx, out));
             })?;
         Ok(Self {
             tx,
-            rx,
+            inbox,
             thread: Some(thread),
             done,
         })
@@ -280,9 +357,10 @@ impl Conn {
         let _ = self.tx.send(Ctl::Req(r));
     }
 
-    /// Everything reported since the last call.
+    /// Everything reported since the last call: the ordered events, then the `leq` frames
+    /// that would otherwise be lost, then the newest mirror and the newest frames.
     pub fn drain(&self) -> Vec<ConnEvent> {
-        self.rx.try_iter().collect()
+        lock(&self.inbox).take()
     }
 }
 
@@ -317,15 +395,101 @@ impl Drop for Conn {
 
 #[derive(Clone)]
 struct Out {
-    tx: std_mpsc::Sender<ConnEvent>,
+    inbox: Shared,
     wake: Wake,
 }
 
 impl Out {
-    fn send(&self, e: ConnEvent) {
-        let _ = self.tx.send(e);
-        (self.wake)();
+    fn wake_once(&self, mut i: std::sync::MutexGuard<'_, Inbox>) {
+        if i.woken.is_none() {
+            i.woken = Some(Instant::now());
+            drop(i);
+            (self.wake)();
+        }
     }
+
+    fn send(&self, e: ConnEvent) {
+        let mut i = lock(&self.inbox);
+        if matches!(e, ConnEvent::Connecting { .. } | ConnEvent::Failed { .. }) {
+            // What the previous connection left untaken describes a daemon that is gone.
+            i.mirror = None;
+            i.data = None;
+            i.leq.clear();
+        }
+        i.events.push(e);
+        self.wake_once(i);
+    }
+
+    /// The newest mirror view; the UI is woken only when `wake` (a change it shows).
+    fn mirror(&self, v: Arc<MirrorView>, wake: bool) {
+        let mut i = lock(&self.inbox);
+        i.mirror = Some(v);
+        if wake {
+            self.wake_once(i);
+        }
+    }
+
+    /// The newest frames; the UI is woken only when `wake` (a change it shows). A snapshot
+    /// the UI has not taken keeps its `leq` frames that this one does not carry.
+    fn data(&self, d: Arc<DataSnapshot>, wake: bool) {
+        let mut i = lock(&self.inbox);
+        if let Some(old) = i.data.take()
+            && let Some(lost) = leq_only(&old, &d)
+        {
+            if i.leq.len() >= LEQ_BACKLOG {
+                i.leq.pop_front();
+            }
+            i.leq.push_back(Arc::new(lost));
+        }
+        i.data = Some(d);
+        if wake {
+            self.wake_once(i);
+        }
+    }
+
+    /// Wakes the UI for what it already holds.
+    fn wake(&self) {
+        self.wake_once(lock(&self.inbox));
+    }
+
+    /// The UI has not drained for [`UI_AWAY`] since it was woken: it is not drawing.
+    fn ui_behind(&self) -> bool {
+        lock(&self.inbox)
+            .woken
+            .is_some_and(|t| t.elapsed() >= UI_AWAY)
+    }
+}
+
+/// `old`'s `leq` frames that `new` replaces with a newer one or drops, as a snapshot of
+/// their own; `None` when every one of them is still in `new`.
+fn leq_only(old: &DataSnapshot, new: &DataSnapshot) -> Option<DataSnapshot> {
+    let frames: BTreeMap<String, ac2_client::TopicFrame> = old
+        .latest
+        .frames
+        .iter()
+        .filter(|(k, f)| {
+            matches!(
+                f.topic,
+                Topic::Data {
+                    stream: Stream::Leq,
+                    ..
+                }
+            ) && new
+                .latest
+                .frames
+                .get(*k)
+                .is_none_or(|n| n.frame.stamp.seq != f.frame.stamp.seq)
+        })
+        .map(|(k, f)| (k.clone(), f.clone()))
+        .collect();
+    (!frames.is_empty()).then(|| DataSnapshot {
+        latest: Latest {
+            frames,
+            ..old.latest.clone()
+        },
+        grids: BTreeMap::new(),
+        drained: old.drained,
+    })
 }
 
 enum Next {
@@ -333,9 +497,21 @@ enum Next {
     Exit,
 }
 
+/// What the UI asked to receive; kept across reconnects and applied to each connection.
+#[derive(Debug)]
+struct Wants {
+    /// The input meters (`session/`).
+    meters: bool,
+    topics: HashSet<Topic>,
+    period: Duration,
+}
+
 async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
-    // The input meters stay subscribed across reconnects while a dialog wants them.
-    let mut meters = false;
+    let mut wants = Wants {
+        meters: false,
+        topics: HashSet::new(),
+        period: DISPLAY_PERIOD,
+    };
     loop {
         out.send(ConnEvent::Connecting {
             target: target.describe.clone(),
@@ -346,14 +522,14 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
             Ok(Ok(c)) => c,
             Ok(Err(e)) => {
                 let why = describe_err(&e, &target);
-                if wait_retry(&target, &mut ctl, &out, why, &mut meters).await {
+                if wait_retry(&target, &mut ctl, &out, why, &mut wants).await {
                     continue;
                 }
                 return;
             }
             Err(_) => {
                 let why = not_responding(&target);
-                if wait_retry(&target, &mut ctl, &out, why, &mut meters).await {
+                if wait_retry(&target, &mut ctl, &out, why, &mut wants).await {
                     continue;
                 }
                 return;
@@ -365,7 +541,7 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
             server: w.server,
             client_id: w.client_id,
         });
-        match session(client, &mut ctl, &out, &mut meters).await {
+        match session(client, &mut ctl, &out, &mut wants).await {
             Next::Reconnect => continue,
             Next::Exit => return,
         }
@@ -391,7 +567,7 @@ async fn wait_retry(
     ctl: &mut mpsc::UnboundedReceiver<Ctl>,
     out: &Out,
     error: String,
-    meters: &mut bool,
+    wants: &mut Wants,
 ) -> bool {
     out.send(ConnEvent::Failed {
         target: target.describe.clone(),
@@ -424,7 +600,9 @@ async fn wait_retry(
                     out.send(ConnEvent::LoopbackDetected(Err("not connected".into())));
                 }
                 // Applied on the next connection.
-                Some(Ctl::Req(Request::Meters(on))) => *meters = on,
+                Some(Ctl::Req(Request::Meters(on))) => wants.meters = on,
+                Some(Ctl::Req(Request::Topics(t))) => wants.topics = t,
+                Some(Ctl::Req(Request::DisplayPeriod(p))) => wants.period = p,
                 // Asked again once connected: the history follows the daemon's log.
                 Some(Ctl::Req(Request::LeqBackfill { .. })) => {}
                 Some(Ctl::Req(Request::PreviewStop)) => {}
@@ -464,6 +642,8 @@ fn request_name(r: &Request) -> String {
         Request::DetectLoopback(_) => "detect loopback".into(),
         Request::CreateMeas { config } => format!("new measurement {}", config.name),
         Request::LeqBackfill { .. } => "SPL history".into(),
+        Request::Topics(_) => "subscribe".into(),
+        Request::DisplayPeriod(_) => "display rate".into(),
         Request::Reconnect => "reconnect".into(),
     }
 }
@@ -486,15 +666,11 @@ async fn session(
     client: Client,
     ctl: &mut mpsc::UnboundedReceiver<Ctl>,
     out: &Out,
-    meters: &mut bool,
+    wants: &mut Wants,
 ) -> Next {
-    if let Err(e) = client.subscribe(Subscription::AllData) {
-        out.send(ConnEvent::Reply {
-            what: "subscribe".into(),
-            result: Err(e.to_string()),
-        });
-    }
-    if *meters {
+    let mut subscribed: HashSet<Topic> = HashSet::new();
+    resubscribe(&client, &mut subscribed, &wants.topics, out);
+    if wants.meters {
         let _ = client.subscribe(Subscription::InputMeters);
     }
     let (stim_tx, stim_rx) = mpsc::unbounded_channel();
@@ -502,12 +678,9 @@ async fn session(
     let (preview_tx, preview_rx) = mpsc::unbounded_channel();
     let preview = tokio::spawn(preview_task(client.clone(), preview_rx, out.clone()));
     let mut mirror = client.watch();
-    let mut tick = tokio::time::interval(POLL_EVERY);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut seqs: HashMap<String, u64> = HashMap::new();
-    let mut responding = false;
-    let mut last_push = Instant::now();
-    let mut last_mirror = Instant::now();
+    let mut shown_mirror: Option<Arc<MirrorView>> = None;
+    let mut poll = DataPoll::default();
+    let mut next_poll = tokio::time::Instant::now();
     // Served columns carry the trace's display smoothing and mic curve: a new setting means
     // new data.
     let mut fetched: HashMap<TraceId, (Option<Smoothing>, Option<Box<TraceMicCurve>>)> =
@@ -518,8 +691,8 @@ async fn session(
                 None | Some(Ctl::Shutdown) => break Next::Exit,
                 Some(Ctl::Req(Request::Reconnect)) => break Next::Reconnect,
                 Some(Ctl::Req(Request::Meters(on))) => {
-                    if on != *meters {
-                        *meters = on;
+                    if on != wants.meters {
+                        wants.meters = on;
                         let r = if on {
                             client.subscribe(Subscription::InputMeters)
                         } else {
@@ -530,6 +703,13 @@ async fn session(
                         }
                     }
                 }
+                Some(Ctl::Req(Request::Topics(t))) => {
+                    wants.topics = t;
+                    resubscribe(&client, &mut subscribed, &wants.topics, out);
+                    // A new stream's first frame is worth showing at the display rate.
+                    next_poll = tokio::time::Instant::now();
+                }
+                Some(Ctl::Req(Request::DisplayPeriod(p))) => wants.period = p,
                 Some(Ctl::Req(r @ (Request::Preview { .. } | Request::PreviewStop))) => {
                     let _ = preview_tx.send(r);
                 }
@@ -548,34 +728,19 @@ async fn session(
                         }
                     }
                 }
-                last_mirror = Instant::now();
-                out.send(ConnEvent::Mirror(v));
+                // Keepalives arrive four times a second and change only their own time:
+                // the UI takes those with its next pass, and liveness flips wake it (the
+                // data poll sees `responding` change).
+                let wake = shown_mirror.as_ref().is_none_or(|s| mirror_differs(s, &v));
+                if wake {
+                    shown_mirror = Some(v.clone());
+                }
+                out.mirror(v, wake);
             },
-            _ = tick.tick() => {
-                // Keepalives stopping changes nothing in the mirror; re-send it so the UI
-                // shows "not responding" even when no frames are flowing.
-                if last_mirror.elapsed() >= MIRROR_REFRESH {
-                    last_mirror = Instant::now();
-                    out.send(ConnEvent::Mirror(client.view()));
-                }
-                let Ok(latest) = client.latest() else { continue };
-                let fresh = latest.frames.iter().any(|(k, f)| seqs.get(k) != Some(&f.frame.stamp.seq))
-                    || latest.frames.len() != seqs.len()
-                    || latest.responding != responding;
-                let refresh = !latest.frames.is_empty() && last_push.elapsed() >= AGE_REFRESH;
-                if !(fresh || refresh) {
-                    continue;
-                }
-                seqs = latest.frames.iter().map(|(k, f)| (k.clone(), f.frame.stamp.seq)).collect();
-                responding = latest.responding;
-                let mut grids = BTreeMap::new();
-                for id in latest.grid_ids() {
-                    if let Ok(g) = client.grid(id).await {
-                        grids.insert(id, g);
-                    }
-                }
-                last_push = Instant::now();
-                out.send(ConnEvent::Data(Arc::new(DataSnapshot { latest, grids, drained: last_push })));
+            () = tokio::time::sleep_until(next_poll) => {
+                let active = poll.poll(&client, out).await;
+                let every = if active && !out.ui_behind() { wants.period } else { IDLE_POLL };
+                next_poll = tokio::time::Instant::now() + every;
             },
         }
     };
@@ -586,6 +751,191 @@ async fn session(
     drop(stim_tx);
     let _ = tokio::time::timeout(QUIT_GRACE, stim).await;
     next
+}
+
+/// Subscribes to the topics in `want` not yet in `have` and drops the rest.
+fn resubscribe(client: &Client, have: &mut HashSet<Topic>, want: &HashSet<Topic>, out: &Out) {
+    let gone: Vec<Topic> = have.difference(want).copied().collect();
+    for t in gone {
+        have.remove(&t);
+        if let Err(e) = client.unsubscribe(Subscription::Topic(t)) {
+            tracing_free_note(out, "unsubscribe", &e.to_string());
+        }
+    }
+    for t in want {
+        if !have.contains(t) {
+            match client.subscribe(Subscription::Topic(*t)) {
+                Ok(()) => {
+                    have.insert(*t);
+                }
+                Err(e) => tracing_free_note(out, "subscribe", &e.to_string()),
+            }
+        }
+    }
+}
+
+/// Whether two mirror views differ in anything the UI shows, keepalive time aside. The
+/// daemon's silence is judged from `responding` flips, which wake the UI on their own.
+pub fn mirror_differs(a: &MirrorView, b: &MirrorView) -> bool {
+    let state = match (&a.state, &b.state) {
+        (Some(x), Some(y)) => !Arc::ptr_eq(x, y),
+        (None, None) => false,
+        _ => true,
+    };
+    state
+        || a.phase != b.phase
+        || a.incarnation != b.incarnation
+        || a.session_epoch != b.session_epoch
+        || a.rev != b.rev
+        || a.generator != b.generator
+        || a.timing != b.timing
+        || a.clock_offset_ns.is_some() != b.clock_offset_ns.is_some()
+        || a.snapshots != b.snapshots
+        || a.since_requests != b.since_requests
+        || a.incarnation_changes != b.incarnation_changes
+        || a.client_id != b.client_id
+}
+
+/// Whether two frames of a topic draw the same: equal content, protection, grid and
+/// configuration. A meter in steady silence sends such frames; showing them changes no
+/// pixel.
+pub fn same_picture(a: &ac2_proto::Frame, b: &ac2_proto::Frame) -> bool {
+    a.stamp.protection == b.stamp.protection
+        && a.stamp.grid_id == b.stamp.grid_id
+        && a.stamp.config_rev == b.stamp.config_rev
+        && a.data == b.data
+}
+
+/// Input meters with a moving bar (an input with signal, or a change of state) redraw at
+/// most this often: a bar reads as moving at ten steps a second.
+const METER_PERIOD: Duration = Duration::from_millis(100);
+/// Input meters whose only change is the readout of a silent input (its noise floor)
+/// redraw at most this often: a number that changes faster cannot be read anyway.
+const METER_QUIET_PERIOD: Duration = Duration::from_millis(500);
+
+/// The meter states of an input-levels frame, per channel; `None` for any other frame.
+fn meter_states(f: &ac2_proto::Frame) -> Option<Vec<ac2_scene::meter::MeterState>> {
+    use ac2_proto::FrameData;
+    let (peak, rms, clip) = match &f.data {
+        FrameData::SessionLevels(l) => (&l.peak, &l.rms, &l.clip),
+        FrameData::PreviewLevels(l) => (&l.peak, &l.rms, &l.clip),
+        _ => return None,
+    };
+    Some(
+        peak.iter()
+            .zip(rms)
+            .zip(clip)
+            .map(|((p, r), c)| {
+                ac2_scene::meter::MeterReading::new(*p, *r, *c != ac2_proto::frame::ClipFlags::NONE)
+                    .state
+            })
+            .collect(),
+    )
+}
+
+/// How soon a change from `prev` to `new` on an input-meter topic needs drawing; `None`
+/// for any other topic, which is drawn at once.
+fn meter_period(prev: &ac2_proto::Frame, new: &ac2_proto::Frame) -> Option<Duration> {
+    use ac2_scene::meter::MeterState;
+    let (a, b) = (meter_states(prev)?, meter_states(new)?);
+    let quiet = a == b
+        && b.iter()
+            .all(|s| matches!(s, MeterState::Silent | MeterState::NoData));
+    Some(if quiet {
+        METER_QUIET_PERIOD
+    } else {
+        METER_PERIOD
+    })
+}
+
+/// The data poll: what the UI was last given, per topic.
+#[derive(Default)]
+struct DataPoll {
+    seen: HashMap<String, (u64, bool, Arc<ac2_proto::Frame>)>,
+    responding: bool,
+    /// When a frame with a new `seq` last arrived.
+    last_new: Option<Instant>,
+    /// When the UI was last woken for data.
+    last_wake: Option<Instant>,
+    /// An input-meter change handed over without a wake, and how soon it needs drawing.
+    meter_due: Option<Duration>,
+}
+
+impl DataPoll {
+    /// Drains the client's newest frames and hands them to the UI: waking it when the
+    /// picture changes (new content, a topic coming or going, a STALE or liveness flip;
+    /// input meters at their own rate), quietly when only `seq` and ages moved. `true`
+    /// while frames are flowing.
+    ///
+    /// Polled: the client keeps only the newest frame per topic, so a poll at the display
+    /// period loses nothing the screen could show.
+    async fn poll(&mut self, client: &Client, out: &Out) -> bool {
+        let Ok(latest) = client.latest() else {
+            return false;
+        };
+        let mut new_seq = false;
+        let mut shows =
+            latest.responding != self.responding || latest.frames.len() != self.seen.len();
+        for (k, f) in &latest.frames {
+            match self.seen.get(k) {
+                Some((seq, stale, prev)) => {
+                    shows |= *stale != f.stale;
+                    if *seq == f.frame.stamp.seq {
+                        continue;
+                    }
+                    new_seq = true;
+                    if same_picture(prev, &f.frame) {
+                        continue;
+                    }
+                    match meter_period(prev, &f.frame) {
+                        Some(p) => self.meter_due = Some(self.meter_due.map_or(p, |d| d.min(p))),
+                        None => shows = true,
+                    }
+                }
+                None => {
+                    new_seq = true;
+                    shows = true;
+                }
+            }
+        }
+        let now = Instant::now();
+        if new_seq {
+            self.last_new = Some(now);
+        }
+        let meters = self.meter_due.is_some_and(|due| {
+            self.last_wake
+                .is_none_or(|t| now.saturating_duration_since(t) >= due)
+        });
+        let wake = shows || meters;
+        if wake {
+            self.last_wake = Some(now);
+            self.meter_due = None;
+        }
+        if shows || new_seq {
+            self.seen = latest
+                .frames
+                .iter()
+                .map(|(k, f)| (k.clone(), (f.frame.stamp.seq, f.stale, f.frame.clone())))
+                .collect();
+            self.responding = latest.responding;
+            let mut grids = BTreeMap::new();
+            for id in latest.grid_ids() {
+                if let Ok(g) = client.grid(id).await {
+                    grids.insert(id, g);
+                }
+            }
+            let snapshot = DataSnapshot {
+                latest,
+                grids,
+                drained: Instant::now(),
+            };
+            out.data(Arc::new(snapshot), wake);
+        } else if wake {
+            out.wake();
+        }
+        self.last_new
+            .is_some_and(|t| now.saturating_duration_since(t) < ACTIVE_HOLD)
+    }
 }
 
 fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out: &Out) {
@@ -781,7 +1131,8 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 o.send(ConnEvent::LeqBackfill { meas, ask, result });
             });
         }
-        Request::Reconnect => {}
+        // Applied by the session loop.
+        Request::Topics(_) | Request::DisplayPeriod(_) | Request::Reconnect => {}
     }
 }
 
@@ -914,6 +1265,7 @@ async fn preview_task(client: Client, mut reqs: mpsc::UnboundedReceiver<Request>
 async fn stimulus_task(client: Client, mut ops: mpsc::UnboundedReceiver<StimOp>, out: Out) {
     let mut lease: Option<StimulusLease> = None;
     let mut check = tokio::time::interval(Duration::from_millis(100));
+    check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             op = ops.recv() => {
@@ -954,7 +1306,8 @@ async fn stimulus_task(client: Client, mut ops: mpsc::UnboundedReceiver<StimOp>,
                 };
                 out.send(ConnEvent::Stimulus(ev));
             }
-            _ = check.tick() => {
+            // Only a held lease can be lost.
+            _ = check.tick(), if lease.is_some() => {
                 if let Some(lost) = lease.as_ref().and_then(StimulusLease::lost) {
                     lease = None;
                     let ac2_client::LeaseLost::Refused { msg, .. } = lost;
@@ -1044,5 +1397,153 @@ async fn stop(client: &Client, lease: &mut Option<StimulusLease>) -> StimEvent {
     match r {
         Ok(()) => StimEvent::Stopped,
         Err(e) => StimEvent::Failed(format!("stop: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use ac2_client::TopicFrame;
+    use ac2_proto::frame::{ClipFlags, LevelsMeta, SessionLevelsFrame};
+    use ac2_proto::units::MeasId;
+    use ac2_proto::{Frame, FrameData};
+
+    use super::*;
+
+    fn out() -> (Out, Shared, Arc<AtomicUsize>) {
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let w = wakes.clone();
+        let inbox = Shared::default();
+        let out = Out {
+            inbox: inbox.clone(),
+            wake: Arc::new(move || {
+                w.fetch_add(1, Ordering::SeqCst);
+            }),
+        };
+        (out, inbox, wakes)
+    }
+
+    /// A frame on `topic` with sequence number `seq` (the body is display material only).
+    fn frame(topic: Topic, seq: u64) -> TopicFrame {
+        let mut stamp = ac2_proto::samples::stamp(None);
+        stamp.seq = seq;
+        TopicFrame {
+            topic,
+            frame: Arc::new(Frame {
+                stamp,
+                data: FrameData::SessionLevels(SessionLevelsFrame {
+                    meta: LevelsMeta { channels: vec![0] },
+                    peak: vec![-20.0],
+                    rms: vec![-30.0],
+                    clip: vec![ClipFlags::NONE],
+                }),
+            }),
+            received: Instant::now(),
+            since_new: Duration::ZERO,
+            age: Some(0.5),
+            stale: false,
+        }
+    }
+
+    fn snapshot(frames: &[TopicFrame]) -> Arc<DataSnapshot> {
+        Arc::new(DataSnapshot {
+            latest: Latest {
+                frames: frames
+                    .iter()
+                    .map(|f| (f.topic.to_string(), f.clone()))
+                    .collect(),
+                ..Latest::default()
+            },
+            grids: BTreeMap::new(),
+            drained: Instant::now(),
+        })
+    }
+
+    const LEQ: Topic = Topic::Data {
+        meas: MeasId(4),
+        stream: Stream::Leq,
+    };
+    const TF: Topic = Topic::Data {
+        meas: MeasId(1),
+        stream: Stream::Tf,
+    };
+
+    fn data_of(e: &ConnEvent) -> Option<&DataSnapshot> {
+        match e {
+            ConnEvent::Data(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// A UI that is not drawing holds one snapshot, not a queue of them; the `leq` frames a
+    /// newer snapshot replaced still reach it, in order, before the newest; the UI is woken
+    /// once until it drains.
+    #[test]
+    fn an_undrained_ui_holds_the_newest_frames_and_every_leq_second() {
+        let (out, inbox, wakes) = out();
+        for s in 1..=100 {
+            // The TF every poll, the Leq once in ten.
+            out.data(snapshot(&[frame(TF, s), frame(LEQ, s.div_ceil(10))]), true);
+        }
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        let got = lock(&inbox).take();
+        let leq_seqs: Vec<u64> = got
+            .iter()
+            .filter_map(data_of)
+            .filter_map(|d| d.latest.get(&LEQ).map(|f| f.frame.stamp.seq))
+            .collect();
+        assert_eq!(leq_seqs, (1..=10).collect::<Vec<u64>>());
+        // The backlog carries only `leq` topics; the last one is the whole newest snapshot.
+        let (last, backlog) = got.split_last().expect("events");
+        assert!(
+            backlog
+                .iter()
+                .filter_map(data_of)
+                .all(|d| d.latest.get(&TF).is_none())
+        );
+        assert_eq!(
+            data_of(last)
+                .and_then(|d| d.latest.get(&TF))
+                .map(|f| f.frame.stamp.seq),
+            Some(100)
+        );
+        out.data(snapshot(&[frame(TF, 101)]), true);
+        assert_eq!(wakes.load(Ordering::SeqCst), 2);
+    }
+
+    /// Quiet updates (keepalive time, unchanged frames) wait for the UI's next pass without
+    /// waking it; a new connection discards what the old one left untaken.
+    #[test]
+    fn quiet_updates_do_not_wake_and_reconnects_discard() {
+        let (out, inbox, wakes) = out();
+        out.data(snapshot(&[frame(TF, 1)]), false);
+        assert_eq!(wakes.load(Ordering::SeqCst), 0);
+        assert!(lock(&inbox).data.is_some());
+        out.send(ConnEvent::Connecting { target: "t".into() });
+        assert_eq!(wakes.load(Ordering::SeqCst), 1);
+        let i = lock(&inbox);
+        assert!(i.data.is_none() && i.mirror.is_none() && i.leq.is_empty());
+        assert_eq!(i.events.len(), 1);
+    }
+
+    #[test]
+    fn ages_count_between_snapshots() {
+        let s = snapshot(&[frame(TF, 1)]);
+        let later = s.drained + Duration::from_millis(1500);
+        let a = s.aged(later);
+        let f = a.latest.get(&TF).expect("the TF");
+        assert_eq!(f.since_new, Duration::from_millis(1500));
+        assert!((f.age.expect("an age") - 2.0).abs() < 1e-9);
+        assert_eq!(a.drained, later);
+    }
+
+    #[test]
+    fn same_picture_ignores_seq_and_time_only() {
+        let a = frame(TF, 1);
+        let mut b = frame(TF, 2);
+        assert!(same_picture(&a.frame, &b.frame));
+        Arc::make_mut(&mut b.frame).stamp.protection = ac2_proto::frame::ProtectionFlags::CLIP;
+        assert!(!same_picture(&a.frame, &b.frame));
     }
 }
