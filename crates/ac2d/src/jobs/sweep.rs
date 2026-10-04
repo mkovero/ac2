@@ -130,14 +130,7 @@ mod tests {
                 [n, -n, 0.5]
             })
             .collect();
-        Block {
-            start_sample: start,
-            frames,
-            channels: 3,
-            flags,
-            wall_ns: 0,
-            data: data.into_boxed_slice(),
-        }
+        Block::new(start, frames, 3, flags, 0, data)
     }
 
     #[test]

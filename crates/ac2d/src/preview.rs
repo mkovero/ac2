@@ -131,47 +131,46 @@ impl Preview {
                     sample_rate,
                 );
                 let mut wall = 0;
-                let mut last: Option<Instant> = None;
                 let mut ended = false;
+                // One wakeup per meter frame: the capture ring holds seconds, so nothing is
+                // gained by draining it more often than the meters are published.
+                let mut next = Instant::now();
                 while !s.load(Ordering::Acquire) {
-                    let mut got = 0;
-                    while got < 64 {
-                        let Some(b) = pop_block(&mut stream) else {
-                            break;
-                        };
+                    while let Some(b) = pop_block(&mut stream) {
                         let since =
                             u64::try_from(opened.elapsed().as_millis()).unwrap_or(NEVER - 1);
                         lb.store(since, Ordering::Release);
                         bursts.observe(Instant::now(), b.frames);
                         levels.push(&b);
                         wall = b.wall_ns;
-                        got += 1;
                     }
-                    if last.is_none_or(|t| t.elapsed() >= meter_period()) {
-                        last = Some(Instant::now());
-                        let stamp = meter_stamp(&levels, Rev(0), wall);
-                        if let Some(Meters {
-                            peak, rms, clip, ..
-                        }) = levels.take_meters()
-                            && em.wants(Topic::PreviewLevels)
-                        {
-                            em.send(
-                                stamp,
-                                FrameData::PreviewLevels(PreviewLevelsFrame {
-                                    meta: meta.clone(),
-                                    peak,
-                                    rms,
-                                    clip,
-                                }),
-                            );
-                        }
+                    let stamp = meter_stamp(&levels, Rev(0), wall);
+                    if let Some(Meters {
+                        peak, rms, clip, ..
+                    }) = levels.take_meters()
+                        && em.wants(Topic::PreviewLevels)
+                    {
+                        em.send(
+                            stamp,
+                            FrameData::PreviewLevels(PreviewLevelsFrame {
+                                meta: meta.clone(),
+                                peak,
+                                rms,
+                                clip,
+                            }),
+                        );
                     }
                     if !ended && stream.events().ended {
                         ended = true;
                         ef.store(true, Ordering::Release);
                         tracing::warn!("preview: the host ended the stream");
                     }
-                    std::thread::sleep(Duration::from_millis(5));
+                    next += meter_period();
+                    let now = Instant::now();
+                    if next <= now {
+                        next = now + meter_period();
+                    }
+                    std::thread::sleep(next - now);
                 }
                 let outcome = stream.stop(STOP_TIMEOUT);
                 tracing::info!("preview stopped: {outcome:?}");

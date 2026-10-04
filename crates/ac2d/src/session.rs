@@ -85,6 +85,7 @@ impl Runtime {
         max_level: MaxLevel,
         epoch: SessionEpoch,
         to_control: Sender<ControlMsg>,
+        fps: u32,
     ) -> Result<Self, ProtoError> {
         validate(cfg)?;
         let (gen_handle, port) =
@@ -125,7 +126,7 @@ impl Runtime {
             n.clock,
             epoch.0
         );
-        let fanout = Fanout::spawn(stream, epoch, to_control)
+        let fanout = Fanout::spawn(stream, epoch, to_control, fps)
             .map_err(|e| perr(ErrorCode::Internal, format!("cannot start fan-out: {e}")))?;
         let rt = Self {
             epoch,

@@ -7,8 +7,8 @@
 //! accumulates.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ use ac2_proto::topic::Topic;
 use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
 use ac2_zmq::Context;
 
-use crate::fanout::Block;
+use crate::fanout::{Batch, Block, JobFeed};
 use crate::io::Interest;
 use crate::outbox::Outbox;
 
@@ -192,6 +192,15 @@ pub(crate) enum SmoothingChange {
     Spectrum(Option<ac2_proto::model::SmoothingFraction>),
 }
 
+/// What a job thread receives: captured audio and commands on one channel, so a job sleeps
+/// in one blocking receive until either arrives.
+pub(crate) enum JobMsg {
+    /// Blocks of one hand-off, oldest first.
+    Blocks(Batch),
+    Cmd(JobCmd),
+    Stop,
+}
+
 /// One analysis.
 pub(crate) trait Analysis: Send {
     /// Accumulates one captured block.
@@ -204,8 +213,7 @@ pub(crate) trait Analysis: Send {
 
 /// A running job thread.
 pub(crate) struct JobHandle {
-    cmd: Sender<JobCmd>,
-    stop: Arc<AtomicBool>,
+    tx: Sender<JobMsg>,
     thread: Option<JoinHandle<()>>,
     latest: LatestFrame,
     /// Id of this job at the fan-out.
@@ -214,7 +222,7 @@ pub(crate) struct JobHandle {
 
 impl JobHandle {
     pub(crate) fn send(&self, c: JobCmd) {
-        let _ = self.cmd.send(c);
+        let _ = self.tx.send(JobMsg::Cmd(c));
     }
 
     /// The newest curve frame this job published.
@@ -226,7 +234,7 @@ impl JobHandle {
     }
 
     fn stop_inner(&mut self) {
-        self.stop.store(true, Ordering::Release);
+        let _ = self.tx.send(JobMsg::Stop);
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -239,21 +247,17 @@ impl Drop for JobHandle {
     }
 }
 
-/// Blocks a job may have queued: about 2 s at 48 kHz in 256-frame blocks. More means the
-/// job cannot keep up; it loses blocks and restarts rather than lagging further.
-const JOB_QUEUE: usize = 512;
-
-/// Starts `analysis` on its own thread. Returns the handle and the sender the fan-out feeds.
+/// Starts `analysis` on its own thread. Returns the handle and the feed the fan-out sends
+/// captured audio through.
 pub(crate) fn spawn(
     name: String,
     env: JobEnv,
     fanout_id: u64,
     mut analysis: Box<dyn Analysis>,
-) -> std::io::Result<(JobHandle, SyncSender<Arc<Block>>)> {
-    let (btx, brx) = std::sync::mpsc::sync_channel::<Arc<Block>>(JOB_QUEUE);
-    let (ctx, crx) = std::sync::mpsc::channel::<JobCmd>();
-    let stop = Arc::new(AtomicBool::new(false));
-    let s = Arc::clone(&stop);
+) -> std::io::Result<(JobHandle, JobFeed)> {
+    let (tx, rx) = std::sync::mpsc::channel::<JobMsg>();
+    let queued = Arc::new(AtomicU64::new(0));
+    let q = Arc::clone(&queued);
     let latest: LatestFrame = Arc::new(Mutex::new(None));
     let slot = Arc::clone(&latest);
     let thread = std::thread::Builder::new()
@@ -271,50 +275,72 @@ pub(crate) fn spawn(
                 env,
                 latest: slot,
             };
-            run(&mut *analysis, &brx, &crx, &s, &em);
+            run(&mut *analysis, &rx, &q, &em);
         })?;
     Ok((
         JobHandle {
-            cmd: ctx,
-            stop,
+            tx: tx.clone(),
             thread: Some(thread),
             latest,
             fanout_id,
         },
-        btx,
+        JobFeed { tx, queued },
     ))
 }
 
-fn run(
-    a: &mut dyn Analysis,
-    blocks: &Receiver<Arc<Block>>,
-    cmds: &Receiver<JobCmd>,
-    stop: &AtomicBool,
-    em: &Emitter,
-) {
+/// Messages handled per wakeup before the job looks at its publish schedule again.
+const DRAIN_MAX: usize = 64;
+
+fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emitter) {
     let period = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
+    // Audio arrives once per fan-out hand-off, about one publish period apart give or take
+    // scheduling jitter. A frame may go this much early, so jitter neither costs a separate
+    // wakeup just to publish nor skips a hand-off's worth of results.
+    let slack = period / 4;
     let mut last_emit: Option<Instant> = None;
     let mut dirty = false;
-    while !stop.load(Ordering::Acquire) {
-        match blocks.recv_timeout(period.min(Duration::from_millis(20))) {
-            Ok(b) => {
-                a.push(&b);
-                dirty = true;
-                for _ in 0..JOB_QUEUE {
-                    match blocks.try_recv() {
-                        Ok(b) => a.push(&b),
-                        Err(_) => break,
-                    }
-                }
+    loop {
+        // Nothing to publish: sleep until audio or a command arrives. Something pending
+        // but published too recently: sleep no longer than until it is due.
+        let first = if dirty {
+            let due = last_emit.map_or_else(Instant::now, |t| t + period - slack);
+            match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
+                Ok(m) => Some(m),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return,
             }
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
-        }
-        while let Ok(c) = cmds.try_recv() {
-            a.command(c);
+        } else {
+            match rx.recv() {
+                Ok(m) => Some(m),
+                Err(_) => return,
+            }
+        };
+        let mut next = first;
+        let mut handled = 0;
+        while let Some(m) = next.take() {
+            match m {
+                JobMsg::Blocks(batch) => {
+                    let mut frames = 0u64;
+                    for b in batch.iter() {
+                        a.push(b);
+                        frames += u64::from(b.frames);
+                    }
+                    queued.fetch_sub(frames, Ordering::AcqRel);
+                }
+                JobMsg::Cmd(c) => a.command(c),
+                JobMsg::Stop => return,
+            }
             dirty = true;
+            handled += 1;
+            if handled < DRAIN_MAX {
+                next = match rx.try_recv() {
+                    Ok(m) => Some(m),
+                    Err(TryRecvError::Empty) => None,
+                    Err(TryRecvError::Disconnected) => return,
+                };
+            }
         }
-        if dirty && last_emit.is_none_or(|t| t.elapsed() >= period) {
+        if dirty && last_emit.is_none_or(|t| t.elapsed() + slack >= period) {
             a.emit(em);
             last_emit = Some(Instant::now());
             dirty = false;
@@ -376,18 +402,13 @@ impl LevelsMeter {
     }
 
     pub(crate) fn push(&mut self, b: &Block) {
-        let n = usize::from(b.channels).max(1);
         let frames = f64::from(b.frames.max(1));
         let alpha = 1.0 - (-frames / (METER_RMS_TAU_S * self.sample_rate)).exp();
         for (m, &ch) in self.idx.iter().enumerate() {
-            let mut p = self.peak[m];
-            let mut s = 0.0f64;
-            for v in b.data.iter().skip(ch).step_by(n) {
-                p = p.max(v.abs());
-                s += f64::from(*v) * f64::from(*v);
-            }
+            let st = b.stats.get(ch).copied().unwrap_or_default();
+            let p = self.peak[m].max(st.peak);
             self.peak[m] = p;
-            let block_ms = s / frames;
+            let block_ms = st.sum_sq / frames;
             self.ms[m] = Some(match self.ms[m] {
                 Some(prev) => prev + alpha * (block_ms - prev),
                 None => block_ms,
@@ -484,14 +505,7 @@ mod levels_tests {
                 amp * (2.0 * std::f64::consts::PI * 997.0 * t).sin() as f32
             })
             .collect();
-        Block {
-            start_sample: start,
-            frames,
-            channels: 1,
-            flags: BlockFlags::NONE,
-            wall_ns: 0,
-            data: data.into_boxed_slice(),
-        }
+        Block::new(start, frames, 1, BlockFlags::NONE, 0, data)
     }
 
     /// A steady −20 dBFS sine reads −20 dBFS RMS, and short frame intervals don't change the

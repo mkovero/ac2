@@ -119,3 +119,54 @@ fn late_subscriber_gets_latest_slot() {
     }
     h.shutdown();
 }
+
+/// Captured audio is handed on in batches, not per device period: meters and measurements
+/// must still publish at their rates (30 Hz session meters, the 60 Hz local publish rate),
+/// and every frame of a topic must cover newer audio than the one before.
+#[test]
+fn batched_hand_off_keeps_publish_rates() {
+    init_log();
+    let backend = realtime_rig();
+    let h = Daemon::start(config(backend, inproc("rates"))).unwrap();
+    let (mut c, sub) = connect(&h, &[b"session/levels", b"d/1/spl"]);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    c.ok(Command::MeasCreate {
+        config: spl("meter", 0),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    // Settle: the first frames of each topic arrive.
+    sub.frame(T, |f| matches!(f.data, FrameData::Spl(_)))
+        .expect("spl frames");
+    sub.frame(T, |f| matches!(f.data, FrameData::SessionLevels(_)))
+        .expect("session meter frames");
+    let window = Duration::from_secs(3);
+    let t0 = Instant::now();
+    let (mut levels, mut spl) = (0u32, 0u32);
+    let (mut last_levels, mut last_spl) = (0u64, 0u64);
+    while t0.elapsed() < window {
+        let Some(DataMessage::Frame(f)) = sub.next(T) else {
+            continue;
+        };
+        let at = f.stamp.audio_sample.0;
+        match f.data {
+            FrameData::SessionLevels(_) => {
+                assert!(at > last_levels, "session meters went back in time");
+                last_levels = at;
+                levels += 1;
+            }
+            FrameData::Spl(_) => {
+                assert!(at > last_spl, "spl went back in time");
+                last_spl = at;
+                spl += 1;
+            }
+            _ => {}
+        }
+    }
+    let secs = t0.elapsed().as_secs_f64();
+    let (lr, sr) = (f64::from(levels) / secs, f64::from(spl) / secs);
+    assert!((25.0..=33.0).contains(&lr), "session meters at {lr:.1} Hz");
+    assert!((45.0..=63.0).contains(&sr), "spl at {sr:.1} Hz");
+    h.shutdown();
+}

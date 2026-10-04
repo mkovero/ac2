@@ -14,8 +14,10 @@
 //!                 │ lease, session, job lifecycle     │
 //!                 └───────┬───────────────────────────┘
 //!                         │ open / close
-//!  audio callback ──► capture ring ──► ac2d-fanout ──► bounded channel ──► ac2d-meas-N ──► PUSH
-//!  (no allocation)                     (Arc<Block>)                        ac2d-timing
+//!  audio callback ──► capture ring ──► ac2d-fanout ──► channel per job ──► ac2d-meas-N ──► PUSH
+//!  (no allocation)                     one Arc<Batch>                      ac2d-timing
+//!                                      per hand-off,
+//!                                      session meters ──────────────────────────────────► PUSH
 //! ```
 //!
 //! Only the I/O thread touches client-facing sockets, and it never blocks on anything but

@@ -64,6 +64,11 @@ struct Slot {
 /// Most messages taken from one socket per poll round, so no source starves the others.
 const BATCH: usize = 256;
 
+/// Longest poll in network mode, so a dead ZAP handler is noticed within it.
+const ZAP_CHECK: Duration = Duration::from_millis(100);
+/// Longest poll in local mode with nothing held back: every input wakes the poll anyway.
+const IDLE_POLL: Duration = Duration::from_secs(1);
+
 /// Per-peer send queue of the data socket, set once before it binds: three frames per topic
 /// for a full desk (about 40 topics). It is never changed on the live socket: libzmq applies
 /// a new SNDHWM to existing pipes by sending commands to their peers, and such a command
@@ -91,6 +96,11 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
     } = s;
     let mut net: Option<(Socket, Socket)> = Some((router, xpub));
     let period = Duration::from_secs_f64(1.0 / f64::from(fps.max(1)));
+    // Shortest interval between two frames of one topic. Jobs publish once per capture
+    // hand-off, about one period apart but with scheduling jitter either way; holding a
+    // frame back for the fraction of a millisecond it came early would cost a wakeup of
+    // its own for nothing a reader could see.
+    let min_gap = period - period / 4;
     let mut slots: HashMap<Vec<u8>, Slot> = HashMap::new();
     loop {
         if let Some(sc) = &secure
@@ -102,16 +112,24 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             let _ = to_control.send(ControlMsg::Fatal(e.to_string()));
         }
         let now = Instant::now();
+        // With nothing held back the thread only needs to wake for socket traffic; in
+        // network mode it still looks at the ZAP handler regularly, since a CURVE server
+        // whose handler died must close promptly.
+        let idle = if secure.is_some() {
+            ZAP_CHECK
+        } else {
+            IDLE_POLL
+        };
         let timeout = slots
             .values()
             .filter(|s| s.dirty)
             .filter_map(|s| {
                 s.last_sent
-                    .map(|t| (t + period).saturating_duration_since(now))
+                    .map(|t| (t + min_gap).saturating_duration_since(now))
             })
             .min()
-            .unwrap_or(Duration::from_millis(100))
-            .min(Duration::from_millis(100));
+            .unwrap_or(idle)
+            .min(idle);
 
         let (r_ready, x_ready, p_ready) = {
             let mut items: Vec<PollItem<'_>> = Vec::with_capacity(3);
@@ -215,19 +233,23 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         if frames.len() < 2 {
                             continue;
                         }
-                        let topic = frames[0].clone();
                         let now = Instant::now();
-                        let slot = slots.entry(topic).or_insert(Slot {
-                            parts: Vec::new(),
-                            dirty: false,
-                            last_sent: None,
-                        });
+                        // Topics repeat every frame; the key is allocated only the first
+                        // time a topic is seen.
+                        let slot = match slots.get_mut(&frames[0]) {
+                            Some(slot) => slot,
+                            None => slots.entry(frames[0].clone()).or_insert(Slot {
+                                parts: Vec::new(),
+                                dirty: false,
+                                last_sent: None,
+                            }),
+                        };
                         slot.parts = frames;
                         slot.dirty = true;
                         if let Some((_, xpub)) = &net
                             && slot
                                 .last_sent
-                                .is_none_or(|t| now.duration_since(t) >= period)
+                                .is_none_or(|t| now.duration_since(t) >= min_gap)
                         {
                             send_data(xpub, &slot.parts);
                             slot.dirty = false;
@@ -251,7 +273,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                 if slot.dirty
                     && slot
                         .last_sent
-                        .is_none_or(|t| now.duration_since(t) >= period)
+                        .is_none_or(|t| now.duration_since(t) >= min_gap)
                 {
                     send_data(xpub, &slot.parts);
                     slot.dirty = false;

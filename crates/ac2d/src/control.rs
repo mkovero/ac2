@@ -29,6 +29,7 @@ use ac2_proto::model::{
     SessionConfig, SweepFailure, SweepInputs, SweepRequest, SweepRun, SweepStatus, TimingStatus,
     TraceKind, TraceMeta, TraceSource,
 };
+use ac2_proto::topic::Topic;
 use ac2_proto::units::{
     ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, SampleIndex, Samples,
     Seconds, SessionEpoch, SweepId, WallNs,
@@ -207,8 +208,6 @@ pub(crate) struct Control {
     session: Option<Runtime>,
     jobs: BTreeMap<MeasId, JobHandle>,
     timing_job: Option<JobHandle>,
-    /// Session input meters (`session/levels`).
-    meter_job: Option<JobHandle>,
     /// Capture-only meters of a device before a session opens on it.
     preview: Option<Preview>,
     /// The loopback detection running, by token.
@@ -459,7 +458,6 @@ impl Control {
             session: None,
             jobs: BTreeMap::new(),
             timing_job: None,
-            meter_job: None,
             preview: None,
             detecting: None,
             next_fanout_id: 1,
@@ -621,6 +619,11 @@ impl Control {
     }
 
     fn send_ka(&mut self) {
+        // Keepalives tell subscribers the daemon is alive; with nobody subscribed there is
+        // no one to tell, and skipping them spares the I/O thread a wakeup each.
+        if !self.s.interest.wants(&Topic::Ka.to_bytes()) {
+            return;
+        }
         self.ka_seq += 1;
         let st = self.store.state();
         let now = wall_ns();
@@ -1176,6 +1179,7 @@ impl Control {
             self.s.max_level,
             epoch,
             self.s.to_self.clone(),
+            self.s.fps,
         ) {
             Ok(rt) => rt,
             Err(e) => {
@@ -1228,7 +1232,7 @@ impl Control {
             }
         }
         self.start_timing_job();
-        self.start_meter_job();
+        self.start_session_levels();
     }
 
     fn session_close(&mut self, client: &ClientId) {
@@ -1284,6 +1288,7 @@ impl Control {
             self.s.max_level,
             epoch,
             self.s.to_self.clone(),
+            self.s.fps,
         ) {
             Ok(rt) => {
                 let s = Session {
@@ -1670,10 +1675,7 @@ impl Control {
         for id in ids {
             self.stop_job(id);
         }
-        for h in [self.timing_job.take(), self.meter_job.take()]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(h) = self.timing_job.take() {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);
             }
@@ -1681,21 +1683,13 @@ impl Control {
         }
     }
 
-    /// Starts the session input meters.
-    fn start_meter_job(&mut self) {
+    /// Starts the session input meters; the fan-out publishes them, they stop with it.
+    fn start_session_levels(&self) {
         let Some(rt) = self.session.as_ref() else {
             return;
         };
-        let a = jobs::meters::SessionMeters::new(&rt.input_map, rt.sample_rate, self.store.rev());
-        let fid = self.next_fanout_id;
-        self.next_fanout_id += 1;
-        match jobs::spawn("ac2d-meters".into(), self.job_env(rt), fid, Box::new(a)) {
-            Ok((h, tx)) => {
-                rt.fanout.attach(fid, tx);
-                self.meter_job = Some(h);
-            }
-            Err(e) => tracing::error!("cannot start the session meters: {e}"),
-        }
+        rt.fanout
+            .start_levels(self.job_env(rt), rt.input_map.clone(), self.store.rev());
     }
 
     fn start_timing_job(&mut self) {
