@@ -73,12 +73,12 @@ across app restarts, meter restarts and daemon restarts (the log is in the autos
 time the daemon was down counts as gap. A log at its 48 h retention is **trimmed**: the
 clock and the total then cover the 48 h kept, and the caption says "last 48 h".
 
-The caption: `running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12` — the clock always
+The caption: `running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s` — the clock always
 in hours (it is never a time of day), the start in local time (with the date when not the
 newest second's day), LAeq always and LCeq / LZeq when a window uses that weighting, gaps
 only when there are some (≥ 1 s). Large (4 % of the pane's height, up to twice the caption
 type) between the meter and the calibration so it reads from a distance in the stage view;
-narrower panes get `2:14:05 since 19:02 · total 97.8 · gaps 0:12`, then `2:14:05 · total
+narrower panes get `2:14:05 since 19:02 · total 97.8 · offline 12 s`, then `2:14:05 · total
 97.8`, and when even that does not fit beside the meter it moves to a row of its own,
 shortened down to the clock. Tested at 320–1920 px in columns and tiles: no overlap.
 

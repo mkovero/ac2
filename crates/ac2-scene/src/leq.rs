@@ -125,7 +125,7 @@ pub struct LeqTile {
     pub recover: Option<String>,
     /// `so far · 12:30 / 30:00` while the window fills: the value is the Leq so far.
     pub filling: Option<String>,
-    /// `gaps: 28:10 of 30:00 measured`.
+    /// `offline for 1 min 50 s`: time in the window with no audio (not counted as silence).
     pub incomplete: Option<String>,
     /// The figures the columns draw: the window's weighting and length (s), the Leq as
     /// shown (rounded to 0.1 dB, NaN before anything was measured), its limit when judged,
@@ -269,11 +269,12 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 recover,
                 filling: filling
                     .then(|| format!("so far · {} / {}", clock(elapsed), clock(duration))),
+                // Seconds inside the window with no audio at all (daemon down, device lost):
+                // not counted as silence, so the operator is told how long it was.
                 incomplete: flags.contains(LeqFlags::INCOMPLETE).then(|| {
                     format!(
-                        "gaps: {} of {} measured",
-                        clock(measured),
-                        clock(elapsed.min(duration))
+                        "offline for {}",
+                        length((elapsed.min(duration) - measured).max(1.0).round())
                     )
                 }),
                 weighting: w.weighting,

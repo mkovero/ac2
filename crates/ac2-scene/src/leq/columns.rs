@@ -289,7 +289,7 @@ fn progress_line(t: &LeqTile) -> Vec<String> {
             f,
             short,
         ],
-        (None, Some(i)) => vec![i.clone(), "gaps".to_string()],
+        (None, Some(i)) => vec![i.clone(), "offline".to_string()],
         (None, None) => vec![],
     }
 }

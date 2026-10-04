@@ -148,7 +148,7 @@ fn tile_strings() {
     assert_eq!(t[3].recover.as_deref(), Some("cooling down"));
     assert_eq!(
         t[3].incomplete.as_deref(),
-        Some("gaps: 58:00 of 1:00:00 measured")
+        Some("offline for 2 min")
     );
 }
 
@@ -257,7 +257,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         "limit 99.0 dB · until full: stay ≤ 100.0 dB",
         "so far · 12:30 / 30:00",
         "now",
-        "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12",
+        "2:14:05 since 19:02 · total 97.8 · offline 12 s",
     ] {
         assert!(all.contains(&want), "{want} in {all:?}");
     }
@@ -999,9 +999,9 @@ fn caption_run_fits_every_width() {
                 }
                 if w >= 1920.0 {
                     let want = if mixed {
-                        "running 2:14:05 since 19:02 · LAeq total 97.8 · LCeq total 110.2 · gaps 0:12"
+                        "running 2:14:05 since 19:02 · LAeq total 97.8 · LCeq total 110.2 · offline 12 s"
                     } else {
-                        "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12"
+                        "running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s"
                     };
                     assert_eq!(run, want, "{at}");
                 }
@@ -1052,13 +1052,13 @@ fn run_wordings() {
     let r = run_text(&run(), &c, |_| UTC_PLUS_2);
     assert_eq!(r.clock, "2:14:05");
     assert_eq!(r.since, "19:02");
-    assert_eq!(r.gaps.as_deref(), Some("0:12"));
+    assert_eq!(r.gaps.as_deref(), Some("12 s"));
     assert_eq!(
         r.variants(),
         [
-            "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12",
-            "2:14:05 since 19:02 · total 97.8 · gaps 0:12",
-            "2:14:05 · total 97.8 · gaps 0:12",
+            "running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s",
+            "2:14:05 since 19:02 · total 97.8 · offline 12 s",
+            "2:14:05 · total 97.8 · offline 12 s",
             "2:14:05 · total 97.8",
             "2:14:05",
         ]
@@ -1105,7 +1105,7 @@ fn run_wordings() {
     let v = r.variants();
     assert_eq!(
         v[0],
-        "last 48 h: 48:00:30 since 3 Oct 19:02 · LAeq total 97.8 · gaps 0:30"
+        "last 48 h: 48:00:30 since 3 Oct 19:02 · LAeq total 97.8 · offline 30 s"
     );
     assert_eq!(v[v.len() - 1], "last 48 h");
     // Nothing measured: no value.
@@ -1122,7 +1122,7 @@ fn new_log_confirmation_names_what_ends() {
     assert_eq!(k.title, "Start a new SPL log for FOH SPL?");
     assert_eq!(
         k.lines[0],
-        "The current log ends: running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12."
+        "The current log ends: running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s."
     );
     assert!(
         k.lines[1].contains(

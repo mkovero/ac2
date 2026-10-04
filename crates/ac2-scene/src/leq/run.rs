@@ -6,7 +6,7 @@ use ac2_proto::frame::LeqRun;
 use ac2_proto::model::{LeqConfig, Weighting};
 use ac2_proto::units::WallNs;
 
-use super::{clock, w_letter};
+use super::{length, w_letter};
 use crate::format;
 
 /// Hours a full log holds (`SplLogPage::RETAINED_ROWS`).
@@ -86,7 +86,7 @@ pub fn run_text(run: &LeqRun, cfg: &LeqConfig, offset_s: impl Fn(WallNs) -> i32)
         since,
         totals,
         plain_total: !used(Weighting::C) && !used(Weighting::Z),
-        gaps: (gaps >= 1.0).then(|| clock(gaps)),
+        gaps: (gaps >= 1.0).then(|| length(gaps.round())),
         trimmed: run.trimmed,
     }
 }
@@ -119,7 +119,7 @@ impl LeqRunText {
 
     fn with_gaps(&self, s: String) -> String {
         match &self.gaps {
-            Some(g) => format!("{s} · gaps {g}"),
+            Some(g) => format!("{s} · offline {g}"),
             None => s,
         }
     }

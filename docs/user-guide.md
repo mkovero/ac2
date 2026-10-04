@@ -737,12 +737,13 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   within the minute, **"cooling down in 7 min 30 s"**: the time until the window is back
   under its limit if the level stays at the limit (narrow columns: "cooling 7:30"); while
   the window fills, how much of it there is;
-  and "gaps" when part of it was not
-  measured (the meter stopped, the capture lost samples). Missing audio isn't counted as
-  silence: a gap neither lowers a window's Leq nor spends or earns budget.
+  and **"offline for 1 min 20 s"** when part of it has no audio at all (the meter stopped,
+  the daemon was down, the capture lost samples). Missing audio isn't counted as silence:
+  the window's Leq is the average of what was measured, and offline time neither lowers it
+  nor spends or earns budget. The note goes away once that time has slid out of the window.
   Narrow columns use the shorter wordings, or leave a line out.
 - The caption above the windows says how long the meter has been logging and the level of
-  the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12`** — the
+  the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s`** — the
   time since the log's first second (it keeps counting when the app or the daemon is
   restarted: the log comes back with the autosave), its start in local time, the energy
   average over everything measured (LCeq and LZeq too when a window uses them; dB SPL when
