@@ -31,6 +31,10 @@ const NEAR_TINT: f32 = 0.18;
 /// A filling window's bar, part of the way from the track to its colour: still a level,
 /// visibly not a whole window yet.
 const FILLING_STRENGTH: f32 = 0.45;
+/// Size of the unit beside a column's value, as a fraction of the value's size.
+const UNIT_RATIO: f32 = 0.3;
+/// Gap between a column's value and its unit, as a fraction of the value's size.
+const UNIT_GAP: f32 = 0.08;
 
 /// The bar scale of the columns.
 ///
@@ -345,7 +349,15 @@ pub(super) fn draw_columns(
         .max()
         .unwrap_or(0)
         .max(5) as f32;
-    let big = (inner / (0.62 * chars)).min(h * 0.16).max(4.0);
+    // The value carries its unit and weighting on its baseline, small and dim (`dB(A)`), so
+    // the value's size leaves room for the widest unit.
+    let unit_w1 = sorted
+        .iter()
+        .map(|t| canvas::text_width(&t.weighted_unit, UNIT_RATIO))
+        .fold(0.0, f32::max);
+    let big = (inner / (0.62 * chars + UNIT_GAP + unit_w1))
+        .min(h * 0.16)
+        .max(4.0);
     let small = small.min(big * 0.6);
     let name_size0 = (h * 0.05).clamp(11.0, 32.0);
     let levels = name_levels(&sorted);
@@ -381,14 +393,11 @@ pub(super) fn draw_columns(
     let progress_size = small * 0.8;
     let mut with_progress = progress_size >= 7.5 && progress.iter().any(|p| !p.is_empty());
     let line_h = small * 1.3;
-    // The window's own unit and weighting (`dB(A)`) sits right under its value: never
-    // dropped, so a column can't be read in the weighting of an SPL meter shown beside it.
-    let unit_h = line_h;
     let top_of_track = |rows: &[bool; 3]| {
         cols_area.y
             + pad
             + big * 1.25
-            + unit_h
+            + 0.5
             + rows.iter().filter(|r| **r).count() as f32 * line_h
             + pad
     };
@@ -503,19 +512,35 @@ pub(super) fn draw_columns(
             theme.text
         };
         let cx = r.x + r.w / 2.0;
+        // The value and its unit on one baseline, centred together; the unit never drops,
+        // so a column can't be read in the weighting of an SPL meter shown beside it.
+        let unit_size = big * UNIT_RATIO;
+        let value_w = canvas::text_width(&t.value, big);
+        let unit_w = canvas::text_width(&t.weighted_unit, unit_size);
+        let gap_w = big * UNIT_GAP;
+        let x0 = cx - (value_w + gap_w + unit_w) / 2.0 + value_w;
+        let base = r.y + pad + 0.95 * big;
+        for (text, x, h, size, color) in [
+            (t.value.clone(), x0, HAlign::Right, big, fg),
+            (
+                t.weighted_unit.clone(),
+                x0 + gap_w,
+                HAlign::Left,
+                unit_size,
+                if alarm { fg } else { theme.text_dim },
+            ),
+        ] {
+            let mut l = label(text, [x, base], anchor(h, VAlign::Baseline), size, color);
+            l.clip = Some(r);
+            c.overlay.labels.push(l);
+        }
         let mut push = |text: String, y: f32, v: VAlign, size: f32| {
             let mut l = label(text, [cx, y], anchor(HAlign::Center, v), size, fg);
             l.clip = Some(r);
             c.overlay.labels.push(l);
         };
-        push(t.value.clone(), r.y + pad, VAlign::Top, big);
-        push(
-            t.weighted_unit.clone(),
-            r.y + pad + big * 1.25,
-            VAlign::Top,
-            small,
-        );
-        let mut y = r.y + pad + big * 1.25 + unit_h;
+        // Half a pixel clear of the value's box (its baseline position rounds).
+        let mut y = r.y + pad + big * 1.25 + 0.5;
         for (row, cands) in lines[k].iter().enumerate() {
             if !rows[row] {
                 continue;
