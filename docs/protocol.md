@@ -27,7 +27,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 11`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 12`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -204,13 +204,22 @@ A window of N seconds covers the newest N seconds of time, measured or not; its 
 the measured time in it (never extrapolated; `elapsed` < N while it fills after the log's
 first second, `measured` < `elapsed` flags it incomplete). Windows rebuild from the log by
 wall time when the meter's job restarts. A limit is judged only while the meter reads dB SPL
-(a sensitivity calibration applies), at 0.1 dB resolution: over when the rounded Leq is
-above the limit, near when within `warn_margin` below it or at it. Headroom: with `K = N −
-horizon` newest seconds staying in the window, energy `E_K`, measured time `M_K` and the
-limit as a mean square `P`, the steady level allowed for the horizon is `(P·(M_K + h) −
-E_K) / h` (`h` = horizon; the limit itself when `K ≤ 0`), floored to 0.1 dB by clients;
-when it is ≤ 0 the window cannot recover within the horizon and `recover` gives the time
-to recover playing at the limit.
+(a sensitivity calibration applies), at 0.1 dB resolution. A full window (`elapsed` = N) is
+over when the rounded Leq is above the limit, near when within `warn_margin` below it or at
+it. A filling window is judged on its budget, the limit as a mean square `P` times its
+measured time `M` plus the `r = N − elapsed` seconds left (`docs/design/leq.md`, *Judging a
+filling window*): `least` = `10·lg(E / (M + r))` is the Leq it ends at if the rest is
+silent, and it is over only when the rounded `least` is above the limit (the energy `E` has
+spent the budget: a certainty); else, with the Leq so far above the limit it is near and
+`ON_COURSE` (at the same mean power the full window ends over it; `over_in` = `(P·(M + r) −
+E) / (E / M)` s until the budget is spent), within the margin near, else ok. Once full
+`least` is the Leq and the two rules agree. Headroom: a window filling for at least the
+horizon (`r ≥ h`, `h` = horizon) allows the steady level that, held until it is full, spends
+its budget exactly: `(P·(M + r) − E) / r`. Otherwise, with `K = N − horizon` newest seconds
+staying in the window, energy `E_K` and measured time `M_K`, the steady level allowed for
+the horizon is `(P·(M_K + h) − E_K) / h` (the limit itself when `K ≤ 0`). Clients floor it
+to 0.1 dB; when it is ≤ 0 the window cannot recover within the horizon and `recover` gives
+the time to recover playing at the limit.
 
 The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
 `LeqWindowState` {`duration`, `weighting`, `judgement`, `since`}; `LeqJudgement`: `no_limit`
@@ -685,7 +694,7 @@ bitmask array says why.
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set), `validity`: bitmask | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
-| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log) |
+| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log) |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
@@ -717,7 +726,7 @@ the measurement has signal: the inputs look mis-patched).
 
 `leq_flags`: `LIMIT` 1 (the window has a limit), `JUDGED` 2 (and it is judged: dB SPL),
 `NEAR` 4, `OVER` 8, `CANNOT_RECOVER` 16, `INCOMPLETE` 32 (part of the window not
-measured). The judgement is `no_limit` without `LIMIT`, `not_calibrated` with `LIMIT` but
+measured), `ON_COURSE` 64 (filling, with `NEAR`: the Leq so far above the limit). The judgement is `no_limit` without `LIMIT`, `not_calibrated` with `LIMIT` but
 not `JUDGED`, else `over`, `near` or `ok`.
 
 ### 5.6 Bounds (checked before decoding)

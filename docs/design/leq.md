@@ -9,7 +9,8 @@ log half of "Continuous crash-safe logging, export".
 Each SPL meter carries a list of rolling windows — by default LAeq over 1, 5, 10, 30 and
 60 min, no limits. A window may have a limit (dB SPL) and a warn margin (default 3 dB).
 Every second the daemon publishes, per window: the Leq, how much of the window has elapsed
-and how much of it was measured, its state (ok / near / over), and the **headroom**: the
+and how much of it was measured, its state (ok / near / over; a window still filling is
+judged on its energy budget, *Judging a filling window*), and the **headroom**: the
 highest steady level for the next minute that keeps the window at or below its limit. The
 app shows each window amber when near, red when over, back to normal when it recovers — as
 columns filling like meter bars or as tiles, with an optional history strip;
@@ -101,11 +102,70 @@ or input counts, and the tile says so; an electrical calibration counts too, and
 names it with its uncertainty, `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB`,
 `q7-calibration.md` §11). Uncalibrated meters show dBFS values, "not
 calibrated", and no state. With limit `L` and margin `μ`, at the displayed 0.1 dB
-resolution (so the colour never disagrees with the number):
+resolution (so the colour never disagrees with the number), a full window is
 
     over  ⇔ round₁(Leq) > L        near ⇔ L − μ < round₁(Leq) ≤ L        else ok
 
-**Headroom** over a horizon of h seconds (default 60): after h more seconds the window holds
+and a window still filling is judged on its budget (next section).
+
+## Judging a filling window
+
+A limit applies to a full window: every rule in *Presets* defines it over N minutes ("à
+aucun moment … sur 15 minutes", "gemeten over 15 minuten"; Brussels' 1 s sliding windows),
+and none says how to judge the first N minutes of a measurement, when the window holds less
+than N minutes. Judged like a full one, the Leq over the elapsed time puts every window
+over its limit at once: a new log at 70 dB with 60 dB limits on 1 to 60 min windows turns
+all of them red in the first second, though the 60 min window has an hour to go and could
+still end under its limit. ac2 judges a filling window on what it can still do:
+
+    budget  B = P · (M + r)        r = N − elapsed (seconds left to fill),  P = 10^(L/10)
+    least   = 10·lg(E / (M + r))   the Leq the window ends at if the rest is silent
+
+with `E` and `M` the energy and measured time so far. `B` is the energy a window may hold
+and still end at the limit; `least` reaches the limit exactly when `E` reaches `B`.
+
+    over       ⇔ round₁(least) > L                 (E has spent the budget: a certainty)
+    on course  ⇔ not over and round₁(Leq) > L      (near, flagged ON_COURSE)
+    near       ⇔ L − μ < round₁(Leq) ≤ L
+    else ok
+
+- **Over only when certain.** An alarm, a red column and a log entry say the window *will*
+  end over its limit whatever is played from now on. A filling window that is over stays
+  over until it is full (E only grows while nothing leaves it), then recovers by the
+  rolling rule.
+- **Amber = on course.** The Leq so far is the level the full window ends at if the rest
+  goes on at the same mean power (`(E + E/M · r) / (M + r) = E/M`), so above the limit it is
+  on course to go over; within the margin it is near, as a full window. The time until the
+  budget is spent at that pace, `(B − E) / (E/M)`, goes with it: "ON COURSE — over in 12
+  min". It is shorter than `r` whenever the Leq so far is above the limit.
+- **Once full both rules are one**: `r = 0`, `least` is the Leq, and the rolling rule
+  applies unchanged.
+- **Gaps** (the meter stopped, lost samples) neither spend nor earn budget: like the Leq,
+  which is over the measured time, the budget counts the measured seconds and the ones
+  still to come (assumed measured). A window with a gap thus ends with the same judgement
+  under both rules, and stays flagged incomplete.
+- **Headroom while filling.** With at least the horizon left to fill, nothing leaves the
+  window before it is full, so the headroom is the steady level that, held until it is
+  full, spends exactly what is left of the budget: `x = (B − E) / r` ("until full ≤ 98.2
+  dB"); `x ≤ 0` means over (cannot recover; the time to recover at the limit is then at
+  least `r`). With less than the horizon left, the rolling headroom below applies.
+
+The user's case: 70 dB against 60 dB limits on a fresh log is ten times the limit's power,
+so a window spends its budget in a tenth of its length. The 1 min window is on course from
+its first second and over after 6 s (shown over from 7 s, when `least` reads above 60.0 at
+0.1 dB), the 60 min one on course for 6 minutes and over after about 6 min 5 s; the 5, 10
+and 30 min windows in between. Tests: `ac2_core::leq` (this case second by second, quiet
+then loud, gaps, full windows identical to the rolling rule), the daemon's alarm timing
+(`crates/ac2d/tests/leq.rs`), the scene's texts and bar, `ac2 spl leq watch --json`, and the
+app from an empty daemon.
+
+This is ac2's presentation choice, not a regulation's: the regulations judge full windows,
+and ac2 reports OVER before a window is full only when the full window cannot end under
+the limit.
+
+**Headroom** of a full window (or one with less than the horizon left to fill; a window
+filling for longer is in the section above) over a horizon of h seconds (default 60):
+after h more seconds the window holds
 the newest `K = N − h` slots of today plus h new ones. With `E_K`, `M_K` the energy and
 measured time of those K slots and `P = 10^(L/10)` (as a mean square), the steady level x
 that lands exactly on the limit solves `(E_K + h·x) / (M_K + h) = P`:
@@ -157,10 +217,15 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   Levels off the scale fill the track or leave it empty; the value on top is always exact.
 - **Colour**: judged only (as the tiles). Over: the bar in the fault colour and the whole
   column tinted towards it; near: an amber bar and a lighter tint; ok: the theme's
-  `level_ok` bar; not judged: a neutral bar. A window still filling (and not near or over)
-  has its bar part way between the track and its colour, and its progress written above its
-  name ("12:30 / 30:00"): a level, visibly not a whole window, never an alarm. The limit is a
-  line across the whole column.
+  `level_ok` bar; not judged: a neutral bar. A window still filling draws its bar at
+  `least` (the Leq it ends at if the rest is silent, *Judging a filling window*): the budget
+  spent, rising to the limit line as it runs out and reaching it when going over becomes
+  certain; its value stays the Leq so far, and its progress is written above its name ("so
+  far · 12:30 / 30:00"). An ok one has its bar part way between the track and its colour, a
+  level visibly not a whole window. On course, the state line says so with the time until
+  the budget is spent ("ON COURSE — over in 12 min", then "over in 12 min", "ON COURSE" as
+  the column narrows), and the headroom holds until the window is full ("until full ≤ 98.2
+  dB"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: the value as large as the column width allows (sized for five characters, the
   same in every column, so it does not jump at 100 dB), then the state, the limit and the
   headroom (or the time to recover at the limit), each in the longest wording that fits the

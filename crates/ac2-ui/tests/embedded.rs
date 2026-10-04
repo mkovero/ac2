@@ -1035,6 +1035,184 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     Ok(())
 }
 
+/// The columns as the SPL pane lays them out now (the pane at 1280 × 720).
+fn leq_columns(s: &AppState) -> Option<ac2_scene::leq::LeqColumns> {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    ac2_ui::scenes::leq(s, &Theme::dark(), size, now).and_then(|x| x.columns)
+}
+
+/// Filling windows judged on their budgets, from an empty daemon, using the app: an SPL
+/// meter from the palette, calibrated; its default windows (1, 5, 10, 30, 60 min) limited to
+/// 80 dB in the Leq dialog; Shift+R, Enter: a new log, so every window fills from nothing.
+/// Pink noise at −20 dBFS (about 91 dB(A), 12 times the limit's power) puts every window's
+/// Leq so far over 80 at once: all amber, "ON COURSE". The 1 min window has spent its budget
+/// after about 5 s and turns red; the 5 min one after about 25 s; the 10, 30 and 60 min ones
+/// stay amber on course, their bars under the limit line, with the time until their budgets
+/// are spent; the only alarms are the two short windows going over.
+#[test]
+fn filling_windows_go_red_only_when_their_budget_is_spent() -> R {
+    use ac2_proto::model::{LeqAlarmKind, LeqJudgement};
+    use ac2_scene::leq::TileState;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.endpoints();
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+    d.until("its windows", |s| {
+        judgement(s, 4) == Some(LeqJudgement::NoLimit)
+    })?;
+    calibrate(&ep)?;
+
+    // Shift+L: ↓↓ to the first window, Tab Tab to its limit, 80; ↓ and 80 for each other.
+    d.key("Shift+L");
+    d.send(Msg::Text("L".into()));
+    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    for k in ["ArrowDown", "ArrowDown", "Tab", "Tab"] {
+        d.key(k);
+    }
+    for i in 0..5 {
+        if i > 0 {
+            d.key("ArrowDown");
+        }
+        d.send(Msg::Text("80".into()));
+    }
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    assert_eq!(d.st.layout.focus, PaneKind::Spl);
+    d.until("five windows judged", |s| {
+        (0..5).all(|i| {
+            judgement(s, i).is_some_and(|j| {
+                matches!(
+                    j,
+                    LeqJudgement::Ok | LeqJudgement::Near | LeqJudgement::Over
+                )
+            })
+        })
+    })?;
+    d.until("the frames judging the 80 dB limits", |s| {
+        let limits: Vec<Option<f64>> = tiles(s).iter().map(|t| t.limit_db).collect();
+        limits == [Some(80.0); 5]
+    })?;
+
+    // A new log: the calibrator's seconds go, every window fills from nothing.
+    d.key("Shift+R");
+    d.key("Enter");
+    d.until("the new log", |s| {
+        s.toasts
+            .iter()
+            .any(|t| t.text.contains("new SPL log started"))
+            && spl_log(s).is_some_and(|l| l.alarms.is_empty())
+            && tiles(s)
+                .first()
+                .is_some_and(|t| t.elapsed_s < 30.0 && t.filling())
+    })?;
+
+    // Loud: every window on course at once, amber, the value the Leq so far.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    let th = Theme::dark();
+    let amber = th.banner_warning.background;
+    let red = th.banner_fault.background;
+    d.until("every window amber, on course", |s| {
+        let t = tiles(s);
+        t.len() == 5
+            && t.iter().all(|x| {
+                x.state == TileState::Near
+                    && x.on_course
+                    && x.state_text.as_deref() == Some("ON COURSE")
+            })
+    })?;
+    let t = tiles(&d.st);
+    assert!(
+        t[4].course
+            .as_deref()
+            .is_some_and(|c| c.starts_with("on course — over in ")),
+        "{:?}",
+        t[4].course
+    );
+    assert!(
+        t[4].filling
+            .as_deref()
+            .is_some_and(|f| f.starts_with("so far · ")),
+        "{:?}",
+        t[4].filling
+    );
+    assert!(
+        t[4].value.parse::<f64>().is_ok_and(|v| v > 80.0),
+        "{}",
+        t[4].value
+    );
+
+    // The 1 min window spends its budget first: red, its alarm; the others still amber.
+    d.until("the 1 min window red", |s| {
+        tiles(s).first().is_some_and(|t| t.state == TileState::Over)
+    })?;
+    let t = tiles(&d.st);
+    assert!(t[0].filling(), "red while filling: {:?}", t[0].filling);
+    assert!(t[1..].iter().all(|x| x.on_course), "{t:?}");
+    // The 5 min window red too, the long ones amber on course.
+    d.until("the 5 min window red", |s| {
+        tiles(s).get(1).is_some_and(|t| t.state == TileState::Over)
+    })?;
+    let t = tiles(&d.st);
+    for x in &t[2..] {
+        assert_eq!(x.state, TileState::Near, "{}", x.name);
+        assert_eq!(x.state_text.as_deref(), Some("ON COURSE"), "{}", x.name);
+        assert!(x.bar_db() < 80.0 && x.leq_db > 80.0, "{x:?}");
+    }
+    let k = leq_columns(&d.st).ok_or("columns")?;
+    let col = |w: usize| k.columns.iter().find(|c| c.window == w).ok_or("column");
+    for w in 0..2 {
+        assert_eq!(col(w)?.bar_color, red);
+    }
+    let long = col(4)?;
+    assert_eq!(long.bar_color, amber);
+    assert!(long.filling);
+    let (bar, limit_y) = (long.bar.ok_or("bar")?, long.limit_y.ok_or("limit")?);
+    assert!(bar.y > limit_y, "the 60 min bar under its limit line");
+    let l = spl_log(&d.st).ok_or("log")?;
+    let alarms: Vec<_> = l.alarms.iter().map(|a| (a.duration.0, a.kind)).collect();
+    assert_eq!(
+        alarms,
+        [(60.0, LeqAlarmKind::Over), (300.0, LeqAlarmKind::Over)]
+    );
+    assert!(
+        l.windows[2..]
+            .iter()
+            .all(|w| w.judgement == LeqJudgement::Near)
+    );
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// The caption's run as the SPL pane draws it now (the pane at 1280 × 720).
 fn run_caption(s: &AppState) -> Option<String> {
     let now = ac2_ui::scenes::Now {

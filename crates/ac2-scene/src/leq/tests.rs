@@ -69,8 +69,11 @@ fn frame(scale: LevelScale) -> LeqFrame {
         leq: vec![97.84, 98.26, 96.94, f32::NAN],
         elapsed: vec![60.0, 900.0, 750.0, 3600.0],
         measured: vec![60.0, 900.0, 750.0, 3480.0],
-        allowed: vec![f32::NAN, 101.56, 104.2, f32::NAN],
+        allowed: vec![f32::NAN, 101.56, 100.03, f32::NAN],
         recover: vec![f32::NAN, f32::NAN, f32::NAN, 450.0],
+        // The 30 min window at 12:30: its 750 s at 96.94 dB over 1800 s.
+        least: vec![97.84, 98.26, 93.13, f32::NAN],
+        over_in: vec![f32::NAN; 4],
         flags: vec![
             LeqFlags::NONE,
             judged(LeqFlags::NEAR),
@@ -117,10 +120,16 @@ fn tile_strings() {
     assert_eq!(t[1].limit.as_deref(), Some("limit 100.0 dB"));
     assert_eq!(t[1].headroom.as_deref(), Some("next 1 min ≤ 101.5 dB"));
     assert_eq!(t[1].filling, None);
-    // Filling: elapsed of length.
+    // Filling: the value is the Leq so far, elapsed of length; with more than the horizon
+    // to fill, the headroom holds until the window is full; the bar is the Leq it ends at if
+    // the rest is silent.
     assert_eq!(t[2].state, TileState::Ok);
-    assert_eq!(t[2].filling.as_deref(), Some("12:30 / 30:00"));
-    assert_eq!(t[2].headroom.as_deref(), Some("next 1 min ≤ 104.2 dB"));
+    assert_eq!(t[2].filling.as_deref(), Some("so far · 12:30 / 30:00"));
+    assert_eq!(t[2].headroom.as_deref(), Some("until full ≤ 100.0 dB"));
+    assert!(t[2].filling() && t[2].allowed_until_full && !t[2].on_course);
+    assert_eq!(t[2].course, None);
+    assert!((t[2].bar_db() - 93.13).abs() < 1e-4, "{}", t[2].bar_db());
+    assert_eq!(t[1].bar_db(), t[1].leq_db);
     // Over, not recoverable within the horizon, with gaps; no value measured shows a dash.
     assert_eq!(t[3].value, "—");
     assert_eq!(t[3].state_text.as_deref(), Some("OVER"));
@@ -238,8 +247,8 @@ fn scene_lays_tiles_out_and_colours_them() {
         "97.8",
         "OVER",
         "NEAR",
-        "limit 99.0 dB · next 1 min ≤ 104.2 dB",
-        "12:30 / 30:00",
+        "limit 99.0 dB · until full ≤ 100.0 dB",
+        "so far · 12:30 / 30:00",
         "now",
         "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12",
     ] {
@@ -313,6 +322,8 @@ fn history_marks_over_segments_and_limits() {
         measured: vec![10.0],
         allowed: vec![f32::NAN],
         recover: vec![f32::NAN],
+        least: vec![leq],
+        over_in: vec![f32::NAN],
         flags: vec![if over {
             judged(LeqFlags::OVER)
         } else {
@@ -369,7 +380,7 @@ fn history_marks_over_segments_and_limits() {
 
 /// `n` windows (1 … 120 min, some C-weighted when `mixed`), listed longest first so the
 /// columns must reorder them, each limited at 99 dB; the frame puts them over, near, ok,
-/// filling and unmeasured in turn.
+/// filling, unmeasured and filling on course in turn.
 fn many(n: usize, mixed: bool, scale: LevelScale) -> (LeqConfig, LeqFrame) {
     let minutes = [120.0, 60.0, 30.0, 15.0, 10.0, 5.0, 2.0, 1.0];
     let windows: Vec<LeqWindow> = minutes[8 - n..]
@@ -394,9 +405,12 @@ fn many(n: usize, mixed: bool, scale: LevelScale) -> (LeqConfig, LeqFrame) {
     f.measured.clear();
     f.allowed.clear();
     f.recover.clear();
+    f.least.clear();
+    f.over_in.clear();
     f.flags.clear();
     for (i, win) in windows.iter().enumerate() {
-        let (leq, flags, elapsed) = match i % 5 {
+        let on_course = i % 6 == 5;
+        let (leq, flags, elapsed) = match i % 6 {
             0 => (
                 101.3,
                 judge(LeqFlags::OVER.with(LeqFlags::CANNOT_RECOVER)),
@@ -405,7 +419,8 @@ fn many(n: usize, mixed: bool, scale: LevelScale) -> (LeqConfig, LeqFrame) {
             1 => (97.2, judge(LeqFlags::NEAR), 1.0),
             2 => (88.4, judge(LeqFlags::NONE), 0.4),
             3 => (100.6, judge(LeqFlags::OVER), 1.0),
-            _ => (f32::NAN, judge(LeqFlags::NONE), 0.0),
+            4 => (f32::NAN, judge(LeqFlags::NONE), 0.0),
+            _ => (102.4, judge(LeqFlags::NEAR.with(LeqFlags::ON_COURSE)), 0.25),
         };
         let leq = match scale {
             LevelScale::DbSpl => leq,
@@ -414,8 +429,14 @@ fn many(n: usize, mixed: bool, scale: LevelScale) -> (LeqConfig, LeqFrame) {
         f.leq.push(leq);
         f.elapsed.push((win.duration.0 * elapsed) as f32);
         f.measured.push((win.duration.0 * elapsed) as f32);
-        f.allowed.push(if i % 5 == 0 { f32::NAN } else { 101.56 });
-        f.recover.push(if i % 5 == 0 { 450.0 } else { f32::NAN });
+        f.allowed.push(if i % 6 == 0 { f32::NAN } else { 101.56 });
+        f.recover.push(if i % 6 == 0 { 450.0 } else { f32::NAN });
+        f.least.push(leq + (10.0 * elapsed.log10()) as f32);
+        f.over_in.push(if on_course {
+            (win.duration.0 * 0.5) as f32
+        } else {
+            f32::NAN
+        });
         f.flags.push(flags);
     }
     (
@@ -680,6 +701,77 @@ fn column_colours_follow_the_state() {
     assert!(!all.contains(&"OVER"), "{all:?}");
 }
 
+/// A filling window on course: amber, `ON COURSE` with the time until it spends its budget,
+/// the value the Leq so far, the bar at the Leq it ends at if the rest is silent — under the
+/// limit line until going over is certain, while a full window's bar is its Leq.
+#[test]
+fn on_course_while_filling() {
+    let (c, f) = many(6, false, LevelScale::DbSpl);
+    let t = leq_tiles(&c, &f);
+    // The sixth window listed is the 1 min one, 15 s in at 102.4 dB, over in 30 s.
+    let oc = &t[5];
+    assert_eq!(oc.name, "LAeq 1 min");
+    assert_eq!(oc.state, TileState::Near);
+    assert!(oc.on_course && oc.filling());
+    assert_eq!(oc.state_text.as_deref(), Some("ON COURSE"));
+    assert_eq!(oc.course.as_deref(), Some("on course — over in 30 s"));
+    assert_eq!(oc.value, "102.4");
+    assert_eq!(oc.filling.as_deref(), Some("so far · 0:15 / 1:00"));
+    // 15 s of 60 at 102.4 dB: 6.0 dB under it.
+    assert!(
+        (oc.bar_db() - (102.4 - 6.0206)).abs() < 1e-3,
+        "{}",
+        oc.bar_db()
+    );
+    // A near window that is not on course says NEAR, and no course.
+    assert_eq!(t[1].state_text.as_deref(), Some("NEAR"));
+    assert_eq!(t[1].course, None);
+    assert_eq!(time_to(29.9), "29 s");
+    assert_eq!(time_to(119.0), "119 s");
+    assert_eq!(time_to(754.0), "12 min");
+    assert_eq!(time_to(3900.0), "1 h 05 min");
+
+    let th = Theme::dark();
+    let s = leq_scene(
+        &columns_view(&c, &f, None),
+        &Status::default(),
+        &th,
+        size(1920.0, 1080.0),
+    );
+    let all = texts(&s.scene);
+    // Six columns: the shorter wording of the state.
+    for want in ["over in 30 s", "so far · 0:15 / 1:00", "102.4"] {
+        assert!(all.contains(&want), "{want} in {all:?}");
+    }
+    let k = cols(&s);
+    let col = k.columns.iter().find(|x| x.window == 5).expect("col");
+    assert_eq!(col.bar_color, th.banner_warning.background);
+    assert!(col.filling);
+    assert!((col.bar_db - oc.bar_db()).abs() < 1e-9);
+    let bar = col.bar.expect("a bar");
+    let limit_y = col.limit_y.expect("a limit");
+    assert!(
+        bar.y > limit_y,
+        "the bar under the limit line while not certain"
+    );
+    // Over (full): the bar is the Leq, above the line.
+    let over = k.columns.iter().find(|x| x.window == 0).expect("col");
+    assert_eq!(over.bar_db, 101.3);
+    assert!(over.bar.expect("a bar").y < over.limit_y.expect("a limit"));
+    // Tiles say it too.
+    let v = LeqView {
+        layout: LeqLayout {
+            style: LeqStyle::Tiles,
+            history: false,
+        },
+        ..columns_view(&c, &f, None)
+    };
+    let s = leq_scene(&v, &Status::default(), &th, size(1920.0, 1080.0));
+    let all = texts(&s.scene);
+    assert!(all.contains(&"ON COURSE"), "{all:?}");
+    assert!(all.contains(&"on course — over in 30 s"), "{all:?}");
+}
+
 #[test]
 fn column_texts() {
     let (c, f) = many(5, false, LevelScale::DbSpl);
@@ -699,11 +791,14 @@ fn column_texts() {
         "OK",
         "limit 99.0 dB",
         "next 1 min ≤ 101.5 dB",
+        // Filling for longer than the horizon: until the window is full.
+        "until full ≤ 101.5 dB",
         // The longest wording that fits.
         "back under in 7 min 30 s",
-        // The 5 min window, 40 % elapsed, and the 1 min one just started.
-        "2:00 / 5:00",
-        "0:00 / 1:00",
+        // The 5 min window, 40 % elapsed, and the 1 min one just started: their values are
+        // the Leq so far.
+        "so far · 2:00 / 5:00",
+        "so far · 0:00 / 1:00",
         "—",
         // One weighting: the caption names it once, the columns only their lengths.
         "15 min",

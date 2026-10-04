@@ -1,7 +1,7 @@
 {
  "topic": "d/4/leq",
  "header": {
-  "v": 11,
+  "v": 12,
   "kind": "leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -12,7 +12,7 @@
   "capture_wall_ns": 1790000000123456789,
   "grid_id": null,
   "protection": 8,
-  "n": 2,
+  "n": 3,
   "arrays": [
    {
     "name": "leq",
@@ -36,6 +36,16 @@
    },
    {
     "name": "recover",
+    "unit": "seconds",
+    "elem": "f32"
+   },
+   {
+    "name": "least",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "over_in",
     "unit": "seconds",
     "elem": "f32"
    },
@@ -78,27 +88,43 @@
  "arrays": {
   "leq": [
    96.5,
-   99.25
+   99.25,
+   101.5
   ],
   "elapsed": [
    60.0,
-   1800.0
+   1800.0,
+   600.0
   ],
   "measured": [
    60.0,
-   1790.0
+   1790.0,
+   600.0
   ],
   "allowed": [
    NaN,
-   NaN
+   NaN,
+   99.5
   ],
   "recover": [
    NaN,
-   412.0
+   412.0,
+   NaN
+  ],
+  "least": [
+   96.5,
+   99.25,
+   93.75
+  ],
+  "over_in": [
+   NaN,
+   NaN,
+   1948.5
   ],
   "leq_flags": [
    0,
-   59
+   59,
+   71
   ]
  }
 }

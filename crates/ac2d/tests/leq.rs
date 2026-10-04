@@ -688,3 +688,128 @@ async fn weightings_change_in_place_and_keep_the_log() {
     assert_eq!(now.windows, entity.windows);
     drop(lease);
 }
+
+/// A new log at 94 dB SPL with 90 dB limits on a 4 s and a 30 s window: a filling window is
+/// judged on its budget (`docs/design/leq.md`, *Judging a filling window*). 2.5 times the
+/// limit's power spends the 4 s budget in 1.6 s and the 30 s one in 12 s: both are on course
+/// at once (near, `ON_COURSE`, the time to the budget counting down), the 4 s window goes
+/// over after 2 s and the 30 s one only after about 13 s (its least level above 90.0 at
+/// 0.1 dB), each an alarm then and not before.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_filling_window_goes_over_when_its_budget_is_spent() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(realtime_rig(), local_tcp());
+    cfg.cal_store = Some(dir.path().join("calibrations.json"));
+    let h = Daemon::start(cfg).unwrap();
+    let c = connect(&h).await;
+    c.call(Command::SessionOpen {
+        config: session(false),
+    })
+    .await
+    .unwrap();
+    c.call(Command::MeasCreate {
+        config: meter(vec![window(4.0, Some(90.0)), window(30.0, Some(90.0))]),
+    })
+    .await
+    .unwrap();
+    c.call(Command::MeasStart { meas: M }).await.unwrap();
+    c.subscribe(Subscription::Meas(M)).unwrap();
+    let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
+    set_level(&lease, -20.0).await;
+    leq_until(&c, "the tone", |f| (f.leq[0] + 26.02).abs() < 0.1).await;
+    calibrate(&c).await;
+    leq_until(&c, "94 dB SPL", |f| {
+        f.meta.scale == LevelScale::DbSpl && (f.leq[0] - 94.0).abs() < 0.2
+    })
+    .await;
+
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    c.call(Command::SplLogNew { meas: M }).await.unwrap();
+    log_until(&c, "entity reset", |l| l.alarms.is_empty()).await;
+    let fresh = |f: &LeqFrame| {
+        f.meta
+            .run
+            .is_some_and(|r| r.started_at.0 + 1_000_000_000 >= at)
+    };
+    // The first seconds: the 30 s window on course, the Leq so far 94 dB, its least level
+    // (the rest silent) under it, its headroom the level that spends what is left of the
+    // budget by the end of the fill.
+    let f = leq_until(&c, "the 30 s window on course", |f| {
+        fresh(f) && (2.0..=8.0).contains(&f.elapsed[1])
+    })
+    .await;
+    let fl = f.flags[1];
+    assert!(
+        fl.contains(LeqFlags::NEAR) && fl.contains(LeqFlags::ON_COURSE),
+        "{fl:?}"
+    );
+    assert!(!fl.contains(LeqFlags::OVER));
+    assert_eq!(fl.judgement(), LeqJudgement::Near);
+    assert!((f.leq[1] - 94.0).abs() < 0.3, "{:?}", f.leq);
+    let (e, m) = (f64::from(f.elapsed[1]), f64::from(f.measured[1]));
+    let r = 30.0 - e;
+    let least = f64::from(f.leq[1]) + 10.0 * (m / (m + r)).log10();
+    assert!(
+        (f64::from(f.least[1]) - least).abs() < 0.05,
+        "{:?}",
+        f.least
+    );
+    // Budget 10^9·(m + r), spent at 10^(L/10) a second.
+    let pace = 10f64.powf(f64::from(f.leq[1]) / 10.0);
+    let over_in = (1e9 * (m + r) - pace * m) / pace;
+    assert!(
+        (f64::from(f.over_in[1]) - over_in).abs() < 0.2,
+        "{:?} vs {over_in}",
+        f.over_in
+    );
+    let allowed = 10.0 * ((1e9 * (m + r) - pace * m) / r).log10();
+    assert!(
+        (f64::from(f.allowed[1]) - allowed).abs() < 0.05,
+        "{:?} vs {allowed}",
+        f.allowed
+    );
+    // The 4 s window spent its budget long ago: over, and its alarm the only one.
+    assert!(f.flags[0].contains(LeqFlags::OVER), "{:?}", f.flags);
+    let l = log_until(&c, "the 4 s window's alarm", |l| !l.alarms.is_empty()).await;
+    assert!(
+        l.alarms
+            .iter()
+            .all(|a| a.duration == Seconds(4.0) && a.kind == LeqAlarmKind::Over),
+        "{:?}",
+        l.alarms
+    );
+    assert_eq!(l.windows[1].judgement, LeqJudgement::Near);
+
+    // The 30 s window over once the budget is spent, about 13 s into the log.
+    let l = log_until(&c, "the 30 s window over", |l| {
+        l.alarms.iter().any(|a| a.duration == Seconds(30.0))
+    })
+    .await;
+    let start = page(&c, 0).await.rows[0].start.0;
+    let over_at = |d: f64| {
+        let a = l.alarms.iter().find(|a| a.duration == Seconds(d)).unwrap();
+        assert_eq!(a.kind, LeqAlarmKind::Over);
+        (a.at.0 - start) as f64 / 1e9
+    };
+    let (t4, t30) = (over_at(4.0), over_at(30.0));
+    assert!((1.5..=3.5).contains(&t4), "4 s window over after {t4} s");
+    assert!(
+        (11.5..=14.5).contains(&t30),
+        "30 s window over after {t30} s"
+    );
+    let f = leq_until(&c, "the 30 s window over in the frame", |f| {
+        f.flags[1].contains(LeqFlags::OVER)
+    })
+    .await;
+    assert!(!f.flags[1].contains(LeqFlags::ON_COURSE));
+    assert!(f.least[1] > 90.0 && f.elapsed[1] < 30.0, "{f:?}");
+    assert!(f.over_in[1].is_nan());
+    drop(lease);
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}

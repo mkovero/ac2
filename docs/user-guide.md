@@ -636,9 +636,22 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   shortened to "30 min" or "30m" when the columns are narrow — the caption then says
   "LAeq"). The limit is a line across the column; a column turns **amber** within the warn
   margin (3 dB by default) of its limit and the whole column goes **red** above it, and goes
-  back when the window recovers; each going over and each recovery also shows as a message. A
-  window still filling has a paler bar and how much of it there is ("12:30 / 30:00"), without
-  any alarm colour. All columns share one scale so their bars compare: from 30 dB below the
+  back when the window recovers; each going over and each recovery also shows as a message.
+- A window **still filling** (a new log, a longer window than the meter has run) shows its
+  Leq **so far** ("so far · 12:30 / 30:00") but is judged on its **budget**: the limit allows
+  so much sound energy over the whole window, and the column goes **red** only once that is
+  spent — when the window will end over its limit even if everything is silent from now
+  on. Before that, a Leq so far above the limit turns it **amber, "ON COURSE — over in
+  12 min"**: at the same level the budget runs out in 12 minutes, and turning down now
+  still keeps it under. Its bar shows the budget spent (the level the window would end at
+  if the rest were silent), climbing to the limit line as the budget runs out, and its
+  headroom is the level that would use up exactly what is left by the time the window is
+  full ("until full ≤ 98.2 dB"). For example, 70 dB against 60 dB limits on a fresh log is
+  ten times the limit's power: the 1 min window is red after about 6 s, the 60 min one
+  after about 6 min, amber on course before then. Seconds not measured neither spend nor
+  add to the budget. The regulations define their limits on full windows only; red only
+  when going over is certain is ac2's choice for the time before. All columns share one
+  scale so their bars compare: from 30 dB below the
   (lowest) limit to 6 dB above the (highest); without limits, or uncalibrated, a 40 dB range
   that follows the loudest window in 10 dB steps and stays put from second to second.
 - **B** switches between columns and **tiles** (a grid with every figure written out),
@@ -649,8 +662,9 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   back while a stimulus is armed or playing). W again goes back to the split layout.
 - Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
   steady level for the next minute that keeps the window at or below its limit ("next 1 min ≤
-  101.5 dB"), or, over and unable to recover within the minute, how long it takes at the
-  limit; while the window fills, how much of it there is; and "gaps" when part of it was not
+  101.5 dB"; "until full ≤ …" while it fills), or, over and unable to recover within the
+  minute, how long it takes at the limit; while the window fills, how much of it there is;
+  and "gaps" when part of it was not
   measured (the meter stopped, the capture lost samples). Gaps are never counted as silence.
   Narrow columns use the shorter wordings, or leave a line out.
 - The caption above the windows says how long the meter has been logging and the level of

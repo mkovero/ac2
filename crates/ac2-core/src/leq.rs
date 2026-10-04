@@ -4,7 +4,8 @@
 //! energy (each with its measured time, so a capture gap is never silence).
 //! [`RollingLeq`] keeps the newest seconds in a ring sized for the longest window and
 //! answers, per window, the Leq over the window (over the elapsed time while it fills), the
-//! headroom for a horizon and the time to recover at a level. Nothing allocates after
+//! headroom for a horizon and the time to recover at a level. [`judge_window`] judges a
+//! full window on its Leq and a filling one on its energy budget. Nothing allocates after
 //! construction.
 //!
 //! Levels are dBFS on the scale of decision 4a (`10·lg(2·ms)`), as everywhere in
@@ -212,12 +213,53 @@ pub struct WindowValue {
     pub elapsed: u32,
     /// Measured seconds within those.
     pub measured: f64,
+    /// Energy over the measured time (FS²·s).
+    pub energy: f64,
+    /// The window's length, s.
+    pub seconds: u32,
 }
 
 impl WindowValue {
     /// Some of the elapsed time was not measured (capture gaps, the meter stopped).
     pub fn incomplete(&self) -> bool {
         self.measured < f64::from(self.elapsed) - 1e-6
+    }
+
+    /// The window has not yet covered its whole length.
+    pub fn filling(&self) -> bool {
+        self.elapsed < self.seconds
+    }
+
+    /// Seconds until the window covers its whole length (0 once full).
+    pub fn remaining(&self) -> u32 {
+        self.seconds.saturating_sub(self.elapsed)
+    }
+
+    /// The Leq the window ends at when the rest of it is measured silence, dBFS: the energy
+    /// so far over the measured time plus the remaining seconds. The least the full window
+    /// can read, so a value above the limit makes going over a certainty; equal to the Leq
+    /// once the window is full. A gap already in the window adds no time, as in the Leq.
+    /// NaN when nothing was measured.
+    pub fn least_dbfs(&self) -> f64 {
+        if self.measured > 0.0 {
+            power_dbfs(self.energy / (self.measured + f64::from(self.remaining())))
+        } else {
+            f64::NAN
+        }
+    }
+
+    /// Seconds until the energy reaches the budget of a filling window, `limit_ms` over its
+    /// measured time plus the remaining seconds, when the rest is played at the mean power
+    /// so far; `None` for a full window, without energy, or when the budget outlasts the
+    /// window (the pace keeps it at or under the limit). `Some(0)` once it is spent.
+    pub fn over_in(&self, limit_ms: f64) -> Option<f64> {
+        if !self.filling() || self.measured <= 0.0 || self.energy <= 0.0 {
+            return None;
+        }
+        let pace = self.energy / self.measured;
+        let budget = limit_ms * (self.measured + f64::from(self.remaining()));
+        let t = ((budget - self.energy) / pace).max(0.0);
+        (t < f64::from(self.remaining())).then_some(t)
     }
 }
 
@@ -447,14 +489,13 @@ impl RollingLeq {
     pub fn value(&self, i: usize) -> WindowValue {
         let a = &self.windows[i];
         let m = a.full.measured();
+        let e = a.full.energy();
         WindowValue {
-            leq_dbfs: if m > 0.0 {
-                power_dbfs(a.full.energy() / m)
-            } else {
-                f64::NAN
-            },
+            leq_dbfs: if m > 0.0 { power_dbfs(e / m) } else { f64::NAN },
             elapsed: self.pushed.min(u64::from(a.spec.seconds)) as u32,
             measured: m,
+            energy: e,
+            seconds: a.spec.seconds,
         }
     }
 
@@ -462,16 +503,26 @@ impl RollingLeq {
     /// steady mean square for the next horizon that leaves the window at the limit, or how
     /// long recovery takes at the limit when no level can.
     ///
+    /// A window still filling for at least the horizon loses nothing before it is full and
+    /// is judged on its budget (`P · (measured + remaining)`, [`judge_window`]), so its level
+    /// is the one that, held until the window is full, spends exactly what is left of it:
+    /// `(P·(M + r) − E) / r` over the remaining `r` seconds.
+    ///
     /// # Panics
     /// If `i` is not a window index.
     pub fn headroom(&self, i: usize, limit_ms: f64) -> Headroom {
         let a = &self.windows[i];
-        if a.keep == 0 {
+        let rem = u64::from(a.spec.seconds).saturating_sub(self.pushed);
+        let x = if rem >= u64::from(self.horizon) {
+            let r = rem as f64;
+            (limit_ms * (a.full.measured() + r) - a.full.energy()) / r
+        } else if a.keep == 0 {
             // The whole window is replaced within the horizon.
             return Headroom::Allowed { ms: limit_ms };
-        }
-        let h = f64::from(self.horizon);
-        let x = (limit_ms * (a.kept.measured() + h) - a.kept.energy()) / h;
+        } else {
+            let h = f64::from(self.horizon);
+            (limit_ms * (a.kept.measured() + h) - a.kept.energy()) / h
+        };
         if x > 0.0 {
             Headroom::Allowed { ms: x }
         } else {
@@ -599,6 +650,47 @@ pub fn judge(leq_db: f64, limit_db: f64, margin_db: f64) -> Option<Judgement> {
         Judgement::Near
     } else {
         Judgement::Ok
+    })
+}
+
+/// A window's judgement, with how a filling window stands on its budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Verdict {
+    pub judgement: Judgement,
+    /// Filling, not over yet, and the Leq so far above the limit: at the pace so far the
+    /// full window ends over it (`judgement` is then [`Judgement::Near`]).
+    pub on_course: bool,
+}
+
+/// Judges window value `v` against `limit_db` with a warn `margin_db`, the window's levels
+/// raised by `offset_db` (the sensitivity, dBFS → dB SPL), at the displayed 0.1 dB
+/// resolution.
+///
+/// A full window is judged on its Leq ([`judge`]). Limits are defined on full windows, so a
+/// filling one is over only when the full window must end over the limit even if the rest
+/// of it is silent ([`WindowValue::least_dbfs`] over the limit: its energy has spent the
+/// budget `limit · (measured + remaining)`). Its Leq so far is what it ends at if the rest
+/// goes on at the same mean power: above the limit it is on course to go over (near),
+/// within the margin near, else ok. Once full, the least level is the Leq and both rules
+/// agree. `None` without a value.
+pub fn judge_window(
+    v: &WindowValue,
+    offset_db: f64,
+    limit_db: f64,
+    margin_db: f64,
+) -> Option<Verdict> {
+    let j = judge(v.leq_dbfs + offset_db, limit_db, margin_db)?;
+    let certain = !v.filling()
+        || judge(v.least_dbfs() + offset_db, limit_db, margin_db) == Some(Judgement::Over);
+    Some(match j {
+        Judgement::Over if !certain => Verdict {
+            judgement: Judgement::Near,
+            on_course: true,
+        },
+        j => Verdict {
+            judgement: j,
+            on_course: false,
+        },
     })
 }
 

@@ -37,10 +37,22 @@ impl Brute<'_> {
             leq_dbfs: if m > 0.0 { power_dbfs(e / m) } else { f64::NAN },
             elapsed: self.0.len().min(spec.seconds as usize) as u32,
             measured: m,
+            energy: e,
+            seconds: spec.seconds,
         }
     }
 
+    /// The level for the next horizon that leaves the window at the limit after it; a
+    /// window filling for at least the horizon spends its budget exactly when held to the
+    /// end of the fill.
     fn allowed(&self, spec: WindowSpec, horizon: u32, limit_ms: f64) -> Option<f64> {
+        let rem = (spec.seconds as usize).saturating_sub(self.0.len());
+        if rem >= horizon as usize {
+            let (e, m) = self.sums(spec.weighting, spec.seconds as usize);
+            let r = rem as f64;
+            let x = (limit_ms * (m + r) - e) / r;
+            return (x > 0.0).then_some(x);
+        }
         let keep = spec.seconds.saturating_sub(horizon) as usize;
         if keep == 0 {
             return Some(limit_ms);
@@ -276,8 +288,8 @@ fn headroom_lands_on_the_limit() {
     }
     assert!((r.value(0).leq_dbfs - limit).abs() < 1e-9);
 
-    // Filling: 100 s at the limit in a 600 s window; after 60 s more the window holds 160 s,
-    // so anything up to the limit itself keeps it there.
+    // Filling: 100 s at the limit in a 600 s window; the 500 s left to fill have a budget of
+    // 500 s at the limit, so the limit itself, held to the end, lands on it.
     let mut r = RollingLeq::new(&[spec], 60);
     for _ in 0..100 {
         r.push(steady(limit));
@@ -530,4 +542,179 @@ fn log_total_is_over_measured_time() {
     assert!((t.measured() - 1.25).abs() < 1e-12);
     let want = 10.0 * ((0.25 * 10f64.powf(-1.0) + 10f64.powf(-3.0)) / 1.25).log10();
     assert!((t.level_dbfs(Weighting::A) - want).abs() < 1e-9);
+}
+
+fn window(seconds: u32) -> WindowSpec {
+    WindowSpec {
+        seconds,
+        weighting: Weighting::A,
+    }
+}
+
+/// Judges every window of `r` against a limit `limit` dBFS (no offset), margin 3 dB.
+fn verdicts(r: &RollingLeq, limit: f64) -> Vec<Verdict> {
+    (0..r.specs().count())
+        .map(|i| judge_window(&r.value(i), 0.0, limit, 3.0).expect("a value"))
+        .collect()
+}
+
+const OVER: Verdict = Verdict {
+    judgement: Judgement::Over,
+    on_course: false,
+};
+const ON_COURSE: Verdict = Verdict {
+    judgement: Judgement::Near,
+    on_course: true,
+};
+const OK: Verdict = Verdict {
+    judgement: Judgement::Ok,
+    on_course: false,
+};
+const NEAR: Verdict = Verdict {
+    judgement: Judgement::Near,
+    on_course: false,
+};
+
+/// A fresh log, 10 dB over the limit steadily: ten times the limit's power spends a
+/// window's budget in a tenth of its length. The 1 min window is on course at once; at 6 s its
+/// energy equals the budget (60·P·s: the least level shows the limit itself, not over it) and
+/// at 7 s it is over. The 60 min one spends its budget at 6 min and is over once the least
+/// level shows above the limit at 0.1 dB: 6 min 5 s (3650·P·s, +0.06 dB; 6 min 4 s is
+/// +0.048, shown as the limit). "Over in" counts down to the budget.
+#[test]
+fn a_fresh_log_10_db_over_spends_its_budget_in_a_tenth() {
+    let limit = -30.0;
+    let p = mean_square(limit);
+    let mut r = RollingLeq::new(&[window(60), window(3600)], 60);
+    r.push(steady(limit + 10.0));
+    assert_eq!(verdicts(&r, limit), [ON_COURSE, ON_COURSE]);
+    let v = r.value(0);
+    assert!((v.leq_dbfs - limit - 10.0).abs() < 1e-9, "the Leq so far");
+    assert!((v.over_in(p).expect("on course") - 5.0).abs() < 1e-9);
+    assert!((r.value(1).over_in(p).expect("on course") - 359.0).abs() < 1e-6);
+    for k in 2..=3600u32 {
+        r.push(steady(limit + 10.0));
+        let want = |t: u32| if k >= t { OVER } else { ON_COURSE };
+        assert_eq!(verdicts(&r, limit), [want(7), want(365)], "after {k} s");
+        if k < 6 {
+            let t = r.value(0).over_in(p).expect("on course");
+            assert!((t - f64::from(6 - k)).abs() < 1e-9, "{k}: {t}");
+        }
+    }
+    // The 60 s budget spent at 6 s: the least level reaches the limit there.
+    let mut r = RollingLeq::new(&[window(60)], 60);
+    for _ in 0..6 {
+        r.push(steady(limit + 10.0));
+    }
+    assert!((r.value(0).least_dbfs() - limit).abs() < 1e-9);
+    assert_eq!(r.value(0).over_in(p), Some(0.0));
+}
+
+/// Quiet, then loud: a filling window ok while quiet, on course once the Leq so far passes
+/// the limit, over only when the energy passes the whole window's budget.
+#[test]
+fn quiet_then_loud_while_filling() {
+    let limit = -30.0;
+    let mut r = RollingLeq::new(&[window(600)], 60);
+    for _ in 0..300 {
+        r.push(steady(limit - 20.0));
+    }
+    assert_eq!(verdicts(&r, limit), [OK]);
+    // 300 s at P/100 = 3·P·s, then 100·P a second: the Leq so far is 103/301·P after one (ok),
+    // within the margin after two, at the limit after three, above it after four; the
+    // budget (600·P·s) is spent after 6 (603: shown at the limit) and passed after 7.
+    let mut seen = Vec::new();
+    for _ in 0..7 {
+        r.push(steady(limit + 20.0));
+        seen.push(verdicts(&r, limit)[0]);
+    }
+    assert_eq!(
+        seen,
+        [OK, NEAR, NEAR, ON_COURSE, ON_COURSE, ON_COURSE, OVER]
+    );
+}
+
+/// Gaps: they earn no budget and spend none, as they add nothing to the Leq. 30 s lost and
+/// 30 s measured at the limit in a 120 s window: the budget is P over the 30 measured
+/// seconds and the 60 to come; the Leq so far is at the limit (near, not on course), and
+/// 1 dB more for the rest ends over it.
+#[test]
+fn gaps_neither_earn_nor_spend_budget() {
+    let limit = -30.0;
+    let p = mean_square(limit);
+    let mut r = RollingLeq::new(&[window(120)], 10);
+    for k in 0..60 {
+        r.push(if k < 30 { Second::GAP } else { steady(limit) });
+    }
+    let v = r.value(0);
+    assert!(v.incomplete() && v.filling());
+    assert_eq!(v.remaining(), 60);
+    assert!((v.least_dbfs() - (limit + 10.0 * (30.0f64 / 90.0).log10())).abs() < 1e-9);
+    assert_eq!(verdicts(&r, limit), [NEAR]);
+    assert_eq!(
+        v.over_in(p),
+        None,
+        "at the limit the budget lasts the window"
+    );
+    let Headroom::Allowed { ms } = r.headroom(0, p) else {
+        panic!("{:?}", r.headroom(0, p))
+    };
+    assert!((ms / p - 1.0).abs() < 1e-12, "the limit for the 60 s left");
+    for _ in 0..60 {
+        r.push(steady(limit + 1.0));
+    }
+    assert_eq!(verdicts(&r, limit)[0].judgement, Judgement::Over);
+}
+
+/// Once full, the budget rule is the rolling one: the same judgement as [`judge`] on the
+/// Leq, whatever the history; while filling, over only with the budget spent.
+#[test]
+fn full_windows_judged_on_their_leq() {
+    let mut rng = Rng(0x5eed);
+    let limit = -30.0;
+    let mut r = RollingLeq::new(&[window(30), window(90)], 10);
+    for _ in 0..400 {
+        let l = limit - 8.0 + 14.0 * rng.next();
+        r.push(if rng.next() < 0.05 {
+            Second::GAP
+        } else {
+            steady(l)
+        });
+        for i in 0..2 {
+            let v = r.value(i);
+            let got = judge_window(&v, 0.0, limit, 3.0);
+            if v.filling() {
+                if got.is_some_and(|g| g.judgement == Judgement::Over) {
+                    assert!(round_tenth(v.least_dbfs()) > limit);
+                }
+            } else {
+                assert_eq!(got.map(|g| g.judgement), judge(v.leq_dbfs, limit, 3.0));
+                assert!(!got.is_some_and(|g| g.on_course));
+                assert_eq!(v.least_dbfs(), v.leq_dbfs);
+            }
+        }
+    }
+}
+
+/// Over while filling is a certainty: a window judged over stays over until full whatever
+/// is played (silence here), and its headroom says it cannot recover.
+#[test]
+fn over_while_filling_stays_over_until_full() {
+    let limit = -30.0;
+    let p = mean_square(limit);
+    let mut r = RollingLeq::new(&[window(300)], 60);
+    for _ in 0..40 {
+        r.push(steady(limit + 10.0));
+    }
+    assert_eq!(verdicts(&r, limit), [OVER]);
+    assert!(matches!(r.headroom(0, p), Headroom::CannotRecover { .. }));
+    for _ in 40..300 {
+        r.push(steady(-200.0));
+        assert_eq!(verdicts(&r, limit), [OVER]);
+    }
+    // Full and sliding: back under once enough loud seconds have left.
+    for _ in 0..60 {
+        r.push(steady(-200.0));
+    }
+    assert_eq!(verdicts(&r, limit), [OK]);
 }

@@ -119,14 +119,19 @@ bitmask!(
         LIMIT = 1 << 0;
         /// The limit is judged (the meter reads dB SPL).
         JUDGED = 1 << 1;
-        /// Within the warn margin below the limit, or at it.
+        /// Within the warn margin below the limit, or at it; or, filling, on course
+        /// (`ON_COURSE`).
         NEAR = 1 << 2;
-        /// Above the limit.
+        /// Above the limit; while filling, the energy so far has spent the whole window's
+        /// budget (it ends over even if the rest is silent).
         OVER = 1 << 3;
         /// No steady level over the horizon brings the window to its limit.
         CANNOT_RECOVER = 1 << 4;
         /// Part of the window was not measured (capture gaps, the meter stopped).
         INCOMPLETE = 1 << 5;
+        /// Filling, with the Leq so far above the limit: at the pace so far the full window
+        /// ends over it (with `NEAR`).
+        ON_COURSE = 1 << 6;
     }
 );
 
@@ -224,6 +229,10 @@ pub enum ArrayName {
     Recover,
     /// Leq window state.
     LeqFlags,
+    /// Leq a window ends at if the rest of it is silent (its Leq once full).
+    Least,
+    /// Seconds until a filling window on course spends its budget (NaN otherwise).
+    OverIn,
 }
 
 /// Array unit.
@@ -675,6 +684,13 @@ pub struct LeqFrame {
     /// Seconds to recover playing at the limit, when it cannot within the horizon; else
     /// NaN.
     pub recover: Vec<f32>,
+    /// The Leq the window ends at if the rest of it is silent: the energy so far over the
+    /// measured time plus the seconds left to fill (the Leq itself once full; NaN before
+    /// anything was measured).
+    pub least: Vec<f32>,
+    /// Seconds until a filling window spends its budget at the pace so far, when it is on
+    /// course (`ON_COURSE`); else NaN.
+    pub over_in: Vec<f32>,
     /// State.
     pub flags: Vec<LeqFlags>,
 }
@@ -1031,6 +1047,8 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             ));
             cols.push((desc(ArrayName::Allowed, unit), Col::F(&f.allowed)));
             cols.push((desc(ArrayName::Recover, Unit::Seconds), Col::F(&f.recover)));
+            cols.push((desc(ArrayName::Least, unit), Col::F(&f.least)));
+            cols.push((desc(ArrayName::OverIn, Unit::Seconds), Col::F(&f.over_in)));
             cols.push((
                 desc(ArrayName::LeqFlags, Unit::Bitmask),
                 Col::U(mask_slice(&f.flags)),
@@ -1335,6 +1353,8 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
                 measured: a.f32(ArrayName::Measured, Unit::Seconds)?,
                 allowed: a.f32(ArrayName::Allowed, unit)?,
                 recover: a.f32(ArrayName::Recover, Unit::Seconds)?,
+                least: a.f32(ArrayName::Least, unit)?,
+                over_in: a.f32(ArrayName::OverIn, Unit::Seconds)?,
                 flags: a.mask(ArrayName::LeqFlags)?,
             })
         }

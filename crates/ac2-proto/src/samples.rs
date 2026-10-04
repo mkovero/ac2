@@ -1246,11 +1246,13 @@ pub fn frames() -> Vec<Frame> {
                         lzeq: 112.5,
                     }),
                 },
-                leq: vec![96.5, 99.25],
-                elapsed: vec![60.0, 1800.0],
-                measured: vec![60.0, 1790.0],
-                allowed: vec![f32::NAN, f32::NAN],
-                recover: vec![f32::NAN, 412.0],
+                leq: vec![96.5, 99.25, 101.5],
+                elapsed: vec![60.0, 1800.0, 600.0],
+                measured: vec![60.0, 1790.0, 600.0],
+                allowed: vec![f32::NAN, f32::NAN, 99.5],
+                recover: vec![f32::NAN, 412.0, f32::NAN],
+                least: vec![96.5, 99.25, 93.75],
+                over_in: vec![f32::NAN, f32::NAN, 1948.5],
                 flags: vec![
                     LeqFlags::NONE,
                     LeqFlags::LIMIT
@@ -1258,6 +1260,10 @@ pub fn frames() -> Vec<Frame> {
                         .with(LeqFlags::OVER)
                         .with(LeqFlags::CANNOT_RECOVER)
                         .with(LeqFlags::INCOMPLETE),
+                    LeqFlags::LIMIT
+                        .with(LeqFlags::JUDGED)
+                        .with(LeqFlags::NEAR)
+                        .with(LeqFlags::ON_COURSE),
                 ],
             }),
         },

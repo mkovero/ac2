@@ -4118,6 +4118,8 @@ fn leq_data(seq: u64, at_s: u64, leq: f32, flags: ac2_proto::frame::LeqFlags) ->
         measured: vec![60.0; n],
         allowed: vec![f32::NAN; n],
         recover: vec![f32::NAN; n],
+        least: vec![leq; n],
+        over_in: vec![f32::NAN; n],
         flags: vec![flags; n],
     });
     let mut stamp = ac2_proto::samples::stamp(None);

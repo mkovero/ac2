@@ -10,7 +10,9 @@
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use ac2_core::leq::{Headroom, RollingLeq, Second, SecondIntegrator, WindowSpec, judge};
+use ac2_core::leq::{
+    Headroom, Judgement, RollingLeq, Second, SecondIntegrator, WindowSpec, judge_window,
+};
 use ac2_core::mic_curve::Correction;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
@@ -62,6 +64,8 @@ struct LeqWindows {
     /// Wall clock of `next` (ns), from the newest block.
     next_wall: u64,
     judgements: Vec<LeqJudgement>,
+    /// Per window: filling and on course to end over its limit (judged near).
+    on_course: Vec<bool>,
     /// The log's epoch the windows and judgements belong to.
     epoch: u64,
     done: Vec<Second>,
@@ -115,6 +119,7 @@ impl LeqWindows {
             second_start: None,
             next: 0,
             next_wall: 0,
+            on_course: vec![false; judgements.len()],
             judgements,
             epoch,
             done: Vec::with_capacity(4),
@@ -146,6 +151,7 @@ impl LeqWindows {
                     .unwrap_or(LeqJudgement::NoLimit)
             })
             .collect();
+        self.on_course = vec![false; self.judgements.len()];
         self.ring = ring_for(&self.cfg);
         if let Some(start) = self.second_start {
             let now = self.wall_of(start, fs);
@@ -274,6 +280,7 @@ impl Spl {
                     .iter()
                     .map(|w| leq_log::initial_judgement(w, calibrated))
                     .collect();
+                self.leq.on_course = vec![false; self.leq.judgements.len()];
             }
             self.leq.ring.push(*s);
             if first {
@@ -286,21 +293,26 @@ impl Spl {
         self.leq.fresh = true;
     }
 
-    /// Judges every window after a second; transitions go to the control thread.
+    /// Judges every window after a second (a filling window on its budget,
+    /// [`judge_window`]); transitions go to the control thread.
     fn judge(&mut self, at: WallNs) {
         let offset = self.cal.sensitivity;
         let mut alarms = Vec::new();
         let mut changed = false;
         for (i, w) in self.leq.cfg.windows.iter().enumerate() {
             let v = self.leq.ring.value(i);
+            let verdict = match (w.limit, offset) {
+                (Some(limit), Some(o)) => judge_window(&v, o, limit.0, w.warn_margin.0),
+                _ => None,
+            };
+            self.leq.on_course[i] = verdict.is_some_and(|v| v.on_course);
             let j = match (w.limit, offset) {
                 (None, _) => LeqJudgement::NoLimit,
                 (Some(_), None) => LeqJudgement::NotCalibrated,
-                (Some(limit), Some(o)) => match judge(v.leq_dbfs + o, limit.0, w.warn_margin.0) {
-                    None => LeqJudgement::Ok,
-                    Some(ac2_core::leq::Judgement::Ok) => LeqJudgement::Ok,
-                    Some(ac2_core::leq::Judgement::Near) => LeqJudgement::Near,
-                    Some(ac2_core::leq::Judgement::Over) => LeqJudgement::Over,
+                (Some(_), Some(_)) => match verdict.map(|v| v.judgement) {
+                    None | Some(Judgement::Ok) => LeqJudgement::Ok,
+                    Some(Judgement::Near) => LeqJudgement::Near,
+                    Some(Judgement::Over) => LeqJudgement::Over,
                 },
             };
             let prev = self.leq.judgements[i];
@@ -380,22 +392,30 @@ impl Spl {
             measured: Vec::with_capacity(n),
             allowed: Vec::with_capacity(n),
             recover: Vec::with_capacity(n),
+            least: Vec::with_capacity(n),
+            over_in: Vec::with_capacity(n),
             flags: Vec::with_capacity(n),
         };
         for (i, w) in self.leq.cfg.windows.iter().enumerate() {
             let v = self.leq.ring.value(i);
             let mut flags = LeqFlags::NONE;
-            let (mut allowed, mut recover) = (f32::NAN, f32::NAN);
+            let (mut allowed, mut recover, mut over_in) = (f32::NAN, f32::NAN, f32::NAN);
             if let Some(limit) = w.limit {
                 flags = flags.with(LeqFlags::LIMIT);
                 if offset.is_some() {
                     flags = flags.with(LeqFlags::JUDGED);
+                    let p = ac2_core::leq::mean_square(limit.0 - o);
                     match self.leq.judgements.get(i) {
                         Some(LeqJudgement::Over) => flags = flags.with(LeqFlags::OVER),
-                        Some(LeqJudgement::Near) => flags = flags.with(LeqFlags::NEAR),
+                        Some(LeqJudgement::Near) => {
+                            flags = flags.with(LeqFlags::NEAR);
+                            if self.leq.on_course.get(i) == Some(&true) {
+                                flags = flags.with(LeqFlags::ON_COURSE);
+                                over_in = v.over_in(p).map_or(f32::NAN, |t| t as f32);
+                            }
+                        }
                         _ => {}
                     }
-                    let p = ac2_core::leq::mean_square(limit.0 - o);
                     match self.leq.ring.headroom(i, p) {
                         Headroom::Allowed { ms } => allowed = (power_dbfs(ms) + o) as f32,
                         Headroom::CannotRecover { recover_s } => {
@@ -413,6 +433,8 @@ impl Spl {
             f.measured.push(v.measured as f32);
             f.allowed.push(allowed);
             f.recover.push(recover);
+            f.least.push((v.least_dbfs() + o) as f32);
+            f.over_in.push(over_in);
             f.flags.push(flags);
         }
         f

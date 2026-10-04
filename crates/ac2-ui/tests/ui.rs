@@ -1326,6 +1326,15 @@ fn leq_frame(
         measured: elapsed.to_vec(),
         allowed: allowed.to_vec(),
         recover: vec![f32::NAN; 5],
+        // A filling window ends at its energy so far over its whole length if the rest is
+        // silent.
+        least: leq
+            .iter()
+            .zip(elapsed)
+            .zip([60.0f32, 300.0, 600.0, 1800.0, 3600.0])
+            .map(|((l, e), d)| l + 10.0 * (e / d).min(1.0).log10())
+            .collect(),
+        over_in: vec![f32::NAN; 5],
         flags: states
             .iter()
             .map(|s| match s {

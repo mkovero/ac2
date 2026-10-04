@@ -49,7 +49,7 @@ LIN_GRID = {"type": "linear", "fs": 48000.0, "n": 65536}
 WEAK_REFERENCE = 1 << 3
 THINNED, OUT_OF_BAND, INSUFFICIENT_RESOLUTION = 1 << 0, 1 << 1, 1 << 7
 CLIP, HELD = 1 << 0, 1 << 1
-LIMIT, JUDGED, NEAR, OVER, CANNOT_RECOVER, INCOMPLETE = (1 << i for i in range(6))
+LIMIT, JUDGED, NEAR, OVER, CANNOT_RECOVER, INCOMPLETE, ON_COURSE = (1 << i for i in range(7))
 
 
 def stamp(grid, protection=WEAK_REFERENCE):
@@ -239,14 +239,20 @@ def frames():
                 },
             },
             [
-                (arr("leq", "db_spl"), [96.5, 99.25]),
-                (arr("elapsed", "seconds"), [60.0, 1800.0]),
-                (arr("measured", "seconds"), [60.0, 1790.0]),
-                (arr("allowed", "db_spl"), [NAN, NAN]),
-                (arr("recover", "seconds"), [NAN, 412.0]),
+                (arr("leq", "db_spl"), [96.5, 99.25, 101.5]),
+                (arr("elapsed", "seconds"), [60.0, 1800.0, 600.0]),
+                (arr("measured", "seconds"), [60.0, 1790.0, 600.0]),
+                (arr("allowed", "db_spl"), [NAN, NAN, 99.5]),
+                (arr("recover", "seconds"), [NAN, 412.0, NAN]),
+                (arr("least", "db_spl"), [96.5, 99.25, 93.75]),
+                (arr("over_in", "seconds"), [NAN, NAN, 1948.5]),
                 (
                     arr("leq_flags", "bitmask", "u32"),
-                    [0, LIMIT | JUDGED | OVER | CANNOT_RECOVER | INCOMPLETE],
+                    [
+                        0,
+                        LIMIT | JUDGED | OVER | CANNOT_RECOVER | INCOMPLETE,
+                        LIMIT | JUDGED | NEAR | ON_COURSE,
+                    ],
                 ),
             ],
         ),

@@ -73,10 +73,13 @@ pub struct LeqColumn {
     pub window: usize,
     pub rect: Rect,
     pub background: Color,
-    /// The bar's full scale, and the bar itself from the bottom up to the value (none
+    /// The bar's full scale, and the bar itself from the bottom up to its level (none
     /// before anything was measured or below the scale).
     pub track: Rect,
     pub bar: Option<Rect>,
+    /// The bar's level: the Leq, or while filling the Leq the window ends at if the rest
+    /// is silent ([`LeqTile::bar_db`]).
+    pub bar_db: f64,
     pub bar_color: Color,
     /// y of the limit marker, drawn across the whole column.
     pub limit_y: Option<f32>,
@@ -197,6 +200,17 @@ fn fitting(candidates: &[String], width: f32, size: f32) -> Option<String> {
 fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 3] {
     let state = match t.state {
         TileState::Over => vec!["OVER".to_string()],
+        TileState::Near if t.on_course => match t.over_in_s {
+            Some(s) => {
+                let d = super::time_to(s);
+                vec![
+                    format!("ON COURSE — over in {d}"),
+                    format!("over in {d}"),
+                    "ON COURSE".to_string(),
+                ]
+            }
+            None => vec!["ON COURSE".to_string()],
+        },
         TileState::Near => vec!["NEAR".to_string()],
         TileState::Ok => vec!["OK".to_string()],
         TileState::NotCalibrated => vec!["not calibrated".to_string(), "uncal.".to_string()],
@@ -209,7 +223,16 @@ fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 3] {
         }
         None => vec![],
     };
-    let next = if let Some(a) = t.allowed_db {
+    let next = if let Some(a) = t.allowed_db
+        && t.allowed_until_full
+    {
+        let a = format::level(a);
+        vec![
+            format!("until full ≤ {a} dB"),
+            format!("until full ≤ {a}"),
+            format!("≤ {a}"),
+        ]
+    } else if let Some(a) = t.allowed_db {
         let a = format::level(a);
         vec![
             format!("next {horizon} ≤ {a} dB"),
@@ -235,9 +258,10 @@ fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 3] {
     [state, limit, next]
 }
 
-/// The line above the name: how far a filling window is, or its gaps.
+/// The line above the name: how far a filling window is (its value is the Leq so far), or
+/// its gaps.
 fn progress_line(t: &LeqTile) -> Vec<String> {
-    let filling = (t.elapsed_s < t.duration_s).then(|| {
+    let filling = t.filling().then(|| {
         (
             format!(
                 "{} / {}",
@@ -248,8 +272,20 @@ fn progress_line(t: &LeqTile) -> Vec<String> {
         )
     });
     match (filling, &t.incomplete) {
-        (Some((f, short)), Some(i)) => vec![format!("{f} · {i}"), f, short],
-        (Some((f, short)), None) => vec![f, short],
+        // "so far" is kept as long as anything is: the value is not a whole window's.
+        (Some((f, short)), Some(i)) => vec![
+            format!("so far · {f} · {i}"),
+            format!("so far · {f}"),
+            format!("so far · {short}"),
+            f,
+            short,
+        ],
+        (Some((f, short)), None) => vec![
+            format!("so far · {f}"),
+            format!("so far · {short}"),
+            f,
+            short,
+        ],
         (None, Some(i)) => vec![i.clone(), "gaps".to_string()],
         (None, None) => vec![],
     }
@@ -390,7 +426,7 @@ pub(super) fn draw_columns(
         );
         let (bg, full) = column_colors(t.state, theme);
         let alarm = matches!(t.state, TileState::Over | TileState::Near);
-        let filling = t.elapsed_s < t.duration_s;
+        let filling = t.filling();
         let track = Rect::new(
             r.x + pad,
             track_top,
@@ -422,8 +458,11 @@ pub(super) fn draw_columns(
                 clip: Some(track),
             });
         }
-        let bar = t.leq_db.is_finite().then(|| {
-            let y = to_y(t.leq_db);
+        // While filling the bar is the budget spent: the Leq the window ends at if the
+        // rest is silent, reaching the limit line when going over becomes certain.
+        let bar_db = t.bar_db();
+        let bar = bar_db.is_finite().then(|| {
+            let y = to_y(bar_db);
             Rect::new(track.x, y, track.w, track.bottom() - y)
         });
         let bar = bar.filter(|b| b.h > 0.0);
@@ -481,6 +520,7 @@ pub(super) fn draw_columns(
             background: bg,
             track,
             bar,
+            bar_db,
             bar_color,
             limit_y,
             name: names.0[k].clone(),

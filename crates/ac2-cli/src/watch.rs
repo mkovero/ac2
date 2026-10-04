@@ -473,10 +473,11 @@ pub async fn leq(
                 let state = t.state_text.clone().unwrap_or_default();
                 let marker = match t.state {
                     TileState::Over => "▶ OVER",
+                    TileState::Near if t.on_course => "▷ ON COURSE",
                     TileState::Near => "▷ NEAR",
                     _ => "",
                 };
-                let details: Vec<String> = [&t.limit, &t.headroom, &t.recover, &t.filling, &t.incomplete]
+                let details: Vec<String> = [&t.course, &t.limit, &t.headroom, &t.recover, &t.filling, &t.incomplete]
                     .into_iter()
                     .flatten()
                     .cloned()
@@ -525,13 +526,19 @@ pub async fn leq(
                         "judgement": f.flags[i].judgement(),
                         "elapsed_s": f.elapsed[i],
                         "measured_s": f.measured[i],
+                        "filling": t.filling(),
                         "incomplete": f.flags[i].contains(ac2_proto::frame::LeqFlags::INCOMPLETE),
+                        "least": num(f.least[i]),
+                        "on_course": f.flags[i].contains(ac2_proto::frame::LeqFlags::ON_COURSE),
+                        "over_in_s": num(f.over_in[i]),
                         "allowed": num(f.allowed[i]),
+                        "allowed_until_full": t.allowed_until_full,
                         "cannot_recover": f.flags[i].contains(ac2_proto::frame::LeqFlags::CANNOT_RECOVER),
                         "recover_s": num(f.recover[i]),
                         "text": {
                             "value": t.value,
                             "state": t.state_text,
+                            "course": t.course,
                             "limit": t.limit,
                             "headroom": t.headroom,
                             "recover": t.recover,

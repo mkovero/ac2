@@ -106,29 +106,73 @@ pub struct LeqTile {
     /// `dB SPL` or `dBFS`.
     pub unit: String,
     pub state: TileState,
-    /// `OVER`, `NEAR`, `OK`, `not calibrated`; none without a limit.
+    /// `OVER`, `NEAR`, `ON COURSE`, `OK`, `not calibrated`; none without a limit.
     pub state_text: Option<String>,
+    /// `on course — over in 12 min` while a filling window's Leq so far is above its limit.
+    pub course: Option<String>,
     /// `limit 99.0 dB`.
     pub limit: Option<String>,
-    /// `next 1 min ≤ 101.5 dB`, or `over — can't recover within 1 min`.
+    /// `next 1 min ≤ 101.5 dB`; `until full ≤ 98.2 dB` while the window fills for longer
+    /// than the horizon (the level that, held to the end of the fill, spends what is left of
+    /// its budget); or `over — can't recover within 1 min`.
     pub headroom: Option<String>,
     /// `at the limit: back under in 7 min 30 s` when it cannot recover within the horizon.
     pub recover: Option<String>,
-    /// `12:30 / 30:00` while the window fills.
+    /// `so far · 12:30 / 30:00` while the window fills: the value is the Leq so far.
     pub filling: Option<String>,
     /// `gaps: 28:10 of 30:00 measured`.
     pub incomplete: Option<String>,
     /// The figures the columns draw: the window's weighting and length (s), the Leq as
     /// shown (rounded to 0.1 dB, NaN before anything was measured), its limit when judged,
-    /// the floored headroom when it can recover within the horizon, the time to recover
-    /// when it cannot, and how much of the window has elapsed (s).
+    /// the floored headroom when it can recover within the horizon (and whether it holds
+    /// until the window is full rather than for the horizon), the time to recover when it
+    /// cannot, how much of the window has elapsed (s), the Leq it ends at if the rest is
+    /// silent (the bar of a filling column; the Leq once full), whether it is on course to
+    /// go over and the seconds until it spends its budget then.
     pub weighting: Weighting,
     pub duration_s: f64,
     pub leq_db: f64,
     pub limit_db: Option<f64>,
     pub allowed_db: Option<f64>,
+    pub allowed_until_full: bool,
     pub recover_s: Option<f64>,
     pub elapsed_s: f64,
+    pub least_db: f64,
+    pub on_course: bool,
+    pub over_in_s: Option<f64>,
+}
+
+impl LeqTile {
+    /// The window has not covered its whole length yet.
+    pub fn filling(&self) -> bool {
+        self.elapsed_s < self.duration_s
+    }
+
+    /// The level the bar shows: while filling, the Leq the window ends at if the rest is
+    /// silent, so the bar climbs towards the limit line as the budget is spent and reaches
+    /// it when going over becomes certain; once full, the Leq.
+    pub fn bar_db(&self) -> f64 {
+        if self.filling() {
+            self.least_db
+        } else {
+            self.leq_db
+        }
+    }
+}
+
+/// A time to come, coarse enough not to flicker every second: `45 s`, `12 min`, `1 h 05 min`.
+pub fn time_to(seconds: f64) -> String {
+    if !seconds.is_finite() || seconds < 0.0 {
+        return format::NO_VALUE.to_string();
+    }
+    let s = seconds.floor() as u64;
+    if s < 120 {
+        format!("{s} s")
+    } else if s < 3600 {
+        format!("{} min", s / 60)
+    } else {
+        format!("{} h {:02} min", s / 3600, (s % 3600) / 60)
+    }
 }
 
 /// The tiles of a meter's windows from its configuration and newest `leq` frame. A frame
@@ -141,6 +185,8 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
         f.measured.len(),
         f.allowed.len(),
         f.recover.len(),
+        f.least.len(),
+        f.over_in.len(),
         f.flags.len(),
     ]
     .iter()
@@ -164,6 +210,10 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
             let duration = w.duration.0;
             let judged = flags.contains(LeqFlags::JUDGED);
             let cannot = flags.contains(LeqFlags::CANNOT_RECOVER);
+            let on_course = judged && flags.contains(LeqFlags::ON_COURSE);
+            let filling = elapsed < duration;
+            // A window filling for at least the horizon has its headroom until it is full.
+            let until_full = filling && duration - elapsed >= f.meta.horizon.0;
             // Floored: the figure is a ceiling to stay under (the margin only absorbs the
             // f32 the frame carries it in).
             let allowed_db = (judged && !cannot)
@@ -173,8 +223,12 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 if cannot {
                     format!("over — can't recover within {horizon}")
                 } else {
-                    let a = allowed_db.unwrap_or(f64::NAN);
-                    format!("next {horizon} ≤ {} dB", format::level(a))
+                    let a = format::level(allowed_db.unwrap_or(f64::NAN));
+                    if until_full {
+                        format!("until full ≤ {a} dB")
+                    } else {
+                        format!("next {horizon} ≤ {a} dB")
+                    }
                 }
             });
             let recover_s = (judged && cannot)
@@ -183,6 +237,9 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
             let recover =
                 recover_s.map(|r| format!("at the limit: back under in {}", format::duration(r)));
             let leq = f64::from(f.leq[i]);
+            let over_in_s = on_course
+                .then(|| f64::from(f.over_in[i]))
+                .filter(|t| t.is_finite());
             LeqTile {
                 name: window_name(w),
                 value: format::level(leq),
@@ -192,14 +249,19 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                     TileState::NoLimit => None,
                     TileState::NotCalibrated => Some("not calibrated".into()),
                     TileState::Ok => Some("OK".into()),
+                    TileState::Near if on_course => Some("ON COURSE".into()),
                     TileState::Near => Some("NEAR".into()),
                     TileState::Over => Some("OVER".into()),
                 },
+                course: on_course.then(|| match over_in_s {
+                    Some(t) => format!("on course — over in {}", time_to(t)),
+                    None => "on course to go over".into(),
+                }),
                 limit: w.limit.map(|l| format!("limit {} dB", format::level(l.0))),
                 headroom,
                 recover,
-                filling: (elapsed < duration)
-                    .then(|| format!("{} / {}", clock(elapsed), clock(duration))),
+                filling: filling
+                    .then(|| format!("so far · {} / {}", clock(elapsed), clock(duration))),
                 incomplete: flags.contains(LeqFlags::INCOMPLETE).then(|| {
                     format!(
                         "gaps: {} of {} measured",
@@ -216,8 +278,12 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 },
                 limit_db: w.limit.filter(|_| judged).map(|l| l.0),
                 allowed_db,
+                allowed_until_full: until_full,
                 recover_s,
                 elapsed_s: elapsed,
+                least_db: f64::from(f.least[i]),
+                on_course,
+                over_in_s,
             }
         })
         .collect()
@@ -616,11 +682,18 @@ fn draw_tile(
         );
     }
     // The number as big as the tile allows: its height, and its width for "100.0".
-    let lines_below = [&t.limit, &t.headroom, &t.recover, &t.filling, &t.incomplete]
-        .iter()
-        .filter(|x| x.is_some())
-        .count()
-        .min(3) as f32;
+    let lines_below = [
+        &t.course,
+        &t.limit,
+        &t.headroom,
+        &t.recover,
+        &t.filling,
+        &t.incomplete,
+    ]
+    .iter()
+    .filter(|x| x.is_some())
+    .count()
+    .min(3) as f32;
     let body_top = r.y + pad + head * 1.3;
     let body_bottom = r.bottom() - pad - lines_below * small * 1.3;
     let big = ((body_bottom - body_top) * 0.95)
@@ -645,9 +718,9 @@ fn draw_tile(
         VAlign::Baseline,
         unit_size,
     );
-    // Below: limit and headroom first, then the recovery time, the filling and the gaps,
-    // as many as fit.
-    let mut below: Vec<String> = Vec::new();
+    // Below: on course first, then limit and headroom, the recovery time, the filling and
+    // the gaps, as many as fit.
+    let mut below: Vec<String> = t.course.iter().cloned().collect();
     match (&t.limit, &t.headroom) {
         (Some(l), Some(hr)) => below.push(format!("{l} · {hr}")),
         (Some(l), None) => below.push(l.clone()),

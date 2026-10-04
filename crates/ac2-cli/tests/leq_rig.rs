@@ -313,6 +313,44 @@ async fn leq_set_watch_and_export() {
         after["run"]
     );
     assert!(after["logged"].as_u64().unwrap() < n, "{after}");
+    // The windows fill again and are judged on their budgets: the 10 s one, 94 dB so far
+    // against 96, near; its least level (the rest silent) under its Leq so far; with more
+    // than the 2 s horizon to fill, its headroom holds until it is full.
+    let w1 = &after["windows"][1];
+    assert_eq!(w1["filling"], true, "{w1}");
+    assert_eq!(w1["judgement"], "near", "{w1}");
+    assert_eq!(w1["on_course"], false, "{w1}");
+    assert!(w1["over_in_s"].is_null(), "{w1}");
+    assert!(
+        w1["least"].as_f64().unwrap() < w1["leq"].as_f64().unwrap(),
+        "{w1}"
+    );
+    let e = w1["elapsed_s"].as_f64().unwrap();
+    assert_eq!(w1["allowed_until_full"], e <= 8.0, "{w1}");
+    assert!(
+        w1["text"]["filling"]
+            .as_str()
+            .unwrap()
+            .starts_with("so far · "),
+        "{w1}"
+    );
+    // The 5 s one, 94 against 90: on course until its budget is spent (2.5 times the
+    // limit's power: after 2 s), then over.
+    let w0 = &after["windows"][0];
+    if w0["judgement"] == "near" {
+        assert_eq!(w0["on_course"], true, "{w0}");
+        assert!(w0["over_in_s"].as_f64().unwrap() < 2.0, "{w0}");
+        assert!(
+            w0["text"]["course"]
+                .as_str()
+                .unwrap()
+                .starts_with("on course — over in "),
+            "{w0}"
+        );
+    } else {
+        assert_eq!(w0["judgement"], "over", "{w0}");
+        assert_eq!(w0["on_course"], false, "{w0}");
+    }
 
     lease.end().await.unwrap();
     drop(c);
