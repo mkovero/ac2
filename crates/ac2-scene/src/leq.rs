@@ -112,11 +112,13 @@ pub struct LeqTile {
     pub course: Option<String>,
     /// `limit 99.0 dB`.
     pub limit: Option<String>,
-    /// `next 1 min ≤ 101.5 dB`; `until full ≤ 98.2 dB` while the window fills for longer
-    /// than the horizon (the level that, held to the end of the fill, spends what is left of
-    /// its budget); or `over — can't recover within 1 min`.
+    /// `next 1 min: stay ≤ 101.5 dB`; `until full: stay ≤ 98.2 dB` while the window fills
+    /// for longer than the horizon (the level that, held to the end of the fill, spends what
+    /// is left of its budget). None when it cannot recover within the horizon.
     pub headroom: Option<String>,
-    /// `at the limit: back under in 7 min 30 s` when it cannot recover within the horizon.
+    /// `cooling down in 7 min 30 s` when it cannot recover within the horizon: the time
+    /// until the window is back under its limit if the level stays at the limit (no time
+    /// when the daemon has none).
     pub recover: Option<String>,
     /// `so far · 12:30 / 30:00` while the window fills: the value is the Leq so far.
     pub filling: Option<String>,
@@ -219,23 +221,21 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
             let allowed_db = (judged && !cannot)
                 .then(|| (f64::from(f.allowed[i]) * 10.0 + 1e-3).floor() / 10.0)
                 .filter(|a| a.is_finite());
-            let headroom = judged.then(|| {
-                if cannot {
-                    format!("over — can't recover within {horizon}")
+            let headroom = (judged && !cannot).then(|| {
+                let a = format::level(allowed_db.unwrap_or(f64::NAN));
+                if until_full {
+                    format!("until full: stay ≤ {a} dB")
                 } else {
-                    let a = format::level(allowed_db.unwrap_or(f64::NAN));
-                    if until_full {
-                        format!("until full ≤ {a} dB")
-                    } else {
-                        format!("next {horizon} ≤ {a} dB")
-                    }
+                    format!("next {horizon}: stay ≤ {a} dB")
                 }
             });
             let recover_s = (judged && cannot)
                 .then(|| f64::from(f.recover[i]))
                 .filter(|r| r.is_finite());
-            let recover =
-                recover_s.map(|r| format!("at the limit: back under in {}", format::duration(r)));
+            let recover = (judged && cannot).then(|| match recover_s {
+                Some(r) => format!("cooling down in {}", format::duration(r)),
+                None => "cooling down".to_string(),
+            });
             let leq = f64::from(f.leq[i]);
             let over_in_s = on_course
                 .then(|| f64::from(f.over_in[i]))

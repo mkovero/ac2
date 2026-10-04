@@ -658,7 +658,7 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   still keeps it under. Its bar shows the budget spent (the level the window would end at
   if the rest were silent), climbing to the limit line as the budget runs out, and its
   headroom is the level that would use up exactly what is left by the time the window is
-  full ("until full ≤ 98.2 dB"). For example, 70 dB against 60 dB limits on a fresh log is
+  full ("until full: stay ≤ 98.2 dB"). For example, 70 dB against 60 dB limits on a fresh log is
   ten times the limit's power: the 1 min window is red after about 6 s, the 60 min one
   after about 6 min, amber on course before then. Seconds not measured neither spend nor
   add to the budget. The regulations define their limits on full windows only; red only
@@ -676,9 +676,11 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   columns and the caption with the meter's name, the run and its calibration (the top bar comes
   back while a stimulus is armed or playing). W again goes back to the split layout.
 - Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
-  steady level for the next minute that keeps the window at or below its limit ("next 1 min ≤
-  101.5 dB"; "until full ≤ …" while it fills), or, over and unable to recover within the
-  minute, how long it takes at the limit; while the window fills, how much of it there is;
+  steady level for the next minute that keeps the window at or below its limit ("next 1 min:
+  stay ≤ 101.5 dB"; "until full: stay ≤ …" while it fills), or, over and unable to recover
+  within the minute, **"cooling down in 7 min 30 s"**: the time until the window is back
+  under its limit if the level stays at the limit (narrow columns: "cooling 7:30"); while
+  the window fills, how much of it there is;
   and "gaps" when part of it was not
   measured (the meter stopped, the capture lost samples). Gaps are never counted as silence.
   Narrow columns use the shorter wordings, or leave a line out.

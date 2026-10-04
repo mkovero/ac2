@@ -228,30 +228,29 @@ fn detail_lines(t: &LeqTile, horizon: &str) -> [Vec<String>; 3] {
     {
         let a = format::level(a);
         vec![
-            format!("until full ≤ {a} dB"),
-            format!("until full ≤ {a}"),
+            format!("until full: stay ≤ {a} dB"),
+            format!("until full: stay ≤ {a}"),
+            format!("stay ≤ {a}"),
             format!("≤ {a}"),
         ]
     } else if let Some(a) = t.allowed_db {
         let a = format::level(a);
         vec![
-            format!("next {horizon} ≤ {a} dB"),
-            format!("next {horizon} ≤ {a}"),
-            format!("next ≤ {a}"),
+            format!("next {horizon}: stay ≤ {a} dB"),
+            format!("next {horizon}: stay ≤ {a}"),
+            format!("stay ≤ {a}"),
             format!("≤ {a}"),
         ]
     } else if let Some(r) = t.recover_s {
-        let d = format::duration(r);
+        // The time back under the limit if the level stays at the limit.
+        let c = super::clock(r);
         vec![
-            format!("at the limit: back under in {d}"),
-            format!("back under in {d}"),
-            format!("under in {d}"),
+            format!("cooling down in {}", format::duration(r)),
+            format!("cooling {c}"),
+            c,
         ]
-    } else if t.headroom.is_some() {
-        vec![
-            format!("can't recover within {horizon}"),
-            "can't recover".to_string(),
-        ]
+    } else if t.recover.is_some() {
+        vec!["cooling down".to_string(), "cooling".to_string()]
     } else {
         vec![]
     };

@@ -206,6 +206,14 @@ async fn leq_set_watch_and_export() {
     assert_eq!(w0["limit"], 90.0);
     assert_eq!(w0["text"]["state"], "OVER");
     assert_eq!(w0["cannot_recover"], true);
+    assert!(w0["text"]["headroom"].is_null(), "{w0}");
+    assert!(
+        w0["text"]["recover"]
+            .as_str()
+            .unwrap()
+            .starts_with("cooling down"),
+        "{w0}"
+    );
     let w1 = &last["windows"][1];
     assert_eq!(w1["judgement"], "near");
     assert_eq!(w1["elapsed_s"], 10.0);
@@ -327,6 +335,13 @@ async fn leq_set_watch_and_export() {
     );
     let e = w1["elapsed_s"].as_f64().unwrap();
     assert_eq!(w1["allowed_until_full"], e <= 8.0, "{w1}");
+    let headroom = w1["text"]["headroom"].as_str().unwrap();
+    let want = if e <= 8.0 {
+        "until full: stay ≤ "
+    } else {
+        "next 2 s: stay ≤ "
+    };
+    assert!(headroom.starts_with(want), "{w1}");
     assert!(
         w1["text"]["filling"]
             .as_str()

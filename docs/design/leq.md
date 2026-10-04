@@ -147,7 +147,7 @@ and still end at the limit; `least` reaches the limit exactly when `E` reaches `
   under both rules, and stays flagged incomplete.
 - **Headroom while filling.** With at least the horizon left to fill, nothing leaves the
   window before it is full, so the headroom is the steady level that, held until it is
-  full, spends exactly what is left of the budget: `x = (B − E) / r` ("until full ≤ 98.2
+  full, spends exactly what is left of the budget: `x = (B − E) / r` ("until full: stay ≤ 98.2
   dB"); `x ≤ 0` means over (cannot recover; the time to recover at the limit is then at
   least `r`). With less than the horizon left, the rolling headroom below applies.
 
@@ -176,7 +176,10 @@ that lands exactly on the limit solves `(E_K + h·x) / (M_K + h) = P`:
 reported floored to 0.1 dB. When `x ≤ 0` the window **cannot recover within h** whatever
 happens; then the daemon reports the time to recover when playing at the limit: the
 smallest t ≥ h with `E_(N−t) ≤ P·M_(N−t)` (the part still inside the window averages at or
-below the limit), found by one pass over the ring.
+below the limit), found by one pass over the ring. The display words it **"cooling down in
+7 min 30 s"**: the time until the window is back under its limit if the level stays at the
+limit (narrow: "cooling 7:30", "7:30"); the headroom reads "next 1 min: stay ≤ 101.5 dB"
+(narrow: "stay ≤ 101.5", "≤ 101.5").
 
 State changes go into the meter's `spl_log` entity: each window's state with the time it
 began, and an alarm list (window, over / recovered, time, Leq, limit; newest 100). The
@@ -275,11 +278,11 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   far · 12:30 / 30:00"). An ok one has its bar part way between the track and its colour, a
   level visibly not a whole window. On course, the state line says so with the time until
   the budget is spent ("ON COURSE — over in 12 min", then "over in 12 min", "ON COURSE" as
-  the column narrows), and the headroom holds until the window is full ("until full ≤ 98.2
+  the column narrows), and the headroom holds until the window is full ("until full: stay ≤ 98.2
   dB"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: the value as large as the column width allows (sized for five characters, the
   same in every column, so it does not jump at 100 dB), then the state, the limit and the
-  headroom (or the time to recover at the limit), each in the longest wording that fits the
+  headroom (or "cooling down in …", the time to recover at the limit), each in the longest wording that fits the
   column and left out when the bar would get too short; the name at the bottom, shortened
   uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the
   weighting; mixed weightings keep their letter). Tested: 2–8 windows, 320–1920 px, no text

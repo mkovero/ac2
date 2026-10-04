@@ -118,14 +118,20 @@ fn tile_strings() {
     assert_eq!(t[1].state, TileState::Near);
     assert_eq!(t[1].state_text.as_deref(), Some("NEAR"));
     assert_eq!(t[1].limit.as_deref(), Some("limit 100.0 dB"));
-    assert_eq!(t[1].headroom.as_deref(), Some("next 1 min ≤ 101.5 dB"));
+    assert_eq!(
+        t[1].headroom.as_deref(),
+        Some("next 1 min: stay ≤ 101.5 dB")
+    );
     assert_eq!(t[1].filling, None);
     // Filling: the value is the Leq so far, elapsed of length; with more than the horizon
     // to fill, the headroom holds until the window is full; the bar is the Leq it ends at if
     // the rest is silent.
     assert_eq!(t[2].state, TileState::Ok);
     assert_eq!(t[2].filling.as_deref(), Some("so far · 12:30 / 30:00"));
-    assert_eq!(t[2].headroom.as_deref(), Some("until full ≤ 100.0 dB"));
+    assert_eq!(
+        t[2].headroom.as_deref(),
+        Some("until full: stay ≤ 100.0 dB")
+    );
     assert!(t[2].filling() && t[2].allowed_until_full && !t[2].on_course);
     assert_eq!(t[2].course, None);
     assert!((t[2].bar_db() - 93.13).abs() < 1e-4, "{}", t[2].bar_db());
@@ -133,14 +139,13 @@ fn tile_strings() {
     // Over, not recoverable within the horizon, with gaps; no value measured shows a dash.
     assert_eq!(t[3].value, "—");
     assert_eq!(t[3].state_text.as_deref(), Some("OVER"));
-    assert_eq!(
-        t[3].headroom.as_deref(),
-        Some("over — can't recover within 1 min")
-    );
-    assert_eq!(
-        t[3].recover.as_deref(),
-        Some("at the limit: back under in 7 min 30 s")
-    );
+    // No headroom then: how long it cools down, at the limit.
+    assert_eq!(t[3].headroom, None);
+    assert_eq!(t[3].recover.as_deref(), Some("cooling down in 7 min 30 s"));
+    let mut f = frame(LevelScale::DbSpl);
+    f.recover[3] = f32::NAN;
+    let t = leq_tiles(&cfg(), &f);
+    assert_eq!(t[3].recover.as_deref(), Some("cooling down"));
     assert_eq!(
         t[3].incomplete.as_deref(),
         Some("gaps: 58:00 of 1:00:00 measured")
@@ -247,7 +252,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         "97.8",
         "OVER",
         "NEAR",
-        "limit 99.0 dB · until full ≤ 100.0 dB",
+        "limit 99.0 dB · until full: stay ≤ 100.0 dB",
         "so far · 12:30 / 30:00",
         "now",
         "running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12",
@@ -790,11 +795,11 @@ fn column_texts() {
         "NEAR",
         "OK",
         "limit 99.0 dB",
-        "next 1 min ≤ 101.5 dB",
+        "next 1 min: stay ≤ 101.5 dB",
         // Filling for longer than the horizon: until the window is full.
-        "until full ≤ 101.5 dB",
+        "until full: stay ≤ 101.5 dB",
         // The longest wording that fits.
-        "back under in 7 min 30 s",
+        "cooling down in 7 min 30 s",
         // The 5 min window, 40 % elapsed, and the 1 min one just started: their values are
         // the Leq so far.
         "so far · 2:00 / 5:00",
