@@ -23,8 +23,8 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   dB(C)), judged against their limits, a
   filling window judged on its energy budget ("ON COURSE — over in 12 min"), headroom
   ("next 1 min: stay ≤ 101.5 dB") and "cooling down in …"; a per-second log that runs
-  whether or not anyone watches, with its run clock, total Leq and gaps (missing audio is
-  never counted as silence), a history strip that survives an app restart, a new log at show
+  whether or not anyone watches, with its run clock, total Leq and offline time (missing audio
+  is never counted as silence), a history strip that survives an app restart, a new log at show
   start; informational presets that replace the windows with a rule's (DIN 15905-5,
   Switzerland, WHO, France, Flanders, Brussels, the Dutch covenant).
 - **Calibration**: per input against an acoustic calibrator, or **electrically** without

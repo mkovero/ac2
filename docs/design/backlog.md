@@ -86,6 +86,9 @@ ff82db7, c98d8b4, a8c8cf9, 5a157e4):
 - **Meter or windows, not both** → a third view, meter + Leq (the default): the number over
   the windows, one caption; each window names its own unit and weighting (`dB(A)`), since
   the meter above may use another.
+- **"gaps: 4:57 of 5:00 measured" read as a puzzle** → "offline for 3 s" on tiles and
+  columns, "offline 12 s" in the run caption (13ad620); the unit sits on the value's line,
+  small and dim (c98d8b4).
 - **A fresh log put every window over at once** → a filling window is judged on its energy
   budget (`ON COURSE — over in 12 min`, "so far · 12:30 / 30:00").
 - **"can't recover within …" / "at the limit: back under in …" read badly** → "next 1 min:
