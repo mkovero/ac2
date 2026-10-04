@@ -1,6 +1,7 @@
 //! SPL logs and Leq windows on the control thread: one log per SPL measurement (kept
 //! across its job's restarts), the `spl_log` entity with each window's state and the
-//! alarms, `spl.log_get`, `spl.history_get`, `spl.log_new` (`docs/design/leq.md`).
+//! alarms, `spl.log_get`, `spl.history_get`, `spl.log_new` (`docs/design/leq.md`). The
+//! autosave's thread keeps the logs on disk; this thread only tells it which logs exist.
 
 use std::sync::{Arc, Mutex};
 
@@ -11,10 +12,11 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{MeasId, Rev, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
-use ac2_traces::session::SavedSplLog;
+use ac2_traces::session::{SavedSplLog, SplLogOnDisk};
 use ac2_traces::spl_log::SplLogInfo;
 
 use super::Control;
+use crate::autosave::{LogSpec, Resume};
 use crate::jobs::spl::LeqSetup;
 use crate::leq_history;
 use crate::leq_log::{self, LeqLog};
@@ -94,29 +96,39 @@ impl Control {
             windows,
             alarms: prev.map(|p| p.alarms).unwrap_or_default(),
         });
+        // A new log is a change to the autosave (its file is named in the manifest).
+        self.autosave_changed();
     }
 
     /// Loads `rows` as the log of SPL measurement `id` (a loaded session's).
     pub(super) fn set_spl_log(&mut self, id: MeasId, log: LeqLog) {
         self.spl_logs.insert(id, Arc::new(Mutex::new(log)));
+        self.autosave_changed();
     }
 
     /// Forgets a measurement's logs and its entity.
     pub(super) fn drop_spl_log(&mut self, id: MeasId) {
-        self.spl_logs.remove(&id);
+        let had = self.spl_logs.remove(&id).is_some();
         self.spl_prev_logs.remove(&id);
         if self.spl_log_entity(id).is_some() {
             self.commit(Change::SplLog(Patch::Deleted(id)));
+        }
+        if had {
+            self.autosave_changed();
         }
     }
 
     /// What a starting SPL job needs: the log and the judgements the entity holds.
     pub(super) fn leq_setup(&mut self, id: MeasId) -> LeqSetup {
-        let log = self
-            .spl_logs
-            .entry(id)
-            .or_insert_with(|| Arc::new(Mutex::new(LeqLog::default())))
-            .clone();
+        let log = match self.spl_logs.get(&id) {
+            Some(l) => l.clone(),
+            None => {
+                let l: crate::leq_log::SharedLog = Arc::new(Mutex::new(LeqLog::default()));
+                self.spl_logs.insert(id, l.clone());
+                self.autosave_changed();
+                l
+            }
+        };
         LeqSetup {
             log,
             to_control: self.s.to_self.clone(),
@@ -306,29 +318,28 @@ impl Control {
             windows,
             alarms: Vec::new(),
         });
+        self.autosave_changed();
         Ok(ReplyBody::Ack {
             rev: self.store.rev(),
         })
     }
 
-    /// Which log and how many rows per SPL meter, for the autosave's change check.
-    pub(super) fn spl_log_totals(&self) -> Vec<(MeasId, u64, u64)> {
-        let mut v: Vec<(MeasId, u64, u64)> = self
+    /// Which log each SPL meter has, for the autosave's change check: a log's growth is
+    /// not a change (the autosave appends it), another log is.
+    pub(super) fn spl_log_ids(&self) -> Vec<(MeasId, u64)> {
+        let mut v: Vec<(MeasId, u64)> = self
             .spl_logs
             .iter()
-            .map(|(id, l)| {
-                let l = leq_log::lock(l);
-                (*id, l.epoch(), l.total())
-            })
+            .map(|(id, l)| (*id, leq_log::lock(l).id()))
             .collect();
-        v.sort_by_key(|(id, ..)| *id);
+        v.sort_by_key(|(id, _)| *id);
         v
     }
 
-    /// Every SPL meter's log as a session saves it.
-    pub(super) fn saved_spl_logs(&self) -> Vec<SavedSplLog> {
+    /// Each SPL meter's log with what its file header names, by measurement.
+    fn spl_log_infos(&self) -> Vec<(SplLogInfo, &crate::leq_log::SharedLog)> {
         let st = self.store.state();
-        let mut out: Vec<SavedSplLog> = self
+        let mut out: Vec<_> = self
             .spl_logs
             .iter()
             .filter_map(|(id, log)| {
@@ -338,18 +349,47 @@ impl Control {
                     .iter()
                     .find(|i| i.channel == config.input)
                     .and_then(|i| i.mic.clone());
-                Some(SavedSplLog {
-                    info: SplLogInfo {
+                Some((
+                    SplLogInfo {
                         meas: *id,
                         name,
                         input: config.input,
                         mic,
                     },
-                    rows: leq_log::lock(log).rows(),
-                })
+                    log,
+                ))
             })
             .collect();
-        out.sort_by_key(|l| l.info.meas);
+        out.sort_by_key(|(i, _)| i.meas);
         out
+    }
+
+    /// Every SPL meter's log as a session saves it.
+    pub(super) fn saved_spl_logs(&self) -> Vec<SavedSplLog> {
+        self.spl_log_infos()
+            .into_iter()
+            .map(|(info, log)| SavedSplLog {
+                info,
+                rows: leq_log::lock(log).rows(),
+            })
+            .collect()
+    }
+
+    /// Every SPL meter's log for the autosave to keep on disk; `resume` says where the
+    /// files of restored logs stand.
+    pub(super) fn spl_log_specs(&self, resume: &[SplLogOnDisk]) -> Vec<LogSpec> {
+        self.spl_log_infos()
+            .into_iter()
+            .map(|(info, log)| LogSpec {
+                meas: info.meas,
+                log: log.clone(),
+                resume: resume.iter().find(|r| r.meas == info.meas).map(|r| Resume {
+                    file: r.file.clone(),
+                    rows: r.rows,
+                    complete_len: r.complete_len,
+                }),
+                info,
+            })
+            .collect()
     }
 }

@@ -31,7 +31,7 @@ silence: it adds neither energy nor measured time.
 Every block becomes a **log row**: wall time of its start, `m`, LAeq,1s, LCeq,1s, LZeq,1s
 (dBFS, `10·lg(2·e/m)`, decision 4a), and the sensitivity in force (dB SPL of 0 dBFS, if
 calibrated). The log is the record: it lives with the meter in the daemon (last 48 h), is
-saved with the session and the autosave (session format 6, one CSV per meter), and is
+saved with the session and the autosave (one CSV per meter, which the autosave appends to), and is
 exported with `spl.log_get` (`ac2 spl leq export`). Frozen or reset meters keep logging:
 freeze and reset are display operations, a compliance record is not.
 

@@ -741,7 +741,8 @@ fn session_round_trip_and_generations() {
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(files, vec![format!("{}-4.csv", s2.saved_at.0)]);
+    assert_eq!(files.len(), 1);
+    assert!(files[0].starts_with("4-"), "{files:?}");
     let logs: Vec<_> = std::fs::read_dir(dir.join("spl"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -753,6 +754,77 @@ fn session_round_trip_and_generations() {
     assert_eq!(listed[0].0, "show");
 }
 
+/// The autosave's in-place save: an unchanged trace's file is not written again, a renamed
+/// trace gets a new file, the replaced manifest stays as the previous one with its files,
+/// and a linked SPL log (appended to by its owner, cut short at its end) is named, kept and
+/// read back up to its last whole line.
+#[test]
+fn autosave_in_place_writes_only_what_changed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("autosave");
+    let mut s = session_sample();
+    let log = s.spl_logs.pop().unwrap();
+    std::fs::create_dir_all(dir.join(session::SPL_DIR)).unwrap();
+    let rel = format!("{}/2-live.csv", session::SPL_DIR);
+    let mut text = ac2_traces::spl_log::export_csv(&log.info, &log.rows);
+    let whole_len = text.len();
+    text.push_str("2026-09-21T14:17:2"); // An append cut short.
+    std::fs::write(dir.join(&rel), &text).unwrap();
+    let linked = [session::SavedSplLogFile {
+        meas: MeasId(2),
+        file: rel.clone(),
+    }];
+    let first = session::save_autosave(&dir, &s, &linked).unwrap();
+    assert!(!dir.join(session::PREV_MANIFEST).exists());
+    let stamp = |f: &str| {
+        let m = std::fs::metadata(dir.join(f)).unwrap();
+        (m.modified().unwrap(), m.len())
+    };
+    let before: Vec<_> = first.traces.iter().map(|t| stamp(&t.file)).collect();
+    let log_before = stamp(&rel);
+
+    // The same content again: the same files, untouched.
+    s.saved_at = WallNs(s.saved_at.0 + 1);
+    let second = session::save_autosave(&dir, &s, &linked).unwrap();
+    assert_eq!(
+        first.traces.iter().map(|t| &t.file).collect::<Vec<_>>(),
+        second.traces.iter().map(|t| &t.file).collect::<Vec<_>>()
+    );
+    let after: Vec<_> = second.traces.iter().map(|t| stamp(&t.file)).collect();
+    assert_eq!(before, after);
+    assert_eq!(stamp(&rel), log_before);
+    let prev = session::read_manifest_named(&dir, session::PREV_MANIFEST).unwrap();
+    assert_eq!(prev.saved_at, first.saved_at);
+
+    // A rename: that trace's file is new, the other one stays; the previous manifest's
+    // files are kept for it.
+    s.saved_at = WallNs(s.saved_at.0 + 1);
+    s.traces[0].meta.edit.name = "renamed".into();
+    let third = session::save_autosave(&dir, &s, &linked).unwrap();
+    assert_ne!(third.traces[0].file, second.traces[0].file);
+    assert_eq!(third.traces[1].file, second.traces[1].file);
+    assert!(dir.join(&second.traces[0].file).exists());
+    let (old, _) = session::load_named(&dir, session::PREV_MANIFEST).unwrap();
+    assert_eq!(old.traces[0].meta.edit.name, first.traces[0].meta.edit.name);
+    // One save later the file only the oldest manifest named is gone.
+    s.saved_at = WallNs(s.saved_at.0 + 1);
+    session::save_autosave(&dir, &s, &linked).unwrap();
+    assert!(!dir.join(&second.traces[0].file).exists());
+
+    let (back, on_disk) = session::load_named(&dir, session::MANIFEST).unwrap();
+    assert_eq!(back.traces[0].meta.edit.name, "renamed");
+    assert_eq!(back.spl_logs[0].rows.len(), log.rows.len());
+    assert_eq!(
+        on_disk,
+        vec![session::SplLogOnDisk {
+            meas: MeasId(2),
+            file: rel,
+            rows: log.rows.len() as u64,
+            complete_len: whole_len as u64,
+        }]
+    );
+}
+
 #[test]
 fn session_refusals() {
     let tmp = tempfile::tempdir().unwrap();
@@ -760,18 +832,18 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (no Leq windows, no SPL logs) is refused with its
+    // A session of the previous format (files named by generation) is refused with its
     // version named, never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 7", "\"version\": 6")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 8", "\"version\": 7")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 6
+            found: 7
         }
     );
-    assert!(e.to_string().contains("reads version 7 only"), "{e}");
+    assert!(e.to_string().contains("reads version 8 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

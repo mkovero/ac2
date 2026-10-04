@@ -15,7 +15,7 @@ impl Control {
         (
             self.saved_measurements(),
             self.store.state().traces.clone(),
-            self.spl_log_totals(),
+            self.spl_log_ids(),
         )
     }
 
@@ -37,7 +37,7 @@ impl Control {
             autosave::skip_restore(&dir);
             return;
         }
-        let Some((data, from)) = autosave::restore(&dir) else {
+        let Some(autosave::Restored { data, from, logs }) = autosave::restore(&dir) else {
             tracing::info!("autosave: nothing to restore in {}", dir.display());
             return;
         };
@@ -55,13 +55,14 @@ impl Control {
                     epoch.0
                 );
                 let fp = self.fingerprint();
+                let specs = self.spl_log_specs(&logs);
                 if let Some(a) = self.autosave.as_mut() {
-                    a.restored(fp);
+                    a.restored(fp, specs);
                 }
                 self.set_autosave(AutosaveState::Saved, Some(at));
             }
             Err(e) => {
-                let to = autosave::set_aside(&from, "damaged");
+                let to = autosave::set_aside(&dir, "damaged");
                 tracing::warn!(
                     "autosave in {} not restored: {}; set aside as {}",
                     from.display(),
@@ -95,7 +96,7 @@ impl Control {
 
     /// The debounce ran out: hands the current state to the write thread.
     pub(super) fn autosave_write(&mut self) {
-        let data = match self.session_data() {
+        let data = match self.session_data(false) {
             Ok(d) => d,
             Err(e) => {
                 let saved_at = self.store.state().autosave.saved_at;
@@ -107,10 +108,11 @@ impl Control {
             }
         };
         let fp = self.fingerprint();
+        let specs = self.spl_log_specs(&[]);
         let Some(a) = self.autosave.as_mut() else {
             return;
         };
-        if !a.write(data, fp) {
+        if !a.write(data, fp, specs) {
             let cur = self.store.state().autosave.clone();
             if cur.state == AutosaveState::Pending {
                 self.set_autosave(AutosaveState::Saved, cur.saved_at);
@@ -144,7 +146,9 @@ impl Control {
             return;
         };
         let data = if a.busy() || self.store.state().autosave.state != AutosaveState::Saved {
-            self.session_data().ok().map(|d| (d, self.fingerprint()))
+            self.session_data(false)
+                .ok()
+                .map(|d| (d, self.fingerprint(), self.spl_log_specs(&[])))
         } else {
             None
         };

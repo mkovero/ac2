@@ -2,8 +2,9 @@
 //!
 //! ```text
 //! <dir>/session.json                 manifest (format, version, measurements, trace metadata)
-//! <dir>/traces/<generation>-<id>.csv one ac2 CSV per trace (columns; header repeats metadata)
-//! <dir>/spl/<generation>-<meas>.csv  one per-second log per SPL meter ([`crate::spl_log`])
+//! <dir>/session.prev.json            the autosave's previous manifest ([`save_autosave`])
+//! <dir>/traces/<id>-<hash>.csv       one ac2 CSV per trace (columns; header repeats metadata)
+//! <dir>/spl/<name>.csv               one per-second log per SPL meter ([`crate::spl_log`])
 //! ```
 //!
 //! A sweep trace's CSV holds all of it: distortion curves as columns, analysis facts in its
@@ -11,11 +12,16 @@
 //! to a trace after capture keeps its points in the manifest (`mic_curve_points`), so the
 //! trace reads the same after the calibration store changed.
 //!
-//! The manifest names the trace files it belongs to, and every save writes its trace files
-//! under a new generation before it replaces the manifest (write to a temporary file, then
-//! rename). A reader therefore sees either the old session or the new one, never a mix,
-//! even if a save is interrupted; files of older generations are removed after the
-//! manifest is in place.
+//! The manifest names the files it belongs to. A trace file is named by a hash of its
+//! content, so it never changes once written: a save writes only the trace files that are
+//! not there yet, then replaces the manifest (write to a temporary file, then rename). A
+//! reader therefore sees either the old session or the new one, never a mix, even if a save
+//! is interrupted; files no manifest names are removed after the manifest is in place.
+//!
+//! The autosave keeps its SPL logs as files that grow a line at a time (the daemon appends
+//! to them between saves); its manifest names them and a save leaves them alone. A log's
+//! last line may therefore be cut short by a power cut, which a load reads past
+//! ([`spl_log::import_csv`]).
 //!
 //! The manifest carries `format: "ac2-session"` and `version`. A file of another version is
 //! refused with that version named — there is no migration and no best-effort read.
@@ -47,11 +53,14 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
+/// The autosave's previous manifest, beside [`MANIFEST`].
+pub const PREV_MANIFEST: &str = "session.prev.json";
 const TRACE_DIR: &str = "traces";
-const SPL_DIR: &str = "spl";
+/// Subdirectory of the SPL logs.
+pub const SPL_DIR: &str = "spl";
 
 /// A measurement as saved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,6 +137,19 @@ pub struct SavedSplLog {
     pub info: SplLogInfo,
     /// Rows, oldest first.
     pub rows: Vec<SplLogRow>,
+}
+
+/// Where a loaded SPL log came from, for appending to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplLogOnDisk {
+    /// SPL measurement.
+    pub meas: MeasId,
+    /// Log file, relative to the session directory.
+    pub file: String,
+    /// Rows read.
+    pub rows: u64,
+    /// Bytes up to the end of the last whole line.
+    pub complete_len: u64,
 }
 
 /// A whole session in memory.
@@ -229,6 +251,24 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), SessionError> {
     })
 }
 
+/// FNV-1a, 64 bits: names a trace file by its content. Only equal content must give equal
+/// names (a collision among a session's few traces is out of reach at 64 bits), and the
+/// algorithm is fixed so that names stay the same across builds.
+fn content_hash(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// How [`save_into`] treats the SPL logs and the manifest it replaces.
+enum Mode<'a> {
+    /// Every log written out whole; the old manifest goes.
+    Whole,
+    /// The logs are `linked` files kept up by the caller; the old manifest becomes
+    /// [`PREV_MANIFEST`] and its files stay.
+    Autosave { linked: &'a [SavedSplLogFile] },
+}
+
 /// Saves `s` into `dir` (created if missing). Returns the manifest written.
 pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     if dir.exists() && !dir.is_dir() {
@@ -241,6 +281,25 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
             return Err(SessionError::NotASession(dir.to_owned()));
         }
     }
+    save_into(dir, s, &Mode::Whole)
+}
+
+/// Saves `s` into the autosave directory `dir` in place: the SPL logs are the `linked`
+/// files the caller appends to (`s.spl_logs` are written whole as usual), the manifest
+/// replaced becomes [`PREV_MANIFEST`], and only files neither manifest names are removed.
+/// A save of what is already there writes the manifest and nothing else.
+pub fn save_autosave(
+    dir: &Path,
+    s: &Session,
+    linked: &[SavedSplLogFile],
+) -> Result<Manifest, SessionError> {
+    if dir.exists() && !dir.is_dir() {
+        return Err(SessionError::NotASession(dir.to_owned()));
+    }
+    save_into(dir, s, &Mode::Autosave { linked })
+}
+
+fn save_into(dir: &Path, s: &Session, mode: &Mode<'_>) -> Result<Manifest, SessionError> {
     let traces_dir = dir.join(TRACE_DIR);
     fs::create_dir_all(&traces_dir).map_err(io(&traces_dir))?;
     let spl_dir = dir.join(SPL_DIR);
@@ -258,10 +317,22 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
             file,
         });
     }
+    if let Mode::Autosave { linked } = mode {
+        logs.extend(linked.iter().cloned());
+    }
     let mut saved = Vec::with_capacity(s.traces.len());
     for t in &s.traces {
-        let file = format!("{TRACE_DIR}/{generation}-{}.csv", t.meta.id.0);
-        write_atomic(&dir.join(&file), export_csv(t).as_bytes())?;
+        let csv = export_csv(t);
+        let file = format!(
+            "{TRACE_DIR}/{}-{:016x}.csv",
+            t.meta.id.0,
+            content_hash(csv.as_bytes())
+        );
+        let p = dir.join(&file);
+        // A file of that name was renamed into place whole, with this content.
+        if !p.is_file() {
+            write_atomic(&p, csv.as_bytes())?;
+        }
         saved.push(SavedTrace {
             meta: t.meta.clone(),
             grid: t.grid.clone(),
@@ -281,14 +352,20 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
         path: dir.join(MANIFEST),
         msg: e.to_string(),
     })?;
-    write_atomic(&dir.join(MANIFEST), &json)?;
-    // Older generations are unreferenced now.
-    let keep: Vec<String> = m
-        .traces
-        .iter()
-        .map(|t| t.file.clone())
-        .chain(m.spl_logs.iter().map(|l| l.file.clone()))
-        .collect();
+    let cur = dir.join(MANIFEST);
+    let mut keep = files_of(&m);
+    if let Mode::Autosave { .. } = mode {
+        let prev = dir.join(PREV_MANIFEST);
+        // A rename, not a copy: the previous manifest is not written again. Should the
+        // write below not complete, the previous one is what a restore finds.
+        if cur.is_file() {
+            fs::rename(&cur, &prev).map_err(io(&prev))?;
+        }
+        if let Ok(pm) = read_manifest_named(dir, PREV_MANIFEST) {
+            keep.extend(files_of(&pm));
+        }
+    }
+    write_atomic(&cur, &json)?;
     for (sub, d) in [(TRACE_DIR, &traces_dir), (SPL_DIR, &spl_dir)] {
         if let Ok(rd) = fs::read_dir(d) {
             for e in rd.flatten() {
@@ -306,9 +383,24 @@ pub fn save(dir: &Path, s: &Session) -> Result<Manifest, SessionError> {
     Ok(m)
 }
 
+/// The files a manifest names.
+fn files_of(m: &Manifest) -> Vec<String> {
+    m.traces
+        .iter()
+        .map(|t| t.file.clone())
+        .chain(m.spl_logs.iter().map(|l| l.file.clone()))
+        .collect()
+}
+
 /// Reads only the manifest of `dir`, checking format and version first.
 pub fn read_manifest(dir: &Path) -> Result<Manifest, SessionError> {
-    let p = dir.join(MANIFEST);
+    read_manifest_named(dir, MANIFEST)
+}
+
+/// Reads the manifest `name` ([`MANIFEST`] or [`PREV_MANIFEST`]) of `dir`, checking format
+/// and version first.
+pub fn read_manifest_named(dir: &Path, name: &str) -> Result<Manifest, SessionError> {
+    let p = dir.join(name);
     if !p.exists() {
         return Err(if dir.exists() {
             SessionError::NotASession(dir.to_owned())
@@ -343,13 +435,19 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, SessionError> {
 
 /// Loads the session in `dir`.
 pub fn load(dir: &Path) -> Result<Session, SessionError> {
-    let m = read_manifest(dir)?;
+    load_named(dir, MANIFEST).map(|(s, _)| s)
+}
+
+/// Loads the session the manifest `name` of `dir` describes, with where each SPL log was
+/// read from.
+pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>), SessionError> {
+    let m = read_manifest_named(dir, name)?;
     let mut traces = Vec::with_capacity(m.traces.len());
     for t in &m.traces {
         let f = &t.file;
         if f.contains("..") || Path::new(f).is_absolute() {
             return Err(SessionError::Corrupt {
-                path: dir.join(MANIFEST),
+                path: dir.join(name),
                 msg: format!("trace file {f:?} is outside the session"),
             });
         }
@@ -373,7 +471,7 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
             (Some(mc), Some(p)) => {
                 Some(
                     crate::mic::correction(p, mc.f_norm.0).map_err(|e| SessionError::Corrupt {
-                        path: dir.join(MANIFEST),
+                        path: dir.join(name),
                         msg: format!("trace {}: mic curve: {e}", t.meta.id),
                     })?,
                 )
@@ -381,7 +479,7 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
             (None, None) => None,
             _ => {
                 return Err(SessionError::Corrupt {
-                    path: dir.join(MANIFEST),
+                    path: dir.join(name),
                     msg: format!("trace {}: mic curve and its points disagree", t.meta.id),
                 });
             }
@@ -395,17 +493,18 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
         });
     }
     let mut spl_logs = Vec::with_capacity(m.spl_logs.len());
+    let mut on_disk = Vec::with_capacity(m.spl_logs.len());
     for l in &m.spl_logs {
         let f = &l.file;
         if f.contains("..") || Path::new(f).is_absolute() {
             return Err(SessionError::Corrupt {
-                path: dir.join(MANIFEST),
+                path: dir.join(name),
                 msg: format!("SPL log file {f:?} is outside the session"),
             });
         }
         let Some(sm) = m.measurements.iter().find(|sm| sm.id == l.meas) else {
             return Err(SessionError::Corrupt {
-                path: dir.join(MANIFEST),
+                path: dir.join(name),
                 msg: format!(
                     "SPL log of measurement {} which is not in the session",
                     l.meas
@@ -414,7 +513,7 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
         };
         let ac2_proto::model::MeasKind::Spl { config } = &sm.config.kind else {
             return Err(SessionError::Corrupt {
-                path: dir.join(MANIFEST),
+                path: dir.join(name),
                 msg: format!(
                     "SPL log of measurement {}, which is not an SPL meter",
                     l.meas
@@ -423,10 +522,16 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
         };
         let p = dir.join(f);
         let bytes = fs::read(&p).map_err(io(&p))?;
-        let rows = spl_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
+        let read = spl_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
             path: p.clone(),
             msg: e.to_string(),
         })?;
+        on_disk.push(SplLogOnDisk {
+            meas: l.meas,
+            file: f.clone(),
+            rows: read.rows.len() as u64,
+            complete_len: read.complete_len as u64,
+        });
         spl_logs.push(SavedSplLog {
             info: SplLogInfo {
                 meas: l.meas,
@@ -434,15 +539,18 @@ pub fn load(dir: &Path) -> Result<Session, SessionError> {
                 input: config.input,
                 mic: None,
             },
-            rows,
+            rows: read.rows,
         });
     }
-    Ok(Session {
-        saved_at: m.saved_at,
-        measurements: m.measurements,
-        spl_logs,
-        traces,
-    })
+    Ok((
+        Session {
+            saved_at: m.saved_at,
+            measurements: m.measurements,
+            spl_logs,
+            traces,
+        },
+        on_disk,
+    ))
 }
 
 /// Sessions directly under `root`, by name; directories without a readable manifest of

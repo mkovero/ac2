@@ -7,6 +7,7 @@
 //! the lock only to copy a row in or out.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ac2_core::leq::{LogTotal, RollingLeq, Second};
@@ -22,8 +23,11 @@ const EXACT_EVERY: u32 = 3600;
 
 /// One meter's log: the newest [`SplLogPage::RETAINED_ROWS`] rows and how many were logged,
 /// with the whole log's total kept as rows come and go.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct LeqLog {
+    /// Unique among the logs of this process: the autosave tells logs apart by it, the
+    /// one that replaced a meter's log included.
+    id: u64,
     rows: VecDeque<SplLogRow>,
     /// Whole seconds without a row before each row (none before the oldest).
     missing_before: VecDeque<u64>,
@@ -60,7 +64,28 @@ pub(crate) fn lock(l: &SharedLog) -> std::sync::MutexGuard<'_, LeqLog> {
     l.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+impl Default for LeqLog {
+    fn default() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            rows: VecDeque::new(),
+            missing_before: VecDeque::new(),
+            missing: 0,
+            total: 0,
+            sum: LogTotal::default(),
+            trimmed_since_exact: 0,
+            epoch: 0,
+        }
+    }
+}
+
 impl LeqLog {
+    /// Which log this is, unique in the process.
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
     /// A log holding `rows` (a loaded session's), numbered from 0.
     pub(crate) fn from_rows(rows: Vec<SplLogRow>) -> Self {
         let mut l = Self::default();
@@ -152,6 +177,14 @@ impl LeqLog {
     /// Every row held, oldest first.
     pub(crate) fn rows(&self) -> Vec<SplLogRow> {
         self.rows.iter().copied().collect()
+    }
+
+    /// The rows numbered `from` on (row numbers count from the log's first row; rows no
+    /// longer held are left out), oldest first.
+    pub(crate) fn rows_from(&self, from: u64) -> Vec<SplLogRow> {
+        let oldest = self.total - self.rows.len() as u64;
+        let skip = usize::try_from(from.saturating_sub(oldest)).unwrap_or(usize::MAX);
+        self.rows.iter().skip(skip).copied().collect()
     }
 
     /// The newest `n` rows held (or all), oldest first, and whether the first of them is

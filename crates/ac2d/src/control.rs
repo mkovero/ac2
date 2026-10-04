@@ -234,12 +234,7 @@ pub(crate) struct Control {
     spl_logs: HashMap<MeasId, crate::leq_log::SharedLog>,
     /// The log `spl.log_new` ended last, per SPL meter.
     spl_prev_logs: HashMap<MeasId, crate::leq_log::LeqLog>,
-    /// When growing SPL logs next count as a change for the autosave.
-    next_log_save: Instant,
 }
-
-/// How often a growing SPL log is a change the autosave writes.
-const LOG_SAVE_EVERY: Duration = Duration::from_secs(60);
 
 const MAX_DELAY_S: f64 = 10.0;
 /// Largest difference between the fast and slow input mean squares a calibration accepts,
@@ -479,7 +474,6 @@ impl Control {
             restore,
             spl_logs: HashMap::new(),
             spl_prev_logs: HashMap::new(),
-            next_log_save: Instant::now() + LOG_SAVE_EVERY,
             s,
         }
     }
@@ -516,11 +510,6 @@ impl Control {
             if let Some(d) = self.autosave.as_ref().and_then(Autosaver::due) {
                 wake = wake.min(d);
             }
-            if now >= self.next_log_save {
-                self.next_log_save = now + LOG_SAVE_EVERY;
-                self.autosave_changed();
-            }
-            wake = wake.min(self.next_log_save);
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
                 Ok(ControlMsg::Request {
                     routing_id,

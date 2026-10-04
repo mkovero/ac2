@@ -130,7 +130,7 @@ fn traces_survive_a_restart() {
     let saved_at = saved.saved_at.expect("saved_at");
     assert_eq!(state(&mut c).autosave, saved);
     assert!(dir.path().join("autosave/session.json").exists());
-    assert!(!dir.path().join("autosave.prev").exists());
+    assert!(!dir.path().join("autosave/session.prev.json").exists());
     drop((c, sub));
     h.shutdown();
 
@@ -162,7 +162,11 @@ fn traces_survive_a_restart() {
         a.state == AutosaveState::Saved && a.saved_at != Some(saved_at)
     });
     assert!(again.saved_at.expect("saved_at") > saved_at);
-    let prev = ac2_traces::session::read_manifest(&dir.path().join("autosave.prev")).unwrap();
+    let prev = ac2_traces::session::read_manifest_named(
+        &dir.path().join("autosave"),
+        ac2_traces::session::PREV_MANIFEST,
+    )
+    .unwrap();
     assert_eq!(prev.saved_at, saved_at);
     assert_eq!(prev.traces[0].meta.edit.name, "kept");
     let cur = ac2_traces::session::read_manifest(&dir.path().join("autosave")).unwrap();
@@ -320,13 +324,22 @@ fn log_page(c: &mut Client, meas: MeasId) -> SplLogPage {
     }
 }
 
+/// The SPL log file the autosave's manifest names, and its rows.
+fn spl_file(dir: &Path) -> (String, usize) {
+    let (s, on_disk) =
+        ac2_traces::session::load_named(&dir.join("autosave"), ac2_traces::session::MANIFEST)
+            .unwrap();
+    (on_disk[0].file.clone(), s.spl_logs[0].rows.len())
+}
+
 /// An SPL meter's per-second log is in the autosave: after a restart the meter, its Leq
-/// windows and every logged second are back.
+/// windows and every logged second are back. The log growing is not an autosave write: the
+/// rows are appended to one file, which carries on after the restart.
 #[test]
 fn spl_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let (h, backend) = start("autosave-spl", dir.path(), true);
-    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    let (mut c, sub) = connect(&h, &[b"evt"]);
     c.ok(Command::SessionOpen {
         config: session(false),
     });
@@ -334,6 +347,7 @@ fn spl_log_survives_a_restart() {
         config: spl("meter", 1),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
+    autosave_event(&sub, |a| a.state == AutosaveState::Saved);
     let mut d = driver(&backend);
     run(&mut d, 3.5);
     let deadline = Instant::now() + T;
@@ -346,8 +360,22 @@ fn spl_log_survives_a_restart() {
         run(&mut d, 0.1);
     };
     assert!(logged.rows.iter().all(|r| r.measured == Seconds(1.0)));
-    drop(c);
+    // Logging seconds is no change to write.
+    assert!(
+        sub.event(Duration::from_secs(2), |e| matches!(
+            e.change,
+            Change::Autosave(_)
+        ))
+        .is_none(),
+        "an autosave while only the log grew"
+    );
+    drop((c, sub));
     h.shutdown();
+    let (file, rows) = spl_file(dir.path());
+    assert!(
+        rows >= logged.rows.len(),
+        "the last rows are written at shutdown"
+    );
 
     let (h, _backend) = start("autosave-spl-2", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
@@ -394,6 +422,11 @@ fn spl_log_survives_a_restart() {
     assert!(run_after.until.0 > logged.rows[logged.rows.len() - 1].start.0);
     assert!(run_after.gaps.0 >= 0.0);
     assert!(!run_after.trimmed);
+    let total = log_page(&mut c, MeasId(1)).total;
     drop((c, sub));
     h.shutdown();
+    // The same file, appended to across the restarts, holds every row.
+    let (again, rows) = spl_file(dir.path());
+    assert_eq!(again, file);
+    assert_eq!(rows as u64, total);
 }

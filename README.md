@@ -124,10 +124,10 @@ own directories:
 | what | Linux | macOS | Windows |
 |---|---|---|---|
 | config: calibration store (`calibrations.json`: sensitivity calibrations, the mic library, each input's mic and active curve), UI preferences (`ui.toml`), key bindings (`keys.toml`), network keys (`server.key`, `authorized_clients`, `keys/`) | `~/.config/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\config` |
-| data: saved sessions (`sessions/<name>/`), the daemon's autosave (`autosave/`, the previous one in `autosave.prev/`) | `~/.local/share/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\data` |
+| data: saved sessions (`sessions/<name>/`), the daemon's autosave (`autosave/`, the previous manifest in `autosave/session.prev.json`) | `~/.local/share/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\data` |
 
 A session directory holds `session.json` (measurements, trace metadata, slots), one CSV per
-trace and one per-second log per SPL meter (`spl/`). The autosave is the same format.
+trace and one per-second log per SPL meter (`spl/`). The autosave is the same format, updated in place: unchanged traces are not written again and SPL logs are appended to.
 Autosaves and calibration stores this build cannot read are set aside, never deleted:
 `autosave.v<N>/` (another session format), `autosave.damaged/`, `autosave.unrestored/`
 (what `ac2d --no-restore` did not load) and `calibrations.json.v<N>` (another store version:

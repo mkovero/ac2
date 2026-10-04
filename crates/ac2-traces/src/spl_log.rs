@@ -86,9 +86,9 @@ fn level(v: f64) -> String {
     }
 }
 
-/// One header and one row per second.
-pub fn export_csv(info: &SplLogInfo, rows: &[SplLogRow]) -> String {
-    let mut s = String::with_capacity(160 + rows.len() * 96);
+/// The header lines, through the column header, for `info`.
+pub fn header(info: &SplLogInfo) -> String {
+    let mut s = String::with_capacity(160);
     s.push_str(HEADER_LINE);
     s.push('\n');
     s.push_str(&format!("# meas: {}\n", info.meas.0));
@@ -100,22 +100,36 @@ pub fn export_csv(info: &SplLogInfo, rows: &[SplLogRow]) -> String {
     }
     s.push_str(COLUMNS);
     s.push('\n');
+    s
+}
+
+/// Appends one row's line, newline included, to `s`.
+pub fn push_row(s: &mut String, r: &SplLogRow) {
+    use std::fmt::Write as _;
+    let (unit, off) = match r.sensitivity {
+        Some(Db(o)) => ("dB SPL", o),
+        None => ("dBFS", 0.0),
+    };
+    let _ = writeln!(
+        s,
+        "{},{},{},{unit},{},{},{},{}",
+        utc_iso(r.start.0),
+        r.start.0,
+        r.measured.0,
+        level(r.laeq.0 + off),
+        level(r.lceq.0 + off),
+        level(r.lzeq.0 + off),
+        r.sensitivity
+            .map_or_else(String::new, |d| format!("{:.4}", d.0)),
+    );
+}
+
+/// One header and one row per second.
+pub fn export_csv(info: &SplLogInfo, rows: &[SplLogRow]) -> String {
+    let mut s = header(info);
+    s.reserve(rows.len() * 96);
     for r in rows {
-        let (unit, off) = match r.sensitivity {
-            Some(Db(o)) => ("dB SPL", o),
-            None => ("dBFS", 0.0),
-        };
-        s.push_str(&format!(
-            "{},{},{},{unit},{},{},{},{}\n",
-            utc_iso(r.start.0),
-            r.start.0,
-            r.measured.0,
-            level(r.laeq.0 + off),
-            level(r.lceq.0 + off),
-            level(r.lzeq.0 + off),
-            r.sensitivity
-                .map_or_else(String::new, |d| format!("{:.4}", d.0)),
-        ));
+        push_row(&mut s, r);
     }
     s
 }
@@ -128,9 +142,22 @@ fn parse_level(s: &str) -> Option<f64> {
     }
 }
 
-/// Reads rows back (the header lines are checked, not returned).
-pub fn import_csv(bytes: &[u8]) -> Result<Vec<SplLogRow>, SplLogError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| SplLogError::Header)?;
+/// A log read back.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SplLogRead {
+    /// Rows, oldest first.
+    pub rows: Vec<SplLogRow>,
+    /// Bytes up to the end of the last whole line: where an append carries on.
+    pub complete_len: usize,
+}
+
+/// Reads rows back (the header lines are checked, not returned). A log grows a line at a
+/// time and a power cut may keep only part of the last append, so an unterminated last line
+/// (and whatever follows the last newline, such as the zeros some file systems leave) is
+/// neither a row nor an error.
+pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
+    let complete_len = bytes.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let text = std::str::from_utf8(&bytes[..complete_len]).map_err(|_| SplLogError::Header)?;
     let mut lines = text.lines().enumerate();
     match lines.next() {
         Some((_, l)) if l.trim_end() == HEADER_LINE => {}
@@ -194,7 +221,7 @@ pub fn import_csv(bytes: &[u8]) -> Result<Vec<SplLogRow>, SplLogError> {
             msg: "no column header".into(),
         });
     }
-    Ok(rows)
+    Ok(SplLogRead { rows, complete_len })
 }
 
 #[cfg(test)]
@@ -254,7 +281,7 @@ mod tests {
             lines[7],
             "2026-09-21T14:17:26.000Z,1790000246000000000,0.25,dBFS,-inf,-90.1250,-80.0000,"
         );
-        let back = import_csv(csv.as_bytes()).expect("reads back");
+        let back = import_csv(csv.as_bytes()).expect("reads back").rows;
         assert_eq!(back.len(), 2);
         for (a, b) in back.iter().zip(rows()) {
             assert_eq!(a.start, b.start);
@@ -266,9 +293,38 @@ mod tests {
         }
     }
 
+    /// A log cut short by a power cut reads up to its last whole line and says where that
+    /// ends, so an append carries on from there.
+    #[test]
+    fn an_unterminated_last_line_is_left_out() {
+        let info = SplLogInfo {
+            meas: MeasId(1),
+            name: "m".into(),
+            input: 0,
+            mic: None,
+        };
+        let csv = export_csv(&info, &rows());
+        let whole = import_csv(csv.as_bytes()).expect("whole");
+        assert_eq!((whole.rows.len(), whole.complete_len), (2, csv.len()));
+        let one = csv.len() - csv.lines().last().expect("row").len() - 1;
+        for cut in [csv.len() - 1, csv.len() - 30, one + 1] {
+            let r = import_csv(&csv.as_bytes()[..cut]).expect("cut");
+            assert_eq!((r.rows.len(), r.complete_len), (1, one), "cut at {cut}");
+        }
+        let mut zeros = csv.clone().into_bytes();
+        zeros.truncate(one + 7);
+        zeros.extend([0u8; 300]);
+        let r = import_csv(&zeros).expect("zeros");
+        assert_eq!((r.rows.len(), r.complete_len), (1, one));
+        // A malformed whole line is damage, not a cut.
+        let bad = format!("{csv}x,1\n");
+        assert!(import_csv(bad.as_bytes()).is_err());
+    }
+
     #[test]
     fn refuses_what_it_did_not_write() {
         assert_eq!(import_csv(b"start,leq\n"), Err(SplLogError::Header));
+        assert_eq!(import_csv(HEADER_LINE.as_bytes()), Err(SplLogError::Header));
         let bad = format!("{HEADER_LINE}\n{COLUMNS}\n1,2,3\n");
         assert!(matches!(
             import_csv(bad.as_bytes()),

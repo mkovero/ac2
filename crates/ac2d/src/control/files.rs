@@ -101,8 +101,9 @@ impl Control {
             .collect()
     }
 
-    /// Everything a session holds, as of now.
-    pub(super) fn session_data(&self) -> Result<SessionData, ProtoError> {
+    /// Everything a session holds, as of now; without the SPL logs' rows unless
+    /// `with_logs` (the autosave keeps its logs on disk itself).
+    pub(super) fn session_data(&self, with_logs: bool) -> Result<SessionData, ProtoError> {
         let traces = self
             .store
             .state()
@@ -113,14 +114,18 @@ impl Control {
         Ok(SessionData {
             saved_at: WallNs(wall_ns()),
             measurements: self.saved_measurements(),
-            spl_logs: self.saved_spl_logs(),
+            spl_logs: if with_logs {
+                self.saved_spl_logs()
+            } else {
+                Vec::new()
+            },
             traces,
         })
     }
 
     pub(super) fn file_save(&self, r: &SessionRef) -> Result<ReplyBody, ProtoError> {
         let (name, dir) = self.session_path(r)?;
-        let data = self.session_data()?;
+        let data = self.session_data(true)?;
         let m = session::save(&dir, &data).map_err(session_err)?;
         tracing::info!("session saved to {}", dir.display());
         Ok(ReplyBody::SessionFile(info(&name, &dir, &m)))

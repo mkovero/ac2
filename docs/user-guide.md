@@ -473,13 +473,18 @@ Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
 
 | | |
 |---|---|
-| `autosave/` | the current autosave (a session directory) |
-| `autosave.prev/` | the one before it, a backup should the newest be damaged |
+| `autosave/` | the current autosave (a session directory); inside it `session.prev.json` is the one before, used should the newest be damaged |
 | `autosave.v<N>/` | an autosave of another session format, set aside at start, not deleted |
 | `autosave.damaged/` | an unreadable autosave, set aside |
 | `autosave.unrestored/` | what `ac2d --no-restore` did not load |
 
-Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.prev`.
+Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.unrestored`.
+
+The autosave is kind to SD cards and batteries: a write adds only the traces that changed,
+and an SPL meter's per-second log is a file the daemon appends to — the new rows every 30 s,
+synced to the card every 5 minutes and when the daemon stops. A running meter does not make
+the top bar say *saving…*. After a power cut a log is back up to its last few minutes; after
+a crash of the daemon alone, up to its last 30 s.
 `ac2d --no-restore` starts empty, `--autosave <dir>` puts the autosave elsewhere (one daemon
 per directory), `--no-autosave` keeps everything in memory only.
 

@@ -811,41 +811,56 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 ### 7.2 Session directory (`file.save` / `file.load`)
 
 ```
-<dir>/session.json                  manifest
-<dir>/traces/<generation>-<id>.csv  one ac2 CSV per trace (a sweep's whole data included)
-<dir>/spl/<generation>-<meas>.csv   one SPL log per SPL meter (§7.4)
+<dir>/session.json           manifest
+<dir>/traces/<id>-<hash>.csv one ac2 CSV per trace (a sweep's whole data included)
+<dir>/spl/<name>.csv         one SPL log per SPL meter (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 7, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 8, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], spl_logs:
 [{meas, file}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
-`meta.mic_curve`, a curve applied after capture). A save
-writes the trace files of a new generation first, then replaces `session.json` atomically
-(temporary file + rename), then removes older generations: a reader sees the old session
-or the new one, never a mix. `format` and `version` are read first; any other version is
+`meta.mic_curve`, a curve applied after capture). A trace
+file is named by its trace id and a 64-bit FNV-1a hash of its content, so it never changes
+once written. A save writes the trace files that are not there yet, then replaces
+`session.json` atomically (temporary file + rename), then removes the files no manifest
+names: a reader sees the old session or the new one, never a mix. An SPL log's
+unterminated last line (an append cut short, §7.3) is not read and is not an error.
+`format` and `version` are read first; any other version is
 refused (no migration). Trace files hold the unsmoothed columns; each trace's display
 smoothing is its `meta.edit.smoothing` (older versions — version 1 transfer captures could
 hold smoothed columns, version 2 named smoothing modes `power` / `complex` and had no
 spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impulse response
 in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a capture's
 curve by name only, without its label, file and content hash, version 6 had no Leq windows
-and no SPL logs — are refused). A directory that holds other files is never written into.
+and no SPL logs, version 7 named files by save generation and its autosave kept the
+previous one as a separate directory — are refused). A directory that holds other files is
+never written into.
 
 ### 7.3 Autosave
 
 A daemon started with an autosave directory (`ac2d` by default: `autosave` in the data
 directory; `--autosave <dir>`, `--no-autosave`) writes the measurements and traces there in
 the §7.2 format whenever they change: after 1.5 s without further changes, at most 10 s
-after the first unwritten one, off the control thread, and once more at shutdown. A
-growing SPL log is a change at most once a minute. A write
-that would not change what is on disk is skipped. Each write goes to `.<dir>.new` first;
-then `<dir>` becomes `<dir>.prev` and the new one `<dir>`, so a failed write never touches
-the last good autosave.
+after the first unwritten one, off the control thread, and once more at shutdown. A write
+that would not change what is on disk is skipped. `<dir>` is updated in place: a write adds
+only the trace files not there yet, renames `session.json` to `session.prev.json` (the
+backup) and puts the new manifest in place; files neither manifest names are removed. A
+failed or interrupted write therefore leaves the last good manifest.
 
-At start the daemon loads `<dir>` (else `<dir>.prev`) exactly as `file.load` does — disarmed,
-no owner, a new session epoch, no audio session opened — and logs what it restored. An
-autosave of another session format version is renamed to `<dir>.v<N>`, an unreadable one to
+Each SPL meter's per-second log is a file in `<dir>/spl/` that the daemon appends to: the
+new rows every 30 s, synced to the disk every 5 min, when the log ends or the meter goes,
+and at shutdown. A growing log is not a change to write (`spl.log_new`, a new meter or a
+loaded session is: the manifest names the new log's file). A file is written whole when its
+log starts, after a failed append, and once it holds a day of rows past the 48 h retention
+(then it keeps the retained rows). A power cut loses at most the last 5 min of a log; a
+daemon crash the last 30 s.
+
+At start the daemon loads `<dir>/session.json` (else `session.prev.json`, renaming a
+damaged `session.json` to `session.damaged.json`) exactly as `file.load` does — disarmed,
+no owner, a new session epoch, no audio session opened — logs what it restored, and carries
+on appending to the restored logs' files after their last whole line. An autosave of
+another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.
 `--no-restore` starts empty and moves the autosave to `<dir>.unrestored`.
 
