@@ -1129,7 +1129,7 @@ pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
 
 /// A 480-column TF frame. Columns 0..4 are thinned and 470.. out of band (NaN). Values
 /// are exactly representable so other languages can rebuild them bit for bit.
-pub fn tf_frame(eff_avg: bool) -> Frame {
+pub fn tf_frame() -> Frame {
     let n = 480;
     let valid = |i: usize| (4..470).contains(&i);
     let val = |i: usize, v: f32| if valid(i) { v } else { f32::NAN };
@@ -1151,7 +1151,6 @@ pub fn tf_frame(eff_avg: bool) -> Frame {
                 .map(|i| val(i, ((i * 15) % 720) as f32 * 0.5 - 180.0))
                 .collect(),
             coh: (0..n).map(|i| val(i, (i % 33) as f32 / 32.0)).collect(),
-            eff_avg: eff_avg.then(|| (0..n).map(|i| 8.0 + (i % 5) as f32).collect()),
             validity: (0..n)
                 .map(|i| {
                     if i < 4 {
@@ -1173,7 +1172,7 @@ pub fn frames() -> Vec<Frame> {
     let log_bins = g.remove(3);
     let bands = g.remove(1);
     vec![
-        tf_frame(true),
+        tf_frame(),
         Frame {
             stamp: stamp(None),
             data: FrameData::Ir(IrFrame {

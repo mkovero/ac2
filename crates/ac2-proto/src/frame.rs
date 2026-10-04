@@ -200,8 +200,6 @@ pub enum ArrayName {
     Phase,
     /// TF coherence γ².
     Coh,
-    /// TF model effective averages.
-    EffAvg,
     /// Validity bitmask.
     Validity,
     /// IR samples, linear.
@@ -249,8 +247,6 @@ pub enum Unit {
     Deg,
     /// γ², 0…1.
     Coherence,
-    /// Count (effective averages).
-    Count,
     /// Linear, full scale = 1.
     FullScale,
     /// Seconds.
@@ -611,8 +607,6 @@ pub struct TfFrame {
     pub phase: Vec<f32>,
     /// Coherence γ².
     pub coh: Vec<f32>,
-    /// Model effective averages, when published.
-    pub eff_avg: Option<Vec<f32>>,
     /// Validity per column.
     pub validity: Vec<ValidityMask>,
 }
@@ -996,9 +990,6 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             cols.push((desc(ArrayName::Mag, Unit::Db), Col::F(&f.mag)));
             cols.push((desc(ArrayName::Phase, Unit::Deg), Col::F(&f.phase)));
             cols.push((desc(ArrayName::Coh, Unit::Coherence), Col::F(&f.coh)));
-            if let Some(e) = &f.eff_avg {
-                cols.push((desc(ArrayName::EffAvg, Unit::Count), Col::F(e)));
-            }
             cols.push((
                 desc(ArrayName::Validity, Unit::Bitmask),
                 Col::U(mask_slice(&f.validity)),
@@ -1318,7 +1309,6 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             mag: a.f32(ArrayName::Mag, Unit::Db)?,
             phase: a.f32(ArrayName::Phase, Unit::Deg)?,
             coh: a.f32(ArrayName::Coh, Unit::Coherence)?,
-            eff_avg: a.opt_f32(ArrayName::EffAvg, Unit::Count)?,
             validity: a.mask(ArrayName::Validity)?,
         }),
         FrameMeta::Ir(meta) => FrameData::Ir(IrFrame {

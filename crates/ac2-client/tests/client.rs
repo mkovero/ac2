@@ -466,7 +466,7 @@ async fn forced_takeover_marks_lease_lost_and_drop_does_not_stop_new_owner() -> 
 }
 
 fn tf_with(f: &FakeDaemon, seq: u64, grid: Option<GridId>) -> Frame {
-    let mut fr = samples::tf_frame(false);
+    let mut fr = samples::tf_frame();
     fr.stamp = f.lock().stamp(seq, grid);
     fr
 }

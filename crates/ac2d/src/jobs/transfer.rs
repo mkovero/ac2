@@ -506,14 +506,12 @@ impl Analysis for Transfer {
             mic_curve: self.corr.is_some(),
         };
         let coh: Vec<f32> = f.coherence.iter().map(|v| *v as f32).collect();
-        let eff_avg: Option<Vec<f32>> = Some(f.eff_avg.iter().map(|v| *v as f32).collect());
         let raw = TfFrame {
             meas: self.meas,
             meta,
             mag: raw_mag,
             phase: raw_phase,
             coh,
-            eff_avg,
             validity,
         };
         match smoothed {

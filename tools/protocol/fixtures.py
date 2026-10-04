@@ -114,7 +114,6 @@ def tf_frame():
             (arr("mag", "db"), [val(i, -6.0 + i * 0.03125) for i in range(n)]),
             (arr("phase", "deg"), [val(i, ((i * 15) % 720) * 0.5 - 180.0) for i in range(n)]),
             (arr("coh", "coherence"), [val(i, (i % 33) / 32.0) for i in range(n)]),
-            (arr("eff_avg", "count"), [8.0 + (i % 5) for i in range(n)]),
             (
                 arr("validity", "bitmask", "u32"),
                 [THINNED if i < 4 else OUT_OF_BAND if i >= 470 else 0 for i in range(n)],

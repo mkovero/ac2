@@ -27,12 +27,11 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                 prop::collection::vec(any_f32_bits(), n),
                 prop::collection::vec(any_f32_bits(), n),
                 prop::collection::vec(any_f32_bits(), n),
-                prop::collection::vec(any_f32_bits(), if eff { n } else { 0 }),
                 prop::collection::vec(0u32..(1 << 9), n),
                 Just((seq, meas, eff, prot)),
             )
         })
-        .prop_map(|(mag, phase, coh, e, val, (seq, meas, eff, prot))| {
+        .prop_map(|(mag, phase, coh, val, (seq, meas, eff, prot))| {
             let mut stamp = samples::stamp(Some(samples::log_grid()));
             stamp.seq = seq;
             stamp.protection = ProtectionFlags(prot);
@@ -49,7 +48,6 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                     mag,
                     phase,
                     coh,
-                    eff_avg: eff.then_some(e),
                     validity: val.into_iter().map(frame::ValidityMask).collect(),
                 }),
             }

@@ -189,26 +189,22 @@ fn every_frame_kind_roundtrips() {
 
 #[test]
 fn tf_frame_size() {
-    for eff in [false, true] {
-        let parts = bytes_of(&samples::tf_frame(eff));
-        let total: usize = parts.iter().map(Vec::len).sum();
-        let arrays = if eff { 5 } else { 4 };
-        assert_eq!(parts.len(), 2 + arrays);
-        assert!(parts[1].len() < MAX_HEADER_BYTES);
-        println!(
-            "tf 480 cols eff_avg={eff}: topic {} B, header {} B, arrays {} x {} B, total {} B",
-            parts[0].len(),
-            parts[1].len(),
-            arrays,
-            parts[2].len(),
-            total
-        );
-    }
+    let parts = bytes_of(&samples::tf_frame());
+    let total: usize = parts.iter().map(Vec::len).sum();
+    assert_eq!(parts.len(), 2 + 4);
+    assert!(parts[1].len() < MAX_HEADER_BYTES);
+    println!(
+        "tf 480 cols: topic {} B, header {} B, arrays 4 x {} B, total {} B",
+        parts[0].len(),
+        parts[1].len(),
+        parts[2].len(),
+        total
+    );
 }
 
 #[test]
 fn nan_and_bit_patterns_survive() {
-    let f = samples::tf_frame(false);
+    let f = samples::tf_frame();
     let back = decode_parts(&bytes_of(&f)).expect("sample message");
     let (FrameData::Tf(a), FrameData::Tf(b)) = (&f.data, &back.data) else {
         panic!()
@@ -217,12 +213,11 @@ fn nan_and_bit_patterns_survive() {
     assert_eq!(bits(&a.mag), bits(&b.mag));
     assert!(b.mag[0].is_nan());
     assert_eq!(b.validity[0], ValidityMask::THINNED);
-    assert_eq!(b.eff_avg, None);
 }
 
 #[test]
 fn misaligned_payload_decodes() {
-    let parts = bytes_of(&samples::tf_frame(true));
+    let parts = bytes_of(&samples::tf_frame());
     // Shift every array part by one byte inside a larger buffer so it is not 4-aligned.
     let shifted: Vec<Vec<u8>> = parts
         .iter()
@@ -239,7 +234,7 @@ fn misaligned_payload_decodes() {
 
 #[test]
 fn malformed_frames_are_refused() {
-    let good = bytes_of(&samples::tf_frame(false));
+    let good = bytes_of(&samples::tf_frame());
     let mut p = good.clone();
     p[2].pop();
     assert!(matches!(
@@ -275,7 +270,7 @@ fn malformed_frames_are_refused() {
 
 #[test]
 fn encode_refuses_ragged_arrays() {
-    let mut f = samples::tf_frame(false);
+    let mut f = samples::tf_frame();
     if let FrameData::Tf(t) = &mut f.data {
         t.coh.pop();
     }

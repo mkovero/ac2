@@ -702,14 +702,14 @@ bitmask array says why.
 | `meta` | {kind: {…}} | per-kind metadata (§5.4) |
 
 `elem` is `f32` or `u32`. `unit` is one of `db`, `dbfs`, `db_spl`, `deg`, `coherence`
-(γ², 0…1), `count`, `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
+(γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`).
 
 ### 5.4 Kinds
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `eff_avg`: count (optional — presence = listed), `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve` |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve` |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
@@ -759,7 +759,7 @@ A malformed frame is dropped and counted by the client; decoders never panic.
 ### 5.7 Sizes
 
 A 480-column `tf` frame: topic 6 B, header ≈ 390 B, four arrays (mag, phase, coh,
-validity) of 1920 B — ≈ 8.1 KB; ≈ 10.0 KB with `eff_avg`. At 60 fps ≈ 0.5–0.6 MB/s per
+validity) of 1920 B — ≈ 8.1 KB. At 60 fps ≈ 0.5–0.6 MB/s per
 measurement locally, half that remote at 30 fps. A default `spec` frame (65 536 points at
 48 kHz: 897 `log_bins` columns of one f32) is ≈ 3.9 KB; it goes out with each new spectrum
 (every hop: `n/8`, ≈ 6 per second at 65 536 points; ≈ 30 per second for short FFTs) and is

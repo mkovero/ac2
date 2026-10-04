@@ -80,7 +80,6 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         mag,
         phase,
         coh,
-        eff_avg: None,
         validity: vec![ValidityMask::NONE; freqs.len()],
     }
 }

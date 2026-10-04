@@ -468,15 +468,17 @@ fn live_smoothing_and_resmoothed_captures() {
     let mut r = rig("smoothing");
     let c = &mut r.c;
     let settled = settle(&mut r.d, c, &r.sub, r.tok, 0);
-    let eff = |f: &ac2_proto::Frame| match &f.data {
-        FrameData::Tf(t) => band()
+    // Restarted averages would leave the deep (low-frequency) stages settling again: only
+    // 0.1 s of audio runs after the change.
+    let settling = |f: &ac2_proto::Frame| match &f.data {
+        FrameData::Tf(t) => t
+            .validity
             .iter()
-            .map(|i| t.eff_avg.as_ref().unwrap()[*i])
-            .fold(f32::INFINITY, f32::min),
+            .filter(|m| m.contains(ac2_proto::frame::ValidityMask::SETTLING))
+            .count(),
         _ => unreachable!(),
     };
-    let eff_before = eff(&settled);
-    assert!(eff_before >= 2.0, "{eff_before}");
+    let settling_before = settling(&settled);
 
     // Live change: same job, averages kept, new rev, frames say so.
     let mut cfg = transfer("main");
@@ -504,9 +506,9 @@ fn live_smoothing_and_resmoothed_captures() {
     };
     assert_eq!(tf.meta.smoothing, Some(sixth()));
     assert!(
-        eff(&first) >= eff_before,
-        "averages restarted: {} < {eff_before}",
-        eff(&first)
+        settling(&first) <= settling_before,
+        "averages restarted: {} columns settling, {settling_before} before",
+        settling(&first)
     );
     let shown = settle(&mut r.d, c, &r.sub, r.tok, m.config_rev.0);
     let FrameData::Tf(shown) = shown.data else {
