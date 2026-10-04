@@ -59,8 +59,9 @@ fn stalled_subscriber_recovers(listen: Listen) {
         took < Duration::from_millis(200),
         "recovered in {took:?} (drain + publish period)"
     );
+    // 1.2 s of SPL frames at 20 per second, of which the queue held two.
     assert!(
-        fresh.stamp.seq > first.stamp.seq + 30,
+        fresh.stamp.seq > first.stamp.seq + 15,
         "newer frames were skipped, not queued"
     );
     h.shutdown();
@@ -81,7 +82,8 @@ fn late_subscriber_gets_latest_slot() {
     init_log();
     let backend = manual_rig();
     let h = Daemon::start(config(backend.clone(), inproc("late"))).unwrap();
-    let (mut c, early) = connect(&h, &[b"d/1/spl"]);
+    // Levels are only metered out while someone receives them.
+    let (mut c, early) = connect(&h, &[b"d/1/spl", b"d/1/levels"]);
     c.ok(Command::SessionOpen {
         config: session(false),
     });
@@ -121,7 +123,7 @@ fn late_subscriber_gets_latest_slot() {
 }
 
 /// Captured audio is handed on in batches, not per device period: meters and measurements
-/// must still publish at their rates (30 Hz session meters, the 60 Hz local publish rate),
+/// must still publish at their rates (30 Hz session meters, 20 Hz SPL),
 /// and every frame of a topic must cover newer audio than the one before.
 #[test]
 fn batched_hand_off_keeps_publish_rates() {
@@ -167,6 +169,7 @@ fn batched_hand_off_keeps_publish_rates() {
     let secs = t0.elapsed().as_secs_f64();
     let (lr, sr) = (f64::from(levels) / secs, f64::from(spl) / secs);
     assert!((25.0..=33.0).contains(&lr), "session meters at {lr:.1} Hz");
-    assert!((45.0..=63.0).contains(&sr), "spl at {sr:.1} Hz");
+    // SPL frames are capped at 20 Hz (the meter's interval figures hold every peak).
+    assert!((15.0..=21.0).contains(&sr), "spl at {sr:.1} Hz");
     h.shutdown();
 }

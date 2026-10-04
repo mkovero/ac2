@@ -20,8 +20,10 @@
 //! Display decimation keeps peaks: [`bucket_max`] returns the largest value of each bucket
 //! and where it was. A stride pick can step over a one-sample arrival and draw it absent.
 
+use std::sync::Arc;
+
 use num_complex::Complex64;
-use realfft::RealFftPlanner;
+use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
 
 /// Lowest dB value either log view reports; an exact zero has no logarithm.
 pub const FLOOR_DB: f64 = -200.0;
@@ -74,33 +76,8 @@ impl ImpulseResponse {
     /// The imaginary parts of the DC and Nyquist bins are dropped: a real response has none,
     /// and an estimate's residue there carries no time-domain meaning.
     pub fn from_tf(tf: UniformTf<'_>) -> Result<Self, IrError> {
-        if tf.h.len() < 2 {
-            return Err(IrError::TooShort);
-        }
-        if !(tf.sample_rate.is_finite() && tf.sample_rate > 0.0) {
-            return Err(IrError::BadSampleRate);
-        }
-        let n = 2 * (tf.h.len() - 1);
-        let mut spec: Vec<Complex64> =
-            tf.h.iter()
-                .map(|z| {
-                    if z.re.is_finite() && z.im.is_finite() {
-                        *z
-                    } else {
-                        Complex64::new(0.0, 0.0)
-                    }
-                })
-                .collect();
-        let last = spec.len() - 1;
-        spec[0].im = 0.0;
-        spec[last].im = 0.0;
-        let mut circ = vec![0.0; n];
-        let ifft = RealFftPlanner::<f64>::new().plan_fft_inverse(n);
-        ifft.process(&mut spec, &mut circ)
-            .map_err(|_| IrError::TooShort)?;
-        let scale = 1.0 / n as f64;
-        let half = n / 2;
-        let samples = (0..n).map(|i| circ[(i + half) % n] * scale).collect();
+        let mut e = IrEngine::default();
+        let samples = e.impulse(tf)?.to_vec();
         Ok(Self {
             samples,
             sample_rate: tf.sample_rate,
@@ -145,38 +122,142 @@ impl ImpulseResponse {
 
     /// Hilbert envelope `|h + j·𝓗{h}|`.
     pub fn envelope(&self) -> Vec<f64> {
-        let n = self.len();
+        let mut e = IrEngine::default();
+        e.envelope_of(&self.samples).to_vec()
+    }
+}
+
+/// FFT plans and buffers for repeated IR views of one length. A live view forms an IR per
+/// frame; planning the FFTs and allocating their buffers each time costs more than the
+/// transforms themselves. Plans are made again only when the length changes.
+#[derive(Default)]
+pub struct IrEngine {
+    n: usize,
+    fwd: Option<Arc<dyn RealToComplex<f64>>>,
+    inv: Option<Arc<dyn ComplexToReal<f64>>>,
+    spec: Vec<Complex64>,
+    circ: Vec<f64>,
+    scratch: Vec<Complex64>,
+    samples: Vec<f64>,
+    env: Vec<f64>,
+}
+
+impl std::fmt::Debug for IrEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IrEngine")
+            .field("n", &self.n)
+            .finish_non_exhaustive()
+    }
+}
+
+type Plans = (Arc<dyn RealToComplex<f64>>, Arc<dyn ComplexToReal<f64>>);
+
+impl IrEngine {
+    fn plan(&mut self, n: usize) -> Plans {
+        if let (true, Some(f), Some(i)) = (self.n == n, &self.fwd, &self.inv) {
+            return (Arc::clone(f), Arc::clone(i));
+        }
         let mut planner = RealFftPlanner::<f64>::new();
-        let fwd = planner.plan_fft_forward(n);
-        let inv = planner.plan_fft_inverse(n);
-        let mut x = self.samples.clone();
-        let mut spec = fwd.make_output_vec();
-        if fwd.process(&mut x, &mut spec).is_err() {
-            return vec![0.0; n];
+        let f = planner.plan_fft_forward(n);
+        let i = planner.plan_fft_inverse(n);
+        self.n = n;
+        self.fwd = Some(Arc::clone(&f));
+        self.inv = Some(Arc::clone(&i));
+        let scratch = f.get_scratch_len().max(i.get_scratch_len());
+        self.scratch.resize(scratch, Complex64::new(0.0, 0.0));
+        (f, i)
+    }
+
+    /// The impulse response of `tf` as [`ImpulseResponse::from_tf`] forms it (index `i` is
+    /// time `(i − n/2) / fs` relative to the inserted delay), in the engine's buffer.
+    pub fn impulse(&mut self, tf: UniformTf<'_>) -> Result<&[f64], IrError> {
+        if tf.h.len() < 2 {
+            return Err(IrError::TooShort);
+        }
+        if !(tf.sample_rate.is_finite() && tf.sample_rate > 0.0) {
+            return Err(IrError::BadSampleRate);
+        }
+        let n = 2 * (tf.h.len() - 1);
+        let (_, inv) = self.plan(n);
+        self.spec.clear();
+        self.spec.extend(tf.h.iter().map(|z| {
+            if z.re.is_finite() && z.im.is_finite() {
+                *z
+            } else {
+                Complex64::new(0.0, 0.0)
+            }
+        }));
+        let last = self.spec.len() - 1;
+        self.spec[0].im = 0.0;
+        self.spec[last].im = 0.0;
+        self.circ.clear();
+        self.circ.resize(n, 0.0);
+        inv.process_with_scratch(&mut self.spec, &mut self.circ, &mut self.scratch)
+            .map_err(|_| IrError::TooShort)?;
+        let scale = 1.0 / n as f64;
+        let half = n / 2;
+        self.samples.clear();
+        self.samples
+            .extend((0..n).map(|i| self.circ[(i + half) % n] * scale));
+        Ok(&self.samples)
+    }
+
+    /// Hilbert envelope (as [`ImpulseResponse::envelope`]) of the response the last
+    /// [`IrEngine::impulse`] formed.
+    pub fn envelope(&mut self) -> &[f64] {
+        let x = std::mem::take(&mut self.samples);
+        self.hilbert_envelope(&x);
+        self.samples = x;
+        &self.env
+    }
+
+    /// Hilbert envelope `|x + j·𝓗{x}|`, treating `x` as circular.
+    pub fn envelope_of(&mut self, x: &[f64]) -> &[f64] {
+        self.hilbert_envelope(x);
+        &self.env
+    }
+
+    fn hilbert_envelope(&mut self, x: &[f64]) {
+        let n = x.len();
+        self.env.clear();
+        let (fwd, inv) = self.plan(n);
+        self.circ.clear();
+        self.circ.extend_from_slice(x);
+        self.spec.clear();
+        self.spec.resize(n / 2 + 1, Complex64::new(0.0, 0.0));
+        if fwd
+            .process_with_scratch(&mut self.circ, &mut self.spec, &mut self.scratch)
+            .is_err()
+        {
+            self.env.resize(n, 0.0);
+            return;
         }
         // 𝓗 multiplies positive frequencies by −j; DC and Nyquist have no quadrature part.
-        let last = spec.len() - 1;
-        for (k, z) in spec.iter_mut().enumerate() {
+        let last = self.spec.len() - 1;
+        for (k, z) in self.spec.iter_mut().enumerate() {
             *z = if k == 0 || k == last {
                 Complex64::new(0.0, 0.0)
             } else {
                 Complex64::new(z.im, -z.re)
             };
         }
-        let mut quad = vec![0.0; n];
-        if inv.process(&mut spec, &mut quad).is_err() {
-            return vec![0.0; n];
+        self.circ.clear();
+        self.circ.resize(n, 0.0);
+        if inv
+            .process_with_scratch(&mut self.spec, &mut self.circ, &mut self.scratch)
+            .is_err()
+        {
+            self.env.resize(n, 0.0);
+            return;
         }
         let scale = 1.0 / n as f64;
-        self.samples
-            .iter()
-            .zip(&quad)
-            .map(|(r, q)| r.hypot(q * scale))
-            .collect()
+        self.env
+            .extend(x.iter().zip(&self.circ).map(|(r, q)| r.hypot(q * scale)));
     }
 }
 
-fn amp_db(a: f64) -> f64 {
+/// `20·log10` of an amplitude, floored at [`FLOOR_DB`]: the scale of the log and ETC views.
+pub fn amp_db(a: f64) -> f64 {
     let db = 20.0 * a.log10();
     if db.is_nan() {
         FLOOR_DB

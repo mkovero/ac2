@@ -202,7 +202,7 @@ impl Control {
         let frame = self
             .jobs
             .get(&meas)
-            .and_then(super::JobHandle::latest)
+            .and_then(super::JobHandle::capture)
             .ok_or_else(|| {
                 perr(
                     ErrorCode::Invalid,

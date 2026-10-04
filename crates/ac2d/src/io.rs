@@ -38,6 +38,18 @@ impl Interest {
             .wants(topic)
     }
 
+    #[cfg(test)]
+    pub(crate) fn subscribe(&self, prefix: &[u8]) {
+        let ev = ac2_zmq::SubscriptionEvent::Subscribe(prefix.to_vec());
+        self.update(|t| t.apply_event(&ev));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn unsubscribe(&self, prefix: &[u8]) {
+        let ev = ac2_zmq::SubscriptionEvent::Unsubscribe(prefix.to_vec());
+        self.update(|t| t.apply_event(&ev));
+    }
+
     fn update(&self, f: impl FnOnce(&mut SubscriptionTracker)) -> usize {
         let mut t = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         f(&mut t);

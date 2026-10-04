@@ -4,9 +4,9 @@
 //! the IR or the delay finder: decision 7c).
 
 use ac2_core::grid::LogGrid;
-use ac2_core::ir_view::{ImpulseResponse, UniformTf};
+use ac2_core::ir_view::{IrEngine, UniformTf, amp_db};
 use ac2_core::mic_curve::Correction;
-use ac2_core::mtw::{Ladder, Mtw, MtwConfig, SampleGate, Validity};
+use ac2_core::mtw::{Ladder, Mtw, MtwConfig, MtwFrame, SampleGate, Validity};
 use ac2_core::protection::{BlockDecision, BlockLevels, Guard, ProtectionConfig};
 use ac2_core::smoothing::{Smoother, SmoothingMode, TfColumns};
 use ac2_proto::frame::{
@@ -19,11 +19,12 @@ use ac2_proto::units::{Hz, MeasId, Rev, Seconds};
 use num_complex::Complex64;
 
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use ac2_proto::units::SessionEpoch;
 
 use super::finder::Finder;
-use super::{Analysis, Emitter, JobCmd, LevelsMeter, SmoothingChange, StampArgs};
+use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, SmoothingChange, StampArgs};
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Block;
@@ -154,13 +155,33 @@ pub(crate) struct Transfer {
     epoch: SessionEpoch,
     to_control: Sender<ControlMsg>,
     grid: LogGrid,
-    /// Mic-curve correction per column (dB subtracted from `mag`).
-    corr: Option<Vec<f64>>,
+    /// Mic-curve correction per column.
+    corr: Option<ColumnCorrection>,
+    /// Advances whenever the result may have changed: a block averaged, a restart, a
+    /// command.
+    generation: u64,
+    tf_pace: Pace,
+    ir_pace: Pace,
+    /// The newest MTW frame; its buffers are reused from frame to frame.
+    frame: MtwFrame,
+    /// Scratch for the smoother's corrected H1 and the IR view's uniform-bin H1.
+    hbuf: Vec<Complex64>,
+    ir: IrEngine,
+    /// Protection flags of the newest emit, for a capture's stamp.
+    last_prot: ProtectionFlags,
 }
 
-/// The mic-curve correction at each column of `grid`.
-fn column_correction(grid: &LogGrid, c: &Correction) -> Vec<f64> {
-    grid.frequencies().into_iter().map(|f| c.db(f)).collect()
+/// The mic-curve correction at each column, in dB (subtracted from `mag`) and as the linear
+/// gain that does the same to H1 before smoothing; both fixed until the curve changes.
+struct ColumnCorrection {
+    db: Vec<f64>,
+    gain: Vec<f64>,
+}
+
+fn column_correction(grid: &LogGrid, c: &Correction) -> ColumnCorrection {
+    let db: Vec<f64> = grid.frequencies().into_iter().map(|f| c.db(f)).collect();
+    let gain = db.iter().map(|d| 10f64.powf(-d / 20.0)).collect();
+    ColumnCorrection { db, gain }
 }
 
 /// The kernel for `smoothing` on `grid`.
@@ -222,8 +243,16 @@ impl Transfer {
         let mut finder = Finder::new(fs);
         finder.track(tracking, delay_samples);
         finder.set_paused(awaiting_pick);
+        let frame = mtw.frame();
         Ok(Self {
             corr: correction.map(|c| column_correction(&grid, c)),
+            generation: 0,
+            tf_pace: Pace::new(Duration::ZERO),
+            ir_pace: Pace::new(Duration::ZERO),
+            frame,
+            hbuf: Vec::new(),
+            ir: IrEngine::default(),
+            last_prot: ProtectionFlags::NONE,
             grid,
             finder,
             epoch,
@@ -268,37 +297,131 @@ impl Transfer {
         self.discontinuity_until = at + self.fs as u64;
     }
 
-    fn ir_frame(&self) -> Option<IrFrame> {
-        let st = self.mtw.stage_spectra(0)?;
-        let h: Vec<Complex64> = st
-            .gxy
-            .iter()
-            .zip(&st.gxx)
-            .map(|(xy, xx)| {
-                if *xx > 0.0 {
-                    *xy / *xx
-                } else {
-                    Complex64::new(0.0, 0.0)
-                }
-            })
-            .collect();
-        let ir = ImpulseResponse::from_tf(UniformTf {
-            h: &h,
+    fn ir_frame(&mut self) -> Option<IrFrame> {
+        if !self.mtw.stage_h1_into(0, &mut self.hbuf) {
+            return None;
+        }
+        let tf = UniformTf {
+            h: &self.hbuf,
             sample_rate: self.fs,
             inserted_delay_s: self.delay_s,
-        })
-        .ok()?;
+        };
+        let linear: Vec<f32> = self
+            .ir
+            .impulse(tf)
+            .ok()?
+            .iter()
+            .map(|v| *v as f32)
+            .collect();
+        let n = linear.len();
+        let etc: Vec<f32> = self
+            .ir
+            .envelope()
+            .iter()
+            .map(|v| amp_db(*v) as f32)
+            .collect();
         Some(IrFrame {
             meas: self.meas,
             meta: IrMeta {
                 sample_rate: Hz(self.fs),
-                t0: Seconds(ir.time_s(0)),
+                // Sample n/2 is time zero, the inserted delay.
+                t0: Seconds(-((n / 2) as f64) / self.fs),
                 dt: Seconds(1.0 / self.fs),
                 inserted_delay: Seconds(self.delay_s),
             },
-            linear: ir.linear().iter().map(|v| *v as f32).collect(),
-            etc: Some(ir.etc_db().into_iter().map(|v| v as f32).collect()),
+            linear,
+            etc: Some(etc),
         })
+    }
+
+    /// The current transfer function from the newest MTW frame: the measured curve with the
+    /// mic curve taken off, display-smoothed when `smooth` and smoothing is on.
+    fn tf_frame(&mut self, smooth: bool) -> TfFrame {
+        self.mtw.frame_into(&mut self.frame);
+        let f = &self.frame;
+        let validity: Vec<ValidityMask> = f
+            .columns
+            .iter()
+            .map(|c| match c.validity {
+                Validity::Valid => ValidityMask::NONE,
+                Validity::Thinned => ValidityMask::THINNED,
+                Validity::OutOfBand => ValidityMask::OUT_OF_BAND,
+                Validity::Settling => ValidityMask::SETTLING,
+                Validity::NoReference => ValidityMask::NO_REFERENCE,
+                Validity::NoMeasurement => ValidityMask::NO_MEASUREMENT,
+            })
+            .collect();
+        let smoother = self.smoother.as_ref().filter(|_| smooth);
+        let (mag, phase) = match smoother {
+            None => {
+                let mut mag: Vec<f32> = f.magnitude_db.iter().map(|v| *v as f32).collect();
+                if let Some(c) = &self.corr {
+                    for (m, d) in mag.iter_mut().zip(&c.db) {
+                        *m -= *d as f32;
+                    }
+                }
+                (mag, f.phase_deg.iter().map(|v| *v as f32).collect())
+            }
+            // Display smoothing averages the corrected curve, so a capture re-smoothed at
+            // this setting reads the same as this frame.
+            Some((sm, mode)) => {
+                let valid: Vec<bool> = validity.iter().map(|v| *v == ValidityMask::NONE).collect();
+                let h: &[Complex64] = match &self.corr {
+                    None => &f.h1,
+                    Some(c) => {
+                        self.hbuf.clear();
+                        self.hbuf
+                            .extend(f.h1.iter().zip(&c.gain).map(|(h, g)| h * g));
+                        &self.hbuf
+                    }
+                };
+                let s = sm.smooth(
+                    TfColumns {
+                        h,
+                        coherence: &f.coherence,
+                        valid: &valid,
+                    },
+                    *mode,
+                );
+                s.h.iter()
+                    .zip(&s.valid)
+                    .map(|(h, ok)| {
+                        if *ok {
+                            (
+                                (20.0 * h.norm().log10()) as f32,
+                                h.arg().to_degrees() as f32,
+                            )
+                        } else {
+                            (f32::NAN, f32::NAN)
+                        }
+                    })
+                    .unzip()
+            }
+        };
+        TfFrame {
+            meas: self.meas,
+            meta: TfMeta {
+                delay: Seconds(self.delay_s),
+                frozen: self.frozen,
+                smoothing: self.cfg.smoothing,
+                mic_curve: self.corr.is_some(),
+            },
+            mag,
+            phase,
+            coh: f.coherence.iter().map(|v| *v as f32).collect(),
+            validity,
+        }
+    }
+
+    fn stamp(&self, end: u64, protection: ProtectionFlags) -> StampArgs {
+        StampArgs {
+            audio_sample: end.saturating_sub(1),
+            config_rev: self.config_rev,
+            applied_at: self.applied_at,
+            wall_ns: self.wall,
+            grid_id: Some(self.grid_id),
+            protection,
+        }
     }
 }
 
@@ -329,8 +452,10 @@ impl Analysis for Transfer {
             }
             BlockDecision::RejectClip | BlockDecision::PauseNoReference => SampleGate::Reject,
         };
-        if let Err(e) = self.mtw.push(b.start_sample, &self.rbuf, &self.mbuf, gate) {
-            tracing::error!("transfer {}: {e}", self.meas);
+        match self.mtw.push(b.start_sample, &self.rbuf, &self.mbuf, gate) {
+            Ok(o) if o.blocks_accumulated > 0 || o.restarted => self.generation += 1,
+            Ok(_) => {}
+            Err(e) => tracing::error!("transfer {}: {e}", self.meas),
         }
         if let Some(d) = self.finder.push(b.start_sample, &self.rbuf, &self.mbuf) {
             tracing::info!(
@@ -350,6 +475,7 @@ impl Analysis for Transfer {
     }
 
     fn command(&mut self, c: JobCmd) {
+        self.generation += 1;
         match c {
             JobCmd::SetDelay {
                 samples,
@@ -400,9 +526,9 @@ impl Analysis for Transfer {
         }
     }
 
-    fn emit(&mut self, e: &Emitter) {
+    fn emit(&mut self, e: &Emitter) -> Flush {
         let Some(end) = self.end else {
-            return;
+            return Flush::Done;
         };
         let (routing, n) = self.routing.take(self.guard.config().reference_floor_dbfs);
         let banners = self.guard.banners();
@@ -434,120 +560,49 @@ impl Analysis for Transfer {
         if check_routing {
             prot = prot.with(ProtectionFlags::CHECK_ROUTING);
         }
-        let stamp = StampArgs {
-            audio_sample: end.saturating_sub(1),
-            config_rev: self.config_rev,
-            applied_at: self.applied_at,
-            wall_ns: self.wall,
-            grid_id: Some(self.grid_id),
-            protection: prot,
-        };
+        self.last_prot = prot;
+        let stamp = self.stamp(end, prot);
+        let now = Instant::now();
 
-        let f = self.mtw.frame();
-        let validity: Vec<ValidityMask> = f
-            .columns
-            .iter()
-            .map(|c| match c.validity {
-                Validity::Valid => ValidityMask::NONE,
-                Validity::Thinned => ValidityMask::THINNED,
-                Validity::OutOfBand => ValidityMask::OUT_OF_BAND,
-                Validity::Settling => ValidityMask::SETTLING,
-                Validity::NoReference => ValidityMask::NO_REFERENCE,
-                Validity::NoMeasurement => ValidityMask::NO_MEASUREMENT,
-            })
-            .collect();
-        // The measured curve with the mic curve taken off; what a capture stores.
-        let mut raw_mag: Vec<f32> = f.magnitude_db.iter().map(|v| *v as f32).collect();
-        if let Some(c) = &self.corr {
-            for (m, d) in raw_mag.iter_mut().zip(c) {
-                *m -= *d as f32;
-            }
-        }
-        let raw_phase: Vec<f32> = f.phase_deg.iter().map(|v| *v as f32).collect();
-        // Display smoothing averages the corrected curve, so a capture re-smoothed at this
-        // setting reads the same as this frame.
-        let smoothed = self.smoother.as_ref().map(|(sm, mode)| {
-            let valid: Vec<bool> = validity.iter().map(|v| *v == ValidityMask::NONE).collect();
-            let h: Vec<Complex64> = match &self.corr {
-                None => f.h1.clone(),
-                Some(c) => {
-                    f.h1.iter()
-                        .zip(c)
-                        .map(|(h, d)| h * 10f64.powf(-d / 20.0))
-                        .collect()
-                }
-            };
-            let s = sm.smooth(
-                TfColumns {
-                    h: &h,
-                    coherence: &f.coherence,
-                    valid: &valid,
-                },
-                *mode,
-            );
-            s.h.iter()
-                .zip(&s.valid)
-                .map(|(h, ok)| {
-                    if *ok {
-                        (
-                            (20.0 * h.norm().log10()) as f32,
-                            h.arg().to_degrees() as f32,
-                        )
-                    } else {
-                        (f32::NAN, f32::NAN)
-                    }
-                })
-                .unzip::<f32, f32, Vec<f32>, Vec<f32>>()
-        });
-        let meta = TfMeta {
-            delay: Seconds(self.delay_s),
-            frozen: self.frozen,
-            smoothing: self.cfg.smoothing,
-            mic_curve: self.corr.is_some(),
-        };
-        let coh: Vec<f32> = f.coherence.iter().map(|v| *v as f32).collect();
-        let raw = TfFrame {
+        let tf_topic = Topic::Data {
             meas: self.meas,
-            meta,
-            mag: raw_mag,
-            phase: raw_phase,
-            coh,
-            validity,
+            stream: Stream::Tf,
         };
-        match smoothed {
-            None => e.send(stamp, FrameData::Tf(raw)),
-            Some((mag, phase)) => {
-                let shown = TfFrame {
-                    mag,
-                    phase,
-                    ..raw.clone()
-                };
-                e.send_with_capture(stamp, FrameData::Tf(shown), FrameData::Tf(raw));
+        let tf_due = self.tf_pace.due(e, tf_topic, self.generation, &stamp, now);
+        if tf_due == Due::Send {
+            let f = self.tf_frame(true);
+            if !e.send(stamp, FrameData::Tf(f)) {
+                self.tf_pace.unsent();
             }
         }
 
-        if e.wants(Topic::Data {
+        let ir_topic = Topic::Data {
             meas: self.meas,
             stream: Stream::Ir,
-        }) && let Some(ir) = self.ir_frame()
+        };
+        let ir_due = self.ir_pace.due(e, ir_topic, self.generation, &stamp, now);
+        if ir_due == Due::Send
+            && let Some(ir) = self.ir_frame()
         {
-            e.send(
+            let sent = e.send(
                 StampArgs {
                     grid_id: None,
                     ..stamp
                 },
                 FrameData::Ir(ir),
             );
+            if !sent {
+                self.ir_pace.unsent();
+            }
         }
-        if let Some(l) = self.levels.take(self.meas) {
-            e.send(
-                StampArgs {
-                    grid_id: None,
-                    ..stamp
-                },
-                FrameData::Levels(l),
-            );
-        }
+        self.levels.send(e, self.meas, stamp);
+        Flush::from_due(tf_due).and(Flush::from_due(ir_due))
+    }
+
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
+        let end = self.end?;
+        let stamp = self.stamp(end, self.last_prot);
+        Some((stamp, FrameData::Tf(self.tf_frame(false))))
     }
 }
 

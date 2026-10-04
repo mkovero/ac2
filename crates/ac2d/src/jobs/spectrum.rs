@@ -4,17 +4,21 @@
 //!
 //! The live `spec` frame gathers the bins into display columns ([`GridDef::LogBins`]), each
 //! the highest level among its bins, so a 65 536-point spectrum is under a thousand columns
-//! on the wire and a single-bin tone keeps its level. The capture slot keeps every bin,
-//! unsmoothed, on the FFT's own grid: that is what `trace.capture` stores.
+//! on the wire and a single-bin tone keeps its level. A capture takes every bin, unsmoothed,
+//! on the FFT's own grid.
 
 use ac2_core::smoothing::LinearSmoother;
 use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig, column_max};
 use ac2_proto::frame::{FrameData, ProtectionFlags, SpecFrame, SpecMeta};
 use ac2_proto::grid::{BinColumns, GridDef, GridId};
 use ac2_proto::model::{LevelScale, SpectrumConfig as WireConfig};
+use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
-use super::{Analysis, Emitter, JobCmd, LevelsMeter, SmoothingChange, StampArgs, channel_f64};
+use super::{
+    Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, SmoothingChange, StampArgs,
+    channel_f64,
+};
 use crate::calstore::InputCal;
 use crate::conv;
 use crate::fanout::Block;
@@ -45,10 +49,11 @@ pub(crate) struct Spectrum {
     power: Vec<f64>,
     /// Smoothed tone power per bin (smoothing on).
     smoothed: Vec<f64>,
-    /// Something new to show since the last `spec` frame: a spectrum, or a setting.
-    fresh: bool,
-    /// End sample at the last `spec` frame.
-    last_spec: Option<u64>,
+    /// Advances whenever there is something new to show: a spectrum, or a setting.
+    generation: u64,
+    /// When a `spec` frame goes out: on something new, and repeated while nothing changes
+    /// (frozen, or a long hop) well inside the second after which a client calls it stale.
+    pace: Pace,
     frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
@@ -77,11 +82,6 @@ pub(crate) fn capture_grid(cfg: &WireConfig, fs: u32) -> GridDef {
 
 /// Updates per second the spectrum aims for when the window is short enough to allow it.
 const SPECTRUM_UPDATES_PER_S: u32 = 30;
-
-/// Most audio between two `spec` frames, seconds. A frame goes out when there is a new
-/// spectrum (every hop) or a setting changed; while nothing changes (frozen, or a long hop)
-/// it is repeated this often, well inside the second after which a client calls it stale.
-const SPEC_REPEAT_S: f64 = 0.25;
 
 /// Hop for an `n`-point spectrum at `fs`: the largest power of two at or below
 /// `fs / SPECTRUM_UPDATES_PER_S`, kept between `n / 8` and `n / 2` (overlap 50 – 87.5 %).
@@ -137,8 +137,8 @@ impl Spectrum {
             smoother,
             power: vec![0.0; bins],
             smoothed: Vec::new(),
-            fresh: true,
-            last_spec: None,
+            generation: 0,
+            pace: Pace::new(std::time::Duration::ZERO),
             cal: InputCal::none(),
             frozen,
             config_rev,
@@ -167,7 +167,53 @@ impl Spectrum {
             })
             .collect();
         self.cal = cal;
-        self.fresh = true;
+        self.generation += 1;
+    }
+}
+
+impl Spectrum {
+    fn stamp(&self, end: u64) -> StampArgs {
+        StampArgs {
+            audio_sample: end.saturating_sub(1),
+            config_rev: self.config_rev,
+            applied_at: self.applied_at.unwrap_or(0),
+            wall_ns: self.wall,
+            grid_id: Some(self.grid_id),
+            protection: if self.levels.any_clip_held() {
+                ProtectionFlags::CLIP
+            } else {
+                ProtectionFlags::NONE
+            },
+        }
+    }
+
+    fn meta(&self) -> SpecMeta {
+        SpecMeta {
+            window: self.cfg.window,
+            scale: if self.cal.sensitivity.is_some() {
+                LevelScale::DbSpl
+            } else {
+                LevelScale::Dbfs
+            },
+            cal: self.cal.status,
+            mic_curve: self.cal.correction.is_some(),
+            smoothing: self.cfg.smoothing,
+        }
+    }
+
+    /// Fills `power` with the averaged tone power per bin; `false` before the first
+    /// spectrum. A bin without power is a gap (−∞ dB has no place on a dB axis), as it is in
+    /// a captured trace; smoothing never crosses a gap, so a capture re-smoothed at this
+    /// setting reads the same as the live frame.
+    fn fill_power(&mut self) -> bool {
+        let Some(ps) = self.analyzer.average() else {
+            return false;
+        };
+        for ((p, f), g) in self.power.iter_mut().zip(ps.folded()).zip(&self.gain) {
+            let x = f * g;
+            *p = if x > 0.0 { x } else { f64::NAN };
+        }
+        true
     }
 }
 
@@ -191,7 +237,7 @@ impl Analysis for Spectrum {
         if !self.frozen {
             channel_f64(b, self.idx, &mut self.buf);
             if self.analyzer.push(&self.buf) > 0 {
-                self.fresh = true;
+                self.generation += 1;
             }
         }
         self.levels.push(b);
@@ -203,7 +249,7 @@ impl Analysis for Spectrum {
         match c {
             JobCmd::Freeze(f) => {
                 self.frozen = f;
-                self.fresh = true;
+                self.generation += 1;
             }
             JobCmd::Reset => self.analyzer.reset_average(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
@@ -218,7 +264,7 @@ impl Analysis for Spectrum {
                 // Frames under the new rev carry the new setting from the next block on.
                 self.config_rev = rev;
                 self.applied_at = None;
-                self.fresh = true;
+                self.generation += 1;
             }
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
@@ -228,48 +274,19 @@ impl Analysis for Spectrum {
         }
     }
 
-    fn emit(&mut self, e: &Emitter) {
+    fn emit(&mut self, e: &Emitter) -> Flush {
         let Some(end) = self.end else {
-            return;
+            return Flush::Done;
         };
-        let stamp = StampArgs {
-            audio_sample: end.saturating_sub(1),
-            config_rev: self.config_rev,
-            applied_at: self.applied_at.unwrap_or(0),
-            wall_ns: self.wall,
-            grid_id: Some(self.grid_id),
-            protection: if self.levels.any_clip_held() {
-                ProtectionFlags::CLIP
-            } else {
-                ProtectionFlags::NONE
-            },
+        let stamp = self.stamp(end);
+        let topic = Topic::Data {
+            meas: self.meas,
+            stream: Stream::Spec,
         };
-        let repeat = (SPEC_REPEAT_S * self.analyzer.config().fs) as u64;
-        let due = self.fresh
-            || self
-                .last_spec
-                .is_none_or(|t| end.saturating_sub(t) >= repeat);
-        if let Some(ps) = self.analyzer.average().filter(|_| due) {
-            self.fresh = false;
-            self.last_spec = Some(end);
-            // A bin without power is a gap (−∞ dB has no place on a dB axis), as it is in a
-            // captured trace; smoothing never crosses a gap, so a capture re-smoothed at
-            // this setting reads the same as this frame.
-            for ((p, f), g) in self.power.iter_mut().zip(ps.folded()).zip(&self.gain) {
-                let x = f * g;
-                *p = if x > 0.0 { x } else { f64::NAN };
-            }
-            let meta = SpecMeta {
-                window: self.cfg.window,
-                scale: if self.cal.sensitivity.is_some() {
-                    LevelScale::DbSpl
-                } else {
-                    LevelScale::Dbfs
-                },
-                cal: self.cal.status,
-                mic_curve: self.cal.correction.is_some(),
-                smoothing: self.cfg.smoothing,
-            };
+        let due = self
+            .pace
+            .due(e, topic, self.generation, &stamp, std::time::Instant::now());
+        if due == Due::Send && self.fill_power() {
             let bins = self.power.len();
             let shown = match self.smoother.as_mut().filter(|s| s.bins() == bins) {
                 Some(sm) => {
@@ -281,30 +298,32 @@ impl Analysis for Spectrum {
             };
             let live = SpecFrame {
                 meas: self.meas,
-                meta,
+                meta: self.meta(),
                 level: column_max(shown, &self.first_bin).map(db).collect(),
             };
-            let capture = SpecFrame {
-                meas: self.meas,
-                meta,
-                level: self.power.iter().map(|p| db(*p)).collect(),
-            };
-            e.send_with_capture_on(
-                stamp,
-                FrameData::Spec(live),
-                FrameData::Spec(capture),
-                self.capture_grid_id,
-            );
+            if !e.send(stamp, FrameData::Spec(live)) {
+                self.pace.unsent();
+            }
         }
-        if let Some(l) = self.levels.take(self.meas) {
-            e.send(
-                StampArgs {
-                    grid_id: None,
-                    ..stamp
-                },
-                FrameData::Levels(l),
-            );
+        self.levels.send(e, self.meas, stamp);
+        Flush::from_due(due)
+    }
+
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
+        let end = self.end?;
+        if !self.fill_power() {
+            return None;
         }
+        let capture = SpecFrame {
+            meas: self.meas,
+            meta: self.meta(),
+            level: self.power.iter().map(|p| db(*p)).collect(),
+        };
+        let stamp = StampArgs {
+            grid_id: Some(self.capture_grid_id),
+            ..self.stamp(end)
+        };
+        Some((stamp, FrameData::Spec(capture)))
     }
 }
 

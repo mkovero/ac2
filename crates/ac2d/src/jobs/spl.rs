@@ -20,9 +20,10 @@ use ac2_proto::frame::{
 use ac2_proto::model::{
     LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, SplConfig, SplLogRow,
 };
+use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
 
-use super::{Analysis, Emitter, JobCmd, LevelsMeter, StampArgs, channel_f64};
+use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, StampArgs, channel_f64};
 use crate::calstore::InputCal;
 use crate::control::ControlMsg;
 use crate::conv;
@@ -30,6 +31,13 @@ use crate::fanout::Block;
 use crate::leq_log::{self, SharedLog};
 
 const NS: f64 = 1e9;
+
+/// Most `spl` frames per second. The fastest time weighting (F, 125 ms) moves little in
+/// 50 ms, and the number on screen updates every half second or slower (it holds a reading
+/// for its display period), so faster frames would only cost battery. Lmax, Lmin, Lpeak and
+/// Leq cover the whole interval since the meter's reset, not the time between frames, so
+/// no peak falls between two frames.
+pub(crate) const SPL_FPS: u32 = 20;
 
 pub(crate) struct Spl {
     meas: MeasId,
@@ -45,6 +53,9 @@ pub(crate) struct Spl {
     end: Option<u64>,
     wall: u64,
     leq: LeqWindows,
+    /// Advances whenever the reading may have changed: a block metered, a command.
+    generation: u64,
+    pace: Pace,
 }
 
 /// The meter's one-second integration, its log and its rolling windows.
@@ -195,6 +206,8 @@ impl Spl {
             end: None,
             wall: 0,
             leq,
+            generation: 0,
+            pace: Pace::new(std::time::Duration::from_secs_f64(1.0 / f64::from(SPL_FPS))),
         })
     }
 
@@ -348,6 +361,34 @@ impl Spl {
         });
     }
 
+    fn spl_frame(&self) -> SplFrame {
+        let mut l = self.meter.levels();
+        let scale = match self.cal.sensitivity {
+            Some(offset_db) => {
+                l = l.calibrated(Sensitivity { offset_db });
+                LevelScale::DbSpl
+            }
+            None => LevelScale::Dbfs,
+        };
+        SplFrame {
+            meas: self.meas,
+            meta: SplMeta {
+                scale,
+                weighting: self.cfg.weighting,
+                time_weighting: self.cfg.time_weighting,
+                peak_weighting: self.cfg.peak_weighting,
+                level: l.level,
+                lmax: l.lmax,
+                lmin: l.lmin,
+                leq: l.leq,
+                lpeak: l.lpeak,
+                duration: Seconds(l.duration_s),
+                cal: self.cal.status,
+                mic_curve: self.meter.has_correction(),
+            },
+        }
+    }
+
     fn leq_frame(&self) -> LeqFrame {
         let offset = self.cal.sensitivity;
         let o = offset.unwrap_or(0.0);
@@ -439,12 +480,17 @@ impl Analysis for Spl {
         self.applied_at.get_or_insert(b.start_sample);
         channel_f64(b, self.idx, &mut self.buf);
         self.push_meter(b);
+        // A frozen meter holds its reading: nothing new to send.
+        if !self.meter.frozen() {
+            self.generation += 1;
+        }
         self.levels.push(b);
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;
     }
 
     fn command(&mut self, c: JobCmd) {
+        self.generation += 1;
         match c {
             JobCmd::Freeze(f) => self.meter.set_frozen(f),
             JobCmd::Reset => self.meter.reset_interval(),
@@ -478,17 +524,9 @@ impl Analysis for Spl {
         }
     }
 
-    fn emit(&mut self, e: &Emitter) {
+    fn emit(&mut self, e: &Emitter) -> Flush {
         let Some(end) = self.end else {
-            return;
-        };
-        let mut l = self.meter.levels();
-        let scale = match self.cal.sensitivity {
-            Some(offset_db) => {
-                l = l.calibrated(Sensitivity { offset_db });
-                LevelScale::DbSpl
-            }
-            None => LevelScale::Dbfs,
+            return Flush::Done;
         };
         let stamp = StampArgs {
             audio_sample: end.saturating_sub(1),
@@ -502,32 +540,29 @@ impl Analysis for Spl {
                 ProtectionFlags::NONE
             },
         };
-        e.send(
-            stamp,
-            FrameData::Spl(SplFrame {
-                meas: self.meas,
-                meta: SplMeta {
-                    scale,
-                    weighting: self.cfg.weighting,
-                    time_weighting: self.cfg.time_weighting,
-                    peak_weighting: self.cfg.peak_weighting,
-                    level: l.level,
-                    lmax: l.lmax,
-                    lmin: l.lmin,
-                    leq: l.leq,
-                    lpeak: l.lpeak,
-                    duration: Seconds(l.duration_s),
-                    cal: self.cal.status,
-                    mic_curve: self.meter.has_correction(),
-                },
-            }),
-        );
-        if self.leq.fresh {
-            self.leq.fresh = false;
-            e.send(stamp, FrameData::Leq(self.leq_frame()));
+        let topic = Topic::Data {
+            meas: self.meas,
+            stream: Stream::Spl,
+        };
+        let due = self
+            .pace
+            .due(e, topic, self.generation, &stamp, std::time::Instant::now());
+        if due == Due::Send && !e.send(stamp, FrameData::Spl(self.spl_frame())) {
+            self.pace.unsent();
         }
-        if let Some(lv) = self.levels.take(self.meas) {
-            e.send(stamp, FrameData::Levels(lv));
+        let leq_topic = Topic::Data {
+            meas: self.meas,
+            stream: Stream::Leq,
+        };
+        // A second not sent stays fresh, so a new subscriber gets the windows at once.
+        if self.leq.fresh && e.wants(leq_topic) {
+            self.leq.fresh = !e.send(stamp, FrameData::Leq(self.leq_frame()));
         }
+        self.levels.send(e, self.meas, stamp);
+        Flush::from_due(due)
+    }
+
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
+        None
     }
 }

@@ -11,7 +11,7 @@ use std::sync::mpsc::Sender;
 
 use ac2_proto::units::SweepId;
 
-use super::{Analysis, Emitter, JobCmd};
+use super::{Analysis, Emitter, Flush, JobCmd, StampArgs};
 use crate::control::ControlMsg;
 use crate::fanout::Block;
 use crate::sweep::Recording;
@@ -115,7 +115,13 @@ impl Analysis for Recorder {
 
     fn command(&mut self, _c: JobCmd) {}
 
-    fn emit(&mut self, _e: &Emitter) {}
+    fn emit(&mut self, _e: &Emitter) -> Flush {
+        Flush::Done
+    }
+
+    fn capture(&mut self) -> Option<(StampArgs, ac2_proto::frame::FrameData)> {
+        None
+    }
 }
 
 #[cfg(test)]

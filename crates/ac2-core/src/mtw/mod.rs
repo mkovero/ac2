@@ -289,6 +289,18 @@ pub struct Mtw {
     dec_y: Vec<f64>,
     deint_r: Vec<f64>,
     deint_m: Vec<f64>,
+    /// Per stage: model effective averages already worked out for the stage's current
+    /// block count, by column width in bins.
+    neff_memo: Vec<NeffMemo>,
+}
+
+/// The effective-averages model costs a few dozen `powf` per column, yet it depends only on
+/// the stage's block count and the column's width in bins, and a stage serves many columns
+/// of the same width: one evaluation per width per new block suffices.
+#[derive(Debug, Default)]
+struct NeffMemo {
+    held: u64,
+    by_bins: Vec<(usize, f64)>,
 }
 
 impl Mtw {
@@ -331,6 +343,7 @@ impl Mtw {
             dec_y: Vec::new(),
             deint_r: Vec::new(),
             deint_m: Vec::new(),
+            neff_memo: Vec::new(),
         })
     }
 
@@ -417,6 +430,7 @@ impl Mtw {
             s.capped = capped;
             s.est.reset_averages(a);
         }
+        self.neff_memo.clear();
         Ok(())
     }
 
@@ -436,6 +450,7 @@ impl Mtw {
         for s in &mut self.stages {
             s.est.reset_averages(s.averaging);
         }
+        self.neff_memo.clear();
     }
 
     fn restart(&mut self) {
@@ -446,6 +461,7 @@ impl Mtw {
             }
             s.est.reset_stream(s.averaging);
         }
+        self.neff_memo.clear();
     }
 
     /// Push planar blocks of reference and measurement samples whose first sample has input
@@ -576,6 +592,29 @@ impl Mtw {
         Some((origin + newest_pair as i64 + 1) as u64)
     }
 
+    /// H1 = Gxy / Gxx per bin of stage `stage` into `out` (0 where the reference has no
+    /// energy); `false` before its first block. The density scaling of
+    /// [`Mtw::stage_spectra`] is common to both spectra and cancels in the ratio, so the raw
+    /// sums give the same H1 without building the spectra.
+    pub fn stage_h1_into(&self, stage: usize, out: &mut Vec<Complex64>) -> bool {
+        out.clear();
+        let Some(s) = self.stages.get(stage) else {
+            return false;
+        };
+        let (sums, weight) = s.est.sums();
+        if weight <= 0.0 {
+            return false;
+        }
+        out.extend(sums.xy.iter().zip(&sums.xx).map(|(xy, xx)| {
+            if *xx > 0.0 {
+                *xy / *xx
+            } else {
+                Complex64::new(0.0, 0.0)
+            }
+        }));
+        true
+    }
+
     /// Averaged spectra of one stage (density-scaled), or `None` before its first block.
     pub fn stage_spectra(&self, stage: usize) -> Option<StageSpectra> {
         let s = self.stages.get(stage)?;
@@ -602,27 +641,59 @@ impl Mtw {
     }
 
     /// Build the current frame.
-    pub fn frame(&self) -> MtwFrame {
+    pub fn frame(&mut self) -> MtwFrame {
+        let mut f = MtwFrame {
+            grid: self.config.grid,
+            freq_hz: Vec::new(),
+            h1: Vec::new(),
+            magnitude_db: Vec::new(),
+            phase_deg: Vec::new(),
+            coherence: Vec::new(),
+            eff_avg: Vec::new(),
+            columns: Vec::new(),
+            last_block_end: None,
+        };
+        self.frame_into(&mut f);
+        f
+    }
+
+    /// Build the current frame into `f`, reusing its buffers.
+    pub fn frame_into(&mut self, f: &mut MtwFrame) {
         let grid = self.config.grid;
         let n = grid.len();
         let nan = f64::NAN;
-        let mut f = MtwFrame {
-            grid,
-            freq_hz: grid.frequencies(),
-            h1: vec![Complex64::new(nan, nan); n],
-            magnitude_db: vec![nan; n],
-            phase_deg: vec![nan; n],
-            coherence: vec![nan; n],
-            eff_avg: vec![nan; n],
-            columns: Vec::with_capacity(n),
-            last_block_end: self
-                .stages
-                .iter()
-                .filter_map(|s| self.stage_block_end(s))
-                .max(),
+        if f.grid != grid || f.freq_hz.len() != n {
+            f.freq_hz = grid.frequencies();
+        }
+        f.grid = grid;
+        let reset = |v: &mut Vec<f64>| {
+            v.clear();
+            v.resize(n, nan);
         };
-        for (i, src) in self.plan.iter().enumerate() {
-            let est = match *src {
+        f.h1.clear();
+        f.h1.resize(n, Complex64::new(nan, nan));
+        reset(&mut f.magnitude_db);
+        reset(&mut f.phase_deg);
+        reset(&mut f.coherence);
+        reset(&mut f.eff_avg);
+        f.columns.clear();
+        f.last_block_end = self
+            .stages
+            .iter()
+            .filter_map(|s| self.stage_block_end(s))
+            .max();
+        self.neff_memo
+            .resize_with(self.stages.len(), NeffMemo::default);
+        for (memo, s) in self.neff_memo.iter_mut().zip(&self.stages) {
+            let held = s.est.held();
+            if memo.held != held {
+                memo.held = held;
+                memo.by_bins.clear();
+            }
+        }
+        for i in 0..n {
+            let src = self.plan[i];
+            let est = match src {
                 ColumnSource::None => {
                     let fc = f.freq_hz[i];
                     let validity = if fc > self.layout.stages[0].served_hi_hz {
@@ -659,13 +730,12 @@ impl Mtw {
             };
             f.columns.push(ColumnInfo {
                 validity,
-                source: *src,
+                source: src,
             });
         }
-        f
     }
 
-    fn column_estimate(&self, b: StageBins) -> Result<ColumnEstimate, Validity> {
+    fn column_estimate(&mut self, b: StageBins) -> Result<ColumnEstimate, Validity> {
         let s = &self.stages[b.stage];
         if s.est.held() == 0 {
             return Err(Validity::Settling);
@@ -680,10 +750,20 @@ impl Mtw {
         if !(yy > 0.0 && yy.is_finite()) {
             return Err(Validity::NoMeasurement);
         }
+        let bins = b.count();
+        let memo = &mut self.neff_memo[b.stage].by_bins;
+        let eff_avg = match memo.iter().find(|(k, _)| *k == bins) {
+            Some(&(_, v)) => v,
+            None => {
+                let v = s.est.neff(bins);
+                memo.push((bins, v));
+                v
+            }
+        };
         Ok(ColumnEstimate {
             h1: xy / xx,
             coherence: (xy.norm_sqr() / (xx * yy)).min(1.0),
-            eff_avg: s.est.neff(b.count()),
+            eff_avg,
         })
     }
 }

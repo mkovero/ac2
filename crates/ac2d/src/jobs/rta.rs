@@ -12,9 +12,10 @@ use ac2_core::weighting::WeightingFilter;
 use ac2_proto::frame::{FrameData, ProtectionFlags, RtaFrame, RtaMeta, ValidityMask};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{LevelScale, RtaConfig, SpecAveraging};
+use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
-use super::{Analysis, Emitter, JobCmd, LevelsMeter, StampArgs, channel_f64};
+use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, StampArgs, channel_f64};
 use crate::calstore::InputCal;
 use crate::conv;
 use crate::fanout::Block;
@@ -72,6 +73,10 @@ pub(crate) struct Rta {
     shown: Option<Vec<f64>>,
     end: Option<u64>,
     wall: u64,
+    /// Advances whenever the result may have changed: a new interval averaged, a reset, a
+    /// command.
+    generation: u64,
+    pace: Pace,
 }
 
 impl Rta {
@@ -119,6 +124,8 @@ impl Rta {
             shown: None,
             end: None,
             wall: 0,
+            generation: 0,
+            pace: Pace::new(std::time::Duration::ZERO),
         };
         r.set_cal(cal);
         Ok(r)
@@ -141,6 +148,63 @@ impl Rta {
             Avg::Exp(_, s) => *s = None,
         }
         self.shown = None;
+        self.generation += 1;
+    }
+
+    fn stamp(&self, end: u64) -> StampArgs {
+        StampArgs {
+            audio_sample: end.saturating_sub(1),
+            config_rev: self.config_rev,
+            applied_at: self.applied_at.unwrap_or(0),
+            wall_ns: self.wall,
+            grid_id: Some(self.grid_id),
+            protection: if self.levels.any_clip_held() {
+                ProtectionFlags::CLIP
+            } else {
+                ProtectionFlags::NONE
+            },
+        }
+    }
+
+    /// The averaged band levels; `None` before the first interval.
+    fn frame(&self) -> Option<RtaFrame> {
+        let shown = self.shown.as_ref()?;
+        let off = self.cal.sensitivity.unwrap_or(0.0);
+        let corr = self.corr.as_deref();
+        let level: Vec<f32> = shown
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let c = corr.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
+                (power_dbfs(*p) + off - c) as f32
+            })
+            .collect();
+        let validity = level
+            .iter()
+            .map(|v| {
+                if v.is_finite() {
+                    ValidityMask::NONE
+                } else {
+                    ValidityMask::BELOW_FLOOR
+                }
+            })
+            .collect();
+        Some(RtaFrame {
+            meas: self.meas,
+            meta: RtaMeta {
+                fraction: self.cfg.fraction,
+                weighting: self.cfg.weighting,
+                scale: if self.cal.sensitivity.is_some() {
+                    LevelScale::DbSpl
+                } else {
+                    LevelScale::Dbfs
+                },
+                cal: self.cal.status,
+                mic_curve: self.corr.is_some(),
+            },
+            level,
+            validity,
+        })
     }
 }
 
@@ -163,6 +227,7 @@ impl Analysis for Rta {
     }
 
     fn command(&mut self, c: JobCmd) {
+        self.generation += 1;
         match c {
             JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.reset(),
@@ -175,12 +240,15 @@ impl Analysis for Rta {
         }
     }
 
-    fn emit(&mut self, e: &Emitter) {
+    fn emit(&mut self, e: &Emitter) -> Flush {
         let Some(end) = self.end else {
-            return;
+            return Flush::Done;
         };
         let interval_s = self.bank.samples() as f64 / self.fs;
+        // Averaging goes on whether or not anyone receives the result: an interval is one
+        // frame of the average.
         if self.bank.samples() > 0 && !self.frozen {
+            self.generation += 1;
             self.bank.band_powers(&mut self.powers);
             let p = self.powers.clone();
             self.shown = Some(match &mut self.avg {
@@ -213,67 +281,26 @@ impl Analysis for Rta {
             });
         }
         self.bank.reset_powers();
-        let stamp = StampArgs {
-            audio_sample: end.saturating_sub(1),
-            config_rev: self.config_rev,
-            applied_at: self.applied_at.unwrap_or(0),
-            wall_ns: self.wall,
-            grid_id: Some(self.grid_id),
-            protection: if self.levels.any_clip_held() {
-                ProtectionFlags::CLIP
-            } else {
-                ProtectionFlags::NONE
-            },
+        let stamp = self.stamp(end);
+        let topic = Topic::Data {
+            meas: self.meas,
+            stream: Stream::Rta,
         };
-        if let Some(shown) = &self.shown {
-            let off = self.cal.sensitivity.unwrap_or(0.0);
-            let corr = self.corr.as_deref();
-            let level: Vec<f32> = shown
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let c = corr.and_then(|c| c.get(i)).copied().unwrap_or(0.0);
-                    (power_dbfs(*p) + off - c) as f32
-                })
-                .collect();
-            let validity = level
-                .iter()
-                .map(|v| {
-                    if v.is_finite() {
-                        ValidityMask::NONE
-                    } else {
-                        ValidityMask::BELOW_FLOOR
-                    }
-                })
-                .collect();
-            e.send(
-                stamp,
-                FrameData::Rta(RtaFrame {
-                    meas: self.meas,
-                    meta: RtaMeta {
-                        fraction: self.cfg.fraction,
-                        weighting: self.cfg.weighting,
-                        scale: if self.cal.sensitivity.is_some() {
-                            LevelScale::DbSpl
-                        } else {
-                            LevelScale::Dbfs
-                        },
-                        cal: self.cal.status,
-                        mic_curve: self.corr.is_some(),
-                    },
-                    level,
-                    validity,
-                }),
-            );
+        let due = self
+            .pace
+            .due(e, topic, self.generation, &stamp, std::time::Instant::now());
+        if due == Due::Send
+            && let Some(f) = self.frame()
+            && !e.send(stamp, FrameData::Rta(f))
+        {
+            self.pace.unsent();
         }
-        if let Some(l) = self.levels.take(self.meas) {
-            e.send(
-                StampArgs {
-                    grid_id: None,
-                    ..stamp
-                },
-                FrameData::Levels(l),
-            );
-        }
+        self.levels.send(e, self.meas, stamp);
+        Flush::from_due(due)
+    }
+
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
+        let end = self.end?;
+        Some((self.stamp(end), FrameData::Rta(self.frame()?)))
     }
 }

@@ -11,7 +11,7 @@ use ac2_proto::frame::{FrameData, ProtectionFlags, TimingMeta, TimingWindow};
 use ac2_proto::model::{Drift, TimingStatus};
 use ac2_proto::units::{Db, Dbfs, Rev, SampleIndex, Samples, Seconds, SessionEpoch, WallNs};
 
-use super::{Analysis, Emitter, JobCmd, StampArgs};
+use super::{Analysis, Emitter, Flush, JobCmd, StampArgs};
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Block;
@@ -234,12 +234,12 @@ impl Analysis for Timing {
 
     fn command(&mut self, _c: JobCmd) {}
 
-    fn emit(&mut self, e: &Emitter) {
+    fn emit(&mut self, e: &Emitter) -> Flush {
         let Some(end) = self.end else {
-            return;
+            return Flush::Done;
         };
         if !self.dirty {
-            return;
+            return Flush::Done;
         }
         self.dirty = false;
         e.send(
@@ -256,5 +256,10 @@ impl Analysis for Timing {
                 window: self.last_window,
             }),
         );
+        Flush::Done
+    }
+
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
+        None
     }
 }

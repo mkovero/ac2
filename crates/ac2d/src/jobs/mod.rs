@@ -2,13 +2,14 @@
 //! I/O thread's latest slots.
 //!
 //! A job's lifetime follows commands (`meas.start/stop`, session open/close), never
-//! subscriptions. Subscriptions only decide which optional derivations are computed (the
-//! live IR view). Every job publishes at most at the publish rate; between frames it only
-//! accumulates.
+//! subscriptions. Subscriptions decide what is built and sent: a result nobody receives is
+//! neither formed nor encoded, and one that has not changed since it was last sent is only
+//! re-sent now and then to keep it fresh ([`Pace`]). Every job publishes at most at the
+//! publish rate; between frames it only accumulates.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -27,6 +28,8 @@ use crate::outbox::Outbox;
 
 pub(crate) mod finder;
 pub(crate) mod meters;
+#[cfg(test)]
+mod pace_tests;
 pub(crate) mod rta;
 pub(crate) mod spectrum;
 pub(crate) mod spl;
@@ -72,17 +75,10 @@ pub(crate) struct StampArgs {
     pub(crate) protection: ProtectionFlags,
 }
 
-/// The newest `tf` / `spec` / `rta` frame a job published, for `trace.capture`: a capture
-/// stores what clients were shown, never a separately computed result — for a transfer
-/// function the same frame before display smoothing, so a stored trace can be re-smoothed;
-/// for a spectrum the same result before smoothing with every bin, not its display columns.
-pub(crate) type LatestFrame = Arc<Mutex<Option<Frame>>>;
-
 /// A job's way out.
 pub(crate) struct Emitter {
     outbox: Outbox,
     env: JobEnv,
-    latest: LatestFrame,
 }
 
 impl Emitter {
@@ -90,44 +86,18 @@ impl Emitter {
     pub(crate) fn connect(env: JobEnv) -> std::io::Result<Self> {
         let outbox = Outbox::connect(&env.ctx, &env.endpoint, 64)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        Ok(Self {
-            outbox,
-            env,
-            latest: Arc::new(Mutex::new(None)),
-        })
+        Ok(Self { outbox, env })
     }
 
     pub(crate) fn wants(&self, t: Topic) -> bool {
         self.env.interest.wants(&t.to_bytes())
     }
 
-    pub(crate) fn send(&self, s: StampArgs, data: FrameData) {
-        self.publish(s, data, None);
-    }
-
-    /// Publishes `data`, keeping `capture` (the same result before display smoothing) as
-    /// what `trace.capture` stores.
-    pub(crate) fn send_with_capture(&self, s: StampArgs, data: FrameData, capture: FrameData) {
-        self.publish(s, data, Some((capture, s.grid_id)));
-    }
-
-    /// Publishes `data`, keeping `capture` — the same result at full resolution, on
-    /// `capture_grid` — as what `trace.capture` stores.
-    pub(crate) fn send_with_capture_on(
-        &self,
-        s: StampArgs,
-        data: FrameData,
-        capture: FrameData,
-        capture_grid: GridId,
-    ) {
-        self.publish(s, data, Some((capture, Some(capture_grid))));
-    }
-
-    fn publish(&self, s: StampArgs, data: FrameData, capture: Option<(FrameData, Option<GridId>)>) {
-        let topic = data.topic();
-        let mut frame = Frame {
+    /// The frame `data` stamped with `s` and sequence number `seq`.
+    fn frame(&self, s: StampArgs, seq: u64, data: FrameData) -> Frame {
+        Frame {
             stamp: FrameStamp {
-                seq: self.env.seqs.next(topic),
+                seq,
                 audio_sample: SampleIndex(s.audio_sample),
                 session_epoch: self.env.epoch,
                 daemon_incarnation: self.env.incarnation,
@@ -138,28 +108,147 @@ impl Emitter {
                 protection: s.protection,
             },
             data,
-        };
-        let parts = match ac2_proto::encode_frame(&frame) {
-            Ok(parts) => parts,
+        }
+    }
+
+    /// Publishes `data`; `false` if it did not reach the I/O thread (pipe full).
+    pub(crate) fn send(&self, s: StampArgs, data: FrameData) -> bool {
+        let topic = data.topic();
+        let frame = self.frame(s, self.env.seqs.next(topic), data);
+        match ac2_proto::encode_frame(&frame) {
+            Ok(parts) => self.outbox.frame(&parts),
             Err(e) => {
                 tracing::error!("{topic}: frame not encodable: {e}");
-                return;
+                false
+            }
+        }
+    }
+}
+
+/// Longest a client goes without a frame of a result that has not changed (frozen, settled,
+/// or gated by protection). A client marks a topic STALE after a second without a new frame
+/// (`ac2_client::data::STALE_AFTER`): re-sending an unchanged result four times a second
+/// keeps a live but steady measurement fresh with room for a late or dropped frame, while
+/// only a stopped stream (no audio, so no blocks and no frames at all) goes STALE.
+pub(crate) const REFRESH: Duration = Duration::from_millis(250);
+
+/// What a [`Pace`] says about one result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Due {
+    /// Build and send it now.
+    Send,
+    /// Nothing to send: nobody receives it, or it is unchanged and was sent recently.
+    Skip,
+    /// Changed, but sent too recently for its rate; ask again soon.
+    Later,
+}
+
+/// When one topic of a job is sent: on a new result (at most every `min_period`), on a
+/// change of its protection flags, and every [`REFRESH`] while unchanged as long as audio
+/// keeps coming — and only while someone subscribes to it.
+#[derive(Debug)]
+pub(crate) struct Pace {
+    min_period: Duration,
+    sent: Option<Sent>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Sent {
+    generation: u64,
+    prot: ProtectionFlags,
+    audio_sample: u64,
+    at: Instant,
+}
+
+impl Pace {
+    /// Sends a new result at most every `min_period` (zero: whenever the job emits).
+    pub(crate) fn new(min_period: Duration) -> Self {
+        Self {
+            min_period,
+            sent: None,
+        }
+    }
+
+    /// Whether `topic`'s result of generation `generation` (a count the job advances whenever
+    /// the result may have changed), stamped `stamp`, goes out at `now`. A `Send` is taken
+    /// to be sent.
+    pub(crate) fn due(
+        &mut self,
+        e: &Emitter,
+        topic: Topic,
+        generation: u64,
+        stamp: &StampArgs,
+        now: Instant,
+    ) -> Due {
+        if !e.wants(topic) {
+            // A new subscriber gets the result on the next emit, whatever it was before.
+            self.sent = None;
+            return Due::Skip;
+        }
+        let due = match self.sent {
+            None => Due::Send,
+            Some(s) => {
+                let since = now.saturating_duration_since(s.at);
+                if s.generation != generation || s.prot != stamp.protection {
+                    if since >= self.min_period {
+                        Due::Send
+                    } else {
+                        Due::Later
+                    }
+                } else if stamp.audio_sample <= s.audio_sample {
+                    // Nothing new at all: the stream has stopped, and the client's STALE
+                    // must say so.
+                    Due::Skip
+                } else if since >= REFRESH {
+                    Due::Send
+                } else {
+                    // The refresh carries the newest stamp even after the last block.
+                    Due::Later
+                }
             }
         };
-        // The capture slot is filled before the frame leaves: a client that has seen this
-        // frame and asks for a capture must get this result (or a newer one), never the
-        // one before it.
-        if let Some((c, grid)) = capture {
-            frame.data = c;
-            frame.stamp.grid_id = grid;
+        if due == Due::Send {
+            self.sent = Some(Sent {
+                generation,
+                prot: stamp.protection,
+                audio_sample: stamp.audio_sample,
+                at: now,
+            });
         }
-        if matches!(
-            frame.data,
-            FrameData::Tf(_) | FrameData::Spec(_) | FrameData::Rta(_)
-        ) {
-            *self.latest.lock().unwrap_or_else(PoisonError::into_inner) = Some(frame);
+        due
+    }
+
+    /// The result taken as sent did not go out: send it on the next emit.
+    pub(crate) fn unsent(&mut self) {
+        self.sent = None;
+    }
+}
+
+/// Whether `emit` sent everything it had.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Flush {
+    Done,
+    /// Something was held back (by its rate, or until its refresh); emit again soon even
+    /// without new audio, so the newest result goes out after the last block.
+    Pending,
+}
+
+impl Flush {
+    /// [`Flush::Pending`] if `due` said to ask again.
+    pub(crate) fn from_due(due: Due) -> Self {
+        if due == Due::Later {
+            Self::Pending
+        } else {
+            Self::Done
         }
-        self.outbox.frame(&parts);
+    }
+
+    pub(crate) fn and(self, o: Flush) -> Flush {
+        if self == Flush::Pending || o == Flush::Pending {
+            Flush::Pending
+        } else {
+            Flush::Done
+        }
     }
 }
 
@@ -212,6 +301,8 @@ pub(crate) enum JobMsg {
     /// Blocks of one hand-off, oldest first.
     Blocks(Batch),
     Cmd(JobCmd),
+    /// Form the current result for a capture and answer on the channel.
+    Capture(SyncSender<Option<Frame>>),
     Stop,
 }
 
@@ -221,15 +312,23 @@ pub(crate) trait Analysis: Send {
     fn push(&mut self, b: &Block);
     /// Applies a command.
     fn command(&mut self, c: JobCmd);
-    /// Publishes the current result.
-    fn emit(&mut self, e: &Emitter);
+    /// Publishes what is due of the current result.
+    fn emit(&mut self, e: &Emitter) -> Flush;
+    /// The current `tf` / `spec` / `rta` result for `trace.capture`, as its next frame would
+    /// carry it but before display smoothing (a stored trace is re-smoothed); `None` for
+    /// analyses without one, or before the first result.
+    fn capture(&mut self) -> Option<(StampArgs, FrameData)>;
 }
+
+/// Longest `trace.capture` waits for a job to form its result. The request wakes the job like
+/// any message and is answered after at most one drain of queued audio, so only a stuck job
+/// takes this long.
+const CAPTURE_WAIT: Duration = Duration::from_secs(1);
 
 /// A running job thread.
 pub(crate) struct JobHandle {
     tx: Sender<JobMsg>,
     thread: Option<JoinHandle<()>>,
-    latest: LatestFrame,
     /// Id of this job at the fan-out.
     pub(crate) fanout_id: u64,
 }
@@ -239,12 +338,13 @@ impl JobHandle {
         let _ = self.tx.send(JobMsg::Cmd(c));
     }
 
-    /// The newest curve frame this job published.
-    pub(crate) fn latest(&self) -> Option<Frame> {
-        self.latest
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+    /// The job's current curve result, formed on request: results are built for clients
+    /// only while someone subscribes, so a capture cannot rely on a published frame. It is
+    /// the newest state, so it is never older than any frame a client has seen.
+    pub(crate) fn capture(&self) -> Option<Frame> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.tx.send(JobMsg::Capture(tx)).ok()?;
+        rx.recv_timeout(CAPTURE_WAIT).ok().flatten()
     }
 
     fn stop_inner(&mut self) {
@@ -272,8 +372,6 @@ pub(crate) fn spawn(
     let (tx, rx) = std::sync::mpsc::channel::<JobMsg>();
     let queued = Arc::new(AtomicU64::new(0));
     let q = Arc::clone(&queued);
-    let latest: LatestFrame = Arc::new(Mutex::new(None));
-    let slot = Arc::clone(&latest);
     let thread = std::thread::Builder::new()
         .name(name.clone())
         .spawn(move || {
@@ -284,18 +382,13 @@ pub(crate) fn spawn(
                     return;
                 }
             };
-            let em = Emitter {
-                outbox,
-                env,
-                latest: slot,
-            };
+            let em = Emitter { outbox, env };
             run(&mut *analysis, &rx, &q, &em);
         })?;
     Ok((
         JobHandle {
             tx: tx.clone(),
             thread: Some(thread),
-            latest,
             fanout_id,
         },
         JobFeed { tx, queued },
@@ -332,7 +425,8 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emi
         let mut next = first;
         let mut handled = 0;
         while let Some(m) = next.take() {
-            match m {
+            // A capture only reads the result; it leaves nothing new to publish.
+            let changed = match m {
                 JobMsg::Blocks(batch) => {
                     let mut frames = 0u64;
                     for b in batch.iter() {
@@ -340,11 +434,20 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emi
                         frames += u64::from(b.frames);
                     }
                     queued.fetch_sub(frames, Ordering::AcqRel);
+                    true
                 }
-                JobMsg::Cmd(c) => a.command(c),
+                JobMsg::Cmd(c) => {
+                    a.command(c);
+                    true
+                }
+                JobMsg::Capture(reply) => {
+                    let f = a.capture().map(|(s, d)| em.frame(s, 0, d));
+                    let _ = reply.send(f);
+                    false
+                }
                 JobMsg::Stop => return,
-            }
-            dirty = true;
+            };
+            dirty |= changed;
             handled += 1;
             if handled < DRAIN_MAX {
                 next = match rx.try_recv() {
@@ -355,9 +458,8 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queued: &AtomicU64, em: &Emi
             }
         }
         if dirty && last_emit.is_none_or(|t| t.elapsed() + slack >= period) {
-            a.emit(em);
+            dirty = a.emit(em) == Flush::Pending;
             last_emit = Some(Instant::now());
-            dirty = false;
         }
     }
 }
@@ -446,6 +548,29 @@ impl LevelsMeter {
             rms: m.rms,
             clip: m.clip,
         })
+    }
+
+    /// Sends the interval's meters of measurement `meas` (stamped `s`, without a grid) when
+    /// someone receives them; a new interval starts either way.
+    pub(crate) fn send(&mut self, e: &Emitter, meas: MeasId, s: StampArgs) {
+        let topic = Topic::Data {
+            meas,
+            stream: ac2_proto::topic::Stream::Levels,
+        };
+        if !e.wants(topic) {
+            self.reset_interval();
+            return;
+        }
+        if let Some(l) = self.take(meas) {
+            e.send(StampArgs { grid_id: None, ..s }, FrameData::Levels(l));
+        }
+    }
+
+    /// Starts a new interval without reading the old one.
+    fn reset_interval(&mut self) {
+        self.peak.fill(0.0);
+        self.clipped.fill(false);
+        self.frames = 0;
     }
 
     /// One past the newest sample metered.

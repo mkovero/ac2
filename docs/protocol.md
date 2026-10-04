@@ -390,10 +390,12 @@ display edits and are never applied to the stored data.
   correction would count it twice) and a locked trace (`refused`), a target (`invalid`),
   a curve not in the mic library (`not_found`).
 
-- `trace.capture` stores the measurement's newest published `tf`, `spec` or `rta` frame —
-  what clients were shown, for a `tf` or `spec` frame before its display smoothing, for a
-  `spec` frame with every FFT bin (grid `linear`) where the live frame has display columns
-  (grid `log_bins`) — with columns whose validity mask is set stored as NaN.
+- `trace.capture` stores the measurement's current `tf`, `spec` or `rta` result, formed
+  for the capture whether or not anyone subscribes — the result its next frame carries
+  (never older than a frame a client has seen), for a `tf` or `spec` result before its
+  display smoothing, for a `spec` result with every FFT bin (grid `linear`) where the live
+  frame has display columns (grid `log_bins`) — with columns whose validity mask is set
+  stored as NaN.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
@@ -666,6 +668,12 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
 | `ka` | keepalive, every 250 ms |
+
+A measurement topic is formed and sent only while someone subscribes to it. `tf`, `ir`,
+`spec` and `rta` frames come when the result changes (at most at the daemon's publish rate);
+`spl` at most 20 times a second (Lmax, Lmin, Lpeak and Leq cover the meter's interval, so
+none is lost between frames). An unchanged result (frozen, settled, gated) is re-sent with a
+fresh header every 250 ms, so only a stream without audio goes STALE.
 
 `<meas>` is the decimal measurement id without sign or leading zeros; a topic has exactly
 one spelling. Prefixes: `d/` (all measurement streams), `d/<meas>/` (one measurement —
