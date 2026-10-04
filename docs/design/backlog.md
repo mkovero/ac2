@@ -79,7 +79,7 @@ the commit when it lands.
 ## Done
 
 SPL meter and the stage view (field, 2026-10-03/04; 1f7337a, f2593e7, 0921351, 63f9bd1,
-ff82db7, a8c8cf9, 5a157e4):
+ff82db7, c98d8b4, a8c8cf9, 5a157e4):
 - **Weightings chosen only when a meter was created** → F / S / I and A / C / Z switched in place (the
   meter runs every combination, so a switch reads settled at once), a held big number
   centred in the pane, statistics headed "meter since … · R resets"; a new meter reads LAF.

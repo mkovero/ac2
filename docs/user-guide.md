@@ -695,12 +695,13 @@ the daemon restarts (the log is in the autosave and in saved sessions).
 - **G** in the SPL pane steps meter → windows → meter + windows (above). The windows show as
   **columns**, made to be read from the stage or across the room: one full-height column per
   window, the shortest on the left, each a bar that fills from the bottom with the window's
-  Leq, the value in large digits on top with the window's own unit and weighting right
-  under it — **dB(A)**, **dB(C)**, **dB(Z)**, or **dBFS (A)** uncalibrated — and the window's
+  Leq, the value in large digits on top with the window's own unit and weighting beside it
+  on the same line, small and dim — **dB(A)**, **dB(C)**, **dB(Z)**, or **dBFS (A)**
+  uncalibrated — and the window's
   name at the bottom ("LAeq 30 min", shortened to "30 min" or "30m" when the columns are
   narrow — the caption then says "LAeq"). The unit is never left out: in meter + Leq the
   meter above may read in another weighting (LCS over LAeq windows), and a column must not be
-  read in the meter's. Tiles show it beside the value. The limit is a line across the column; a column turns **amber** within the warn
+  read in the meter's. Tiles show it the same way. The limit is a line across the column; a column turns **amber** within the warn
   margin (3 dB by default) of its limit and the whole column goes **red** above it, and goes
   back when the window recovers; each going over and each recovery also shows as a message.
 - A window **still filling** (a new log, a longer window than the meter has run) shows its

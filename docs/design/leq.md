@@ -282,9 +282,9 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   the column narrows), and the headroom holds until the window is full ("until full: stay ≤ 98.2
   dB"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: the value as large as the column width allows (sized for five characters, the
-  same in every column, so it does not jump at 100 dB); right under it the window's own unit
-  and weighting (`dB(A)`, `dB(C)`, `dBFS (A)` uncalibrated; tiles: beside the value), never
-  dropped, since the SPL meter shown above the windows may use another weighting; then the
+  same in every column, so it does not jump at 100 dB, and leaving room for the unit); on
+  its baseline, small and dim, the window's own unit and weighting (`dB(A)`, `dB(C)`,
+  `dBFS (A)` uncalibrated; tiles the same), never dropped, since the SPL meter shown above the windows may use another weighting; then the
   state, the limit and the
   headroom (or "cooling down in …", the time to recover at the limit), each in the longest wording that fits the
   column and left out when the bar would get too short; the name at the bottom, shortened
