@@ -68,14 +68,22 @@ impl Finder {
             self.measurement.clear();
             self.start = start;
         }
-        self.reference.extend(r);
-        self.measurement.extend(m);
-        let excess = self.reference.len().saturating_sub(self.cap);
-        if excess > 0 {
-            self.reference.drain(..excess);
-            self.measurement.drain(..excess);
-            self.start += excess as u64;
+        // Room is made before appending, so the history never outgrows the capacity reserved
+        // for it (a deque past its capacity doubles it: 8 MB more per channel at 96 kHz).
+        let keep = r.len().min(m.len()).min(self.cap);
+        let excess = (self.reference.len() + keep).saturating_sub(self.cap);
+        self.reference.drain(..excess);
+        self.measurement.drain(..excess);
+        self.start += excess as u64;
+        if self.reference.is_empty() {
+            self.start = start + (r.len() - keep) as u64;
         }
+        self.reference
+            .reserve_exact(self.cap - self.reference.len());
+        self.measurement
+            .reserve_exact(self.cap - self.measurement.len());
+        self.reference.extend(&r[r.len() - keep..]);
+        self.measurement.extend(&m[m.len() - keep..]);
         if self.paused {
             return None;
         }
@@ -84,7 +92,7 @@ impl Finder {
         stream.push_meas(DBlock { start, samples: m });
         let mut moved = None;
         loop {
-            match stream.poll() {
+            match stream.poll_tracking(tracker.held()) {
                 Ok(Some(res)) => {
                     if let Some(d) = tracker.observe(&res) {
                         moved = Some(d);
@@ -364,6 +372,61 @@ mod tests {
             .expect("valid config");
         assert!(matches!(res.outcome, Outcome::Accepted { .. }), "{res:?}");
         assert!(!f.paused());
+    }
+
+    /// Tracking follows a jump far outside the region it searches while holding a delay.
+    #[test]
+    fn tracking_relocks_after_a_far_jump() {
+        let fs = 48_000.0;
+        let mut f = Finder::new(fs);
+        f.track(true, 0);
+        let r = noise(48_000 * 6, 21);
+        let change = 48_000 * 4;
+        let near = paths(&r, &[(412, 1.0)], 22);
+        let far = paths(&r, &[(30_000, 1.0)], 23);
+        let m: Vec<f32> = (0..r.len())
+            .map(|i| if i < change { near[i] } else { far[i] })
+            .collect();
+        let mut moves = Vec::new();
+        for (i, (rc, mc)) in r.chunks(1024).zip(m.chunks(1024)).enumerate() {
+            if let Some(d) = f.push(i as u64 * 1024, rc, mc) {
+                moves.push((i * 1024, d));
+            }
+        }
+        let ds: Vec<i64> = moves.iter().map(|&(_, d)| d).collect();
+        assert_eq!(ds, vec![412, 30_000], "{moves:?}");
+        assert!(moves[1].0 >= change);
+    }
+
+    /// Past its length the history slides without growing, and stays aligned: a finding on
+    /// the newest audio after many seconds still reads the true delay.
+    #[test]
+    fn history_slides_in_its_reserved_capacity() {
+        let fs = 48_000.0;
+        let mut f = Finder::new(fs);
+        let d = 77;
+        let r = noise(48_000 * 13, 9);
+        let m = paths(&r, &[(d, 1.0)], 10);
+        for (i, (rc, mc)) in r.chunks(1000).zip(m.chunks(1000)).enumerate() {
+            f.push(i as u64 * 1000, rc, mc);
+        }
+        assert_eq!(f.reference.len(), f.cap);
+        assert_eq!(f.start, r.len() as u64 - f.cap as u64);
+        assert!(
+            f.reference.capacity() < f.cap + 1000,
+            "{}",
+            f.reference.capacity()
+        );
+        let res = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config");
+        assert_eq!(res.accepted().map(|a| a.delay), Some(d as i64), "{res:?}");
+        // a block longer than the whole history keeps its newest samples
+        let long = noise(f.cap + 500, 11);
+        let start = r.len() as u64;
+        f.push(start, &long, &long);
+        assert_eq!(f.start, start + 500);
+        assert_eq!(f.reference.back(), long.last());
     }
 
     #[test]

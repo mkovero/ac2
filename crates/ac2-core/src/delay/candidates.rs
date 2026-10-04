@@ -30,8 +30,12 @@ pub(super) fn median(v: &mut [f64]) -> f64 {
 /// level noise maxima exceed with probability p_fa is median·√(ln(N_ind/p_fa)/ln 2). Lags
 /// within `excl` samples of anything above that level are not floor: wide lobes would
 /// otherwise inflate the median.
+///
+/// `region_lags` is the region's extent for N_ind: the floor is estimated from `env`, a
+/// sample of the region, while the false-peak probability belongs to the whole region.
 pub(super) fn detection_floor(
     env: &[f64],
+    region_lags: usize,
     b_eff: f64,
     fs: f64,
     p_fa: f64,
@@ -39,7 +43,7 @@ pub(super) fn detection_floor(
     tmp: &mut Vec<f64>,
 ) -> (f64, f64) {
     let n = env.len();
-    let n_ind = (n as f64 / fs * b_eff).max(1.0);
+    let n_ind = (region_lags as f64 / fs * b_eff).max(1.0);
     let kappa = ((n_ind / p_fa).ln() / std::f64::consts::LN_2).sqrt();
     tmp.clear();
     tmp.extend_from_slice(env);

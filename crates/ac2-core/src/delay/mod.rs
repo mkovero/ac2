@@ -42,8 +42,8 @@ use num_complex::Complex64;
 
 use candidates::{Lobe, RAYLEIGH_MEDIAN, deblend, detection_floor, local_maxima, parabolic};
 use estimator::{
-    Ffts, GridShape, MeasSpectra, Model, Pair, Pulse, Reg, Shape, Tile, band_hi, band_snr,
-    detect_period,
+    Ffts, GridShape, MeasSpectra, Model, Pair, PeriodWork, Pulse, RefSpectra, Reg, Shape, Tile,
+    band_hi, band_snr, detect_period,
 };
 
 pub use stream::DelayStream;
@@ -589,6 +589,8 @@ struct Work {
     y1: MeasSpectra,
     y2: MeasSpectra,
     tile: Tile,
+    refs: RefSpectra,
+    period: PeriodWork,
     hcx: Vec<Complex64>,
     env: Vec<f64>,
     det: Vec<f64>,
@@ -616,6 +618,17 @@ pub fn find_with(
     meas: Block<'_>,
     cfg: &FinderConfig,
 ) -> Result<FinderResult, ConfigError> {
+    find_in(scratch, ref_, meas, cfg, None)
+}
+
+/// [`find_with`], optionally confined to `local`.
+pub(crate) fn find_in(
+    scratch: &mut FinderScratch,
+    ref_: Block<'_>,
+    meas: Block<'_>,
+    cfg: &FinderConfig,
+    local: Option<Local>,
+) -> Result<FinderResult, ConfigError> {
     cfg.validate()?;
     let a = i64::try_from(ref_.start).map_err(|_| ConfigError::SampleIndex(ref_.start))?;
     let b = i64::try_from(meas.start).map_err(|_| ConfigError::SampleIndex(meas.start))?;
@@ -632,6 +645,7 @@ pub fn find_with(
         w: &mut w,
         cfg,
         pair,
+        local,
     };
     let (outcome, candidates, confidence) = run.find();
     w.r = r;
@@ -714,6 +728,19 @@ struct Run<'s, 'd> {
     w: &'s mut Work,
     cfg: &'s FinderConfig,
     pair: Pair<'d>,
+    /// Set for a local search: lags outside it are not searched.
+    local: Option<Local>,
+}
+
+/// A search confined to lags near known arrivals, for tracking (see [`DelayStream`]).
+/// Everything else, the periodicity test against the full span included, stays the full
+/// search's.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Local {
+    /// Lags searched, inside `cfg.search` and on its acquisition tile grid.
+    pub search: SearchRange,
+    /// Excitation period from the last full search over this excitation.
+    pub period: Option<u64>,
 }
 
 /// Python-style round half to even, so integer delays match the reference prototype.
@@ -722,6 +749,11 @@ fn round_lag(x: f64) -> i64 {
 }
 
 impl Run<'_, '_> {
+    /// Lags searched.
+    fn search(&self) -> SearchRange {
+        self.local.map_or(self.cfg.search, |l| l.search)
+    }
+
     fn find(&mut self) -> (Outcome, Vec<Arrival>, Confidence) {
         let cfg = self.cfg;
         let t = cfg.tuning;
@@ -732,7 +764,8 @@ impl Run<'_, '_> {
         let fs = cfg.fs;
         let class = cfg.band.class();
         let (lo, hi) = cfg.band.edges(fs);
-        let (d_min, d_max) = (cfg.search.min, cfg.search.max);
+        let search = self.search();
+        let (d_min, d_max) = (search.min, search.max);
         let mut conf = Confidence::unknown();
         let mut reasons = Vec::new();
         let refuse = |reasons, conf| (Outcome::NoEstimate { reasons }, Vec::new(), conf);
@@ -766,8 +799,10 @@ impl Run<'_, '_> {
         let step = (n1 / 4) as i64;
         let half = step / 2;
         let mut d0 = d_min + half;
+        w.refs.reset(&g1, w.y1.segments());
         while d0 < d_max + step {
-            w.tile.compute(ffts, &g1, &w.y1, self.pair, d0, reg);
+            w.tile
+                .compute(ffts, &g1, &w.y1, self.pair, d0, reg, Some(&mut w.refs));
             if w.tile.k > 0 {
                 for d in (d0 - half).max(d_min)..=(d0 - half + step - 1).min(d_max) {
                     let i = (d - d_min) as usize;
@@ -803,8 +838,15 @@ impl Run<'_, '_> {
             .zip(&w.valid)
             .filter_map(|(e, &v)| v.then_some(*e))
             .collect();
+        // a local search samples the floor near the arrivals but keeps the full search's
+        // false-peak level, so its gates match the full search's
+        let region = match self.local {
+            Some(_) => cfg.search.len() as usize,
+            None => env_valid.len(),
+        };
         let (med1, det1) = detection_floor(
             &env_valid,
+            region,
             pulse1.b_eff(g1.df()),
             fs,
             t.p_fa,
@@ -849,9 +891,19 @@ impl Run<'_, '_> {
         if conf.excited_fraction < t.min_excited_fraction {
             reasons.push(NoEstimateReason::InsufficientExcitation);
         }
-        let period = cfg
-            .excitation_period
-            .or_else(|| detect_period(&mut self.s.ffts, self.pair.r, fs, t.eps, t.periodic_db));
+        let period = match self.local {
+            Some(l) => l.period,
+            None => cfg.excitation_period.or_else(|| {
+                detect_period(
+                    &mut self.s.ffts,
+                    &mut self.w.period,
+                    self.pair.r,
+                    fs,
+                    t.eps,
+                    t.periodic_db,
+                )
+            }),
+        };
         conf.period = period;
         if let Some(p) = period
             && (p as f64) <= cfg.search.span() as f64 + cfg.tail_s * fs
@@ -1006,10 +1058,11 @@ impl Run<'_, '_> {
             estimator: cfg.estimator,
             eps: t.eps,
         };
-        let (d_min, d_max) = (cfg.search.min, cfg.search.max);
+        let search = self.search();
+        let (d_min, d_max) = (search.min, search.max);
         let w = &mut *self.w;
         let ffts = &mut self.s.ffts;
-        w.tile.compute(ffts, g2, &w.y2, self.pair, d0, reg);
+        w.tile.compute(ffts, g2, &w.y2, self.pair, d0, reg, None);
         if w.tile.k == 0 {
             return;
         }
@@ -1032,6 +1085,7 @@ impl Run<'_, '_> {
         let (i0, i1) = ((lo - d_min) as usize, (hi - d_min) as usize);
         let (med, det) = detection_floor(
             &w.env[i0..=i1],
+            i1 - i0 + 1,
             model.pulse.b_eff(g2.df()),
             cfg.fs,
             t.p_fa,
@@ -1048,7 +1102,7 @@ impl Run<'_, '_> {
     fn candidates(&mut self, pulse: &Pulse, om: &Model) -> Vec<Cand> {
         let cfg = self.cfg;
         let t = cfg.tuning;
-        let d_min = cfg.search.min;
+        let d_min = self.search().min;
         let w = &mut *self.w;
         let width = pulse.width;
         let e_max = w.env.iter().copied().fold(0.0, f64::max);

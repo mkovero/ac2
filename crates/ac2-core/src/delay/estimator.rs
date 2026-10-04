@@ -259,6 +259,63 @@ pub(super) struct Pair<'a> {
     pub b: i64,
 }
 
+/// Windowed ref segment spectra by start sample, shared by the tiles of one pass. On the
+/// acquisition grid the meas hop is twice the tile step, so a ref segment start recurs in
+/// about K tiles (K = meas segments): transforming each start once gives the same spectra
+/// as transforming it per tile, at about 1/K of the cost.
+#[derive(Debug, Default)]
+pub(super) struct RefSpectra {
+    bins: usize,
+    cap: usize,
+    /// Start (index into the ref block) held in each slot.
+    keys: Vec<usize>,
+    spec: Vec<Complex64>,
+}
+
+impl RefSpectra {
+    /// Empties the cache for a pass on grid `g` whose meas grid has `segments` segments.
+    /// Tiles sweep d0 upwards, so ref starts sweep downwards and consecutive tiles of one
+    /// parity share all but one start: two tiles' worth of starts covers every reuse.
+    pub(super) fn reset(&mut self, g: &GridShape, segments: usize) {
+        self.bins = g.bins();
+        self.cap = (2 * segments).max(1);
+        self.keys.clear();
+        self.spec.clear();
+    }
+
+    /// Spectrum of the ref segment starting at `r0`, computed on first use. When full, the
+    /// slot with the highest start is replaced: the downward sweep never asks for it again.
+    fn get(&mut self, ffts: &mut Ffts, g: &GridShape, r: &[f64], r0: usize) -> &[Complex64] {
+        let bins = self.bins;
+        let slot = match self.keys.iter().position(|&k| k == r0) {
+            Some(i) => return &self.spec[i * bins..(i + 1) * bins],
+            None if self.keys.len() < self.cap => {
+                self.keys.push(r0);
+                self.spec.resize(self.keys.len() * bins, ZERO);
+                self.keys.len() - 1
+            }
+            None => {
+                let mut hi = 0;
+                for (i, &k) in self.keys.iter().enumerate() {
+                    if k > self.keys[hi] {
+                        hi = i;
+                    }
+                }
+                self.keys[hi] = r0;
+                hi
+            }
+        };
+        let seg = &r[r0..r0 + g.nseg];
+        let out = &mut self.spec[slot * bins..(slot + 1) * bins];
+        ffts.rfft(g.nfft, out, |buf| {
+            for ((o, x), w) in buf.iter_mut().zip(seg).zip(&g.w) {
+                *o = x * w;
+            }
+        });
+        out
+    }
+}
+
 /// Output of one tile.
 #[derive(Debug, Default)]
 pub(super) struct Tile {
@@ -273,7 +330,9 @@ pub(super) struct Tile {
 }
 
 impl Tile {
-    /// Regularised H1 (or PHAT) at integer pre-shift `d0` (§4.2).
+    /// Regularised H1 (or PHAT) at integer pre-shift `d0` (§4.2). Ref spectra come from
+    /// `cache` when given (it must have been reset for `g`).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn compute(
         &mut self,
         ffts: &mut Ffts,
@@ -282,6 +341,7 @@ impl Tile {
         pair: Pair<'_>,
         d0: i64,
         reg: Reg,
+        mut cache: Option<&mut RefSpectra>,
     ) {
         let bins = g.bins();
         self.gxy.clear();
@@ -295,20 +355,20 @@ impl Tile {
             if r0 < 0 || r0 as usize + g.nseg > pair.r.len() {
                 continue; // the ref block does not cover this segment at this lag
             }
-            let seg = &pair.r[r0 as usize..r0 as usize + g.nseg];
-            ffts.rfft(g.nfft, &mut self.xspec, |buf| {
-                for ((o, x), w) in buf.iter_mut().zip(seg).zip(&g.w) {
-                    *o = x * w;
+            let xspec: &[Complex64] = match cache.as_deref_mut() {
+                Some(c) => c.get(ffts, g, pair.r, r0 as usize),
+                None => {
+                    let seg = &pair.r[r0 as usize..r0 as usize + g.nseg];
+                    ffts.rfft(g.nfft, &mut self.xspec, |buf| {
+                        for ((o, x), w) in buf.iter_mut().zip(seg).zip(&g.w) {
+                            *o = x * w;
+                        }
+                    });
+                    &self.xspec
                 }
-            });
+            };
             let yi = &y.y[i * bins..(i + 1) * bins];
-            for (((xy, xx), x), y) in self
-                .gxy
-                .iter_mut()
-                .zip(&mut self.gxx)
-                .zip(&self.xspec)
-                .zip(yi)
-            {
+            for (((xy, xx), x), y) in self.gxy.iter_mut().zip(&mut self.gxx).zip(xspec).zip(yi) {
                 *xy += x.conj() * y;
                 *xx += x.norm_sqr();
             }
@@ -536,10 +596,26 @@ impl Model {
     }
 }
 
+/// Buffers of [`detect_period`], kept between calls: its transforms span the whole ref
+/// block (hundreds of thousands of bins).
+#[derive(Debug, Default)]
+pub(super) struct PeriodWork {
+    spec: Vec<Complex64>,
+    /// Band weights and the (nfft, fs) they were computed for.
+    b: Vec<f64>,
+    b_key: (usize, f64),
+    g: Vec<f64>,
+    prefix: Vec<f64>,
+    gs: Vec<f64>,
+    white: Vec<Complex64>,
+    ac: Vec<Complex64>,
+}
+
 /// Repeat period of the ref block from its whitened, band-limited autocorrelation (§10.1).
 /// Returns the period when its peak reaches `level_db` re lag 0.
 pub(super) fn detect_period(
     ffts: &mut Ffts,
+    pw: &mut PeriodWork,
     r: &[f64],
     fs: f64,
     eps: f64,
@@ -548,38 +624,47 @@ pub(super) fn detect_period(
     let n = r.len();
     let nfft = (2 * n).next_power_of_two();
     let bins = nfft / 2 + 1;
-    let mut spec = vec![ZERO; bins];
-    ffts.rfft(nfft, &mut spec, |buf| buf[..n].copy_from_slice(r));
+    pw.spec.clear();
+    pw.spec.resize(bins, ZERO);
+    ffts.rfft(nfft, &mut pw.spec, |buf| buf[..n].copy_from_slice(r));
     let df = fs / nfft as f64;
-    let (lo, hi) = (PERIOD_BAND.0, band_hi(PERIOD_BAND.1, fs));
-    let b: Vec<f64> = (0..bins)
-        .map(|k| band_weight(k as f64 * df, lo, hi))
-        .collect();
-    let g: Vec<f64> = spec.iter().map(|x| x.norm_sqr()).collect();
+    if pw.b_key != (nfft, fs) || pw.b.len() != bins {
+        let (lo, hi) = (PERIOD_BAND.0, band_hi(PERIOD_BAND.1, fs));
+        pw.b.clear();
+        pw.b.extend((0..bins).map(|k| band_weight(k as f64 * df, lo, hi)));
+        pw.b_key = (nfft, fs);
+    }
+    let b = &pw.b;
+    pw.g.clear();
+    pw.g.extend(pw.spec.iter().map(|x| x.norm_sqr()));
+    let g = &pw.g;
     // |R|² smoothed to the excitation shape (zero beyond the ends, like a "same" convolution)
     let k = (nfft / 4096).max(1);
-    let mut prefix = vec![0.0; bins + 1];
-    for i in 0..bins {
-        prefix[i + 1] = prefix[i] + g[i];
+    pw.prefix.clear();
+    pw.prefix.push(0.0);
+    let mut acc = 0.0;
+    for &v in g {
+        acc += v;
+        pw.prefix.push(acc);
     }
-    let gs: Vec<f64> = (0..bins)
-        .map(|i| {
-            let lo_i = i.saturating_sub(k);
-            let hi_i = (i + k + 1).min(bins);
-            (prefix[hi_i] - prefix[lo_i]) / (2 * k + 1) as f64
-        })
-        .collect();
+    let prefix = &pw.prefix;
+    pw.gs.clear();
+    pw.gs.extend((0..bins).map(|i| {
+        let lo_i = i.saturating_sub(k);
+        let hi_i = (i + k + 1).min(bins);
+        (prefix[hi_i] - prefix[lo_i]) / (2 * k + 1) as f64
+    }));
+    let gs = &pw.gs;
     let b_sum: f64 = b.iter().sum();
-    let mean_b = b.iter().zip(&gs).map(|(b, g)| b * g).sum::<f64>() / b_sum;
+    let mean_b = b.iter().zip(gs).map(|(b, g)| b * g).sum::<f64>() / b_sum;
     let reg = eps * mean_b;
-    let white: Vec<Complex64> = (0..bins)
-        .map(|i| {
-            let den = gs[i] + reg;
-            Complex64::new(if den > 0.0 { b[i] * g[i] / den } else { 0.0 }, 0.0)
-        })
-        .collect();
-    let mut ac = Vec::new();
-    ffts.analytic(&white, &mut ac);
+    pw.white.clear();
+    pw.white.extend((0..bins).map(|i| {
+        let den = gs[i] + reg;
+        Complex64::new(if den > 0.0 { b[i] * g[i] / den } else { 0.0 }, 0.0)
+    }));
+    ffts.analytic(&pw.white, &mut pw.ac);
+    let ac = &pw.ac;
     let ac0 = ac[0].norm();
     if ac0 <= 0.0 {
         return None;

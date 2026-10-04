@@ -376,6 +376,19 @@ State: `held: Option<i64>` and `pending: Option<(delay, meas_window_end)>`.
 4. Any other `Accepted` result becomes the new `pending`.
 5. A change of band, threshold, search range or measurement routing clears `pending`.
 
+**Local search while holding.** A tracking window runs every observation (0.25 s full range),
+so a full ±1 s search per window is most of the analyzer's CPU on small machines. While the
+last accepted result's first arrival is `held`, a window is searched only within one
+acquisition segment N₁ of its first and strongest arrivals, on the full search's tile grid
+(so those tiles are the full search's), with the full search's false-peak level and the
+period found by the last full search. The local result stands only when it is `Accepted`
+with first arrival `held` and both arrivals at least N₁/2 from the local edges; anything
+else is replaced by the full search of the same window. Every refusal, ambiguity and
+delay move therefore comes from a full search. A full search also runs at least every 2 s
+and whenever the local span would cover more than half the search range (always for sub).
+The cost: an arrival that appears far from the followed ones while the held delay stays
+valid is seen at the next forced full search, up to 2 s late.
+
 Tracking is off by default. The operator enables it per measurement. It agrees only between
 results of the *same* rule, so a deterministic wrong arrival is tracked just as confidently as a
 correct one. This is why wrong-arrival acceptance is scored per window in §12, and why
