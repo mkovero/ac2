@@ -146,10 +146,7 @@ fn tile_strings() {
     f.recover[3] = f32::NAN;
     let t = leq_tiles(&cfg(), &f);
     assert_eq!(t[3].recover.as_deref(), Some("cooling down"));
-    assert_eq!(
-        t[3].incomplete.as_deref(),
-        Some("offline for 2 min")
-    );
+    assert_eq!(t[3].incomplete.as_deref(), Some("offline for 2 min"));
 }
 
 #[test]
