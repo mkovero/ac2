@@ -191,8 +191,8 @@ daemon logs each over and recovery. Clients toast them. There is no hysteresis b
 - App: **G** steps the SPL pane meter → windows → meter + windows (the meter's number over
   the windows, the default; `ac2_scene::meter_leq`); **B** lays the
   windows out as columns or tiles, **Shift+B** shows the history strip (rebuilt from the
-  log, *The history strip* below), both remembered in `ui.toml`; **W** maximises the pane, **F11**
-  goes full screen, the two together are the stage view. **Shift+L** opens the windows
+  log, *The history strip* below), both remembered in `ui.toml`; **W** steps split → the pane
+  alone → full screen (the stage view); **F11** puts the window full screen in any layout. **Shift+L** opens the windows
   dialog (lengths and weightings picked, limits typed, a preset row, the horizon). Over /
   recovered alarms are toasts. See *Display* below.
 - CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second, with the
@@ -282,7 +282,10 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   the column narrows), and the headroom holds until the window is full ("until full: stay ≤ 98.2
   dB"). Tiles show the same texts. The limit is a line across the whole column.
 - **Text**: the value as large as the column width allows (sized for five characters, the
-  same in every column, so it does not jump at 100 dB), then the state, the limit and the
+  same in every column, so it does not jump at 100 dB); right under it the window's own unit
+  and weighting (`dB(A)`, `dB(C)`, `dBFS (A)` uncalibrated; tiles: beside the value), never
+  dropped, since the SPL meter shown above the windows may use another weighting; then the
+  state, the limit and the
   headroom (or "cooling down in …", the time to recover at the limit), each in the longest wording that fits the
   column and left out when the bar would get too short; the name at the bottom, shortened
   uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the

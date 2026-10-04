@@ -168,7 +168,10 @@ pane shows…** in the palette opens the same list (**↑/↓**, **Enter**).
 A click inside a pane selects the measurement it shows, exactly as clicking it in the
 measurement list does; selecting one in the list makes its pane show it and gives that pane
 the focus (unless the focused pane draws it already: the IR pane keeps it for a transfer
-measurement). Keys such as **F**, **R**, **S** and **X** act on the selected measurement.
+measurement). **S** (start / stop) and **R** (reset) act on the measurement the focused pane
+shows — never on one of another kind selected elsewhere — and say what to create when the
+pane shows none. **F**, **X** and the delay keys act on the selected measurement and say
+which kind they need when it is another.
 
 **One pane only, full screen (W).** **W** steps through three layouts: the split layout →
 the focused pane alone in the window → that pane **full screen** → the split layout again.
@@ -212,9 +215,14 @@ distortion) is its own and is kept while the app runs:
 - **Ctrl+↑** / **Ctrl+↓** pan it by a round step (about a tenth of the range: 10 dB of a
   100 dB range); **Shift+wheel** pans it smoothly. Plain **↑/↓** stay the stimulus level.
 - **Shift+Home** fits it to what the pane shows (live and stored curves, display offsets
-  included, in the shown frequency range; a few empty bins far below do not stretch it):
-  the way to look at very low signals, e.g. a spectrum between −140 and −80 dBFS.
-  **Ctrl+Home** puts the pane's default range back (±30 dB, 0 … −100 dB).
+  included; a few empty bins far below do not stretch it) and puts the frequency axis back
+  to 20 Hz – 20 kHz: the way to look at very low signals, e.g. a spectrum between −140 and
+  −80 dBFS. **Ctrl+Home** puts the pane's default ranges back (transfer ±30 dB, spectrum
+  0 … −100 dBFS or 20 … 120 dB SPL, 20 Hz – 20 kHz).
+- The spectrum pane keeps one level range per scale: **dBFS** for uncalibrated curves and
+  **dB SPL** once its input is calibrated, chosen by the scale its curves are shown in, so a
+  calibration never leaves the curves above a dBFS-sized axis. Zoom, pan, fit and reset act
+  on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
 ### Smoothing
@@ -244,12 +252,12 @@ curve.
 - On a **live measurement** the keys act on the measurement of the focused pane (the
   spectrum pane's when it has focus, else the transfer pane's). The change applies at once
   and the averages carry on — nothing restarts.
-- On a **stored trace**: select its slot — **V** steps through the shown slots in slot
-  order and **Shift+V** backwards, or click it in the list. The slot is highlighted and the
-  title of the pane it is drawn in says `slot 3 (…): smoothing …`; then **K** / **Shift+K**.
-  To go back to the live measurement press **Esc** with no window open (it also stops the
-  stimulus; with a window open Esc only closes the window), step past the last slot with **V**,
-  click the slot again, or select a measurement (**N**, **Alt+1 … Alt+4**, a click).
+- On a **stored trace**: select it — **V** / **Shift+V** step through the shown traces,
+  slotted or not, or click it in the **Traces** list (see *Traces and slots*). The row is
+  highlighted and the title of the pane it is drawn in names it (`slot 3 (…): smoothing …`,
+  `Sweep 2: smoothing off`); then **K** / **Shift+K**. To go back to the live measurement,
+  step past the last trace with **V**, click the trace again, choose *Deselect the stored
+  trace* in the palette, or select a measurement (**N**, **Alt+1 … Alt+4**, a click).
 - From the **command line**: `ac2 trace smooth <trace> 1/12` (also `1/3` … `1/48`, or just
   `12`; `none` turns it off). A transfer or sweep trace keeps the mode it had — magnitude
   and phase for one that was not smoothed — unless `--phase` (magnitude and phase) or
@@ -305,8 +313,9 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   deselects); a click on its dot shows or hides it.
 - **V** / **Shift+V** select the next / previous **shown** trace in that order — sweep
   results and imports included — with the live measurement as the stop between the last and
-  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. **Esc** goes back
-  to the live measurement. **A** shows or hides the selected trace. **Move the selected
+  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. *Deselect the stored
+  trace* in the palette goes straight back to the live measurement (Esc does not: it is the
+  stimulus stop). **A** shows or hides the selected trace. **Move the selected
   trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
   gives it up; `none` frees its slot), so the digit keys reach it.
 - The trace keys act on the selected trace when its curve is on the transfer pane (else on
@@ -476,18 +485,24 @@ per directory), `--no-autosave` keeps everything in memory only.
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (**N** on the input in the session dialog or in the input setup
-view, `ac2 session open … --mic 3=M30`). Two things are stored, in the calibration store of
-the daemon's machine:
+Inputs carry a **mic name** (**N** on the input in the session dialog or in the
+Calibrations view, `ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`).
+Two things are stored, in the calibration store of the daemon's machine:
 
-- **Sensitivity** — per device, input and mic: put a 94 dB (or 114 dB) acoustic calibrator
-  on the mic and run `ac2 cal spl --input 3 --ref 94db`. SPL is then computed from the raw
-  input level with that sensitivity. It calibrates the whole chain, preamp gain included, so
-  it belongs to that input: a calibration from another mic or input is used but shown as
-  such (*from M30 on in 2*); otherwise its age is shown (*verified · 94.0 dB SPL at 1.00 kHz
-  · 3 h ago*). Without a calibrator, an **electrical calibration** (below) gives the same
-  thing from a voltmeter and the mic's data sheet, with a stated uncertainty (±1 dB).
-- **Mic curves** — per mic, any number, each with a short **label**: a measurement mic often
+- **Sensitivity** (dB SPL of 0 dBFS) — per device, input and mic. It calibrates the whole
+  chain, preamp gain included, so it belongs to that input and that gain: change the gain
+  and calibrate again. There are two ways to get it:
+  - **acoustic**: put a 94 dB (or 114 dB) calibrator on the mic and run
+    `ac2 cal spl --input 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz). This is
+    the reference method; the app has no calibrator dialog yet, so it is done from the CLI;
+  - **electrical** ([below](#calibrating-without-a-calibrator-electrical)): no calibrator,
+    but a true-RMS voltmeter at the input and the mic's data-sheet sensitivity, with a stated
+    uncertainty (±1 dB). **E** in the Calibrations view, or `ac2 cal electrical`.
+
+  SPL is then computed from the raw input level with that sensitivity. A calibration made
+  with another mic or on another input is used but shown as such; an acoustic calibration
+  replaces an electrical one, never the other way round unless you say so.
+- **Mic curves** (the **mic library**) — per mic, any number, each with a short **label**: a measurement mic often
   comes with one file per incidence angle (0° for pointing at the source, 90° for grazing
   incidence), and using the wrong one is a few dB of error at high frequencies.
   `ac2 cal curve import 449350_34804_90Grad.txt --input 3` imports a file into the mic
@@ -501,8 +516,8 @@ the daemon's machine:
 **Which curve is in use** is chosen per input, explicitly: `ac2 cal use 3 90°` (or `off`;
 `ac2 session inputs --mic 3=M30 --curve 3=90°` sets names and curves of several inputs at
 once, and `ac2 session inputs` alone lists them); in
-the app **←/→** on the input's row in the session dialog or in the **Input setup** view
-(palette), **Mic curve on input N…** (*3=90°*), or **Mic curve: next curve on the selected
+the app **←/→** on the input's row in the session dialog or in the **Calibrations** view
+(palette; *Input setup…* opens it on the selected measurement's input), **Mic curve on input N…** (*3=90°*), or **Mic curve: next curve on the selected
 measurement's input**. Importing a mic's first curve on an input chooses it; with several
 curves and none chosen, none applies and the input says *choose: 0°, 90°* — ac2 never
 guesses. The change applies to the running measurements at once (it is a display correction
@@ -513,6 +528,8 @@ transfer, spectrum, RTA and SPL captions (*mic curve: MM1 34804 90°*), `ac2 cal
 *mic curve 90° not stored for MM1 34804* after the curve was deleted). Captured traces keep
 exactly which curve their columns carry (label, file and content hash; the export header
 says it).
+
+### The Calibrations view
 
 The **Calibrations** view (palette; **Input setup…** opens it on the selected measurement's
 input) lists what each input uses, every mic with its curves (file, points, range, data
@@ -526,6 +543,24 @@ calibration. On the command line: `ac2 cal list`, `ac2 cal curve rm --mic NAME L
 A calibration store written by an older ac2 is set aside (renamed to
 `calibrations.json.v1`, `.v2`, …, never deleted) and the daemon starts with an empty store: calibrate
 again and import the curves again; the old file shows the mic and file names.
+
+### What the calibration labels say
+
+Every calibrated readout names what its dB SPL rests on: the SPL meter's footer, the Leq
+caption, the spectrum / RTA captions, the Calibrations view, `ac2 cal list` and
+`ac2 status`.
+
+| label | meaning |
+|---|---|
+| `cal 94 dB · 3 h ago` | acoustic: a 94 dB calibrator on this mic on this input, 3 h ago |
+| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, session dialog) |
+| `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; the sensitivity taken from the mic's curve file (`data sheet`) or typed (`typed`); ±1 dB the stated uncertainty |
+| `electrical cal (injected, 10.0 mV/Pa) ±0.5 dB` | electrical, a generator in place of the mic, phantom off |
+| `cal from other mic / input`, `from M30 on in 2 · …` | a calibration made with another mic or on another input: used, but it may not hold here |
+| `uncalibrated` (values in dBFS) | no calibration for this device, input and mic |
+| `· mic curve` after any of these | a mic curve is in the readout as well (its label is in the caption) |
+
+Limits of Leq windows are judged only on a calibrated input, whichever method.
 
 ### Calibrating without a calibrator (electrical)
 
@@ -596,10 +631,14 @@ A tone other than 1 kHz is accepted (`--freq 400hz`; a meter specified only to 4
 the sensitivity is still the capsule's at 1 kHz, so this assumes the preamp is flat between
 the two — ac2 notes it. The mic curve stays normalised at 1 kHz.
 
+### SPL meter
+
 The **SPL meter** shows the sound level with Fast, Slow or Impulse time weighting and A, C
 or Z frequency weighting (IEC 61672-1: F and S are exponential averages of the squared
 signal with 125 ms and 1 s; I, from IEC 60651, averages with 35 ms and holds peaks, falling
-with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal.
+with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal. A new
+meter reads **A-weighted, Fast** (`LAF`) unless you choose otherwise, in the app and with
+`ac2 meas new spl` alike.
 
 - **Three views, G steps them**: the **meter** (below), the **Leq windows** (next section)
   and **meter + Leq**, where a new meter starts: the meter's number centred across the top
@@ -656,9 +695,12 @@ the daemon restarts (the log is in the autosave and in saved sessions).
 - **G** in the SPL pane steps meter → windows → meter + windows (above). The windows show as
   **columns**, made to be read from the stage or across the room: one full-height column per
   window, the shortest on the left, each a bar that fills from the bottom with the window's
-  Leq, the value in large digits on top and the window's name at the bottom ("LAeq 30 min",
-  shortened to "30 min" or "30m" when the columns are narrow — the caption then says
-  "LAeq"). The limit is a line across the column; a column turns **amber** within the warn
+  Leq, the value in large digits on top with the window's own unit and weighting right
+  under it — **dB(A)**, **dB(C)**, **dB(Z)**, or **dBFS (A)** uncalibrated — and the window's
+  name at the bottom ("LAeq 30 min", shortened to "30 min" or "30m" when the columns are
+  narrow — the caption then says "LAeq"). The unit is never left out: in meter + Leq the
+  meter above may read in another weighting (LCS over LAeq windows), and a column must not be
+  read in the meter's. Tiles show it beside the value. The limit is a line across the column; a column turns **amber** within the warn
   margin (3 dB by default) of its limit and the whole column goes **red** above it, and goes
   back when the window recovers; each going over and each recovery also shows as a message.
 - A window **still filling** (a new log, a longer window than the meter has run) shows its
@@ -695,7 +737,8 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   under its limit if the level stays at the limit (narrow columns: "cooling 7:30"); while
   the window fills, how much of it there is;
   and "gaps" when part of it was not
-  measured (the meter stopped, the capture lost samples). Gaps are never counted as silence.
+  measured (the meter stopped, the capture lost samples). Missing audio isn't counted as
+  silence: a gap neither lowers a window's Leq nor spends or earns budget.
   Narrow columns use the shorter wordings, or leave a line out.
 - The caption above the windows says how long the meter has been logging and the level of
   the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · gaps 0:12`** — the
@@ -775,9 +818,7 @@ plot behind it. The help and the delay candidates leave the other keys working (
 while reading), except the stimulus's. **Shift+Esc** stops the stimulus from anywhere,
 windows included; it is fixed, and cannot be rebound.
 
-*Changed keys:* Esc no longer stops the stimulus while a window is open — it only closes the
-window; press it again, or use **Shift+Esc**, which stops from anywhere. In the delay
-candidate list ↑/↓ and Enter choose a candidate (1–3 still pick directly).
+In the delay candidate list ↑/↓ and Enter choose a candidate; 1–3 pick one directly.
 
 Change bindings in `keys.toml` in the ac2 config directory (`~/.config/ac2` on Linux,
 `~/Library/Application Support/ac2` on macOS, `%APPDATA%\ac2\config` on Windows):
@@ -790,9 +831,13 @@ cycle_theme = "Ctrl+T"
 insert_delay = ["X", "Alt+D"]
 ```
 
+A `keys.toml` that cannot be used — a conflict, an unknown key or command, a pane's command
+on **H** (help in every pane), a change to the fixed **Shift+Esc** — is reported at start
+and the default keys are used until it is fixed.
+
 **Key hints.** The focused pane shows a slim line under its plot with its most used keys,
 for example in the transfer pane `V select trace · A show/hide · Ctrl+1 capture · X find
-delay · K smoothing · Shift+I IR · W maximise · H all keys`. The keys are the ones bound now
+delay · K smoothing · Shift+I IR · W maximise · Alt+↑ offset · H all keys`. The keys are the ones bound now
 (a key changed in `keys.toml` shows its new chord; macOS shows `⌘ ⌥ ⇧`). On a narrow pane the
 least used drop off first; **H all keys** always stays. Hovering over a pane's name (or the
 line) lists the same keys with what each does; hovering over a clickable control (the
@@ -800,13 +845,6 @@ line) lists the same keys with what each does; hovering over a clickable control
 chip) names the key that does the same. **Shift+H** (palette: *Key hints on / off*) turns the
 line off and on; the app remembers it in `ui.toml` (`key_hints = false`). The stage view
 never shows it. Every pane's line is listed at the end of the keyboard map below.
-
-**Changed keys.** Help moved from `/` (Shift+7 on Nordic and German keyboards) to **H**, so
-the panes' H keys moved: the IR pane on / off and the sweep pane's distortion / IR switch are
-**Shift+I** (I zooms), peak hold in the spectrum pane is **P**, the Leq history strip is
-**Shift+B**, hiding the sweep pane is **Shift+W**. A `keys.toml` that still binds one of the
-panes' commands to `H` is reported at start (H is help everywhere) and the default keys are
-used until it is changed; `help = ["H", "/"]` in `[global]` brings `/` back.
 
 ### Keyboard map
 
@@ -1039,9 +1077,9 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
 | `ac2 delay find / insert / set / track` | the delay finder and delay of a transfer measurement |
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
-| `ac2 trace capture / list / show / rm / average / math / import / export / smooth / mic` | stored traces |
+| `ac2 trace capture / list / show / rename / display / slot / rm / average / math / import / export / smooth / mic` | stored traces |
 | `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
-| `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, calibration, Leq windows, the per-second log and a new log |
+| `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |
 | `ac2 state dump` | the daemon's whole state as JSON |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |
