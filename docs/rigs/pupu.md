@@ -23,6 +23,43 @@ what ac2 learned on it.
   firewall between the VPN and this LAN that must allow those ports too). mDNS does not cross the
   VPN: connect by address. Clients authorized: `ketunkolo` (192.168.9.25), `rantu`
   (100.100.44.45).
+- **Operator policy (2026-10-04):** pupu is the ac2 agent's machine to deploy to and restart,
+  and the ac2 app on ketunkolo may be (re)started freely. Emission ceilings above still apply;
+  anything louder needs the operator's approval for that run. Other changes on ketunkolo
+  (system config, non-ac2 software) need asking.
+
+## Deploying a build
+
+Hosts: daemon on pupu (192.168.9.27), app on ketunkolo (192.168.9.25, X display `:0`). Both keep
+binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap every `ssh` in
+`timeout` with `</dev/null`; start long-running processes with `setsid nohup … </dev/null &`.
+
+1. Build locally: `cargo build --release -p ac2d -p ac2-cli -p ac2-ui` (never on the rig).
+2. Ship: on each host `cd ~/ac2-test && rm -rf bin.prev bin.new && cp -a bin bin.prev && mkdir
+   bin.new`, then `scp target/release/{ac2d,ac2,ac2-ui} mui@<host>:ac2-test/bin.new/`.
+3. Swap: on ketunkolo `pkill -x ac2-ui`; on pupu `pkill -TERM -x ac2d` (clean shutdown flushes the
+   autosave and SPL logs), wait for it to exit, `cp -f bin.new/* bin/` on both.
+4. Start the daemon on pupu:
+   `cd ~/ac2-test && setsid nohup bin/ac2d --listen tcp://0.0.0.0 --name pupu --max-level -50 > d-net.log 2>&1 </dev/null &`.
+   Check `d-net.log`: "autosave restored … no audio session opened" is normal.
+5. Reopen audio (from ketunkolo):
+   `bin/ac2 --remote 192.168.9.27 session open --backend jack --in 1-2 --outputs 2 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
+   Restored measurements resume; check `meas list`.
+6. App on ketunkolo:
+   `cd ~/ac2-test && DISPLAY=:0 setsid nohup bin/ac2-ui --remote 192.168.9.27 > ui-net.log 2>&1 </dev/null &`.
+   Screenshot: `DISPLAY=:0 xfce4-screenshooter -f -s <file>`.
+
+**When the session format changes**, the daemon sets the old autosave aside as `autosave.vN` and
+starts empty. Before such a deploy, save `bin/ac2 --remote 192.168.9.27 state dump` and
+`spl leq export --meas <name> <file>` on ketunkolo; afterwards recreate the measurements from
+the dump and `trace import` the CSVs in `autosave.vN/traces/` (copy them over with `scp -3`).
+The calibration store (`~/.config/ac2/calibrations.json`) survives unless its own format
+changes; then redo the electrical calibration with the operator.
+
+**Reading thread costs:** `ac2d-control` at one wake per audio period (≈375/s at 96 kHz/256) is
+JACK's process thread (libjack threads take the name of the thread that opened the client), not
+the control loop. Most of the daemon's RSS is JACK's `/dev/shm/jack-*` mapping; compare
+`Anonymous` in `/proc/<pid>/smaps_rollup`.
 
 ## First measurement (2026-10-03, ac2 850a3a4)
 
