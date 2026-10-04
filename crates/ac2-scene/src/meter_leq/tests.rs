@@ -209,6 +209,17 @@ fn meter_takes_the_top_third_and_the_windows_the_rest() {
             if w >= 1920.0 {
                 assert!(number.size > 150.0, "{at}: {}", number.size);
             }
+            // The meter's number is the one big number: every text of the windows, their
+            // values first, stays well under it.
+            for l in all.iter().filter(|l| l.pos[1] >= m.region.bottom()) {
+                assert!(
+                    l.size <= number.size * 0.3,
+                    "{at}: {:?} at {} next to {}",
+                    l.text,
+                    l.size,
+                    number.size
+                );
+            }
             let bar = m.bar.expect("bar");
             assert!(bar.y > b.bottom() && bar.bottom() <= m.region.bottom() + 0.5);
             for x in window_rects(&s.leq) {

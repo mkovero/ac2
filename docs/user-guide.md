@@ -746,12 +746,16 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   columns (in meter + Leq, the number above them) and the caption with the meter's name,
   the run and its calibration (the top bar comes
   back while a stimulus is armed or playing). W again goes back to the split layout.
-- Each column (and tile) shows the window's Leq; its limit; the **headroom**: the highest
-  steady level for the next minute that keeps the window at or below its limit ("next 1 min:
-  stay ≤ 101.5 dB"; "until full: stay ≤ …" while it fills), or, over and unable to recover
-  within the minute, **"cooling down in 7 min 30 s"**: the time until the window is back
-  under its limit if the level stays at the limit (narrow columns: "cooling 7:30"); while
-  the window fills, how much of it there is;
+- Each column (and tile) says, large, its **state** (OK, NEAR, OVER, or "over in 47 s" when a
+  filling window is on course to go over) and the **headroom**: the highest steady level for
+  the next minute that keeps the window at or below its limit ("next 1 min" over "stay ≤
+  101.5 dB"; "until full" while it fills), or, over and unable to recover within the minute,
+  **"cooling down in" "7 min 30 s"**: the time until the window is back under its limit if
+  the level stays at the limit. Its limit is written small under them, and is the line
+  across the bar. The window's **Leq** is the smaller figure at the top of its bar — on the
+  bar in white or black, whichever reads on its colour, or just above a short bar in the
+  bar's colour — so the meter's own number above the windows stays the one big number; what
+  to do about a window is the headroom. While the window fills, how much of it there is;
   and **"offline for 1 min 20 s"** when part of it has no audio at all (the meter stopped,
   the daemon was down, the capture lost samples). Missing audio isn't counted as silence:
   the window's Leq is the average of what was measured, and offline time neither lowers it

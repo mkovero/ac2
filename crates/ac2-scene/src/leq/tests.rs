@@ -251,7 +251,12 @@ fn scene_lays_tiles_out_and_colours_them() {
         "97.8",
         "OVER",
         "NEAR",
-        "limit 99.0 dB · until full: stay ≤ 100.0 dB",
+        "limit 99.0 dB",
+        // What to do, its horizon above it.
+        "until full",
+        "stay ≤ 100.0 dB",
+        "cooling down in",
+        "7 min 30 s",
         "so far · 12:30 / 30:00",
         "now",
         "2:14:05 since 19:02 · total 97.8 · offline 12 s",
@@ -269,21 +274,24 @@ fn scene_lays_tiles_out_and_colours_them() {
     assert_eq!(fill(&s.tiles[3]), Some(th.banner_fault.background));
     assert_eq!(fill(&s.tiles[1]), Some(th.banner_warning.background));
     assert_eq!(fill(&s.tiles[0]), Some(th.plot_background));
-    // Big numbers: the value is the largest text of its tile.
-    let v97 = s.scene.layers[2]
-        .labels
-        .iter()
-        .find(|l| l.text == "97.8")
-        .expect("value");
-    assert!(v97.size > 40.0, "{}", v97.size);
-    // Maximised to a whole screen the numbers grow.
+    // What to do reads larger than the value, which every tile of a grid shows at one size
+    // whether or not it has an instruction.
+    let size_of = |s: &LeqScene, t: &str| {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .find(|l| l.text == t)
+            .map(|l| l.size)
+            .expect(t)
+    };
+    let v97 = size_of(&s, "97.8");
+    assert!(v97 > 20.0, "{v97}");
+    assert!(size_of(&s, "stay ≤ 100.0 dB") > v97);
+    assert!((size_of(&s, "96.9") - v97).abs() < 1e-3);
+    // Maximised to a whole screen they grow.
     let big = leq_scene(&v, &Status::default(), &th, size(2400.0, 1400.0));
-    let b97 = big.scene.layers[2]
-        .labels
-        .iter()
-        .find(|l| l.text == "97.8")
-        .expect("value");
-    assert!(b97.size > v97.size * 1.5);
+    assert!(size_of(&big, "97.8") > v97);
     // A short pane is all tiles.
     let short = leq_scene(&v, &Status::default(), &th, size(900.0, 260.0));
     assert!(short.history.is_none());
@@ -892,11 +900,14 @@ fn column_texts() {
         "NEAR",
         "OK",
         "limit 99.0 dB",
-        "next 1 min: stay ≤ 101.5 dB",
-        // Filling for longer than the horizon: until the window is full.
-        "until full: stay ≤ 101.5 dB",
-        // The longest wording that fits.
-        "cooling down in 7 min 30 s",
+        // What to do, under what it holds for: the next minute, or while filling for
+        // longer than the horizon, until the window is full.
+        "next 1 min",
+        "stay ≤ 101.5 dB",
+        "until full",
+        // How long an over window cools down when it cannot recover within the horizon.
+        "cooling down in",
+        "7 min 30 s",
         // The 5 min window, 40 % elapsed, and the 1 min one just started: their values are
         // the Leq so far.
         "so far · 2:00 / 5:00",
@@ -909,7 +920,8 @@ fn column_texts() {
     ] {
         assert!(all.contains(&want), "{want} in {all:?}");
     }
-    // The value is the biggest text, as big as the column allows, and grows with it.
+    // The state and the instruction are the large text; the value is smaller, sits at its
+    // bar, and grows with the column.
     let size_of = |s: &LeqScene, t: &str| {
         s.scene
             .layers
@@ -919,9 +931,15 @@ fn column_texts() {
             .map(|l| l.size)
             .expect(t)
     };
+    let k = cols(&s);
     let v = size_of(&s, "101.3");
-    assert!(v > 60.0, "{v}");
-    assert!(v > size_of(&s, "15 min"));
+    assert!(v > 20.0 && v < 50.0, "{v}");
+    assert!((size_of(&s, "OVER") - k.large).abs() < 1e-3);
+    // The instruction may shrink a little to keep its wording.
+    let stay = size_of(&s, "stay ≤ 101.5 dB");
+    assert!(stay <= k.large && stay > v, "{stay}");
+    assert!(v <= k.large * VALUE_RATIO + 1e-3, "{v} vs {}", k.large);
+    assert!(size_of(&s, "limit 99.0 dB") < v);
     let small = leq_scene(
         &columns_view(&c, &f, None),
         &Status::default(),
@@ -929,6 +947,94 @@ fn column_texts() {
         size(800.0, 450.0),
     );
     assert!(size_of(&small, "101.3") < v);
+}
+
+/// Each value sits at its bar's top — on the fill under its edge, or on the track just above
+/// it — never across the limit line, inside its track, in a colour that reads where it is
+/// and goes with the bar: inked for the fill on it (never red on red), the bar's colour or
+/// plain text above it.
+#[test]
+fn values_sit_at_their_bars() {
+    for th in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
+        for scale in [LevelScale::DbSpl, LevelScale::Dbfs] {
+            for n in 1..=8 {
+                let (c, mut f) = many(n, false, scale);
+                // Some levels low on the scale, near the bottom of the track.
+                for (i, l) in f.leq.iter_mut().enumerate() {
+                    if i % 4 == 2 {
+                        *l -= 25.0;
+                    }
+                }
+                for (w, h) in [
+                    (480.0, 320.0),
+                    (960.0, 540.0),
+                    (1920.0, 1080.0),
+                    (3840.0, 2160.0),
+                ] {
+                    let s = leq_scene(
+                        &columns_view(&c, &f, None),
+                        &Status::default(),
+                        &th,
+                        size(w, h),
+                    );
+                    let at = format!("{:?} {scale:?} {n} at {w}x{h}", th.name);
+                    let k = cols(&s);
+                    for x in &k.columns {
+                        let v = x.value;
+                        let r = v.rect;
+                        let t = x.track;
+                        assert!(
+                            r.y >= t.y - 0.01 && r.bottom() <= t.bottom() + 0.01,
+                            "{at}: {} value {r:?} outside its track {t:?}",
+                            x.name
+                        );
+                        assert!(
+                            r.x >= x.rect.x - 0.01 && r.right() <= x.rect.right() + 0.01,
+                            "{at}: {} value {r:?} wider than its column",
+                            x.name
+                        );
+                        if let Some(y) = x.limit_y {
+                            assert!(
+                                r.bottom() < y - 1.0 || r.y > y + 1.0,
+                                "{at}: {} value {r:?} across the limit at {y}",
+                                x.name
+                            );
+                        }
+                        let fill_top = x.bar.map_or(t.bottom(), |b| b.y);
+                        // Near the fill's top: within half the value's height of it, unless
+                        // the limit line was in the way.
+                        let near = (r.y - fill_top).abs().min((r.bottom() - fill_top).abs());
+                        let moved = x.limit_y.is_some_and(|y| (y - fill_top).abs() < 2.0 * r.h);
+                        if t.h > 4.0 * r.h {
+                            assert!(
+                                near <= 0.5 * r.h || moved,
+                                "{at}: {} value {r:?} far from its bar top {fill_top}",
+                                x.name
+                            );
+                        }
+                        if v.on_bar {
+                            let b = x.bar.expect("on a bar");
+                            assert!(r.y >= b.y - 0.01, "{at}: {}", x.name);
+                            assert_ne!(v.color, x.bar_color, "{at}: {}", x.name);
+                            let ratio = crate::theme::contrast_ratio(v.color, x.bar_color);
+                            assert!(ratio >= 4.5, "{at}: {} on its bar {ratio:.2}", x.name);
+                        } else if x.bar.is_some() {
+                            assert!(r.bottom() <= fill_top + 0.01, "{at}: {}", x.name);
+                            let ratio = crate::theme::contrast_ratio(v.color, x.track_color);
+                            assert!(ratio >= 3.0, "{at}: {} on the track {ratio:.2}", x.name);
+                        }
+                        // Smaller than the state and instruction above it.
+                        assert!(v.size <= k.large * VALUE_RATIO + 1e-3, "{at}");
+                    }
+                    // A tall over bar carries its value on the fill, in the fill's ink.
+                    if h >= 540.0 && scale == LevelScale::DbSpl {
+                        let over = k.columns.iter().find(|x| x.window == 0).expect("col");
+                        assert!(over.value.on_bar, "{at}");
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Every label of the scene that is not the caption, with the column it sits in.

@@ -23,8 +23,8 @@ use crate::view::{LeqLayout, LeqStyle};
 mod columns;
 mod run;
 pub use columns::{
-    ABOVE_LIMIT_DB, BELOW_LIMIT_DB, FREE_SPAN_DB, LeqColumn, LeqColumns, column_colors,
-    column_range,
+    ABOVE_LIMIT_DB, BELOW_LIMIT_DB, FREE_SPAN_DB, LeqColumn, LeqColumns, VALUE_RATIO, ValueLabel,
+    column_colors, column_range,
 };
 pub use run::{LeqRunText, NewLogConfirm, new_log_confirm, run_text};
 
@@ -296,6 +296,9 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
         })
         .collect()
 }
+
+/// A tile's instruction is at most this many times its header's size.
+const TILE_INSTRUCTION_EM: f32 = 1.8;
 
 /// Background and text colour of a tile.
 pub fn tile_colors(state: TileState, theme: &Theme) -> (Color, Color) {
@@ -819,12 +822,34 @@ fn shown_name<'a>(name: &'a str, shared: Option<&str>) -> &'a str {
         .unwrap_or(name)
 }
 
+/// The small lines at the bottom of a tile: on course first, then the limit, the filling
+/// and the gaps.
+fn tile_below(t: &LeqTile) -> Vec<String> {
+    let mut below: Vec<String> = t.course.iter().cloned().collect();
+    below.extend(t.limit.iter().cloned());
+    match (&t.filling, &t.incomplete) {
+        (Some(f), Some(i)) => below.push(format!("{f} · {i}")),
+        (Some(f), None) => below.push(f.clone()),
+        (None, Some(i)) => below.push(i.clone()),
+        (None, None) => {}
+    }
+    below
+}
+
+/// One tile: the name and state on top; in the middle, large, what to do (`next 1 min` over
+/// `stay ≤ 101.5 dB`, or how long it cools down) and under it the window's value, smaller
+/// — on stage the instruction is acted on, the value only explains it, and a meter's number
+/// shown above the tiles must stay the big one; below, the course, limit and progress, in
+/// room for `lines_below` of them.
+#[allow(clippy::too_many_arguments)]
 fn draw_tile(
     c: &mut Canvas,
     t: &LeqTile,
     r: Rect,
     stale: bool,
     shared: Option<&str>,
+    horizon: &str,
+    lines_below: usize,
     theme: &Theme,
 ) {
     let (bg, fg) = tile_colors(t.state, theme);
@@ -841,6 +866,7 @@ fn draw_tile(
     let pad = (r.h * 0.06).clamp(4.0, 14.0);
     let head = (r.h * 0.11).clamp(11.0, 30.0);
     let small = (r.h * 0.075).clamp(9.0, 20.0);
+    let width = (r.w - 2.0 * pad).max(1.0);
     let clip = Some(r);
     let mut push = |text: String, pos: [f32; 2], h: HAlign, v: VAlign, size: f32| {
         let mut l = label(text, pos, anchor(h, v), size, fg);
@@ -863,61 +889,10 @@ fn draw_tile(
             head,
         );
     }
-    // The number as big as the tile allows: its height, and its width for "100.0".
-    let lines_below = [
-        &t.course,
-        &t.limit,
-        &t.headroom,
-        &t.recover,
-        &t.filling,
-        &t.incomplete,
-    ]
-    .iter()
-    .filter(|x| x.is_some())
-    .count()
-    .min(3) as f32;
-    let body_top = r.y + pad + head * 1.3;
-    let body_bottom = r.bottom() - pad - lines_below * small * 1.3;
-    let big = ((body_bottom - body_top) * 0.95)
-        .min((r.w - 2.0 * pad) / (0.62 * 5.0 + 0.62 * 0.45 * 6.0))
-        .max(10.0);
-    let base = body_top + (body_bottom - body_top) * 0.5 + big * 0.36;
-    let unit_size = (big * 0.3).max(9.0);
-    let value_w = canvas::text_width(&t.value, big);
-    let unit_w = canvas::text_width(&t.weighted_unit, unit_size);
-    let x0 = r.x + (r.w - value_w - unit_w - 6.0) / 2.0 + value_w;
-    push(
-        t.value.clone(),
-        [x0, base],
-        HAlign::Right,
-        VAlign::Baseline,
-        big,
-    );
-    push(
-        t.weighted_unit.clone(),
-        [x0 + 6.0, base],
-        HAlign::Left,
-        VAlign::Baseline,
-        unit_size,
-    );
-    // Below: on course first, then limit and headroom, the recovery time, the filling and
-    // the gaps, as many as fit.
-    let mut below: Vec<String> = t.course.iter().cloned().collect();
-    match (&t.limit, &t.headroom) {
-        (Some(l), Some(hr)) => below.push(format!("{l} · {hr}")),
-        (Some(l), None) => below.push(l.clone()),
-        (None, Some(hr)) => below.push(hr.clone()),
-        (None, None) => {}
-    }
-    below.extend(t.recover.iter().cloned());
-    match (&t.filling, &t.incomplete) {
-        (Some(f), Some(i)) => below.push(format!("{f} · {i}")),
-        (Some(f), None) => below.push(f.clone()),
-        (None, Some(i)) => below.push(i.clone()),
-        (None, None) => {}
-    }
-    for (k, text) in below.into_iter().take(3).enumerate().rev() {
-        let row = (lines_below - 1.0 - k as f32).max(0.0);
+    let below = tile_below(t);
+    let lines = below.len() as f32;
+    for (k, text) in below.into_iter().enumerate().rev() {
+        let row = lines - 1.0 - k as f32;
         push(
             text,
             [r.x + r.w / 2.0, r.bottom() - pad - row * small * 1.3],
@@ -926,6 +901,62 @@ fn draw_tile(
             small,
         );
     }
+    let body_top = r.y + pad + head * 1.3;
+    let body_bottom = r.bottom() - pad - lines_below as f32 * small * 1.3;
+    let [_, qualifier, instruction, _] = columns::detail_lines(t, horizon);
+    // Every tile shares the shares of its body, so tiles of one grid show their values at
+    // one size whether or not they have an instruction above them. The instruction stays
+    // within [`TILE_INSTRUCTION_EM`] of the header's size and the value under it, so a meter's number above
+    // the tiles keeps the eye.
+    let avail = (body_bottom - body_top - small * 1.3).max(1.0);
+    let instr = (avail * 0.5 / 1.25)
+        .min(head * TILE_INSTRUCTION_EM)
+        .max(1.0);
+    let value_h = (avail * 0.4 / 1.25).min(instr * columns::VALUE_RATIO);
+    let unit_ratio = 0.35;
+    let value_w =
+        canvas::text_width(&t.value, 1.0) + 0.1 + canvas::text_width(&t.weighted_unit, unit_ratio);
+    let value_size = value_h.min(width / value_w.max(1e-3)).max(8.0);
+    let unit_size = value_size * unit_ratio;
+    let line = columns::fitting_shrunk(&instruction, width, instr, small);
+    let cx = r.x + r.w / 2.0;
+    let value_block = value_size * 1.25;
+    let value_top = match line {
+        Some((text, size)) => {
+            let q = qualifier
+                .iter()
+                .find(|q| canvas::text_width(q, small) <= width)
+                .filter(|_| small >= 8.0);
+            let stack = q.map_or(0.0, |_| small * 1.3) + size * 1.25 + value_block;
+            let mut y = body_top + ((body_bottom - body_top) - stack).max(0.0) / 2.0;
+            if let Some(q) = q {
+                push(q.clone(), [cx, y], HAlign::Center, VAlign::Top, small);
+                y += small * 1.3;
+            }
+            push(text, [cx, y], HAlign::Center, VAlign::Top, size);
+            y + size * 1.25
+        }
+        None => body_top + ((body_bottom - body_top) - value_block).max(0.0) / 2.0,
+    };
+    let base = value_top + 0.95 * value_size;
+    let vw = canvas::text_width(&t.value, value_size);
+    let uw = canvas::text_width(&t.weighted_unit, unit_size);
+    let gap = value_size * 0.1;
+    let x0 = cx - (vw + gap + uw) / 2.0 + vw;
+    push(
+        t.value.clone(),
+        [x0, base],
+        HAlign::Right,
+        VAlign::Baseline,
+        value_size,
+    );
+    push(
+        t.weighted_unit.clone(),
+        [x0 + gap, base],
+        HAlign::Left,
+        VAlign::Baseline,
+        unit_size,
+    );
 }
 
 fn draw_history(c: &mut Canvas, s: &HistoryStrip, shared: Option<&str>, theme: &Theme) {
@@ -1089,6 +1120,14 @@ pub(crate) fn leq_scene_under<T>(
         let rows = n.div_ceil(ncols);
         let tw = (tiles_area.w - gap * (ncols as f32 - 1.0)) / ncols as f32;
         let th = (tiles_area.h - gap * (rows as f32 - 1.0)) / rows as f32;
+        // Every tile keeps room for as many small lines as the fullest one, so all bodies
+        // are one height and the values one size.
+        let lines_below = v
+            .tiles
+            .iter()
+            .map(|t| tile_below(t).len())
+            .max()
+            .unwrap_or(0);
         for (i, t) in v.tiles.iter().enumerate() {
             let (row, col) = (i / ncols, i % ncols);
             let r = Rect::new(
@@ -1097,7 +1136,16 @@ pub(crate) fn leq_scene_under<T>(
                 tw.max(1.0),
                 th.max(1.0),
             );
-            draw_tile(&mut c, t, r, v.stale.is_some(), shared.as_deref(), theme);
+            draw_tile(
+                &mut c,
+                t,
+                r,
+                v.stale.is_some(),
+                shared.as_deref(),
+                &v.horizon,
+                lines_below,
+                theme,
+            );
             rects.push(r);
         }
     }

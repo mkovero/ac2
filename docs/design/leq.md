@@ -178,8 +178,9 @@ happens; then the daemon reports the time to recover when playing at the limit: 
 smallest t ≥ h with `E_(N−t) ≤ P·M_(N−t)` (the part still inside the window averages at or
 below the limit), found by one pass over the ring. The display words it **"cooling down in
 7 min 30 s"**: the time until the window is back under its limit if the level stays at the
-limit (narrow: "cooling 7:30", "7:30"); the headroom reads "next 1 min: stay ≤ 101.5 dB"
-(narrow: "stay ≤ 101.5", "≤ 101.5").
+limit (columns and tiles: "cooling down in" over "7 min 30 s", narrow "7:30"); the headroom
+reads "next 1 min: stay ≤ 101.5 dB" (the CLI), "next 1 min" over "stay ≤ 101.5 dB" in the
+app (narrow: "stay ≤ 101.5", "≤ 101.5").
 
 State changes go into the meter's `spl_log` entity: each window's state with the time it
 began, and an alarm list (window, over / recovered, time, Leq, limit; newest 100). The
@@ -281,17 +282,31 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   the budget is spent ("ON COURSE — over in 12 min", then "over in 12 min", "ON COURSE" as
   the column narrows), and the headroom holds until the window is full ("until full: stay ≤ 98.2
   dB"). Tiles show the same texts. The limit is a line across the whole column.
-- **Text**: the value as large as the column width allows (sized for five characters, the
-  same in every column, so it does not jump at 100 dB, and leaving room for the unit); on
-  its baseline, small and dim, the window's own unit and weighting (`dB(A)`, `dB(C)`,
-  `dBFS (A)` uncalibrated; tiles the same), never dropped, since the SPL meter shown above the windows may use another weighting; then the
-  state, the limit and the
-  headroom (or "cooling down in …", the time to recover at the limit), each in the longest wording that fits the
-  column and left out when the bar would get too short; the name at the bottom, shortened
+- **Text**: what a performer acts on is large — the state (`OVER`, `NEAR`, `OK`, "over in
+  47 s" on course) and the instruction ("stay ≤ 101.5 dB", under a small "next 1 min" or
+  "until full"; "7 min 30 s" under "cooling down in" when it cannot recover within the
+  horizon) — each in the longest wording that fits every column, shrinking up to 30 % before a
+  shorter one is used, so neighbours read alike ("stay ≤ 102.0" beside "stay ≤ 85.3"); the limit small under them (dim unless the column is alarmed), as the
+  line across the bar shows it. The window's value is secondary: a figure at its bar's top,
+  at most 0.8 of the state's size (`VALUE_RATIO`) and well under the meter's number above the
+  windows (≤ 0.3 of it, tested), since on stage the value of each window matters less than
+  whether to back off, and two big numbers compete. It sits on the fill just under its top
+  edge when the fill is tall enough, inked for the fill (white on red, black on amber or
+  green: the theme ink of highest contrast, ≥ 4.5:1), else on the track just above it in
+  the bar's own colour where that reads (≥ 3:1) or plain text; a value whose box would cross
+  the limit line moves to the other side of it, since a level near the limit is the one
+  that matters. On its baseline, smaller, the window's own unit and weighting (`dB(A)`,
+  `dB(C)`, `dBFS (A)` uncalibrated; tiles the same), never dropped, since the SPL meter shown
+  above the windows may use another weighting. "not calibrated" takes the small row of the
+  horizon: nothing judged is nothing large. Rows are left out when the bar would get too
+  short (the limit first, the instruction last); the name at the bottom, shortened
   uniformly when narrow (`LAeq 30 min` → `30 min` → `30m`, the caption then names the
-  weighting; mixed weightings keep their letter). Tested: 2–8 windows, 320–1920 px, no text
-  overlaps.
-- **Tiles** (B) keep every figure written out in a grid; the **history strip** (Shift+B) goes under
+  weighting; mixed weightings keep their letter). Tested: 1–8 windows, 320–3840 px, no text
+  overlaps, every value inside its track at its bar's top and clear of the limit line.
+- **Tiles** (B) keep every figure written out in a grid: the name and state on top, in the
+  middle the instruction large under its horizon and the value under it smaller (one size
+  in every tile of the grid, with an instruction or not), the course, limit and progress
+  below; over tiles fill red, near ones amber; the **history strip** (Shift+B) goes under
   either. Defaults: columns, no strip.
 - **Stage view**: full screen with the SPL pane maximised on its windows draws only the
   scene — columns and the caption (meter, unit, run, calibration) — without the app's top bar,
