@@ -1038,6 +1038,31 @@ impl AppState {
             .or_else(|| c.first().copied())
     }
 
+    /// What a pane key (start/stop, reset) acts on: the measurement the focused pane shows,
+    /// never one of another kind selected elsewhere (an SPL meter picked in the list must not
+    /// stop when S is pressed on the transfer pane). Says what to create when there is none.
+    fn focused_pane_meas(&mut self) -> Option<Measurement> {
+        let p = self.layout.focus;
+        if p == PaneKind::Distortion {
+            let m = self.selected_meas().cloned();
+            if m.is_none() {
+                self.error("select a measurement first (N)");
+            }
+            return m;
+        }
+        let m = self.pane_meas(p).cloned();
+        if m.is_none() {
+            self.error(match p {
+                PaneKind::Transfer | PaneKind::Ir => {
+                    "no transfer measurement: Ctrl+K → New transfer measurement…"
+                }
+                PaneKind::Spectrum => "no spectrum or RTA: Ctrl+K → New spectrum / New RTA",
+                _ => "no SPL meter: Ctrl+K → New SPL meter",
+            });
+        }
+        m
+    }
+
     /// Stored trace `id` as mirrored, or why not.
     fn trace_meta(&self, id: TraceId) -> Result<TraceMeta, String> {
         self.daemon()
@@ -3503,26 +3528,22 @@ impl AppState {
                 }
             }
             C::ResetAverage => {
-                if let Some(m) = self.selected_meas().cloned() {
+                if let Some(m) = self.focused_pane_meas() {
                     self.call(
                         out,
                         Command::MeasReset { meas: m.id },
                         format!("{} averaging reset", m.config.name),
                     );
-                } else {
-                    self.error("select a measurement first (N)");
                 }
             }
             C::StartStop => {
-                if let Some(m) = self.selected_meas().cloned() {
+                if let Some(m) = self.focused_pane_meas() {
                     let (cmd, what) = if m.running {
                         (Command::MeasStop { meas: m.id }, "stopped")
                     } else {
                         (Command::MeasStart { meas: m.id }, "started")
                     };
                     self.call(out, cmd, format!("{} {what}", m.config.name));
-                } else {
-                    self.error("select a measurement first (N)");
                 }
             }
 

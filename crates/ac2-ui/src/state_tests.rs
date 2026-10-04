@@ -4080,6 +4080,53 @@ fn spl_meter() -> MeasKind {
     }
 }
 
+/// S and R act on the measurement the focused pane shows: an SPL meter picked in the list
+/// stays as it is when S is pressed on the transfer pane, which says what is missing.
+#[test]
+fn pane_keys_act_on_the_panes_own_measurement() {
+    use ac2_proto::Command;
+    let mut t = T::new();
+    let mut s = with_spl();
+    s.measurements
+        .retain(|m| matches!(m.config.kind, MeasKind::Spl { .. }));
+    s.measurements[0].running = true;
+    t.conn(mirror(s));
+    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    t.key("Alt+1");
+    let r = t.key("S");
+    assert!(
+        !r.iter().any(|r| matches!(
+            r,
+            Request::Call {
+                cmd: Command::MeasStop { .. } | Command::MeasStart { .. },
+                ..
+            }
+        )),
+        "{r:?}"
+    );
+    assert!(
+        t.last_toast().contains("no transfer measurement"),
+        "{}",
+        t.last_toast()
+    );
+    // With a transfer measurement, S on the transfer pane stops that one, not the meter.
+    let mut s = with_spl();
+    for m in &mut s.measurements {
+        m.running = true;
+    }
+    t.conn(mirror(s));
+    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    t.key("Alt+1");
+    let r = t.key("S");
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::Call { cmd: Command::MeasStop { meas }, .. } if *meas == MeasId(1)
+        )),
+        "{r:?}"
+    );
+}
+
 fn with_spl() -> State {
     let mut s = daemon_state();
     s.measurements.push(meas(4, "FOH SPL", spl_meter()));
