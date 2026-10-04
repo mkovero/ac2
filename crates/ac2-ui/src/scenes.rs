@@ -558,8 +558,15 @@ pub fn leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Leq
     Some(leq_scene(&v, &status, theme, size))
 }
 
-/// The SPL measurement the pane shows (else the first one with a frame).
-pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<SplScene> {
+/// The SPL measurement the pane shows (else the first one with a frame). `keymap` names the
+/// key that resets the meter's statistics.
+pub fn spl(
+    st: &AppState,
+    keymap: &crate::keys::Keymap,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<SplScene> {
     let (m, tf) = pane_order(st, PaneKind::Spl)
         .into_iter()
         .find_map(|(_, m)| {
@@ -577,7 +584,25 @@ pub fn spl(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<Spl
     // The number shows the held reading; the bar and the freshness follow the newest frame.
     let held = st.spl_hold.get(&m.id).map_or(f, |h| &h.frame);
     let cal = spl_cal(st, config.input, held.meta.cal, held.meta.mic_curve, now);
-    let r = spl_readout(held, f.meta.level, cal, Some(freshness(tf)));
+    // The statistics run from the newest frame's capture less its interval: the same instant
+    // in every frame until the meter is reset.
+    let newest = tf.frame.stamp.capture_wall_ns;
+    let start_ns = newest
+        .0
+        .saturating_sub((f.meta.duration.0.max(0.0) * 1e9).round() as u64);
+    let reset = keymap
+        .first_chord(
+            crate::keys::CommandId::ResetAverage,
+            crate::keys::Scope::Spl,
+        )
+        .map(|c| c.label());
+    let since = ac2_scene::spl::meter_since(
+        ac2_proto::units::WallNs(start_ns),
+        newest,
+        |t| st.local_zone.offset_s(t),
+        reset.as_deref(),
+    );
+    let r = spl_readout(held, f.meta.level, cal, Some(freshness(tf)), since);
     let status = status(st, &[tf], None, now);
     Some(spl_scene(&r, &status, theme, size))
 }

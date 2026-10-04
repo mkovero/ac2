@@ -1993,7 +1993,7 @@ fn electrical_calibration_from_the_app() -> R {
     };
     let want = "electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB";
     d.until("the SPL meter in dB SPL, electrically calibrated", |s| {
-        ac2_ui::scenes::spl(s, &Theme::dark(), size, now()).is_some_and(|x| {
+        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now()).is_some_and(|x| {
             let t = scene_texts(&x.scene);
             t.iter().any(|l| l.contains(want))
                 && t.iter().any(|l| l == "94.0")
@@ -2104,11 +2104,16 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    d.until("the meter labelled LCS", |s| {
-        ac2_ui::scenes::spl(s, &Theme::dark(), size, now()).is_some_and(|x| {
-            scene_texts(&x.scene)
-                .iter()
-                .any(|l| l.starts_with("LCS · "))
+    // The statistics under one heading: since when the meter runs, and its reset key.
+    d.until("the meter labelled LCS, its statistics headed once", |s| {
+        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now()).is_some_and(|x| {
+            let t = scene_texts(&x.scene);
+            t.iter().any(|l| l.starts_with("LCS · "))
+                && t.iter()
+                    .filter(|l| l.starts_with("meter since") && l.ends_with("· R resets"))
+                    .count()
+                    == 1
+                && t.iter().any(|l| l.starts_with("LCeq "))
         })
     })?;
     // Readings for 3.5 s: each new one at least a display period after the last.

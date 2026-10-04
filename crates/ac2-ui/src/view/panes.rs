@@ -150,7 +150,10 @@ fn scene_for(
         PaneKind::Spl if st.view.spl.leq => {
             (scenes::leq(st, theme, vp, now)?.scene, Axes::default())
         }
-        PaneKind::Spl => (scenes::spl(st, theme, vp, now)?.scene, Axes::default()),
+        PaneKind::Spl => (
+            scenes::spl(st, &app.keymap, theme, vp, now)?.scene,
+            Axes::default(),
+        ),
         PaneKind::Distortion => {
             let s = scenes::sweep(st, theme, vp, now);
             let axes = Axes {

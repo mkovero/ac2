@@ -217,6 +217,10 @@ fn spec_frame(meas: u32) -> SpecFrame {
     }
 }
 
+/// When the rig's SPL meter started: 2026-10-03 19:02:00 UTC (the screenshots show it in
+/// UTC, on a day before any run of them: with its date).
+pub const SPL_SINCE: WallNs = WallNs(1_791_054_120_000_000_000);
+
 fn spl_frame(meas: u32) -> SplFrame {
     SplFrame {
         meas: MeasId(meas),
@@ -417,10 +421,15 @@ impl Rig {
                 {
                     let mut s = f.lock();
                     for (data, grid) in &frames {
-                        let frame = Frame {
-                            stamp: s.stamp(seq, *grid),
-                            data: data.clone(),
-                        };
+                        let stamp = s.stamp(seq, *grid);
+                        let mut data = data.clone();
+                        // The meter has run since a fixed instant, as a real one runs since
+                        // its start: its interval grows, the heading's time stays put.
+                        if let FrameData::Spl(f) = &mut data {
+                            let ns = stamp.capture_wall_ns.0.saturating_sub(SPL_SINCE.0);
+                            f.meta.duration = Seconds(ns as f64 / 1e9);
+                        }
+                        let frame = Frame { stamp, data };
                         s.publish(&frame);
                     }
                 }

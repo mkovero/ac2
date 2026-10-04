@@ -68,11 +68,14 @@ fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
 fn harness(opts: AppOptions) -> Harness<'static, App> {
     // Screenshots are compared on every OS; macOS would otherwise label keys with glyphs.
     ac2_ui::keys::set_label_style(ac2_ui::keys::LabelStyle::Pc);
-    Harness::builder()
+    let mut h = Harness::builder()
         .with_size(SIZE)
         .with_pixels_per_point(1.0)
         .wgpu()
-        .build_eframe(move |cc| App::new(cc, opts))
+        .build_eframe(move |cc| App::new(cc, opts));
+    // Local times in UTC on every machine.
+    h.state_mut().state.local_zone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 0 };
+    h
 }
 
 /// How long a wait for the UI may take. Only a ceiling: every wait ends as soon as its

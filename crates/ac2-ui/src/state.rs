@@ -3755,7 +3755,7 @@ impl AppState {
 
     /// F / Z in the SPL pane (or the palette's direct choices): the meter the pane shows
     /// takes the next (or the named) time or frequency weighting, in place — its Leq
-    /// windows, log and interval carry on — and the pane shows the meter.
+    /// windows, log and interval carry on. The pane keeps showing what it showed.
     fn spl_weightings(&mut self, c: CommandId, out: &mut Vec<Request>) {
         use CommandId as C;
         use ac2_proto::model::{TimeWeighting as T, Weighting as W};
@@ -3794,7 +3794,9 @@ impl AppState {
             m.config.name,
             ac2_scene::spl::metric_name(config.weighting, config.time_weighting)
         );
-        self.view.spl.leq = false;
+        // The pane keeps its view: the Leq windows do not follow the meter's weightings, so
+        // switching to the meter would read as the windows having changed. The daemon's
+        // reply names the new metric either way.
         self.focus(PaneKind::Spl);
         let (meas, config) = (m.id, m.config);
         self.call(out, Command::MeasUpdate { meas, config }, what);

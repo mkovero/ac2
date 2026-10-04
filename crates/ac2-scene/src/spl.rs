@@ -1,6 +1,7 @@
 //! SPL meter: the held time-weighted level as a big centred number, its name and unit, a
-//! live level bar, interval statistics and the calibration state (decisions 7a/7b), and the
-//! display hold that keeps the number readable ([`SplHold`]).
+//! live level bar, the meter's own statistics since it was last reset (headed once by when
+//! that was: they are not the Leq windows) and the calibration state (decisions 7a/7b), and
+//! the display hold that keeps the number readable ([`SplHold`]).
 //!
 //! Metric names follow IEC 61672 notation: `L` + frequency weighting + time weighting
 //! (`LAF` = A-weighted, Fast), `LAeq`, `LCpeak`, `LAFmax`, `LAFmin`.
@@ -169,10 +170,11 @@ pub struct SplReadout {
     pub unit: String,
     /// `LAF · dB SPL`, under the number.
     pub caption: String,
-    /// Leq, Lpeak, Lmax, Lmin in the meter's weightings.
+    /// Leq, Lpeak, Lmax, Lmin in the meter's weightings, over the meter's interval.
     pub stats: Vec<SplStat>,
-    /// `over 1 min 23 s`.
-    pub interval: String,
+    /// `meter since 4:01 · R resets`: the statistics' interval, stated once over them (the
+    /// meter's own, not the Leq windows').
+    pub since: String,
     /// `cal 3 h ago`, `cal from other mic / input`, `uncalibrated`; `· mic curve` when the
     /// curve is applied.
     pub cal: String,
@@ -209,13 +211,32 @@ pub fn cal_text(
     }
 }
 
+/// The heading of the meter's statistics: since when they run (`meter since 4:01`, the date
+/// too when not today) and the key that starts them again. `start` and `newest` are on the
+/// daemon clock: the interval's start (the newest frame's capture less its interval) and the
+/// newest frame's capture, whose local day is "today".
+pub fn meter_since(
+    start: WallNs,
+    newest: WallNs,
+    offset_s: impl Fn(WallNs) -> i32,
+    reset_key: Option<&str>,
+) -> String {
+    let at = time::local_clock(start, newest, offset_s);
+    match reset_key {
+        Some(k) => format!("meter since {at} · {k} resets"),
+        None => format!("meter since {at}"),
+    }
+}
+
 /// The readout of `held` (the reading the number shows, [`SplHold`]) with the bar at
-/// `live_level`, the newest frame's level in the same scale.
+/// `live_level`, the newest frame's level in the same scale; `since` heads the statistics
+/// ([`meter_since`]).
 pub fn spl_readout(
     held: &SplFrame,
     live_level: f64,
     cal: String,
     freshness: Option<Freshness>,
+    since: String,
 ) -> SplReadout {
     let m = &held.meta;
     let w = w_letter(m.weighting);
@@ -240,7 +261,7 @@ pub fn spl_readout(
             stat(format!("{metric}min"), m.lmin),
         ],
         metric,
-        interval: format!("over {}", format::duration(m.duration.0)),
+        since,
         cal,
         stale: freshness
             .filter(Freshness::is_stale)
@@ -264,25 +285,18 @@ fn cut(text: &str, width: f32, size: f32) -> String {
     format!("{}…", out.trim_end())
 }
 
-/// The footer's rows from the top, each `(text, align)` pieces: the interval left and the
-/// calibration right on one row when both fit, else every part (`over 6 min`, `MM1 34804`,
-/// `uncalibrated`, `mic curve: …`) packed into rows left to right, a part too wide for a row
-/// cut with `…`. At most `max_rows`; what does not fit goes into the last row, cut.
-fn footer_rows(
-    interval: &str,
-    cal: &str,
-    width: f32,
-    size: f32,
-    max_rows: usize,
-) -> Vec<Vec<(String, HAlign)>> {
-    let gap = 2.0 * size;
-    if canvas::text_width(interval, size) + gap + canvas::text_width(cal, size) <= width {
-        return vec![vec![
-            (interval.to_owned(), HAlign::Left),
-            (cal.to_owned(), HAlign::Right),
-        ]];
+/// The footer's rows from the top, each `(text, align)` pieces: the calibration on the right
+/// when it fits one row, else its parts (`MM1 34804`, `uncalibrated`, `mic curve: …`) packed
+/// into rows left to right, a part too wide for a row cut with `…`. At most `max_rows`; what
+/// does not fit goes into the last row, cut.
+fn footer_rows(cal: &str, width: f32, size: f32, max_rows: usize) -> Vec<Vec<(String, HAlign)>> {
+    if cal.is_empty() {
+        return Vec::new();
     }
-    let parts = std::iter::once(interval).chain(cal.split(FOOTER_SEP));
+    if canvas::text_width(cal, size) <= width {
+        return vec![vec![(cal.to_owned(), HAlign::Right)]];
+    }
+    let parts = cal.split(FOOTER_SEP);
     let mut rows: Vec<String> = Vec::new();
     for p in parts.filter(|p| !p.is_empty()) {
         let full = rows.len() >= max_rows.max(1);
@@ -345,10 +359,10 @@ impl Stack {
 
 /// Lays the meter out in `size` below the banner strip, to be read across a room: the held
 /// level as large as the pane allows, centred, its name and unit under it (`LAS · dB SPL`),
-/// the live level as a slim bar, then the statistics and, at the bottom, the interval and
-/// the calibration. Secondary text grows with the pane. Laid out from the bottom up, so on
-/// a small pane the footer wraps or is cut, the statistics wrap and the number shrinks
-/// rather than anything running into anything else.
+/// the live level as a slim bar, then the statistics under their one heading (since when
+/// the meter has run) and, at the bottom, the calibration. Secondary text grows with the
+/// pane. Laid out from the bottom up, so on a small pane the footer wraps or is cut, the
+/// statistics wrap and the number shrinks rather than anything running into anything else.
 pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport) -> SplScene {
     let mut c = Canvas::new(size, theme);
     let pad = 12.0;
@@ -386,7 +400,7 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         h if h >= 160.0 => 2,
         _ => 1,
     };
-    let footer = footer_rows(&r.interval, &r.cal, area.w, small, max_rows);
+    let footer = footer_rows(&r.cal, area.w, small, max_rows);
     let line_h = 1.25 * small;
     let footer_top = area.bottom() - footer.len() as f32 * line_h;
     let gap = (0.5 * stat_size).max(6.0);
@@ -411,7 +425,9 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
     let row_h = 1.4 * stat_size;
     let stats_top =
         footer_top - gap - stat_rows.saturating_sub(1) as f32 * row_h - 1.25 * stat_size;
-    let room = (stats_top - gap - room_top).max(0.0);
+    // The statistics' heading sits right over them: it belongs to them, not to the number.
+    let since_top = stats_top - 0.25 * stat_size - line_h;
+    let room = (since_top - gap - room_top).max(0.0);
     // The number as wide as the pane allows, then as high as the room allows.
     let mut s = Stack::new(area.w * 0.94 / number_em(&r.value), fs);
     for _ in 0..4 {
@@ -472,6 +488,13 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
             });
         }
     }
+    c.overlay.labels.push(label(
+        cut(&r.since, area.w, small),
+        [cx, since_top],
+        anchor(HAlign::Center, VAlign::Top),
+        small,
+        theme.text_dim,
+    ));
     for (i, t) in texts.into_iter().enumerate() {
         let (r_i, c_i) = (i / per_row, i % per_row);
         c.overlay.labels.push(label(
@@ -557,8 +580,16 @@ mod tests {
         }
     }
 
+    const SINCE: &str = "meter since 4:01 · R resets";
+
     fn readout(f: &SplFrame, cal: &str, age: Option<f64>) -> SplReadout {
-        spl_readout(f, f.meta.level, cal.into(), age.map(Freshness::from_age))
+        spl_readout(
+            f,
+            f.meta.level,
+            cal.into(),
+            age.map(Freshness::from_age),
+            SINCE.into(),
+        )
     }
 
     fn vp(w: f32, h: f32) -> Viewport {
@@ -599,7 +630,7 @@ mod tests {
             stats,
             ["LAeq 92.1", "LCpeak 110.3", "LAFmax 97.2", "LAFmin —"]
         );
-        assert_eq!(r.interval, "over 1 min 23 s");
+        assert_eq!(r.since, SINCE);
         assert_eq!(r.stale, None);
         // 94 dB on the 30 … 130 dB SPL bar.
         assert!((r.bar.fill - 0.6404).abs() < 1e-4, "{}", r.bar.fill);
@@ -613,6 +644,7 @@ mod tests {
             -23.4,
             "uncalibrated".into(),
             Some(Freshness::from_age(3.24)),
+            SINCE.into(),
         );
         assert_eq!(r.unit, "dBFS");
         assert_eq!(r.caption, "LCS · dBFS");
@@ -621,7 +653,7 @@ mod tests {
         assert_eq!(r.stale.as_deref(), Some("STALE 3.2 s"));
         // The bar follows the live level, not the held one: −23.4 dBFS on −100 … 0.
         assert!((r.bar.fill - 0.766).abs() < 1e-4, "{}", r.bar.fill);
-        let r = spl_readout(&f, f64::NEG_INFINITY, String::new(), None);
+        let r = spl_readout(&f, f64::NEG_INFINITY, String::new(), None, SINCE.into());
         assert_eq!(r.bar.fill, 0.0);
         assert_eq!(metric_name(Weighting::Z, TimeWeighting::Impulse), "LZI");
     }
@@ -695,7 +727,7 @@ mod tests {
             "94.0",
             "LAeq 92.1",
             "LCpeak 110.3",
-            "over 1 min 23 s",
+            SINCE,
             "cal 94 dB · 3 h ago",
             "STALE 5.0 s",
         ] {
@@ -768,9 +800,10 @@ mod tests {
         crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.area]);
     }
 
-    /// From the small panes of a grid (the footer `over 6 min · MM1 34804 · uncalibrated ·
-    /// mic curve: …` wraps or is cut, the statistics wrap) to a full-screen 1920×1080: no two
-    /// labels overlap, the bar overlaps none, and all stay inside the readout area.
+    /// From the small panes of a grid (the footer `MM1 34804 · uncalibrated · mic curve: …`
+    /// wraps or is cut, the statistics wrap) to a full-screen 1920×1080: no two labels
+    /// overlap, the bar overlaps none, and all stay inside the readout area; the statistics'
+    /// heading sits above them and under the number's block.
     #[test]
     fn meter_never_overlaps_at_any_size() {
         let mut f = frame(LevelScale::DbSpl);
@@ -811,15 +844,31 @@ mod tests {
                     let texts: Vec<&str> = boxes.iter().map(|(t, _)| *t).collect();
                     assert!(texts.contains(&"LZeq 92.1"), "{w}×{h}: {texts:?}");
                     assert!(texts.contains(&"LZF · dB SPL"), "{w}×{h}: {texts:?}");
-                    assert!(
-                        texts.iter().any(|t| t.contains("over 6 min")),
-                        "{w}×{h}: {texts:?}"
-                    );
-                    // Wide enough, the footer is one row: the interval left, the calibration
-                    // right.
+                    let heading = boxes
+                        .iter()
+                        .find(|(t, _)| t.starts_with("meter since"))
+                        .unwrap_or_else(|| panic!("{w}×{h}: no heading in {texts:?}"));
+                    let stat = boxes
+                        .iter()
+                        .find(|(t, _)| t.starts_with("LZeq"))
+                        .map(|(_, b)| *b)
+                        .expect("stat");
+                    assert!(heading.1.bottom() <= stat.y + 0.5, "{w}×{h}: heading under");
+                    if let Some(bar) = s.bar {
+                        assert!(
+                            heading.1.y >= bar.bottom() - 0.5,
+                            "{w}×{h}: heading over bar"
+                        );
+                    }
+                    // Wide enough, the heading is whole and the footer one row.
                     if w >= 600 {
+                        assert!(texts.contains(&SINCE), "{w}×{h}: {texts:?}");
                         assert!(texts.contains(&cal), "{w}×{h}: {texts:?}");
                     }
+                    assert!(
+                        !texts.iter().any(|t| t.contains("since") && t != &heading.0),
+                        "{w}×{h}: the interval is stated once: {texts:?}"
+                    );
                     if h >= 240 {
                         assert!(s.bar.is_some(), "{w}×{h}: no bar");
                     }
@@ -831,21 +880,22 @@ mod tests {
     #[test]
     fn footer_rows_wrap_at_the_parts() {
         let cal = "MM1 34804 · uncalibrated · mic curve: MM1 34804 90°";
-        let one = footer_rows("over 6 min", cal, 600.0, 10.0, 3);
-        assert_eq!(one.len(), 1);
-        assert_eq!(one[0].len(), 2);
-        let rows = footer_rows("over 6 min", cal, 200.0, 10.0, 3);
+        let one = footer_rows(cal, 600.0, 10.0, 3);
+        assert_eq!(one, [[(cal.to_owned(), HAlign::Right)]]);
+        let rows = footer_rows(cal, 200.0, 10.0, 3);
         let text: Vec<&str> = rows.iter().map(|r| r[0].0.as_str()).collect();
         assert_eq!(
             text,
-            [
-                "over 6 min · MM1 34804",
-                "uncalibrated",
-                "mic curve: MM1 34804 90°"
-            ]
+            ["MM1 34804 · uncalibrated", "mic curve: MM1 34804 90°"]
         );
+        assert!(footer_rows("", 200.0, 10.0, 3).is_empty());
         // Two rows at most: the rest is cut.
-        let rows = footer_rows("over 6 min", cal, 160.0, 10.0, 2);
+        let rows = footer_rows(
+            &format!("{cal} · cal from other mic / input"),
+            160.0,
+            10.0,
+            2,
+        );
         assert_eq!(rows.len(), 2);
         assert!(rows[1][0].0.ends_with('…'), "{rows:?}");
         assert!(canvas::text_width(&rows[1][0].0, 10.0) <= 160.0);
@@ -879,6 +929,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The heading: since when (local time; the date when not today) and the reset key.
+    #[test]
+    fn meter_since_names_the_start_once() {
+        const S: u64 = 1_000_000_000;
+        // 2026-10-03 04:01:30 UTC, read at 06:00.
+        let start = WallNs((20_729 * 86_400 + 4 * 3600 + 90) * S);
+        let newest = WallNs(start.0 + 7110 * S);
+        let utc = |_: WallNs| 0;
+        assert_eq!(
+            meter_since(start, newest, utc, Some("R")),
+            "meter since 4:01 · R resets"
+        );
+        assert_eq!(meter_since(start, newest, utc, None), "meter since 4:01");
+        let next_day = WallNs(start.0 + 86_400 * S);
+        assert_eq!(
+            meter_since(start, next_day, utc, Some("R")),
+            "meter since 3 Oct 4:01 · R resets"
+        );
+        // Local time: UTC+2.
+        assert_eq!(
+            meter_since(start, newest, |_| 7200, Some("R")),
+            "meter since 6:01 · R resets"
+        );
     }
 
     #[test]

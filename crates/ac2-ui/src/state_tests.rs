@@ -4670,8 +4670,9 @@ fn spl_update(r: &[Request]) -> Option<(SplConfig, String)> {
 }
 
 /// F steps the meter's time weighting F → S → I → F, Z its frequency weighting A → C → Z →
-/// A, in place (`meas.update` of the same input, the Leq windows as they were); either shows
-/// the meter. The palette names each choice. Without a meter, it says so.
+/// A, in place (`meas.update` of the same input, the Leq windows as they were); the pane
+/// keeps its view (meter or Leq windows). The palette names each choice. Without a meter, it
+/// says so.
 #[test]
 fn spl_keys_cycle_the_weightings() {
     let mut t = T::new();
@@ -4710,7 +4711,20 @@ fn spl_keys_cycle_the_weightings() {
             "FOH SPL: LAF"
         ]
     );
-    assert!(!t.st.view.spl.leq, "the meter shows");
+    assert!(
+        t.st.view.spl.leq,
+        "the Leq windows stay: they do not change"
+    );
+    // The reply names the meter's new metric over the Leq view.
+    t.conn(ConnEvent::Reply {
+        what: seen[3].clone(),
+        result: Ok(()),
+    });
+    assert_eq!(t.last_toast(), "FOH SPL: LCF");
+    t.key("G");
+    assert!(!t.st.view.spl.leq);
+    t.key("F");
+    assert!(!t.st.view.spl.leq, "the meter stays");
     for (c, want) in [
         (CommandId::SplSlow, "FOH SPL: LAS"),
         (CommandId::SplImpulse, "FOH SPL: LAI"),
@@ -4758,7 +4772,7 @@ fn spl_number_holds_for_the_display_period() {
             changes.push(k);
         }
         // The number is the held reading; the bar follows the newest frame.
-        let s = crate::scenes::spl(&t.st, &theme, size, now).expect("scene");
+        let s = crate::scenes::spl(&t.st, &t.keys, &theme, size, now).expect("scene");
         let texts: Vec<&str> = s.scene.layers[2]
             .labels
             .iter()

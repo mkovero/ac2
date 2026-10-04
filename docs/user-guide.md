@@ -603,9 +603,12 @@ with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal
 
 - **The number** is the current time-weighted level, centred and as large as the pane
   allows; under it the level's name and unit, `LAF · dB SPL` (`dBFS` uncalibrated), then a
-  slim bar with the level live (30 … 130 dB SPL, or −100 … 0 dBFS, 10 dB ticks), the
-  statistics — `LAeq` and `LCpeak` over the meter's interval, `LAFmax` and `LAFmin` in the
-  meter's weightings — and at the bottom how long the interval is and the calibration.
+  slim bar with the level live (30 … 130 dB SPL, or −100 … 0 dBFS, 10 dB ticks), then the
+  meter's own statistics under one heading that says since when they run — *meter since
+  4:01 · R resets* (local time; the date too when not today) — `LAeq`, `LCpeak`, `LAFmax`
+  and `LAFmin` in the meter's weightings, and at the bottom the calibration. These are the
+  meter's figures since its start or the last **R**, not the Leq windows (**G**), which
+  keep their own lengths and are never reset by R.
   The secondary figures grow with the pane: **W** twice (or W, then F11) makes the meter
   full screen, to be read across the room.
 - **Readable, not flickering.** The number takes a new reading twice a second with F and I
@@ -617,7 +620,9 @@ with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal
 - **F** in the SPL pane steps the time weighting Fast → Slow → Impulse, **Z** the frequency
   weighting A → C → Z; the palette has each one by name ("SPL meter: Slow time
   weighting", "SPL meter: C weighting"…). The change applies to the running meter at once
-  and is kept with it (sessions, autosave). Nothing restarts: the meter measures every
+  and is kept with it (sessions, autosave). The pane stays as it is: with the Leq windows
+  showing, a message names the meter's new reading (*FOH SPL: LCS*) and the windows stay —
+  they keep their own weightings. Nothing restarts: the meter measures every
   combination all the time, so the new one reads its settled level from the first frame
   (a Slow meter started at the switch would need 5 s), and its Lmax, Lmin, Leq and Lpeak
   cover the same interval as before — each combination keeps its own, from the meter's
