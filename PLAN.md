@@ -520,6 +520,10 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
 ### 8.3 Lightweight targets
 - First frame < 300 ms, RSS < 120 MB with 8 live TFs, binary < 25 MB.
 - Frame p99 < 4 ms at 1440p with 16 live traces on an integrated GPU.
+- Idle (nothing changing on screen): no repaints, near-zero CPU; the GPU request prefers
+  the low-power adapter on hybrid laptops; device limits fit a Pi 4 class GPU (V3D).
+- Daemon, SPL meter only: a few % of one Pi 4 core at 48 kHz, no wakeup storms, disk
+  writes proportional to new log rows.
 
 ---
 
@@ -543,7 +547,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
 | 7 | Post-1.0 extras | ASIO, SPL logging/alarms, ESS IR + ISO 3382, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | per-feature criteria (room metrics vs published values; 24 h log clean; …) |
 
-### 9.0 Status (2026-10-04)
+### 9.0 Status (2026-10-05)
 
 | # | CI criteria | HW criteria |
 |---|---|---|
@@ -553,15 +557,26 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **done** on Linux (`docs/rigs/pupu.md`, network test) |
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
-| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
+| 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
 | 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | 24 h log clean — **open** |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
 transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,
 mDNS; `docs/rigs/pupu.md`); Windows only as an MSI install in a VM with the simulated rig
-(`docs/design/backlog.md`); macOS built (universal disk image) but not yet on hardware. No
+(`docs/design/backlog.md`); macOS: the universal disk image installs and starts on a
+tester's Mac (microphone prompt shown), not yet measured with an audio interface. No
 GitHub release is published: installers are workflow artifacts of `release.yml` runs,
-unsigned. Protocol version 13.
+unsigned. Protocol version 14, session format 8.
+
+Performance pass for the real targets (2026-10-04, `docs/design/flow-control.md` for what
+is left): idle wakeups cut (≈1340 → 250/s with a session open), work only for subscribed
+and new results, display-sized spectrum frames (≈8–12 MB/s → ≈22 kB/s per client),
+append-only SPL log (no whole-log rewrites, SD-card safe), cheaper SPL/RTA/delay-tracking
+DSP, UI repaints only on visible change with per-pane rebuilds and a low-power GPU request.
+Measured on the fake rig: daemon 10.5 % → 2.4 % of a desktop core with TF + RTA + spectrum +
+SPL; UI with idle panes 3.3 → 0.2 cores under a software renderer. On pupu (i5-2415M,
+96 kHz): SPL + spectrum ≈ 14 % of a core, of which ≈ 4 % is JACK's own process thread.
+Not yet measured: §8.3 frame time on a real laptop iGPU, anything on a Pi.
 
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and
@@ -613,7 +628,12 @@ Open decisions (settle before phase 1; technical design questions are in §9.2):
    phase 7 starts (Steinberg proprietary terms vs GPLv3 SDK, which would make that binary GPL).
 2. ~~Distance readout~~ **Decided:** shown as plain delay × c(temperature), no correction layers.
 3. ~~UI chrome~~ **Decided (phase 0 spike):** egui + custom theme; requirement stays cross-platform, sleek, beautiful.
-4. ~~Headless hardware~~ **Decided:** primary target x86-64 + modern GPU; SIMD where it matters; ARM best effort.
+4. ~~Headless hardware~~ **Decided (revised 2026-10-05):** primary targets are laptops with
+   integrated GPUs on battery (the UI, often with an embedded daemon) and, in the near
+   future, a headless ARM board of Raspberry Pi 4 class running the daemon for SPL metering
+   with the UI elsewhere. A desktop with a discrete GPU is the easy case, not the yardstick.
+   The Pi is best effort until a Pi rig exists; then it gets an HW gate (SPL + Leq log 24 h,
+   CPU budget, SD-card writes). SIMD where it matters, NEON included.
 5. ~~Raw capture format~~ **Decided:** f32 WAV/W64 + JSON sidecar (config timeline,
    discontinuities, algorithm version). Exact sample preservation;
    DSP replay judged within tolerance, not bit-exact.
