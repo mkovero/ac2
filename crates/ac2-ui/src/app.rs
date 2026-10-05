@@ -85,6 +85,8 @@ pub struct App {
     conn: Option<Conn>,
     started: Instant,
     last_tick: Option<Instant>,
+    /// When `ui.toml` was last written ([`PREFS_SAVE_INTERVAL`]).
+    prefs_saved: Option<Instant>,
     pub startup: StartupTiming,
     bench_startup: bool,
     applied_theme: Option<ThemeName>,
@@ -156,6 +158,7 @@ impl App {
             conn,
             started: opts.started,
             last_tick: None,
+            prefs_saved: None,
             startup: StartupTiming::default(),
             bench_startup: opts.bench_startup,
             applied_theme: None,
@@ -324,18 +327,32 @@ impl App {
                 c.send(r);
             }
         }
-        if self.state.prefs_dirty {
-            self.state.prefs_dirty = false;
-            // A few hundred bytes, written only when the operator changes a preference.
-            if let Some(path) = &self.prefs_path
-                && let Err(e) = self.state.prefs.save(path)
-            {
-                self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                    what: "preferences".into(),
-                    result: Err(e),
-                })));
-            }
+        self.save_prefs(Instant::now());
+    }
+
+    /// Writes `ui.toml` when a preference changed, at most once per
+    /// [`PREFS_SAVE_INTERVAL`]; `Some(wait)` while a write waits.
+    fn save_prefs(&mut self, now: Instant) -> Option<Duration> {
+        if !self.state.prefs_dirty {
+            return None;
         }
+        if let Some(t) = self.prefs_saved
+            && now.duration_since(t) < PREFS_SAVE_INTERVAL
+        {
+            return Some(PREFS_SAVE_INTERVAL - now.duration_since(t));
+        }
+        self.state.prefs_dirty = false;
+        self.prefs_saved = Some(now);
+        // A few hundred bytes, written only when the operator changes a preference.
+        if let Some(path) = &self.prefs_path
+            && let Err(e) = self.state.prefs.save(path)
+        {
+            self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
+                what: "preferences".into(),
+                result: Err(e),
+            })));
+        }
+        None
     }
 
     fn pump_link(&mut self) {
@@ -549,6 +566,10 @@ impl ClockTexts {
 /// panes' banners ("saved 3 min ago", a calibration's age).
 const SLOW_REFRESH: Duration = Duration::from_secs(10);
 
+/// Shortest time between two writes of `ui.toml`: a wheel or drag on a level axis changes
+/// it on every event, and each write is synced to disk.
+const PREFS_SAVE_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Wakes the UI for what the link reports: one pass. egui answers a plain
 /// `request_repaint` with two passes (for responses that land a frame late), which on a
 /// software rasteriser doubles the cost of every data frame; a delayed request is painted
@@ -585,11 +606,14 @@ impl eframe::App for App {
     fn on_exit(&mut self) {
         if self.window.is_some() && self.window != self.state.prefs.window {
             self.state.prefs.window = self.window;
-            if let Some(path) = &self.prefs_path
-                && let Err(e) = self.state.prefs.save(path)
-            {
-                eprintln!("ac2-ui: {e}");
-            }
+            self.state.prefs_dirty = true;
+        }
+        // Also a change still waiting for its write.
+        if std::mem::take(&mut self.state.prefs_dirty)
+            && let Some(path) = &self.prefs_path
+            && let Err(e) = self.state.prefs.save(path)
+        {
+            eprintln!("ac2-ui: {e}");
         }
     }
 
@@ -666,6 +690,9 @@ impl eframe::App for App {
         }
         if self.conn.is_some() {
             ctx.request_repaint_after(SLOW_REFRESH);
+        }
+        if let Some(wait) = self.save_prefs(Instant::now()) {
+            ctx.request_repaint_after(wait);
         }
         if self.state.animating() || self.startup.first_frame.is_none() {
             ctx.request_repaint();

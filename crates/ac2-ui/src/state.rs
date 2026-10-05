@@ -1466,11 +1466,16 @@ impl AppState {
         }
     }
 
-    /// Saves the layout with the preferences when it changed.
+    /// Saves the layout and the level axes with the preferences when they changed.
     fn remember_layout(&mut self) {
         let now = self.layout_prefs();
         if now != self.prefs.layout {
             self.prefs.layout = now;
+            self.prefs_dirty = true;
+        }
+        let levels = crate::prefs::LevelPrefs::of(&self.view);
+        if levels != self.prefs.levels {
+            self.prefs.levels = levels;
             self.prefs_dirty = true;
         }
     }
@@ -1543,6 +1548,8 @@ impl AppState {
         self.view.spl.mode = l.spl_view;
         self.view.ir.mode = l.ir_mode;
         self.view.distortion.unit = l.distortion_unit;
+        // Before any frame: a spectrum that starts still fits its axis on its first one.
+        prefs.levels.apply(&mut self.view);
         self.pending_pane_meas = l.measurements.clone();
         self.prefs = prefs;
     }

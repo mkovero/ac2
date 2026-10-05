@@ -2,8 +2,9 @@
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
 //! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
-//! meter's number holds a reading, and the layout and window as last left: the focused
-//! pane, maximised or full screen, what each pane shows, the window's size and position.
+//! meter's number holds a reading, the layout and window as last left: the focused
+//! pane, maximised or full screen, what each pane shows, the window's size and position,
+//! and each pane's level axis range (a fit made for one show is a fair start for the next).
 //!
 //! ```toml
 //! key_hints = false
@@ -36,6 +37,12 @@
 //! transfer = "Main L"
 //! spl = "FOH SPL"
 //!
+//! [levels]
+//! transfer = [-24.0, 12.0]
+//! spectrum_dbfs = [-140.0, -40.0]
+//! spectrum_spl = [20.0, 120.0]
+//! distortion = [-100.0, 0.0]
+//!
 //! [window]
 //! width = 1600
 //! height = 900
@@ -51,7 +58,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use ac2_scene::view::{DistortionUnit, IrMode, LeqLayout, LeqStyle, SplMode};
+use ac2_scene::axis::Range;
+use ac2_scene::view::{DistortionUnit, IrMode, LeqLayout, LeqStyle, SplMode, ViewState, level};
 use serde::{Deserialize, Serialize};
 
 use crate::state::PaneKind;
@@ -104,6 +112,41 @@ impl Default for LayoutPrefs {
     }
 }
 
+/// The level axis range of each pane, dB (the spectrum pane keeps one per scale).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LevelPrefs {
+    pub transfer: Range,
+    pub spectrum_dbfs: Range,
+    pub spectrum_spl: Range,
+    pub distortion: Range,
+}
+
+impl LevelPrefs {
+    /// The ranges `view` shows.
+    pub fn of(view: &ViewState) -> Self {
+        Self {
+            transfer: view.tf.magnitude_db,
+            spectrum_dbfs: view.spectrum.level,
+            spectrum_spl: view.spectrum.level_spl,
+            distortion: view.distortion.range_db,
+        }
+    }
+
+    /// Puts the ranges on `view`.
+    pub fn apply(&self, view: &mut ViewState) {
+        view.tf.magnitude_db = self.transfer;
+        view.spectrum.level = self.spectrum_dbfs;
+        view.spectrum.level_spl = self.spectrum_spl;
+        view.distortion.range_db = self.distortion;
+    }
+}
+
+impl Default for LevelPrefs {
+    fn default() -> Self {
+        Self::of(&ViewState::default())
+    }
+}
+
 /// The window's size and position, logical points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowPrefs {
@@ -122,7 +165,7 @@ impl WindowPrefs {
 pub const SPL_HOLD_MS: std::ops::RangeInclusive<u32> = 100..=10_000;
 
 /// What the UI remembers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiPrefs {
     /// Zero-based stimulus outputs per output device id.
     pub outputs: BTreeMap<String, Vec<u16>>,
@@ -137,6 +180,8 @@ pub struct UiPrefs {
     pub spl_hold_ms: Option<u32>,
     /// The layout as last left.
     pub layout: LayoutPrefs,
+    /// The level axes as last left.
+    pub levels: LevelPrefs,
     /// The window as last left (`None`: never saved).
     pub window: Option<WindowPrefs>,
 }
@@ -150,6 +195,7 @@ impl Default for UiPrefs {
             key_hints: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
+            levels: LevelPrefs::default(),
             window: None,
         }
     }
@@ -174,7 +220,57 @@ struct File {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     layout: Option<LayoutFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    levels: Option<LevelsFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
+}
+
+/// `[low, high]` dB per axis; one left out is the default.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LevelsFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transfer: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spectrum_dbfs: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spectrum_spl: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    distortion: Option<[f64; 2]>,
+}
+
+impl LevelsFile {
+    fn parse(&self) -> Result<LevelPrefs, String> {
+        let d = LevelPrefs::default();
+        let range = |name: &str, v: Option<[f64; 2]>, default: Range| match v {
+            None => Ok(default),
+            Some([lo, hi]) if lo.is_finite() && hi.is_finite() && lo < hi => {
+                Ok(level::clamp(Range::new(lo, hi)))
+            }
+            Some(_) => Err(format!(
+                "ui.toml: levels.{name} must be [low, high] in dB, low below high"
+            )),
+        };
+        Ok(LevelPrefs {
+            transfer: range("transfer", self.transfer, d.transfer)?,
+            spectrum_dbfs: range("spectrum_dbfs", self.spectrum_dbfs, d.spectrum_dbfs)?,
+            spectrum_spl: range("spectrum_spl", self.spectrum_spl, d.spectrum_spl)?,
+            distortion: range("distortion", self.distortion, d.distortion)?,
+        })
+    }
+
+    /// Only the ranges moved off their defaults.
+    fn from_prefs(l: &LevelPrefs) -> Option<Self> {
+        let d = LevelPrefs::default();
+        let v = |r: Range, default: Range| (r != default).then_some([r.lo, r.hi]);
+        let f = Self {
+            transfer: v(l.transfer, d.transfer),
+            spectrum_dbfs: v(l.spectrum_dbfs, d.spectrum_dbfs),
+            spectrum_spl: v(l.spectrum_spl, d.spectrum_spl),
+            distortion: v(l.distortion, d.distortion),
+        };
+        (*l != d).then_some(f)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -514,6 +610,12 @@ impl UiPrefs {
             key_hints: f.key_hints.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
+            levels: f
+                .levels
+                .as_ref()
+                .map(LevelsFile::parse)
+                .transpose()?
+                .unwrap_or_default(),
             window,
         })
     }
@@ -525,6 +627,7 @@ impl UiPrefs {
             spl_hold_ms: self.spl_hold_ms,
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
+            levels: LevelsFile::from_prefs(&self.levels),
             window: self.window.map(|w| WindowFile {
                 width: w.width,
                 height: w.height,
@@ -760,6 +863,28 @@ mod tests {
         assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmics = [0]\n").is_err());
         assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmic_names = { a = \"M\" }\n").is_err());
         assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\ncolour = 1\n").is_err());
+        assert!(UiPrefs::from_toml("[levels]\ntransfer = [10.0, -10.0]\n").is_err());
+        assert!(UiPrefs::from_toml("[levels]\ntransfer = [-10.0]\n").is_err());
+        assert!(UiPrefs::from_toml("[levels]\nphase = [-10.0, 10.0]\n").is_err());
+    }
+
+    /// Level axes moved off their defaults are written, the rest left out; an
+    /// out-of-limits range is brought within the axis limits on reading.
+    #[test]
+    fn level_ranges_round_trip() {
+        let d = UiPrefs::default();
+        assert!(!d.to_toml().contains("levels"));
+        let mut p = UiPrefs::default();
+        p.levels.spectrum_dbfs = Range::new(-140.0, -40.0);
+        p.levels.transfer = Range::new(-24.5, 12.0);
+        let text = p.to_toml();
+        assert!(text.contains("[levels]"), "{text}");
+        assert!(text.contains("spectrum_dbfs = [-140.0, -40.0]"), "{text}");
+        assert!(!text.contains("spectrum_spl"), "{text}");
+        assert!(!text.contains("distortion ="), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+        let far = UiPrefs::from_toml("[levels]\ndistortion = [-900.0, -800.0]\n").expect("parse");
+        assert_eq!(far.levels.distortion, Range::new(-300.0, -200.0));
     }
 
     #[test]

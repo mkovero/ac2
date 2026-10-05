@@ -4865,6 +4865,40 @@ fn key_hints_follow_the_focused_pane() {
     assert_eq!(hint_texts(&u, PaneKind::Transfer), None);
 }
 
+/// Every pane's level axis is remembered in the preferences as it moves, and the next start
+/// comes back to it; Ctrl+Home's defaults are remembered as such (left out of the file).
+#[test]
+fn level_axes_are_remembered_for_the_next_start() {
+    let mut t = T::new();
+    let default = crate::prefs::LevelPrefs::default();
+    t.key("Alt+2");
+    t.st.prefs_dirty = false;
+    t.key("Ctrl+Down");
+    let spectrum = t.st.view.spectrum.level;
+    assert_ne!(spectrum, default.spectrum_dbfs);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.st.prefs.levels.spectrum_dbfs, spectrum);
+    t.key("Alt+1");
+    t.key("Ctrl+I");
+    let transfer = t.st.view.tf.magnitude_db;
+    assert_ne!(transfer, default.transfer);
+    assert_eq!(t.st.prefs.levels.transfer, transfer);
+    let text = t.st.prefs.to_toml();
+    assert!(text.contains("[levels]"), "{text}");
+
+    let mut u = T::new();
+    u.st.set_prefs(crate::prefs::UiPrefs::from_toml(&text).expect("parse"));
+    assert_eq!(u.st.view.spectrum.level, spectrum);
+    assert_eq!(u.st.view.tf.magnitude_db, transfer);
+    assert_eq!(u.st.view.spectrum.level_spl, default.spectrum_spl);
+    // Nothing changed by the start itself.
+    u.key("Alt+1");
+    assert_eq!(u.st.prefs.levels.transfer, transfer);
+    u.key("Ctrl+Home");
+    assert_eq!(u.st.prefs.levels.transfer, default.transfer);
+    assert!(!u.st.prefs.to_toml().contains("transfer = ["));
+}
+
 /// A remapped key shows its new chord on the line; the stage view has no line.
 #[test]
 fn key_hints_use_the_live_keymap_and_never_show_on_stage() {

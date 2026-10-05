@@ -195,7 +195,8 @@ split layout every pane is on screen and selecting a trace leaves the focus wher
 **The layout comes back.** The app remembers in `ui.toml` (written when the layout changes
 and on exit) which pane has the focus, whether it is maximised or full screen, the
 measurement each pane shows (by name), the SPL pane's view (meter, Leq windows or both), the Leq windows'
-style, the IR mode, the sweep pane's dB / % and the window's size and position. The next
+style, the IR mode, the sweep pane's dB / % and the window's size and position, and each
+pane's level axis range (see below). The next
 start comes back to them — full screen too — without arming or playing anything; a
 measurement that is gone (deleted, another daemon) quietly leaves its pane on its usual
 choice, and a window larger than the screen it opens on is made to fit. On Wayland the
@@ -208,7 +209,9 @@ The frequency axis is shared by the panes: **I** / **O** zoom it, **←** / **�
 pans.
 
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, the sweep pane's
-distortion) is its own and is kept while the app runs:
+distortion) is its own, and the app remembers it in `ui.toml` for the next start (a fit made
+for one show is a fair start for the next; **Ctrl+Home** forgets it). A spectrum that starts
+still fits its level axis on its first frame:
 
 - **Ctrl+I** / **Ctrl+O** zoom the focused pane's level axis in / out about its middle;
   **Ctrl+wheel** zooms it about the level under the pointer.
