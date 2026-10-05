@@ -669,7 +669,7 @@ pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
 
 fn main_stream(k: &MeasKind) -> Stream {
     match k {
-        MeasKind::Transfer { .. } => Stream::Tf,
+        MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. } => Stream::Tf,
         MeasKind::Spectrum { .. } => Stream::Spec,
         MeasKind::Rta { .. } => Stream::Rta,
         MeasKind::Spl { .. } => Stream::Spl,

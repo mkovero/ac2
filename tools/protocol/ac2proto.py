@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 18
+PROTO_VERSION = 19
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -136,8 +136,16 @@ _TIMING_STATUS = [
     ("internal_reference", None),
 ]
 _LEVELS = [("channels", None)]
+_MEMBER_STATUS = ("tagged", {
+    "included": [],
+    "stopped": [],
+    "settling": [],
+    "refused": [("protection", None)],
+})
 META = {
-    "tf": [("delay", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None)],
+    "tf": [("delay", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
+           ("average", ("opt", [("method", None),
+                                ("members", ("list", [("meas", None), ("status", _MEMBER_STATUS)]))]))],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None)],
     "spec": [("window", None), ("scale", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None)],

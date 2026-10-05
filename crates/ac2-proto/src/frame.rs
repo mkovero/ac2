@@ -15,8 +15,9 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
-    BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, PeakWeighting,
-    Smoothing, SmoothingFraction, TimeWeighting, TimingState, TimingStatus, Weighting, Window,
+    AverageMethod, BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale,
+    PeakWeighting, Smoothing, SmoothingFraction, TimeWeighting, TimingState, TimingStatus,
+    Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -86,6 +87,8 @@ bitmask!(
         INSUFFICIENT_RESOLUTION = 1 << 7;
         /// Band above Nyquist.
         ABOVE_NYQUIST = 1 << 8;
+        /// A spatial average with fewer usable members than it needs: no value.
+        FEW_MEMBERS = 1 << 9;
     }
 );
 
@@ -281,17 +284,81 @@ pub struct ArrayDesc {
 // Per-kind metadata
 
 /// TF metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TfMeta {
-    /// Delay applied to the reference.
+    /// Delay applied to the reference; for a spatial average, the delay its phase is
+    /// referred to.
     pub delay: Seconds,
     /// Display frozen.
     pub frozen: bool,
     /// Live smoothing applied.
     pub smoothing: Option<Smoothing>,
-    /// A mic curve was subtracted from `mag`.
+    /// A mic curve was subtracted from `mag` (for a spatial average: from every member
+    /// averaged).
     pub mic_curve: bool,
+    /// What a spatial average combined; `None` for a transfer measurement.
+    pub average: Option<TfAverage>,
+}
+
+/// What a spatial average's frame combined.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TfAverage {
+    /// Method.
+    pub method: AverageMethod,
+    /// Every configured member, in configuration order, with whether it was averaged.
+    pub members: Vec<AverageMemberState>,
+}
+
+impl TfAverage {
+    /// Members averaged into the frame.
+    pub fn included(&self) -> usize {
+        self.members
+            .iter()
+            .filter(|m| m.status == MemberStatus::Included)
+            .count()
+    }
+}
+
+/// One member of a spatial average in a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AverageMemberState {
+    /// The member measurement.
+    pub meas: MeasId,
+    /// Whether it was averaged, and why not.
+    pub status: MemberStatus,
+}
+
+/// Whether a member went into a spatial average's frame. A member is left out rather than
+/// let it mislead the average (PLAN principle 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MemberStatus {
+    /// Averaged.
+    Included,
+    /// Not running (or deleted).
+    Stopped,
+    /// Running without a usable result yet: no valid column, or not answering.
+    Settling,
+    /// Its own frame shows a fault banner (clip, no reference, check routing, no signal).
+    Refused {
+        /// The member's protection flags.
+        protection: ProtectionFlags,
+    },
+}
+
+impl MemberStatus {
+    /// Protection flags that leave a member out of an average: the ones that raise a fault
+    /// banner on its own frame. A weak reference or a recent discontinuity only hold or
+    /// restart the member's averaging, which its validity mask already reports per column.
+    pub const REFUSING: ProtectionFlags = ProtectionFlags(
+        ProtectionFlags::CLIP.0
+            | ProtectionFlags::NO_REFERENCE.0
+            | ProtectionFlags::CHECK_ROUTING.0
+            | ProtectionFlags::NO_SIGNAL.0,
+    );
 }
 
 /// IR metadata: point `i` is at `t0 + i · dt` relative to the inserted delay.
@@ -996,7 +1063,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                 desc(ArrayName::Validity, Unit::Bitmask),
                 Col::U(mask_slice(&f.validity)),
             ));
-            FrameMeta::Tf(f.meta)
+            FrameMeta::Tf(f.meta.clone())
         }
         FrameData::Ir(f) => {
             cols.push((

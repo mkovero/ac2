@@ -9,10 +9,11 @@ use crate::ctrl::{
 };
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
-    ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags,
-    LeqFrame, LeqMeta, LeqRun, LevelsFrame, LevelsMeta, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta,
-    TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    AverageMemberState, ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta,
+    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqRun, LevelsFrame, LevelsMeta, MemberStatus,
+    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
+    SpecFrame, SpecMeta, SplFrame, SplMeta, TfAverage, TfFrame, TfMeta, TimingMeta, TimingWindow,
+    ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -368,6 +369,32 @@ pub fn commands() -> Vec<Command> {
             pace: ReplayPace::Fast,
         },
     ]
+}
+
+/// A spatial average of three transfer measurements.
+pub fn average_measurement() -> Measurement {
+    Measurement {
+        id: MeasId(6),
+        config: MeasConfig {
+            name: "FOH average".into(),
+            kind: MeasKind::SpatialAverage {
+                config: SpatialAverageConfig {
+                    members: vec![MeasId(1), MeasId(2), MeasId(5)],
+                    method: AverageMethod::CoherenceWeighted,
+                    reference: AverageReference::Member { meas: MeasId(2) },
+                    smoothing: Some(Smoothing {
+                        fraction: SmoothingFraction::Third,
+                        mode: SmoothingMode::MagnitudePhase,
+                    }),
+                },
+            },
+        },
+        config_rev: Rev(62),
+        running: true,
+        frozen: false,
+        delay: None,
+        grid_id: Some(log_grid().id()),
+    }
 }
 
 fn measurement() -> Measurement {
@@ -1034,6 +1061,7 @@ pub fn events() -> Vec<Event> {
         ev(59, Change::Measurement(Patch::Set(spl_measurement()))),
         ev(60, Change::Recording(recording_run())),
         ev(61, Change::Session(replay_session())),
+        ev(62, Change::Measurement(Patch::Set(average_measurement()))),
     ]
 }
 
@@ -1243,8 +1271,9 @@ pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
     }
 }
 
-/// A 480-column TF frame. Columns 0..4 are thinned and 470.. out of band (NaN). Values
-/// are exactly representable so other languages can rebuild them bit for bit.
+/// A 480-column TF frame of a spatial average of four members, two of them averaged.
+/// Columns 0..4 are thinned and 470.. out of band (NaN). Values are exactly representable
+/// so other languages can rebuild them bit for bit.
 pub fn tf_frame() -> Frame {
     let n = 480;
     let valid = |i: usize| (4..470).contains(&i);
@@ -1261,6 +1290,29 @@ pub fn tf_frame() -> Frame {
                     mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
+                average: Some(TfAverage {
+                    method: AverageMethod::Power,
+                    members: vec![
+                        AverageMemberState {
+                            meas: MeasId(2),
+                            status: MemberStatus::Included,
+                        },
+                        AverageMemberState {
+                            meas: MeasId(3),
+                            status: MemberStatus::Included,
+                        },
+                        AverageMemberState {
+                            meas: MeasId(4),
+                            status: MemberStatus::Refused {
+                                protection: ProtectionFlags::NO_SIGNAL,
+                            },
+                        },
+                        AverageMemberState {
+                            meas: MeasId(5),
+                            status: MemberStatus::Stopped,
+                        },
+                    ],
+                }),
             },
             mag: (0..n).map(|i| val(i, -6.0 + i as f32 * 0.031_25)).collect(),
             phase: (0..n)

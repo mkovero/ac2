@@ -13,7 +13,7 @@ use crate::CliError;
 use crate::args::*;
 use crate::output::{self, Out};
 
-fn method(m: AverageArg) -> AverageMethod {
+pub(crate) fn method(m: AverageArg) -> AverageMethod {
     match m {
         AverageArg::Power => AverageMethod::Power,
         AverageArg::Complex => AverageMethod::Complex,

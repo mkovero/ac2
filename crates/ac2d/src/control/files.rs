@@ -6,12 +6,13 @@
 //! traces: a trace captured in another run must never look like it shares the live time
 //! base just because the epoch counters happen to match.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::event::{Change, Patch};
+use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
     DelayState, GenAction, MeasKind, Measurement, Session, SessionFile, SessionRef, SweepFailure,
-    TraceSource,
 };
 use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
@@ -19,7 +20,7 @@ use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
-use super::{Control, delay_samples, static_grid, validate_meas};
+use super::{Control, averages, delay_samples, static_grid, validate_meas};
 use crate::util::{perr, perr_detail, wall_ns};
 
 fn session_err(e: SessionError) -> ProtoError {
@@ -164,6 +165,9 @@ impl Control {
     ) -> Result<SessionEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state
         // as it was.
+        // The grid of each measurement that has one before a session runs; a spatial
+        // average's is its members' (checked against the loaded measurements).
+        let mut grids: HashMap<MeasId, GridDef> = HashMap::new();
         for sm in &data.measurements {
             validate_meas(&sm.config)?;
             if data.measurements.iter().filter(|o| o.id == sm.id).count() > 1 {
@@ -171,6 +175,20 @@ impl Control {
                     ErrorCode::Invalid,
                     format!("measurement {} appears twice in the session", sm.id),
                 ));
+            }
+            let grid = match &sm.config.kind {
+                MeasKind::SpatialAverage { config } => {
+                    Some(averages::members_grid(Some(sm.id), config, |id| {
+                        data.measurements
+                            .iter()
+                            .find(|o| o.id == id)
+                            .map(|o| (o.config.name.as_str(), &o.config.kind))
+                    })?)
+                }
+                k => static_grid(k),
+            };
+            if let Some(g) = grid {
+                grids.insert(sm.id, g);
             }
         }
         for t in &data.traces {
@@ -224,12 +242,7 @@ impl Control {
         let newest = data
             .traces
             .iter()
-            .filter_map(|t| match t.meta.source {
-                TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
-                    Some(epoch.0)
-                }
-                _ => None,
-            })
+            .filter_map(|t| t.meta.source.shared_epoch().map(|e| e.0))
             .max()
             .unwrap_or(0);
         let epoch = SessionEpoch(self.epoch().0.max(newest) + 1);
@@ -265,7 +278,7 @@ impl Control {
                     last_finding: None,
                 }
             });
-            let grid_id = static_grid(&sm.config.kind).map(|g| self.register_grid(g));
+            let grid_id = grids.remove(&sm.id).map(|g| self.register_grid(g));
             let mut meas = Measurement {
                 id: sm.id,
                 config: sm.config,

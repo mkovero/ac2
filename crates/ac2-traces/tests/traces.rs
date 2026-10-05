@@ -547,6 +547,54 @@ fn spectrum_and_rta_math_across_grids_is_refused() {
     }
 }
 
+/// Live spatial average path: columns already on one grid and time base, each with its own
+/// inserted delay. ±3 dB flat members average by power to 10·log10((10^0.3 + 10^−0.3)/2).
+#[test]
+fn time_base_average_of_plus_minus_three_db() {
+    use ac2_core::average::DelayReference as CoreRef;
+    let g = grid();
+    let f = frequencies(&g);
+    let flat = |db: f32| Columns {
+        mag_db: vec![db; f.len()],
+        phase_deg: Some(vec![0.0; f.len()]),
+        coherence: Some(vec![0.9; f.len()]),
+    };
+    let cols = [flat(3.0), flat(-3.0)];
+    let r = ac2_traces::ops::average_on_time_base(
+        &g,
+        &f,
+        &cols,
+        &[0.0, 0.0],
+        AverageMethod::Power,
+        CoreRef::Trace(0),
+    )
+    .unwrap();
+    let want = 10.0 * ((10f64.powf(0.3) + 10f64.powf(-0.3)) / 2.0).log10();
+    let i = col(&g, 1000.0);
+    assert!((f64::from(r.columns.mag_db[i]) - want).abs() < 1e-5);
+    assert!((r.columns.coherence.as_ref().unwrap()[i] - 0.9).abs() < 1e-6);
+
+    // A member measured with its own inserted delay τ (stored flat) is re-referred to the
+    // first member's zero delay: the complex mean is the comb |cos(π f τ)|, null at 1/(2τ).
+    let tau = 0.5e-3;
+    let flat0 = flat(0.0);
+    let r = ac2_traces::ops::average_on_time_base(
+        &g,
+        &f,
+        &[flat0.clone(), flat0],
+        &[0.0, tau],
+        AverageMethod::Complex,
+        CoreRef::Trace(0),
+    )
+    .unwrap();
+    for (k, hz) in f.iter().enumerate() {
+        let want = (std::f64::consts::PI * hz * tau).cos().abs();
+        let got = 10f64.powf(f64::from(r.columns.mag_db[k]) / 20.0);
+        assert!((got - want).abs() < 1e-4, "{hz} Hz: {got} vs {want}");
+    }
+    assert_eq!(r.delay, Seconds(0.0));
+}
+
 // ---- display smoothing -------------------------------------------------------------
 
 fn sixth() -> Smoothing {
@@ -832,8 +880,8 @@ fn session_refusals() {
     session::save(&dir, &session_sample()).unwrap();
     let m = dir.join(session::MANIFEST);
     let text = std::fs::read_to_string(&m).unwrap();
-    // A session of the previous format (files named by generation) is refused with its
-    // version named, never read best-effort.
+    // A session of the previous format is refused with its version named, never read
+    // best-effort.
     std::fs::write(&m, text.replace("\"version\": 9", "\"version\": 8")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(

@@ -19,7 +19,7 @@ use ac2_core::average as core;
 use ac2_proto::FrameData;
 use ac2_proto::GridDef;
 use ac2_proto::frame::ValidityMask;
-use ac2_proto::model::{AverageMethod, DelayReference, MathOp, TraceKind, TraceSource};
+use ac2_proto::model::{AverageMethod, DelayReference, MathOp, TraceKind};
 use ac2_proto::units::{Seconds, SessionEpoch, TraceId};
 use num_complex::Complex64;
 
@@ -164,10 +164,7 @@ pub fn capture_columns(data: &FrameData) -> Option<(TraceKind, Columns)> {
 
 /// The session epoch whose time base a trace's phase is in, if any.
 pub fn shared_epoch(t: &StoredTrace) -> Option<SessionEpoch> {
-    match t.meta.source {
-        TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => Some(epoch),
-        _ => None,
-    }
+    t.meta.source.shared_epoch()
 }
 
 fn all_shared(ts: &[&StoredTrace]) -> bool {
@@ -335,6 +332,26 @@ fn average_tf(
             core::DelayReference::Fixed(delay.0)
         }
     };
+    let delays: Vec<f64> = traces.iter().map(|t| t.meta.delay.0).collect();
+    average_on_time_base(grid, freqs, &cols, &delays, method, core_ref)
+}
+
+/// Averages transfer columns that share one grid and one time base (captures of one
+/// session epoch, or the live results of a spatial average's members): each `cols[k]` was
+/// measured with its own inserted delay `delays[k]` removed, and every phase is re-referred
+/// to `reference` before combining (`ac2_core::average`). Every column needs phase, and
+/// coherence for [`AverageMethod::CoherenceWeighted`]; the result's coherence is the plain
+/// mean of the inputs' (a display mask, not a coherence of the average).
+pub fn average_on_time_base(
+    grid: &GridDef,
+    freqs: &[f64],
+    cols: &[Columns],
+    delays: &[f64],
+    method: AverageMethod,
+    reference: core::DelayReference,
+) -> Result<Derived, OpError> {
+    let n = freqs.len();
+    let with_coherence = cols.iter().all(|c| c.coherence.is_some());
     let h: Vec<Vec<Complex64>> = cols
         .iter()
         .map(|c| {
@@ -363,14 +380,14 @@ fn average_tf(
                 .collect()
         })
         .collect();
-    let inputs: Vec<core::Trace<'_>> = traces
+    let inputs: Vec<core::Trace<'_>> = delays
         .iter()
         .enumerate()
-        .map(|(k, t)| core::Trace {
+        .map(|(k, d)| core::Trace {
             h: &h[k],
             coherence: &coh[k],
             valid: &valid[k],
-            delay_s: t.meta.delay.0,
+            delay_s: *d,
         })
         .collect();
     let core_method = match method {
@@ -378,7 +395,7 @@ fn average_tf(
         AverageMethod::Complex => core::AverageMethod::Complex,
         AverageMethod::CoherenceWeighted => core::AverageMethod::CoherenceWeighted,
     };
-    let a = core::average(freqs, &inputs, core_method, core_ref).map_err(|e| match e {
+    let a = core::average(freqs, &inputs, core_method, reference).map_err(|e| match e {
         core::AverageError::NonFiniteReference => OpError::BadReference,
         _ => OpError::NoOverlap,
     })?;

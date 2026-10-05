@@ -229,6 +229,43 @@
   }
  },
  {
+  "kind": "measurement",
+  "rev": 60,
+  "payload": {
+   "type": "set",
+   "value": {
+    "id": 6,
+    "config": {
+     "name": "FOH average",
+     "kind": {
+      "type": "spatial_average",
+      "config": {
+       "members": [
+        1,
+        2,
+        5
+       ],
+       "method": "coherence_weighted",
+       "reference": {
+        "type": "member",
+        "meas": 2
+       },
+       "smoothing": {
+        "fraction": "third",
+        "mode": "magnitude_phase"
+       }
+      }
+     }
+    },
+    "config_rev": 60,
+    "running": true,
+    "frozen": false,
+    "delay": null,
+    "grid_id": 8785464140711761104
+   }
+  }
+ },
+ {
   "kind": "spl_log",
   "rev": 52,
   "payload": {

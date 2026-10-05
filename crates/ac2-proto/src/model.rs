@@ -702,6 +702,76 @@ pub enum MeasKind {
         /// Configuration.
         config: SplConfig,
     },
+    /// Live spatial average of transfer measurements (publishes `tf` only;
+    /// `docs/design/spatial-average.md`).
+    SpatialAverage {
+        /// Configuration.
+        config: SpatialAverageConfig,
+    },
+}
+
+impl MeasKind {
+    /// Whether the measurement publishes a `tf` stream (a transfer function or a spatial
+    /// average of them), so it is drawn, captured and compared as a transfer function.
+    pub fn publishes_tf(&self) -> bool {
+        matches!(
+            self,
+            MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. }
+        )
+    }
+}
+
+/// Live spatial average of transfer measurements: the daemon combines the members' current
+/// results whenever it publishes, with the same mathematics as `trace.average`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpatialAverageConfig {
+    /// Member transfer measurements, in display order: at least
+    /// [`SpatialAverageConfig::MIN_MEMBERS`], at most [`SpatialAverageConfig::MAX_MEMBERS`],
+    /// distinct, all on one grid.
+    pub members: Vec<MeasId>,
+    /// How the members are combined.
+    pub method: AverageMethod,
+    /// Delay the averaged phase is referred to.
+    pub reference: AverageReference,
+    /// Live smoothing of the average, if any (members are averaged unsmoothed).
+    pub smoothing: Option<Smoothing>,
+}
+
+impl SpatialAverageConfig {
+    /// Fewest members of an average, and fewest usable members for it to show a value.
+    pub const MIN_MEMBERS: usize = 2;
+    /// Most members of an average.
+    pub const MAX_MEMBERS: usize = 16;
+
+    /// `members` averaged by power, phase referred to the first member's delay, unsmoothed.
+    pub fn power_of(members: Vec<MeasId>) -> Self {
+        let reference = AverageReference::Member {
+            meas: members.first().copied().unwrap_or(MeasId(0)),
+        };
+        Self {
+            members,
+            method: AverageMethod::Power,
+            reference,
+            smoothing: None,
+        }
+    }
+}
+
+/// Delay a live spatial average's phase is referred to.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AverageReference {
+    /// The inserted delay of one member (the delay its newest result was measured with).
+    Member {
+        /// That member.
+        meas: MeasId,
+    },
+    /// An explicit delay.
+    Fixed {
+        /// Delay.
+        delay: Seconds,
+    },
 }
 
 /// Arguments of `meas.create` / `meas.update`.
@@ -1583,6 +1653,23 @@ pub enum TraceSource {
         /// What the file held that the trace does not keep.
         notes: Vec<ImportNote>,
     },
+    /// Captured from a live spatial average (shared time reference within `epoch`, like a
+    /// capture).
+    SpatialAverage {
+        /// The average measurement.
+        meas: MeasId,
+        /// Its name at capture.
+        meas_name: String,
+        /// Epoch it was captured in.
+        epoch: SessionEpoch,
+        /// Capture sample index.
+        at_sample: SampleIndex,
+        /// Method.
+        method: AverageMethod,
+        /// The members averaged into the capture (members excluded at that moment are not
+        /// listed).
+        members: Vec<AverageMember>,
+    },
     /// Average of other traces.
     Average {
         /// Inputs.
@@ -1618,6 +1705,32 @@ pub enum TraceSource {
         /// Measurement input.
         measurement_input: u16,
     },
+}
+
+impl TraceSource {
+    /// The session epoch whose time base the trace's phase is in: captures (live, spatial
+    /// average or sweep) share their epoch's; every other source is independent
+    /// (decision 8a).
+    pub fn shared_epoch(&self) -> Option<SessionEpoch> {
+        match self {
+            TraceSource::Captured { epoch, .. }
+            | TraceSource::SpatialAverage { epoch, .. }
+            | TraceSource::IrCapture { epoch, .. } => Some(*epoch),
+            TraceSource::Imported { .. }
+            | TraceSource::Average { .. }
+            | TraceSource::Math { .. } => None,
+        }
+    }
+}
+
+/// A member of a captured spatial average.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AverageMember {
+    /// The member measurement.
+    pub meas: MeasId,
+    /// Its name at capture.
+    pub name: String,
 }
 
 /// Something an imported file held that the trace does not keep.

@@ -913,6 +913,23 @@ fn source_text(s: &TraceSource) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        TraceSource::SpatialAverage {
+            meas,
+            meas_name,
+            epoch,
+            at_sample,
+            method,
+            members,
+        } => format!(
+            "captured from spatial average {meas_name:?} (measurement {meas}), {method:?} of {}, session epoch {}, sample {}",
+            members
+                .iter()
+                .map(|m| format!("{:?}", m.name))
+                .collect::<Vec<_>>()
+                .join(", "),
+            epoch.0,
+            at_sample.0
+        ),
         TraceSource::Math { a, b, op } => format!("{op:?} of trace {a} and trace {b}"),
         TraceSource::IrCapture {
             run,
@@ -957,10 +974,7 @@ pub fn export_csv(t: &StoredTrace) -> String {
     line("source", source_text(&m.source));
     line(
         "time_base",
-        if matches!(
-            m.source,
-            TraceSource::Captured { .. } | TraceSource::IrCapture { .. }
-        ) {
+        if m.source.shared_epoch().is_some() {
             "shared within its session epoch".into()
         } else {
             "independent".into()

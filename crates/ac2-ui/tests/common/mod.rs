@@ -76,6 +76,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
                 mode: SmoothingMode::MagnitudePhase,
             }),
             mic_curve: false,
+            average: None,
         },
         mag,
         phase,

@@ -148,6 +148,25 @@ pub fn meas_kind(k: &MeasKind) -> String {
             weighting(config.weighting),
             time_weighting(config.time_weighting)
         ),
+        MeasKind::SpatialAverage { config } => format!(
+            "{} average of {}",
+            average_method(config.method),
+            config
+                .members
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// `power`, `complex`, `coherence-weighted`.
+pub fn average_method(m: ac2_proto::model::AverageMethod) -> &'static str {
+    match m {
+        ac2_proto::model::AverageMethod::Power => "power",
+        ac2_proto::model::AverageMethod::Complex => "complex",
+        ac2_proto::model::AverageMethod::CoherenceWeighted => "coherence-weighted",
     }
 }
 
@@ -340,12 +359,22 @@ fn source_text(s: &TraceSource) -> String {
             meas, meas_name, ..
         } => format!("captured from {meas_name} ({meas})"),
         TraceSource::Imported { file_name, .. } => format!("imported {file_name}"),
+        TraceSource::SpatialAverage {
+            meas_name,
+            method,
+            members,
+            ..
+        } => format!(
+            "{} average {meas_name} of {}",
+            average_method(*method),
+            members
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         TraceSource::Average { traces, method, .. } => {
-            let m = match method {
-                ac2_proto::model::AverageMethod::Power => "power",
-                ac2_proto::model::AverageMethod::Complex => "complex",
-                ac2_proto::model::AverageMethod::CoherenceWeighted => "coherence-weighted",
-            };
+            let m = average_method(*method);
             format!(
                 "{m} average of {}",
                 traces
@@ -401,9 +430,10 @@ pub fn traces(t_: &[TraceMeta]) -> String {
 }
 
 fn time_base(s: &TraceSource) -> &'static str {
-    match s {
-        TraceSource::Captured { .. } | TraceSource::IrCapture { .. } => "shared",
-        _ => "indep.",
+    if s.shared_epoch().is_some() {
+        "shared"
+    } else {
+        "indep."
     }
 }
 
@@ -466,6 +496,9 @@ pub fn trace_meta(t: &TraceMeta) -> String {
     };
     let epoch = match &t.source {
         TraceSource::Captured {
+            epoch, at_sample, ..
+        }
+        | TraceSource::SpatialAverage {
             epoch, at_sample, ..
         } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
         TraceSource::IrCapture { epoch, .. } => format!("\n  epoch       {}", epoch.0),

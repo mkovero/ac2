@@ -16,6 +16,7 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
         (TraceKind::Sweep, TraceSource::Imported { .. }) => "imported sweep",
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",
+        (_, TraceSource::SpatialAverage { .. }) => "spatial average",
         (
             _,
             TraceSource::Math {

@@ -27,6 +27,7 @@ use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
 use crate::outbox::Outbox;
 
+pub(crate) mod average;
 pub(crate) mod finder;
 pub(crate) mod meters;
 #[cfg(test)]
@@ -370,6 +371,14 @@ impl JobHandle {
         rx.recv_timeout(CAPTURE_WAIT).ok().flatten()
     }
 
+    /// A handle another job can ask for this job's current result with.
+    pub(crate) fn probe(&self) -> Option<Probe> {
+        Some(Probe {
+            tx: self.tx.clone(),
+            thread: self.thread.as_ref()?.thread().clone(),
+        })
+    }
+
     fn stop_inner(&mut self) {
         let _ = self.tx.send(JobMsg::Stop);
         self.wake();
@@ -382,6 +391,52 @@ impl JobHandle {
 impl Drop for JobHandle {
     fn drop(&mut self) {
         self.stop_inner();
+    }
+}
+
+/// Asks a running job for its current result, as `trace.capture` does, from another thread
+/// (a spatial average asking its members). A probe of a stopped job answers nothing.
+#[derive(Clone, Debug)]
+pub(crate) struct Probe {
+    tx: Sender<JobMsg>,
+    thread: std::thread::Thread,
+}
+
+impl Probe {
+    /// Sends the request; the answer arrives on the returned channel (nothing if the job
+    /// has stopped).
+    pub(crate) fn request(&self) -> Option<Receiver<Option<Frame>>> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.tx.send(JobMsg::Capture(tx)).ok()?;
+        self.thread.unpark();
+        Some(rx)
+    }
+}
+
+/// The probes of running transfer jobs by measurement, kept by control as jobs start and
+/// stop, read by spatial averages when they publish.
+#[derive(Debug, Default)]
+pub(crate) struct Probes(Mutex<HashMap<MeasId, Probe>>);
+
+impl Probes {
+    pub(crate) fn set(&self, meas: MeasId, p: Option<Probe>) {
+        let mut m = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        match p {
+            Some(p) => {
+                m.insert(meas, p);
+            }
+            None => {
+                m.remove(&meas);
+            }
+        }
+    }
+
+    pub(crate) fn get(&self, meas: MeasId) -> Option<Probe> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&meas)
+            .cloned()
     }
 }
 

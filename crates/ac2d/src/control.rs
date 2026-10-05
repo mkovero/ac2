@@ -46,7 +46,9 @@ use crate::config::{DedupLimits, ReplayLimits};
 use crate::conv;
 use crate::dedup::Dedup;
 use crate::io::Interest;
-use crate::jobs::{self, Analysis, JobCmd, JobEnv, JobHandle, Seqs, SmoothingChange, block_index};
+use crate::jobs::{
+    self, Analysis, JobCmd, JobEnv, JobHandle, Probes, Seqs, SmoothingChange, block_index,
+};
 use crate::outbox::Outbox;
 use crate::preview::Preview;
 use crate::session::{self, Runtime};
@@ -56,6 +58,7 @@ use crate::sweep::Recording;
 use crate::util::{hex, perr, perr_detail, random_u64, random_u128, wall_ns};
 
 mod autosave;
+mod averages;
 mod cal;
 mod files;
 mod leq;
@@ -218,6 +221,8 @@ pub(crate) struct Control {
     dedup: Dedup,
     session: Option<Runtime>,
     jobs: BTreeMap<MeasId, JobHandle>,
+    /// How spatial averages reach their running members.
+    probes: Arc<Probes>,
     timing_job: Option<JobHandle>,
     /// Capture-only meters of a device before a session opens on it.
     preview: Option<Preview>,
@@ -387,6 +392,7 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
                 .check()
                 .map_err(|m| perr(ErrorCode::Invalid, m))?;
         }
+        MeasKind::SpatialAverage { config } => averages::validate(config)?,
     }
     Ok(())
 }
@@ -423,6 +429,14 @@ fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<SmoothingChange> {
             } == *b =>
         {
             Some(SmoothingChange::Spectrum(b.smoothing))
+        }
+        (MeasKind::SpatialAverage { config: a }, MeasKind::SpatialAverage { config: b })
+            if ac2_proto::model::SpatialAverageConfig {
+                smoothing: b.smoothing,
+                ..a.clone()
+            } == *b =>
+        {
+            Some(SmoothingChange::Transfer(b.smoothing))
         }
         _ => None,
     }
@@ -475,6 +489,7 @@ impl Control {
             dedup,
             session: None,
             jobs: BTreeMap::new(),
+            probes: Arc::new(Probes::default()),
             timing_job: None,
             preview: None,
             detecting: None,
@@ -875,9 +890,10 @@ impl Control {
 
             Command::MeasCreate { config } => {
                 validate_meas(&config)?;
+                let grid = self.grid_of(None, &config.kind)?;
                 let id = MeasId(self.next_meas);
                 self.next_meas += 1;
-                let grid_id = static_grid(&config.kind).map(|g| self.register_grid(g));
+                let grid_id = grid.map(|g| self.register_grid(g));
                 let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
                     applied: Seconds(0.0),
                     applied_samples: 0.0,
@@ -901,6 +917,8 @@ impl Control {
             Command::MeasUpdate { meas, config } => {
                 validate_meas(&config)?;
                 let mut m = self.meas(meas)?.clone();
+                self.check_member_update(meas, &config.kind)?;
+                let grid = self.grid_of(Some(meas), &config.kind)?;
                 let old_leq = match &m.config.kind {
                     MeasKind::Spl { config } => Some(config.leq.clone()),
                     _ => None,
@@ -947,7 +965,7 @@ impl Control {
                         last_finding: None,
                     });
                 }
-                m.grid_id = static_grid(&m.config.kind).map(|g| self.register_grid(g));
+                m.grid_id = grid.map(|g| self.register_grid(g));
                 // The log and the entity follow the new configuration before the job
                 // starts, so a restarted meter reports against its new windows; the
                 // measurement's own commit comes after, under the rev it names.
@@ -964,6 +982,7 @@ impl Control {
             }
             Command::MeasDelete { meas } => {
                 self.meas(meas)?;
+                self.check_member_delete(meas)?;
                 self.stop_job(meas);
                 self.s
                     .outbox
@@ -1000,7 +1019,13 @@ impl Control {
                 Ok(ReplyBody::Measurement(m))
             }
             Command::MeasReset { meas } => {
-                self.meas(meas)?;
+                if let MeasKind::SpatialAverage { .. } = self.meas(meas)?.config.kind {
+                    // Its members hold the averages; resetting one is the operator's choice.
+                    return Err(perr(
+                        ErrorCode::Invalid,
+                        "a spatial average holds no averages of its own; reset its members",
+                    ));
+                }
                 if let Some(j) = self.jobs.get(&meas) {
                     j.send(JobCmd::Reset);
                 }
@@ -1599,6 +1624,8 @@ impl Control {
                 MeasKind::Rta { config } => config.input,
                 MeasKind::Spl { config } => config.input,
                 MeasKind::Transfer { config } => config.measurement_input,
+                // Its members' mic curves are in their results already.
+                MeasKind::SpatialAverage { .. } => continue,
             };
             job.send(JobCmd::Cal(Box::new(self.input_cal(rt, input))));
         }
@@ -1698,7 +1725,21 @@ impl Control {
                         .map_err(inv)?;
                 (Box::new(a), None)
             }
+            MeasKind::SpatialAverage { config } => {
+                let g = averages::members_grid(Some(m.id), config, |id| self.lookup(id))?;
+                let a = jobs::average::Average::new(
+                    m.id,
+                    config.clone(),
+                    g.clone(),
+                    rt.epoch,
+                    Arc::clone(&self.probes),
+                    m.frozen,
+                    m.config_rev,
+                );
+                (Box::new(a), Some(g))
+            }
         };
+        let is_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
         let fid = self.next_fanout_id;
         self.next_fanout_id += 1;
         let (handle, tx) = jobs::spawn(
@@ -1709,6 +1750,8 @@ impl Control {
         )
         .map_err(|e| perr(ErrorCode::Internal, format!("cannot start job: {e}")))?;
         rt.fanout.attach(fid, tx);
+        self.probes
+            .set(m.id, handle.probe().filter(|_| is_transfer));
         if let Some(old) = self.jobs.insert(m.id, handle)
             && let Some(rt) = &self.session
         {
@@ -1734,6 +1777,7 @@ impl Control {
                 self.answer(&p.routing_id, &p.client, p.id, Err(e), Instant::now());
             }
         }
+        self.probes.set(id, None);
         if let Some(h) = self.jobs.remove(&id) {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);

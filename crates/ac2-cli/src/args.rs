@@ -375,6 +375,8 @@ pub enum MeasKindArg {
     Rta,
     /// SPL meter.
     Spl,
+    /// Live spatial average of transfer measurements (`--of`).
+    Avg,
 }
 
 /// Frequency weighting.
@@ -543,6 +545,18 @@ pub struct MeasNew {
     /// Time weighting (spl).
     #[arg(long, value_enum, default_value = "fast")]
     pub time: TimeWeightArg,
+    /// avg: member transfer measurements by id or name, e.g. `--of "Seat 1,Seat 2,Seat 3"`.
+    #[arg(long, value_delimiter = ',', value_name = "MEAS,…")]
+    pub of: Vec<MeasRef>,
+    /// avg: power (RMS magnitude), complex, or coherence (inverse-variance weighted).
+    #[arg(long, value_enum)]
+    pub method: Option<AverageArg>,
+    /// avg phase reference: this member's inserted delay (default: the first member).
+    #[arg(long, value_name = "MEAS", conflicts_with = "ref_delay")]
+    pub phase_ref: Option<MeasRef>,
+    /// avg phase reference: an explicit delay, e.g. `12.5ms`.
+    #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
+    pub ref_delay: Option<Time>,
     /// Start right away.
     #[arg(long)]
     pub start: bool,

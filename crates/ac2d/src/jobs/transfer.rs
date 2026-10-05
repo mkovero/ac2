@@ -413,6 +413,7 @@ impl Transfer {
                 frozen: self.frozen,
                 smoothing: self.cfg.smoothing,
                 mic_curve: self.corr.is_some(),
+                average: None,
             },
             mag,
             phase,

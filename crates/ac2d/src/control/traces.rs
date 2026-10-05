@@ -8,10 +8,11 @@ use std::collections::BTreeMap;
 
 use ac2_core::mic_curve::Correction;
 use ac2_proto::event::{Change, Patch};
+use ac2_proto::frame::{Frame, MemberStatus, TfFrame};
 use ac2_proto::model::{
-    AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathOp,
-    MeasKind, MicCurveId, MicState, Smoothing, SmoothingMode, SweepData, TraceEdit, TraceKind,
-    TraceMeta, TraceMicCurve, TraceSource,
+    AverageMember, AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole,
+    MathOp, MeasKind, Measurement, MicCurveId, MicState, Smoothing, SmoothingMode,
+    SpatialAverageConfig, SweepData, TraceEdit, TraceKind, TraceMeta, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -229,6 +230,11 @@ impl Control {
             .grid_id
             .and_then(|g| self.grids.get(&g).cloned())
             .ok_or_else(|| perr(ErrorCode::Internal, "the frame's grid is not registered"))?;
+        if let (FrameData::Tf(f), MeasKind::SpatialAverage { config }) =
+            (&frame.data, &m.config.kind)
+        {
+            return self.capture_average(&m, config.method, f, &frame, grid, columns, name, slot);
+        }
         let (delay, smoothing, depth, input): (Seconds, Option<Smoothing>, _, u16) =
             match (&frame.data, &m.config.kind) {
                 (FrameData::Tf(f), MeasKind::Transfer { config }) => (
@@ -284,6 +290,71 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} captured from measurement {meas}");
+        Ok(self.add_trace(t, grid, columns, None))
+    }
+
+    /// `trace.capture` of a spatial average: the trace names the members averaged into it
+    /// and the method; members left out at that moment are not named. A ratio of several
+    /// inputs, it is uncalibrated and names no single mic.
+    #[allow(clippy::too_many_arguments)]
+    fn capture_average(
+        &mut self,
+        m: &Measurement,
+        method: AverageMethod,
+        f: &TfFrame,
+        frame: &Frame,
+        grid: GridDef,
+        columns: Columns,
+        name: String,
+        slot: Option<u8>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let included: Vec<AverageMember> = f
+            .meta
+            .average
+            .iter()
+            .flat_map(|a| &a.members)
+            .filter(|s| s.status == MemberStatus::Included)
+            .map(|s| AverageMember {
+                meas: s.meas,
+                name: self
+                    .lookup(s.meas)
+                    .map_or_else(|| format!("measurement {}", s.meas), |(n, _)| n.to_owned()),
+            })
+            .collect();
+        if included.len() < SpatialAverageConfig::MIN_MEMBERS {
+            return Err(perr(
+                ErrorCode::Refused,
+                format!(
+                    "{}: fewer than {} members have a usable result; nothing to capture",
+                    m.config.name,
+                    SpatialAverageConfig::MIN_MEMBERS
+                ),
+            ));
+        }
+        let id = self.traces.alloc();
+        let mut edit = meta::new_edit(id, name, slot);
+        edit.smoothing = f.meta.smoothing;
+        let t = TraceMeta {
+            id,
+            edit,
+            kind: TraceKind::Transfer,
+            source: TraceSource::SpatialAverage {
+                meas: m.id,
+                meas_name: m.config.name.clone(),
+                epoch: frame.stamp.session_epoch,
+                at_sample: frame.stamp.audio_sample,
+                method,
+                members: included,
+            },
+            grid_id: grid.id(),
+            delay: f.meta.delay,
+            depth: None,
+            cal: CalState::Uncalibrated,
+            mic: None,
+            mic_curve: None,
+            created_at: WallNs(wall_ns()),
+        };
+        tracing::info!("trace {id} captured from spatial average {}", m.id);
         Ok(self.add_trace(t, grid, columns, None))
     }
 

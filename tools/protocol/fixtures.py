@@ -109,6 +109,15 @@ def tf_frame():
             "frozen": False,
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
+            "average": {
+                "method": "power",
+                "members": [
+                    {"meas": 2, "status": {"type": "included"}},
+                    {"meas": 3, "status": {"type": "included"}},
+                    {"meas": 4, "status": {"type": "refused", "protection": 2}},
+                    {"meas": 5, "status": {"type": "stopped"}},
+                ],
+            },
         },
         [
             (arr("mag", "db"), [val(i, -6.0 + i * 0.03125) for i in range(n)]),
@@ -461,6 +470,28 @@ def measurement():
     }
 
 
+AVERAGE_MEASUREMENT = {
+    "id": 6,
+    "config": {
+        "name": "FOH average",
+        "kind": {
+            "type": "spatial_average",
+            "config": {
+                "members": [1, 2, 5],
+                "method": "coherence_weighted",
+                "reference": {"type": "member", "meas": 2},
+                "smoothing": {"fraction": "third", "mode": "magnitude_phase"},
+            },
+        },
+    },
+    "config_rev": 62,
+    "running": True,
+    "frozen": False,
+    "delay": None,
+    "grid_id": p.grid_id(LOG_GRID),
+}
+
+
 SWEEP = {"start": 20.0, "end": 20000.0, "duration": 5.0, "fade_in": 0.01, "fade_out": 0.01}
 
 
@@ -634,6 +665,11 @@ def events():
             "kind": "measurement",
             "rev": 59,
             "payload": {"type": "set", "value": SPL_MEASUREMENT},
+        },
+        {
+            "kind": "measurement",
+            "rev": 62,
+            "payload": {"type": "set", "value": AVERAGE_MEASUREMENT},
         },
         {"kind": "spl_log", "rev": 52, "payload": {"type": "set", "value": SPL_LOG}},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},
