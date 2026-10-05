@@ -207,3 +207,38 @@ CSV, not against ac2's own summary:
   apart from device-to-device drift.
 - After 26 h: ac2d RSS 167 MB, of which 105 MB JACK shared memory and 54 MB its own (one
   sample, not a trend); the data directory (autosave, log, traces) 9.1 MB in all.
+
+## Wiring and FF400 reset recovery (2026-10-05)
+
+Measured with a −60 dBFS 1 kHz sine from ac2 on one output at a time, all eight captures read by
+an independent JACK client (`~/ac2-test/probe_levels.py`, venv `venv-meas`); crosstalk elsewhere
+below −118 dBFS:
+
+| out | goes to | reads | gain |
+|---|---|---|---|
+| 1 | Genelec 1083 | — (never probed) | |
+| 2 | in 2 (loopback reference) | −57.6 dBFS | +2.4 dB |
+| 3 | Xone:62 ch 1 (RCA L) → Xone mono out → in 5 | −74.8 dBFS | −14.8 dB (Xone gain/fader) |
+| 4 | in 6 | −66.0 dBFS | −6.0 dB |
+| 5 | in 7 | −66.1 dBFS | −6.1 dB |
+| 6 | in 8 | −66.1 dBFS | −6.1 dB |
+
+In 1 is the MM1 (phantom, mic gain 20); ins 3–4 are empty. Session:
+`session open --backend jack --in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
+
+**An FF400 reset (front-panel or bus) takes three steps to recover**, as on 2026-10-05:
+1. The FireWire layer re-creates the device, but jackd keeps the old card open: `snd_card_free`
+   blocks in the kernel (`hung task … fw_device_shutdown`), jackd stops answering (`jack_lsp`
+   times out) and ac2 gets no audio and no error — the app shows STALE. Stop jackd
+   (`pkill -TERM -x jackd`; it exited cleanly), wait for the bus to settle, start it again with
+   the same command line (`/usr/bin/jackd -R -P 80 -S -n default -t 2000 -d alsa -d
+   hw:Fireface400 -r 96000 -p 256 -n 3`), then `session open` as above. ac2d noticed the server
+   going away, closed the session and tried one reopen, which failed while JACK was down.
+2. The control service (`snd-fireface-ctl`, user unit) dies with the reset:
+   `systemctl --user restart snd-fireface-ctl`.
+3. The device is back at driver defaults (phantom off, gains 0: the mic read a dead −102 dBFS
+   and failed a clap test; no output reached any input) while ALSA readback still shows the old
+   values. Restore with the toggle writes in `~/src/ac/docs/rigs/pupu.md` ("Restore with toggle
+   writes"; not `ff400.sh`, which forces phantom off) and verify by emission: the table above,
+   mic room noise ≈ −67 dBFS RMS.
+
