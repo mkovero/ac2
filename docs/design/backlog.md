@@ -3,6 +3,31 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to "Done" with
 the commit when it lands.
 
+## Performance and platforms (2026-10-05, after the laptop / Pi performance pass)
+
+Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SPL (PLAN
+decision 4). Measured numbers: PLAN §9.0.
+
+- **macOS not verified with an audio interface**: a tester has the dev.9 disk image and
+  `testing/macos/README.md` (two cables, four tests, a report table). Results pending.
+- **App Nap**: the macOS hand-off timer is no longer coalesced (kqueue `NOTE_CRITICAL`,
+  9dc4274), but a hidden app on battery may still be App Napped, throttling a daemon the app
+  hosts. Would need an activity assertion from the UI while a session is open.
+- **The UI still redraws the whole window per data frame**: under a software renderer, 4
+  live measurements cost ≈ 1.7 cores, SPL only ≈ 1.3 (egui has no damage regions). Not yet
+  measured on a real laptop iGPU (PLAN §8.3 frame-time target).
+- **Software adapter**: see *Windows* below (reduced frame rate when wgpu reports a CPU
+  adapter).
+- **No flow control to slow clients**: a Wi-Fi client can lag up to the 48-frame send queue;
+  client-paced credit is designed in `docs/design/flow-control.md`, not implemented (wire
+  change).
+- **Delay finder full searches run on the transfer job's thread**: every 2 s while tracking,
+  about 33 ms on a desktop core, likely 150–250 ms on a Pi; `detect_period` is ~60 % of it.
+- **A weighting could reuse the C filter** (A = C + one more section): two biquads per
+  sample saved on the SPL path.
+- **Pi 4 untested**: NEON speed of the RTA's 4-band groups and the f32 mic-curve FIR, the
+  V3D device limits, SD-card writes; needs a Pi rig (then an HW gate in PLAN).
+
 ## Leq windows and limits (left after the first version, `docs/design/leq.md`)
 
 - **Peak limits not judged**: DIN 15905-5 also limits LCpeak (135 dB), V-NISSG LAFmax
@@ -15,8 +40,6 @@ the commit when it lands.
 - **The app has no acoustic calibration flow**: an electrical calibration (DMM in-line or an
   injected generator, `q7-calibration.md` §11; 2a5d881) is in the app (**E** in the
   Calibrations view); a calibrator dialog (`cal.spl`) is still CLI only.
-- **Autosave rewrites the whole session once a minute while a meter logs** (trace files
-  included); appending to the log file would cut that to the new rows.
 
 ## Electrical calibration (left after the first version, `q7-calibration.md` §11)
 
@@ -44,6 +67,12 @@ the commit when it lands.
   say so once ("software rendering: reduced frame rate"); measure frame time before and after.
 
 ## Flaky tests
+
+- **ac2-cli `cmd::ir::tests::ir_capture_on_the_simulated_rig` on macOS CI**: H3 −48.9 dB
+  (want −50 ± 1) once on the first attempt of 9dc4274's branch run; passed on rerun and 6/6
+  locally.
+- **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
+  at load ~30 (no loopback, so the timing job is not involved); passed 4/4 alone.
 
 - **ac2d `traces::capture_average_math_export_import`, unaligned capture at 301.6 Hz:
   −6.37 dB (want −6.02 ± 0.3)**, once, in a full `cargo test --workspace` at load ~40 after
@@ -77,6 +106,27 @@ the commit when it lands.
   list highlights it; a thicker line or a marker in the legend would show it in the plot.
 
 ## Done
+
+Laptop / Pi performance pass (2026-10-04/05; a0d015d … 9dc4274, PLAN §9.0 has the numbers):
+- **Autosave rewrote the whole SPL log every minute** (≈15 MB/min at 48 h retention) → the
+  log is appended to its own file, traces written only when changed (c8406c7); resuming on
+  Windows fixed (ed189b2).
+- **Spectrum frames carried all 32769 bins** → display-sized log columns, positional
+  headers, PROTO 14 (b5a3622 … d392ef1).
+- **Idle wakeups and work for nobody** → batched hand-off, meters computed once, jobs emit
+  only new and wanted results, per-topic UI subscriptions, repaint only on visible change,
+  low-power GPU request; SPL / RTA / delay-tracking DSP cheaper; timing monitor idles
+  without a stimulus (b97a2c9).
+- **macOS publish rates at 8–15 Hz** (coalesced timers) → uncoalesced hand-off timer and
+  fixed-grid cadence pacing (9dc4274). CI green on Linux, macOS and Windows again
+  (c5484e3, ed189b2, 9dc4274) after being red since at least 2026-10-03.
+
+Leq view for acting live (field, 2026-10-04/05: "the individual slot db values dont mean much
+and those competing on actual SPL number … is bit difficult"; b251aaf … c009b6b):
+- the state and "stay ≤ … dB" lead each window, large; the window's value is small, held
+  still low in its bar, coloured against what is behind it; the run line centred over the
+  meter (own row when the calibration text leaves no centred room); values one size in
+  every window, no-limit windows included.
 
 SPL meter and the stage view (field, 2026-10-03/04; 1f7337a, f2593e7, 0921351, 63f9bd1,
 ff82db7, c98d8b4, a8c8cf9, 5a157e4):

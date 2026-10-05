@@ -32,6 +32,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `spikes/*` | phase 0 throwaway spikes (`audio-duplex`, `gpu-headless`; the ZMQ spike became `ac2-zmq`); findings in `docs/design/spike-*.md` |
+| `testing/` | per-platform tester guides (`testing/macos/README.md`); release binaries placed beside them are git-ignored |
 | `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments` |
 
 ## Rules
@@ -43,6 +44,8 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 - Put a new dependency in the crate's own `Cargo.toml`; don't edit `[workspace.dependencies]`
   in parallel branches.
 - Audio callback: no allocation, locks or syscalls.
+- CI must stay green on all three OS: after pushing, check the run (`gh run list --branch main`);
+  local runs are Linux only, so macOS/Windows breakage shows only there.
 - Any change to what goes on the wire bumps `PROTO_VERSION` (pre-1.0: no compatibility);
   `fixtures/protocol/WIRE_LOCK` and its test enforce it.
 

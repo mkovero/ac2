@@ -566,7 +566,10 @@ mDNS; `docs/rigs/pupu.md`); Windows only as an MSI install in a VM with the simu
 (`docs/design/backlog.md`); macOS: the universal disk image installs and starts on a
 tester's Mac (microphone prompt shown), not yet measured with an audio interface. No
 GitHub release is published: installers are workflow artifacts of `release.yml` runs,
-unsigned. Protocol version 14, session format 8.
+unsigned. Protocol version 14, session format 8. CI (Linux, macOS, Windows) green again
+since 9dc4274 (2026-10-05). The current macOS tester build (dev.9, 9dc4274) and its test
+guide are in `testing/macos/` (binaries git-ignored); open items in
+`docs/design/backlog.md` → *Performance and platforms*.
 
 Performance pass for the real targets (2026-10-04, `docs/design/flow-control.md` for what
 is left): idle wakeups cut (≈1340 → 250/s with a session open), work only for subscribed
