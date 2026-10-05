@@ -18,6 +18,7 @@ use crate::grid::nearest_column;
 use crate::primitives::{
     Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
+use crate::tf::LegendEntry;
 use crate::theme::Theme;
 use crate::time::Freshness;
 use crate::trace::TraceKey;
@@ -198,7 +199,7 @@ pub struct SpectrumTrace<'a> {
     pub caption: String,
     pub freshness: Option<Freshness>,
     /// Display offset, dB, added to the level and the peak hold: traces spread apart to
-    /// compare their shapes. The plot names every offset trace ([`offset_note`]), so a
+    /// compare their shapes. The legend and the cursor name every offset trace, so a
     /// spread is never read as a level difference.
     pub offset_db: f64,
 }
@@ -416,9 +417,13 @@ pub struct SpectrumScene {
     pub unit_help: Option<String>,
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
-    /// One line per trace drawn with a display offset ([`offset_note`]), top left of the
-    /// plot in the trace's colour.
-    pub offsets: Vec<String>,
+    /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
+    /// `STALE 3.2 s`, `offset +3.0 dB`). Drawn in rows above the plot, never over a curve.
+    pub legend: Vec<LegendEntry>,
+    /// The legend as drawn: entry texts, shortened to fit (`+2 more` when entries do not).
+    pub legend_shown: Vec<String>,
+    /// The band the legend takes above the plot; zero height without one.
+    pub legend_rect: Rect,
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
@@ -446,8 +451,127 @@ fn unit_forms(traces: &[SpectrumTrace<'_>]) -> (Vec<String>, Option<String>) {
     (level_unit_forms(first.scale, first.quantity, bin), help)
 }
 
-/// Line pitch of the offset notes.
-const NOTE_ROW: f32 = 15.0;
+/// Legend row pitch.
+const LEGEND_ROW: f32 = 16.0;
+/// Colour swatch of a legend entry and the gap after it.
+const SWATCH_W: f32 = 12.0;
+const SWATCH_GAP: f32 = 6.0;
+/// Gap between two entries on a row.
+const ENTRY_GAP: f32 = 16.0;
+/// Most of the pane height the legend may take: the curves are what the pane is for.
+const LEGEND_SHARE: f32 = 0.25;
+const LEGEND_MAX_ROWS: usize = 4;
+
+/// Legend line of one curve: its name and what sets it apart — `stopped`, `STALE 3.2 s`,
+/// `offset +3.0 dB` (a spread is never read as a level difference).
+fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
+    let mut tags = Vec::new();
+    if t.offset_db != 0.0 {
+        tags.push(format!("offset {}", format::db_readout(t.offset_db)));
+    }
+    let stale = t.is_stale();
+    match t.freshness {
+        Some(f) if stale => tags.push(format!("STALE {}", format::age(f.age_s()))),
+        Some(f) if f.is_stopped() => tags.push("stopped".to_string()),
+        _ => {}
+    }
+    let mut text = t.name.clone();
+    for tag in &tags {
+        text.push_str(" · ");
+        text.push_str(tag);
+    }
+    LegendEntry {
+        key: t.key,
+        name: t.name.clone(),
+        tags,
+        text,
+        stale,
+    }
+}
+
+/// Width an entry takes on a row: swatch, gap, text.
+fn entry_width(text: &str, font: f32) -> f32 {
+    SWATCH_W + SWATCH_GAP + text_width(text, font)
+}
+
+/// `text` cut to `width` with an ellipsis (no font metrics: [`text_width`]'s generous
+/// advance per character).
+fn cut_to(text: &str, width: f32, font: f32) -> String {
+    if text_width(text, font) <= width {
+        return text.to_string();
+    }
+    let n = (width / text_width("x", font)).floor() as usize;
+    let mut s: String = text.chars().take(n.saturating_sub(1)).collect();
+    s.push('…');
+    s
+}
+
+/// Flows `texts` into rows `width` wide; each item's row and x offset. An item wider than
+/// a row is cut to fit it.
+fn flow(texts: &[String], width: f32, font: f32) -> Vec<(usize, f32, String)> {
+    let mut out = Vec::with_capacity(texts.len());
+    let (mut row, mut x) = (0usize, 0.0f32);
+    for t in texts {
+        let t = cut_to(t, width - SWATCH_W - SWATCH_GAP, font);
+        let w = entry_width(&t, font);
+        if x > 0.0 && x + w > width {
+            row += 1;
+            x = 0.0;
+        }
+        out.push((row, x, t));
+        x += w + ENTRY_GAP;
+    }
+    out
+}
+
+/// The legend laid out in at most `max_rows` rows `width` wide: every entry in full when
+/// that fits, else names only, else the names that fit and `+N more` closing the last row.
+/// Items are (entry index or `None` for the `+N more` note, row, x, text).
+fn legend_layout(
+    entries: &[LegendEntry],
+    width: f32,
+    max_rows: usize,
+    font: f32,
+) -> Vec<(Option<usize>, usize, f32, String)> {
+    if entries.is_empty() || max_rows == 0 {
+        return Vec::new();
+    }
+    let rows = |f: &[(usize, f32, String)]| f.last().map_or(0, |l| l.0 + 1);
+    let indexed = |f: Vec<(usize, f32, String)>| {
+        f.into_iter()
+            .enumerate()
+            .map(|(i, (r, x, t))| (Some(i), r, x, t))
+            .collect()
+    };
+    let full: Vec<String> = entries.iter().map(|e| e.text.clone()).collect();
+    let f = flow(&full, width, font);
+    if rows(&f) <= max_rows {
+        return indexed(f);
+    }
+    let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+    let f = flow(&names, width, font);
+    if rows(&f) <= max_rows {
+        return indexed(f);
+    }
+    let mut kept: Vec<(usize, f32, String)> = f
+        .into_iter()
+        .take_while(|(r, _, _)| *r < max_rows)
+        .collect();
+    // Room on the last row for the note of what is left out.
+    loop {
+        let more = format!("+{} more", entries.len() - kept.len());
+        let end = kept
+            .last()
+            .map_or(0.0, |(_, x, t)| x + entry_width(t, font) + ENTRY_GAP);
+        let last_row = kept.last().map_or(0, |k| k.0);
+        if kept.is_empty() || end + text_width(&more, font) <= width {
+            let mut out: Vec<_> = indexed(kept);
+            out.push((None, last_row, end, more));
+            return out;
+        }
+        kept.pop();
+    }
+}
 
 pub fn spectrum_scene(
     traces: &[SpectrumTrace<'_>],
@@ -472,11 +596,57 @@ pub(crate) fn spectrum_scene_in(
     let mut c = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
-    let plot = canvas::plot_area(size, strip.rect.bottom(), right);
+    let font = theme.small_font_size;
+    // The legend takes rows of its own between the banner strip and the plot, so it never
+    // covers a curve; a short pane gives it fewer rows.
+    let legend: Vec<LegendEntry> = traces.iter().map(legend_entry).collect();
+    let free = size.height - strip.rect.bottom() - MARGINS.top - MARGINS.bottom;
+    let max_rows =
+        ((free * LEGEND_SHARE / LEGEND_ROW).floor().max(0.0) as usize).min(LEGEND_MAX_ROWS);
+    let placed = legend_layout(&legend, plot_w, max_rows, font);
+    let legend_rows = placed.iter().map(|p| p.1 + 1).max().unwrap_or(0);
+    let legend_rect = Rect::new(
+        MARGINS.left,
+        strip.rect.bottom() + if legend_rows > 0 { 4.0 } else { 0.0 },
+        plot_w,
+        legend_rows as f32 * LEGEND_ROW,
+    );
+    let plot = canvas::plot_area(
+        size,
+        legend_rect.bottom() - if legend_rows > 0 { 4.0 } else { 0.0 },
+        right,
+    );
+    let mut legend_shown = Vec::with_capacity(placed.len());
+    for (i, row, x, text) in placed {
+        let y = legend_rect.y + (row as f32 + 0.5) * LEGEND_ROW;
+        let x = legend_rect.x + x;
+        let (tx, color) = match i.and_then(|i| traces.get(i).zip(legend.get(i))) {
+            Some((t, e)) => {
+                let a = if e.stale { theme.stale_alpha } else { 1.0 };
+                c.overlay.rects.push(FillRect {
+                    rect: Rect::new(x, y - 1.5, SWATCH_W, 3.0),
+                    color: t.color.with_alpha(a),
+                    clip: None,
+                });
+                (
+                    x + SWATCH_W + SWATCH_GAP,
+                    if e.stale { theme.text_dim } else { theme.text },
+                )
+            }
+            None => (x, theme.text_dim),
+        };
+        c.overlay.labels.push(label(
+            text.clone(),
+            [tx, y],
+            anchor(HAlign::Left, VAlign::Center),
+            font,
+            color,
+        ));
+        legend_shown.push(text);
+    }
     let caption = traces.first().map_or(String::new(), |t| t.caption.clone());
     // The unit shares the plot's top line with the caption (right): it takes its longest
     // form that leaves the caption room.
-    let font = theme.small_font_size;
     let room = plot.w
         - 12.0
         - if caption.is_empty() {
@@ -502,18 +672,6 @@ pub(crate) fn spectrum_scene_in(
         theme.text_dim,
     ));
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
-    let mut offsets = Vec::new();
-    for t in traces.iter().filter(|t| t.offset_db != 0.0) {
-        let text = offset_note(&t.name, t.offset_db);
-        c.base.labels.push(label(
-            text.clone(),
-            [plot.x + 6.0, plot.y + 4.0 + NOTE_ROW * offsets.len() as f32],
-            anchor(HAlign::Left, VAlign::Top),
-            theme.small_font_size,
-            t.color,
-        ));
-        offsets.push(text);
-    }
 
     for t in traces {
         let dim = if t.is_stale() { theme.stale_alpha } else { 1.0 };
@@ -677,7 +835,9 @@ pub(crate) fn spectrum_scene_in(
         unit_help,
         caption,
         cursor,
-        offsets,
+        legend,
+        legend_shown,
+        legend_rect,
         strip: strip.rect,
         banners: strip.rows,
     }
@@ -1035,7 +1195,8 @@ mod tests {
             ..ViewState::default()
         };
         let s = spectrum_scene(&[a, b], &Status::default(), &view, &Theme::dark(), SIZE);
-        assert_eq!(s.offsets, ["Main L S1 · offset +3.0 dB"]);
+        let texts: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+        assert_eq!(texts, ["RTA", "Main L S1 · offset +3.0 dB"]);
         let ym = s.y_axis.mapping;
         let lines = &s.scene.layers[1].polylines;
         let y_of = |l: &Polyline| l.points.iter().find(|p| p[1].is_finite()).map(|p| p[1]);
@@ -1249,13 +1410,117 @@ mod tests {
         };
         let calm = build(&Status::default());
         assert_eq!(calm.strip.h, 0.0);
-        assert_eq!(calm.plot.y, MARGINS.top);
+        // The legend row sits between the strip and the plot.
+        assert_eq!(calm.legend_rect.y, 4.0);
+        assert_eq!(calm.plot.y, calm.legend_rect.bottom() - 4.0 + MARGINS.top);
         let s = build(&crate::banner::tests::everything());
         assert_eq!(s.banners.len(), crate::banner::MAX_BANNERS);
-        assert_eq!(s.plot.y, s.strip.bottom() + MARGINS.top);
+        assert_eq!(s.legend_rect.y, s.strip.bottom() + 4.0);
+        assert_eq!(s.plot.y, s.legend_rect.bottom() - 4.0 + MARGINS.top);
         assert_eq!(s.plot.bottom(), calm.plot.bottom());
         assert!(s.cursor.is_some());
-        crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot]);
+        crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot, s.legend_rect]);
+    }
+
+    /// Several live spectra and captures are told apart by a legend above the plot: name,
+    /// colour and tags in full while they fit, names alone when not, then the names that fit
+    /// and `+N more`. It never reaches into the plot or past the pane.
+    #[test]
+    fn legend_names_every_curve_and_fits_small_panes() {
+        let g = third_octaves();
+        let (f, e) = (column_frequencies(&g), column_edges(&g));
+        let level = vec![-40.0f32; f.len()];
+        let names = ["Main L", "Main R", "Sub array", "Front fill", "Delay tower"];
+        let mut traces: Vec<SpectrumTrace<'_>> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+                t.key = TraceKey::Live(MeasId(i as u32 + 1));
+                t.name = (*n).to_string();
+                t.color = Color::rgb(0.1 * i as f32, 0.5, 0.5);
+                t
+            })
+            .collect();
+        traces[1].freshness = Some(Freshness::Stopped { age_s: 3.0 });
+        traces[2].offset_db = -6.0;
+        let build = |w: f32, h: f32| {
+            spectrum_scene(
+                &traces,
+                &Status::default(),
+                &ViewState::default(),
+                &Theme::dark(),
+                Viewport {
+                    width: w,
+                    height: h,
+                },
+            )
+        };
+        let texts = |s: &SpectrumScene| s.legend_shown.clone();
+        let wide = build(1200.0, 500.0);
+        assert_eq!(
+            texts(&wide),
+            [
+                "Main L",
+                "Main R · stopped",
+                "Sub array · offset \u{2212}6.0 dB",
+                "Front fill",
+                "Delay tower"
+            ]
+        );
+        assert_eq!(wide.legend.len(), 5);
+        assert_eq!(wide.legend[1].tags, ["stopped"]);
+        assert_eq!(wide.legend_rect.h, LEGEND_ROW);
+        // Narrow: rows wrap, then the tags go, then `+N more`.
+        let narrow = build(420.0, 500.0);
+        assert!(
+            narrow.legend_rect.h > LEGEND_ROW,
+            "{:?}",
+            narrow.legend_rect
+        );
+        let short = build(300.0, 120.0);
+        assert_eq!(texts(&short).first().map(String::as_str), Some("Main L"));
+        assert!(
+            texts(&short).last().is_some_and(|t| t.ends_with(" more")),
+            "{:?}",
+            texts(&short)
+        );
+        assert!(!texts(&short).iter().any(|t| t.contains('·')));
+        let tiny = build(160.0, 120.0);
+        assert!(tiny.legend_rect.h <= LEGEND_ROW);
+        for (w, h) in [
+            (1200.0, 500.0),
+            (420.0, 500.0),
+            (300.0, 200.0),
+            (220.0, 160.0),
+            (160.0, 120.0),
+        ] {
+            let s = build(w, h);
+            let boxes: Vec<Rect> = s
+                .scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.labels)
+                .filter(|l| s.legend_shown.contains(&l.text))
+                .map(crate::canvas::tests::label_box)
+                .collect();
+            assert_eq!(boxes.len(), s.legend_shown.len(), "{w}x{h}");
+            for b in &boxes {
+                assert!(
+                    !crate::canvas::tests::intersects(*b, s.plot),
+                    "{w}x{h}: {b:?} in the plot"
+                );
+                assert!(b.right() <= w + 0.5, "{w}x{h}: {b:?} past the pane");
+            }
+            for (i, a) in boxes.iter().enumerate() {
+                for b in &boxes[i + 1..] {
+                    assert!(
+                        !crate::canvas::tests::intersects(*a, *b),
+                        "{w}x{h}: {a:?} {b:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

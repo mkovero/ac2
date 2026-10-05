@@ -145,7 +145,7 @@ fn offset_steps_change_the_pane_measurement_without_a_trace() {
 }
 
 /// The offset is written next to the curve, so a spread trace is never read as a level
-/// difference: the transfer legend's tag, the spectrum's note.
+/// difference: the transfer legend's tag, the spectrum legend's.
 #[test]
 fn offsets_are_named_where_the_curves_are_drawn() {
     let mut t = T::new();
@@ -165,7 +165,8 @@ fn offsets_are_named_where_the_curves_are_drawn() {
     let d = s.traces.iter().find(|d| d.name == "t13").expect("trace");
     assert!(d.magnitude_db.iter().all(|m| *m == -7.0), "the curve moves");
     let s = crate::scenes::spectrum(&t.st, &theme, SIZE, now());
-    assert_eq!(s.offsets, ["t16 · offset −6.0 dB"]);
+    let texts: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(texts, ["t16 · offset −6.0 dB"]);
 }
 
 fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {

@@ -241,6 +241,11 @@ sound reads 1.8 dB above what that spacing alone would give (the window's noise 
 is 1.5 bins). Curves on different FFT lengths share `per bin, mixed widths`; a narrow pane
 shortens the unit (`dBFS per 1.46 Hz bin`, `dBFS/bin`, `dBFS`).
 
+**The spectrum legend** names every curve the pane draws — live spectra and RTAs, then
+shown captures — with its colour and what sets it apart: `stopped`, `STALE 3.2 s`, a display
+offset (`offset +3.0 dB`). It sits in rows of its own above the plot, so it never covers a
+curve; a narrow pane drops the tags first, then names what fits and `+2 more`.
+
 A live **narrowband spectrum** is drawn from display columns, not from every FFT bin: each
 bin is its own column while bins are wider than 1/96 octave (up to about 100 Hz at the
 default 65 536 points and 48 kHz), above that a column spans 1/96 octave and shows the
@@ -394,7 +399,7 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   stored trace's offset is part of its record (shown in `ac2 trace list`, kept in sessions
   and exports); a live measurement's is this app's display only. The toast names the curve
   and its new offset, and the plot says it next to the curve — the transfer legend row
-  (`Main L S2 · Δt 0.00 ms · +3.0 dB`), a note in the spectrum pane's corner (`Main L S2 ·
+  (`Main L S2 · Δt 0.00 ms · +3.0 dB`), its row in the spectrum legend (`Main L S2 ·
   offset +3.0 dB`), the spectrum cursor values — so a spread is never read as a level
   difference. A locked trace keeps its offset.
 - **F2** (or **Rename the selected trace…** in the palette) renames the selected stored
