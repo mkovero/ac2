@@ -144,6 +144,8 @@ useful.
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence) | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
 | Test 4: 1 h run clean? CPU %, memory and battery at start and end | |
+| Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
+| ac2 CPU % in Activity Monitor with a session open and nothing playing | |
 | Any banner, freeze, crash or odd behaviour | |
 
 Attach `~/ac2-test.log` and screenshots of anything that looked wrong.
