@@ -425,7 +425,12 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **C** turns on the comparison cursor, synchronised across panes and traces; **Shift+←/→**
   moves it.
 - **M** averages the shown stored traces (power; complex and coherence-weighted averages are
-  in the command palette); A − B is a dB difference, A / B a complex division.
+  in the command palette); A − B is a dB difference, A / B a complex division. A is the
+  selected trace and B the next shown trace after it in the list (slotted or not, wrapping
+  round, hidden ones skipped) that it combines with — transfer, sweep and target curves with
+  each other, a spectrum or RTA capture only with its own kind — so an unslotted trace needs
+  no slot first; with no trace selected they take the two lowest shown slots (the lower is
+  A). The new trace is named after both (`S1 − S2`, `Main L − S3`).
 - **Z** loads a target curve; the command palette imports CSV and other analyzers' text
   exports. `ac2 trace export <name> --csv out.csv` exports.
 - From the command line: `ac2 trace display <trace> on|off` shows or hides a trace, `ac2
@@ -1140,8 +1145,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Delay finder: observation length (s)… | `finder_observation` |
 | Average shown stored traces (complex) | `average_complex` |
 | Average shown stored traces (coherence-weighted) | `average_coherence` |
-| A − B: dB difference of the two lowest shown slots | `math_difference` |
-| A / B: complex division of the two lowest shown slots | `math_divide` |
+| A − B: the selected trace minus the next shown one (dB) | `math_difference` |
+| A / B: the selected trace divided by the next shown one (complex) | `math_divide` |
 | Smoothing: off | `smooth_off` |
 | Smoothing: 1/48 oct | `smooth_48` |
 | Smoothing: 1/24 oct | `smooth_24` |

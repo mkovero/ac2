@@ -1521,8 +1521,9 @@ fn a_minus_b_from_the_palette() {
         stored(4, Some(2), 2),
         stored(5, Some(7), 2),
     ]));
+    // Nothing selected: the two lowest shown slots.
     t.key("Ctrl+K");
-    t.text("A − B dB difference");
+    t.text("A − B the selected");
     let r = t.key("Enter");
     assert!(
         matches!(
@@ -1540,7 +1541,7 @@ fn a_minus_b_from_the_palette() {
         "{r:?}"
     );
     t.key("Ctrl+K");
-    t.text("complex division");
+    t.text("A / B divided");
     let r = t.key("Enter");
     assert!(matches!(
         r.as_slice(),
@@ -1552,6 +1553,60 @@ fn a_minus_b_from_the_palette() {
             ..
         }]
     ));
+}
+
+/// With a trace selected, A − B is it minus the next shown trace of its kind in the list's
+/// order (slotted or not, wrapping round, hidden ones skipped); spectra pair with spectra.
+#[test]
+fn a_minus_b_takes_the_selected_trace_and_the_next_shown_one() {
+    let math = |r: &[Request]| match r {
+        [
+            Request::Call {
+                cmd: Command::TraceMath { a, b, name, .. },
+                ..
+            },
+        ] => Some((a.0, b.0, name.clone())),
+        _ => None,
+    };
+    let mut t = T::new();
+    let spec = |id: u32| TraceMeta {
+        kind: TraceKind::Spectrum {
+            scale: LevelScale::Dbfs,
+        },
+        ..stored(id, None, 2)
+    };
+    let mut hidden = stored(6, None, 2);
+    hidden.edit.visible = false;
+    // List order: slot 2 (t4), then unslotted oldest first: t5, t6 (hidden), t7, spectra.
+    t.conn(with_traces(vec![
+        stored(4, Some(2), 2),
+        stored(5, None, 2),
+        hidden,
+        stored(7, None, 2),
+        spec(8),
+        spec(9),
+    ]));
+    let run = |t: &mut T| {
+        t.st.update(Msg::Command(CommandId::MathDifference), &t.keys)
+    };
+    // An unslotted trace needs no slot: t5 − t7 (t6 is hidden).
+    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    assert_eq!(math(&run(&mut t)), Some((5, 7, "t5 − t7".into())));
+    // The last one wraps round to the first: t7 − slot 2.
+    t.st.update(Msg::SelectTrace(TraceId(7)), &t.keys);
+    assert_eq!(math(&run(&mut t)), Some((7, 4, "t7 − S2".into())));
+    // A spectrum pairs with the next spectrum, past the transfer traces.
+    t.st.update(Msg::SelectTrace(TraceId(9)), &t.keys);
+    assert_eq!(math(&run(&mut t)), Some((9, 8, "t9 − t8".into())));
+    // A divided by B follows the same pair.
+    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    let r = t.st.update(Msg::Command(CommandId::MathDivide), &t.keys);
+    assert_eq!(math(&r), Some((4, 5, "S2 / t5".into())));
+    // Alone of its kind: it says what B would be.
+    t.conn(with_traces(vec![stored(4, Some(2), 2), spec(8)]));
+    t.st.update(Msg::SelectTrace(TraceId(8)), &t.keys);
+    assert!(run(&mut t).is_empty());
+    assert!(t.last_toast().contains("t8 is A"), "{}", t.last_toast());
 }
 
 #[test]

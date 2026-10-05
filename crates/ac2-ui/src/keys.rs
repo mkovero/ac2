@@ -475,8 +475,8 @@ commands! {
     Average => "average", "Average shown stored traces (power)", [Transfer];
     AverageComplex => "average_complex", "Average shown stored traces (complex)", [Transfer];
     AverageCoherence => "average_coherence", "Average shown stored traces (coherence-weighted)", [Transfer];
-    MathDifference => "math_difference", "A − B: dB difference of the two lowest shown slots", [Transfer];
-    MathDivide => "math_divide", "A / B: complex division of the two lowest shown slots", [Transfer];
+    MathDifference => "math_difference", "A − B: the selected trace minus the next shown one (dB)", [Transfer, Spectrum];
+    MathDivide => "math_divide", "A / B: the selected trace divided by the next shown one (complex)", [Transfer];
     PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
     SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected trace or pane's measurement)", [Transfer, Spectrum];
     SmoothFiner => "smooth_finer", "Smoothing finer (selected trace or pane's measurement)", [Transfer, Spectrum];

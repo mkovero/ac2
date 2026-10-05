@@ -5059,21 +5059,59 @@ impl AppState {
         );
     }
 
-    /// A − B (or A / B) of the two lowest shown slots.
+    /// A − B (or A / B): the selected stored trace and the next shown one after it in the
+    /// list's order (slotted or not, wrapping round) that it can be combined with; with no
+    /// trace selected, the two lowest shown slots on the transfer pane.
     fn math(&mut self, op: MathOp, out: &mut Vec<Request>) {
-        let slotted: Vec<&TraceMeta> = self
-            .shown_transfer_traces()
-            .into_iter()
-            .filter(|t| t.edit.slot.is_some())
-            .collect();
-        let [a, b, ..] = slotted.as_slice() else {
-            self.error("A − B: show two slotted traces (1…9); the lower slot is A");
-            return;
+        let pair = match self.selected_trace_meta() {
+            Some(a) => {
+                let list = self.trace_list();
+                let at = list.iter().position(|t| t.id == a.id).unwrap_or(0);
+                let b = list[at + 1..]
+                    .iter()
+                    .chain(&list[..at])
+                    .find(|t| t.edit.visible && t.id != a.id && combinable(a.kind, t.kind));
+                match b {
+                    Some(b) => Ok((a, *b)),
+                    None => Err(format!(
+                        "A − B: {} is A; show another trace of its kind to be B (the next \
+                         shown one in the list)",
+                        trace_label(a)
+                    )),
+                }
+            }
+            None => {
+                let slotted: Vec<&TraceMeta> = self
+                    .shown_transfer_traces()
+                    .into_iter()
+                    .filter(|t| t.edit.slot.is_some())
+                    .collect();
+                match slotted.as_slice() {
+                    [a, b, ..] => Ok((*a, *b)),
+                    _ => Err(
+                        "A − B: select a trace (A, minus the next shown one), or show \
+                              two slotted traces (the lower slot is A)"
+                            .to_string(),
+                    ),
+                }
+            }
         };
-        let (sa, sb) = (a.edit.slot.unwrap_or(0), b.edit.slot.unwrap_or(0));
+        let (a, b) = match pair {
+            Ok(p) => p,
+            Err(e) => {
+                self.error(e);
+                return;
+            }
+        };
+        let label = |t: &TraceMeta| {
+            t.edit
+                .slot
+                .map_or_else(|| t.edit.name.clone(), |s| format!("S{s}"))
+        };
+        let (la, lb) = (label(a), label(b));
         let name = match op {
-            MathOp::MagnitudeDifference => format!("S{sa} − S{sb}"),
-            MathOp::ComplexDivision => format!("S{sa} / S{sb}"),
+            MathOp::MagnitudeDifference => format!("{la} − {lb}"),
+            MathOp::ComplexDivision => format!("{la} / {lb}"),
         };
         let cmd = Command::TraceMath {
             a: a.id,
@@ -5184,6 +5222,18 @@ impl AppState {
             }
         }
     }
+}
+
+/// Whether traces of kinds `a` and `b` combine in A − B: transfer-like curves and targets
+/// with each other (they are relative), a spectrum or RTA only with its own kind and scale.
+fn combinable(a: TraceKind, b: TraceKind) -> bool {
+    let relative = |k: TraceKind| {
+        matches!(
+            k,
+            TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target
+        )
+    };
+    (relative(a) && relative(b)) || a == b
 }
 
 /// The stream a spectrum / RTA measurement's curve comes on; `None` for other kinds.

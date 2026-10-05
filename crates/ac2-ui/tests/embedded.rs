@@ -2279,9 +2279,10 @@ fn retype(d: &mut Driver, text: &str) {
 }
 
 /// The selected stored trace exported from the palette: to a folder (under its own name),
-/// then to a typed file in the folder the prompt then starts in.
+/// then to a typed file in the folder the prompt then starts in; then A − B of an unslotted
+/// selected trace and the next shown one.
 #[test]
-fn the_selected_trace_exports_from_the_palette() -> R {
+fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
@@ -2354,6 +2355,37 @@ fn the_selected_trace_exports_from_the_palette() -> R {
         s.toasts
             .iter()
             .any(|t| t.error && t.text.contains("cannot write") && t.text.contains("gone"))
+    })?;
+
+    // A − B of an unslotted trace: it, minus the next shown one (slot 1), without a slot.
+    d.key("Ctrl+2");
+    d.until("slot 2", |s| s.slots()[1].is_some())?;
+    let b = d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?;
+    d.send(Msg::SelectTrace(b));
+    d.key("Ctrl+K");
+    d.send(Msg::Text("move the selected trace to slot".into()));
+    d.key("Enter");
+    retype(&mut d, "none");
+    d.key("Enter");
+    d.until("slot 2 freed", |s| {
+        s.daemon()
+            .is_some_and(|x| x.traces.iter().any(|t| t.id == b && t.edit.slot.is_none()))
+    })?;
+    let b_name =
+        d.st.selected_trace_meta()
+            .map(|t| t.edit.name.clone())
+            .ok_or("b")?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("A − B the selected".into()));
+    d.key("Enter");
+    let want = format!("{b_name} − S1");
+    d.until("the difference trace", |s| {
+        s.daemon().is_some_and(|x| {
+            x.traces.iter().any(|t| {
+                t.edit.name == want
+                    && matches!(t.source, ac2_proto::model::TraceSource::Math { a: x, b: y, .. } if x == b && y == a)
+            })
+        })
     })?;
     drop(d);
     drop(daemon);
