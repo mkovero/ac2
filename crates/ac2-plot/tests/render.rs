@@ -5,8 +5,9 @@
 mod common;
 
 use ac2_plot::{
-    Anchor, Band, BandPoint, Color, Colormap, ColumnUpload, FrameTarget, HAlign, Heatmap,
-    HeatmapId, Label, Layer, Polyline, PrepareError, Rect, Stroke, VAlign, offscreen::Offscreen,
+    Anchor, Band, BandPoint, Color, Colormap, FrameTarget, HAlign, Heatmap, HeatmapAxes,
+    HeatmapColumn, HeatmapId, Label, Layer, Polyline, PrepareError, Rect, Stroke, VAlign,
+    offscreen::Offscreen,
 };
 use ac2_testkit::image::Image;
 use common::{gpu, ink, render, render_on, renderer, scene};
@@ -211,31 +212,48 @@ fn hairline_ink_scales_with_width() {
     }
 }
 
-fn heatmap_scene(scroll: u32, uploads: Vec<ColumnUpload>) -> ac2_plot::Scene {
+fn heatmap_with(
+    rect: Rect,
+    columns: u32,
+    rows: u32,
+    axes: HeatmapAxes,
+    scroll: u32,
+    data: Vec<Option<HeatmapColumn>>,
+) -> Heatmap {
+    Heatmap {
+        id: HeatmapId(1),
+        rect,
+        clip: None,
+        columns,
+        rows,
+        axes,
+        scroll,
+        range: [0.0, 31.0],
+        colormap: Colormap::Viridis,
+        opacity: 1.0,
+        data,
+    }
+}
+
+fn heatmap_scene(scroll: u32, data: Vec<Option<HeatmapColumn>>) -> ac2_plot::Scene {
     one_layer(40.0, 24.0, |l| {
-        l.heatmaps.push(Heatmap {
-            id: HeatmapId(1),
-            rect: Rect::new(4.0, 4.0, 32.0, 16.0),
-            clip: None,
-            columns: 8,
-            rows: 4,
+        l.heatmaps.push(heatmap_with(
+            Rect::new(4.0, 4.0, 32.0, 16.0),
+            8,
+            4,
+            HeatmapAxes::TimeAcross,
             scroll,
-            range: [0.0, 31.0],
-            colormap: Colormap::Viridis,
-            opacity: 1.0,
-            uploads,
-        });
+            data,
+        ));
     })
 }
 
-fn ring_values(order: impl Iterator<Item = u32>) -> Vec<f32> {
-    order
-        .flat_map(|c| (0..4).map(move |row| (c * 4 + row) as f32))
-        .collect()
+/// Logical column `c` of the test ring: rows `c * 4 + row`.
+fn column(c: u32) -> HeatmapColumn {
+    (0..4).map(|row| (c * 4 + row) as f32).collect()
 }
 
-/// Scrolling by k over a ring equals drawing the rotated ring unscrolled, and a wrapping
-/// upload lands in the right columns.
+/// Scrolling by k over a ring equals drawing the rotated ring unscrolled.
 #[test]
 fn heatmap_scroll_is_a_rotation() {
     let Some(gpu) = gpu("heatmap_scroll_is_a_rotation") else {
@@ -243,35 +261,62 @@ fn heatmap_scroll_is_a_rotation() {
     };
     let mut a = renderer(gpu);
     let mut b = renderer(gpu);
-    let scrolled = heatmap_scene(
-        3,
-        vec![
-            ColumnUpload {
-                first: 0,
-                values: ring_values(0..6),
-            },
-            // A second upload in the same frame.
-            ColumnUpload {
-                first: 6,
-                values: ring_values(6..8),
-            },
-        ],
-    );
-    let rotated = heatmap_scene(
-        0,
-        vec![ColumnUpload {
-            first: 5,
-            // Ring column (5 + i) % 8 holds logical column (3 + i) % 8.
-            values: ring_values((0..8).map(|i| (3 + i) % 8)),
-        }],
-    );
+    let cols: Vec<HeatmapColumn> = (0..8).map(column).collect();
+    let scrolled = heatmap_scene(3, cols.iter().cloned().map(Some).collect());
+    // Ring column i holds logical column (3 + i) % 8.
+    let rotated = heatmap_scene(0, (0..8).map(|i| Some(cols[(3 + i) % 8].clone())).collect());
     let ia = render(gpu, &mut a, &scrolled, 1.0);
     let ib = render(gpu, &mut b, &rotated, 1.0);
-    // The wrapping upload put logical column 3 at ring 5; scrolling by 5 shows it first.
-    let rotated = heatmap_scene(5, vec![]);
-    let ib2 = render(gpu, &mut b, &rotated, 1.0);
-    assert_ne!(ia, ib, "scroll offset has no effect");
-    assert_eq!(ia, ib2, "scrolled ring differs from rotated ring");
+    let unscrolled = heatmap_scene(0, cols.iter().cloned().map(Some).collect());
+    let ia0 = render(gpu, &mut a, &unscrolled, 1.0);
+    assert_ne!(ia, ia0, "scroll offset has no effect");
+    assert_eq!(ia, ib, "scrolled ring differs from rotated ring");
+}
+
+/// A column is uploaded when the scene holds another one at its ring position: replacing a
+/// column (or emptying it) shows at once, and a ring updated column by column draws as a
+/// fresh renderer given the same columns does.
+#[test]
+fn heatmap_columns_follow_identity() {
+    let Some(gpu) = gpu("heatmap_columns_follow_identity") else {
+        return;
+    };
+    let mut r = renderer(gpu);
+    let cols: Vec<HeatmapColumn> = (0..8).map(column).collect();
+    let all = |cols: &[HeatmapColumn]| cols.iter().cloned().map(Some).collect::<Vec<_>>();
+    render_on(
+        gpu,
+        &mut r,
+        &heatmap_scene(0, all(&cols)),
+        1.0,
+        Color::BLACK,
+    );
+    let mut changed = cols.clone();
+    changed[2] = column(7);
+    let mut emptied = all(&changed);
+    emptied[5] = None;
+    let img = render_on(
+        gpu,
+        &mut r,
+        &heatmap_scene(0, emptied.clone()),
+        1.0,
+        Color::BLACK,
+    );
+    let fresh = render_on(
+        gpu,
+        &mut renderer(gpu),
+        &heatmap_scene(0, emptied),
+        1.0,
+        Color::BLACK,
+    );
+    assert_eq!(
+        img, fresh,
+        "a ring updated column by column differs from a fresh one"
+    );
+    // Ring column 5 (x 24..28) is empty now: background.
+    assert_eq!(img.pixel(25, 12), [0, 0, 0, 255]);
+    // Ring column 2 (x 12..16) shows column 7's top row, as ring column 7 does.
+    assert_eq!(img.pixel(13, 5), img.pixel(33, 5));
 }
 
 #[test]
@@ -280,15 +325,11 @@ fn heatmap_nan_is_transparent_and_rings_are_released() {
         return;
     };
     let mut r = renderer(gpu);
-    let mut values = ring_values(0..8);
-    values[0] = f32::NAN; // ring column 0, row 0: bottom-left cell (4x4 px).
-    let img = render_on(
-        gpu,
-        &mut r,
-        &heatmap_scene(0, vec![ColumnUpload { first: 0, values }]),
-        1.0,
-        Color::BLACK,
-    );
+    let mut data: Vec<Option<HeatmapColumn>> = (0..8).map(|c| Some(column(c))).collect();
+    let mut first: Vec<f32> = column(0).to_vec();
+    first[0] = f32::NAN; // ring column 0, row 0: bottom-left cell (4x4 px).
+    data[0] = Some(first.into());
+    let img = render_on(gpu, &mut r, &heatmap_scene(0, data), 1.0, Color::BLACK);
     assert_eq!(
         img.pixel(5, 18),
         [0, 0, 0, 255],
@@ -297,12 +338,92 @@ fn heatmap_nan_is_transparent_and_rings_are_released() {
     assert_ne!(img.pixel(9, 18), [0, 0, 0, 255]);
     // A scene without the heatmap releases it; it comes back empty.
     render(gpu, &mut r, &one_layer(40.0, 24.0, |_| {}), 1.0);
-    let img = render_on(gpu, &mut r, &heatmap_scene(0, vec![]), 1.0, Color::BLACK);
+    let img = render_on(
+        gpu,
+        &mut r,
+        &heatmap_scene(0, vec![None; 8]),
+        1.0,
+        Color::BLACK,
+    );
     assert_eq!(
         img.pixel(20, 12),
         [0, 0, 0, 255],
         "released ring must restart empty"
     );
+}
+
+/// Time running up is the transpose of time running across: on a square rect, the pixel
+/// at (x, y) of one is the pixel at (15 − y, 15 − x) of the other.
+#[test]
+fn heatmap_time_up_is_the_transpose() {
+    let Some(gpu) = gpu("heatmap_time_up_is_the_transpose") else {
+        return;
+    };
+    let cols: Vec<Option<HeatmapColumn>> = (0..4).map(|c| Some(column(c))).collect();
+    let draw = |axes| {
+        let s = one_layer(16.0, 16.0, |l| {
+            l.heatmaps.push(heatmap_with(
+                Rect::new(0.0, 0.0, 16.0, 16.0),
+                4,
+                4,
+                axes,
+                0,
+                cols.clone(),
+            ));
+        });
+        render(gpu, &mut renderer(gpu), &s, 1.0)
+    };
+    let across = draw(HeatmapAxes::TimeAcross);
+    let up = draw(HeatmapAxes::TimeUp);
+    assert_ne!(across, up);
+    for y in 0..16 {
+        for x in 0..16 {
+            assert_eq!(
+                up.pixel(x, y),
+                across.pixel(15 - y, 15 - x),
+                "pixel ({x}, {y})"
+            );
+        }
+    }
+}
+
+/// A pixel over several cells shows the highest of them: one hot cell among cold ones
+/// draws its pixel as hot as a pixel of hot cells only, along both axes.
+#[test]
+fn heatmap_pixel_shows_the_highest_cell() {
+    let Some(gpu) = gpu("heatmap_pixel_shows_the_highest_cell") else {
+        return;
+    };
+    // 16 columns x 16 rows on 4 x 4 pixels: 4 x 4 cells per pixel.
+    let draw = |hot: &dyn Fn(u32, u32) -> bool| {
+        let data = (0..16)
+            .map(|c| {
+                Some(
+                    (0..16)
+                        .map(|row| if hot(c, row) { 31.0 } else { 0.0 })
+                        .collect::<HeatmapColumn>(),
+                )
+            })
+            .collect();
+        let s = one_layer(4.0, 4.0, |l| {
+            l.heatmaps.push(heatmap_with(
+                Rect::new(0.0, 0.0, 4.0, 4.0),
+                16,
+                16,
+                HeatmapAxes::TimeAcross,
+                0,
+                data,
+            ));
+        });
+        render(gpu, &mut renderer(gpu), &s, 1.0)
+    };
+    let one = draw(&|c, row| c == 5 && row == 9);
+    let all = draw(&|_, _| true);
+    let none = draw(&|_, _| false);
+    // Column 5 is in pixel column 1, row 9 in pixel row 2 from the bottom (y = 1).
+    assert_eq!(one.pixel(1, 1), all.pixel(1, 1));
+    assert_eq!(one.pixel(0, 0), none.pixel(0, 0));
+    assert_ne!(all.pixel(0, 0), none.pixel(0, 0));
 }
 
 /// Ink bounding box of channel 0 above `threshold`.
@@ -452,18 +573,23 @@ fn invalid_scenes_are_rejected() {
         r.prepare(&gpu.device, &gpu.queue, &s, &t),
         Err(PrepareError::AlphaLength { .. })
     ));
-    let bad_upload = heatmap_scene(
-        0,
-        vec![ColumnUpload {
-            first: 0,
-            values: vec![0.0; 5],
-        }],
-    );
+    let mut short: Vec<Option<HeatmapColumn>> = vec![None; 8];
+    short[3] = Some(vec![0.0; 5].into());
+    let bad_upload = heatmap_scene(0, short);
     assert!(matches!(
         r.prepare(&gpu.device, &gpu.queue, &bad_upload, &t),
         Err(PrepareError::Heatmap { .. })
     ));
-    let mut twice = heatmap_scene(0, vec![]);
+    assert!(matches!(
+        r.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &heatmap_scene(0, vec![None; 7]),
+            &t
+        ),
+        Err(PrepareError::Heatmap { .. })
+    ));
+    let mut twice = heatmap_scene(0, vec![None; 8]);
     let h = twice.layers[0].heatmaps[0].clone();
     twice.layers[0].heatmaps.push(h);
     assert!(matches!(

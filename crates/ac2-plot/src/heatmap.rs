@@ -2,13 +2,14 @@
 //! plus one colormap LUT texture per [`Colormap`].
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 
 use crate::PrepareError;
 use crate::colormap::{LUT_SIZE, lut};
 use crate::geometry::ClipPx;
-use crate::scene::{Colormap, Heatmap, HeatmapId};
+use crate::scene::{Colormap, Heatmap, HeatmapAxes, HeatmapColumn, HeatmapId};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -20,7 +21,9 @@ struct Uniform {
     columns: u32,
     rows: u32,
     scroll: u32,
-    _pad: [u32; 2],
+    /// 1 when time runs bottom to top ([`HeatmapAxes::TimeUp`]).
+    time_up: u32,
+    _pad: u32,
 }
 
 #[derive(Debug)]
@@ -31,6 +34,9 @@ struct Ring {
     texture: wgpu::Texture,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    /// The column last uploaded at each ring position (`None`: empty). Held, so the
+    /// allocation cannot be reused for other values while compared by pointer.
+    uploaded: Vec<Option<HeatmapColumn>>,
     /// Frame counter of the last scene that referenced it.
     seen: u64,
 }
@@ -140,8 +146,8 @@ impl Heatmaps {
         view
     }
 
-    /// Validates `h`, (re)creates its ring when new or resized, applies its uploads and
-    /// writes its uniform.
+    /// Validates `h`, (re)creates its ring when new or resized, uploads the columns that
+    /// changed and writes its uniform.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -168,20 +174,23 @@ impl Heatmaps {
             return Err(bad("id used twice in one scene".into()));
         }
         let rows = h.rows as usize;
-        for u in &h.uploads {
-            if u.values.len() % rows != 0 || u.values.len() / rows > h.columns as usize {
-                return Err(bad(format!(
-                    "upload of {} values is not 1..={} whole columns of {rows}",
-                    u.values.len(),
-                    h.columns
-                )));
-            }
-            if u.first >= h.columns {
-                return Err(bad(format!(
-                    "upload starts at column {} of {}",
-                    u.first, h.columns
-                )));
-            }
+        if h.data.len() != h.columns as usize {
+            return Err(bad(format!(
+                "{} data columns for a ring of {}",
+                h.data.len(),
+                h.columns
+            )));
+        }
+        if let Some((i, c)) = h
+            .data
+            .iter()
+            .enumerate()
+            .find_map(|(i, c)| c.as_ref().filter(|c| c.len() != rows).map(|c| (i, c)))
+        {
+            return Err(bad(format!(
+                "column {i} has {} values, not {rows}",
+                c.len()
+            )));
         }
 
         let fits = self.rings.get(&h.id).is_some_and(|r| {
@@ -193,8 +202,9 @@ impl Heatmaps {
                 .rings
                 .remove(&h.id)
                 .filter(|r| r.columns == h.columns && r.rows == h.rows)
-                .map(|r| (r.texture, r.uniform));
-            let (texture, uniform) = match reuse {
+                .map(|r| (r.texture, r.uniform, r.uploaded));
+            // A reused texture keeps its contents, so it keeps the record of them too.
+            let (texture, uniform, uploaded) = match reuse {
                 Some(t) => t,
                 None => (
                     new_ring_texture(device, queue, h.columns, h.rows),
@@ -204,6 +214,7 @@ impl Heatmaps {
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     }),
+                    vec![None; h.columns as usize],
                 ),
             };
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -234,6 +245,7 @@ impl Heatmaps {
                     texture,
                     uniform,
                     bind_group,
+                    uploaded,
                     seen: 0,
                 },
             );
@@ -242,27 +254,7 @@ impl Heatmaps {
             unreachable!("ring inserted above")
         };
         ring.seen = self.frame;
-        for u in &h.uploads {
-            let n = (u.values.len() / rows) as u32;
-            // A range past the last column wraps to column 0.
-            let first_part = n.min(h.columns - u.first);
-            write_columns(
-                queue,
-                &ring.texture,
-                h.rows,
-                u.first,
-                &u.values[..first_part as usize * rows],
-            );
-            if first_part < n {
-                write_columns(
-                    queue,
-                    &ring.texture,
-                    h.rows,
-                    0,
-                    &u.values[first_part as usize * rows..],
-                );
-            }
-        }
+        upload_changed(queue, ring, &h.data, rows);
         let uniform = Uniform {
             rect,
             clip,
@@ -271,10 +263,45 @@ impl Heatmaps {
             columns: h.columns,
             rows: h.rows,
             scroll: h.scroll % h.columns,
-            _pad: [0; 2],
+            time_up: u32::from(h.axes == HeatmapAxes::TimeUp),
+            _pad: 0,
         };
         queue.write_buffer(&ring.uniform, 0, bytemuck::bytes_of(&uniform));
         Ok(())
+    }
+}
+
+/// Uploads the ring positions whose column differs from the one uploaded there, one write
+/// per run of adjacent changed positions.
+fn upload_changed(
+    queue: &wgpu::Queue,
+    ring: &mut Ring,
+    data: &[Option<HeatmapColumn>],
+    rows: usize,
+) {
+    let same = |a: &Option<HeatmapColumn>, b: &Option<HeatmapColumn>| match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        _ => false,
+    };
+    let mut run: Vec<f32> = Vec::new();
+    let mut i = 0;
+    while i < data.len() {
+        if same(&data[i], &ring.uploaded[i]) {
+            i += 1;
+            continue;
+        }
+        let first = i;
+        run.clear();
+        while i < data.len() && !same(&data[i], &ring.uploaded[i]) {
+            match &data[i] {
+                Some(c) => run.extend_from_slice(c),
+                None => run.extend(std::iter::repeat_n(f32::NAN, rows)),
+            }
+            ring.uploaded[i] = data[i].clone();
+            i += 1;
+        }
+        write_columns(queue, &ring.texture, ring.rows, first as u32, &run);
     }
 }
 

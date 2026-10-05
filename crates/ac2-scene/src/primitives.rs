@@ -241,23 +241,35 @@ pub enum Colormap {
     Viridis,
 }
 
-/// Values written into heatmap columns `first..first + n`, where
-/// `n = values.len() / rows`. `values` holds whole columns one after another, each from
-/// row 0 (bottom of the rect) upwards. A range that runs past the last column wraps to
-/// column 0. NaN marks a cell without data (drawn transparent).
-#[derive(Clone, Debug, PartialEq)]
-pub struct ColumnUpload {
-    pub first: u32,
-    pub values: Vec<f32>,
+/// One column of a heatmap: `rows` values, from row 0 (the start of the value axis)
+/// onwards, NaN where a cell has no data (drawn transparent). Shared with whatever keeps
+/// the history: a scene holds the column, not a copy of it.
+pub type HeatmapColumn = std::sync::Arc<[f32]>;
+
+/// Which way the time (column) axis of a heatmap runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeatmapAxes {
+    /// Columns left to right, rows bottom to top.
+    TimeAcross,
+    /// Columns bottom to top, rows left to right: a waterfall under a spectrum, whose
+    /// frequency axis is horizontal.
+    TimeUp,
 }
 
 /// Scrolling value texture (spectrograph): a ring of `columns` columns of `rows` values,
-/// drawn across `rect` with columns evenly spaced left to right and rows evenly spaced
-/// bottom to top; the scene layer has already resampled onto that even grid.
+/// drawn across `rect` with columns and rows evenly spaced as `axes` says; the scene layer
+/// has already resampled onto that even grid.
 ///
-/// The renderer keeps the ring between frames under `id`: `uploads` carries only the
-/// columns that changed since the previous frame. A new `id` (or new dimensions) starts
-/// with all cells empty; an id absent from a scene is released.
+/// The renderer keeps the ring between frames under `id` and uploads a ring column only
+/// when the column in `data` is not the one it last uploaded there (`Arc` identity). The
+/// renderer holds on to what it uploaded, so an identical pointer always means identical
+/// values: scenes may be built, dropped or painted twice without losing or repeating an
+/// upload, and a new frame of a scrolling history costs one column. A new `id` (or new
+/// dimensions) starts with all cells empty; an id absent from a scene is released.
+///
+/// Where a pixel covers several cells (more history than pixel rows, more frequency rows
+/// than pixel columns), it shows the highest value among them, so a short event or a
+/// narrow tone never falls between pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Heatmap {
     pub id: HeatmapId,
@@ -265,14 +277,17 @@ pub struct Heatmap {
     pub clip: Option<Rect>,
     pub columns: u32,
     pub rows: u32,
-    /// Ring column drawn at the left edge of `rect`; scrolling advances this.
+    pub axes: HeatmapAxes,
+    /// Ring column drawn first (left edge, or bottom edge for [`HeatmapAxes::TimeUp`]);
+    /// scrolling advances this.
     pub scroll: u32,
     /// Values mapped to the first and last colormap entry; values outside clamp.
     pub range: [f32; 2],
     pub colormap: Colormap,
     /// Overall opacity.
     pub opacity: f32,
-    pub uploads: Vec<ColumnUpload>,
+    /// The ring, `columns` long, by ring position; `None` is a column without data.
+    pub data: Vec<Option<HeatmapColumn>>,
 }
 
 /// Primitives drawn in a fixed order: rects, heatmaps, bands, grids, polylines, labels.

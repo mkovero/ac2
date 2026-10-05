@@ -6,8 +6,9 @@
 mod common;
 
 use ac2_plot::{
-    Anchor, Band, BandPoint, Color, Colormap, ColumnUpload, Dash, FillRect, Grid, GridAxis,
-    GridKind, GridLine, HAlign, Heatmap, HeatmapId, Label, Layer, Polyline, Rect, Stroke, VAlign,
+    Anchor, Band, BandPoint, Color, Colormap, Dash, FillRect, Grid, GridAxis, GridKind, GridLine,
+    HAlign, Heatmap, HeatmapAxes, HeatmapColumn, HeatmapId, Label, Layer, Polyline, Rect, Stroke,
+    VAlign,
 };
 use ac2_testkit::image::ImageTolerance;
 use common::{golden, gpu, render, renderer, scene};
@@ -376,18 +377,19 @@ fn hm_columns(first: u32, n: u32) -> Vec<f32> {
     v
 }
 
-fn heatmap(scroll: u32, uploads: Vec<ColumnUpload>) -> Heatmap {
+fn heatmap(scroll: u32, data: Vec<Option<HeatmapColumn>>) -> Heatmap {
     Heatmap {
         id: HeatmapId(7),
         rect: Rect::new(10.0, 10.0, 128.0, 72.0),
         clip: None,
         columns: HM_COLS,
         rows: HM_ROWS,
+        axes: HeatmapAxes::TimeAcross,
         scroll,
         range: [-60.0, -10.0],
         colormap: Colormap::Viridis,
         opacity: 1.0,
-        uploads,
+        data,
     }
 }
 
@@ -402,24 +404,24 @@ fn heatmap_scroll() {
         layer.heatmaps.push(h);
         scene(148.0, 92.0, vec![layer])
     };
-    // Frame 1: data columns 0..30 into ring columns 0..30; ring columns 30 and 31 are still
+    let cols: Vec<HeatmapColumn> = (0..36).map(|c| hm_columns(c, 1).into()).collect();
+    // Frame 1: data columns 0..30 in ring columns 0..30; ring columns 30 and 31 are still
     // empty and draw transparent.
     let s1 = frame(heatmap(
         0,
-        vec![ColumnUpload {
-            first: 0,
-            values: hm_columns(0, 30),
-        }],
+        (0..HM_COLS as usize)
+            .map(|i| (i < 30).then(|| cols[i].clone()))
+            .collect(),
     ));
     render(gpu, &mut r, &s1, 1.0);
-    // Frame 2: data columns 30..36 land in ring columns 30, 31, 0..4 (the upload wraps);
-    // the view scrolls so the oldest remaining column (data 4, ring 4) is at the left.
+    // Frame 2: data columns 30..36 land in ring columns 30, 31, 0..4 (the ring wraps), the
+    // rest are the columns frame 1 uploaded; the view scrolls so the oldest remaining
+    // column (data 4, ring 4) is at the left.
     let s2 = frame(heatmap(
         4,
-        vec![ColumnUpload {
-            first: 30,
-            values: hm_columns(30, 6),
-        }],
+        (0..HM_COLS as usize)
+            .map(|i| Some(cols[if i < 4 { 32 + i } else { i }].clone()))
+            .collect(),
     ));
     let img = render(gpu, &mut r, &s2, 1.0);
     golden("heatmap_scroll", &img, HEATMAP);
