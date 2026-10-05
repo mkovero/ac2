@@ -32,6 +32,7 @@ mod authlog;
 mod autosave;
 mod backend;
 mod burst;
+mod cadence;
 mod calstore;
 pub mod config;
 mod control;

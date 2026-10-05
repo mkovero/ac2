@@ -213,7 +213,7 @@ fn an_unchanged_result_is_only_refreshed() {
     for _ in 0..10 {
         feed(&mut s, &mut at, 4, 0.1, &mut seed);
         // Newer audio: the refresh is pending.
-        assert_eq!(s.emit(&r.em), Flush::Pending);
+        assert!(matches!(s.emit(&r.em), Flush::Pending(_)));
     }
     assert_eq!(r.count(Stream::Rta), 0);
     std::thread::sleep(REFRESH + Duration::from_millis(10));
@@ -251,9 +251,9 @@ fn the_last_block_is_stamped() {
     feed(&mut s, &mut at, 4, 0.1, &mut seed);
     s.emit(&r.em);
     feed(&mut s, &mut at, 1, 0.1, &mut seed);
-    assert_eq!(s.emit(&r.em), Flush::Pending);
+    assert!(matches!(s.emit(&r.em), Flush::Pending(_)));
     let t0 = std::time::Instant::now();
-    while s.emit(&r.em) == Flush::Pending {
+    while matches!(s.emit(&r.em), Flush::Pending(_)) {
         assert!(t0.elapsed() < 2 * REFRESH);
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -366,7 +366,7 @@ fn spl_peaks_survive_the_frame_rate() {
     // Within the frame period: a burst 30 dB up, emitted at once; nothing goes out yet, and
     // the emit asks to be called again.
     feed(&mut s, &mut at, 1, 0.316, &mut seed);
-    assert_eq!(s.emit(&r.em), Flush::Pending);
+    assert!(matches!(s.emit(&r.em), Flush::Pending(_)));
     assert!(spl_frames(&r).is_empty());
     // Quiet again for half a second, then the next frame.
     feed(&mut s, &mut at, 100, 0.01, &mut seed);

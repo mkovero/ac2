@@ -22,6 +22,7 @@ use ac2_proto::topic::Topic;
 use ac2_proto::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
 use ac2_zmq::Context;
 
+use crate::cadence::Cadence;
 use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
 use crate::outbox::Outbox;
@@ -139,16 +140,17 @@ pub(crate) enum Due {
     Send,
     /// Nothing to send: nobody receives it, or it is unchanged and was sent recently.
     Skip,
-    /// Changed, but sent too recently for its rate; ask again soon.
-    Later,
+    /// Changed, or due a refresh, but not yet; ask again at this instant.
+    Later(Instant),
 }
 
-/// When one topic of a job is sent: on a new result (at most every `min_period`), on a
-/// change of its protection flags, and every [`REFRESH`] while unchanged as long as audio
-/// keeps coming — and only while someone subscribes to it.
+/// When one topic of a job is sent: on a new result (at most every `min_period` on
+/// average, on a [`Cadence`] so jittery wakeups do not cost rate), on a change of its
+/// protection flags, and every [`REFRESH`] while unchanged as long as audio keeps coming —
+/// and only while someone subscribes to it.
 #[derive(Debug)]
 pub(crate) struct Pace {
-    min_period: Duration,
+    cadence: Cadence,
     sent: Option<Sent>,
 }
 
@@ -164,7 +166,9 @@ impl Pace {
     /// Sends a new result at most every `min_period` (zero: whenever the job emits).
     pub(crate) fn new(min_period: Duration) -> Self {
         Self {
-            min_period,
+            // A job emits on hand-offs a fraction of `min_period` apart; a quarter period of
+            // lead lets the hand-off just before a slot take it instead of the one after.
+            cadence: Cadence::new(min_period, min_period / 4),
             sent: None,
         }
     }
@@ -182,32 +186,31 @@ impl Pace {
     ) -> Due {
         if !e.wants(topic) {
             // A new subscriber gets the result on the next emit, whatever it was before.
-            self.sent = None;
+            self.unsent();
             return Due::Skip;
         }
         let due = match self.sent {
             None => Due::Send,
             Some(s) => {
-                let since = now.saturating_duration_since(s.at);
                 if s.generation != generation || s.prot != stamp.protection {
-                    if since >= self.min_period {
-                        Due::Send
-                    } else {
-                        Due::Later
+                    match self.cadence.ready_at() {
+                        Some(t) if now < t => Due::Later(t),
+                        _ => Due::Send,
                     }
                 } else if stamp.audio_sample <= s.audio_sample {
                     // Nothing new at all: the stream has stopped, and the client's STALE
                     // must say so.
                     Due::Skip
-                } else if since >= REFRESH {
+                } else if now.saturating_duration_since(s.at) >= REFRESH {
                     Due::Send
                 } else {
                     // The refresh carries the newest stamp even after the last block.
-                    Due::Later
+                    Due::Later(s.at + REFRESH)
                 }
             }
         };
         if due == Due::Send {
+            self.cadence.take(now);
             self.sent = Some(Sent {
                 generation,
                 prot: stamp.protection,
@@ -221,6 +224,7 @@ impl Pace {
     /// The result taken as sent did not go out: send it on the next emit.
     pub(crate) fn unsent(&mut self) {
         self.sent = None;
+        self.cadence.reset();
     }
 }
 
@@ -228,26 +232,28 @@ impl Pace {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Flush {
     Done,
-    /// Something was held back (by its rate, or until its refresh); emit again soon even
-    /// without new audio, so the newest result goes out after the last block.
-    Pending,
+    /// Something was held back (by its rate, or until its refresh); emit again at this
+    /// instant even without new audio, so the newest result goes out after the last block.
+    Pending(Instant),
 }
 
 impl Flush {
     /// [`Flush::Pending`] if `due` said to ask again.
     pub(crate) fn from_due(due: Due) -> Self {
-        if due == Due::Later {
-            Self::Pending
-        } else {
-            Self::Done
+        match due {
+            Due::Later(t) => Self::Pending(t),
+            Due::Send | Due::Skip => Self::Done,
         }
     }
 
+    /// Pending if either is, at the sooner instant.
     pub(crate) fn and(self, o: Flush) -> Flush {
-        if self == Flush::Pending || o == Flush::Pending {
-            Flush::Pending
-        } else {
-            Flush::Done
+        match (self, o) {
+            (Flush::Pending(a), Flush::Pending(b)) => Flush::Pending(a.min(b)),
+            (Flush::Pending(t), Flush::Done) | (Flush::Done, Flush::Pending(t)) => {
+                Flush::Pending(t)
+            }
+            (Flush::Done, Flush::Done) => Flush::Done,
         }
     }
 }
@@ -422,18 +428,23 @@ const DRAIN_MAX: usize = 64;
 
 fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter) {
     let period = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
-    // Audio arrives once per fan-out hand-off, about one publish period apart give or take
-    // scheduling jitter. A frame may go this much early, so jitter neither costs a separate
-    // wakeup just to publish nor skips a hand-off's worth of results.
-    let slack = period / 4;
-    let mut last_emit: Option<Instant> = None;
-    let mut dirty = false;
+    // Audio arrives once per fan-out hand-off, a publish period apart or less, give or take
+    // scheduling jitter. A frame may go a quarter period early, so a hand-off just before
+    // its slot takes it rather than the one after.
+    let mut cadence = Cadence::new(period, period / 4);
+    // A frame held back is due at a known instant, but audio usually arrives within a
+    // period of it, and an emit on that hand-off carries newer results than one on a timer
+    // would. The timer is for when audio stops: it waits this much past the instant, so it
+    // seldom fires while audio flows.
+    let grace = period;
+    let mut changed = false;
+    // When to emit again without new input (a frame held back by a rate or a refresh).
+    let mut retry: Option<Instant> = None;
     loop {
-        // Nothing to publish: sleep until audio or a command arrives. Something pending
-        // but published too recently: sleep no longer than until it is due.
-        let first = if dirty {
-            let due = last_emit.map_or_else(Instant::now, |t| t + period - slack);
-            match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
+        // Sleep until audio or a command arrives, or until a frame held back is due.
+        let first = if let Some(at) = retry {
+            let wait = (at + grace).saturating_duration_since(Instant::now());
+            match rx.recv_timeout(wait) {
                 Ok(m) => Some(m),
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -448,7 +459,7 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter)
         let mut handled = 0;
         while let Some(m) = next.take() {
             // A capture only reads the result; it leaves nothing new to publish.
-            let changed = match m {
+            changed |= match m {
                 JobMsg::Blocks(batch) => {
                     let mut frames = 0u64;
                     for b in batch.iter() {
@@ -469,7 +480,6 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter)
                 }
                 JobMsg::Stop => return,
             };
-            dirty |= changed;
             handled += 1;
             if handled < DRAIN_MAX {
                 next = match rx.try_recv() {
@@ -479,11 +489,28 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter)
                 };
             }
         }
-        if dirty && last_emit.is_none_or(|t| t.elapsed() + slack >= period) {
-            dirty = a.emit(em) == Flush::Pending;
-            last_emit = Some(Instant::now());
+        let now = Instant::now();
+        if changed || retry.is_some_and(|t| now >= t) {
+            match cadence.ready_at() {
+                Some(t) if now < t => {
+                    // Too soon after the previous frame: emit at the slot (or on the
+                    // hand-off around it).
+                    retry = Some(retry.filter(|_| !changed).map_or(t, |r| r.max(t)));
+                }
+                _ => {
+                    cadence.take(now);
+                    changed = false;
+                    retry = match a.emit(em) {
+                        Flush::Done => None,
+                        Flush::Pending(at) => Some(at),
+                    };
+                }
+            }
         }
-        if !dirty && let Some(n) = a.frames_needed().filter(|&n| n > 0) {
+        if retry.is_none()
+            && !changed
+            && let Some(n) = a.frames_needed().filter(|&n| n > 0)
+        {
             park_until_queued(queue, n);
         }
     }

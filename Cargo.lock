@@ -8,6 +8,7 @@ version = "0.0.0"
 dependencies = [
  "cpal",
  "jack",
+ "libc",
  "log",
  "rtrb",
  "serde",

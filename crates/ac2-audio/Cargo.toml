@@ -26,3 +26,7 @@ log = "0.4"
 # macOS and Windows: the OS audio host (Core Audio, WASAPI) through cpal.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 cpal = "0.18"
+
+# macOS: kqueue timers that opt out of coalescing (see src/timer.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"

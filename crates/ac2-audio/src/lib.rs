@@ -42,6 +42,7 @@ pub mod history;
 pub mod level;
 pub mod output;
 pub mod stream;
+pub mod timer;
 
 #[cfg(not(target_os = "linux"))]
 mod cpal_host;

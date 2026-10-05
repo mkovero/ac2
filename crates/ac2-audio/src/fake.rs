@@ -595,6 +595,7 @@ fn spawn_driver(
     let stop_t = Arc::clone(&stop);
     let limit = c.stop_after_blocks;
     let block = Duration::from_nanos(c.ns(u64::from(c.block_frames)));
+    let (sleeper, _) = crate::timer::sleeper()?;
     let thread = std::thread::Builder::new()
         .name("ac2-fake-audio".into())
         .spawn(move || {
@@ -608,8 +609,10 @@ fn spawn_driver(
                 driver.step();
                 if pace == Pace::Realtime {
                     due += block;
-                    if let Some(wait) = due.checked_sub(t0.elapsed()) {
-                        std::thread::sleep(wait);
+                    // A coalesced sleep would deliver the audio in lumps a real device
+                    // never produces.
+                    while Instant::now() < t0 + due {
+                        sleeper.sleep_until(t0 + due);
                     }
                 }
             }

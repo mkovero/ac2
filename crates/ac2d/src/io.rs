@@ -118,11 +118,11 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
     } = s;
     let mut net: Option<(Socket, Socket)> = Some((router, xpub));
     let period = Duration::from_secs_f64(1.0 / f64::from(fps.max(1)));
-    // Shortest interval between two frames of one topic. Jobs publish once per capture
-    // hand-off, about one period apart but with scheduling jitter either way; holding a
-    // frame back for the fraction of a millisecond it came early would cost a wakeup of
-    // its own for nothing a reader could see.
-    let min_gap = period - period / 4;
+    // Shortest interval between two frames of one topic. Publishers pace themselves on a
+    // cadence (`crate::cadence`) that keeps the average rate by sending some frames early
+    // and never sends two within half a period, so this only stops a publisher that
+    // bursts. A frame held back here waits for a timer of its own, which the OS may defer.
+    let min_gap = period / 2;
     let mut slots: HashMap<Vec<u8>, Slot> = HashMap::new();
     let evt_topic = match Part::copy_from(b"evt") {
         Ok(p) => p,

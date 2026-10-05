@@ -16,9 +16,10 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
+use ac2_audio::timer::{Sleeper, Waker};
 use ac2_audio::{BlockFlags, DuplexStream};
 use ac2_proto::units::{Rev, SessionEpoch};
 
@@ -212,6 +213,8 @@ pub(crate) enum FanoutMsg {
 /// Running fan-out thread.
 pub(crate) struct Fanout {
     tx: Sender<FanoutMsg>,
+    /// Ends the thread's sleep between hand-offs, so a message is handled at once.
+    waker: Waker,
     thread: Option<std::thread::JoinHandle<()>>,
     pub(crate) meters: Arc<InputMeters>,
     /// One past the newest captured sample.
@@ -307,6 +310,7 @@ impl Fanout {
             .map(|f| Duration::from_secs_f64(f64::from(f) / rate));
         let bursts = BurstDetector::new(n.sample_rate, crate::burst::label(n));
         let (tx, rx) = std::sync::mpsc::channel();
+        let (sleeper, waker) = ac2_audio::timer::sleeper()?;
         let meters = Arc::new(InputMeters::new(channels));
         let latest = Arc::new(AtomicU64::new(0));
         let m = Arc::clone(&meters);
@@ -319,26 +323,35 @@ impl Fanout {
         };
         let thread = std::thread::Builder::new()
             .name("ac2d-fanout".into())
-            .spawn(move || run(stream, &rx, &cfg, &to_control, &m, &l, bursts))?;
+            .spawn(move || {
+                let wait = Wait { rx, sleeper };
+                run(stream, &wait, &cfg, &to_control, &m, &l, bursts);
+            })?;
         Ok(Self {
             tx,
+            waker,
             thread: Some(thread),
             meters,
             latest,
         })
     }
 
+    fn send(&self, m: FanoutMsg) {
+        let _ = self.tx.send(m);
+        self.waker.wake();
+    }
+
     pub(crate) fn attach(&self, id: u64, feed: JobFeed) {
-        let _ = self.tx.send(FanoutMsg::Attach(id, feed));
+        self.send(FanoutMsg::Attach(id, feed));
     }
 
     pub(crate) fn detach(&self, id: u64) {
-        let _ = self.tx.send(FanoutMsg::Detach(id));
+        self.send(FanoutMsg::Detach(id));
     }
 
     /// Starts publishing the session input meters.
     pub(crate) fn start_levels(&self, env: JobEnv, input_map: Vec<u16>, config_rev: Rev) {
-        let _ = self.tx.send(FanoutMsg::Levels {
+        self.send(FanoutMsg::Levels {
             env,
             input_map,
             config_rev,
@@ -351,7 +364,7 @@ impl Fanout {
     }
 
     fn stop_inner(&mut self) {
-        let _ = self.tx.send(FanoutMsg::Stop);
+        self.send(FanoutMsg::Stop);
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -361,6 +374,31 @@ impl Fanout {
 impl Drop for Fanout {
     fn drop(&mut self) {
         self.stop_inner();
+    }
+}
+
+/// What the fan-out thread sleeps on between hand-offs: messages, and a timer that wakes it
+/// on time (see [`ac2_audio::timer`]).
+struct Wait {
+    rx: Receiver<FanoutMsg>,
+    sleeper: Sleeper,
+}
+
+impl Wait {
+    /// The next message, or `None` once `deadline` has passed with none pending.
+    /// Disconnection reads as [`FanoutMsg::Stop`].
+    fn until(&self, deadline: Instant) -> Option<FanoutMsg> {
+        loop {
+            match self.rx.try_recv() {
+                Ok(m) => return Some(m),
+                Err(TryRecvError::Disconnected) => return Some(FanoutMsg::Stop),
+                Err(TryRecvError::Empty) => {}
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            self.sleeper.sleep_until(deadline);
+        }
     }
 }
 
@@ -418,7 +456,7 @@ impl Pool {
 
 fn run(
     mut stream: DuplexStream,
-    rx: &Receiver<FanoutMsg>,
+    wait: &Wait,
     cfg: &Config,
     to_control: &Sender<ControlMsg>,
     meters: &InputMeters,
@@ -432,39 +470,42 @@ fn run(
     let mut gaps = Discontinuities::default();
     let mut pool = Pool::default();
     let queue_limit = (JOB_QUEUE_S * cfg.rate) as u64;
-    // Meter frames are due every other hand-off; half a hand-off of slack keeps a late
-    // wakeup from pushing a frame to the hand-off after.
-    let meter_slack = cfg.handoff / 2;
+    // Meter frames are due every other hand-off; a frame may go half a hand-off ahead of
+    // its slot, so a hand-off a little early takes it rather than the one after.
+    let meter_early = cfg.handoff / 2;
     let mut next = Instant::now();
     loop {
         // Control messages wake the thread at once; otherwise it sleeps until the next
         // hand-off.
-        loop {
-            let wait = next.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(wait) {
-                Ok(FanoutMsg::Attach(id, feed)) => {
+        while let Some(msg) = wait.until(next) {
+            match msg {
+                FanoutMsg::Attach(id, feed) => {
                     jobs.insert(id, feed);
                 }
-                Ok(FanoutMsg::Detach(id)) => {
+                FanoutMsg::Detach(id) => {
                     jobs.remove(&id);
                 }
-                Ok(FanoutMsg::Levels {
+                FanoutMsg::Levels {
                     env,
                     input_map,
                     config_rev,
-                }) => match Emitter::connect(env) {
+                } => match Emitter::connect(env) {
                     Ok(em) => {
-                        let l = SessionLevels::new(&input_map, cfg.sample_rate, config_rev);
+                        let l = SessionLevels::new(
+                            &input_map,
+                            cfg.sample_rate,
+                            config_rev,
+                            meter_early,
+                        );
                         levels = Some((l, em));
                     }
                     Err(e) => tracing::error!("cannot start the session meters: {e}"),
                 },
-                Ok(FanoutMsg::Stop) | Err(RecvTimeoutError::Disconnected) => {
+                FanoutMsg::Stop => {
                     let outcome = stream.stop(STOP_TIMEOUT);
                     tracing::info!("audio stream stopped: {outcome:?}");
                     return;
                 }
-                Err(RecvTimeoutError::Timeout) => break,
             }
         }
         let now = Instant::now();
@@ -532,7 +573,7 @@ fn run(
             pool.hand_out(batch);
         }
         if let Some((l, em)) = &mut levels {
-            l.emit(em, meter_slack);
+            l.emit(em);
         }
 
         // Output timing records are not used yet; keep the ring from overflowing.

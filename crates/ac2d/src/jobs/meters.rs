@@ -10,6 +10,7 @@ use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
 
 use super::{Emitter, LevelsMeter, Meters, StampArgs};
+use crate::cadence::Cadence;
 use crate::fanout::Block;
 
 /// Meter frames per second at most. A meter read by eye gains nothing above ~30 updates per
@@ -25,12 +26,18 @@ pub(crate) struct SessionLevels {
     levels: LevelsMeter,
     config_rev: Rev,
     wall: u64,
-    last: Option<Instant>,
+    cadence: Cadence,
 }
 
 impl SessionLevels {
-    /// Meters every block channel of a session capturing `input_map`.
-    pub(crate) fn new(input_map: &[u16], sample_rate: u32, config_rev: Rev) -> Self {
+    /// Meters every block channel of a session capturing `input_map`. `early`: how far
+    /// ahead of its slot a frame may go, so a wakeup just before a slot takes it.
+    pub(crate) fn new(
+        input_map: &[u16],
+        sample_rate: u32,
+        config_rev: Rev,
+        early: Duration,
+    ) -> Self {
         Self {
             levels: LevelsMeter::new(
                 (0..input_map.len()).collect(),
@@ -39,7 +46,7 @@ impl SessionLevels {
             ),
             config_rev,
             wall: 0,
-            last: None,
+            cadence: Cadence::new(meter_period(), early),
         }
     }
 
@@ -48,18 +55,15 @@ impl SessionLevels {
         self.wall = b.wall_ns;
     }
 
-    /// Publishes a frame if one is due. `slack`: how early a frame may go, so a wakeup
-    /// schedule close to the meter period does not drop every other frame.
-    pub(crate) fn emit(&mut self, e: &Emitter, slack: Duration) {
+    /// Publishes a frame if one is due.
+    pub(crate) fn emit(&mut self, e: &Emitter) {
         // Between frames the meter keeps accumulating: the next frame's peak covers the
         // whole gap, so no transient is lost to the rate limit.
-        if self
-            .last
-            .is_some_and(|t| t.elapsed() + slack < meter_period())
-        {
+        let now = Instant::now();
+        if !self.cadence.is_ready(now) {
             return;
         }
-        self.last = Some(Instant::now());
+        self.cadence.take(now);
         let stamp = meter_stamp(&self.levels, self.config_rev, self.wall);
         let Some(Meters {
             meta,
