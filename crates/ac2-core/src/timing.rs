@@ -8,15 +8,18 @@
 //! - [`GccPhat::measure`]: applies the stimulus, loopback-level and confidence floors and
 //!   turns one window into a [`WindowMeasurement`].
 //! - [`TimingTracker`]: the NoStimulus / Acquiring / Locked / Jumped / Lost state machine and
-//!   the drift regression, fed one measurement per hop.
+//!   the drift line ([`drift`]), fed one measurement per hop.
 //!
 //! [`LoopbackTiming`] bundles the three for the daemon job.
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use realfft::num_complex::Complex;
 use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
+
+pub mod drift;
+
+pub use drift::{DriftEstimate, DriftLine};
 
 /// Window length at 48 kHz; other rates use the nearest power of two to the same duration.
 pub const WINDOW_AT_48K: usize = 1 << 15;
@@ -85,8 +88,18 @@ pub struct TimingConfig {
     pub stimulus_floor_dbfs: f64,
     /// Loopback level below which a window is not measured, dBFS RMS.
     pub loopback_floor_dbfs: f64,
-    /// Offsets within this many samples agree.
-    pub agree_tolerance: i64,
+    /// Windows of one acquisition or jump candidate agree when each lies within this many
+    /// samples of the candidate's line.
+    pub agree_samples: f64,
+    /// A locked window further than this from the drift line's prediction (or three times
+    /// the prediction's uncertainty, if larger) is a jump candidate, samples.
+    pub jump_samples: f64,
+    /// Largest slope a candidate line may have, ppm. The stimulus slides by `W·ε` within
+    /// one window, which smears the correlation peak over that many lags (6.5 samples at
+    /// 200 ppm with 0.68 s windows), so single windows scatter along the smear. Drift is
+    /// followed reliably up to about 200 ppm; around 300 ppm the lock comes and goes, and
+    /// far beyond the bound the monitor reports Lost rather than a line through scatter.
+    pub max_drift_ppm: f64,
     /// Agreeing windows needed to lock; the first and last must not overlap.
     pub acquire_windows: usize,
     /// Consecutive unmeasurable windows after which the state is Lost.
@@ -114,7 +127,9 @@ impl TimingConfig {
             psr_floor_db: 20.0,
             stimulus_floor_dbfs: -100.0,
             loopback_floor_dbfs: -80.0,
-            agree_tolerance: 1,
+            agree_samples: 1.0,
+            jump_samples: 0.5,
+            max_drift_ppm: 500.0,
             acquire_windows: 3,
             lost_after_windows: 4,
             drift_window_s: 30.0,
@@ -573,39 +588,80 @@ pub struct LastLock {
     pub at_capture_sample: u64,
 }
 
-/// Linear regression of offset over capture time.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DriftEstimate {
-    /// Slope, ppm (offset samples per million capture samples).
-    pub ppm: f64,
-    /// Time covered by the regression, s.
-    pub span_s: f64,
-    /// Above threshold on a long enough span.
-    pub warning: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
+/// Windows that agree on one offset line: an acquisition, or the new offset after a jump.
+#[derive(Debug, Clone)]
 struct Candidate {
+    /// Integer offset of the newest window.
     offset: i64,
+    /// Capture start of the first window.
     first_start: u64,
-    count: usize,
+    /// (window centre, offset) of each window, oldest first.
+    points: Vec<(f64, f64)>,
 }
 
-/// Q3 state machine and drift regression; pure logic over [`WindowMeasurement`]s.
+impl Candidate {
+    fn new(x: f64, y: f64, offset: i64, start: u64) -> Self {
+        let mut points = Vec::with_capacity(8);
+        points.push((x, y));
+        Self {
+            offset,
+            first_start: start,
+            points,
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.points.len()
+    }
+
+    /// Whether a window at (`x`, `y`) lies on this candidate's line: its own slope once it
+    /// has two windows, else `slope` (the drift known so far); with neither, any drift up
+    /// to the largest followed is allowed. The candidate's own windows take precedence, so
+    /// a drift line fitted on too short a span cannot keep a correct candidate out.
+    fn agrees(&self, x: f64, y: f64, slope: Option<f64>, cfg: &TimingConfig) -> bool {
+        let (&(x0, y0), &(x1, y1)) = match (self.points.first(), self.points.last()) {
+            (Some(a), Some(b)) => (a, b),
+            _ => return false,
+        };
+        let own = (x1 > x0).then(|| (y1 - y0) / (x1 - x0));
+        let max_slope = cfg.max_drift_ppm * 1e-6;
+        match own.or(slope) {
+            Some(s) if s.abs() <= max_slope + cfg.agree_samples / (x1 - x0).max(1.0) => {
+                (y - (y1 + s * (x - x1))).abs() <= cfg.agree_samples
+            }
+            Some(_) => false,
+            None => (y - y1).abs() <= cfg.agree_samples + max_slope * (x - x1).abs(),
+        }
+    }
+
+    fn add(&mut self, x: f64, y: f64, offset: i64) {
+        self.points.push((x, y));
+        self.offset = offset;
+    }
+}
+
+/// Q3 state machine and drift model; pure logic over [`WindowMeasurement`]s.
+///
+/// Every window is judged against the offset the epoch's [`DriftLine`] predicts for it, so
+/// a drifting offset is followed however fast it moves (up to
+/// [`TimingConfig::max_drift_ppm`]) and a step is told from drift by its size against the
+/// prediction's uncertainty (`docs/design/multi-device.md` §5).
 #[derive(Debug)]
 pub struct TimingTracker {
     cfg: TimingConfig,
     epoch: u64,
     state: TimingState,
-    /// The epoch's validated offset; survives Lost and NoStimulus so a re-lock elsewhere is
-    /// reported as a jump instead of passing silently.
-    epoch_offset: Option<i64>,
     last_lock: Option<LastLock>,
     acquire: Option<Candidate>,
     jump: Option<Candidate>,
     misses: usize,
+    /// Consecutive locked windows off the line that did not confirm a jump.
+    off_line: usize,
     wide_next: bool,
-    drift_points: VecDeque<(f64, f64)>,
+    /// Offsets of the epoch's validated windows; kept through Lost and NoStimulus so a
+    /// re-lock elsewhere than the line predicts is reported as a jump instead of passing
+    /// silently.
+    line: DriftLine,
     drift_warning: bool,
 }
 
@@ -618,13 +674,19 @@ impl TimingTracker {
             cfg,
             epoch: 0,
             state: TimingState::NoStimulus,
-            epoch_offset: None,
             last_lock: None,
             acquire: None,
             jump: None,
             misses: 0,
+            off_line: 0,
             wide_next: false,
-            drift_points: VecDeque::with_capacity(capacity),
+            line: DriftLine::new(
+                cfg.sample_rate,
+                cfg.drift_window_s,
+                cfg.drift_min_span_s,
+                cfg.drift_threshold_ppm,
+                capacity,
+            ),
             drift_warning: false,
         }
     }
@@ -650,16 +712,16 @@ impl TimingTracker {
     }
 
     /// Starts a new offset epoch (stream open, device/rate/buffer change, continuity break,
-    /// xrun). The offset may legitimately change, so the next lock is not a jump.
+    /// xrun). The offset may legitimately change, so the next lock is not a jump. The
+    /// judged drift stays: the clocks are those of the same stream.
     pub fn new_epoch(&mut self) {
         self.epoch += 1;
-        self.epoch_offset = None;
+        self.line.clear();
         self.acquire = None;
         self.jump = None;
         self.misses = 0;
+        self.off_line = 0;
         self.wide_next = false;
-        self.drift_points.clear();
-        self.drift_warning = false;
         if self.state != TimingState::NoStimulus {
             self.state = TimingState::Acquiring;
         }
@@ -674,7 +736,8 @@ impl TimingTracker {
         let r = self.cfg.track_radius;
         let candidate_far = self
             .jump
-            .is_some_and(|c| (c.offset - locked).abs() > r - self.cfg.agree_tolerance);
+            .as_ref()
+            .is_some_and(|c| (c.offset - locked).abs() as f64 > r as f64 - self.cfg.agree_samples);
         if self.wide_next || candidate_far {
             self.cfg.acquisition
         } else {
@@ -685,31 +748,10 @@ impl TimingTracker {
         }
     }
 
-    /// Current drift regression, if any points are held.
+    /// Drift between the output and the input clock: the current regression once it spans
+    /// enough to judge, else the last judged one of this stream, else the short current one.
     pub fn drift(&self) -> Option<DriftEstimate> {
-        let (&(x0, _), &(x1, _)) = (self.drift_points.front()?, self.drift_points.back()?);
-        let n = self.drift_points.len() as f64;
-        if n < 3.0 {
-            return None;
-        }
-        let mx = self.drift_points.iter().map(|p| p.0).sum::<f64>() / n;
-        let my = self.drift_points.iter().map(|p| p.1).sum::<f64>() / n;
-        let (mut sxy, mut sxx) = (0.0, 0.0);
-        for &(x, y) in &self.drift_points {
-            sxy += (x - mx) * (y - my);
-            sxx += (x - mx) * (x - mx);
-        }
-        if sxx <= 0.0 {
-            return None;
-        }
-        let ppm = sxy / sxx * 1e6;
-        let span_s = (x1 - x0) / self.cfg.sample_rate;
-        Some(DriftEstimate {
-            ppm,
-            span_s,
-            warning: span_s >= self.cfg.drift_min_span_s
-                && ppm.abs() > self.cfg.drift_threshold_ppm,
-        })
+        self.line.estimate()
     }
 
     /// Feeds one window's measurement.
@@ -771,43 +813,54 @@ impl TimingTracker {
     fn reset_search(&mut self) {
         self.acquire = None;
         self.jump = None;
-        self.drift_points.clear();
+        self.off_line = 0;
     }
 
-    fn agrees(&self, a: i64, b: i64) -> bool {
-        (a - b).abs() <= self.cfg.agree_tolerance
+    /// Capture index a window's offset belongs to: its centre.
+    fn centre(&self, m: &WindowMeasurement) -> f64 {
+        m.capture_start as f64 + self.cfg.window as f64 / 2.0
+    }
+
+    /// Distance from the line's prediction beyond which a window is a jump candidate:
+    /// three standard deviations of a window's offset around the line, never less than
+    /// [`TimingConfig::jump_samples`]. Under drift a window's stimulus slides by `W·ε`
+    /// while it is captured, and its peak can sit anywhere along that smear (σ of a uniform
+    /// spread, `W·ε/√12`). That scatter is a property of the drift, so it holds even right
+    /// after a lock, when a few windows cannot yet show it in their residuals.
+    fn jump_threshold(&self, sigma: f64) -> f64 {
+        let smear = self.line.slope().map_or(0.0, |s| s.abs()) * self.cfg.window as f64;
+        let sigma = sigma.max(smear / 12f64.sqrt());
+        self.cfg.jump_samples.max(3.0 * sigma)
     }
 
     fn acquire(&mut self, p: Peak, m: &WindowMeasurement, ev: &mut TimingEvents) {
-        let c = match self.acquire {
-            Some(c) if self.agrees(c.offset, p.offset) => Candidate {
-                offset: p.offset,
-                first_start: c.first_start,
-                count: c.count + 1,
-            },
-            _ => Candidate {
-                offset: p.offset,
-                first_start: m.capture_start,
-                count: 1,
-            },
+        let (x, y) = (self.centre(m), p.offset as f64 + p.fraction);
+        let slope = self.line.slope();
+        let c = match self.acquire.take() {
+            Some(mut c) if c.agrees(x, y, slope, &self.cfg) => {
+                c.add(x, y, p.offset);
+                c
+            }
+            _ => Candidate::new(x, y, p.offset, m.capture_start),
         };
         let disjoint = m.capture_start >= c.first_start + self.cfg.window as u64;
-        if c.count < self.cfg.acquire_windows || !disjoint {
+        if c.count() < self.cfg.acquire_windows || !disjoint {
             self.acquire = Some(c);
             return;
         }
-        self.acquire = None;
         self.wide_next = false;
-        self.drift_points.clear();
-        match self.epoch_offset {
-            Some(prev) if !self.agrees(prev, p.offset) => {
-                self.state = TimingState::Jumped {
-                    from: prev,
-                    to: p.offset,
-                };
+        // A re-lock within the epoch (after a gap or a loss) is judged against the drift line
+        // extrapolated across the gap, at the newest window: the first may straddle the
+        // stimulus onset.
+        let (xn, yn) = c.points[c.count() - 1];
+        match self.line.predict(xn) {
+            Some(q) if (yn - q.offset).abs() > self.jump_threshold(q.sigma) => {
+                let from = q.offset.round() as i64;
+                self.line.shift(yn - q.offset);
+                self.state = TimingState::Jumped { from, to: p.offset };
                 ev.push(TimingEvent::Jump {
                     epoch: self.epoch,
-                    from: prev,
+                    from,
                     to: p.offset,
                     at_capture_sample: c.first_start,
                 });
@@ -821,69 +874,87 @@ impl TimingTracker {
                 });
             }
         }
+        for &(px, py) in &c.points {
+            self.line.push(px, py);
+        }
         self.confirm(p, m);
     }
 
     fn track(&mut self, locked: i64, p: Peak, m: &WindowMeasurement, ev: &mut TimingEvents) {
-        if self.agrees(locked, p.offset) {
-            // Clock drift moves the offset one sample at a time; follow it.
+        let (x, y) = (self.centre(m), p.offset as f64 + p.fraction);
+        let on_line = match self.line.predict(x) {
+            Some(q) => (y - q.offset).abs() <= self.jump_threshold(q.sigma),
+            None => (y - locked as f64).abs() <= self.cfg.agree_samples,
+        };
+        if on_line {
+            // Clock drift moves the offset steadily; the line follows it.
             self.jump = None;
+            self.off_line = 0;
             self.wide_next = false;
             self.state = TimingState::Locked { offset: p.offset };
+            self.line.push(x, y);
             self.confirm(p, m);
             return;
         }
-        let c = match self.jump {
-            Some(c) if self.agrees(c.offset, p.offset) => Candidate {
-                offset: p.offset,
-                first_start: c.first_start,
-                count: c.count + 1,
-            },
-            _ => Candidate {
-                offset: p.offset,
-                first_start: m.capture_start,
-                count: 1,
-            },
+        let slope = self.line.slope();
+        let c = match self.jump.take() {
+            Some(mut c) if c.agrees(x, y, slope, &self.cfg) => {
+                c.add(x, y, p.offset);
+                c
+            }
+            _ => Candidate::new(x, y, p.offset, m.capture_start),
         };
-        if m.capture_start >= c.first_start + self.cfg.window as u64 {
-            self.jump = None;
-            self.wide_next = false;
-            self.drift_points.clear();
-            self.state = TimingState::Jumped {
-                from: locked,
-                to: p.offset,
-            };
-            ev.push(TimingEvent::Jump {
-                epoch: self.epoch,
-                from: locked,
-                to: p.offset,
-                at_capture_sample: c.first_start,
-            });
-            self.confirm(p, m);
-        } else {
+        if m.capture_start < c.first_start + self.cfg.window as u64 {
             self.jump = Some(c);
+            self.off_line += 1;
+            // Off the line, yet no new line forms: the windows scatter more than the model
+            // allows (drift beyond the largest followed, or a stimulus the estimator cannot
+            // time). Locked would claim an offset nothing confirms any more.
+            let confirm_windows = self.cfg.window.div_ceil(self.cfg.hop.max(1));
+            if self.off_line > confirm_windows + self.cfg.lost_after_windows {
+                self.state = TimingState::Lost;
+                self.reset_search();
+                self.wide_next = true;
+                ev.push(TimingEvent::Lost {
+                    epoch: self.epoch,
+                    at_capture_sample: m.capture_start,
+                });
+            }
+            return;
         }
+        self.off_line = 0;
+        // The step is measured against the drifted offset at the newest window: the first
+        // one may straddle the step and read part of it.
+        let (xn, yn) = c.points[c.count() - 1];
+        if let Some(q) = self.line.predict(xn) {
+            self.line.shift(yn - q.offset);
+        } else {
+            self.line.clear();
+        }
+        for &(px, py) in &c.points {
+            self.line.push(px, py);
+        }
+        self.wide_next = false;
+        self.state = TimingState::Jumped {
+            from: locked,
+            to: p.offset,
+        };
+        ev.push(TimingEvent::Jump {
+            epoch: self.epoch,
+            from: locked,
+            to: p.offset,
+            at_capture_sample: c.first_start,
+        });
+        self.confirm(p, m);
     }
 
-    /// Records a validated offset: epoch offset, last lock, drift point.
+    /// Records a validated offset as the last lock.
     fn confirm(&mut self, p: Peak, m: &WindowMeasurement) {
-        self.epoch_offset = Some(p.offset);
         self.last_lock = Some(LastLock {
             epoch: self.epoch,
             offset: p.offset,
             at_capture_sample: m.capture_start,
         });
-        let x = m.capture_start as f64 + self.cfg.window as f64 / 2.0;
-        let horizon = self.cfg.drift_window_s * self.cfg.sample_rate;
-        while self
-            .drift_points
-            .front()
-            .is_some_and(|&(x0, _)| x - x0 > horizon)
-        {
-            self.drift_points.pop_front();
-        }
-        self.drift_points
-            .push_back((x, p.offset as f64 + p.fraction));
     }
 }
 
