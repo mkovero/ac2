@@ -168,7 +168,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Feature | Pri | Src | Phase |
 |---|---|---|---|
 | IR capture by ESS, deconvolution, harmonic split, gating; H2…H5 / THD vs f (done: `docs/design/sweep-distortion.md`) | P1 | ac | 7 |
-| ETC, Schroeder, T20/T30/EDT, C50/C80/D50 per band | P1 | ac | 7 |
+| ETC, Schroeder, T20/T30/EDT, C50/C80/D50 per band (done: `docs/design/room-metrics.md`) | P1 | ac | 7 |
 | STI / STIPA | P2 | new | later |
 
 ### 3.8 Beyond parity
@@ -562,7 +562,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); open — ASIO, ISO 3382 room metrics, spatial average, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); ISO 3382-1 room parameters per band from the sweep IR (`docs/design/room-metrics.md`); open — ASIO, spatial average, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
 transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,
@@ -570,7 +570,7 @@ mDNS; `docs/rigs/pupu.md`); Windows only as an MSI install in a VM with the simu
 (`docs/design/backlog.md`); macOS: the universal disk image installs and starts on a
 tester's Mac (microphone prompt shown), not yet measured with an audio interface. No
 GitHub release is published: installers are workflow artifacts of `release.yml` runs,
-unsigned. Protocol version 17, session format 8. CI (Linux, macOS, Windows) green again
+unsigned. Protocol version 18, session format 9. CI (Linux, macOS, Windows) green again
 since 9dc4274 (2026-10-05). The current macOS tester build (dev.9, 9dc4274) and its test
 guide are in `testing/macos/` (binaries git-ignored); open items in
 `docs/design/backlog.md` → *Performance and platforms*.

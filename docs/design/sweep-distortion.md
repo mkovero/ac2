@@ -2,7 +2,8 @@
 
 Status: implemented (`ac2_core::sweep`, `ir.capture`, `ac2 ir capture`, the app's sweep dialog
 and Distortion pane). Answers PLAN.md §3.7 "IR capture by ESS, deconvolution, harmonic split,
-gating" and §5.5; the ISO 3382 room parameters are separate work.
+gating" and §5.5; the ISO 3382-1 room parameters of the same IR are in
+`docs/design/room-metrics.md`.
 
 ## Stimulus
 

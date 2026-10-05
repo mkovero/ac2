@@ -135,6 +135,12 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+ISO 3382-1 room parameters from the sweep IR (2026-10-05, `docs/design/room-metrics.md`):
+- EDT / T20 / T30 / C50 / C80 / D50 per octave and one-third octave and broadband, band
+  filters run backwards, own trigger per band, Lundeby truncation with tail correction,
+  refusals (`noise`, `short`) instead of numbers; sweep `tail` option (1…20 s); `ac2 ir
+  metrics`, the table under the sweep IR view, CSV v3, PROTO 18, session format 9.
+
 Raw capture files (2026-10-05, `docs/design/raw-capture.md`, PROTO 17):
 - **Record and replay** → `rec.start/stop/list` write chosen inputs to f32 WAV (RF64 past
   4 GiB) + JSON sidecar (devices, channel roles, config timeline, every discontinuity at

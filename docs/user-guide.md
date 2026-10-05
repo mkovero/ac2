@@ -480,6 +480,18 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   floor, THD), the analysis facts and the impulse response; `ac2 trace import` of that file
   restores the sweep. The sweep's columns are uncorrected even when its mic has a curve:
   `ac2 trace mic <sweep> <mic>` applies it.
+- **Room parameters (ISO 3382-1):** every sweep also computes EDT, T20, T30, C50, C80 and
+  D50 of its impulse response per octave band (and one-third octave) and broadband
+  (`docs/design/room-metrics.md`). In the app, the sweep pane's impulse response
+  (**Shift+I**) shows the octave table under the plot when the pane is tall enough. A value
+  the measurement cannot support is a word, never a number: `noise` (the decay meets the
+  noise too soon: T30 needs 45 dB of decay range, T20 35 dB, EDT and C/D 20 dB), `short`
+  (the decay is too short for that band's filter), `—` (no decay, e.g. an anechoic
+  measurement); T30 with `*` is a curved decay (more than 10 % above T20). The silence after
+  the sweep must hold the room's decay: the dialog's **Silence after** (1, 2, 4, 8 s) or
+  `--tail 4s` on the CLI; a hall of 2 s wants 4 s. `ac2 ir metrics <sweep> [--third]
+  [--json]` prints the table; `ac2 ir capture` prints the octave table after its summary;
+  the CSV export carries them.
 - A distortion value is only shown where it is at least 6 dB above the noise in its window;
   elsewhere it reads `< −72.0 dB` (`< 0.0251 %`: the floor). Lower the floor with repeats or
   a longer sweep, not with more level than the speaker should take.

@@ -658,6 +658,106 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     Ok(())
 }
 
+/// Room parameters from the app: from an empty daemon on the simulated rig, the session
+/// dialog takes the rig's hall mic (in 3) as a second mic, a sweep plays to it with 2 s of
+/// silence after it, and the sweep's impulse response (Shift+I) carries the octave table
+/// with the hall's reverberation time (0.8 s), every string from `ac2_scene::room`.
+#[test]
+fn room_parameters_of_a_sweep_from_the_app() -> R {
+    use ac2_ui::forms::FieldId;
+    use ac2_ui::session_dialog::Row;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.synced()?;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until("the meters of the device", |s| {
+        matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some())
+            && s.input_meters().len() == 4
+    })?;
+    if let Overlay::Session(x) = &mut d.st.overlay {
+        x.focus_row(Row::Input(2));
+    }
+    d.key("M");
+    d.key("Enter");
+    d.until("the session", |s| s.open_session().is_some())?;
+    let open = d.st.open_session().cloned().ok_or("session")?;
+    assert_eq!(open.config.input_channels, vec![0, 1, 2]);
+    d.until("the measurement offer", |s| {
+        matches!(s.overlay, Overlay::Offer(_))
+    })?;
+    d.key("Escape");
+
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        assert!(f.set_channel(FieldId::Measurement, 2), "the hall mic");
+        f.set_text(FieldId::Level, "-20");
+        f.set_text(FieldId::From, "100 Hz");
+        f.set_text(FieldId::To, "10 kHz");
+        let at = |f: &ac2_ui::forms::Form, id| f.fields.iter().position(|x| x.id == id);
+        f.focus = at(f, FieldId::Duration).ok_or("duration")?;
+        f.cycle(-1);
+        f.focus = at(f, FieldId::Tail).ok_or("tail")?;
+        assert_eq!(f.fields[f.focus].display(), "1 s (small rooms)");
+        f.cycle(1);
+        assert_eq!(f.fields[f.focus].display(), "2 s");
+    }
+    d.key("Enter");
+    d.until("armed with the sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
+    })?;
+    d.key("Enter");
+    d.until("the sweep stored and shown", |s| {
+        s.sweep.run.is_none() && s.layout.focus == PaneKind::Distortion && s.shown_sweep().is_some()
+    })?;
+    d.key("Shift+I");
+    assert!(d.st.view.distortion.show_ir);
+    let theme = Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 1100.0,
+        height: 600.0,
+    };
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let ac2_ui::scenes::SweepPane::Ir(ir) = ac2_ui::scenes::sweep(&d.st, &theme, size, now) else {
+        return Err("the sweep pane does not show the impulse response".into());
+    };
+    let t = ir.room.as_ref().ok_or("no room table")?;
+    assert!(
+        t.caption
+            .starts_with("Room (ISO 3382-1) · octave bands · decay to "),
+        "{}",
+        t.caption
+    );
+    assert_eq!(t.bands, ["250", "500", "1k", "2k", "4k", "All"]);
+    let row = |p| t.rows.iter().find(|r| r.param == p).ok_or("row");
+    for p in [ac2_scene::room::Param::T20, ac2_scene::room::Param::T30] {
+        for c in &row(p)?.cells {
+            let v: f64 = c.text.trim_end_matches('*').parse()?;
+            assert!((v / 0.8 - 1.0).abs() < 0.1, "{} {}: {v}", p.name(), c.text);
+        }
+    }
+    // The table is drawn: its strings are in the scene.
+    let labels: Vec<&str> = ir
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|x| x.text.as_str()))
+        .collect();
+    assert!(labels.contains(&"T30 (s)") && labels.contains(&t.caption.as_str()));
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// From an empty daemon, using only the app: the session's inputs metered by name and role
 /// in the sidebar, then a set of two sweeps followed on the progress strip, sweep 1 of 2
 /// then 2 of 2, stopped from it: the output stops, the generator is disarmed and the run
