@@ -579,7 +579,9 @@ DSP, UI repaints only on visible change with per-pane rebuilds and a low-power G
 Measured on the fake rig: daemon 10.5 % → 2.4 % of a desktop core with TF + RTA + spectrum +
 SPL; UI with idle panes 3.3 → 0.2 cores under a software renderer. On pupu (i5-2415M,
 96 kHz): SPL + spectrum ≈ 14 % of a core, of which ≈ 4 % is JACK's own process thread.
-Not yet measured: §8.3 frame time on a real laptop iGPU, anything on a Pi.
+Not yet measured: §8.3 frame time on a real laptop iGPU, anything on Pi hardware. Pi 4 class
+so far in emulation only (2026-10-05): the aarch64 test suites pass under qemu-user, and a
+kiosk image (JACK, network-mode daemon, full-screen UI) boots in QEMU (`docs/design/backlog.md`).
 
 ### 9.1 1.0 release
 Phases 0–6: one clock domain, reliable dual-channel TF and RTA, delay finder, traces and

@@ -25,8 +25,22 @@ decision 4). Measured numbers: PLAN §9.0.
   about 33 ms on a desktop core, likely 150–250 ms on a Pi; `detect_period` is ~60 % of it.
 - **A weighting could reuse the C filter** (A = C + one more section): two biquads per
   sample saved on the SPL path.
-- **Pi 4 untested**: NEON speed of the RTA's 4-band groups and the f32 mic-curve FIR, the
-  V3D device limits, SD-card writes; needs a Pi rig (then an HW gate in PLAN).
+- **Pi 4 class: built and tested in emulation only** (2026-10-05, c59ef65). A Raspberry Pi
+  image (Arch Linux ARM, stock `linux-rpi`; JACK on the first USB interface, `ac2d
+  --listen`, `ac2-ui` full screen under the `cage` kiosk compositor, the UI self-paired over
+  CURVE) is built outside this repo, for a CM4 on a CM4IO and a Pi 4 B from SD. In
+  emulation: the aarch64 (cortex-a72) suites of ac2-core, -proto, -zmq, -traces, -scene,
+  ac2d, -cli and -client pass under qemu-user against the image's own libraries (711 passed,
+  0 failed, 3 ignored); in QEMU the image boots, a JACK session opens from the CLI and the
+  kiosk UI shows it. Still open, needs the board: NEON speed of the RTA's 4-band groups and
+  the f32 mic-curve FIR, V3D (v3dv) as the wgpu adapter and its frame time (§8.3), SD-card
+  writes, a real interface; then an HW gate in PLAN.
+- **`ac2-zmq`'s test binary does not link with GNU ld**: on its link line `-lsodium` comes
+  before the static `libzmq.a`, so ld drops it (`undefined reference to sodium_init`,
+  `crypto_box`, …). The release binaries link (their order differs). Hidden on x86_64 Linux,
+  where rustc links with rust-lld by default; seen cross-building for aarch64, and a native
+  build on a Pi uses GNU ld too. `build.rs` should emit the libraries in dependency order
+  (zmq, then sodium); rust-lld (`-fuse-ld=lld` with rustc's `gcc-ld`) works around it.
 
 ## Leq windows and limits (left after the first version, `docs/design/leq.md`)
 
