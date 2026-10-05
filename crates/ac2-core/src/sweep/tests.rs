@@ -32,6 +32,7 @@ fn spec(ess: EssConfig) -> SweepSpec {
         sample_rate: FS,
         max_order: DEFAULT_MAX_ORDER,
         gate_s: None,
+        tail_s: None,
         grid: LogGrid {
             ppo: 48,
             k_min: -240,
@@ -429,4 +430,79 @@ fn timing_follows_the_sweep() {
     assert!((long.pre_s / long.post_s - t.pre_s / t.post_s).abs() < 1e-9);
     assert!((db_to_percent(-40.0) - 1.0).abs() < 1e-12);
     assert!(is_valid(-40.0, -46.0) && !is_valid(-40.0, -45.0));
+}
+
+/// Linear convolution by FFT.
+fn convolve(x: &[f64], h: &[f64]) -> Vec<f64> {
+    let n = (x.len() + h.len()).next_power_of_two();
+    let (a, b) = (fft_forward(x, n), fft_forward(h, n));
+    let y = fft_inverse(a.iter().zip(&b).map(|(p, q)| p * q).collect(), n);
+    y[..x.len()].to_vec()
+}
+
+/// A reverberant room through the whole chain (sweep, loopback, deconvolution, averaging):
+/// the room parameters of the measured IR are those of the room's own IR, analysed
+/// directly, within 0.5 % (decay times per band; 3 % broadband, whose band the sweep
+/// limits) and 0.3 dB (C80: the onset moves by a sample with the band); the tail option
+/// lengthens the silence the IR is taken from.
+#[test]
+fn a_room_keeps_its_parameters_through_the_sweep() {
+    let t60 = 0.5;
+    let mut noise = Noise(11);
+    let room: Vec<f64> = (0..(0.9 * FS) as usize)
+        .map(|i| {
+            let t = i as f64 / FS;
+            let direct = if i == 0 { 3.0 } else { 0.0 };
+            direct + 0.05 * 10f64.powf(-3.0 * t / t60) * noise.gauss()
+        })
+        .collect();
+    // The truth needs time before the arrival as the measurement has: the band filters run
+    // backwards put the direct sound's band energy there.
+    let padded: Vec<f64> = std::iter::repeat_n(0.0, (0.1 * FS) as usize)
+        .chain(room.iter().copied())
+        .collect();
+    let truth = crate::room::analyse(&padded, FS, -0.1, (100.0, 8000.0));
+    let s = SweepSpec {
+        tail_s: Some(1.2),
+        ..spec(ess(50.0, 12_000.0, 2.0))
+    };
+    let t = SweepTiming::new(&s).expect("timing");
+    assert!((t.post_roll_s - 1.2).abs() < 1e-12);
+    let (reference, mic) = record(&s, 1, |x| convolve(x, &room), 1e-7, 5);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    assert!(r.room_end_s > 1.0 && r.room_end_s < 1.2, "{}", r.room_end_s);
+    let pairs = std::iter::once((&r.room.broadband, &truth.broadband))
+        .chain(r.room.octave.iter().filter_map(|m| {
+            truth
+                .octave
+                .iter()
+                .find(|x| x.centre_hz == m.centre_hz)
+                .map(|x| (m, x))
+        }))
+        .collect::<Vec<_>>();
+    assert!(pairs.len() >= 6, "{} bands", pairs.len());
+    for (got, want) in pairs {
+        let name = got.centre_hz.unwrap_or(0.0);
+        for (g, w) in [
+            (got.edt_s, want.edt_s),
+            (got.t20_s, want.t20_s),
+            (got.t30_s, want.t30_s),
+        ] {
+            let (g, w) = (g.expect("measured"), w.expect("truth"));
+            // Broadband differs a little by construction: the sweep excites 50 Hz–12 kHz.
+            let tol = if got.centre_hz.is_some() { 0.005 } else { 0.03 };
+            assert!((g / w - 1.0).abs() < tol, "{name} Hz: {g} vs {w}");
+        }
+        let (g, w) = (got.c80_db.expect("C80"), want.c80_db.expect("C80"));
+        assert!((g - w).abs() < 0.3, "{name} Hz C80: {g} vs {w}");
+        // The onset is the arrival (the direct sound), whatever the chain's latencies.
+        assert!(got.onset_s.abs() < 2e-3, "{name} Hz onset {}", got.onset_s);
+    }
+    assert!(matches!(
+        SweepTiming::new(&SweepSpec {
+            tail_s: Some(f64::NAN),
+            ..s
+        }),
+        Err(SweepError::BadTail)
+    ));
 }

@@ -615,6 +615,31 @@ fn design_band(
     last.expect("at least one order tried")
 }
 
+/// One band of `fraction` centred at `fm`, designed to run at the full rate `fs`: the
+/// bank's design without decimation (order 3 per side, raised near Nyquist until the
+/// class 1 mask holds). `None` when the band's upper edge is at or above Nyquist. For
+/// offline filtering of a whole record (room acoustics), where the bank's multirate saving
+/// buys nothing and its decimators' phase would only add delay.
+pub fn full_rate_band(fraction: BandFraction, fm: f64, fs: f64) -> Option<(BandInfo, Vec<Biquad>)> {
+    let (lower, upper) = fraction.edges(fm);
+    if !(fs.is_finite() && fs > 0.0) || upper >= 0.5 * fs {
+        return None;
+    }
+    let (order, sections, ok) =
+        design_band(&half_band_coefs(), fm, (lower, upper), fraction.b(), fs, 0);
+    Some((
+        BandInfo {
+            centre_hz: fm,
+            lower_hz: lower,
+            upper_hz: upper,
+            order,
+            meets_class1: ok,
+            decimation: 1,
+        },
+        sections,
+    ))
+}
+
 /// IEC 61260-1 fractional-octave filterbank. Accumulates the mean square of each band's
 /// output (band power in FS²) between reads.
 #[derive(Debug, Clone)]

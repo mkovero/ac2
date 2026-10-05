@@ -1,0 +1,165 @@
+{
+  "format": "ac2-golden",
+  "format_version": 1,
+  "name": "room_schroeder_octaves",
+  "description": "An impulse response (two exponential decays, a direct sound, background noise) through IEC 61260-1 octave-band Butterworth filters (order 3) run backwards in time; Schroeder integral from each band's -20 dB trigger to a fixed truncation point without correction; EDT/T20/T30 by numpy.polyfit over 0..-10, -5..-25, -5..-35 dB; C50/C80 by window-before-filtering from the broadband trigger.",
+  "generator": {
+    "script": "tools/refgen/generate.py",
+    "function": "gen_room_schroeder_octaves"
+  },
+  "versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.0"
+  },
+  "parameters": {
+    "fs": 48000.0,
+    "n": 48000,
+    "seed": 180499330,
+    "truncation_index": 43200,
+    "band_filter": "scipy.signal.butter(3, [fm/G^0.5, fm*G^0.5], btype='bandpass', fs=fs, output='sos'), sosfilt on the reversed IR[:end], reversed",
+    "onset": "first index with energy >= max * 10^(-20/10)",
+    "ratios": "energy of sosfilt(ir[start:k] + pad zeros) / energy of sosfilt(ir[k:end] + pad zeros), pad = ceil(20/B*fs)",
+    "edc_sampling": "every 48th sample (1 ms) of each band, bands concatenated"
+  },
+  "references": [
+    "ISO 3382-1:2009 (decay ranges, onset trigger, C50/C80/D50)",
+    "M. R. Schroeder, J. Acoust. Soc. Am. 37, 409-412 (1965)",
+    "F. Jacobsen, J. H. Rindel, J. Sound Vib. 117(1), 187-190 (1987)",
+    "scipy.signal.butter / sosfilt, numpy.polyfit"
+  ],
+  "scalars": {
+    "fs": 48000.0,
+    "truncation_index": 43200.0,
+    "broadband_onset_index": 960.0
+  },
+  "blob": {
+    "file": "room_schroeder_octaves.bin",
+    "nbytes": 441136,
+    "sha256": "096d1b7996c02f78f75fdad11eeb003735d5a51c1180972efb07f22c3365dbcb"
+  },
+  "arrays": [
+    {
+      "name": "ir",
+      "dtype": "f64",
+      "shape": [
+        48000
+      ],
+      "offset": 0,
+      "nbytes": 384000,
+      "unit": "FS",
+      "description": "impulse response (input)"
+    },
+    {
+      "name": "centres_hz",
+      "dtype": "f64",
+      "shape": [
+        8
+      ],
+      "offset": 384000,
+      "nbytes": 64,
+      "unit": "Hz",
+      "description": "octave mid-band frequencies"
+    },
+    {
+      "name": "edc_db_every_ms",
+      "dtype": "f64",
+      "shape": [
+        7094
+      ],
+      "offset": 384064,
+      "nbytes": 56752,
+      "unit": "dB",
+      "description": "Schroeder curve of each band from its onset, every 1 ms",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      }
+    },
+    {
+      "name": "edt_s",
+      "dtype": "f64",
+      "shape": [
+        8
+      ],
+      "offset": 440816,
+      "nbytes": 64,
+      "unit": "s",
+      "description": "edt_s per band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-07
+      },
+      "axis": "centres_hz"
+    },
+    {
+      "name": "t20_s",
+      "dtype": "f64",
+      "shape": [
+        8
+      ],
+      "offset": 440880,
+      "nbytes": 64,
+      "unit": "s",
+      "description": "t20_s per band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-07
+      },
+      "axis": "centres_hz"
+    },
+    {
+      "name": "t30_s",
+      "dtype": "f64",
+      "shape": [
+        8
+      ],
+      "offset": 440944,
+      "nbytes": 64,
+      "unit": "s",
+      "description": "t30_s per band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 0.0,
+        "rel": 1e-07
+      },
+      "axis": "centres_hz"
+    },
+    {
+      "name": "c50_db",
+      "dtype": "f64",
+      "shape": [
+        8
+      ],
+      "offset": 441008,
+      "nbytes": 64,
+      "unit": "dB",
+      "description": "c50_db per band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      },
+      "axis": "centres_hz"
+    },
+    {
+      "name": "c80_db",
+      "dtype": "f64",
+      "shape": [
+        8
+      ],
+      "offset": 441072,
+      "nbytes": 64,
+      "unit": "dB",
+      "description": "c80_db per band",
+      "tolerance": {
+        "kind": "linear",
+        "abs": 1e-06,
+        "rel": 0.0
+      },
+      "axis": "centres_hz"
+    }
+  ]
+}

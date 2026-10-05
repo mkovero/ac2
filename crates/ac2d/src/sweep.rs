@@ -51,6 +51,7 @@ pub(crate) fn spec(
         sample_rate: fs,
         max_order: DEFAULT_MAX_ORDER,
         gate_s: gate.map(|g| g.0),
+        tail_s: None,
         grid: LogGrid::covering(PPO, ess.start_hz, ess.end_hz),
     };
     let timing = SweepTiming::new(&spec).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;

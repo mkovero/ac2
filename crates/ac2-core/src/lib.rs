@@ -1,5 +1,5 @@
 //! Pure DSP and acoustics math: MTW transfer function, smoothing, averaging, delay finder,
-//! spectrum, RTA, SPL, generator. No I/O, no threads.
+//! spectrum, RTA, SPL, generator, sweep analysis and room acoustics. No I/O, no threads.
 #![forbid(unsafe_code)]
 
 pub mod grid;
@@ -15,6 +15,7 @@ pub mod loopback;
 pub mod mic_curve;
 pub mod mtw;
 pub mod protection;
+pub mod room;
 pub mod rta;
 pub mod smoothing;
 pub mod spectrum;

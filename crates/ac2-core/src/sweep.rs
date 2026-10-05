@@ -27,6 +27,13 @@
 //! `f` is `P_k(k·f) / P_1(f)`; THD is the power sum of the orders in band over `P_1(f)`. The
 //! noise floor is the same window cut from the deconvolved silence after the response; a
 //! point counts when it is [`FLOOR_MARGIN_DB`] above that floor ([`is_valid`]).
+//!
+//! # Room parameters
+//!
+//! The averaged IR from just after H2's window to the end of the silence after the sweep
+//! goes through [`crate::room::analyse`] (ISO 3382-1 per band). The span ends there because
+//! a lag beyond the silence would pair the late part of the sweep with samples the record
+//! does not have: the deconvolved noise would thin out with the lag and read as decay.
 
 use std::f64::consts::{LN_2, PI, TAU};
 
@@ -36,6 +43,7 @@ use realfft::RealFftPlanner;
 use crate::generator::{EssConfig, EssInverse, EssPlan, GeneratorError, dbfs_to_rms};
 use crate::grid::LogGrid;
 use crate::ir_view::ImpulseResponse;
+use crate::room::RoomAnalysis;
 
 /// Highest harmonic order analysed by default (H2 … H5).
 pub const DEFAULT_MAX_ORDER: u8 = 5;
@@ -62,6 +70,9 @@ pub const MAX_WINDOW_S: f64 = 0.1;
 pub const PRE_ROLL_S: f64 = 0.1;
 /// Shortest silence after each sweep, seconds.
 pub const MIN_POST_ROLL_S: f64 = 1.0;
+/// Longest silence after each sweep the analysis accepts, seconds (a cathedral's decay with
+/// room for its noise).
+pub const MAX_TAIL_S: f64 = 20.0;
 /// Harmonics are analysed up to this fraction of the sample rate (anti-alias filters roll
 /// off above it).
 pub const HARMONIC_FS_FRACTION: f64 = 0.45;
@@ -75,6 +86,8 @@ const REGULARISATION: f64 = 1e-6;
 const EARLIEST_ARRIVAL_S: f64 = 0.02;
 /// The noise window ends this long before the end of the post-roll.
 const NOISE_MARGIN_S: f64 = 0.01;
+/// The room parameters' IR starts at most this long before the arrival, seconds.
+const ROOM_PRE_S: f64 = 0.1;
 /// Samples at or above this magnitude count as clipped.
 const CLIP: f64 = 0.999;
 
@@ -91,6 +104,9 @@ pub struct SweepSpec {
     pub max_order: u8,
     /// Linear-response gate after the arrival, seconds; `None` = up to the noise window.
     pub gate_s: Option<f64>,
+    /// Silence recorded after each sweep, seconds (at least [`MIN_POST_ROLL_S`]); `None` =
+    /// the shortest the analysis needs. The room's decay and its noise must fit in it.
+    pub tail_s: Option<f64>,
     /// Grid of the reported curves.
     pub grid: LogGrid,
 }
@@ -104,6 +120,8 @@ pub enum SweepError {
     BadOrder,
     /// The gate is not positive and finite.
     BadGate,
+    /// The tail is not finite or longer than [`MAX_TAIL_S`].
+    BadTail,
     /// No repeat, or the two inputs differ in length.
     BadRecording,
     /// The reference carries no sweep (or a much weaker one than emitted).
@@ -129,6 +147,10 @@ impl std::fmt::Display for SweepError {
             Self::Sweep(e) => write!(f, "sweep: {e}"),
             Self::BadOrder => write!(f, "harmonic order must be 2 … {MAX_ORDER}"),
             Self::BadGate => write!(f, "the gate must be positive"),
+            Self::BadTail => write!(
+                f,
+                "the silence after the sweep must be at most {MAX_TAIL_S} s"
+            ),
             Self::BadRecording => write!(f, "the recording is empty or its inputs differ"),
             Self::NoReference { level_db } => write!(
                 f,
@@ -175,6 +197,12 @@ impl SweepTiming {
         if spec.gate_s.is_some_and(|g| !(g.is_finite() && g > 0.0)) {
             return Err(SweepError::BadGate);
         }
+        if spec
+            .tail_s
+            .is_some_and(|t| !(t.is_finite() && t <= MAX_TAIL_S))
+        {
+            return Err(SweepError::BadTail);
+        }
         if !spec.level_dbfs.is_finite() {
             return Err(SweepError::Sweep(GeneratorError::NonFiniteLevel));
         }
@@ -187,7 +215,9 @@ impl SweepTiming {
         // grows with L: capping the window lets a longer sweep lower the floor.
         let shrink = (MAX_WINDOW_S / (pre_s + post_s)).min(1.0);
         let (pre_s, post_s) = (pre_s * shrink, post_s * shrink);
-        let post_roll_s = MIN_POST_ROLL_S.max(4.0 * (pre_s + post_s));
+        let post_roll_s = MIN_POST_ROLL_S
+            .max(4.0 * (pre_s + post_s))
+            .max(spec.tail_s.unwrap_or(0.0));
         Ok(Self {
             plan,
             pre_s,
@@ -281,6 +311,10 @@ pub struct SweepAnalysis {
     pub ir_dt_s: f64,
     /// A sample of either input reached full scale.
     pub clipped: bool,
+    /// ISO 3382-1 room parameters of the IR (times re the arrival).
+    pub room: RoomAnalysis,
+    /// End of the IR the room parameters were computed from, s re the arrival.
+    pub room_end_s: f64,
 }
 
 /// Whether a distortion point counts: [`FLOOR_MARGIN_DB`] above its noise floor.
@@ -643,6 +677,17 @@ pub fn analyse_recording(
         })
         .collect();
 
+    // Room parameters: from half-way to H2's impulse (at most 100 ms before the arrival, room
+    // for the band filters' pre-ringing) to the end of the silence.
+    let room_start = d - ((0.5 * l * LN_2).min(ROOM_PRE_S) * fs).round() as i64;
+    let room_end = (((timing.post_roll_s - NOISE_MARGIN_S) * fs).floor() as i64).max(d + 2);
+    let room_ir: Vec<f64> = (room_start..room_end).map(at).collect();
+    let excited = (
+        f1 * (spec.ess.fade_in_s / l).exp(),
+        f2 * (-spec.ess.fade_out_s / l).exp(),
+    );
+    let room = crate::room::analyse(&room_ir, fs, (room_start - d) as f64 / fs, excited);
+
     Ok(SweepAnalysis {
         sample_rate: fs,
         rate_s: l,
@@ -665,6 +710,8 @@ pub fn analyse_recording(
         ir_t0_s: (ir_start - d) as f64 / fs,
         ir_dt_s: bucket as f64 / fs,
         clipped,
+        room,
+        room_end_s: (room_end - d) as f64 / fs,
     })
 }
 
