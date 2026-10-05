@@ -8,6 +8,15 @@ the commit when it lands.
 Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SPL (PLAN
 decision 4). Measured numbers: PLAN §9.0.
 
+- **ac2d holds 666 MB with four transfer measurements** (54 MB with SPL + spectrum only; the
+  phase 1 run on pupu, `docs/rigs/pupu.md`). Stable over the hour, so not a leak, but large
+  for a Pi 4 class daemon: account for the MTW ladders' buffers (and the 65536-point
+  spectrum) per job.
+- **A device that stops delivering is not reported or recovered**: after an FF400 reset jackd
+  hung, ac2 got no audio and no error (the app only said STALE); when jackd was stopped ac2d
+  closed the session and tried one reopen. Wanted: an "audio stopped" state when blocks stop
+  arriving while a session is open, and reopening with backoff until the device is back
+  (`docs/rigs/pupu.md`, *Wiring and FF400 reset recovery*).
 - **Audio continuity is not in `ac2 status`**: xruns and capture discontinuities are only
   logged by the daemon (`capture discontinuity at sample …`); a long-run check has to grep the
   log. Counters since the session opened (and the last one's time) in `status` / `--json`

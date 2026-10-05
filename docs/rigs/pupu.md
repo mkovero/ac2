@@ -242,3 +242,23 @@ In 1 is the MM1 (phantom, mic gain 20); ins 3–4 are empty. Session:
    writes"; not `ff400.sh`, which forces phantom off) and verify by emission: the table above,
    mic room noise ≈ −67 dBFS RMS.
 
+
+## Phase 1 hardware run (2026-10-05, ac2d b97a2c9)
+
+JACK at the gate's **48 kHz / 128 frames** (3 periods), session 8 in / 6 out, pink noise
+−63 dBFS RMS on outs 2–6 (the electrical loops; out 1 unconnected — −50 dBFS RMS was refused
+by the peak ceiling), four transfer measurements against the in 2 loopback plus the running SPL
+meter and a 65536-point spectrum. Sampled every 5 min for 65 min (noise ran 92 min):
+
+- **0 xruns** (`jackd` log), **0 capture discontinuities** (ac2d log).
+- CPU (one core of the i5-2415M): ac2d 28–36 %, jackd 6–9 %.
+- ac2d anonymous memory 666 MB, growing 16 kB per 5 min (≈ 55 B/s: the per-second SPL log
+  held in memory, bounded by its 48 h retention). The 666 MB against 54 MB at 96 kHz with
+  SPL + spectrum only is the four transfer ladders' state — worth a look (backlog).
+- Results against the expected answer (ref in 2 reads +2.4 dB, rear ins −6 dB → −8.4 dB):
+  lines 6/7/8 −8.38…−8.65 dB, flat within 0.2 dB 31 Hz–20 kHz, coherence ≥ 0.9987, delay
+  0 samples; phase 0° mid-band, −7.7° at 31 Hz (different input coupling corners). The Xone
+  path: −17.4 dB at 1 kHz (expected −17.2), rising +1.8 dB to 20 kHz with −22° there, and
+  coherence down to 0.94 (0.98 at 50 Hz: mains hum in the mixer path).
+- Afterwards JACK went back to 96 kHz / 256 and the session reopened; the FF400 kept its
+  settings over both JACK restarts (mic alive, tone levels unchanged at 48 kHz).

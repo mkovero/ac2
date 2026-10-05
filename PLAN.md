@@ -552,7 +552,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | # | CI criteria | HW criteria |
 |---|---|---|
 | 0 | done | duplex spike on real mac/win interface — **open** |
-| 1 | done (overflow → discontinuity, never a channel shift) | 8 in / 2 out, 1 h, per OS — **open** (Linux used on a real rig, pupu, since 2026-10-03; no formal 1 h run yet) |
+| 1 | done (overflow → discontinuity, never a channel shift) | 8 in / 2 out, 1 h, per OS — **done on Linux** (pupu, 48 kHz / 128, 4 TF jobs on electrical loops, 0 xruns in 65 min; `docs/rigs/pupu.md`); macOS, Windows open |
 | 2 | done (refgen + Q1 scenario acceptance) | — |
 | 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **done** on Linux (`docs/rigs/pupu.md`, network test) |
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
