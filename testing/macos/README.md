@@ -10,7 +10,7 @@ stability. Install and first start (microphone prompt) were confirmed on 2026-10
 The build is a universal disk image (Apple silicon and Intel, macOS 11 or newer), unsigned
 for now.
 
-1. The disk image `ac2-0.0.0-dev.8-macos-universal.dmg` (main f039243, built
+1. The disk image `ac2-0.0.0-dev.9-macos-universal.dmg` (main 9dc4274, built
    2026-10-05) is in this directory, with `SHA256SUMS` beside it (check with
    `shasum -a 256 -c SHA256SUMS --ignore-missing`). The `.zip` beside it holds the same
    programs unpacked, for use without the disk image.
