@@ -186,10 +186,11 @@ fn live(app: &App) -> bool {
 
 fn snapshot_options() -> SnapshotOptions {
     // lavapipe is bit-exact run to run; the thresholds only absorb other rasterizers'
-    // edge pixels (Metal differs in 1–2 pixels of 1280×800).
+    // edge pixels (Metal differs in 1–2 pixels of 1280×800, WARP in up to 4 at the ends of
+    // hard-edged grid rectangles).
     SnapshotOptions::new()
         .threshold(1.0)
-        .max_failed_pixels(egui_kittest::OsThreshold::new(0).macos(16))
+        .max_failed_pixels(egui_kittest::OsThreshold::new(0).macos(16).windows(16))
 }
 
 #[test]

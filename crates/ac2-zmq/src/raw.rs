@@ -37,6 +37,7 @@ pub(crate) const ZMQ_SUBSCRIBE: c_int = 6;
 pub(crate) const ZMQ_UNSUBSCRIBE: c_int = 7;
 pub(crate) const ZMQ_SNDBUF: c_int = 11;
 pub(crate) const ZMQ_RCVBUF: c_int = 12;
+#[cfg(unix)]
 pub(crate) const ZMQ_FD: c_int = 14;
 pub(crate) const ZMQ_EVENTS: c_int = 15;
 pub(crate) const ZMQ_LINGER: c_int = 17;

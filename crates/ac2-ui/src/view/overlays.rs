@@ -805,6 +805,8 @@ mod tests {
 
     #[test]
     fn help_lists_every_binding_once() {
+        // Which opposite steps fit the key column depends on how keys are named; pin the PC way.
+        crate::keys::set_label_style(crate::keys::LabelStyle::Pc);
         let k = Keymap::default();
         let rows = help_rows(&k, Scope::Transfer);
         let binds = rows

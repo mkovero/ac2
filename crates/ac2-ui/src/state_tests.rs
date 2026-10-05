@@ -122,6 +122,8 @@ struct T {
 
 impl T {
     fn new() -> Self {
+        // Texts the tests compare name keys the PC way on every OS (macOS would print `⇧H`).
+        crate::keys::set_label_style(crate::keys::LabelStyle::Pc);
         let mut t = Self {
             st: AppState::default(),
             keys: Keymap::default(),
