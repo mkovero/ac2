@@ -800,5 +800,90 @@ pub fn judge_window(
     })
 }
 
+/// A judged state is lowered at once only when its level is this far under the state's
+/// boundary (the limit for over, the limit less the margin for near). A full window's Leq
+/// moves by about `4.34 · (10^(Δ/10) − 1) / N` dB in a second whose level is Δ dB off the
+/// window's: a 6 dB louder second moves a 1 min window 0.22 dB, a 15 min one 0.015 dB. Three
+/// display steps (0.3 dB) are more than one loud second can undo for any window of a minute
+/// or more, so a window let go this far below does not come straight back.
+pub const RELEASE_DB: f64 = 0.3;
+
+/// …or when it has stayed under the boundary this many seconds in a row. A long window
+/// drifting across its limit dithers between the two 0.1 dB steps either side for a few
+/// seconds (its per-second movement is far below the display step, a few hundredths of a
+/// dB for 15 min); 10 s outlasts that, and is short against every window a rule defines
+/// (15 min and up: about 1 %), so "recovered" is never late by more than a glance.
+pub const RELEASE_HOLD_S: u32 = 10;
+
+fn rank(j: Judgement) -> u8 {
+    match j {
+        Judgement::Ok => 0,
+        Judgement::Near => 1,
+        Judgement::Over => 2,
+    }
+}
+
+/// A window's judgement with hysteresis, one call per second: a state rises at once (an
+/// alarm is never late) and is lowered only when the level is [`RELEASE_DB`] under the
+/// state's boundary, or has been under it for [`RELEASE_HOLD_S`] seconds in a row. A window
+/// hovering at its limit thus reports at most one over / recovered pair per hold, instead of
+/// one every time its rounded Leq crosses the limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Latch {
+    held: Option<Judgement>,
+    /// Seconds in a row the judgement has been below the held one.
+    under: u32,
+}
+
+impl Latch {
+    /// Holding `j` (a job that carries on from a state another run reported).
+    pub fn holding(j: Option<Judgement>) -> Self {
+        Self { held: j, under: 0 }
+    }
+
+    /// The state held.
+    pub fn held(&self) -> Option<Judgement> {
+        self.held
+    }
+
+    /// This second's verdict `raw` ([`judge_window`]) on a window whose Leq is `leq_db`
+    /// (the unit of `limit_db`), against `limit_db` with warn `margin_db`: the verdict with
+    /// the held state. A lowered state not yet released is reported as held (not on course).
+    pub fn judge(
+        &mut self,
+        raw: Option<Verdict>,
+        leq_db: f64,
+        limit_db: f64,
+        margin_db: f64,
+    ) -> Option<Verdict> {
+        let Some(v) = raw else {
+            *self = Self::default();
+            return None;
+        };
+        let held = match self.held {
+            Some(h) if rank(v.judgement) < rank(h) => h,
+            _ => {
+                *self = Self::holding(Some(v.judgement));
+                return Some(v);
+            }
+        };
+        let boundary = match held {
+            Judgement::Over => limit_db,
+            _ => limit_db - margin_db.max(0.0),
+        };
+        self.under += 1;
+        let far = leq_db.is_finite() && round_tenth(leq_db) <= boundary - RELEASE_DB + 1e-9;
+        let far = far || leq_db == f64::NEG_INFINITY;
+        if far || self.under >= RELEASE_HOLD_S {
+            *self = Self::holding(Some(v.judgement));
+            return Some(v);
+        }
+        Some(Verdict {
+            judgement: held,
+            on_course: false,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests;

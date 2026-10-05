@@ -3,7 +3,7 @@
 //! connected (an app restarted, another machine) gets what the `leq` frames it missed
 //! carried (`docs/design/leq.md`, *The history strip*).
 
-use ac2_core::leq::{Judgement, LogReplay, WindowSpec, judge_window};
+use ac2_core::leq::{Judgement, Latch, LogReplay, WindowSpec, judge_window};
 use ac2_proto::model::{LeqConfig, LevelScale, SplHistory, SplLogRow};
 use ac2_proto::units::{MeasId, WallNs};
 
@@ -29,7 +29,9 @@ pub(crate) fn rows_needed(cfg: &LeqConfig, seconds: u32) -> usize {
 /// log, oldest first; `from_log_start` when the first of them is the log's first row), as
 /// the `leq` frames carried them: the Leq in the meter's unit then (dB SPL with the row's
 /// sensitivity, or dBFS) as f32, and whether the window was over its limit, judged as the
-/// job judges (a filling window on its budget). A second's time is its end; a second
+/// job judges (a filling window on its budget, with the job's hysteresis: the latches run
+/// over every row given, so begun part way through the log a state the job held from
+/// before the first row can be released up to `RELEASE_HOLD_S` seconds early). A second's time is its end; a second
 /// without a row gets none (no frame was sent for it). Seconds before the replay is settled
 /// (begun part way through the log, the longest window not yet holding only replayed rows)
 /// are left out, as are those before the last change of unit and those more than `seconds`
@@ -60,12 +62,37 @@ pub(crate) fn history(
         over: vec![Vec::new(); n],
     };
     let mut scale = None;
+    let mut latches = vec![Latch::default(); n];
     for r in rows {
         replay.push(r.start.0, row_second(r));
+        let offset = r.sensitivity.map(|s| s.0);
+        let windows = replay.windows();
+        let over: Vec<bool> = cfg
+            .windows
+            .iter()
+            .zip(&mut latches)
+            .enumerate()
+            .map(|(i, (w, latch))| match (w.limit, offset) {
+                (Some(limit), Some(o)) => {
+                    let v = windows.value(i);
+                    latch
+                        .judge(
+                            judge_window(&v, o, limit.0, w.warn_margin.0),
+                            v.leq_dbfs + o,
+                            limit.0,
+                            w.warn_margin.0,
+                        )
+                        .is_some_and(|x| x.judgement == Judgement::Over)
+                }
+                _ => {
+                    *latch = Latch::default();
+                    false
+                }
+            })
+            .collect();
         if !replay.settled() {
             continue;
         }
-        let offset = r.sensitivity.map(|s| s.0);
         let s = if offset.is_some() {
             LevelScale::DbSpl
         } else {
@@ -79,14 +106,8 @@ pub(crate) fn history(
             scale = Some(s);
         }
         h.at.push(WallNs(r.start.0 + NS));
-        let windows = replay.windows();
-        for (i, w) in cfg.windows.iter().enumerate() {
+        for (i, over) in over.into_iter().enumerate() {
             let v = windows.value(i);
-            let over = match (w.limit, offset) {
-                (Some(limit), Some(o)) => judge_window(&v, o, limit.0, w.warn_margin.0)
-                    .is_some_and(|x| x.judgement == Judgement::Over),
-                _ => false,
-            };
             // As the job puts it in the frame: f64 levels, sent as f32.
             h.leq[i].push((v.leq_dbfs + offset.unwrap_or(0.0)) as f32);
             h.over[i].push(over);
@@ -176,6 +197,7 @@ mod tests {
             })
             .collect();
         let mut ring = RollingLeq::new(&specs, 30);
+        let mut latches = vec![Latch::default(); cfg.windows.len()];
         let mut out = Vec::new();
         for (i, r) in rows.iter().enumerate() {
             let step = (i > 0).then(|| (r.start.0 - rows[i - 1].start.0 + NS / 2) / NS);
@@ -197,10 +219,17 @@ mod tests {
                 .windows
                 .iter()
                 .enumerate()
-                .map(|(k, w)| {
+                .zip(&mut latches)
+                .map(|((k, w), latch)| {
                     let v = ring.value(k);
                     let over = w.limit.is_some_and(|l| {
-                        judge_window(&v, o, l.0, w.warn_margin.0)
+                        latch
+                            .judge(
+                                judge_window(&v, o, l.0, w.warn_margin.0),
+                                v.leq_dbfs + o,
+                                l.0,
+                                w.warn_margin.0,
+                            )
                             .is_some_and(|j| j.judgement == Judgement::Over)
                     });
                     ((v.leq_dbfs + o) as f32, over)

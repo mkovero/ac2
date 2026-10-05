@@ -103,7 +103,8 @@ or input counts, and the tile says so; an electrical calibration counts too, and
 names it with its uncertainty, `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB`,
 `q7-calibration.md` §11). Uncalibrated meters show dBFS values, "not
 calibrated", and no state. With limit `L` and margin `μ`, at the displayed 0.1 dB
-resolution (so the colour never disagrees with the number), a full window is
+resolution (so the colour does not disagree with the number, but for the hysteresis on
+the way down, *Hysteresis*), a full window is
 
     over  ⇔ round₁(Leq) > L        near ⇔ L − μ < round₁(Leq) ≤ L        else ok
 
@@ -185,8 +186,37 @@ for what it holds for would compete with it.
 
 State changes go into the meter's `spl_log` entity: each window's state with the time it
 began, and an alarm list (window, over / recovered, time, Leq, limit; newest 100). The
-daemon logs each over and recovery. Clients toast them. There is no hysteresis beyond the
-0.1 dB resolution: a window that hovers on its limit reports each crossing.
+daemon logs each over and recovery. Clients toast them.
+
+## Hysteresis
+
+Judged at 0.1 dB alone, a window hovering at its limit would turn over / recovered every
+time its rounded Leq crossed it: a 15 min window drifting through its limit moves a few
+hundredths of a dB a second and dithers between the two 0.1 dB steps either side for
+seconds. So a state **rises at once** (an alarm, an amber column, never late) and is
+**lowered** only when
+
+    round₁(Leq) ≤ boundary − 0.3 dB        or        below the boundary 10 s in a row
+
+with the boundary the limit for over and the limit less the margin for near
+(`ac2_core::leq::Latch`, `RELEASE_DB`, `RELEASE_HOLD_S`). The numbers:
+
+- **0.3 dB.** A second whose level is Δ dB off a full N-second window's moves its Leq by
+  about `4.34 · (10^(Δ/10) − 1) / N` dB: a 6 dB louder second moves a 1 min window 0.22 dB,
+  a 15 min one 0.015 dB. Three display steps are more than one loud second can undo for
+  any window of a minute or more, so a window let go that far below does not come straight
+  back.
+- **10 s.** Longer than the dithering of a long window crossing its limit (its per-second
+  movement is far below the 0.1 dB step), and short against every window a rule defines (15
+  min and up: about 1 %), so "recovered" is late by at most a glance. A hovering window
+  reports at most one over / recovered pair per 10 s instead of one per crossing.
+
+While a lowered state is pending (the Leq already at or under the limit, within 0.3 dB, for
+less than 10 s) the window still reads OVER: the state can lag the number by at most those
+10 s on the way down, never on the way up. A filling window over its budget is over until
+full anyway (*Judging a filling window*). A job that restarts carries the states on from
+the `spl_log` entity (no recovery reported just because the job restarted); the history
+replay (`spl.history_get`) runs the same latches over the rows it reads.
 
 ## Where it shows
 

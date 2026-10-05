@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use ac2_core::leq::{Headroom, Judgement, RollingLeq, Second, WindowSpec, judge_window};
+use ac2_core::leq::{Headroom, Judgement, Latch, RollingLeq, Second, WindowSpec, judge_window};
 use ac2_core::mic_curve::Correction;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
@@ -71,6 +71,8 @@ struct LeqWindows {
     /// Wall clock of `next` (ns), from the newest block.
     next_wall: u64,
     judgements: Vec<LeqJudgement>,
+    /// Per window: the judgement with hysteresis (`ac2_core::leq::Latch`).
+    latches: Vec<Latch>,
     /// Per window: filling and on course to end over its limit (judged near).
     on_course: Vec<bool>,
     /// The log's epoch the windows and judgements belong to.
@@ -86,6 +88,17 @@ fn same_curve(a: Option<&Arc<Correction>>, b: Option<&Arc<Correction>>) -> bool 
         (Some(a), Some(b)) => Arc::ptr_eq(a, b) || **a == **b,
         _ => false,
     }
+}
+
+/// A latch holding what the `spl_log` entity says a window's state is, so a restarted job
+/// carries the hysteresis on rather than reporting a recovery at once.
+fn latch_of(j: LeqJudgement) -> Latch {
+    Latch::holding(match j {
+        LeqJudgement::Ok => Some(Judgement::Ok),
+        LeqJudgement::Near => Some(Judgement::Near),
+        LeqJudgement::Over => Some(Judgement::Over),
+        LeqJudgement::NoLimit | LeqJudgement::NotCalibrated => None,
+    })
 }
 
 fn specs(cfg: &LeqConfig) -> Vec<WindowSpec> {
@@ -126,6 +139,7 @@ impl LeqWindows {
             next: 0,
             next_wall: 0,
             on_course: vec![false; judgements.len()],
+            latches: judgements.iter().map(|j| latch_of(*j)).collect(),
             judgements,
             epoch,
             done: Vec::with_capacity(4),
@@ -157,6 +171,7 @@ impl LeqWindows {
                     .unwrap_or(LeqJudgement::NoLimit)
             })
             .collect();
+        self.latches = self.judgements.iter().map(|j| latch_of(*j)).collect();
         self.on_course = vec![false; self.judgements.len()];
         self.ring = ring_for(&self.cfg);
         if let Some(start) = self.second_start {
@@ -286,6 +301,7 @@ impl Spl {
                     .iter()
                     .map(|w| leq_log::initial_judgement(w, calibrated))
                     .collect();
+                self.leq.latches = vec![Latch::default(); self.leq.judgements.len()];
                 self.leq.on_course = vec![false; self.leq.judgements.len()];
             }
             self.leq.ring.push(*s);
@@ -307,9 +323,18 @@ impl Spl {
         let mut changed = false;
         for (i, w) in self.leq.cfg.windows.iter().enumerate() {
             let v = self.leq.ring.value(i);
+            let latch = &mut self.leq.latches[i];
             let verdict = match (w.limit, offset) {
-                (Some(limit), Some(o)) => judge_window(&v, o, limit.0, w.warn_margin.0),
-                _ => None,
+                (Some(limit), Some(o)) => latch.judge(
+                    judge_window(&v, o, limit.0, w.warn_margin.0),
+                    v.leq_dbfs + o,
+                    limit.0,
+                    w.warn_margin.0,
+                ),
+                _ => {
+                    *latch = Latch::default();
+                    None
+                }
             };
             self.leq.on_course[i] = verdict.is_some_and(|v| v.on_course);
             let j = match (w.limit, offset) {

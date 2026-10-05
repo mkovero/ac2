@@ -858,3 +858,75 @@ fn replay_from_the_middle_settles_after_the_longest_window() {
     let at = settled_at.expect("settles");
     assert!(at - from <= 300, "{at}");
 }
+
+/// One second through a latch on a full window at `leq` against a 100 dB limit with a
+/// 3 dB margin.
+fn latch_step(l: &mut Latch, leq: f64) -> Judgement {
+    let v = WindowValue {
+        leq_dbfs: leq,
+        elapsed: 60,
+        measured: 60.0,
+        energy: mean_square(leq) * 60.0,
+        seconds: 60,
+    };
+    l.judge(judge_window(&v, 0.0, 100.0, 3.0), leq, 100.0, 3.0)
+        .expect("a value")
+        .judgement
+}
+
+/// A window dithering around its limit (100.0 / 100.1 shown) goes over once and stays
+/// over; without hysteresis it would toggle every second.
+#[test]
+fn latch_holds_a_window_hovering_at_its_limit() {
+    let mut l = Latch::default();
+    let seq: Vec<f64> = (0..60)
+        .map(|k| if k % 2 == 0 { 100.06 } else { 99.98 })
+        .collect();
+    let states: Vec<Judgement> = seq.iter().map(|&x| latch_step(&mut l, x)).collect();
+    assert!(states.iter().all(|s| *s == Judgement::Over), "{states:?}");
+    let raw_toggles = seq
+        .windows(2)
+        .filter(|p| judge(p[0], 100.0, 3.0) != judge(p[1], 100.0, 3.0))
+        .count();
+    assert_eq!(
+        raw_toggles, 59,
+        "the unlatched judgement toggles every second"
+    );
+}
+
+/// Under the limit but within 0.3 dB: released after 10 s in a row; a second back over
+/// within those restarts the count. 0.3 dB under (99.7 shown): released at once.
+#[test]
+fn latch_releases_after_the_hold_or_far_enough_below() {
+    let mut l = Latch::default();
+    assert_eq!(latch_step(&mut l, 100.3), Judgement::Over);
+    for k in 1..RELEASE_HOLD_S {
+        assert_eq!(latch_step(&mut l, 99.9), Judgement::Over, "second {k}");
+    }
+    assert_eq!(
+        latch_step(&mut l, 99.9),
+        Judgement::Near,
+        "the 10th second under"
+    );
+    // Over again at once; then 9 s under, one over, and the count starts again.
+    assert_eq!(latch_step(&mut l, 100.1), Judgement::Over);
+    for _ in 0..9 {
+        assert_eq!(latch_step(&mut l, 99.9), Judgement::Over);
+    }
+    assert_eq!(latch_step(&mut l, 100.1), Judgement::Over);
+    for _ in 0..9 {
+        assert_eq!(latch_step(&mut l, 99.9), Judgement::Over);
+    }
+    // 99.7 shown is RELEASE_DB under: released at once, to what it is now.
+    assert_eq!(latch_step(&mut l, 99.7), Judgement::Near);
+    // Near lowers to ok the same way against the margin's boundary (97.0).
+    assert_eq!(latch_step(&mut l, 96.9), Judgement::Near);
+    assert_eq!(latch_step(&mut l, 96.7), Judgement::Ok);
+    // Rising is never delayed.
+    assert_eq!(latch_step(&mut l, 97.1), Judgement::Near);
+    assert_eq!(latch_step(&mut l, 100.1), Judgement::Over);
+    // A latch picked up from a reported state holds it the same way.
+    let mut l = Latch::holding(Some(Judgement::Over));
+    assert_eq!(latch_step(&mut l, 99.95), Judgement::Over);
+    assert_eq!(l.held(), Some(Judgement::Over));
+}
