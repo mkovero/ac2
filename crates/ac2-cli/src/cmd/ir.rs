@@ -220,7 +220,7 @@ async fn foreground(
                     let r = c
                         .call(Command::IrCapture {
                             lease_token: lease.token(),
-                            request: req.clone(),
+                            request: Box::new(req.clone()),
                             name: name.clone(),
                         })
                         .await

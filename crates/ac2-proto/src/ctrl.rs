@@ -457,8 +457,8 @@ pub enum Command {
     IrCapture {
         /// Lease.
         lease_token: LeaseToken,
-        /// What to play and record.
-        request: SweepRequest,
+        /// What to play and record (boxed: it is the largest command).
+        request: Box<SweepRequest>,
         /// Name of the resulting trace.
         name: String,
     },

@@ -888,7 +888,7 @@ impl Shared {
                 self.expire_lease();
                 self.check_lease(lease_token)?;
                 self.refresh();
-                self.ir_capture(client, request, name)?
+                self.ir_capture(client, *request, name)?
             }
             C::TraceUpdate { trace, edit } => self.trace_update(trace, edit)?,
             C::TraceDelete { trace } => self.trace_delete(trace)?,

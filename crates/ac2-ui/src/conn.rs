@@ -1298,7 +1298,7 @@ async fn stimulus_task(client: Client, mut ops: mpsc::UnboundedReceiver<StimOp>,
                         Some(l) => match client
                             .call(Command::IrCapture {
                                 lease_token: l.token(),
-                                request,
+                                request: Box::new(request),
                                 name,
                             })
                             .await

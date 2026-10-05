@@ -279,7 +279,7 @@ pub fn commands() -> Vec<Command> {
         },
         Command::IrCapture {
             lease_token: token(),
-            request: SweepRequest {
+            request: Box::new(SweepRequest {
                 inputs: SweepInputs::Channels {
                     reference: 1,
                     measurement: 0,
@@ -290,7 +290,7 @@ pub fn commands() -> Vec<Command> {
                 repeats: 2,
                 gate: Some(Seconds(0.005)),
                 tail: Some(Seconds(3.0)),
-            },
+            }),
             name: "1083 sweep".into(),
         },
         Command::StateSnapshot,

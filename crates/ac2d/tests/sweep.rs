@@ -130,7 +130,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let capture = |c: &mut Client, level: Option<f64>| {
         c.call(Command::IrCapture {
             lease_token: token,
-            request: request(level),
+            request: Box::new(request(level)),
             name: "sweep 1".into(),
         })
     };
@@ -281,7 +281,7 @@ fn stopping_or_losing_the_lease_discards_the_run() {
     arm(&mut c, token);
     let start = |c: &mut Client| match c.ok(Command::IrCapture {
         lease_token: token,
-        request: request(Some(LEVEL)),
+        request: Box::new(request(Some(LEVEL))),
         name: "sweep".into(),
     }) {
         ReplyBody::Sweep(r) => r,
@@ -338,10 +338,10 @@ fn a_failed_sweep_leaves_the_generator_disarmed() {
     arm(&mut c, token);
     let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
         lease_token: token,
-        request: SweepRequest {
+        request: Box::new(SweepRequest {
             outputs: vec![1],
             ..request(Some(LEVEL))
-        },
+        }),
         name: "unheard".into(),
     }) else {
         panic!("not a sweep");
@@ -417,7 +417,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
     };
     let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
         lease_token: token,
-        request: req,
+        request: Box::new(req),
         name: "hall".into(),
     }) else {
         panic!("not a sweep");

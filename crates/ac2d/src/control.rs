@@ -1132,7 +1132,7 @@ impl Control {
                 lease_token,
                 request,
                 name,
-            } => self.ir_capture(client, lease_token, request, name),
+            } => self.ir_capture(client, lease_token, *request, name),
 
             Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
                 self.store.snapshot(self.s.incarnation),
