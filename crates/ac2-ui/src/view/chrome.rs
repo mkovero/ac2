@@ -3,6 +3,7 @@
 use ac2_proto::model::MeasKind;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
+use ac2_scene::recording::RecordingTone;
 use eframe::egui::{self, Color32, RichText};
 
 use crate::app::App;
@@ -258,6 +259,26 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         )
         .sep();
         it.hover = Some(l.detail);
+        right.push(it);
+    }
+    if let Some(l) = st.recording_label() {
+        let color = match l.tone {
+            RecordingTone::Recording => ch.fault,
+            RecordingTone::Quiet => ch.dim,
+            RecordingTone::Warning => ch.warn,
+        };
+        let active = l.tone != RecordingTone::Quiet;
+        let mut it = Item::new(
+            if active { 70 } else { 25 },
+            vec![RichText::new(l.text).color(color)],
+        )
+        .sep();
+        it.hover = Some(l.detail);
+        right.push(it);
+    }
+    if let Some(t) = st.replay_label() {
+        let mut it = Item::new(70, vec![RichText::new(t).color(ch.armed)]).sep();
+        it.hover = Some(ac2_scene::recording::REPLAY_DETAIL.to_owned());
         right.push(it);
     }
     right.extend(stimulus(app, ch));

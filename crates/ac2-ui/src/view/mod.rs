@@ -7,6 +7,7 @@ mod chrome;
 mod leq;
 mod overlays;
 mod panes;
+mod recording;
 mod session;
 
 use ac2_scene::theme::Theme;

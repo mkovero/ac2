@@ -536,6 +536,10 @@ pub fn parse_input_curve(text: &str) -> Result<(u16, CurveChoice), String> {
     Ok((n - 1, choice))
 }
 
+/// Longest recording the record toggle starts, s: an hour of every input bounds the file
+/// (≈ 0.7 GB per channel at 48 kHz) if nobody stops it.
+pub const RECORD_MAX_S: f64 = 3600.0;
+
 /// What a text prompt sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptKind {
@@ -547,6 +551,8 @@ pub enum PromptKind {
     ImportFile(ImportRole),
     SessionSave,
     SessionLoad,
+    /// A recording to replay as the session.
+    ReplayRecording,
     InputMics,
     /// `input=curve` of the input setup.
     MicCurveInput,
@@ -582,6 +588,7 @@ impl PromptKind {
             PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
             PromptKind::SessionSave => "Save session as (name or path)",
             PromptKind::SessionLoad => "Load session, disarmed (name or path)",
+            PromptKind::ReplayRecording => "Replay recording (name or path of its .wav)",
             PromptKind::InputMics => "Mic per input (1-based, e.g. 3=M30, 4=ECM; 3= clears)",
             PromptKind::MicCurveInput => {
                 "Mic curve on input N: input=curve (1-based, e.g. 2=90°; 2=off)"
@@ -1796,6 +1803,14 @@ impl AppState {
     /// The names of the open session's inputs, as the dialogs show them: mic name, else the
     /// device's channel name, else `Input N`.
     pub fn session_input_names(&self) -> Vec<(u16, String)> {
+        self.session_input_labels()
+            .into_iter()
+            .map(|(c, name)| (c, ac2_scene::meter::channel_choice(c, &name)))
+            .collect()
+    }
+
+    /// The open session's inputs by name alone (mic, device channel name or `Input N`).
+    pub fn session_input_labels(&self) -> Vec<(u16, String)> {
         let Some(o) = self.open_session() else {
             return Vec::new();
         };
@@ -1816,8 +1831,10 @@ impl AppState {
                 let dev = device_names
                     .as_ref()
                     .and_then(|n| n.get(usize::from(c)).cloned());
-                let name = ac2_scene::meter::input_name(c, mic.as_deref(), dev.as_deref());
-                (c, ac2_scene::meter::channel_choice(c, &name))
+                (
+                    c,
+                    ac2_scene::meter::input_name(c, mic.as_deref(), dev.as_deref()),
+                )
             })
             .collect()
     }
@@ -2406,6 +2423,25 @@ impl AppState {
                     out.push(Request::Call { cmd, what });
                 })
             }
+            PromptKind::ReplayRecording => parse_session_ref(&text).map(|r| {
+                let (recording, what) = match r {
+                    SessionRef::Name { name } => (
+                        ac2_proto::model::RecordingRef::Name { name: name.clone() },
+                        name,
+                    ),
+                    SessionRef::Path { path } => (
+                        ac2_proto::model::RecordingRef::Path { path: path.clone() },
+                        path,
+                    ),
+                };
+                out.push(Request::Call {
+                    cmd: Command::SessionReplay {
+                        recording,
+                        pace: ac2_proto::model::ReplayPace::Realtime,
+                    },
+                    what: format!("replaying {what:?}"),
+                });
+            }),
             PromptKind::InputMics => parse_mics(&text).map(|mics| {
                 let inputs: Vec<InputSetup> = mics
                     .into_iter()
@@ -3408,6 +3444,40 @@ impl AppState {
                     self.overlay =
                         Overlay::Session(Box::new(SessionDialog::new(open.as_ref(), &setup)));
                     out.push(Request::Devices);
+                }
+            }
+            C::Record => {
+                let recording = self
+                    .daemon()
+                    .and_then(|s| s.recording.as_ref())
+                    .is_some_and(ac2_proto::model::RecordingRun::active);
+                match self.open_session().cloned() {
+                    _ if recording => {
+                        self.call(out, Command::RecStop, "recording stopped".into());
+                    }
+                    None => self.error(format!(
+                        "no audio session to record: {}",
+                        open_session_hint(keymap)
+                    )),
+                    Some(o) => self.call(
+                        out,
+                        Command::RecStart {
+                            request: ac2_proto::model::RecordRequest {
+                                inputs: o.config.input_channels.clone(),
+                                name: None,
+                                max_duration: Seconds(RECORD_MAX_S),
+                                max_bytes: None,
+                            },
+                        },
+                        "recording started".into(),
+                    ),
+                }
+            }
+            C::ReplayRecording => {
+                if self.connected() {
+                    self.prompt(PromptKind::ReplayRecording, String::new());
+                } else {
+                    self.error("not connected");
                 }
             }
             C::CloseSession => {

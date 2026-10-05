@@ -421,6 +421,8 @@ commands! {
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
     OpenSession => "session_open", "Open audio session…", [Global];
     CloseSession => "session_close", "Close audio session", [Global];
+    Record => "record", "Record: raw audio of every input on / off (stops by itself after 1 h)", [Global];
+    ReplayRecording => "replay_recording", "Replay a recording as the session (name or path)…", [Global];
     NewTransfer => "meas_new_transfer", "New transfer measurement…", [Global];
     NewSpectrum => "meas_new_spectrum", "New spectrum…", [Global];
     NewRta => "meas_new_rta", "New RTA…", [Global];
@@ -1071,6 +1073,8 @@ mod tests {
             CommandId::StimulusTakeOver,
             CommandId::Reconnect,
             CommandId::CloseSession,
+            CommandId::Record,
+            CommandId::ReplayRecording,
             CommandId::NewTransfer,
             CommandId::NewSpectrum,
             CommandId::NewRta,

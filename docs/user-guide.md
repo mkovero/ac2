@@ -1072,6 +1072,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Session: load, disarmed (name or path)… | `session_load` |
 | Reconnect to the daemon now | `reconnect` |
 | Close audio session | `session_close` |
+| Record: raw audio of every input on / off (stops by itself after 1 h) | `record` |
+| Replay a recording as the session (name or path)… | `replay_recording` |
 | New transfer measurement… | `meas_new_transfer` |
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |

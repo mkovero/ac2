@@ -224,6 +224,44 @@ fn transfer_view_two_traces_and_banner() {
     snapshot(&mut h, "transfer_two_traces_banner");
 }
 
+/// The top bar while recording: `REC` with the audio's length and size in the record
+/// colour, with a dropout counted.
+#[test]
+fn recording_indicator() {
+    use ac2_proto::Change;
+    use ac2_proto::model::{RecordingRun, RecordingStatus};
+    use ac2_proto::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
+    if !have_gpu("recording_indicator") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.fake.lock().commit(Change::Recording(RecordingRun {
+        name: "rec-2026-10-05T18-00-00".into(),
+        path: "/home/op/.local/share/ac2/recordings/rec-2026-10-05T18-00-00.wav".into(),
+        inputs: vec![0, 1],
+        sample_rate_hz: 48_000,
+        session_epoch: SessionEpoch(1),
+        start_sample: SampleIndex(0),
+        started_at: WallNs(0),
+        started_by: ClientId("ac2-ui test".into()),
+        frames: 48_000 * 83,
+        bytes: 116 + 48_000 * 83 * 8,
+        discontinuities: 1,
+        max_duration: Seconds(3600.0),
+        max_bytes: None,
+        status: RecordingStatus::Recording,
+    }));
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames and the recording", |a| {
+        live(a) && a.state.recording_label().is_some()
+    });
+    assert_eq!(
+        h.state().state.recording_label().map(|l| l.text),
+        Some("REC 1:23 · 31.9 MB · 1 dropout".to_owned())
+    );
+    snapshot(&mut h, "recording_indicator");
+}
+
 #[test]
 fn help_overlay() {
     if !have_gpu("help_overlay") {

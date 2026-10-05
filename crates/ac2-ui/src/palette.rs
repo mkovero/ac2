@@ -210,6 +210,8 @@ mod tests {
             ("slot 3", CommandId::Slot3),
             ("open session", CommandId::OpenSession),
             ("close session", CommandId::CloseSession),
+            ("record", CommandId::Record),
+            ("replay", CommandId::ReplayRecording),
             ("new transfer", CommandId::NewTransfer),
             ("new rta", CommandId::NewRta),
             ("new spl", CommandId::NewSpl),

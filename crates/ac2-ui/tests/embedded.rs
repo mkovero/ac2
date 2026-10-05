@@ -2792,3 +2792,110 @@ fn spectrograph_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon: measure, then record from the palette while the noise plays — the
+/// top bar shows REC with the audio's length and size, then what was recorded — and replay
+/// the recording from the palette: the session plays the file, the bar says so, and the
+/// transfer function shows the rig's path again from the recorded inputs.
+#[test]
+fn record_and_replay_from_the_app() -> R {
+    let dir = tempfile::tempdir()?;
+    let listen = ac2d::Listen::Local {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+    };
+    let audio = ac2d::backend(ac2d::BackendChoice::Fake)?;
+    let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
+    config.session_dir = dir.path().join("sessions");
+    config.recording_dir = Some(dir.path().join("recordings"));
+    let handle = ac2d::Daemon::start(config)?;
+    let ep = Endpoints {
+        ctrl: handle.ctrl_endpoint().to_owned(),
+        data: handle.data_endpoint().to_owned(),
+    };
+    let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
+    measure_from_empty(&mut d)?;
+    assert_eq!(d.st.recording_label(), None, "nothing recorded yet");
+    let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+
+    // The level typed for the first run stands: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("record".into()));
+    d.key("Enter");
+    d.until("two seconds recorded", |s| {
+        s.daemon()
+            .and_then(|x| x.recording.as_ref())
+            .is_some_and(|r| r.active() && r.frames >= 2 * u64::from(r.sample_rate_hz))
+    })?;
+    let rec = d.st.recording_label().ok_or("no indicator")?;
+    assert!(rec.text.starts_with("REC 0:0"), "{}", rec.text);
+    assert!(
+        rec.text.contains(" kB") || rec.text.contains(" MB"),
+        "{}",
+        rec.text
+    );
+    assert_eq!(rec.tone, ac2_scene::recording::RecordingTone::Recording);
+    assert!(rec.detail.contains("Room mic"), "{}", rec.detail);
+
+    d.key("Ctrl+K");
+    d.send(Msg::Text("record".into()));
+    d.key("Enter");
+    d.until("the recording ended", |s| {
+        s.daemon()
+            .and_then(|x| x.recording.as_ref())
+            .is_some_and(|r| !r.active())
+    })?;
+    d.stop()?;
+    let run =
+        d.st.daemon()
+            .and_then(|x| x.recording.clone())
+            .ok_or("recording")?;
+    let label = d.st.recording_label().ok_or("no indicator")?;
+    assert!(
+        label
+            .text
+            .starts_with(&format!("recorded {} · 0:0", run.name)),
+        "{}",
+        label.text
+    );
+
+    d.key("Ctrl+K");
+    d.send(Msg::Text("replay".into()));
+    d.key("Enter");
+    d.send(Msg::Text(run.name.clone()));
+    d.key("Enter");
+    d.until("the replay session", |s| {
+        s.open_session().is_some_and(|o| o.replay.is_some())
+    })?;
+    let replay = d.st.replay_label().ok_or("no replay label")?;
+    assert!(
+        replay.starts_with(&format!("REPLAY {} · 0:0", run.name)),
+        "{replay}"
+    );
+    let epoch = d.st.daemon().map(|x| x.session.epoch).ok_or("state")?;
+    let topic = Topic::Data {
+        meas,
+        stream: Stream::Tf,
+    };
+    d.until("the −6 dB path at 1 kHz from the recording", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| {
+                f.frame.stamp.session_epoch == epoch
+                    && match &f.frame.data {
+                        FrameData::Tf(tf) => tf
+                            .mag
+                            .get(240)
+                            .is_some_and(|m| m.is_finite() && (m - (-6.02)).abs() < 0.5),
+                        _ => false,
+                    }
+            })
+        })
+    })?;
+    drop(d);
+    handle.shutdown();
+    Ok(())
+}
