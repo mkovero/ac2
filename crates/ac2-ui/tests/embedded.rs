@@ -25,7 +25,7 @@ use ac2_ui::embedded::{
 };
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::{Chord, CommandId, Keymap};
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PromptKind, StimPhase};
 
 type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -2231,6 +2231,96 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     d.send(Msg::SelectMeas(tf));
     assert_eq!(d.st.layout.visible(), [PaneKind::Transfer]);
     assert!(d.st.layout.maximized);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// Types `text` into the open prompt in place of what it holds.
+fn retype(d: &mut Driver, text: &str) {
+    while matches!(&d.st.overlay, Overlay::Prompt(p) if !p.text.is_empty()) {
+        d.send(Msg::Backspace);
+    }
+    d.send(Msg::Text(text.into()));
+}
+
+/// The selected stored trace exported from the palette: to a folder (under its own name),
+/// then to a typed file in the folder the prompt then starts in.
+#[test]
+fn the_selected_trace_exports_from_the_palette() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+1");
+    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    let a = d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?;
+    let name = d.st.slots()[0].map(|t| t.edit.name.clone()).ok_or("name")?;
+    let dir = tempfile::tempdir()?;
+    let export = |d: &mut Driver| {
+        d.key("Ctrl+K");
+        d.send(Msg::Text("export the selected".into()));
+        d.key("Enter");
+    };
+
+    // Nothing selected: it says so.
+    d.send(Msg::Command(CommandId::SelectLive));
+    export(&mut d);
+    assert!(!matches!(d.st.overlay, Overlay::Prompt(_)));
+    assert!(
+        d.st.toasts
+            .iter()
+            .any(|t| t.error && t.text.contains("select"))
+    );
+
+    d.key("V");
+    assert_eq!(d.st.selected_trace, Some(a));
+    export(&mut d);
+    let Overlay::Prompt(p) = &d.st.overlay else {
+        return Err("the export prompt".into());
+    };
+    assert_eq!(p.kind, PromptKind::TraceExport(a));
+    // It starts in the app's working directory, where a relative path goes.
+    let cwd = std::env::current_dir()?.display().to_string();
+    assert_eq!(p.text, format!("{cwd}{}", std::path::MAIN_SEPARATOR));
+    retype(&mut d, &dir.path().display().to_string());
+    d.key("Enter");
+    let file = dir.path().join(format!("{name}.csv"));
+    d.until("the export written", |s| {
+        s.toasts
+            .iter()
+            .any(|t| !t.error && t.text.contains("exported to"))
+    })?;
+    let csv = std::fs::read_to_string(&file)?;
+    assert!(csv.starts_with("# ac2 trace export"), "{csv:.80}");
+    assert!(csv.contains(&format!("# name: {name}\n")), "{csv:.80}");
+    assert!(csv.lines().filter(|l| !l.starts_with('#')).count() > 100);
+
+    // The next export starts in that folder; a typed name is the file.
+    export(&mut d);
+    let Overlay::Prompt(p) = &d.st.overlay else {
+        return Err("the export prompt".into());
+    };
+    let folder = format!("{}{}", dir.path().display(), std::path::MAIN_SEPARATOR);
+    assert_eq!(p.text, folder);
+    d.send(Msg::Text("front fill.csv".into()));
+    d.key("Enter");
+    let named = dir.path().join("front fill.csv");
+    d.until("the second export written", |s| {
+        s.toasts
+            .iter()
+            .any(|t| t.text.contains("front fill.csv") && t.text.contains("bytes"))
+    })?;
+    assert_eq!(std::fs::read_to_string(&named)?, csv);
+
+    // A folder that is not there: the error names the path.
+    export(&mut d);
+    retype(&mut d, &dir.path().join("gone/x.csv").display().to_string());
+    d.key("Enter");
+    d.until("the write error", |s| {
+        s.toasts
+            .iter()
+            .any(|t| t.error && t.text.contains("cannot write") && t.text.contains("gone"))
+    })?;
     drop(d);
     drop(daemon);
     Ok(())

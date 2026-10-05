@@ -397,6 +397,12 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **F2** (or **Rename the selected trace…** in the palette) renames the selected stored
   trace; a double click on a trace in the list selects it and asks for its name in one go.
   `ac2 trace rename <trace> <name>` does the same from the command line.
+- **Export the selected trace (ac2 CSV) to a file…** in the palette writes the selected
+  stored trace as `ac2 trace export --csv` does: type a file path, or a folder to write it
+  under the trace's own name (`Main L S1.csv`). The prompt starts in the folder of the last
+  export (at first, the folder the app was started in, where a relative path goes); the
+  toast says where the file went. The file is written on this computer, also with a remote
+  daemon.
 - **Delete** asks before the selected stored trace goes (naming it); **Delete** again or
   **Enter** deletes it, **N** or **Esc** keeps it.
   The selection moves to the next shown trace in the list (else the one before it, else the
@@ -1091,6 +1097,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
 | Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
+| Export the selected trace (ac2 CSV) to a file… | `trace_export` |
 | Deselect the stored trace: keys act on the live measurement again | `select_live` |
 | Import a trace file (CSV / analyzer text)… | `import_trace` |
 | Session: save (name or path)… | `session_save` |

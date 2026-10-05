@@ -408,6 +408,7 @@ commands! {
     ToggleTrace => "toggle_trace", "Show / hide the selected stored trace", [Global];
     TraceSlot => "trace_slot", "Move the selected trace to slot… (1 … 9, none frees its slot)", [Global];
     TraceRename => "trace_rename", "Rename the selected trace…", [Global];
+    TraceExport => "trace_export", "Export the selected trace (ac2 CSV) to a file…", [Global];
     SelectLive => "select_live", "Deselect the stored trace: keys act on the live measurement again", [Global];
     DeleteTrace => "trace_delete", "Delete selected trace… (asks first)", [Global];
     OffsetUp => "offset_up", "Display offset +1 dB of the selected curve", [Global];
@@ -1096,6 +1097,7 @@ mod tests {
             CommandId::TraceMicCurve,
             CommandId::TraceSlot,
             CommandId::TraceRename,
+            CommandId::TraceExport,
             CommandId::FinderAuto,
             CommandId::FinderFull,
             CommandId::FinderMid,

@@ -566,6 +566,8 @@ pub enum PromptKind {
     TraceSlot(TraceId),
     /// A stored trace's new name.
     TraceRename(TraceId),
+    /// Where a stored trace is exported to.
+    TraceExport(TraceId),
     /// Custom delay-finder band edges.
     FinderBand,
     /// Delay-finder observation.
@@ -583,6 +585,9 @@ impl PromptKind {
                 "Slot for the selected trace: 1 … 9 (its holder gives it up), none frees it"
             }
             PromptKind::TraceRename(_) => "New name for the selected trace",
+            PromptKind::TraceExport(_) => {
+                "Export the selected trace as ac2 CSV to (file path; a folder takes the trace's name)"
+            }
             PromptKind::Delay(_) => "Delay (ms)",
             PromptKind::ImportFile(ImportRole::Target) => "Target curve file (path)",
             PromptKind::ImportFile(ImportRole::Trace) => "Trace file to import (path)",
@@ -903,6 +908,9 @@ pub struct AppState {
     pub prefs: UiPrefs,
     /// `prefs` changed since the app last saved them.
     pub prefs_dirty: bool,
+    /// The folder an export prompt starts in: the last export's, else the app's working
+    /// directory (a relative path is relative to it).
+    pub export_dir: Option<std::path::PathBuf>,
     /// Local time of day for wall times.
     pub local_zone: crate::scenes::LocalZone,
     /// The output device the stimulus outputs belong to (the open session's).
@@ -1000,6 +1008,7 @@ impl AppState {
             sweep: SweepUi::default(),
             prefs: UiPrefs::default(),
             prefs_dirty: false,
+            export_dir: std::env::current_dir().ok(),
             local_zone: crate::scenes::LocalZone::System,
             stim_device: None,
             finder: FinderChoice::default(),
@@ -2376,6 +2385,29 @@ impl AppState {
                     })
                 }
             }
+            PromptKind::TraceExport(id) => {
+                let path = text.trim();
+                if path.is_empty() {
+                    Err("type a file or folder path".to_string())
+                } else {
+                    self.trace_meta(id).map(|t| {
+                        let path = std::path::PathBuf::from(path);
+                        // The next export starts in the same folder.
+                        self.export_dir = if path.is_dir() {
+                            Some(path.clone())
+                        } else {
+                            path.parent()
+                                .filter(|p| !p.as_os_str().is_empty())
+                                .map(std::path::Path::to_path_buf)
+                        };
+                        out.push(Request::ExportTrace {
+                            trace: id,
+                            name: t.edit.name.clone(),
+                            path,
+                        });
+                    })
+                }
+            }
             PromptKind::TraceSlot(id) => parse_slot(&text).and_then(|slot| {
                 let t = self.trace_meta(id)?;
                 let mut edit = t.edit.clone();
@@ -3307,6 +3339,25 @@ impl AppState {
                 Some(t) => {
                     let text = t.edit.slot.map(|n| n.to_string()).unwrap_or_default();
                     self.prompt(PromptKind::TraceSlot(t.id), text);
+                }
+                None => self.error(SELECT_TRACE_FIRST),
+            },
+            C::TraceExport => match self.selected_trace_meta().map(|t| t.id) {
+                Some(id) => {
+                    // The folder of the last export (else the app's working directory, where
+                    // a relative path goes), ready for a file name.
+                    let text = self
+                        .export_dir
+                        .as_ref()
+                        .map(|d| {
+                            let mut s = d.display().to_string();
+                            if !s.ends_with(std::path::MAIN_SEPARATOR) {
+                                s.push(std::path::MAIN_SEPARATOR);
+                            }
+                            s
+                        })
+                        .unwrap_or_default();
+                    self.prompt(PromptKind::TraceExport(id), text);
                 }
                 None => self.error(SELECT_TRACE_FIRST),
             },

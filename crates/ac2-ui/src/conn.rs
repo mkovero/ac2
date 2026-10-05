@@ -193,6 +193,13 @@ pub enum Request {
         mic: String,
         input: Option<u16>,
     },
+    /// `trace.export` of `trace` (named `name`) as ac2 CSV, written to `path`, or into it
+    /// under the daemon's suggested file name when `path` is a folder.
+    ExportTrace {
+        trace: TraceId,
+        name: String,
+        path: std::path::PathBuf,
+    },
     /// `session.devices`, for the session dialog.
     Devices,
     /// `session.open`, then `session.inputs` with the mic names; [`ConnEvent::SessionOpened`]
@@ -633,6 +640,7 @@ fn request_name(r: &Request) -> String {
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
         Request::Import { path, .. } => format!("import {}", path.display()),
         Request::ImportCurve { path, .. } => format!("import curve {}", path.display()),
+        Request::ExportTrace { name, .. } => format!("export {name}"),
         Request::FindDelay { .. } => "delay find".into(),
         Request::Devices => "list devices".into(),
         Request::OpenSession { what, .. } => what.clone(),
@@ -1042,6 +1050,19 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 }
             });
         }
+        Request::ExportTrace { trace, name, path } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = export_trace(&c, trace, path).await;
+                o.send(ConnEvent::Reply {
+                    what: match &result {
+                        Ok((p, n)) => format!("{name} exported to {} ({n} bytes)", p.display()),
+                        Err(_) => format!("export {name}"),
+                    },
+                    result: result.map(|_| ()),
+                });
+            });
+        }
         Request::Devices => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
@@ -1190,6 +1211,40 @@ async fn import(c: &Client, path: &std::path::Path, role: ImportRole) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     expect_body!("trace.import", r, ReplyBody::Trace(t) => t).map_err(|e| e.to_string())
+}
+
+/// `trace.export`s `trace` as ac2 CSV and writes it to `path` (into it, under the daemon's
+/// suggested name, when `path` is a folder); returns where it went and its size.
+async fn export_trace(
+    c: &Client,
+    trace: TraceId,
+    path: std::path::PathBuf,
+) -> Result<(std::path::PathBuf, usize), String> {
+    let r = c
+        .call(Command::TraceExport {
+            trace,
+            format: ac2_proto::model::ExportFormat::Ac2Csv,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    let (file_name, content) = expect_body!(
+        "trace.export", r, ReplyBody::Export { file_name, content } => (file_name, content)
+    )
+    .map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let path = if path.is_dir() {
+            path.join(file_name)
+        } else {
+            path
+        };
+        // Said back absolute: a relative path is relative to where the app was started.
+        let path = std::path::absolute(&path).unwrap_or(path);
+        std::fs::write(&path, &content.0)
+            .map(|()| (path.clone(), content.0.len()))
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Reads `path` and imports it into the mic library; returns the curve's label.
