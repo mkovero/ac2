@@ -85,6 +85,9 @@ pub struct TfTrace<'a> {
     /// The stored trace the columns are borrowed from: they are then fixed for as long as
     /// it lives, so its display math can be kept between frames ([`DisplayCache`]).
     pub stored: Option<&'a Arc<TraceData>>,
+    /// The selected stored trace: the trace keys act on it, so the plot and the legend
+    /// mark it.
+    pub selected: bool,
 }
 
 impl<'a> TfTrace<'a> {
@@ -116,6 +119,7 @@ impl<'a> TfTrace<'a> {
             freshness: Some(freshness),
             smoothing: frame.meta.smoothing,
             stored: None,
+            selected: false,
         }
     }
 
@@ -150,6 +154,7 @@ impl<'a> TfTrace<'a> {
             freshness: None,
             smoothing: m.edit.smoothing,
             stored: Some(data),
+            selected: false,
         }
     }
 }
@@ -692,6 +697,7 @@ mod tests {
                 freshness: None,
                 smoothing: None,
                 stored: None,
+                selected: false,
             }
         }
     }

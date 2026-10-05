@@ -196,6 +196,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     }
     for (data, cols) in &stored {
         let mut t = TfTrace::stored(data, &cols.freqs);
+        t.selected = st.selected_trace == Some(data.meta.id);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (
             TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. },
@@ -424,6 +425,7 @@ fn with_spectrum<R>(
             },
             freshness: None,
             offset_db: data.meta.edit.offset.0,
+            selected: st.selected_trace == Some(data.meta.id),
         });
     }
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();

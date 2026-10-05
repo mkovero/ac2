@@ -202,6 +202,8 @@ pub struct SpectrumTrace<'a> {
     /// compare their shapes. The legend and the cursor name every offset trace, so a
     /// spread is never read as a level difference.
     pub offset_db: f64,
+    /// The selected stored trace: marked in the legend and drawn with a thicker line.
+    pub selected: bool,
 }
 
 /// ` · stopped` after a stopped measurement's caption: its curve is the final result.
@@ -250,6 +252,7 @@ impl<'a> SpectrumTrace<'a> {
             ),
             freshness: Some(freshness),
             offset_db: 0.0,
+            selected: false,
         }
     }
 
@@ -288,6 +291,7 @@ impl<'a> SpectrumTrace<'a> {
             ),
             freshness: Some(freshness),
             offset_db: 0.0,
+            selected: false,
         }
     }
 
@@ -486,6 +490,7 @@ fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
         tags,
         text,
         stale,
+        selected: t.selected,
     }
 }
 
@@ -623,11 +628,8 @@ pub(crate) fn spectrum_scene_in(
         let (tx, color) = match i.and_then(|i| traces.get(i).zip(legend.get(i))) {
             Some((t, e)) => {
                 let a = if e.stale { theme.stale_alpha } else { 1.0 };
-                c.overlay.rects.push(FillRect {
-                    rect: Rect::new(x, y - 1.5, SWATCH_W, 3.0),
-                    color: t.color.with_alpha(a),
-                    clip: None,
-                });
+                let color = t.color.with_alpha(a);
+                crate::tf::legend_swatch(&mut c, x, y, SWATCH_W, color, e.selected, None, theme);
                 (
                     x + SWATCH_W + SWATCH_GAP,
                     if e.stale { theme.text_dim } else { theme.text },
@@ -720,7 +722,15 @@ pub(crate) fn spectrum_scene_in(
                     c.data.polylines.push(Polyline {
                         points,
                         alpha: vec![],
-                        stroke: Stroke::solid(color, theme.trace_width),
+                        stroke: Stroke::solid(
+                            color,
+                            theme.trace_width
+                                * if t.selected {
+                                    crate::tf::SELECTED_WIDTH
+                                } else {
+                                    1.0
+                                },
+                        ),
                         clip: Some(plot),
                     });
                 }
@@ -892,6 +902,7 @@ mod tests {
             ),
             freshness: None,
             offset_db: 0.0,
+            selected: false,
         }
     }
 
@@ -1270,6 +1281,7 @@ mod tests {
             caption: "Hann window".into(),
             freshness: None,
             offset_db: 0.0,
+            selected: false,
         };
         let theme = Theme::dark();
         let scene = |traces: &[SpectrumTrace<'_>], w: f32| {
@@ -1444,6 +1456,7 @@ mod tests {
             .collect();
         traces[1].freshness = Some(Freshness::Stopped { age_s: 3.0 });
         traces[2].offset_db = -6.0;
+        traces[3].selected = true;
         let build = |w: f32, h: f32| {
             spectrum_scene(
                 &traces,
@@ -1470,6 +1483,8 @@ mod tests {
         );
         assert_eq!(wide.legend.len(), 5);
         assert_eq!(wide.legend[1].tags, ["stopped"]);
+        let selected: Vec<bool> = wide.legend.iter().map(|e| e.selected).collect();
+        assert_eq!(selected, [false, false, false, true, false]);
         assert_eq!(wide.legend_rect.h, LEGEND_ROW);
         // Narrow: rows wrap, then the tags go, then `+N more`.
         let narrow = build(420.0, 500.0);

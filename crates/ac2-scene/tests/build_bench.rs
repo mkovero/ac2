@@ -236,6 +236,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         freshness: Some(Freshness::from_age(0.1)),
         smoothing: None,
         stored: None,
+        selected: false,
     };
     let traces: Vec<TfTrace<'_>> = std::iter::once(live)
         .chain(traces_data.iter().map(|d| TfTrace::stored(d, &freqs)))

@@ -169,6 +169,38 @@ fn offsets_are_named_where_the_curves_are_drawn() {
     assert_eq!(texts, ["t16 · offset −6.0 dB"]);
 }
 
+/// The selected stored trace is marked in the legend of the pane that draws it (the title
+/// names it too); V moving the selection moves the mark.
+#[test]
+fn the_selected_trace_is_marked_in_its_legend() {
+    let mut t = T::new();
+    let a = stored(13, Some(1), 2);
+    let b = stored(14, Some(2), 2);
+    let sp = spec_meta(16);
+    t.conn(with_traces(vec![a.clone(), b.clone(), sp.clone()]));
+    t.conn(data(&a, vec![-10.0; 8]));
+    t.conn(data(&b, vec![-12.0; 8]));
+    t.conn(data(&sp, vec![-90.0; 8]));
+    let theme = Theme::dark();
+    let marked = |t: &T| {
+        let tf = crate::scenes::transfer(&t.st, &theme, SIZE, now());
+        let spec = crate::scenes::spectrum(&t.st, &theme, SIZE, now());
+        tf.legend
+            .iter()
+            .chain(&spec.legend)
+            .filter(|e| e.selected)
+            .map(|e| e.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(marked(&t).is_empty());
+    t.key("V");
+    assert_eq!(marked(&t), ["t13"]);
+    t.key("V");
+    assert_eq!(marked(&t), ["t14"]);
+    t.key("V");
+    assert_eq!(marked(&t), ["t16"]);
+}
+
 fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::Frame;

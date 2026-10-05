@@ -51,6 +51,41 @@ pub struct LegendEntry {
     /// `name · tag · tag`, as drawn.
     pub text: String,
     pub stale: bool,
+    /// The selected stored trace: marked in the legend (a bar before a thicker swatch) and
+    /// drawn with a thicker line.
+    pub selected: bool,
+}
+
+/// Line width of the selected trace, times the theme's trace width.
+pub(crate) const SELECTED_WIDTH: f32 = 2.0;
+
+/// Draws one legend entry's swatch (a thicker one, and a bar in the text colour before it,
+/// for the selected trace) with its swatch's left edge at `x`, centred on `y`. The bar is
+/// drawn, not a glyph: the plot font has no arrow-like marks.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn legend_swatch(
+    c: &mut Canvas,
+    x: f32,
+    y: f32,
+    w: f32,
+    color: crate::primitives::Color,
+    selected: bool,
+    clip: Option<Rect>,
+    theme: &Theme,
+) {
+    let h = if selected { 3.0 * SELECTED_WIDTH } else { 3.0 };
+    c.overlay.rects.push(FillRect {
+        rect: Rect::new(x, y - h / 2.0, w, h),
+        color,
+        clip,
+    });
+    if selected {
+        c.overlay.rects.push(FillRect {
+            rect: Rect::new(x - 5.0, y - 5.0, 2.0, 10.0),
+            color: theme.text,
+            clip,
+        });
+    }
 }
 
 /// Everything the transfer view shows, as data plus the scene.
@@ -72,7 +107,7 @@ pub struct TfScene {
     pub banners: Vec<BannerRow>,
 }
 
-fn legend_entry(t: &DisplayTrace, nudge_s: f64) -> LegendEntry {
+fn legend_entry(t: &DisplayTrace, nudge_s: f64, selected: bool) -> LegendEntry {
     let mut tags = Vec::new();
     match t.relation {
         PhaseRelation::Reference => tags.push("ref".to_string()),
@@ -111,6 +146,7 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64) -> LegendEntry {
         tags,
         text,
         stale,
+        selected,
     }
 }
 
@@ -124,9 +160,10 @@ fn signed_ms(s: f64) -> String {
     format!("{} ms", format::signed(s * 1000.0, 2))
 }
 
-fn trace_stroke(t: &DisplayTrace, theme: &Theme) -> Stroke {
+fn trace_stroke(t: &DisplayTrace, selected: bool, theme: &Theme) -> Stroke {
     let a = if t.is_stale() { theme.stale_alpha } else { 1.0 };
-    Stroke::solid(t.color.with_alpha(a), theme.trace_width)
+    let w = if selected { SELECTED_WIDTH } else { 1.0 };
+    Stroke::solid(t.color.with_alpha(a), theme.trace_width * w)
 }
 
 /// Coherence overlaid on the magnitude pane: γ² 0…1 maps linearly onto `band`, the top
@@ -250,6 +287,7 @@ pub fn transfer_scene(
     let mut c = Canvas::new(size, theme);
     let (reference, shown) =
         display_traces(traces, cache, view.tf.phase_reference, &view.tf.coherence);
+    let selected = traces.iter().find(|t| t.selected).map(|t| t.key);
     let overlay = overlaid(view);
     let right = if overlay {
         OVERLAY_MARGIN_RIGHT
@@ -368,7 +406,7 @@ pub fn transfer_scene(
             let alpha = (kind != TfPaneKind::Coherence && view.tf.coherence.alpha)
                 .then(|| &t.alpha[cols.clone()]);
             let wrapped = kind == TfPaneKind::Phase && view.tf.phase == PhaseView::Wrapped;
-            let stroke = trace_stroke(t, theme);
+            let stroke = trace_stroke(t, selected == Some(t.key), theme);
             c.data.polylines.extend(trace_line(
                 &xs,
                 &values[cols.clone()],
@@ -411,7 +449,7 @@ pub fn transfer_scene(
     let legend: Vec<LegendEntry> = shown
         .iter()
         .zip(&nudges)
-        .map(|(t, n)| legend_entry(t, *n))
+        .map(|(t, n)| legend_entry(t, *n, selected == Some(t.key)))
         .collect();
     let cursor = view
         .cursor_hz
@@ -436,11 +474,8 @@ pub fn transfer_scene(
         let y0 = block + 22.0;
         for (i, (e, t)) in legend.iter().zip(&shown).enumerate() {
             let y = y0 + i as f32 * ROW;
-            c.overlay.rects.push(FillRect {
-                rect: Rect::new(x0, y - 1.5, 12.0, 3.0),
-                color: trace_stroke(t, theme).color,
-                clip: Some(top),
-            });
+            let color = trace_stroke(t, e.selected, theme).color;
+            legend_swatch(&mut c, x0, y, 12.0, color, e.selected, Some(top), theme);
             let mut l = label(
                 e.text.clone(),
                 [x0 + 18.0, y],
@@ -499,7 +534,7 @@ pub fn transfer_scene(
                     [xr, rows_y0 + i as f32 * ROW],
                     anchor(HAlign::Right, VAlign::Center),
                     theme.small_font_size,
-                    trace_stroke(&shown[i], theme).color,
+                    trace_stroke(&shown[i], false, theme).color,
                 );
                 l.clip = Some(top);
                 c.overlay.labels.push(l);
@@ -585,6 +620,7 @@ mod tests {
             freshness: Some(Freshness::from_age(0.1)),
             smoothing: None,
             stored: None,
+            selected: false,
         }
     }
 
@@ -726,6 +762,57 @@ mod tests {
             smoothing_caption(s(SmoothingFraction::Twelfth, SmoothingMode::Magnitude)),
             "smoothing 1/12 oct mag only"
         );
+    }
+
+    /// The selected stored trace is marked: a bar before its legend swatch, a thicker
+    /// swatch, and a line twice as wide in every pane; the others stay as they are.
+    #[test]
+    fn the_selected_trace_is_marked_in_legend_and_plot() {
+        let a = cols(97);
+        let ta = trace(&a, TraceKey::Live(MeasId(1)), 0.010);
+        let mut ts = trace(&a, TraceKey::Stored(TraceId(7)), 0.010);
+        ts.selected = true;
+        let theme = Theme::dark();
+        let s = transfer_scene(
+            &[ta, ts],
+            &DisplayCache::default(),
+            &Status::default(),
+            &ViewState::default(),
+            &theme,
+            SIZE,
+        );
+        let sel: Vec<bool> = s.legend.iter().map(|e| e.selected).collect();
+        assert_eq!(sel, [false, true]);
+        assert_eq!(s.legend[1].text, "t7 · Δt 0.00 ms");
+        let widths: Vec<f32> = s.scene.layers[1]
+            .polylines
+            .iter()
+            .map(|p| p.stroke.width)
+            .collect();
+        // Magnitude, phase and coherence: the live line then the selected one, each pane.
+        assert!(widths.len() >= 6, "{widths:?}");
+        for pair in widths.chunks(2) {
+            assert_eq!(
+                pair,
+                [theme.trace_width, theme.trace_width * SELECTED_WIDTH]
+            );
+        }
+        let row = s.scene.layers[2]
+            .labels
+            .iter()
+            .find(|l| l.text == "t7 · Δt 0.00 ms")
+            .expect("legend row");
+        // Swatch, swatch, then the bar: thicker swatch and the bar on the selected row.
+        let rects: Vec<Rect> = s.scene.layers[2].rects.iter().map(|r| r.rect).collect();
+        assert_eq!(rects.len(), 3, "{rects:?}");
+        assert_eq!(rects[0].h, 3.0);
+        assert_eq!(rects[1].h, 3.0 * SELECTED_WIDTH);
+        assert_eq!(
+            rects[2].y + rects[2].h / 2.0,
+            row.pos[1],
+            "on the selected row"
+        );
+        assert!(rects[2].right() < rects[1].x);
     }
 
     #[test]

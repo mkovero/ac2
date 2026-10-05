@@ -390,7 +390,8 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   it. The offset keys (**J**, **Alt+↑/↓**, below) act on a selected trace of any kind. A
   target curve takes an offset only (it has no phase); a
   locked trace refuses. The pane's title names the selected trace (`Sweep 2: smoothing
-  off`).
+  off`), and the plot marks it: a bar and a thicker swatch on its legend row, its line
+  twice as wide (transfer and spectrum panes).
 - **Spreading curves apart (display offset).** **Alt+↑** / **Alt+↓** move the selected
   curve up / down by 1 dB, **Alt+Shift+↑** / **Alt+Shift+↓** by 3 dB, **Alt+Home** puts it
   back at 0 dB; **J** types a value. The selected curve is the selected stored trace (any
