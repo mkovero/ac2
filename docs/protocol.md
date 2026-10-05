@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 15`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 16`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -633,7 +633,10 @@ math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `cre
 [MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `spl_logs` (`SplLog` per SPL
 meter: `meas`, `started_at`, `windows`, `alarms`; §3.2), `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
-`drift`, `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
+`drift` (`Drift` | nil: `ppm` output-vs-input clock drift from the loopback offset's slope,
+`span` s regressed, `warning` true when output and input are on different clocks, `at`
+WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
+committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`; see §7.3).
 
@@ -714,7 +717,7 @@ stays a one-entry map `{kind: [...]}`; enums without data stay strings. Nested o
 until, measured, gaps, trimmed, laeq, lceq, lzeq]; `TimingStatus` [epoch, state, last_lock,
 drift, internal_reference]; `TimingState` `no_stimulus` \| `acquiring` \| `locked`
 [offset] \| `jumped` [from, to] \| `lost`; `LastLock` [epoch, offset, at_sample, at];
-`Drift` [ppm, span, warning]. `tools/protocol/ac2proto.py` (`HEADER`, `META`) is the same
+`Drift` [ppm, span, warning, at]. `tools/protocol/ac2proto.py` (`HEADER`, `META`) is the same
 layout as code.
 
 | field | type | meaning |

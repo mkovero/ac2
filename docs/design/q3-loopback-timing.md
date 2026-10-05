@@ -65,7 +65,7 @@ block is rendered, and is lock-free.
 NoStimulus ──stimulus on──► Acquiring ──3 agreeing windows──► Locked
      ▲                          ▲   │                            │
      └──── stimulus off ────────┘   └── confidence lost ─► Lost ◄┘
-Locked ── offset change > 1 sample in 2 consecutive non-overlapping windows ──► Jumped ─► Locked(new)
+Locked ── off the drift line (> ½ sample or 3σ) in windows spanning ≥ W ──► Jumped ─► Locked(new)
 ```
 
 - **NoStimulus:** shows the last locked offset with its age (decision 3a). No claims.
@@ -77,7 +77,10 @@ Locked ── offset change > 1 sample in 2 consecutive non-overlapping windows 
   use internal reference reset. TF jobs on a measured reference are annotated, not reset.
 - **Drift:** the slope of the offset over a 30 s regression. Above 2 ppm (configurable) the
   monitor warns "input and output are on different clocks"; internal reference is then
-  refused (PLAN §4.3).
+  refused (PLAN §4.3). Windows are judged against the drift line's prediction, not the
+  previous offset, so a drifting offset is followed and a jump (more than half a sample, or
+  three standard deviations of the prediction, off the line) is measured against it and
+  taken out of the slope: `multi-device.md` §5.
 
 ## Epochs
 

@@ -14,9 +14,9 @@
 use std::collections::BTreeMap;
 
 use ac2_proto::model::{
-    Availability, BackendInfo, BackendKind, CurveChoice, DeviceId, DeviceInfo, DeviceSelector,
-    InputSetup, LoopbackDetection, LoopbackRoute, MeasConfig, MeasKind, Mic, OpenSession,
-    SessionConfig, TransferConfig,
+    Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
+    DeviceSelector, InputSetup, LoopbackDetection, LoopbackRoute, MeasConfig, MeasKind, Mic,
+    OpenSession, SessionConfig, TransferConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
@@ -288,6 +288,34 @@ impl SessionDialog {
     /// The open session, if the dialog opened over one.
     pub fn open_session(&self) -> Option<&OpenSession> {
         self.open.as_ref()
+    }
+
+    /// A note when input and output of the chosen device are not known to share a clock:
+    /// the open session plays on another device than it captures from, or the device's
+    /// directions are separate endpoints. Measurements on the loopback reference are
+    /// unaffected; the drift is measured once a stimulus plays
+    /// (`docs/design/multi-device.md`).
+    pub fn clock_note(&self) -> Option<String> {
+        const CHECKED: &str = "the loopback monitor measures their drift while a stimulus plays";
+        if self.is_open_device() {
+            let o = self.open.as_ref()?;
+            return (o.input_device != o.output_device || o.clock == ClockRelation::Unknown).then(
+                || {
+                    format!(
+                        "Output plays on {}, another device than the input: the two may run on \
+                         different clocks; {CHECKED}.",
+                        o.output_device.0
+                    )
+                },
+            );
+        }
+        let d = self.device_info()?;
+        (d.duplex_clock == ClockRelation::Unknown).then(|| {
+            format!(
+                "Input and output of this device are separate endpoints and may run on \
+                 different clocks; {CHECKED}."
+            )
+        })
     }
 
     /// Where meters come from for the chosen device: a capture-only preview, unless the

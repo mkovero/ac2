@@ -1,7 +1,7 @@
 {
  "topic": "timing",
  "header": {
-  "v": 15,
+  "v": 16,
   "kind": "timing",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -31,7 +31,8 @@
      "drift": {
       "ppm": 0.4,
       "span": 30.0,
-      "warning": false
+      "warning": false,
+      "at": 1790000000500000000
      },
      "internal_reference": true
     },

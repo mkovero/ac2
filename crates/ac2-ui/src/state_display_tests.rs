@@ -596,3 +596,31 @@ fn a_started_spectrum_fits_its_level_axis_once() {
     let r = t.st.view.spectrum.level;
     assert!(r.lo <= -40.0 && r.hi >= -30.0 && r.hi <= -20.0, "{r:?}");
 }
+
+/// The daemon's committed drift reaches every pane's banners once it is a warning; a value
+/// below the threshold shows nothing.
+#[test]
+fn committed_clock_drift_shows_a_banner() {
+    let mut t = T::new();
+    let with_drift = |ppm: f64, warning: bool| {
+        let mut s = daemon_state();
+        s.timing.drift = Some(ac2_proto::model::Drift {
+            ppm,
+            span: ac2_proto::units::Seconds(30.0),
+            warning,
+            at: WallNs(0),
+        });
+        mirror(s)
+    };
+    t.conn(with_drift(0.3, false));
+    let calm = crate::scenes::status(&t.st, &[], None, now());
+    assert_eq!(calm.clock_drift_ppm, None);
+    assert!(ac2_scene::banner::banners(&calm).is_empty(), "{calm:?}");
+    t.conn(with_drift(49.6, true));
+    let s = crate::scenes::status(&t.st, &[], None, now());
+    let texts: Vec<String> = ac2_scene::banner::banners(&s)
+        .into_iter()
+        .map(|b| b.text)
+        .collect();
+    assert_eq!(texts, ["CLOCK DRIFT · 50 ppm"]);
+}

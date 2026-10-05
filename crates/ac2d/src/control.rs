@@ -1707,6 +1707,12 @@ impl Control {
     }
 
     fn start_timing_job(&mut self) {
+        // Drift belongs to the two clocks of one stream; a stream just opened has shown none,
+        // whether or not it has a loopback to show one on.
+        let mut t = self.store.state().timing;
+        if t.drift.take().is_some() {
+            self.commit(Change::Timing(t));
+        }
         let Some(rt) = self.session.as_ref() else {
             return;
         };

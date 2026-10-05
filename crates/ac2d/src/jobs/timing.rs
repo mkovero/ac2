@@ -42,6 +42,9 @@ pub(crate) struct Timing {
     reported: Option<TimingStatus>,
     last_window: Option<TimingWindow>,
     last_lock_wall: u64,
+    /// Newest window of the drift estimate published, and the wall time it arrived at.
+    drift_end: Option<u64>,
+    drift_wall: u64,
     to_control: Sender<ControlMsg>,
     epoch: SessionEpoch,
     /// Windows measured; the `timing` result changes with each.
@@ -76,6 +79,8 @@ impl Timing {
             reported: Some(initial),
             last_window: None,
             last_lock_wall: initial.last_lock.map_or(0, |l| l.at.0),
+            drift_end: None,
+            drift_wall: 0,
             to_control,
             epoch,
             generation: 0,
@@ -187,27 +192,46 @@ impl Timing {
         {
             self.last_lock_wall = self.wall;
         }
+        let drift = t.drift();
+        if drift.map(|d| d.end_sample) != self.drift_end {
+            self.drift_end = drift.map(|d| d.end_sample);
+            self.drift_wall = self.wall;
+        }
+        let judged_after = self.mon.config().drift_min_span_s;
         self.status = TimingStatus {
             epoch: t.epoch(),
             state: conv::timing_state(t.state()),
             last_lock: t
                 .last_lock()
                 .map(|l| conv::last_lock(l, WallNs(self.last_lock_wall))),
-            drift: t.drift().map(|d| Drift {
+            drift: drift.map(|d| Drift {
                 ppm: d.ppm,
                 span: Seconds(d.span_s),
                 warning: d.warning,
+                at: WallNs(self.drift_wall),
             }),
             internal_reference: t.internal_reference_allowed(),
         };
         // Control commits only changes an operator must see: state, lock offset / epoch,
-        // drift warning and internal-reference availability; not every refreshed age.
+        // the drift as shown (warning, judged or not, value at the resolution displayed) and
+        // internal-reference availability; not every refreshed age or regression wobble.
         let key = |s: &TimingStatus| {
             (
                 s.epoch,
                 s.state,
                 s.last_lock.map(|l| (l.epoch, l.offset)),
-                s.drift.map(|d| d.warning),
+                s.drift.map(|d| {
+                    let step = if d.warning && d.ppm.abs() < 10.0 {
+                        0.1
+                    } else {
+                        1.0
+                    };
+                    (
+                        d.warning,
+                        d.span.0 >= judged_after,
+                        (d.ppm / step).round() as i64,
+                    )
+                }),
                 s.internal_reference,
             )
         };

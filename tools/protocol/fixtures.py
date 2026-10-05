@@ -75,7 +75,7 @@ TIMING_STATUS = {
     "epoch": 3,
     "state": {"type": "locked", "offset": 312},
     "last_lock": {"epoch": 3, "offset": 312, "at_sample": 96000, "at": 1790000000000000000},
-    "drift": {"ppm": 0.4, "span": 30.0, "warning": False},
+    "drift": {"ppm": 0.4, "span": 30.0, "warning": False, "at": 1790000000500000000},
     "internal_reference": True,
 }
 

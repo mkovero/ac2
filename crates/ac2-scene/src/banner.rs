@@ -12,7 +12,13 @@
 //! | 5 | NO SIGNAL | fault | protection `NO_SIGNAL` |
 //! | 6 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
 //! | 7 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
-//! | 8 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//! | 8 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
+//! | 9 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//!
+//! CLOCK DRIFT sits under OUTPUT TIMING JUMP: both are output-side timing, a jump is the
+//! newer event, and drift does not touch a transfer function on the measured loopback
+//! reference (reference and measurement hear the same drifting stimulus on one input clock),
+//! which the detail says so the operator does not distrust a valid trace.
 //!
 //! CHECK ROUTING sits right under NO REFERENCE: a mis-patched reference invalidates every
 //! transfer value just as a missing one does, and fixing the patch comes before any other
@@ -59,6 +65,7 @@ pub enum BannerKind {
     NoSignal,
     Stale,
     OutputTimingJump,
+    ClockDrift,
     NoDelayEstimate,
 }
 
@@ -70,7 +77,7 @@ impl BannerKind {
             | Self::NoReference
             | Self::CheckRouting
             | Self::NoSignal => Severity::Fault,
-            Self::Stale | Self::OutputTimingJump => Severity::Warning,
+            Self::Stale | Self::OutputTimingJump | Self::ClockDrift => Severity::Warning,
             Self::NoDelayEstimate => Severity::Info,
         }
     }
@@ -95,6 +102,9 @@ pub struct Status {
     /// Age of the newest live frame shown; `None` when nothing live is shown.
     pub frame_age_s: Option<f64>,
     pub timing: Option<TimingState>,
+    /// Output-vs-input clock drift, ppm, when the daemon judged it a warning
+    /// (`TimingStatus.drift`).
+    pub clock_drift_ppm: Option<f64>,
     pub no_delay_estimate: Option<NoDelayEstimate>,
 }
 
@@ -204,6 +214,16 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             )),
         ));
     }
+    if let Some(ppm) = s.clock_drift_ppm {
+        out.push(banner(
+            BannerKind::ClockDrift,
+            format!("CLOCK DRIFT · {}", drift_ppm(ppm)),
+            Some(format!(
+                "output and input clocks differ ({} per 10 s); loopback TF unaffected",
+                format::ms(ppm.abs() * 1e-6 * 10.0, 2)
+            )),
+        ));
+    }
     if let Some(why) = &s.no_delay_estimate {
         let detail = match why {
             NoDelayEstimate::NotFound => "phase is not aligned; find or set the delay".into(),
@@ -222,6 +242,14 @@ pub fn banners(s: &Status) -> Vec<Banner> {
     }
     out.sort_by_key(|b| b.kind);
     out
+}
+
+/// A drift in ppm as the banner and status lines show it: whole ppm from 10 up, one
+/// decimal below (the threshold is 2 ppm), unsigned: which clock is fast does not change
+/// what the operator must do.
+pub fn drift_ppm(ppm: f64) -> String {
+    let decimals = if ppm.abs() >= 10.0 { 0 } else { 1 };
+    format!("{} ppm", format::fixed(ppm.abs(), decimals))
 }
 
 /// One placed banner row.
@@ -372,8 +400,27 @@ pub(crate) mod tests {
                 from: Samples(480),
                 to: Samples(-512),
             }),
+            clock_drift_ppm: Some(-52.4),
             no_delay_estimate: Some(NoDelayEstimate::NotFound),
         }
+    }
+
+    #[test]
+    fn clock_drift_alone_names_the_value_and_what_it_spares() {
+        let b = banners(&Status {
+            clock_drift_ppm: Some(3.24),
+            timing: Some(TimingState::Locked {
+                offset: Samples(2000),
+            }),
+            ..Status::default()
+        });
+        assert_eq!(texts(&b), ["CLOCK DRIFT · 3.2 ppm"]);
+        assert_eq!(
+            b[0].detail.as_deref(),
+            Some("output and input clocks differ (0.03 ms per 10 s); loopback TF unaffected")
+        );
+        assert_eq!(drift_ppm(150.4), "150 ppm");
+        assert_eq!(drift_ppm(-9.94), "9.9 ppm");
     }
 
     #[test]
@@ -401,9 +448,15 @@ pub(crate) mod tests {
                 "NO SIGNAL",
                 "STALE · 4.2 s",
                 "OUTPUT TIMING JUMP",
+                "CLOCK DRIFT · 52 ppm",
                 "NO DELAY ESTIMATE"
             ]
         );
+        assert_eq!(
+            b[7].detail.as_deref(),
+            Some("output and input clocks differ (0.52 ms per 10 s); loopback TF unaffected")
+        );
+        assert_eq!(b[7].severity, Severity::Warning);
         assert_eq!(b[0].detail.as_deref(), Some("no keepalive for 3.2 s"));
         assert_eq!(
             b[6].detail.as_deref(),
@@ -412,7 +465,7 @@ pub(crate) mod tests {
         assert_eq!(b[0].severity, Severity::Fault);
         assert_eq!(b[3].severity, Severity::Fault);
         assert_eq!(b[5].severity, Severity::Warning);
-        assert_eq!(b[7].severity, Severity::Info);
+        assert_eq!(b[8].severity, Severity::Info);
         // Severity never increases down the list.
         assert!(b.windows(2).all(|w| w[0].severity <= w[1].severity));
     }
@@ -576,12 +629,12 @@ pub(crate) mod tests {
         assert_eq!(rows.len(), MAX_BANNERS);
         assert_eq!(rows[0].text, "DAEMON NOT RESPONDING");
         assert_eq!(rows[1].text, "CLIP");
-        assert_eq!(rows[2].text, "+6 more");
+        assert_eq!(rows[2].text, "+7 more");
         assert_eq!(rows[2].severity, Severity::Fault);
         assert_eq!(
             rows[2].detail.as_deref(),
             Some(
-                "NO REFERENCE · CHECK ROUTING · NO SIGNAL · STALE · 4.2 s · OUTPUT TIMING JUMP · NO DELAY ESTIMATE"
+                "NO REFERENCE · CHECK ROUTING · NO SIGNAL · STALE · 4.2 s · OUTPUT TIMING JUMP · CLOCK DRIFT · 52 ppm · NO DELAY ESTIMATE"
             )
         );
         // Stacked downwards without overlap, centred, capped width.
@@ -606,7 +659,7 @@ pub(crate) mod tests {
         );
         let rows = layout_banners(&b, short);
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[1].text, "+7 more");
+        assert_eq!(rows[1].text, "+8 more");
         assert_eq!(rows[0].rect.w, 284.0);
         assert!(layout_banners(&b, Rect::new(0.0, 0.0, 300.0, 20.0)).is_empty());
     }
@@ -646,7 +699,7 @@ pub(crate) mod tests {
         );
         assert!(short.rect.h <= 50.0);
         assert_eq!(short.rows.len(), 1);
-        assert_eq!(short.rows[0].text, "+8 more");
+        assert_eq!(short.rows[0].text, "+9 more");
     }
 
     #[test]

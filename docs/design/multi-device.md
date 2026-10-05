@@ -1,8 +1,9 @@
 # Multiple devices, one clock domain, drift detection
 
-Status: design (PLAN §3.1 "Multiple devices in one clock domain; drift detection", P2,
-phase 7; §12 "Clock drift between devices"). Part implemented: drift detection on the
-loopback timing monitor (§5, §6). Multi-device *support* (resampling) is out of scope (§8).
+Status: PLAN §3.1 "Multiple devices in one clock domain; drift detection", P2, phase 7;
+§12 "Clock drift between devices". Implemented: output-vs-input drift detection on the
+loopback timing monitor (§5, §6; `ac2-core::timing::drift`, PROTO 16). Designed, not
+implemented: methods B and C (§4, §7). Multi-device *support* (resampling) is out of scope (§8).
 Builds on `q3-loopback-timing.md` (the monitor), `spike-audio-duplex.md` (cpal has no
 duplex API) and decisions 3a/3b in `open-questions.md`.
 
@@ -21,7 +22,9 @@ clock ran +5.56 ppm against `CLOCK_REALTIME`, stable to ±0.3 ppm across 20+ seg
 1 000–25 000 s, with per-row wall timestamps jittering ±1 period (2.67 ms) and never
 accumulating (`docs/rigs/pupu.md`). ac2 never compares audio against wall time for a
 measurement (wall time only stamps frames for age), so this must not and does not raise a
-drift warning. Only **device against device** matters.
+drift warning. Only **device against device** matters. Within one device the inputs
+share its clock: on pupu at 48 kHz / 128 frames over a 65 min run with 0 xruns, every
+transfer delay between inputs of the one FF400 stayed at 0 samples.
 
 ## 2. Per OS: what one domain looks like and what ac2 can know
 
@@ -100,7 +103,7 @@ delay moving monotonically at a constant rate over minutes is a clock slip betwe
 reference and measurement inputs. Delay tracking already re-estimates the delay; a
 regression of tracked delay over time with the same threshold logic as A would flag it.
 
-### What the existing monitor got wrong (found while writing this note)
+### What the Q3 monitor got wrong (found while writing this note, fixed by §5)
 
 Probing the Q3 tracker with the simulated drift (`timing/tests.rs`):
 
@@ -120,22 +123,32 @@ The offset within an epoch is `offset(x) = c + ε·x + Σ steps`: a straight lin
 ratio) plus integer steps (dropped or repeated frames). The tracker keeps that model
 (`ac2-core::timing::drift::DriftLine`) and judges every window against its *prediction*:
 
+Offsets are fractional (integer peak plus the parabolic fraction), and each window's
+offset belongs to its centre.
+
 - **Acquisition** chains windows that lie on one line: the second window may differ from
-  the first by up to `tolerance + max_drift·Δx` (max 500 ppm: beyond that the stimulus
-  smears by more than `W·ε` ≈ 16 samples inside one 0.68 s window and the correlation peak
-  degrades), every later one must lie within the agreement tolerance (1 sample) of the line
-  through the candidate's first and last windows. On lock, the candidate's points seed the
-  regression, so the slope is known from the first locked hop.
+  the first by up to `1 sample + max_drift·Δx` (bound 500 ppm), every later one must lie
+  within 1 sample of the line through the candidate's first and newest windows. On lock,
+  the candidate's windows seed the regression, so the slope is known from the first locked
+  hop.
 - **Tracking** compares each window with the line's prediction at its centre. Within the
-  tolerance: followed (drift), point added. Outside: a jump candidate, confirmed over
-  non-overlapping windows exactly as in Q3, and then judged against the prediction (the jump
-  size is measured re the drifted offset, not re the last value).
+  jump threshold — ½ sample, or 3σ of the prediction if larger — it is followed (drift) and
+  added to the line. σ is the larger of the regression scatter (widened by extrapolation)
+  and the correlation smear `W·|ε|/√12`: while a window is captured the stimulus slides by
+  `W·ε` samples (3.3 at 100 ppm in a 0.68 s window) and the peak can sit anywhere along
+  that. Outside the threshold a window is a jump candidate, confirmed when its windows lie
+  on one line over at least W (as in Q3). The jump is measured re the drifted offset at the
+  newest candidate window (the first may straddle the step).
 - **Steps never enter the slope.** A confirmed jump shifts the held points by the step, so
-  the regression continues across it with the same slope; a sub-tolerance step (deviation of
-  more than half a sample from the prediction, confirmed by the next window) is absorbed the
-  same way. One outlier window off by half a sample to a sample, not confirmed by the next,
-  is dropped. A rate ratio does not change when frames drop, so continuing the line is the
-  physically right model.
+  the regression continues across it with the same slope. A rate ratio does not change when
+  frames drop, so continuing the line is the physically right model. With a ½-sample
+  threshold a single dropped or repeated frame is an OUTPUT TIMING JUMP of one sample (it
+  was invisible before), and no 10-minute 0 dB SNR run reads a false one.
+- **When no line fits** (off the line for longer than a jump takes to confirm plus the loss
+  count, without a new line forming) the state is Lost, never a Locked offset nothing
+  confirms. Measured on the simulated loopback (pink, 10 dB SNR, 48 kHz): followed without
+  jumps, slope within 0.02 ppm, up to 200 ppm; around 300 ppm the lock comes and goes; at
+  1000 ppm Lost.
 - **The estimate outlives the stimulus.** Points are kept through stimulus gaps within the
   epoch (the line predicts the re-lock offset across the gap, so a gap of a minute at
   100 ppm — 290 samples at 48 kHz — re-locks without a false jump), and the last *judged*
@@ -154,22 +167,44 @@ open question (§9).
 ## 6. What the operator sees, what is refused
 
 - **CLOCK DRIFT banner** (warning, below OUTPUT TIMING JUMP): `CLOCK DRIFT · 52 ppm`,
-  detail `output and input on different clocks (0.5 ms per 10 s) · TF on the loopback
-  reference unaffected`; while no stimulus plays the detail ends with the estimate's age.
-  It stays up for the session (the clock relation does not heal) and goes when the session
-  is reopened. Asserted headless in `ac2-scene::banner`.
-- `ac2 status` prints a `clock` line: the session's clock relation in words and, once
-  measured, `drift 52.0 ppm over 30 s (WARNING: output and input on different clocks)`.
-  `ac2 timing` keeps its drift line.
+  detail `output and input clocks differ (0.52 ms per 10 s); loopback TF unaffected`. It
+  stays up for the session (the clock relation does not heal, so the judged estimate is
+  kept through stimulus gaps and offset epochs) and goes when the session is reopened.
+  Asserted headless in `ac2-scene::banner` and from mirrored state in `ac2-ui`.
+- `ac2 status` prints a `clock` line: the session's clock relation in words and the drift,
+  e.g. `clock        one clock (one callback for input and output); drift +50.0 ppm over
+  30 s  WARNING: output and input on different clocks` (the fake rig claims one callback
+  and simulates two clocks: the relation is a prior, the measurement decides). `ac2 status
+  --json` carries the whole `timing` status; `ac2 timing` keeps its drift line.
 - The session dialog notes, for an open session whose output plays on another device than
   its input (`ClockRelation::Unknown`): the two devices may run on different clocks, which
   the loopback monitor checks while a stimulus plays.
 - **Refused**: the internal reference (generator standing in for the loopback reference)
-  whenever drift is detected or not yet ruled out. Nothing else is refused: transfer
+  whenever drift is detected. Nothing else is refused: transfer
   functions, sweeps, RTA and SPL on a measured reference are unaffected (§3).
 - **Published**: `TimingStatus.drift` (`Drift {ppm, span, warning, at}` in `state.timing`)
   with `at` the wall time of the newest window in the estimate. Control commits it when the
-  warning flips or the shown value (0.1 ppm) changes.
+  warning flips, the span first reaches the judged length, or the shown value changes
+  (1 ppm; 0.1 ppm below 10 ppm while warning), not on every regression wobble.
+
+### Tests
+
+| Where | Case | Expectation |
+|---|---|---|
+| `ac2-core::timing::drift` | known slope −120 … 500 ppm, no noise | exact; warning iff \|ppm\| > 2 on ≥ 10 s |
+| | jitter σ = 0.05 sample over 10 s | slope within 0.2 ppm, σ_pred 0.04–0.08 sample |
+| | unshifted vs shifted one-sample step | 2.6 ppm false drift vs exact slope |
+| | new epoch, a minute's gap | judged drift kept; line predicts across the gap |
+| `ac2-core::timing` (simulated loopback) | ±100, 200 ppm | no jumps, one warning, slope within 2 % (measured 0.02 ppm) |
+| | one-sample step | one jump 500 → 501, no warning, \|slope\| < 0.3 ppm |
+| | 50 ppm with a −17 jump | one jump, slope 50 ± 1 ppm, one warning |
+| | 80 ppm, 20 s stimulus gap | re-lock without a jump, warning kept |
+| | 1000 ppm | Lost, never a stale Locked |
+| `ac2d/tests/drift.rs` (empty daemon, fake DAC clock) | 0 ppm | drift shown, no warning |
+| | 50 ppm | warning, 50 ± 0.5 ppm published and committed; reopened session forgets it |
+| | 17 output frames dropped | OUTPUT TIMING JUMP 2000 → 1983, no drift warning |
+| `ac2-cli/tests/drift_rig.rs` | 50 ppm | `ac2 status` clock line with `+50.0 ppm` and the warning |
+| `ac2-scene`, `ac2-ui` | banner text, order, detail; from mirrored state; session dialog note | asserted headless |
 
 ## 7. Input-vs-input (designed, not implemented)
 

@@ -135,6 +135,16 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Clock drift detection (2026-10-05, `docs/design/multi-device.md`):
+- **Drift above one sample per hop read as timing jumps** (83 ppm at 48 kHz: PLAN §12's
+  100 ppm example gave 14 OUTPUT TIMING JUMPs in 20 s and no drift) and **a one-sample step
+  read as 3 ppm of drift** → the loopback monitor judges windows against a drift line
+  (`ac2-core::timing::drift`), jumps are measured against it and taken out of the slope;
+  CLOCK DRIFT banner, `ac2 status` clock line, session dialog note, PROTO 16 (`Drift.at`).
+  Left: callback-timestamp rate estimate without a stimulus (method B), TF delay slope for
+  reference and measurement on different clocks (method C), resampler servo wander on real
+  hardware.
+
 Delay change without a full resettle; sub-sample delay (operator, 2026-10-05: "delay change
 without resettle sounds useful too"; `docs/design/delay-no-resettle.md`):
 - **A delay change restarted the whole MTW ladder** (~2.4 s of settling) → the reference is

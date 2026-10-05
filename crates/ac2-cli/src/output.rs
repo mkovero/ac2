@@ -5,9 +5,10 @@ use std::io::{self, Write};
 use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic, PeakWeighting, Polarity,
-    Session, SessionFile, SmoothingFraction, SmoothingMode, State, TimeWeighting, TimingState,
-    TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource, Weighting,
+    ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic,
+    PeakWeighting, Polarity, Session, SessionFile, SmoothingFraction, SmoothingMode, State,
+    TimeWeighting, TimingState, TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource,
+    Weighting,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
@@ -653,6 +654,35 @@ pub fn timing_state(s: &TimingState, rate: Option<u32>) -> String {
         }
         TimingState::Lost => "LOST".to_owned(),
     }
+}
+
+/// The session's clock domain, as one line: what the backend states about input and output
+/// clocks and, once the loopback monitor has measured it, their drift
+/// (`docs/design/multi-device.md`). `None` while no session is open.
+pub fn clock(session: &Session, t: &TimingStatus) -> Option<String> {
+    let open = session.open.as_ref()?;
+    let relation = match open.clock {
+        ClockRelation::SingleCallback => "one clock (one callback for input and output)",
+        ClockRelation::SameDeviceSeparateCallbacks => {
+            "one device (separate input and output callbacks)"
+        }
+        ClockRelation::Unknown => "input and output may be on different clocks",
+    };
+    let drift = match &t.drift {
+        None if open.config.loopback.is_none() => "drift not measured (no loopback)".to_owned(),
+        None => "drift not measured yet (needs a stimulus)".to_owned(),
+        Some(d) => format!(
+            "drift {} ppm over {}{}",
+            format::signed(d.ppm, 1),
+            format::duration(d.span.0),
+            if d.warning {
+                "  WARNING: output and input on different clocks"
+            } else {
+                ""
+            }
+        ),
+    };
+    Some(format!("clock        {relation}; {drift}"))
 }
 
 /// Timing status, as lines.

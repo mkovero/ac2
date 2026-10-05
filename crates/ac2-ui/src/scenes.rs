@@ -99,6 +99,11 @@ pub fn status(
         protection,
         frame_age_s,
         timing: st.mirror.as_ref().and_then(|m| m.timing),
+        clock_drift_ppm: st
+            .daemon()
+            .and_then(|d| d.timing.drift)
+            .filter(|d| d.warning)
+            .map(|d| d.ppm),
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
     }
 }

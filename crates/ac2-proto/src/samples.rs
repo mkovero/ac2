@@ -751,6 +751,7 @@ fn timing() -> TimingStatus {
             ppm: 0.4,
             span: Seconds(30.0),
             warning: false,
+            at: WallNs(1_790_000_000_500_000_000),
         }),
         internal_reference: true,
     }

@@ -267,6 +267,9 @@ fn backend_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
             }
         }
     });
+    if let Some(note) = d.clock_note() {
+        ui.label(RichText::new(note).small().color(ch.dim));
+    }
 }
 
 fn channel_grid(

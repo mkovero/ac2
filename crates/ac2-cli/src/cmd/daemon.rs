@@ -54,6 +54,7 @@ fn status_json(
         "session_epoch": w.session_epoch,
         "rev": w.rev,
         "session": session,
+        "timing": st.timing,
         "autosave": st.autosave,
         "inputs": output::inputs_json(st),
     })
@@ -85,6 +86,10 @@ fn status_text(
         w.rev,
         output::session(session)
     ));
+    if let Some(c) = output::clock(session, &st.timing) {
+        s.push('\n');
+        s.push_str(&c);
+    }
     s.push('\n');
     s.push_str(&output::autosave(&st.autosave, crate::watch::now_wall()));
     let inputs = output::inputs(st, crate::watch::now_wall());

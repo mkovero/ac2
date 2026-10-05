@@ -281,7 +281,8 @@
    "drift": {
     "ppm": 0.4,
     "span": 30.0,
-    "warning": false
+    "warning": false,
+    "at": 1790000000500000000
    },
    "internal_reference": true
   }

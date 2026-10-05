@@ -5240,3 +5240,37 @@ fn the_link_receives_what_the_panes_draw() {
     assert!(t.st.wanted_topics().contains(&topic(2, Stream::Spec)));
     assert!(t.st.wanted_topics().contains(&topic(4, Stream::Rta)));
 }
+
+/// The session dialog says when input and output may be on different clocks: an open
+/// session playing on another device, or a device whose directions are separate endpoints.
+#[test]
+fn session_dialog_notes_separate_clocks() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.backend = BackendKind::Fake;
+    }
+    t.conn(mirror(s.clone()));
+    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert!(dialog(&t).is_open_device());
+    assert_eq!(dialog(&t).clock_note(), None);
+    t.key("Escape");
+
+    if let Some(o) = &mut s.session.open {
+        o.output_device = DeviceId("speakers".into());
+        o.clock = ClockRelation::Unknown;
+    }
+    t.conn(mirror(s));
+    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    let mut b = backends(true);
+    b[0].devices[0].duplex_clock = ClockRelation::Unknown;
+    t.conn(ConnEvent::Devices(Ok(b)));
+    assert_eq!(
+        dialog(&t).clock_note().as_deref(),
+        Some(
+            "Output plays on speakers, another device than the input: the two may run on \
+             different clocks; the loopback monitor measures their drift while a stimulus plays."
+        )
+    );
+}

@@ -562,7 +562,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, multi-device | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
 transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,
@@ -570,7 +570,7 @@ mDNS; `docs/rigs/pupu.md`); Windows only as an MSI install in a VM with the simu
 (`docs/design/backlog.md`); macOS: the universal disk image installs and starts on a
 tester's Mac (microphone prompt shown), not yet measured with an audio interface. No
 GitHub release is published: installers are workflow artifacts of `release.yml` runs,
-unsigned. Protocol version 14, session format 8. CI (Linux, macOS, Windows) green again
+unsigned. Protocol version 16, session format 8. CI (Linux, macOS, Windows) green again
 since 9dc4274 (2026-10-05). The current macOS tester build (dev.9, 9dc4274) and its test
 guide are in `testing/macos/` (binaries git-ignored); open items in
 `docs/design/backlog.md` → *Performance and platforms*.
@@ -627,7 +627,7 @@ Q7 calibration store (phase 5), Q8 phase comparison time reference (phase 4).
 | GPU UI testability (killed `ac`'s first GPU UI) | scene layer + software-adapter render tests in CI |
 | ZMQ PUB queueing defeats latest-wins | daemon slot + client-side drain, frame age, STALE (§4.3); `CONFLATE` unusable with multipart |
 | MTW resettle on delay change (~2.4 s) | **resolved** (phase 7): stages keep their averages, rotated, while the change is small next to their window; only larger changes resettle (`docs/design/delay-no-resettle.md`) |
-| Clock drift between devices (~600 µs in 6–30 s) | one clock domain required; drift detection warns |
+| Clock drift between devices (~600 µs in 6–30 s) | one clock domain required; drift detection warns (`docs/design/multi-device.md`) |
 | libzmq / CURVE build on Windows/macOS | phase 0 spike, vendored |
 | Scope creep before 1.0 | §9.1 slice; phase 7 is explicitly post-1.0 |
 

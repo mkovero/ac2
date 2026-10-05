@@ -2447,16 +2447,22 @@ pub struct LastLock {
     pub at: WallNs,
 }
 
-/// Clock drift estimate.
+/// Drift between the output and the input clock, from the slope of the loopback offset
+/// (`docs/design/multi-device.md`). Kept after the stimulus stops and through offset
+/// epochs of the same stream; a new session starts without one.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Drift {
-    /// ppm, positive = offset grows.
+    /// ppm, positive = offset grows (the output clock is slow against the input's).
     pub ppm: f64,
-    /// Span the estimate covers.
+    /// Capture time the regression covers.
     pub span: Seconds,
-    /// Above threshold.
+    /// Above the threshold on a span long enough to judge: output and input are on
+    /// different clocks.
     pub warning: bool,
+    /// Wall time of the newest window in the estimate (for its age once the stimulus
+    /// stopped).
+    pub at: WallNs,
 }
 
 /// Timing status entity.

@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 15
+PROTO_VERSION = 16
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -132,7 +132,7 @@ _TIMING_STATUS = [
     ("epoch", None),
     ("state", _TIMING_STATE),
     ("last_lock", ("opt", [("epoch", None), ("offset", None), ("at_sample", None), ("at", None)])),
-    ("drift", ("opt", [("ppm", None), ("span", None), ("warning", None)])),
+    ("drift", ("opt", [("ppm", None), ("span", None), ("warning", None), ("at", None)])),
     ("internal_reference", None),
 ]
 _LEVELS = [("channels", None)]

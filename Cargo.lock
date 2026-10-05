@@ -19,6 +19,7 @@ dependencies = [
 name = "ac2-cli"
 version = "0.0.0"
 dependencies = [
+ "ac2-audio",
  "ac2-client",
  "ac2-discovery",
  "ac2-proto",

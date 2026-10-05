@@ -115,6 +115,7 @@ fn status() -> Status {
         protection: ac2_proto::frame::ProtectionFlags::NONE,
         frame_age_s: None,
         timing: None,
+        clock_drift_ppm: None,
         no_delay_estimate: None,
     }
 }
