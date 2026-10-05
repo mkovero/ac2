@@ -120,7 +120,7 @@ fn healthy(app: &App, now: Instant) -> bool {
         d.latest
             .frames
             .values()
-            .all(|f| !ac2_ui::scenes::freshness(f).is_stale())
+            .all(|f| !ac2_ui::scenes::freshness(st, f).is_stale())
     });
     link && fresh
 }

@@ -263,9 +263,12 @@ pub fn spl_readout(
         metric,
         since,
         cal,
-        stale: freshness
-            .filter(Freshness::is_stale)
-            .map(|f| format!("STALE {}", format::age(f.age_s()))),
+        stale: match freshness {
+            Some(Freshness::Stale { age_s }) => Some(format!("STALE {}", format::age(age_s))),
+            // A stopped meter's number is no current level: it says so, dimmed like STALE.
+            Some(Freshness::Stopped { .. }) => Some("STOPPED".into()),
+            _ => None,
+        },
         bar: bar(m.scale, live_level),
     }
 }
@@ -731,6 +734,10 @@ mod tests {
         assert_eq!(r.stats[1].label, "LZpeak");
         assert_eq!(r.stats[2].label, "LCSmax");
         assert_eq!(r.stale.as_deref(), Some("STALE 3.2 s"));
+        // A stopped meter's number is no current level either, but nothing is late.
+        let stopped = Some(Freshness::Stopped { age_s: 23.0 });
+        let r2 = spl_readout(&f, -23.4, String::new(), stopped, SINCE.into());
+        assert_eq!(r2.stale.as_deref(), Some("STOPPED"));
         // The bar follows the live level, not the held one: −23.4 dBFS on −100 … 0.
         assert!((r.bar.fill - 0.766).abs() < 1e-4, "{}", r.bar.fill);
         let r = spl_readout(&f, f64::NEG_INFINITY, String::new(), None, SINCE.into());

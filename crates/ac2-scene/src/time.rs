@@ -67,8 +67,17 @@ pub fn local_clock(at: WallNs, today: WallNs, offset_s: impl Fn(WallNs) -> i32) 
 /// Freshness of displayed data.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Freshness {
-    Fresh { age_s: f64 },
-    Stale { age_s: f64 },
+    Fresh {
+        age_s: f64,
+    },
+    /// Frames should be arriving and are not: a fault in the pipeline or the link.
+    Stale {
+        age_s: f64,
+    },
+    /// The measurement was stopped: its last frame is its final result, not a late one.
+    Stopped {
+        age_s: f64,
+    },
 }
 
 impl Freshness {
@@ -84,9 +93,13 @@ impl Freshness {
         matches!(self, Self::Stale { .. })
     }
 
+    pub fn is_stopped(&self) -> bool {
+        matches!(self, Self::Stopped { .. })
+    }
+
     pub fn age_s(&self) -> f64 {
         match *self {
-            Self::Fresh { age_s } | Self::Stale { age_s } => age_s,
+            Self::Fresh { age_s } | Self::Stale { age_s } | Self::Stopped { age_s } => age_s,
         }
     }
 }

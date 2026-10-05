@@ -169,6 +169,16 @@ Keyboard (field, 2026-10-03/04; 548e2c8, 8d15d70, 79fed56):
 - **S on the transfer pane stopped an SPL meter selected in the list** → S and R act on the
   focused pane's own measurement.
 
+Stopped measurements and the spectrum's level axis (field, 2026-10-05: "if I start transfer
+measurement or spectrum and then stop it, then it says STALE … 23s no fresh data"; "make
+spectrum to start shift+home-position when it begins"):
+- **A stopped measurement read STALE** → its last frame is its final result: no STALE banner
+  and none of its last protection flags, the curve not dimmed, tagged `stopped` (transfer
+  legend, spectrum caption; SPL readout and Leq windows say STOPPED). STALE stays for
+  running measurements whose frames stop.
+- **The spectrum pane opened on −100 … 0 dBFS** → each start of a spectrum / RTA fits the
+  level axis on its first frame, as Shift+Home (frequency left as it is).
+
 Smaller fixes from the field (2026-10-03/04): CHECK ROUTING flashing beside NO REFERENCE
 (e5e4161); a calibrated spectrum drawn above a dBFS-sized axis (ad3cfae: one level range per
 scale); renaming a stored trace (a14e1af: F2, double click, `ac2 trace rename`).

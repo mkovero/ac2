@@ -129,6 +129,11 @@ pub struct SpectrumTrace<'a> {
     pub offset_db: f64,
 }
 
+/// ` · stopped` after a stopped measurement's caption: its curve is the final result.
+fn stopped_caption(f: Freshness) -> &'static str {
+    if f.is_stopped() { " · stopped" } else { "" }
+}
+
 /// What the spectrum plot writes for a trace drawn with a display offset:
 /// `Main L S1 · offset +3.0 dB`.
 pub fn offset_note(name: &str, offset_db: f64) -> String {
@@ -161,10 +166,11 @@ impl<'a> SpectrumTrace<'a> {
             scale: frame.meta.scale,
             quantity: Quantity::Band,
             caption: format!(
-                "{} · {}{}",
+                "{} · {}{}{}",
                 fraction_label(frame.meta.fraction),
                 weighting_label(frame.meta.weighting),
-                cal_caption(frame.meta.cal, curve, captured)
+                cal_caption(frame.meta.cal, curve, captured),
+                stopped_caption(freshness)
             ),
             freshness: Some(freshness),
             offset_db: 0.0,
@@ -198,9 +204,10 @@ impl<'a> SpectrumTrace<'a> {
             quantity: Quantity::tone(frame.meta.smoothing),
             // The axis unit says whether the level is smoothed (`level_unit`).
             caption: format!(
-                "{}{}",
+                "{}{}{}",
                 window_label(frame.meta.window),
-                cal_caption(frame.meta.cal, curve, captured)
+                cal_caption(frame.meta.cal, curve, captured),
+                stopped_caption(freshness)
             ),
             freshness: Some(freshness),
             offset_db: 0.0,

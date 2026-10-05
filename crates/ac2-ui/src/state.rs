@@ -8,7 +8,7 @@
 //! offsets, polarity, nudges, selection) and hands them with the received frames to
 //! `ac2-scene`, which does all display math.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use ac2_client::MirrorView;
@@ -932,6 +932,11 @@ pub struct AppState {
     pending_pane_meas: BTreeMap<PaneKind, String>,
     /// What the link was last asked to receive, and how often ([`crate::link_wants`]).
     pub(crate) link_wants: crate::link_wants::Sent,
+    /// Spectrum / RTA measurements seen running, so a start is told from a run going on.
+    spectrum_running: BTreeSet<MeasId>,
+    /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
+    /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
+    spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
 }
 
 impl Default for AppState {
@@ -999,6 +1004,8 @@ impl AppState {
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
             link_wants: crate::link_wants::Sent::default(),
+            spectrum_running: BTreeSet::new(),
+            spectrum_fit: BTreeMap::new(),
         }
     }
 
@@ -4216,6 +4223,7 @@ impl AppState {
                 {
                     self.view.tf.phase_reference = None;
                 }
+                self.follow_spectrum_starts();
                 self.follow_output_device();
                 self.follow_sweep(out);
                 self.follow_leq_alarms();
@@ -4290,6 +4298,7 @@ impl AppState {
                 self.fold_leq(&d);
                 self.fold_spl(&d);
                 self.data = Some(d);
+                self.fit_started_spectra();
             }
             ConnEvent::Trace(mut t, g) => {
                 if let Some(m) = self
@@ -4872,6 +4881,33 @@ impl AppState {
         self.call(out, cmd, format!("{name} created"));
     }
 
+    /// Note the spectrum / RTA measurements that started since the last state: each fits
+    /// the level axis on its first frame.
+    fn follow_spectrum_starts(&mut self) {
+        let running: BTreeSet<MeasId> = self
+            .measurements()
+            .iter()
+            .filter(|m| m.running && spectrum_stream(m).is_some())
+            .map(|m| m.id)
+            .collect();
+        for &id in running.difference(&self.spectrum_running) {
+            let shown = self.spectrum_frame(id).map(|f| f.frame.clone());
+            self.spectrum_fit.insert(id, shown);
+        }
+        self.spectrum_fit.retain(|id, _| running.contains(id));
+        self.spectrum_running = running;
+    }
+
+    /// The newest frame of spectrum / RTA measurement `id`.
+    pub(super) fn spectrum_frame(&self, id: MeasId) -> Option<&ac2_client::TopicFrame> {
+        let m = self.meas(id)?;
+        let stream = spectrum_stream(m)?;
+        self.data
+            .as_ref()?
+            .latest
+            .get(&Topic::Data { meas: id, stream })
+    }
+
     fn fold_peaks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         for tf in d.latest.frames.values() {
@@ -4893,6 +4929,15 @@ impl AppState {
                 e.1 = at;
             }
         }
+    }
+}
+
+/// The stream a spectrum / RTA measurement's curve comes on; `None` for other kinds.
+fn spectrum_stream(m: &Measurement) -> Option<Stream> {
+    match m.config.kind {
+        MeasKind::Spectrum { .. } => Some(Stream::Spec),
+        MeasKind::Rta { .. } => Some(Stream::Rta),
+        _ => None,
     }
 }
 

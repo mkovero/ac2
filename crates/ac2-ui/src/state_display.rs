@@ -231,6 +231,36 @@ impl AppState {
         }
     }
 
+    /// A started spectrum / RTA measurement's first frame is in: the spectrum pane's level
+    /// axis frames what it shows, as Shift+Home does (frequency left as it is). A level
+    /// range that suits one signal rarely suits the next, so each start begins framed.
+    pub(super) fn fit_started_spectra(&mut self) {
+        let arrived: Vec<MeasId> = self
+            .spectrum_fit
+            .iter()
+            .filter(|(id, shown)| {
+                self.spectrum_frame(**id).is_some_and(|f| {
+                    shown
+                        .as_ref()
+                        .is_none_or(|old| !std::sync::Arc::ptr_eq(old, &f.frame))
+                })
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if arrived.is_empty() {
+            return;
+        }
+        for id in &arrived {
+            self.spectrum_fit.remove(id);
+        }
+        let scale = crate::scenes::spectrum_scale(self);
+        if let Some(fit) = level::fit(self.level_values(PaneKind::Spectrum))
+            && let Some(slot) = level_range_mut(&mut self.view, PaneKind::Spectrum, scale)
+        {
+            *slot = fit;
+        }
+    }
+
     /// Every level pane `p` draws in the shown frequency range, as drawn (offsets
     /// included).
     fn level_values(&self, p: PaneKind) -> Vec<f64> {

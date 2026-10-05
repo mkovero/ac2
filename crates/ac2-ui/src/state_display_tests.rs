@@ -508,3 +508,91 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
     assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
 }
+
+/// The state with measurement `id` running or stopped.
+fn with_running(id: u32, running: bool) -> ConnEvent {
+    let mut s = daemon_state();
+    for m in &mut s.measurements {
+        if m.id == MeasId(id) {
+            m.running = running;
+        }
+    }
+    mirror(s)
+}
+
+/// The newest frame of spectrum measurement `id`, aged `age_s` with the client's STALE flag.
+fn aged_spec(t: &T, id: u32, age_s: f64) -> ac2_client::TopicFrame {
+    let mut f =
+        t.st.spectrum_frame(MeasId(id))
+            .expect("spectrum frame")
+            .clone();
+    f.age = Some(age_s);
+    f.since_new = std::time::Duration::from_secs_f64(age_s);
+    f.stale = true;
+    f
+}
+
+/// A stopped measurement's last frame is its final result: no STALE banner (nor its last
+/// protection flags), the curve not dimmed, its caption saying `stopped`. A running one
+/// whose frames stop is STALE.
+#[test]
+fn a_stopped_measurement_is_not_stale() {
+    let mut t = T::new();
+    spec_frame(&mut t, 2, vec![-60.0; 5]);
+    let now = crate::scenes::Now {
+        instant: Instant::now(),
+        wall: WallNs(0),
+    };
+    let f = aged_spec(&t, 2, 23.0);
+    let running = crate::scenes::status(&t.st, &[&f], None, now);
+    assert_eq!(running.frame_age_s, Some(23.0));
+    assert!(
+        ac2_scene::banner::banners(&running)
+            .iter()
+            .any(|b| b.text.starts_with("STALE")),
+        "{running:?}"
+    );
+
+    t.conn(with_running(2, false));
+    let stopped = crate::scenes::status(&t.st, &[&f], None, now);
+    assert_eq!(stopped.frame_age_s, None);
+    assert!(
+        ac2_scene::banner::banners(&stopped).is_empty(),
+        "{stopped:?}"
+    );
+    let fresh = crate::scenes::freshness(&t.st, &f);
+    assert!(fresh.is_stopped() && !fresh.is_stale(), "{fresh:?}");
+}
+
+/// Each start of a spectrum fits the level axis on its first frame, as Shift+Home; frames
+/// after it leave the operator's range alone.
+#[test]
+fn a_started_spectrum_fits_its_level_axis_once() {
+    let mut t = T::new();
+    let default = ViewState::default().spectrum.level;
+    // Bins at 0, 6, 12, 18 and 24 kHz: only 6–18 kHz is in 20 Hz – 20 kHz.
+    spec_frame(&mut t, 2, vec![0.0, -138.0, -120.0, -95.0, 0.0]);
+    let r = t.st.view.spectrum.level;
+    assert_ne!(r, default);
+    assert!(r.lo <= -138.0 && r.lo >= -150.0, "{r:?}");
+    assert!(r.hi >= -95.0 && r.hi <= -85.0, "{r:?}");
+
+    // The operator's own range stays while the run goes on.
+    t.key("Alt+2");
+    t.key("Ctrl+Home");
+    spec_frame(&mut t, 2, vec![0.0, -40.0, -40.0, -40.0, 0.0]);
+    assert_eq!(t.st.view.spectrum.level, default);
+
+    // Stopped: nothing fits; started again: the first new frame does.
+    t.conn(with_running(2, false));
+    spec_frame(&mut t, 2, vec![0.0, -40.0, -40.0, -40.0, 0.0]);
+    assert_eq!(t.st.view.spectrum.level, default);
+    t.conn(with_running(2, true));
+    assert_eq!(
+        t.st.view.spectrum.level, default,
+        "the old frame is no start"
+    );
+    spec_frame(&mut t, 2, vec![0.0, -30.0, -35.0, -40.0, 0.0]);
+    let r = t.st.view.spectrum.level;
+    assert!(r.lo <= -40.0 && r.hi >= -30.0 && r.hi <= -20.0, "{r:?}");
+}

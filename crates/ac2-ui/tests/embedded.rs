@@ -1995,7 +1995,12 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     })?;
     d.key("Alt+2");
     let level = |s: &AppState| s.view.spectrum.level;
+    // The new spectrum's first frame framed the level axis (as Shift+Home).
+    let default = ac2_scene::view::ViewState::default().spectrum.level;
+    assert_ne!(level(&d.st), default);
+    d.key("Ctrl+Home");
     let start = level(&d.st);
+    assert_eq!(start, default);
     for _ in 0..4 {
         d.key("Ctrl+Down");
     }

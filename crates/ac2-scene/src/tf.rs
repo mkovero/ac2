@@ -95,10 +95,10 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64) -> LegendEntry {
         tags.push(format::smoothing(t.smoothing));
     }
     let stale = t.is_stale();
-    if let Some(f) = t.freshness
-        && stale
-    {
-        tags.push(format!("STALE {}", format::age(f.age_s())));
+    match t.freshness {
+        Some(f) if stale => tags.push(format!("STALE {}", format::age(f.age_s()))),
+        Some(f) if f.is_stopped() => tags.push("stopped".to_string()),
+        _ => {}
     }
     let mut text = t.name.clone();
     for tag in &tags {
@@ -802,6 +802,27 @@ mod tests {
         assert!(labels.contains(&"Main L · ref · 1/6 oct"));
         assert!(labels.contains(&"1.00 kHz"));
         assert!(labels.contains(&"+3.0 dB  0°  1.00"));
+    }
+
+    /// A stopped measurement's curve is its final result: tagged, drawn at full strength.
+    #[test]
+    fn stopped_trace_is_tagged_not_dimmed() {
+        let c = cols(100);
+        let mut t = trace(&c, TraceKey::Live(MeasId(1)), 0.0);
+        t.name = "Main L".into();
+        t.freshness = Some(Freshness::Stopped { age_s: 23.0 });
+        let s = transfer_scene(
+            &[t],
+            &DisplayCache::default(),
+            &Status::default(),
+            &ViewState::default(),
+            &Theme::dark(),
+            SIZE,
+        );
+        assert_eq!(s.legend[0].text, "Main L · ref · stopped");
+        assert!(!s.legend[0].stale);
+        let stroke = &s.scene.layers[1].polylines[0].stroke;
+        assert_eq!(stroke.color.a, 1.0);
     }
 
     #[test]

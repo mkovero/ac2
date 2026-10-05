@@ -501,8 +501,9 @@ impl ClockTexts {
         };
         if let Some(d) = &st.data {
             for f in d.latest.frames.values() {
-                if f.stale && matches!(f.topic, Topic::Data { .. }) {
-                    count(crate::scenes::freshness(f).age_s(), &mut texts);
+                let fresh = crate::scenes::freshness(st, f);
+                if fresh.is_stale() && matches!(f.topic, Topic::Data { .. }) {
+                    count(fresh.age_s(), &mut texts);
                 }
             }
         }

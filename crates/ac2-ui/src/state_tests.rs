@@ -4215,9 +4215,9 @@ fn leq_frame_a_little_over_a_second_old_is_fresh() {
     let mut f = d.latest.frames.values().next().expect("frame").clone();
     f.age = Some(1.2);
     f.since_new = std::time::Duration::from_millis(1200);
-    assert!(!crate::scenes::freshness(&f).is_stale());
+    assert!(!crate::scenes::freshness(&AppState::default(), &f).is_stale());
     f.stale = true;
-    assert!(crate::scenes::freshness(&f).is_stale());
+    assert!(crate::scenes::freshness(&AppState::default(), &f).is_stale());
 }
 
 /// Shift+L opens the SPL meter's Leq windows by name; a preset (its windows replace the

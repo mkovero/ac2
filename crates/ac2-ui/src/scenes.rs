@@ -43,10 +43,15 @@ pub fn frame(st: &AppState, meas: MeasId, stream: Stream) -> Option<&TopicFrame>
 
 /// Freshness of a received frame: its age, or STALE when the client says so (no new frame
 /// within the stream's threshold — 3 s for Leq, 1 s otherwise — or the daemon not
-/// responding).
-pub fn freshness(tf: &TopicFrame) -> Freshness {
+/// responding), or stopped when its measurement no longer runs (no frame is due).
+pub fn freshness(st: &AppState, tf: &TopicFrame) -> Freshness {
     let since = tf.since_new.as_secs_f64();
     let age = tf.age.unwrap_or(since);
+    if stopped(st, tf) {
+        return Freshness::Stopped {
+            age_s: age.max(since),
+        };
+    }
     // The client's flag already applies each stream's own threshold (a once-a-second Leq frame
     // is 3 s, the rest 1 s); judging the age again here with the general 1 s would dim a Leq
     // view for a moment whenever a frame arrived a little after its second.
@@ -59,6 +64,16 @@ pub fn freshness(tf: &TopicFrame) -> Freshness {
     }
 }
 
+/// The frame's measurement is listed and not running: its last frame is its final result.
+fn stopped(st: &AppState, tf: &TopicFrame) -> bool {
+    let Topic::Data { meas, .. } = tf.topic else {
+        return false;
+    };
+    st.daemon()
+        .and_then(|s| s.measurements.iter().find(|m| m.id == meas))
+        .is_some_and(|m| !m.running)
+}
+
 /// Banner inputs for a pane showing `shown` frames.
 pub fn status(
     st: &AppState,
@@ -69,12 +84,15 @@ pub fn status(
     let daemon_silence_s = st.mirror.as_ref().and_then(|m| m.last_ka).map_or(0.0, |t| {
         now.instant.saturating_duration_since(t).as_secs_f64()
     });
-    let protection = shown.iter().fold(ProtectionFlags::NONE, |a, f| {
+    // A stopped measurement raises no fault: nothing is due from it, and its last frame's
+    // protection flags describe a signal that is no longer measured.
+    let live: Vec<&TopicFrame> = shown.iter().copied().filter(|f| !stopped(st, f)).collect();
+    let protection = live.iter().fold(ProtectionFlags::NONE, |a, f| {
         a.with(f.frame.stamp.protection)
     });
-    let frame_age_s = shown
+    let frame_age_s = live
         .iter()
-        .map(|f| freshness(f).age_s())
+        .map(|f| freshness(st, f).age_s())
         .min_by(f64::total_cmp);
     Status {
         daemon_silence_s,
@@ -156,7 +174,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             &l.cols.freqs,
             l.meas.config.name.clone(),
             theme.trace_color(l.color),
-            freshness(l.tf),
+            freshness(st, l.tf),
         );
         let e = st.edit(l.meas.id);
         t.offset_db = e.offset_db;
@@ -278,7 +296,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
                 &c.cols.edges,
                 name,
                 color,
-                freshness(c.tf),
+                freshness(st, c.tf),
             ),
             FrameData::Rta(f) => SpectrumTrace::rta(
                 f,
@@ -288,7 +306,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
                 &c.cols.edges,
                 name,
                 color,
-                freshness(c.tf),
+                freshness(st, c.tf),
             ),
             _ => continue,
         };
@@ -381,7 +399,7 @@ pub fn ir(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<IrSc
     Some(ir_scene(
         f,
         theme.trace_color(i),
-        Some(freshness(tf)),
+        Some(freshness(st, tf)),
         &status,
         &st.view,
         theme,
@@ -536,16 +554,18 @@ fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqVie
     };
     // The frame describes the windows of the configuration it was made under.
     let cfg = &config.leq;
-    let fresh = freshness(tf);
+    let fresh = freshness(st, tf);
     Some(LeqView {
         meter: m.config.name.clone(),
         cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
         cfg,
         tiles: leq_tiles(cfg, f),
         history: st.leq_history.get(&m.id).map(|(_, h)| h),
-        stale: fresh
-            .is_stale()
-            .then(|| format!("STALE {}", format::age(fresh.age_s()))),
+        stale: match fresh {
+            Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),
+            Freshness::Stopped { .. } => Some("STOPPED".into()),
+            Freshness::Fresh { .. } => None,
+        },
         scale: f.meta.scale,
         layout: st.view.spl.layout,
         run: f
@@ -592,7 +612,7 @@ fn spl_readout_of<'a>(
         |t| st.local_zone.offset_s(t),
         reset.as_deref(),
     );
-    let r = spl_readout(held, f.meta.level, cal, Some(freshness(tf)), since);
+    let r = spl_readout(held, f.meta.level, cal, Some(freshness(st, tf)), since);
     Some((r, tf))
 }
 
