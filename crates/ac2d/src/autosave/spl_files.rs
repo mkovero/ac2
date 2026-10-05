@@ -167,13 +167,22 @@ impl SplFiles {
             return false;
         }
         let p = self.dir.join(&r.file);
-        let opened = OpenOptions::new().append(true).open(&p).and_then(|file| {
-            if file.metadata()?.len() < r.complete_len {
-                return Err(std::io::Error::other("shorter than when it was read"));
-            }
-            file.set_len(r.complete_len)?;
-            Ok(file)
-        });
+        // The cut goes through a plain write handle: an append-only handle on Windows lacks
+        // the write-data right `set_len` needs.
+        let opened = OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .and_then(|file| {
+                let len = file.metadata()?.len();
+                if len < r.complete_len {
+                    return Err(std::io::Error::other("shorter than when it was read"));
+                }
+                if len > r.complete_len {
+                    file.set_len(r.complete_len)?;
+                }
+                Ok(())
+            })
+            .and_then(|()| OpenOptions::new().append(true).open(&p));
         match opened {
             Ok(file) => {
                 f.file = Some(file);
