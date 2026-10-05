@@ -298,7 +298,7 @@ pub struct TfMeta {
     /// averaged).
     pub mic_curve: bool,
     /// What a spatial average combined; `None` for a transfer measurement.
-    pub average: Option<TfAverage>,
+    pub average: Option<Box<TfAverage>>,
 }
 
 /// What a spatial average's frame combined.

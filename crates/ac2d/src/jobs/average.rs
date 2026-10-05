@@ -191,11 +191,7 @@ impl Average {
 }
 
 /// Why a member's answer cannot go into the average, if it cannot.
-fn usable<'a>(
-    a: &'a Answer,
-    epoch: SessionEpoch,
-    grid_id: GridId,
-) -> Result<&'a TfFrame, MemberStatus> {
+fn usable(a: &Answer, epoch: SessionEpoch, grid_id: GridId) -> Result<&TfFrame, MemberStatus> {
     let f = match a {
         Answer::Stopped => return Err(MemberStatus::Stopped),
         Answer::NoResult => return Err(MemberStatus::Settling),
@@ -215,7 +211,7 @@ fn usable<'a>(
             protection: refusing,
         });
     }
-    if !tf.validity.iter().any(|v| *v == ValidityMask::NONE) {
+    if !tf.validity.contains(&ValidityMask::NONE) {
         return Err(MemberStatus::Settling);
     }
     Ok(tf)
@@ -279,7 +275,7 @@ pub(crate) fn combine(
             frozen: false,
             smoothing: None,
             mic_curve: false,
-            average: Some(average),
+            average: Some(Box::new(average)),
         },
         mag: nan(),
         phase: nan(),
@@ -333,7 +329,7 @@ pub(crate) fn combine(
             frozen: false,
             smoothing: None,
             mic_curve,
-            average: Some(average),
+            average: Some(Box::new(average)),
         },
         mag: d.columns.mag_db,
         phase: d.columns.phase_deg.unwrap_or_else(nan),

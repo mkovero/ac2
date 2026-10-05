@@ -113,7 +113,7 @@ fn power_average_leaves_out_refused_and_stopped_members() {
             MemberStatus::Stopped,
         ]
     );
-    assert_eq!(f.meta.average.as_ref().map(TfAverage::included), Some(2));
+    assert_eq!(f.meta.average.as_ref().map(|a| a.included()), Some(2));
 }
 
 /// A weak reference only holds a member's averaging: it stays in.

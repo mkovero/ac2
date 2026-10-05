@@ -18,12 +18,15 @@ use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Change, Frame, FrameData, GridDef, GridId, Patch};
 
+/// A frame the rig publishes, and its grid.
+type Published = (FrameData, Option<GridId>);
+
 pub struct Rig {
     pub fake: Arc<FakeDaemon>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     /// Further frames published with the rig's own, each round.
-    extra: Arc<std::sync::Mutex<Vec<(FrameData, Option<GridId>)>>>,
+    extra: Arc<std::sync::Mutex<Vec<Published>>>,
 }
 
 impl Drop for Rig {
@@ -394,7 +397,7 @@ impl Rig {
             }
         }
         let stop = Arc::new(AtomicBool::new(false));
-        let extra: Arc<std::sync::Mutex<Vec<(FrameData, Option<GridId>)>>> = Arc::default();
+        let extra: Arc<std::sync::Mutex<Vec<Published>>> = Arc::default();
         let (f, st, more) = (fake.clone(), stop.clone(), extra.clone());
         let thread = std::thread::spawn(move || {
             let tf = |meas, gain, tau, bump| {
@@ -477,7 +480,7 @@ impl Rig {
             s.commit(Change::Measurement(Patch::Set(avg)));
         }
         let mut f = tf_frame(6, -1.5, 0.0, 1300.0);
-        f.meta.average = Some(TfAverage {
+        f.meta.average = Some(Box::new(TfAverage {
             method: AverageMethod::Power,
             members: [
                 (1, MemberStatus::Included),
@@ -489,7 +492,7 @@ impl Rig {
                 status,
             })
             .to_vec(),
-        });
+        }));
         self.extra
             .lock()
             .unwrap()

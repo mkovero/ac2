@@ -1290,7 +1290,7 @@ pub fn tf_frame() -> Frame {
                     mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
-                average: Some(TfAverage {
+                average: Some(Box::new(TfAverage {
                     method: AverageMethod::Power,
                     members: vec![
                         AverageMemberState {
@@ -1312,7 +1312,7 @@ pub fn tf_frame() -> Frame {
                             status: MemberStatus::Stopped,
                         },
                     ],
-                }),
+                })),
             },
             mag: (0..n).map(|i| val(i, -6.0 + i as f32 * 0.031_25)).collect(),
             phase: (0..n)
