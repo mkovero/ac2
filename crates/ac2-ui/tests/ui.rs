@@ -278,6 +278,71 @@ fn help_overlay() {
     step_until(&mut h, "help closed", |a| a.state.overlay == Overlay::None);
 }
 
+/// The keys belong to the reducer, so egui never holds keyboard focus: Tab and the arrows in
+/// an open dialog (or with none open) leave no widget focused — the sidebar's measurement
+/// chip in particular — and the dialog stays open on its own focus.
+#[test]
+fn keyboard_focus_stays_in_the_open_dialog() {
+    if !have_gpu("keyboard_focus_stays_in_the_open_dialog") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    let wander = |h: &mut Harness<'_, App>, what: &str| {
+        for key in [
+            Key::Tab,
+            Key::ArrowDown,
+            Key::ArrowRight,
+            Key::ArrowLeft,
+            Key::ArrowUp,
+            Key::Tab,
+            Key::ArrowDown,
+        ] {
+            h.key_press(key);
+            h.step();
+            h.step();
+            assert_eq!(
+                h.ctx.memory(|m| m.focused()),
+                None,
+                "{what}: egui focus after {key:?}"
+            );
+        }
+    };
+    wander(&mut h, "no dialog");
+    type Open = (
+        &'static str,
+        fn(&mut Harness<'_, App>),
+        fn(&Overlay) -> bool,
+    );
+    let dialogs: [Open; 4] = [
+        (
+            "Leq windows",
+            |h| h.key_press_modifiers(Modifiers::SHIFT, Key::L),
+            |o| matches!(o, Overlay::Leq(_)),
+        ),
+        (
+            "palette",
+            |h| h.key_press_modifiers(Modifiers::COMMAND, Key::K),
+            |o| matches!(o, Overlay::Palette(_)),
+        ),
+        (
+            "level prompt",
+            |h| h.key_press(Key::Space),
+            |o| matches!(o, Overlay::Prompt(_)),
+        ),
+        ("help", |h| h.key_press(Key::H), |o| *o == Overlay::Help),
+    ];
+    for (what, open, is_open) in dialogs {
+        open(&mut h);
+        step_until(&mut h, what, |a| is_open(&a.state.overlay));
+        wander(&mut h, what);
+        assert!(is_open(&h.state().state.overlay), "{what} stays open");
+        h.key_press(Key::Escape);
+        step_until(&mut h, "closed", |a| a.state.overlay == Overlay::None);
+    }
+}
+
 #[test]
 fn command_palette() {
     if !have_gpu("command_palette") {

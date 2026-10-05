@@ -79,13 +79,6 @@ decision 4). Measured numbers: PLAN §9.0.
 - **No guided in-line tone**: the operator starts the 1 kHz tone (own source or the
   generator); the dialog could offer to arm a 1 kHz sine under the usual ceiling.
 
-## UI focus (2026-10-03)
-
-- **egui focus wanders to the sidebar's measurement chip** after arrow keys in the Leq dialog
-  (seen while testing preset cycling): the chip gets egui's focus highlight. Check whether a
-  dialog leaves focus on the side panel in the app too, and keep keyboard focus inside the open
-  dialog.
-
 ## Windows (2026-10-03, operator's Windows 11 VM, release build of 6c122d5)
 
 - MSI installed cleanly (unsigned: SmartScreen "More info → Run anyway"), Start-menu entry and
@@ -118,20 +111,6 @@ decision 4). Measured numbers: PLAN §9.0.
   the summing axis. Left: heights through the reference axis, 15–30° off axis, rear-panel
   settings, listening position; listen during a burst;
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
-
-## Stored traces in the app (left after the Traces list)
-
-- **No export of the selected trace from the app**: `ac2 trace export` does it by name; a
-  palette entry (export to a typed path) would close it.
-- **The level axis ranges are forgotten when the app quits**: kept per pane while it runs;
-  `ui.toml` could remember them (a fit made for one show is rarely right for the next).
-- **The spectrum pane has no legend**: only offset curves are named (a note in its corner);
-  the colours of several live spectra and captures are told apart by the list alone.
-- **A − B takes the two lowest shown slots**: an unslotted trace has to be moved to a slot
-  first (**Move the selected trace to slot…**); "selected trace minus the next shown one"
-  would not need it.
-- **The transfer legend does not mark the selected trace**: the pane's title names it and the
-  list highlights it; a thicker line or a marker in the legend would show it in the plot.
 
 ## Done
 
@@ -179,6 +158,26 @@ without resettle sounds useful too"; `docs/design/delay-no-resettle.md`):
   delay flat within 0.03° per bin to 0.45·fs); the finder's estimate is inserted exactly;
   `applied_samples` is fractional, `delay.nudge`, PROTO 15; Ctrl / Alt + `,` `.` move the
   measurement's delay by 1 / 0.1 sample, `ac2 delay nudge`.
+
+Small app fixes (2026-10-05; operator: "small app fixes yes", "spectrum axis label naming
+yes" — "I don't completely understand the spectrum y-axis, why it goes below 0 …"):
+- **The spectrum's level axis did not say its levels are per bin** → `dB SPL per 1.46 Hz bin
+  (tone, 1/3 oct smoothed)` (the bin spacing fs/N from the frame's grid, not the window's
+  ENBW), shortened to fit narrow panes; its tooltip and the user guide say broadband reads
+  lower with finer bins and point to the RTA. No wire change.
+- **No export of the selected trace from the app** → palette *Export the selected trace (ac2
+  CSV) to a file…* (a file or a folder; starts in the last export's folder).
+- **Level axis ranges forgotten when the app quits** → `[levels]` in `ui.toml` (written at
+  most once a second); a started spectrum still fits on its first frame.
+- **The spectrum pane had no legend** → a legend in rows above the plot (name, colour,
+  `stopped` / `STALE` / `offset`), shortened to `+N more` on small panes.
+- **A − B took the two lowest shown slots** → the selected trace minus the next shown one it
+  combines with (slots when nothing is selected).
+- **The transfer legend did not mark the selected trace** → a bar and a thicker swatch on its
+  row, a line twice as wide (spectrum pane too).
+- **egui focus wandered to the sidebar's measurement chip** (Tab / arrows, any dialog) → the
+  app clears egui's keyboard focus every pass; the reducer owns the keys and each dialog its
+  own focus (tested for the Leq dialog, palette, prompt and help).
 
 Laptop / Pi performance pass (2026-10-04/05; a0d015d … 9dc4274, PLAN §9.0 has the numbers):
 - **Autosave rewrote the whole SPL log every minute** (≈15 MB/min at 48 h retention) → the

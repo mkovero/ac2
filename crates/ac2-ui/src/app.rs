@@ -661,6 +661,18 @@ impl eframe::App for App {
         // The dialog owns the keyboard while open (text entry); there is no link to drive.
         if self.connect.is_none() {
             self.input(&ctx);
+            // The keys reach the reducer, which keeps each dialog's focus itself; egui's own
+            // keyboard focus would only wander: Tab and the arrows move it from widget to
+            // widget across the window (an open dialog's buttons to the sidebar's chips)
+            // whatever is open, and highlight what no key acts on. egui reads those keys at
+            // the start of the pass, before the reducer takes them; here, before any widget
+            // is laid out, the move is cancelled and no widget keeps the focus.
+            ctx.memory_mut(|m| {
+                m.move_focus(egui::FocusDirection::None);
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
         }
         if self.state.quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
