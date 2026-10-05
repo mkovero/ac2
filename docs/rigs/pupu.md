@@ -218,7 +218,7 @@ below −118 dBFS:
 |---|---|---|---|
 | 1 | Genelec 1083 | — (never probed) | |
 | 2 | in 2 (loopback reference) | −57.6 dBFS | +2.4 dB |
-| 3 | Xone:62 ch 1 (RCA L) → Xone mono out → in 5 | −74.8 dBFS | −14.8 dB (Xone gain/fader) |
+| 3 | Xone:62 ch 1 (RCA L) → Xone mono out → in 5 (no speaker on the Xone; EQ off) | −74.8 dBFS | −14.8 dB (Xone gain/fader) |
 | 4 | in 6 | −66.0 dBFS | −6.0 dB |
 | 5 | in 7 | −66.1 dBFS | −6.1 dB |
 | 6 | in 8 | −66.1 dBFS | −6.1 dB |
