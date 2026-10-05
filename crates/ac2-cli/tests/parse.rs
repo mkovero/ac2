@@ -19,6 +19,47 @@ fn ok(args: &[&str]) -> Cli {
 }
 
 #[test]
+fn recording_grammar() {
+    let c = ok(&[
+        "rec",
+        "start",
+        "--in",
+        "1,2",
+        "--max",
+        "10min",
+        "--max-size",
+        "2GB",
+        "--name",
+        "show",
+    ]);
+    let Cmd::Rec {
+        cmd: RecCmd::Start(a),
+    } = c.cmd
+    else {
+        panic!("not rec start");
+    };
+    assert_eq!(a.inputs, Some(Channels(vec![0, 1])));
+    assert_eq!(a.max, Time(Seconds(600.0)));
+    assert_eq!(a.max_size, Some(ByteSize(2_000_000_000)));
+    assert_eq!(a.name.as_deref(), Some("show"));
+    assert!(
+        parse(&["rec", "start"]).is_err(),
+        "the time limit is required"
+    );
+    assert_eq!("1.5GiB".parse::<ByteSize>(), Ok(ByteSize(1_610_612_736)));
+    assert_eq!("1h".parse::<Time>(), Ok(Time(Seconds(3600.0))));
+    assert!("2".parse::<ByteSize>().is_err(), "a size needs its unit");
+    assert!("25h".parse::<Time>().is_err(), "a day at most");
+    for sub in ["stop", "status", "list"] {
+        ok(&["rec", sub]);
+    }
+    assert!(matches!(
+        ok(&["session", "replay", "show", "--fast"]).cmd,
+        Cmd::Session { cmd: SessionCmd::Replay { ref recording, fast: true } } if recording == "show"
+    ));
+}
+
+#[test]
 fn plan_examples_parse() {
     // PLAN §7, as written.
     let c = ok(&["gen", "pink", "--out", "1,2", "--level", "-20dbfs"]);
@@ -476,6 +517,7 @@ proptest! {
         let _ = s.parse::<Gain>();
         let _ = s.parse::<SplLevel>();
         let _ = s.parse::<Time>();
+        let _ = s.parse::<ByteSize>();
         let _ = s.parse::<SampleCount>();
         let _ = s.parse::<Distance>();
         let _ = s.parse::<Celsius>();

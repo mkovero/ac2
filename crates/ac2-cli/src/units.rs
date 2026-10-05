@@ -197,6 +197,8 @@ impl FromStr for MicSensitivityArg {
 
 fn seconds_of(n: f64, u: &str) -> Option<f64> {
     match u {
+        "h" => Some(n * 3600.0),
+        "min" => Some(n * 60.0),
         "s" | "sec" => Some(n),
         "ms" => Some(n * 1e-3),
         "us" | "µs" | "μs" => Some(n * 1e-6),
@@ -204,7 +206,7 @@ fn seconds_of(n: f64, u: &str) -> Option<f64> {
     }
 }
 
-/// A non-negative duration: `1.5ms`, `2s`, `250us`. ≤ 1 day.
+/// A non-negative duration: `1.5ms`, `2s`, `250us`, `10min`, `1h`. ≤ 1 day.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Time(pub Seconds);
 
@@ -216,6 +218,31 @@ impl FromStr for Time {
             return need_unit(s, &u, "s, ms or us");
         };
         Ok(Self(Seconds(in_range(s, sec, 0.0, 86_400.0, "duration")?)))
+    }
+}
+
+/// A file size: `500MB`, `2GB`, `1.5GiB` (decimal kB/MB/GB/TB, binary KiB/MiB/GiB/TiB).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteSize(pub u64);
+
+impl FromStr for ByteSize {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let (n, u) = split(s)?;
+        let k: f64 = match u.as_str() {
+            "b" => 1.0,
+            "kb" => 1e3,
+            "mb" => 1e6,
+            "gb" => 1e9,
+            "tb" => 1e12,
+            "kib" => 1024.0,
+            "mib" => 1_048_576.0,
+            "gib" => 1_073_741_824.0,
+            "tib" => 1_099_511_627_776.0,
+            _ => return need_unit(s, &u, "kB, MB, GB, TB or KiB, MiB, GiB, TiB"),
+        };
+        let v = in_range(s, n * k, 1.0, 1e15, "size")?;
+        Ok(Self(v.round() as u64))
     }
 }
 

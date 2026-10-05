@@ -7,8 +7,8 @@ use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
-    Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs,
-    MicSensitivityArg, SampleCount, SplLevel, Time, VoltsArg,
+    ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg,
+    LevelDbfs, MicSensitivityArg, SampleCount, SplLevel, Time, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -99,6 +99,13 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: IrCmd,
     },
+    /// Raw capture files: record inputs of the open session losslessly, with a sidecar of
+    /// what was measured; play one back with `session replay`.
+    Rec {
+        /// Action.
+        #[command(subcommand)]
+        cmd: RecCmd,
+    },
     /// Stored traces.
     Trace {
         /// Action.
@@ -167,6 +174,16 @@ pub enum SessionCmd {
     },
     /// Saved sessions in the daemon's session directory.
     List,
+    /// Open a session that plays a recording (`ac2 rec list`) instead of a device: the
+    /// running measurements analyse it as they did the live inputs.
+    Replay {
+        /// Recording name (in the daemon's recording directory) or the path of its .wav or
+        /// .ac2rec.json file.
+        recording: String,
+        /// As fast as the measurements take it, instead of in real time.
+        #[arg(long)]
+        fast: bool,
+    },
     /// Input setup: the mic on each input and its active mic curve (shown without options).
     Inputs(SessionInputs),
 }
@@ -1212,6 +1229,38 @@ pub enum IrCmd {
     /// the reference and the mic, and store a sweep trace with harmonic distortion H2 … H5
     /// and THD vs frequency; prints a summary.
     Capture(IrCaptureArgs),
+}
+
+/// `rec …`.
+#[derive(Debug, Subcommand)]
+pub enum RecCmd {
+    /// Start recording inputs of the open session (f32 WAV + JSON sidecar on the daemon
+    /// host); it runs until `rec stop`, its time or size limit, or the session closes.
+    Start(RecStartArgs),
+    /// Stop the recording and finalise its file.
+    Stop,
+    /// The recording in progress, or the last one.
+    Status,
+    /// Recordings in the daemon's recording directory.
+    List,
+}
+
+/// `rec start`.
+#[derive(Debug, Args)]
+pub struct RecStartArgs {
+    /// Inputs to record, e.g. `1,2` (default: every input of the session).
+    #[arg(long = "in", value_name = "CHANNELS")]
+    pub inputs: Option<Channels>,
+    /// File name (default `rec-<UTC date and time>`); an existing recording is never
+    /// replaced.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Stop by itself after this much audio, e.g. `10min`, `1h`; required.
+    #[arg(long, value_name = "TIME")]
+    pub max: Time,
+    /// … or once the file reaches this size, e.g. `2GB`.
+    #[arg(long, value_name = "SIZE")]
+    pub max_size: Option<ByteSize>,
 }
 
 /// `ir capture`.

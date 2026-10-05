@@ -374,6 +374,7 @@ async fn status_reports_build_ids() -> R {
         json!({
             "epoch": 1,
             "open": null,
+            "recording": null,
             "autosave": { "state": { "type": "off" }, "saved_at": null },
         })
     );

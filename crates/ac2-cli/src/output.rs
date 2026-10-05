@@ -6,9 +6,9 @@ use ac2_proto::GridDef;
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
     ClockRelation, DelayReference, DepthPolicy, LevelScale, MeasKind, Measurement, Mic,
-    PeakWeighting, Polarity, Session, SessionFile, SmoothingFraction, SmoothingMode, State,
-    TimeWeighting, TimingState, TimingStatus, TraceData, TraceKind, TraceMeta, TraceSource,
-    Weighting,
+    PeakWeighting, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
+    SmoothingFraction, SmoothingMode, State, TimeWeighting, TimingState, TimingStatus, TraceData,
+    TraceKind, TraceMeta, TraceSource, Weighting,
 };
 use ac2_proto::units::WallNs;
 use ac2_scene::format;
@@ -258,17 +258,80 @@ pub fn autosave(a: &Autosave, now: WallNs) -> String {
 pub fn session(s: &Session) -> String {
     match &s.open {
         None => format!("session closed (epoch {})", s.epoch),
-        Some(o) => format!(
-            "session open (epoch {})\n  input  {} ch {}\n  output {} × {}\n  rate   {}  buffer {} samples",
-            s.epoch,
-            o.input_device.0,
-            channels_text(&o.config.input_channels),
-            o.output_device.0,
-            o.config.output_channels,
-            format::freq_readout(f64::from(o.sample_rate_hz)),
-            o.buffer_frames
-        ),
+        Some(o) => match &o.replay {
+            Some(r) => format!(
+                "session open (epoch {}): replaying {} ({:?})\n  file   {}\n  input  {} ch {}\n  rate   {}  {} recorded",
+                s.epoch,
+                r.name,
+                r.pace,
+                r.path,
+                o.input_device.0,
+                channels_text(&o.config.input_channels),
+                format::freq_readout(f64::from(o.sample_rate_hz)),
+                ac2_scene::recording::clock(r.frames as f64 / f64::from(o.sample_rate_hz.max(1)))
+            ),
+            None => format!(
+                "session open (epoch {})\n  input  {} ch {}\n  output {} × {}\n  rate   {}  buffer {} samples",
+                s.epoch,
+                o.input_device.0,
+                channels_text(&o.config.input_channels),
+                o.output_device.0,
+                o.config.output_channels,
+                format::freq_readout(f64::from(o.sample_rate_hz)),
+                o.buffer_frames
+            ),
+        },
     }
+}
+
+fn input_label(i: u16) -> String {
+    format!("in {}", i + 1)
+}
+
+/// One line for a recording: the indicator's text.
+pub fn recording_line(r: &RecordingRun) -> String {
+    ac2_scene::recording::recording_label(r, input_label).text
+}
+
+/// A recording: the indicator and its detail.
+pub fn recording(r: &RecordingRun) -> String {
+    let l = ac2_scene::recording::recording_label(r, input_label);
+    format!("{}\n  {}", l.text, l.detail)
+}
+
+/// `rec list`.
+pub fn recordings(l: &[RecordingFile]) -> String {
+    if l.is_empty() {
+        return "no recordings".to_owned();
+    }
+    let mut t = table(&[
+        "name",
+        "started (UTC)",
+        "inputs",
+        "length",
+        "dropouts",
+        "ended",
+        "path",
+    ]);
+    for r in l {
+        let secs = r.frames as f64 / f64::from(r.sample_rate_hz.max(1));
+        t.add_row(vec![
+            r.name.clone(),
+            utc(r.started_at.0),
+            channels_text(&r.inputs),
+            ac2_scene::recording::clock(secs),
+            r.discontinuities.to_string(),
+            r.end.as_ref().map_or_else(
+                || "recording".to_owned(),
+                |e| match e {
+                    RecordingEnd::WriteFailed { msg } => format!("write failed: {msg}"),
+                    other => format!("{other:?}"),
+                },
+            ),
+            r.path.clone(),
+        ]);
+    }
+    t.to_string()
 }
 
 fn source_text(s: &TraceSource) -> String {
