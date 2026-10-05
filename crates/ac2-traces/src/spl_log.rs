@@ -2,27 +2,29 @@
 //! SPL meter and what `ac2 spl leq export` writes for compliance records.
 //!
 //! ```text
-//! # ac2 spl log v1
+//! # ac2 spl log v2
 //! # meas: 4
 //! # name: FOH SPL
 //! # input: 2
 //! # mic: M30
-//! start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,sensitivity_db
-//! 2026-10-03T14:57:25.000Z,1790000245000000000,1,dB SPL,95.1234,98.0000,99.5000,120.0200
+//! start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db
+//! 2026-10-03T14:57:25.000Z,1790000245000000000,1,dB SPL,95.1234,98.0000,99.5000,121.2500,101.0000,120.0200,3.0000,2.0000
 //! ```
 //!
 //! Levels are written in the unit of their row (dB SPL when a sensitivity was in force,
 //! else dBFS) with four decimals: 10⁻⁴ dB is far below anything a one-second level is read
-//! to, and keeps a day's log near 6 MB. Reading back recovers dBFS by subtracting the
-//! sensitivity.
+//! to, and keeps a day's log near 8 MB. Reading back recovers dBFS by subtracting the
+//! sensitivity. The levels are what was measured: a measuring-position correction in force
+//! is recorded beside them (energy, peak), never added in.
 
-use ac2_proto::model::SplLogRow;
+use ac2_proto::model::{PositionCorrection, SplLogRow};
 use ac2_proto::units::{Db, Dbfs, MeasId, Seconds, WallNs};
 use thiserror::Error;
 
 /// First line of every SPL log file.
-pub const HEADER_LINE: &str = "# ac2 spl log v1";
-const COLUMNS: &str = "start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,sensitivity_db";
+pub const HEADER_LINE: &str = "# ac2 spl log v2";
+const COLUMNS: &str = "start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,\
+                       sensitivity_db,position_db,position_peak_db";
 
 /// What the header names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,17 +112,21 @@ pub fn push_row(s: &mut String, r: &SplLogRow) {
         Some(Db(o)) => ("dB SPL", o),
         None => ("dBFS", 0.0),
     };
+    let db = |d: Option<f64>| d.map_or_else(String::new, |d| format!("{d:.4}"));
     let _ = writeln!(
         s,
-        "{},{},{},{unit},{},{},{},{}",
+        "{},{},{},{unit},{},{},{},{},{},{},{},{}",
         utc_iso(r.start.0),
         r.start.0,
         r.measured.0,
         level(r.laeq.0 + off),
         level(r.lceq.0 + off),
         level(r.lzeq.0 + off),
-        r.sensitivity
-            .map_or_else(String::new, |d| format!("{:.4}", d.0)),
+        level(r.lcpeak.0 + off),
+        level(r.lafmax.0 + off),
+        db(r.sensitivity.map(|d| d.0)),
+        db(r.position.map(|p| p.level.0)),
+        db(r.position.map(|p| p.peak.0)),
     );
 }
 
@@ -183,18 +189,34 @@ pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
             continue;
         }
         let f: Vec<&str> = l.split(',').collect();
-        if f.len() != 8 {
-            return Err(bad("expected 8 fields"));
+        if f.len() != 12 {
+            return Err(bad("expected 12 fields"));
         }
         let start: u64 = f[1].parse().map_err(|_| bad("bad start_ns"))?;
         let measured: f64 = f[2].parse().map_err(|_| bad("bad measured_s"))?;
         if !(0.0..=1.0).contains(&measured) {
             return Err(bad("measured_s outside 0…1"));
         }
-        let sensitivity = if f[7].is_empty() {
-            None
-        } else {
-            Some(f[7].parse::<f64>().map_err(|_| bad("bad sensitivity_db"))?)
+        let opt_db = |t: &str, what: &str| {
+            if t.is_empty() {
+                Ok(None)
+            } else {
+                t.parse::<f64>()
+                    .map(Some)
+                    .map_err(|_| bad(&format!("bad {what}")))
+            }
+        };
+        let sensitivity = opt_db(f[9], "sensitivity_db")?;
+        let position = match (
+            opt_db(f[10], "position_db")?,
+            opt_db(f[11], "position_peak_db")?,
+        ) {
+            (None, None) => None,
+            (Some(level), Some(peak)) => Some(PositionCorrection {
+                level: Db(level),
+                peak: Db(peak),
+            }),
+            _ => return Err(bad("position_db and position_peak_db go together")),
         };
         match (f[3], sensitivity) {
             ("dB SPL", Some(_)) | ("dBFS", None) => {}
@@ -212,7 +234,10 @@ pub fn import_csv(bytes: &[u8]) -> Result<SplLogRead, SplLogError> {
             laeq: lv(f[4])?,
             lceq: lv(f[5])?,
             lzeq: lv(f[6])?,
+            lcpeak: lv(f[7])?,
+            lafmax: lv(f[8])?,
             sensitivity: sensitivity.map(Db),
+            position,
         });
     }
     if !seen_columns {
@@ -236,7 +261,13 @@ mod tests {
                 laeq: Dbfs(-24.9),
                 lceq: Dbfs(-22.0),
                 lzeq: Dbfs(-20.5),
+                lcpeak: Dbfs(1.23),
+                lafmax: Dbfs(-19.02),
                 sensitivity: Some(Db(120.02)),
+                position: Some(PositionCorrection {
+                    level: Db(3.0),
+                    peak: Db(2.0),
+                }),
             },
             SplLogRow {
                 start: WallNs(1_790_000_246_000_000_000),
@@ -244,7 +275,10 @@ mod tests {
                 laeq: Dbfs(f64::NEG_INFINITY),
                 lceq: Dbfs(-90.125),
                 lzeq: Dbfs(-80.0),
+                lcpeak: Dbfs(-70.0),
+                lafmax: Dbfs(f64::NEG_INFINITY),
                 sensitivity: None,
+                position: None,
             },
         ]
     }
@@ -275,11 +309,13 @@ mod tests {
         assert_eq!(lines[5], COLUMNS);
         assert_eq!(
             lines[6],
-            "2026-09-21T14:17:25.000Z,1790000245000000000,1,dB SPL,95.1200,98.0200,99.5200,120.0200"
+            "2026-09-21T14:17:25.000Z,1790000245000000000,1,dB SPL,95.1200,98.0200,99.5200,\
+             121.2500,101.0000,120.0200,3.0000,2.0000"
         );
         assert_eq!(
             lines[7],
-            "2026-09-21T14:17:26.000Z,1790000246000000000,0.25,dBFS,-inf,-90.1250,-80.0000,"
+            "2026-09-21T14:17:26.000Z,1790000246000000000,0.25,dBFS,-inf,-90.1250,-80.0000,\
+             -70.0000,-inf,,,"
         );
         let back = import_csv(csv.as_bytes()).expect("reads back").rows;
         assert_eq!(back.len(), 2);
@@ -287,7 +323,14 @@ mod tests {
             assert_eq!(a.start, b.start);
             assert_eq!(a.measured, b.measured);
             assert_eq!(a.sensitivity, b.sensitivity);
-            for (x, y) in [(a.laeq, b.laeq), (a.lceq, b.lceq), (a.lzeq, b.lzeq)] {
+            assert_eq!(a.position, b.position);
+            for (x, y) in [
+                (a.laeq, b.laeq),
+                (a.lceq, b.lceq),
+                (a.lzeq, b.lzeq),
+                (a.lcpeak, b.lcpeak),
+                (a.lafmax, b.lafmax),
+            ] {
                 assert!(x.0 == y.0 || (x.0 - y.0).abs() < 1e-9, "{x:?} {y:?}");
             }
         }
@@ -330,7 +373,13 @@ mod tests {
             import_csv(bad.as_bytes()),
             Err(SplLogError::Line { line: 3, .. })
         ));
-        let bad = format!("{HEADER_LINE}\n{COLUMNS}\nx,1,1,dBFS,1,1,1,120\n");
+        let bad = format!("{HEADER_LINE}\n{COLUMNS}\nx,1,1,dBFS,1,1,1,1,1,120,,\n");
+        assert!(matches!(
+            import_csv(bad.as_bytes()),
+            Err(SplLogError::Line { line: 3, .. })
+        ));
+        // A correction is energy and peak together.
+        let bad = format!("{HEADER_LINE}\n{COLUMNS}\n1,1,1,dB SPL,1,1,1,1,1,120,3,\n");
         assert!(matches!(
             import_csv(bad.as_bytes()),
             Err(SplLogError::Line { line: 3, .. })

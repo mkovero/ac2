@@ -120,6 +120,8 @@ pub(crate) enum ControlMsg {
         config_rev: Rev,
         at: WallNs,
         judgements: Vec<ac2_proto::model::LeqJudgement>,
+        /// The peak limits' judgements (`PeakQuantity::ALL` order).
+        peak_judgements: [ac2_proto::model::LeqJudgement; 2],
         alarms: Vec<ac2_proto::model::LeqAlarm>,
     },
     /// The recording under `token` has more audio in its file.
@@ -387,10 +389,7 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             }
         }
         MeasKind::Spl { config } => {
-            config
-                .leq
-                .check()
-                .map_err(|m| perr(ErrorCode::Invalid, m))?;
+            config.check().map_err(|m| perr(ErrorCode::Invalid, m))?;
         }
         MeasKind::SpatialAverage { config } => averages::validate(config)?,
     }
@@ -603,8 +602,17 @@ impl Control {
                     config_rev,
                     at,
                     judgements,
+                    peak_judgements,
                     alarms,
-                }) => self.leq_reported(meas, epoch, config_rev, at, &judgements, alarms),
+                }) => self.leq_reported(
+                    meas,
+                    epoch,
+                    config_rev,
+                    at,
+                    &judgements,
+                    peak_judgements,
+                    alarms,
+                ),
                 Ok(ControlMsg::RecordingProgress { token }) => self.recording_progress(token),
                 Ok(ControlMsg::RecordingEnded { token }) => self.recording_ended(token),
                 Ok(ControlMsg::Fatal(why)) => {

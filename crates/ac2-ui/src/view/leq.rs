@@ -4,7 +4,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::leq_dialog::{Col, Focus};
+use crate::leq_dialog::{Col, Extra, Focus};
 use crate::state::{LeqMsg, Msg, Overlay};
 use crate::theme::Chrome;
 
@@ -81,7 +81,7 @@ pub(super) fn leq(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 70.0))
         .show(ctx, |ui| {
             card(ch).show(ui, |ui| {
-                ui.set_width(660.0);
+                ui.set_width(720.0);
                 ui.label(
                     RichText::new(format!("Leq windows and limits — {}", d.name))
                         .strong()
@@ -199,6 +199,36 @@ pub(super) fn leq(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 if d.rows.is_empty() {
                     ui.label(RichText::new("No windows: Insert adds one.").color(ch.dim));
                 }
+                ui.add_space(8.0);
+                egui::Grid::new("ac2-leq-extra")
+                    .num_columns(3)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .show(ui, |ui| {
+                        for e in Extra::ALL {
+                            let at = Focus::Extra(e);
+                            let f = d.focus == at;
+                            ui.label(RichText::new(e.title()).color(if f {
+                                ch.text
+                            } else {
+                                ch.dim
+                            }));
+                            text_cell(
+                                ui,
+                                &d.extra_text(e),
+                                f,
+                                d.selected,
+                                e.empty(),
+                                at,
+                                &mut msg,
+                                ch,
+                            );
+                            ui.add(
+                                egui::Label::new(RichText::new(e.note()).small().color(ch.dim))
+                                    .wrap(),
+                            );
+                            ui.end_row();
+                        }
+                    });
                 if let Some(e) = &d.error {
                     ui.add_space(4.0);
                     ui.label(RichText::new(e).color(ch.fault));

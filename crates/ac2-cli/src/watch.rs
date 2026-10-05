@@ -304,6 +304,11 @@ pub async fn spl(
                 format::duration(m.duration.0),
                 age_text(tf.age, tf.stale)
             ));
+            // Every level above includes the measuring-position correction: said, never
+            // left to be guessed.
+            if let Some(p) = &m.position {
+                lines.push(ac2_scene::leq::position_text(p));
+            }
             let offset = view.clock_offset_ns.map_or(0, |o| {
                 o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
             });
@@ -455,10 +460,14 @@ pub async fn leq(
                 Some(name) => format!("{name} · {cal}"),
                 None => cal,
             };
+            let corrected = f.meta.position.as_ref().map(ac2_scene::leq::position_text);
             let head = format!(
-                "{} · in {} · {cal} · age {}",
+                "{} · in {} · {cal}{} · age {}",
                 m.config.name,
                 u32::from(config.input) + 1,
+                corrected
+                    .as_ref()
+                    .map_or_else(String::new, |c| format!(" · {c}")),
                 age_text(tf.age, tf.stale)
             );
             lines.push(head.clone());
@@ -477,7 +486,7 @@ pub async fn leq(
                     TileState::Near => "▷ NEAR",
                     _ => "",
                 };
-                let details: Vec<String> = [&t.course, &t.limit, &t.headroom, &t.recover, &t.filling, &t.incomplete]
+                let details: Vec<String> = [&t.course, &t.limit, &t.headroom, &t.recover, &t.filling, &t.incomplete, &t.held]
                     .into_iter()
                     .flatten()
                     .cloned()
@@ -493,12 +502,12 @@ pub async fn leq(
                     let rows = big_number(&t.value);
                     lines.push(format!("  {}", rows[0]));
                     lines.push(format!("  {}", rows[1]));
-                    lines.push(format!("  {}  {}", rows[2], t.unit));
+                    lines.push(format!("  {}  {}", rows[2], t.weighted_unit));
                     if !details.is_empty() {
                         lines.push(format!("  {}", details.join(" · ")));
                     }
                 } else {
-                    let mut l = format!("{}  {} {}", t.name, t.value, t.unit);
+                    let mut l = format!("{}  {} {}", t.name, t.value, t.weighted_unit);
                     if !state.is_empty() {
                         l.push_str(&format!("  {state}"));
                     }
@@ -548,6 +557,35 @@ pub async fn leq(
                     })
                 })
                 .collect();
+            let peaks: Vec<serde_json::Value> = tiles
+                .iter()
+                .filter_map(|t| match t.kind {
+                    ac2_scene::leq::TileKind::Peak(q) => Some((q, t)),
+                    ac2_scene::leq::TileKind::Window => None,
+                })
+                .map(|(q, t)| {
+                    let p = match q {
+                        ac2_proto::model::PeakQuantity::LcPeak => f.meta.lcpeak,
+                        ac2_proto::model::PeakQuantity::LafMax => f.meta.lafmax,
+                    };
+                    json!({
+                        "quantity": q,
+                        "name": t.name,
+                        "level": p.and_then(|p| p.level.is_finite().then_some(p.level)),
+                        "held_s": ac2_proto::frame::LeqPeak::HOLD_S,
+                        "limit": config.leq.peaks.get(q).map(|l| l.limit),
+                        "warn_margin": config.leq.peaks.get(q).map(|l| l.warn_margin),
+                        "judgement": p.map(|p| p.judgement),
+                        "text": {
+                            "value": t.value,
+                            "unit": t.weighted_unit,
+                            "state": t.state_text,
+                            "limit": t.limit,
+                            "held": t.held,
+                        },
+                    })
+                })
+                .collect();
             View {
                 lines,
                 json: json!({
@@ -561,6 +599,9 @@ pub async fn leq(
                     "scale": f.meta.scale,
                     "cal": f.meta.cal,
                     "cal_text": cal,
+                    "position": f.meta.position,
+                    "position_text": corrected,
+                    "peaks": peaks,
                     "horizon_s": f.meta.horizon.0,
                     "logged": f.meta.logged,
                     "run": run.as_ref().map(|(r, rt)| {

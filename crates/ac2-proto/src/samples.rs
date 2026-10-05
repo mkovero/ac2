@@ -10,7 +10,7 @@ use crate::ctrl::{
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
     AverageMemberState, ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta,
-    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqRun, LevelsFrame, LevelsMeta, MemberStatus,
+    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MemberStatus,
     PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
     SpecFrame, SpecMeta, SplFrame, SplMeta, TfAverage, TfFrame, TfMeta, TimingMeta, TimingWindow,
     ValidityMask,
@@ -905,7 +905,18 @@ pub fn spl_config() -> SplConfig {
                 },
             ],
             horizon: Seconds(60.0),
+            peaks: PeakLimits {
+                lcpeak: Some(PeakLimit {
+                    limit: DbSpl(135.0),
+                    warn_margin: Db(3.0),
+                }),
+                lafmax: None,
+            },
         },
+        position: Some(PositionCorrection {
+            level: Db(2.5),
+            peak: Db(1.5),
+        }),
     }
 }
 
@@ -945,14 +956,39 @@ fn spl_log() -> SplLog {
                 since: WallNs(1_790_000_600_000_000_000),
             },
         ],
-        alarms: vec![LeqAlarm {
-            at: WallNs(1_790_000_600_000_000_000),
-            duration: Seconds(1800.0),
-            weighting: Weighting::A,
-            kind: LeqAlarmKind::Over,
-            leq: DbSpl(99.25),
-            limit: DbSpl(99.0),
-        }],
+        peaks: PeakStates {
+            lcpeak: LeqPeakState {
+                judgement: LeqJudgement::Near,
+                since: WallNs(1_790_000_500_000_000_000),
+            },
+            lafmax: LeqPeakState {
+                judgement: LeqJudgement::NoLimit,
+                since: WallNs(1_790_000_000_000_000_000),
+            },
+        },
+        alarms: vec![
+            LeqAlarm {
+                at: WallNs(1_790_000_600_000_000_000),
+                subject: AlarmSubject::Window {
+                    duration: Seconds(1800.0),
+                    weighting: Weighting::A,
+                },
+                kind: LeqAlarmKind::Over,
+                level: DbSpl(99.25),
+                limit: DbSpl(99.0),
+                position: Some(Db(2.5)),
+            },
+            LeqAlarm {
+                at: WallNs(1_790_000_610_000_000_000),
+                subject: AlarmSubject::Peak {
+                    quantity: PeakQuantity::LcPeak,
+                },
+                kind: LeqAlarmKind::Recovered,
+                level: DbSpl(133.5),
+                limit: DbSpl(135.0),
+                position: None,
+            },
+        ],
     }
 }
 
@@ -988,7 +1024,13 @@ fn spl_log_page() -> SplLogPage {
                 laeq: Dbfs(-26.5),
                 lceq: Dbfs(-24.25),
                 lzeq: Dbfs(-23.0),
+                lcpeak: Dbfs(-8.5),
+                lafmax: Dbfs(-18.25),
                 sensitivity: Some(Db(120.0)),
+                position: Some(PositionCorrection {
+                    level: Db(2.5),
+                    peak: Db(1.5),
+                }),
             },
             SplLogRow {
                 start: WallNs(1_790_000_121_000_000_000),
@@ -996,7 +1038,10 @@ fn spl_log_page() -> SplLogPage {
                 laeq: Dbfs(f64::NEG_INFINITY),
                 lceq: Dbfs(-90.0),
                 lzeq: Dbfs(-80.0),
+                lcpeak: Dbfs(-70.0),
+                lafmax: Dbfs(f64::NEG_INFINITY),
                 sensitivity: None,
+                position: None,
             },
         ],
     }
@@ -1415,12 +1460,16 @@ pub fn frames() -> Vec<Frame> {
                         },
                     },
                     mic_curve: true,
+                    position: Some(PositionCorrection {
+                        level: Db(2.5),
+                        peak: Db(1.5),
+                    }),
                 },
             }),
         },
         Frame {
             stamp: stamp(None),
-            data: FrameData::Leq(LeqFrame {
+            data: FrameData::Leq(Box::new(LeqFrame {
                 meas: MeasId(4),
                 meta: LeqMeta {
                     scale: LevelScale::DbSpl,
@@ -1440,6 +1489,15 @@ pub fn frames() -> Vec<Frame> {
                         laeq: 97.8,
                         lceq: 110.25,
                         lzeq: 112.5,
+                    }),
+                    lcpeak: Some(LeqPeak {
+                        level: 133.5,
+                        judgement: LeqJudgement::Near,
+                    }),
+                    lafmax: None,
+                    position: Some(PositionCorrection {
+                        level: Db(2.5),
+                        peak: Db(1.5),
                     }),
                 },
                 leq: vec![96.5, 99.25, 101.5],
@@ -1461,7 +1519,7 @@ pub fn frames() -> Vec<Frame> {
                         .with(LeqFlags::NEAR)
                         .with(LeqFlags::ON_COURSE),
                 ],
-            }),
+            })),
         },
         Frame {
             stamp: stamp(None),

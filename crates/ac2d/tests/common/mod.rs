@@ -155,6 +155,7 @@ pub fn spl(name: &str, input: u16) -> MeasConfig {
                 time_weighting: ac2_proto::model::TimeWeighting::Fast,
                 peak_weighting: ac2_proto::model::PeakWeighting::Z,
                 leq: ac2_proto::model::LeqConfig::default_windows(),
+                position: None,
             },
         },
     }

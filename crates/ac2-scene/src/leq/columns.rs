@@ -19,7 +19,7 @@ use crate::format;
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Stroke, VAlign};
 use crate::theme::{Theme, contrast_ratio};
 
-use super::{LeqTile, TileState, length, w_letter};
+use super::{LeqTile, TileKind, TileState, length, w_letter};
 
 /// A judged scale starts this far below the lowest limit…
 pub const BELOW_LIMIT_DB: f64 = 30.0;
@@ -176,12 +176,21 @@ fn compact(seconds: f64) -> String {
     }
 }
 
-/// The names of every column at each level of shortening, longest first.
+/// The names of every column at each level of shortening, longest first. A peak limit's
+/// name (`LCpeak`) is already short and says what it is: it stays whole.
 fn name_levels(tiles: &[&LeqTile]) -> Vec<(Vec<String>, bool)> {
-    let one = tiles
+    let windows: Vec<&&LeqTile> = tiles
+        .iter()
+        .filter(|t| t.kind == TileKind::Window)
+        .collect();
+    let one = windows
         .first()
         .map(|t| t.weighting)
-        .filter(|w| tiles.iter().all(|t| t.weighting == *w));
+        .filter(|w| windows.iter().all(|t| t.weighting == *w));
+    let short = |t: &LeqTile, name: String| match t.kind {
+        TileKind::Window => name,
+        TileKind::Peak(_) => t.name.clone(),
+    };
     let pre = |w: Weighting| match one {
         Some(_) => String::new(),
         None => w_letter(w).to_string(),
@@ -198,14 +207,14 @@ fn name_levels(tiles: &[&LeqTile]) -> Vec<(Vec<String>, bool)> {
         (
             tiles
                 .iter()
-                .map(|t| format!("{}{}", sep(t.weighting), length(t.duration_s)))
+                .map(|t| short(t, format!("{}{}", sep(t.weighting), length(t.duration_s))))
                 .collect(),
             one.is_some(),
         ),
         (
             tiles
                 .iter()
-                .map(|t| format!("{}{}", pre(t.weighting), compact(t.duration_s)))
+                .map(|t| short(t, format!("{}{}", pre(t.weighting), compact(t.duration_s))))
                 .collect(),
             one.is_some(),
         ),
@@ -342,8 +351,12 @@ pub(super) fn detail_lines(t: &LeqTile) -> [Vec<String>; 3] {
 }
 
 /// The line above the name: how far a filling window is (its value is the Leq so far), or
-/// its gaps.
+/// its gaps; for a peak limit what its value is.
 fn progress_line(t: &LeqTile) -> Vec<String> {
+    if let Some(h) = &t.held {
+        let hold = length(t.duration_s);
+        return vec![h.clone(), format!("last {hold}"), hold];
+    }
     let filling = t.filling().then(|| {
         (
             format!(
@@ -445,12 +458,21 @@ pub(super) fn draw_columns(
     stale: bool,
     theme: &Theme,
 ) -> LeqColumns {
+    // Windows by length, then the peak limits (LCpeak, LAFmax) at the right: a peak is
+    // not a window and does not belong among their lengths.
     let mut order: Vec<usize> = (0..tiles.len()).collect();
     order.sort_by(|&a, &b| {
-        tiles[a]
-            .duration_s
-            .total_cmp(&tiles[b].duration_s)
-            .then_with(|| w_letter(tiles[a].weighting).cmp(w_letter(tiles[b].weighting)))
+        let peak = |t: &LeqTile| t.kind != TileKind::Window;
+        peak(&tiles[a]).cmp(&peak(&tiles[b])).then_with(|| {
+            if peak(&tiles[a]) {
+                a.cmp(&b)
+            } else {
+                tiles[a]
+                    .duration_s
+                    .total_cmp(&tiles[b].duration_s)
+                    .then_with(|| w_letter(tiles[a].weighting).cmp(w_letter(tiles[b].weighting)))
+            }
+        })
     });
     let sorted: Vec<&LeqTile> = order.iter().map(|&i| &tiles[i]).collect();
     let n = sorted.len().max(1) as f32;
@@ -517,7 +539,8 @@ pub(super) fn draw_columns(
     }
     let weighting = names.1.then(|| {
         sorted
-            .first()
+            .iter()
+            .find(|t| t.kind == TileKind::Window)
             .map(|t| format!("L{}eq", w_letter(t.weighting)))
             .unwrap_or_default()
     });

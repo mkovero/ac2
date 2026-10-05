@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 19
+PROTO_VERSION = 20
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -142,6 +142,8 @@ _MEMBER_STATUS = ("tagged", {
     "settling": [],
     "refused": [("protection", None)],
 })
+_POSITION = [("level", None), ("peak", None)]
+_PEAK = [("level", None), ("judgement", None)]
 META = {
     "tf": [("delay", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
            ("average", ("opt", [("method", None),
@@ -151,10 +153,11 @@ META = {
     "spec": [("window", None), ("scale", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None)],
     "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
             ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
-            ("duration", None), ("cal", _CAL), ("mic_curve", None)],
+            ("duration", None), ("cal", _CAL), ("mic_curve", None), ("position", ("opt", _POSITION))],
     "leq": [("scale", None), ("cal", _CAL), ("mic_curve", None), ("horizon", None), ("logged", None),
             ("run", ("opt", [("started_at", None), ("until", None), ("measured", None), ("gaps", None),
-                             ("trimmed", None), ("laeq", None), ("lceq", None), ("lzeq", None)]))],
+                             ("trimmed", None), ("laeq", None), ("lceq", None), ("lzeq", None)])),
+            ("lcpeak", ("opt", _PEAK)), ("lafmax", ("opt", _PEAK)), ("position", ("opt", _POSITION))],
     "levels": _LEVELS,
     "session_levels": _LEVELS,
     "preview_levels": [("backend", None), ("device", None), ("channels", None)],

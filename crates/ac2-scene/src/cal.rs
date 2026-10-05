@@ -231,6 +231,19 @@ pub fn uncertainty_cell(e: &CalEntry) -> String {
     }
 }
 
+/// What to do before reading a calibrator (the acoustic calibration dialog).
+pub fn acoustic_steps() -> &'static str {
+    "Fit the calibrator snugly on the mic (the right adapter for its diameter), switch it on \
+     and wait for the level to settle; set the gain you will measure with first: a gain \
+     change needs a new calibration."
+}
+
+/// What to do once an acoustic calibration is stored.
+pub fn acoustic_after() -> &'static str {
+    "Done: take the calibrator off; keep the gain as it is. Every SPL meter, spectrum and RTA \
+     on this input now reads dB SPL."
+}
+
 /// What to do once an electrical calibration is stored.
 pub fn electrical_after(c: ElectricalConnection) -> &'static str {
     match c {

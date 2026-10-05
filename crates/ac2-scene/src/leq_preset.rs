@@ -1,11 +1,12 @@
 //! What a Leq limit preset sets, as the dialog and the CLI show it (`docs/design/leq.md`).
 
-use ac2_proto::model::LeqPreset;
+use ac2_proto::model::{LeqPreset, PeakQuantity};
 
-/// The preset's windows and limits: `France R1336-1: LAeq 15 min ≤ 102 dB, LCeq 15 min ≤
-/// 118 dB`. A window the rule wants shown without a limit of its own reads `… shown`.
+/// The preset's windows and limits, then its peak limits: `France R1336-1: LAeq 15 min ≤
+/// 102 dB, LCeq 15 min ≤ 118 dB`, `DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB`. A
+/// window the rule wants shown without a limit of its own reads `… shown`.
 pub fn summary(p: LeqPreset) -> String {
-    let windows: Vec<String> = p
+    let mut windows: Vec<String> = p
         .windows()
         .iter()
         .map(|w| {
@@ -16,6 +17,12 @@ pub fn summary(p: LeqPreset) -> String {
             }
         })
         .collect();
+    let peaks = p.peaks();
+    for q in PeakQuantity::ALL {
+        if let Some(l) = peaks.get(q) {
+            windows.push(format!("{} ≤ {} dB", crate::leq::peak_name(q), l.limit.0));
+        }
+    }
     format!("{}: {}", p.name(), windows.join(", "))
 }
 
@@ -32,7 +39,11 @@ mod tests {
     fn summaries_name_every_window() {
         assert_eq!(
             summary(LeqPreset::Din15905),
-            "DIN 15905-5: LAeq 30 min ≤ 99 dB"
+            "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+        );
+        assert_eq!(
+            summary(LeqPreset::Swiss96),
+            "Swiss V-NISSG 96 dB: LAeq 60 min ≤ 96 dB, LAFmax ≤ 125 dB"
         );
         assert_eq!(
             summary(LeqPreset::France),

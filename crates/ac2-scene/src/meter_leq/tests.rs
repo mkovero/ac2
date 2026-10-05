@@ -34,6 +34,7 @@ fn readout(stale: Option<f64>) -> SplReadout {
             duration: Seconds(83.9),
             cal: CAL,
             mic_curve: false,
+            position: None,
         },
     };
     spl_readout(
@@ -76,6 +77,9 @@ fn leq() -> (LeqConfig, LeqFrame) {
                 lceq: 110.2,
                 lzeq: 112.0,
             }),
+            lcpeak: None,
+            lafmax: None,
+            position: None,
         },
         leq: vec![101.3, 97.2, 88.4, 96.9, 95.1],
         elapsed: vec![60.0, 300.0, 600.0, 750.0, 3600.0],
@@ -96,6 +100,7 @@ fn leq() -> (LeqConfig, LeqFrame) {
         LeqConfig {
             windows,
             horizon: Seconds(60.0),
+            peaks: Default::default(),
         },
         f,
     )

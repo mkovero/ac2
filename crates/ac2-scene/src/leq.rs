@@ -7,8 +7,11 @@
 
 use std::collections::VecDeque;
 
-use ac2_proto::frame::{LeqFlags, LeqFrame};
-use ac2_proto::model::{LeqConfig, LeqJudgement, LeqWindow, LevelScale, SplHistory, Weighting};
+use ac2_proto::frame::{LeqFlags, LeqFrame, LeqPeak};
+use ac2_proto::model::{
+    AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindow, LevelScale,
+    PeakQuantity, PositionCorrection, SplHistory, Weighting,
+};
 
 use crate::axis::{self, Axis, Mapping, Range, Scale, Steps};
 use crate::banner::{BannerRow, Status};
@@ -59,6 +62,76 @@ pub fn window_name(w: &LeqWindow) -> String {
     format!("L{}eq {}", w_letter(w.weighting), length(w.duration.0))
 }
 
+/// `LCpeak`, `LAFmax`.
+pub fn peak_name(q: PeakQuantity) -> &'static str {
+    match q {
+        PeakQuantity::LcPeak => "LCpeak",
+        PeakQuantity::LafMax => "LAFmax",
+    }
+}
+
+/// The frequency weighting a peak quantity is in.
+fn peak_weighting(q: PeakQuantity) -> Weighting {
+    match q {
+        PeakQuantity::LcPeak => Weighting::C,
+        PeakQuantity::LafMax => Weighting::A,
+    }
+}
+
+/// `corrected +5.0 dB`, or with a peak difference of its own `corrected +5.0 dB, peaks
+/// +1.0 dB`: the measuring-position correction in the levels shown.
+pub fn position_text(p: &PositionCorrection) -> String {
+    let db = |v: f64| format!("{v:+.1} dB");
+    if p.level == p.peak {
+        format!("corrected {}", db(p.level.0))
+    } else {
+        format!("corrected {}, peaks {}", db(p.level.0), db(p.peak.0))
+    }
+}
+
+/// The unit a value is shown with when corrected: the plain unit then `corr.`, so a
+/// corrected number never reads as a measured one (the caption says by how much).
+const CORRECTED_MARK: &str = "corr.";
+
+/// What an alarm says: `FOH SPL: LAeq 30 min over its limit — 101.2 dB > 99.0 dB`,
+/// `FOH SPL: LCpeak back within its limit — 133.0 dB (corrected +2.0 dB)`. `true` for an
+/// over, which the app shows as an error.
+pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
+    let what = match a.subject {
+        AlarmSubject::Window {
+            duration,
+            weighting,
+        } => window_name(&LeqWindow {
+            duration,
+            weighting,
+            limit: None,
+            warn_margin: ac2_proto::units::Db(0.0),
+        }),
+        AlarmSubject::Peak { quantity } => peak_name(quantity).to_owned(),
+    };
+    let corrected = match a.position {
+        Some(p) => format!(" (corrected {:+.1} dB)", p.0),
+        None => String::new(),
+    };
+    match a.kind {
+        LeqAlarmKind::Over => (
+            true,
+            format!(
+                "{meter}: {what} over its limit — {} dB > {} dB{corrected}",
+                format::level(a.level.0),
+                format::level(a.limit.0)
+            ),
+        ),
+        LeqAlarmKind::Recovered => (
+            false,
+            format!(
+                "{meter}: {what} back within its limit — {} dB{corrected}",
+                format::level(a.level.0)
+            ),
+        ),
+    }
+}
+
 /// Elapsed time as a clock: `0:05`, `12:30`, `1:02:03`.
 pub fn clock(seconds: f64) -> String {
     if !seconds.is_finite() || seconds < 0.0 {
@@ -96,10 +169,20 @@ impl From<LeqJudgement> for TileState {
     }
 }
 
-/// Every string of one window's tile.
+/// What a tile stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TileKind {
+    /// A rolling Leq window.
+    Window,
+    /// A peak limit: its value is the highest second of the hold.
+    Peak(PeakQuantity),
+}
+
+/// Every string of one window's (or peak limit's) tile.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeqTile {
-    /// `LAeq 30 min`.
+    pub kind: TileKind,
+    /// `LAeq 30 min`, `LCpeak`.
     pub name: String,
     /// `96.4`, or `—` before anything was measured.
     pub value: String,
@@ -127,6 +210,10 @@ pub struct LeqTile {
     pub filling: Option<String>,
     /// `offline for 1 min 50 s`: time in the window with no audio (not counted as silence).
     pub incomplete: Option<String>,
+    /// A peak limit's value: `highest of the last 10 s`.
+    pub held: Option<String>,
+    /// `corrected +5.0 dB`: the measuring-position correction in the value.
+    pub corrected: Option<String>,
     /// The figures the columns draw: the window's weighting and length (s), the Leq as
     /// shown (rounded to 0.1 dB, NaN before anything was measured), its limit when judged,
     /// the floored headroom when it can recover within the horizon (and whether it holds
@@ -180,8 +267,85 @@ pub fn time_to(seconds: f64) -> String {
     }
 }
 
-/// The tiles of a meter's windows from its configuration and newest `leq` frame. A frame
-/// of another configuration (a different window count) gives none.
+/// A unit with the window's own weighting, `dB(A)`, `dBFS (C)`, marked when corrected.
+fn weighted_unit(scale: LevelScale, w: Weighting, corrected: bool) -> String {
+    let u = match scale {
+        LevelScale::DbSpl => format!("dB({})", w_letter(w)),
+        LevelScale::Dbfs => format!("dBFS ({})", w_letter(w)),
+    };
+    if corrected {
+        format!("{u} {CORRECTED_MARK}")
+    } else {
+        u
+    }
+}
+
+/// The tile of peak limit `q` from its state in the frame.
+fn peak_tile(
+    q: PeakQuantity,
+    p: &LeqPeak,
+    limit: f64,
+    scale: LevelScale,
+    corrected: Option<String>,
+) -> LeqTile {
+    let state = TileState::from(p.judgement);
+    let judged = matches!(state, TileState::Ok | TileState::Near | TileState::Over);
+    let hold = f64::from(LeqPeak::HOLD_S);
+    LeqTile {
+        kind: TileKind::Peak(q),
+        name: peak_name(q).to_owned(),
+        value: format::level(p.level),
+        unit: unit_of(scale).to_owned(),
+        weighted_unit: weighted_unit(scale, peak_weighting(q), corrected.is_some()),
+        state,
+        state_text: state_text(state, false),
+        course: None,
+        limit: Some(format!("limit {} dB", format::level(limit))),
+        headroom: None,
+        recover: None,
+        filling: None,
+        incomplete: None,
+        held: Some(format!("highest of the last {}", length(hold))),
+        corrected,
+        weighting: peak_weighting(q),
+        duration_s: hold,
+        leq_db: if p.level.is_finite() {
+            (p.level * 10.0).round() / 10.0
+        } else {
+            f64::NAN
+        },
+        limit_db: judged.then_some(limit),
+        allowed_db: None,
+        allowed_until_full: false,
+        recover_s: None,
+        elapsed_s: hold,
+        least_db: p.level,
+        on_course: false,
+        over_in_s: None,
+    }
+}
+
+fn unit_of(scale: LevelScale) -> &'static str {
+    match scale {
+        LevelScale::DbSpl => "dB SPL",
+        LevelScale::Dbfs => "dBFS",
+    }
+}
+
+fn state_text(state: TileState, on_course: bool) -> Option<String> {
+    match state {
+        TileState::NoLimit => None,
+        TileState::NotCalibrated => Some("not calibrated".into()),
+        TileState::Ok => Some("OK".into()),
+        TileState::Near if on_course => Some("ON COURSE".into()),
+        TileState::Near => Some("NEAR".into()),
+        TileState::Over => Some("OVER".into()),
+    }
+}
+
+/// The tiles of a meter's windows from its configuration and newest `leq` frame, then one
+/// per peak limit (LCpeak, LAFmax). A frame of another configuration (a different window
+/// count) gives none.
 pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
     let n = cfg.windows.len();
     if [
@@ -199,12 +363,11 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
     {
         return Vec::new();
     }
-    let unit = match f.meta.scale {
-        LevelScale::DbSpl => "dB SPL",
-        LevelScale::Dbfs => "dBFS",
-    };
+    let unit = unit_of(f.meta.scale);
+    let corrected = f.meta.position.as_ref().map(position_text);
     let horizon = length(f.meta.horizon.0);
-    cfg.windows
+    let mut tiles: Vec<LeqTile> = cfg
+        .windows
         .iter()
         .enumerate()
         .map(|(i, w)| {
@@ -244,22 +407,13 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 .then(|| f64::from(f.over_in[i]))
                 .filter(|t| t.is_finite());
             LeqTile {
+                kind: TileKind::Window,
                 name: window_name(w),
                 value: format::level(leq),
                 unit: unit.to_string(),
-                weighted_unit: match f.meta.scale {
-                    LevelScale::DbSpl => format!("dB({})", w_letter(w.weighting)),
-                    LevelScale::Dbfs => format!("dBFS ({})", w_letter(w.weighting)),
-                },
+                weighted_unit: weighted_unit(f.meta.scale, w.weighting, corrected.is_some()),
                 state,
-                state_text: match state {
-                    TileState::NoLimit => None,
-                    TileState::NotCalibrated => Some("not calibrated".into()),
-                    TileState::Ok => Some("OK".into()),
-                    TileState::Near if on_course => Some("ON COURSE".into()),
-                    TileState::Near => Some("NEAR".into()),
-                    TileState::Over => Some("OVER".into()),
-                },
+                state_text: state_text(state, on_course),
                 course: on_course.then(|| match over_in_s {
                     Some(t) => format!("on course — over in {}", time_to(t)),
                     None => "on course to go over".into(),
@@ -277,6 +431,8 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                         length((elapsed.min(duration) - measured).max(1.0).round())
                     )
                 }),
+                held: None,
+                corrected: corrected.clone(),
                 weighting: w.weighting,
                 duration_s: duration,
                 leq_db: if leq.is_finite() {
@@ -294,7 +450,16 @@ pub fn leq_tiles(cfg: &LeqConfig, f: &LeqFrame) -> Vec<LeqTile> {
                 over_in_s,
             }
         })
-        .collect()
+        .collect();
+    for (q, p) in [
+        (PeakQuantity::LcPeak, f.meta.lcpeak),
+        (PeakQuantity::LafMax, f.meta.lafmax),
+    ] {
+        if let (Some(p), Some(l)) = (p, cfg.peaks.get(q)) {
+            tiles.push(peak_tile(q, &p, l.limit.0, f.meta.scale, corrected.clone()));
+        }
+    }
+    tiles
 }
 
 /// A tile's instruction is at most this many times its header's size.
@@ -821,10 +986,11 @@ fn shown_name<'a>(name: &'a str, shared: Option<&str>) -> &'a str {
 }
 
 /// The small lines at the bottom of a tile: on course first, then the limit, the filling
-/// and the gaps.
+/// and the gaps (a peak limit: what its value is).
 fn tile_below(t: &LeqTile) -> Vec<String> {
     let mut below: Vec<String> = t.course.iter().cloned().collect();
     below.extend(t.limit.iter().cloned());
+    below.extend(t.held.iter().cloned());
     match (&t.filling, &t.incomplete) {
         (Some(f), Some(i)) => below.push(format!("{f} · {i}")),
         (Some(f), None) => below.push(f.clone()),
@@ -1018,11 +1184,16 @@ pub(crate) fn leq_scene_under<T>(
     let n = v.tiles.len();
     // The columns decide whether their names leave the weighting to the caption once the
     // caption's height is known; the run is placed clear of the longer of the two texts.
-    let shared = v
+    // Peak limits keep their own names (`LCpeak`), so only the windows decide.
+    let windows: Vec<&LeqTile> = v
         .tiles
+        .iter()
+        .filter(|t| t.kind == TileKind::Window)
+        .collect();
+    let shared = windows
         .first()
         .map(|t| t.weighting)
-        .filter(|w| v.tiles.iter().all(|t| t.weighting == *w))
+        .filter(|w| windows.iter().all(|t| t.weighting == *w))
         .map(|w| format!("L{}eq", w_letter(w)));
     let right = match &v.stale {
         Some(s) => format!("{s} · {}", v.cal),
@@ -1199,12 +1370,16 @@ pub(crate) fn leq_scene_under<T>(
 }
 
 /// The caption's left part: the meter, and for columns the unit and the `weighting` their
-/// names leave out.
+/// names leave out; the measuring-position correction when the values carry one.
 fn caption_left(v: &LeqView<'_>, weighting: Option<&str>) -> String {
     if v.tiles.is_empty() {
         return v.meter.clone();
     }
     let unit = v.tiles.first().map_or("", |t| t.unit.as_str());
+    let unit = match v.tiles.first().and_then(|t| t.corrected.as_deref()) {
+        Some(c) => format!("{unit} {c}"),
+        None => unit.to_owned(),
+    };
     match weighting {
         Some(w) => format!("{} · {w}, {unit}", v.meter),
         None => format!("{} · {unit}", v.meter),

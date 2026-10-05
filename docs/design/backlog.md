@@ -56,19 +56,6 @@ decision 4). Measured numbers: PLAN §9.0.
   build on a Pi uses GNU ld too. `build.rs` should emit the libraries in dependency order
   (zmq, then sodium); rust-lld (`-fuse-ld=lld` with rustc's `gcc-ld`) works around it.
 
-## Leq windows and limits (left after the first version, `docs/design/leq.md`)
-
-- **Peak limits not judged**: DIN 15905-5 also limits LCpeak (135 dB), V-NISSG LAFmax
-  (125 dB). The meter shows LCpeak / LAFmax; no limit, state or alarm on them yet.
-- **No measuring-position correction**: a limit for the loudest audience position read from a
-  FOH mic needs the difference added by hand; a per-meter offset (with its own "corrected"
-  label) would do it.
-- **No hysteresis on the alarms**: judged at 0.1 dB, a window hovering on its limit toggles
-  over / recovered each time the rounded value crosses it.
-- **The app has no acoustic calibration flow**: an electrical calibration (DMM in-line or an
-  injected generator, `q7-calibration.md` §11; 2a5d881) is in the app (**E** in the
-  Calibrations view); a calibrator dialog (`cal.spl`) is still CLI only.
-
 ## Electrical calibration (left after the first version, `q7-calibration.md` §11)
 
 - **Stored traces do not record the method**: `CalState::Calibrated` names the key and the
@@ -199,6 +186,21 @@ Laptop / Pi performance pass (2026-10-04/05; a0d015d … 9dc4274, PLAN §9.0 has
 - **macOS publish rates at 8–15 Hz** (coalesced timers) → uncoalesced hand-off timer and
   fixed-grid cadence pacing (9dc4274). CI green on Linux, macOS and Windows again
   (c5484e3, ed189b2, 9dc4274) after being red since at least 2026-10-03.
+
+Leq windows and limits, the rest of the first version (operator: "Leq changes yes";
+`leq.md`, `q7-calibration.md` §12; PROTO 15, session format 9, SPL log CSV v2):
+- **Peak limits not judged** → LCpeak and LAFmax limits per meter (DIN 15905-5 LCpeak 135
+  dB, V-NISSG LAFmax 125 dB set by their presets; `--peak-limit`, the Leq dialog), judged on
+  the highest second of the last 10 s; columns / tiles of their own, alarms, `peaks` in
+  `ac2 spl leq watch --json`, `lcpeak_1s` / `lafmax_1s` in the log.
+- **No measuring-position correction** → `SplConfig.position` (energy and peak, as DIN's K1 /
+  K2), added to everything the meter reports once calibrated and said everywhere
+  ("corrected +4.0 dB", `dB(A) corr.`, alarms); the log keeps what was measured and records
+  the correction per second.
+- **No hysteresis on the alarms** → a state rises at once and drops only 0.3 dB under its
+  boundary or after 10 s under it (`leq.md`, *Hysteresis*).
+- **No acoustic calibration in the app** → **C** in the Calibrations view: the calibrator
+  dialog beside the electrical one.
 
 Leq view for acting live (field, 2026-10-04/05: "the individual slot db values dont mean much
 and those competing on actual SPL number … is bit difficult"; b251aaf … c009b6b):

@@ -1254,7 +1254,7 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     let l = spl_log(&d.st).ok_or("log")?;
     let kinds: Vec<_> = l.alarms[seen..]
         .iter()
-        .map(|a| (a.duration.0, a.kind))
+        .map(|a| (a.subject.duration().map_or(f64::NAN, |d| d.0), a.kind))
         .collect();
     use ac2_proto::model::LeqAlarmKind::{Over, Recovered};
     assert_eq!(
@@ -1280,6 +1280,139 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     let p = h.points(&config.leq.windows[0]).ok_or("points")?;
     assert!(p.iter().any(|x| x.over));
     assert!(!p.back().ok_or("newest")?.over);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// A peak limit and a measuring-position correction from an empty daemon, using the app:
+/// in the Leq dialog ↑ from the preset row reaches the correction (4 dB), Shift+Tab twice
+/// the LCpeak limit (95 dB). The pane gets an LCpeak column right of the windows, every
+/// value marked corrected and the caption saying by how much; pink noise from the keys
+/// puts LCpeak over (a toast naming LCpeak and the correction); stopped, it stays over for
+/// the 10 s hold, then recovers (a toast).
+#[test]
+fn a_peak_limit_and_the_position_correction_from_the_app() -> R {
+    use ac2_proto::model::{LeqJudgement, PeakQuantity, PositionCorrection};
+    use ac2_scene::leq::{TileKind, TileState};
+    use ac2_ui::leq_dialog::{Extra, Focus};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.client_config(NAME);
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+    calibrate(&ep)?;
+
+    d.key("Shift+L");
+    d.send(Msg::Text("L".into()));
+    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    d.key("ArrowUp");
+    d.key("ArrowUp");
+    let Overlay::Leq(x) = &d.st.overlay else {
+        return Err("the Leq dialog".into());
+    };
+    assert_eq!(x.focus, Focus::Extra(Extra::Position));
+    d.send(Msg::Text("4".into()));
+    d.key("Shift+Tab");
+    d.key("Shift+Tab");
+    d.send(Msg::Text("95".into()));
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    d.until("the meter with the limit and the correction", |s| {
+        s.measurements().iter().any(|m| match &m.config.kind {
+            MeasKind::Spl { config } => {
+                config.position == Some(PositionCorrection::both(4.0))
+                    && config.leq.peaks.lcpeak.is_some()
+            }
+            _ => false,
+        })
+    })?;
+    d.until("an LCpeak tile, corrected", |s| {
+        tiles(s).iter().any(|t| {
+            t.kind == TileKind::Peak(PeakQuantity::LcPeak)
+                && t.weighted_unit == "dB(C) corr."
+                && t.corrected.as_deref() == Some("corrected +4.0 dB")
+        })
+    })?;
+    // The LCpeak column right of the windows, named whole; the caption names the
+    // correction.
+    let c = columns(&d.st);
+    assert_eq!(c.last().map(|x| x.0.as_str()), Some("LCpeak"), "{c:?}");
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    let scene = ac2_ui::scenes::leq(&d.st, &Theme::dark(), size, now).ok_or("the Leq view")?;
+    let texts = scene_texts(&scene.scene);
+    assert!(
+        texts.iter().any(|t| t.contains("corrected +4.0 dB")),
+        "{texts:?}"
+    );
+
+    // The calibrator's seconds (97 dB peaks, 101 corrected) leave the 10 s hold first.
+    d.until("LCpeak judged and not over", |s| {
+        spl_log(s).is_some_and(|l| {
+            matches!(
+                l.peaks.lcpeak.judgement,
+                LeqJudgement::Ok | LeqJudgement::Near
+            )
+        })
+    })?;
+    let toasts = d.st.toasts.len();
+    let new_toasts = move |s: &AppState, what: &str, error: bool| {
+        s.toasts[toasts.min(s.toasts.len())..]
+            .iter()
+            .filter(|t| t.error == error && t.text.contains(what))
+            .count()
+    };
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("LCpeak over", |s| {
+        spl_log(s).is_some_and(|l| l.peaks.lcpeak.judgement == LeqJudgement::Over)
+    })?;
+    d.until("its over toast, corrected", |s| {
+        new_toasts(s, "LCpeak over its limit", true) == 1
+            && new_toasts(s, "(corrected +4.0 dB)", true) >= 1
+    })?;
+    d.until("the LCpeak tile red", |s| {
+        tiles(s)
+            .iter()
+            .any(|t| t.name == "LCpeak" && t.state == TileState::Over)
+    })?;
+    d.stop()?;
+    let stopped = Instant::now();
+    d.until("LCpeak back under after the hold", |s| {
+        spl_log(s).is_some_and(|l| l.peaks.lcpeak.judgement != LeqJudgement::Over)
+    })?;
+    assert!(
+        stopped.elapsed() >= Duration::from_secs(8),
+        "held {:?}",
+        stopped.elapsed()
+    );
+    d.until("its recovery toast", |s| {
+        new_toasts(s, "LCpeak back within its limit", false) == 1
+    })?;
     drop(d);
     drop(daemon);
     Ok(())
@@ -1447,7 +1580,11 @@ fn filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     let (bar, limit_y) = (long.bar.ok_or("bar")?, long.limit_y.ok_or("limit")?);
     assert!(bar.y > limit_y, "the 60 min bar under its limit line");
     let l = spl_log(&d.st).ok_or("log")?;
-    let alarms: Vec<_> = l.alarms.iter().map(|a| (a.duration.0, a.kind)).collect();
+    let alarms: Vec<_> = l
+        .alarms
+        .iter()
+        .map(|a| (a.subject.duration().map_or(f64::NAN, |d| d.0), a.kind))
+        .collect();
     assert_eq!(
         alarms,
         [(60.0, LeqAlarmKind::Over), (300.0, LeqAlarmKind::Over)]
@@ -1781,7 +1918,10 @@ fn a_preset_replaces_the_windows_from_the_app() -> R {
     let Overlay::Leq(x) = &d.st.overlay else {
         return Err("the Leq dialog".into());
     };
-    assert_eq!(x.preset_text(), "DIN 15905-5: LAeq 30 min ≤ 99 dB");
+    assert_eq!(
+        x.preset_text(),
+        "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+    );
     assert!(x.preset_note().contains("replaces the windows"));
     let shown: Vec<(String, String)> = x
         .rows
@@ -2627,6 +2767,138 @@ fn electrical_calibration_from_the_app() -> R {
                 }
                 _ => false,
             })
+        })
+    })?;
+    drop(tone);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// Acoustic calibration (a calibrator on the mic) from an empty daemon with the app: the
+/// calibrations view, C on the mic's input opens the dialog with the input still unnamed,
+/// the mic typed, the calibrator's 94 dB at 1 kHz as offered; Enter reads the input (the
+/// simulated rig's tone stands in for the calibrator), retried in the dialog until steady,
+/// stores the calibration, names the mic on the input and closes with what to do next; the
+/// SPL meter then reads 94.0 dB SPL with the calibrator named.
+#[test]
+fn acoustic_calibration_from_the_app() -> R {
+    use ac2_proto::model::CalMethod;
+    use ac2_ui::cal_view::{CalLine, lines};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let ep = daemon.client_config(NAME);
+    let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spl".into()));
+    d.key("Enter");
+    d.until(
+        "the SPL dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spl),
+    )?;
+    d.key("Enter");
+    d.until("the SPL meter running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    })?;
+
+    d.key("Ctrl+K");
+    d.send(Msg::Text("calibrations".into()));
+    d.key("Enter");
+    let focused = |s: &AppState| match &s.overlay {
+        Overlay::Calibrations(v) => s.daemon().and_then(|st| v.focused(st)),
+        _ => None,
+    };
+    for _ in 0..8 {
+        if focused(&d.st) == Some(CalLine::Input(1)) {
+            break;
+        }
+        d.key("ArrowDown");
+    }
+    assert_eq!(
+        focused(&d.st),
+        Some(CalLine::Input(1)),
+        "{:?}",
+        d.st.daemon().map(lines)
+    );
+    let tone = Tone::start(&ep)?;
+    d.key("C");
+    d.send(Msg::Text("c".into()));
+    let dialog = |s: &AppState| match &s.overlay {
+        Overlay::Calibrations(v) => v.acoustic.clone(),
+        _ => None,
+    };
+    let dl = dialog(&d.st).ok_or("the acoustic dialog")?;
+    assert_eq!(dl.title(), "Acoustic calibration · in 2");
+    assert_eq!(
+        (dl.mic.as_str(), dl.level.as_str(), dl.freq.as_str()),
+        ("", "94 dB", "1 kHz")
+    );
+    assert!(dl.instructions().contains("calibrator"));
+    // The focus starts on the unnamed mic: typed there.
+    d.send(Msg::Text("MM1 34804".into()));
+    let end = Instant::now() + DEADLINE;
+    loop {
+        d.key("Enter");
+        d.until("the reply", |s| {
+            dialog(s).is_none_or(|x| x.pending.is_none())
+        })?;
+        match dialog(&d.st) {
+            None => break,
+            Some(x) => {
+                let e = x.error.unwrap_or_default();
+                assert!(
+                    e.contains("not steady") || e.contains("no calibrator"),
+                    "refused: {e}"
+                );
+            }
+        }
+        if Instant::now() > end {
+            return Err("the calibrator never read steady".into());
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let notice = match &d.st.overlay {
+        Overlay::Calibrations(v) => v.notice.clone().unwrap_or_default(),
+        _ => String::new(),
+    };
+    assert!(
+        notice.contains("acoustic calibration of input 2 (MM1 34804): stored")
+            && notice.contains("take the calibrator off"),
+        "{notice}"
+    );
+    d.until("the calibration stored, the mic named on the input", |s| {
+        s.daemon().is_some_and(|x| {
+            x.inputs
+                .iter()
+                .any(|i| i.channel == 1 && i.mic.as_deref() == Some("MM1 34804"))
+                && x.calibrations.iter().any(|e| {
+                    e.key.channel == 1
+                        && e.key.mic == "MM1 34804"
+                        && matches!(e.spl.method, CalMethod::Acoustic { .. })
+                })
+        })
+    })?;
+    d.key("Escape");
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos() as u64),
+        ),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1280.0,
+        height: 720.0,
+    };
+    d.until("the SPL meter at the calibrator's 94.0 dB SPL", |s| {
+        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now()).is_some_and(|x| {
+            let t = scene_texts(&x.scene);
+            t.iter().any(|l| l.contains("cal 94 dB"))
+                && t.iter().any(|l| l == "94.0")
+                && t.iter().any(|l| l.contains("dB SPL"))
         })
     })?;
     drop(tone);

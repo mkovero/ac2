@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LeqWindowState, MeasKind, Measurement,
-    SplHistory, SplLog, SplLogWhich,
+    AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, MeasKind, Measurement,
+    PeakQuantity, SplHistory, SplLog, SplLogWhich, Weighting,
 };
 use ac2_proto::units::{MeasId, Rev, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -22,20 +22,33 @@ use crate::leq_history;
 use crate::leq_log::{self, LeqLog};
 use crate::util::{perr, wall_ns};
 
-/// `LAeq 30 min`, for the daemon's own log.
-fn window_name(s: &LeqWindowState) -> String {
-    let w = match s.weighting {
-        ac2_proto::model::Weighting::A => "A",
-        ac2_proto::model::Weighting::C => "C",
-        ac2_proto::model::Weighting::Z => "Z",
-    };
-    let secs = s.duration.0;
-    let len = if secs >= 60.0 && secs % 60.0 == 0.0 {
-        format!("{} min", secs / 60.0)
-    } else {
-        format!("{secs} s")
-    };
-    format!("L{w}eq {len}")
+/// `LAeq 30 min`, `LCpeak`, for the daemon's own log.
+fn subject_name(s: &AlarmSubject) -> String {
+    match s {
+        AlarmSubject::Window {
+            duration,
+            weighting,
+        } => {
+            let w = match weighting {
+                Weighting::A => "A",
+                Weighting::C => "C",
+                Weighting::Z => "Z",
+            };
+            let secs = duration.0;
+            let len = if secs >= 60.0 && secs % 60.0 == 0.0 {
+                format!("{} min", secs / 60.0)
+            } else {
+                format!("{secs} s")
+            };
+            format!("L{w}eq {len}")
+        }
+        AlarmSubject::Peak {
+            quantity: PeakQuantity::LcPeak,
+        } => "LCpeak".into(),
+        AlarmSubject::Peak {
+            quantity: PeakQuantity::LafMax,
+        } => "LAFmax".into(),
+    }
 }
 
 impl Control {
@@ -83,17 +96,27 @@ impl Control {
             .clone();
         let started_at = leq_log::lock(&log).started_at();
         let prev = self.spl_log_entity(m.id).cloned();
+        let calibrated = self.input_calibrated(config.input);
+        let now = WallNs(wall_ns());
         let windows = leq_log::window_states(
             &config.leq,
             old,
             prev.as_ref().map_or(&[][..], |p| &p.windows),
-            self.input_calibrated(config.input),
-            WallNs(wall_ns()),
+            calibrated,
+            now,
+        );
+        let peaks = leq_log::peak_states(
+            &config.leq,
+            old,
+            prev.as_ref().map(|p| p.peaks),
+            calibrated,
+            now,
         );
         self.commit_spl_log(SplLog {
             meas: m.id,
             started_at,
             windows,
+            peaks,
             alarms: prev.map(|p| p.alarms).unwrap_or_default(),
         });
         // A new log is a change to the autosave (its file is named in the manifest).
@@ -129,17 +152,21 @@ impl Control {
                 l
             }
         };
+        let entity = self.spl_log_entity(id);
         LeqSetup {
             log,
             to_control: self.s.to_self.clone(),
-            judgements: self
-                .spl_log_entity(id)
+            judgements: entity
                 .map(|l| l.windows.iter().map(|w| w.judgement).collect())
                 .unwrap_or_default(),
+            peak_judgements: PeakQuantity::ALL
+                .map(|q| entity.map_or(LeqJudgement::NoLimit, |l| l.peaks.get(q).judgement)),
         }
     }
 
-    /// A job reported its windows' judgements after a second (or a log's first row).
+    /// A job reported its windows' and peak limits' judgements after a second (or a log's
+    /// first row).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn leq_reported(
         &mut self,
         meas: MeasId,
@@ -147,6 +174,7 @@ impl Control {
         config_rev: Rev,
         at: WallNs,
         judgements: &[LeqJudgement],
+        peak_judgements: [LeqJudgement; 2],
         alarms: Vec<LeqAlarm>,
     ) {
         let current = self
@@ -178,24 +206,29 @@ impl Control {
                 w.since = at;
             }
         }
+        for (q, j) in PeakQuantity::ALL.into_iter().zip(peak_judgements) {
+            let s = l.peaks.get_mut(q);
+            if s.judgement != j {
+                s.judgement = j;
+                s.since = at;
+            }
+        }
         for a in &alarms {
-            let s = LeqWindowState {
-                duration: a.duration,
-                weighting: a.weighting,
-                judgement: LeqJudgement::Over,
-                since: a.at,
+            let corrected = match a.position {
+                Some(p) => format!(" (corrected {:+.1} dB)", p.0),
+                None => String::new(),
             };
             match a.kind {
                 LeqAlarmKind::Over => tracing::warn!(
-                    "SPL meter {meas} ({name}): {} over its limit: {:.1} dB > {:.1} dB",
-                    window_name(&s),
-                    a.leq.0,
+                    "SPL meter {meas} ({name}): {} over its limit: {:.1} dB > {:.1} dB{corrected}",
+                    subject_name(&a.subject),
+                    a.level.0,
                     a.limit.0
                 ),
                 LeqAlarmKind::Recovered => tracing::info!(
-                    "SPL meter {meas} ({name}): {} back within its limit: {:.1} dB ≤ {:.1} dB",
-                    window_name(&s),
-                    a.leq.0,
+                    "SPL meter {meas} ({name}): {} back within its limit: {:.1} dB ≤ {:.1} dB{corrected}",
+                    subject_name(&a.subject),
+                    a.level.0,
                     a.limit.0
                 ),
             }
@@ -305,17 +338,15 @@ impl Control {
             );
         }
         self.spl_prev_logs.insert(meas, ended);
-        let windows = leq_log::window_states(
-            &config.leq,
-            None,
-            &[],
-            self.input_calibrated(config.input),
-            WallNs(wall_ns()),
-        );
+        let calibrated = self.input_calibrated(config.input);
+        let now = WallNs(wall_ns());
+        let windows = leq_log::window_states(&config.leq, None, &[], calibrated, now);
+        let peaks = leq_log::peak_states(&config.leq, None, None, calibrated, now);
         self.commit_spl_log(SplLog {
             meas,
             started_at: None,
             windows,
+            peaks,
             alarms: Vec::new(),
         });
         self.autosave_changed();

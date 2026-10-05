@@ -930,3 +930,24 @@ fn latch_releases_after_the_hold_or_far_enough_below() {
     assert_eq!(latch_step(&mut l, 99.95), Judgement::Over);
     assert_eq!(l.held(), Some(Judgement::Over));
 }
+
+/// A peak is held for PEAK_HOLD_S seconds, then gone; NaN before any second.
+#[test]
+fn peak_hold_keeps_the_highest_second_of_the_newest_ten() {
+    let mut h = PeakHold::default();
+    assert!(h.max_dbfs()[0].is_nan());
+    let loud = Second::GAP.with_maxima(-3.0, -10.0);
+    let quiet = Second::GAP.with_maxima(-30.0, -40.0);
+    h.push(&loud);
+    for k in 1..PEAK_HOLD_S {
+        h.push(&quiet);
+        assert!((h.max_dbfs()[0] + 3.0).abs() < 1e-9, "second {k}");
+        assert!((h.max_dbfs()[1] + 10.0).abs() < 1e-9, "second {k}");
+    }
+    h.push(&quiet);
+    assert!((h.max_dbfs()[0] + 30.0).abs() < 1e-9);
+    h.push(&Second::GAP);
+    assert!((h.max_dbfs()[1] + 40.0).abs() < 1e-9, "a gap adds nothing");
+    h.clear();
+    assert!(h.max_dbfs()[1].is_nan());
+}

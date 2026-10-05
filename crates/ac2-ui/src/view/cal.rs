@@ -4,6 +4,7 @@
 
 use eframe::egui::{self, RichText};
 
+use crate::acoustic_dialog::{AcousticDialog, Field as AcousticField};
 use crate::app::App;
 use crate::cal_view::{CalLine, CalView, line_texts};
 use crate::electrical_dialog::{ElectricalDialog, Field};
@@ -123,8 +124,9 @@ pub(super) fn calibrations(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 ui.label(
                     RichText::new(
                         "↑↓ move (PgUp/PgDn, Home/End) · ←→ mic curve of an input (off / 0° / 90° …) · N names the \
-                         mic · I imports a curve file · R renames a curve · E calibrates an \
-                         input electrically (meter, no calibrator) · Delete deletes (twice) · \
+                         mic · I imports a curve file · R renames a curve · C calibrates an \
+                         input with a calibrator · E calibrates it electrically (meter, no \
+                         calibrator) · Delete deletes (twice) · \
                          Enter ends typing / closes · Esc closes",
                     )
                     .small()
@@ -135,6 +137,121 @@ pub(super) fn calibrations(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     if let Some(d) = &v.electrical {
         electrical(app, ctx, ch, d);
     }
+    if let Some(d) = &v.acoustic {
+        acoustic(app, ctx, ch, d);
+    }
+}
+
+/// The acoustic calibration dialog over the view: what to do, the input's level now, the
+/// mic, the calibrator's level and tone; the calibration it replaces, if electrical.
+fn acoustic(app: &App, ctx: &egui::Context, ch: &Chrome, d: &AcousticDialog) {
+    let meter = app
+        .state
+        .input_meters()
+        .get(&d.input)
+        .cloned()
+        .unwrap_or_else(ac2_scene::meter::MeterReading::none);
+    egui::Area::new(egui::Id::new("ac2-acoustic-cal"))
+        .order(egui::Order::Tooltip)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(640.0);
+                ui.label(RichText::new(d.title()).strong().size(16.0));
+                ui.add_space(4.0);
+                ui.add(egui::Label::new(RichText::new(d.instructions()).color(ch.text)).wrap());
+                ui.add_space(6.0);
+                egui::Grid::new("ac2-acoustic-fields")
+                    .num_columns(4)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .show(ui, |ui| {
+                        let row = |ui: &mut egui::Ui, f: Option<AcousticField>, label: &str| {
+                            let focused = f.is_some_and(|f| f == d.focus);
+                            ui.label(
+                                RichText::new(if focused { "▸" } else { " " })
+                                    .color(ch.focus)
+                                    .monospace(),
+                            );
+                            ui.label(RichText::new(label).color(if focused {
+                                ch.focus
+                            } else {
+                                ch.text
+                            }));
+                            focused
+                        };
+                        let value = |ui: &mut egui::Ui, text: &str, focused: bool| {
+                            ui.label(
+                                RichText::new(if focused {
+                                    format!("{text}▏")
+                                } else {
+                                    text.to_owned()
+                                })
+                                .monospace()
+                                .color(if focused {
+                                    ch.focus
+                                } else {
+                                    ch.text
+                                }),
+                            );
+                        };
+                        row(ui, None, "Input level now");
+                        ui.horizontal(|ui| super::session::meter(ui, &meter, ch));
+                        ui.label(
+                            RichText::new("dBFS · steady, not clipping")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(AcousticField::Mic), "Mic");
+                        value(ui, &d.mic, f);
+                        ui.label(
+                            RichText::new("the name it is stored for, e.g. MM1 34804")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(AcousticField::Level), "Calibrator level");
+                        value(ui, &d.level, f);
+                        ui.label(
+                            RichText::new("←/→ 94 / 114 dB, or type")
+                                .small()
+                                .color(ch.dim),
+                        );
+                        ui.end_row();
+                        let f = row(ui, Some(AcousticField::Freq), "Calibrator tone");
+                        value(ui, &d.freq, f);
+                        ui.label(RichText::new("←/→ 1 kHz / 250 Hz").small().color(ch.dim));
+                        ui.end_row();
+                    });
+                if let Some(r) = &d.replaces {
+                    ui.label(
+                        RichText::new(format!(
+                            "Replaces the electrical calibration of this mic ({r}): a \
+                             calibrator measures the capsule too."
+                        ))
+                        .small()
+                        .color(ch.dim),
+                    );
+                }
+                for (text, color) in [
+                    (d.pending.as_ref().map(|_| "reading the input…"), ch.dim),
+                    (d.error.as_deref(), ch.fault),
+                ] {
+                    if let Some(t) = text {
+                        ui.label(RichText::new(t).color(color));
+                    }
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "↑↓ field · ←→ level / tone · type the values · Enter reads the input \
+                         and stores · Esc closes (back to the calibrations)",
+                    )
+                    .small()
+                    .color(ch.dim),
+                );
+            });
+        });
 }
 
 /// The electrical calibration dialog over the view: where the voltage is measured (with its

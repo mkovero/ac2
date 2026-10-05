@@ -73,6 +73,9 @@ fn leq_frame(levels: &[f32]) -> LeqFrame {
             horizon: Seconds(60.0),
             logged: 3600,
             run: None,
+            lcpeak: None,
+            lafmax: None,
+            position: None,
         },
         leq: levels.to_vec(),
         elapsed: vec![3600.0; n],
@@ -101,6 +104,7 @@ fn leq_view_with_four_hours_of_four_windows() {
             leq_window(60.0, 98.0),
         ],
         horizon: Seconds(60.0),
+        peaks: Default::default(),
     };
     let mut h = LeqHistory::default();
     let level = |k: u32, w: usize| 95.0 + 4.0 * ((f64::from(k) * 0.01 + w as f64).sin() as f32);

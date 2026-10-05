@@ -43,12 +43,13 @@ enum Window {
     Offer,
     Calibrations,
     Electrical,
+    Acoustic,
     Leq,
     NewLog,
     DeleteTrace,
 }
 
-const WINDOWS: [Window; 14] = [
+const WINDOWS: [Window; 15] = [
     Window::Help,
     Window::Palette,
     Window::Prompt,
@@ -60,6 +61,7 @@ const WINDOWS: [Window; 14] = [
     Window::Offer,
     Window::Calibrations,
     Window::Electrical,
+    Window::Acoustic,
     Window::Leq,
     Window::NewLog,
     Window::DeleteTrace,
@@ -118,6 +120,11 @@ fn with_window(w: Window) -> T {
             t.type_key("E", "e");
             assert!(cal_view(&t).electrical.is_some());
         }
+        Window::Acoustic => {
+            cmd(&mut t, CommandId::InputSetup);
+            t.type_key("C", "c");
+            assert!(cal_view(&t).acoustic.is_some());
+        }
         Window::Leq => {
             t.type_key("Shift+L", "L");
         }
@@ -141,7 +148,7 @@ fn with_window(w: Window) -> T {
             | (Window::PaneMenu, Overlay::PaneMenu(_))
             | (Window::Offer, Overlay::Offer(_))
             | (
-                Window::Calibrations | Window::Electrical,
+                Window::Calibrations | Window::Electrical | Window::Acoustic,
                 Overlay::Calibrations(_)
             )
             | (Window::Leq, Overlay::Leq(_))
@@ -179,8 +186,8 @@ fn a_window_owns_the_arrows_and_esc_closes_it_without_touching_the_stimulus() {
         assert!(stimulus_requests(&r).is_empty(), "{w:?} Esc: {r:?}");
         assert_eq!(t.st.stimulus.phase, StimPhase::Firing, "{w:?}");
         // A dialog over a view closes back to the view; the next Esc closes the view.
-        if matches!(w, Window::Electrical) {
-            assert!(cal_view(&t).electrical.is_none());
+        if matches!(w, Window::Electrical | Window::Acoustic) {
+            assert!(cal_view(&t).electrical.is_none() && cal_view(&t).acoustic.is_none());
             let r = t.key("Esc");
             assert!(stimulus_requests(&r).is_empty(), "{r:?}");
         }

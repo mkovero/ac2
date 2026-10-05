@@ -2274,7 +2274,9 @@ impl AppState {
     /// strip's Stop stops it.
     fn close_overlay(&mut self, out: &mut Vec<Request>) {
         match &mut self.overlay {
-            Overlay::Calibrations(v) if v.electrical.is_some() => v.electrical = None,
+            Overlay::Calibrations(v) if v.electrical.is_some() || v.acoustic.is_some() => {
+                v.close_dialog();
+            }
             Overlay::Form(f) if f.kind == FormKind::Sweep => {
                 self.overlay = Overlay::None;
                 self.disarm_unfired(out);
@@ -4428,23 +4430,9 @@ impl AppState {
         }
         self.leq_alarms_seen = seen;
         for (name, a) in news {
-            let w = ac2_proto::model::LeqWindow {
-                duration: a.duration,
-                weighting: a.weighting,
-                limit: Some(a.limit),
-                warn_margin: ac2_proto::units::Db(0.0),
-            };
-            let window = ac2_scene::leq::window_name(&w);
-            match a.kind {
-                ac2_proto::model::LeqAlarmKind::Over => self.error(format!(
-                    "{name}: {window} over its limit — {} dB > {} dB",
-                    format::level(a.leq.0),
-                    format::level(a.limit.0)
-                )),
-                ac2_proto::model::LeqAlarmKind::Recovered => self.toast(format!(
-                    "{name}: {window} back within its limit — {} dB",
-                    format::level(a.leq.0)
-                )),
+            match ac2_scene::leq::alarm_text(&name, &a) {
+                (true, text) => self.error(text),
+                (false, text) => self.toast(text),
             }
         }
     }
@@ -4769,6 +4757,14 @@ impl AppState {
         let Overlay::Calibrations(v) = &mut self.overlay else {
             return;
         };
+        if let Some(d) = &mut v.acoustic {
+            if let Some(a) = crate::acoustic_dialog::key(d, &chord) {
+                self.cal_action(a, out);
+            } else {
+                self.swallow_text = swallow;
+            }
+            return;
+        }
         if let Some(d) = &mut v.electrical {
             if let Some(a) = crate::electrical_dialog::key(d, &chord) {
                 self.cal_action(a, out);
@@ -4837,6 +4833,12 @@ impl AppState {
                 }
                 None
             }
+            Key::C if plain => {
+                if v.start_acoustic(&st) {
+                    self.swallow_text = typed_char(&chord);
+                }
+                None
+            }
             Key::Delete | Key::Backspace => v.delete(&st),
             _ => {
                 self.swallow_text = swallow;
@@ -4872,7 +4874,7 @@ impl AppState {
                 ),
                 cmd: Command::CalCurveDelete { curve: id },
             }),
-            CalAction::Electrical(cmd, what) => out.push(Request::Call { what, cmd }),
+            CalAction::Calibrate(cmd, what) => out.push(Request::Call { what, cmd }),
             CalAction::DeleteSensitivity(key) => out.push(Request::Call {
                 what: format!(
                     "sensitivity calibration of {} on input {} deleted",

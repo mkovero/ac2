@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 19`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 20`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -169,7 +169,8 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   no longer the tone level of that bin: frames say so (`SpecMeta.smoothing`) and clients
   label it.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
-  `peak_weighting`, the Leq windows (`leq: LeqConfig`), the name — applies in place; the
+  `peak_weighting`, the Leq windows and peak limits (`leq: LeqConfig`), the measuring-position
+  correction (`position`), the name — applies in place; the
   meter, its log and its windows go on (§3.2, SPL log). The meter runs every frequency
   weighting with every time weighting (and the peak with C and Z) all the time and reports
   the configured ones, so the first `spl` frame with the new `config_rev` reads the new
@@ -198,18 +199,28 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
 #### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 
 Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8, in
-display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60)}. `LeqWindow` =
+display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60), `peaks`:
+`PeakLimits` {`lcpeak`, `lafmax`: `PeakLimit` \| nil}}. `LeqWindow` =
 {`duration`: Seconds (1 s … 24 h, whole seconds), `weighting`: `a` \| `c` \| `z`, `limit`:
-DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3)}. Front ends create meters with LAeq over
-1, 5, 10, 30 and 60 min and no limits. A configuration outside these bounds is `invalid`
-at `meas.create` / `meas.update`.
+DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3)}. `PeakLimit` = {`limit`: DbSpl, `warn_margin`:
+Db ≥ 0}. `SplConfig.position`: `PositionCorrection` \| nil = {`level`: Db, `peak`: Db, each
+within ±30}: the measuring-position correction (`docs/design/leq.md`, *Measuring-position
+correction*), added to every level the meter reports while calibrated — `level` to the
+energy levels (the time-weighted levels, Leq, the windows, headroom, run totals, LAFmax),
+`peak` to the peak levels (`lpeak`, LCpeak) — and to what limits are judged on; uncalibrated
+meters ignore it. Front ends create meters with LAeq over 1, 5, 10, 30 and 60 min, no limits
+and no correction. A configuration outside these bounds is `invalid` at `meas.create` /
+`meas.update`.
 
 Every running SPL meter integrates its input (after the mic curve, when on) into one-second
 blocks of A-, C- and Z-weighted energy on a grid of whole seconds from its first sample;
 lost samples (a capture discontinuity) move the grid on without energy or measured time.
 Each second is a log row, `SplLogRow` = {`start`: WallNs, `measured`: Seconds (< 1 next to
-a gap), `laeq`, `lceq`, `lzeq`: Dbfs over the measured time, `sensitivity`: Db \| nil (dB
-SPL of 0 dBFS in force)}. The log belongs to the meter: it survives stopping and starting,
+a gap), `laeq`, `lceq`, `lzeq`: Dbfs over the measured time, `lcpeak`, `lafmax`: Dbfs, the
+second's highest C-weighted peak and A-weighted Fast level (both kept while the meter is
+frozen), `sensitivity`: Db \| nil (dB SPL of 0 dBFS in force), `position`:
+`PositionCorrection` \| nil (the correction in force while calibrated; never included in the
+row's levels, which are what was measured)}. The log belongs to the meter: it survives stopping and starting,
 device reopens, config changes and daemon restarts (session files and the autosave carry
 it, §7.2), keeps the newest 48 h, and is kept while frozen or after `meas.reset` (those
 are display operations). `spl.log_get` returns `SplLogPage` {`meas`, `from`, `total`,
@@ -248,6 +259,19 @@ the horizon is `(P·(M_K + h) − E_K) / h` (the limit itself when `K ≤ 0`). C
 to 0.1 dB; when it is ≤ 0 the window cannot recover within the horizon and `recover` gives
 the time to recover playing at the limit.
 
+States have hysteresis (`docs/design/leq.md`, *Hysteresis*): a judgement rises at once and
+is lowered only when the rounded Leq is 0.3 dB under the state's boundary (the limit for
+`over`, the limit less `warn_margin` for `near`) or has been under it for 10 s in a row;
+until then the frame and the entity keep the higher state.
+
+A peak limit is judged each second on the highest `lcpeak` (`lafmax`) of the newest 10
+seconds (`LeqPeak::HOLD_S`), with the position correction's `peak` (`level`) and the
+sensitivity added: over when its rounded value is above the limit, near within
+`warn_margin` below it or at it, else ok; the hold is its dwell (one second over keeps it
+over for 10 s). The `leq` frame's `lcpeak` and `lafmax` (`LeqPeak` \| nil: nil without that
+limit) carry {`level`: f64, that held value in the frame's `scale` (NaN before anything was
+measured), `judgement`: `LeqJudgement`}.
+
 `spl.history_get` returns `SplHistory` {`meas`, `windows`: [`LeqWindow`] (the meter's, in
 configuration order), `scale`: `LevelScale`, `at`: [WallNs], `leq`: [[f32]], `over`:
 [[bool]]}: each window second by second over the newest `seconds` (at most 14400, 4 h) of
@@ -257,8 +281,11 @@ window `w`'s Leq at `at[k]` in `scale` (NaN when nothing was measured in it), `o
 whether it was over its limit then. The daemon replays the log as the meter's job computed
 it (`docs/design/leq.md`, *The history strip*): a second lost while running is a gap in the
 windows, a stretch without rows a restart whose windows were refilled from the rows in their
-span; each second judged with the window's limit and the row's sensitivity, a filling
-window on its budget. Only seconds after the last change of unit (a calibration) are
+span; each second judged with the window's limit, the row's sensitivity and its position
+correction, a filling window on its budget, with the hysteresis above (begun part way
+through a log, a state held from before the first row read can be released up to 10 s
+early). `leq` includes the row's position correction. Only seconds after the last change of
+unit (a calibration, or a change of the position correction) are
 returned; `scale` is theirs. The windows are the meter's current ones, also for seconds
 logged before they were set. Empty `at` for an empty log. `invalid` for a measurement that
 is not an SPL meter. A client that was not connected (an app restarted) draws the history
@@ -266,9 +293,13 @@ from it and continues with the frames.
 
 The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (each window's
 `LeqWindowState` {`duration`, `weighting`, `judgement`, `since`}; `LeqJudgement`: `no_limit`
-\| `not_calibrated` \| `ok` \| `near` \| `over`), when the windows change and when the log
-starts (`started_at`). Going over and recovering append a `LeqAlarm` {`at`, `duration`,
-`weighting`, `kind`: `over` \| `recovered`, `leq`, `limit`} to `alarms` (the newest 100).
+\| `not_calibrated` \| `ok` \| `near` \| `over`) or a peak limit's (`peaks`: `PeakStates`
+{`lcpeak`, `lafmax`: `LeqPeakState` {`judgement`, `since`}}, `no_limit` without that limit),
+when the windows change and when the log starts (`started_at`). Going over and recovering
+append a `LeqAlarm` {`at`, `subject`: `AlarmSubject` (`window` {`duration`, `weighting`} \|
+`peak` {`quantity`: `lcpeak` \| `lafmax`}), `kind`: `over` \| `recovered`, `level` (the
+window's Leq or the peak limit's held level, with the correction), `limit`, `position`: Db
+\| nil (the correction included in `level`)} to `alarms` (the newest 100).
 
 The `leq` frame's `run` (`LeqRun` \| nil before the log's first second) is the log as a
 whole, every second: `started_at` (WallNs of its oldest kept second), `until` (WallNs of the
@@ -739,7 +770,7 @@ math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `cre
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal), `mics` (`Mic`: `name`, `curves`
 [MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `spl_logs` (`SplLog` per SPL
-meter: `meas`, `started_at`, `windows`, `alarms`; §3.2), `timing` (`TimingStatus`: `epoch`,
+meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
 `drift` (`Drift` | nil: `ppm` output-vs-input clock drift from the loopback offset's slope,
 `span` s regressed, `warning` true when output and input are on different clocks, `at`
@@ -822,7 +853,8 @@ stays a one-entry map `{kind: [...]}`; enums without data stay strings. Nested o
 `Smoothing` [fraction, mode]; `CalStatus` `uncalibrated` \| `verified` /
 `other_mic_or_input` [calibrated_at, basis]; `CalBasis` `acoustic` [calibrator_level] \|
 `electrical` [connection, mic_sensitivity, data_sheet, uncertainty]; `LeqRun` [started_at,
-until, measured, gaps, trimmed, laeq, lceq, lzeq]; `TimingStatus` [epoch, state, last_lock,
+until, measured, gaps, trimmed, laeq, lceq, lzeq]; `LeqPeak` [level, judgement];
+`PositionCorrection` [level, peak]; `TimingStatus` [epoch, state, last_lock,
 drift, internal_reference]; `TimingState` `no_stimulus` \| `acquiring` \| `locked`
 [offset] \| `jumped` [from, to] \| `lost`; `LastLock` [epoch, offset, at_sample, at];
 `Drift` [ppm, span, warning, at]. `tools/protocol/ac2proto.py` (`HEADER`, `META`) is the same
@@ -857,8 +889,8 @@ layout as code.
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
-| `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve` |
-| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log) |
+| `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
+| `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
@@ -1044,12 +1076,16 @@ restored one was). Status changes are ordinary events, so they bump `rev`.
 ### 7.4 SPL log (CSV)
 
 What sessions store and `ac2 spl leq export` writes: the first line is exactly
-`# ac2 spl log v1`, then `# key: value` lines (`meas`, `name`, `input` (1-based), `mic`), then the
-header `start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,sensitivity_db` and one
-row per logged second: ISO 8601 UTC time of the second's start, the same in Unix ns, the
-measured time, `dB SPL` or `dBFS`, the three levels in that unit (4 decimals; `-inf` for
-digital silence) and the sensitivity (empty uncalibrated). Reading it back takes
-`start_ns`, `measured_s`, the levels and the sensitivity.
+`# ac2 spl log v2`, then `# key: value` lines (`meas`, `name`, `input` (1-based), `mic`), then the
+header
+`start_utc,start_ns,measured_s,unit,laeq_1s,lceq_1s,lzeq_1s,lcpeak_1s,lafmax_1s,sensitivity_db,position_db,position_peak_db`
+and one row per logged second: ISO 8601 UTC time of the second's start, the same in Unix
+ns, the measured time, `dB SPL` or `dBFS`, the five levels in that unit as measured (4
+decimals; `-inf` for digital silence), the sensitivity (empty uncalibrated) and the
+measuring-position correction in force, energy and peak (empty without one): a corrected
+level is the row's level plus the correction, which the row records but never applies.
+Reading it back takes `start_ns`, `measured_s`, the levels, the sensitivity and the
+correction.
 
 ### 7.5 Raw capture files (`rec.start`)
 

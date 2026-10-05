@@ -10,8 +10,11 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ac2_core::leq::{LogTotal, RollingLeq, Second};
-use ac2_proto::model::{LeqConfig, LeqJudgement, LeqWindow, LeqWindowState, SplLogPage, SplLogRow};
+use ac2_core::leq::{LogTotal, PEAK_HOLD_S, PeakHold, RollingLeq, Second};
+use ac2_proto::model::{
+    LeqConfig, LeqJudgement, LeqPeakState, LeqWindow, LeqWindowState, PeakQuantity, PeakStates,
+    SplLogPage, SplLogRow,
+};
 use ac2_proto::units::{MeasId, WallNs};
 
 const NS: u64 = 1_000_000_000;
@@ -212,18 +215,70 @@ impl LeqLog {
     /// Refills `ring` with the seconds of the log that fall in the `ring.capacity()`
     /// seconds before `now`, placed by wall time; seconds without a row are gaps. The
     /// windows then count as elapsed from the oldest row inside that span
-    /// ([`RollingLeq::refill`], which a client's replay of the log follows too).
-    pub(crate) fn rebuild(&self, ring: &mut RollingLeq, now: u64) {
+    /// ([`RollingLeq::refill`], which a client's replay of the log follows too). `peaks`
+    /// gets the rows of the newest [`PEAK_HOLD_S`] seconds before `now`, so a restarted
+    /// job judges its peak limits on what was just logged.
+    pub(crate) fn rebuild(&self, ring: &mut RollingLeq, peaks: &mut PeakHold, now: u64) {
         ring.refill(
             self.rows.iter().rev().map(|r| (r.start.0, row_second(r))),
             now,
         );
+        peaks.clear();
+        let from = now.saturating_sub(PEAK_HOLD_S as u64 * NS);
+        let recent = self
+            .rows
+            .iter()
+            .rev()
+            .take_while(|r| r.start.0 >= from)
+            .collect::<Vec<_>>();
+        for r in recent.into_iter().rev() {
+            peaks.push(&row_second(r));
+        }
     }
 }
 
-/// A log row back as energy.
+/// A log row back as energy, with its maxima.
 pub(crate) fn row_second(r: &SplLogRow) -> Second {
     Second::from_levels([r.laeq.0, r.lceq.0, r.lzeq.0], r.measured.0)
+        .with_maxima(r.lcpeak.0, r.lafmax.0)
+}
+
+/// Judgement of peak limit `q` of `cfg` before a second was judged.
+pub(crate) fn initial_peak_judgement(
+    cfg: &LeqConfig,
+    q: PeakQuantity,
+    calibrated: bool,
+) -> LeqJudgement {
+    match (cfg.peaks.get(q), calibrated) {
+        (None, _) => LeqJudgement::NoLimit,
+        (Some(_), false) => LeqJudgement::NotCalibrated,
+        (Some(_), true) => LeqJudgement::Ok,
+    }
+}
+
+/// The peak limits' states for `cfg`: a limit set as before keeps its state, others start
+/// from [`initial_peak_judgement`] at `now`.
+pub(crate) fn peak_states(
+    cfg: &LeqConfig,
+    old_cfg: Option<&LeqConfig>,
+    old: Option<PeakStates>,
+    calibrated: bool,
+    now: WallNs,
+) -> PeakStates {
+    let state = |q: PeakQuantity| {
+        let kept = match (old_cfg, old) {
+            (Some(oc), Some(o)) if oc.peaks.get(q) == cfg.peaks.get(q) => Some(o.get(q)),
+            _ => None,
+        };
+        kept.unwrap_or(LeqPeakState {
+            judgement: initial_peak_judgement(cfg, q, calibrated),
+            since: now,
+        })
+    };
+    PeakStates {
+        lcpeak: state(PeakQuantity::LcPeak),
+        lafmax: state(PeakQuantity::LafMax),
+    }
 }
 
 /// Judgement of a window without a value to judge yet: what its limit and the
@@ -279,7 +334,10 @@ mod tests {
             laeq: Dbfs(level),
             lceq: Dbfs(level),
             lzeq: Dbfs(level),
+            lcpeak: Dbfs(level + 12.0),
+            lafmax: Dbfs(level + 2.0),
             sensitivity: Some(Db(120.0)),
+            position: None,
         }
     }
 
@@ -324,7 +382,10 @@ mod tests {
             },
         ];
         let mut r = RollingLeq::new(&specs, 60);
-        l.rebuild(&mut r, t0 + 240 * NS);
+        let mut peaks = PeakHold::default();
+        l.rebuild(&mut r, &mut peaks, t0 + 240 * NS);
+        // The newest ten seconds' maxima: -30 dBFS rows, +12 dB peaks.
+        assert!((peaks.max_dbfs()[0] + 18.0).abs() < 1e-9);
         let v = r.value(0);
         assert_eq!(v.elapsed, 240);
         assert!((v.measured - 120.0).abs() < 1e-9);
@@ -334,9 +395,10 @@ mod tests {
         let v = r.value(1);
         assert!((v.leq_dbfs + 30.0).abs() < 1e-9);
         assert!(!v.incomplete());
-        // Nothing within the span: empty windows.
-        l.rebuild(&mut r, t0 + 5000 * NS);
+        // Nothing within the span: empty windows, no peaks.
+        l.rebuild(&mut r, &mut peaks, t0 + 5000 * NS);
         assert_eq!(r.pushed(), 0);
+        assert!(peaks.max_dbfs()[0].is_nan());
     }
 
     /// Brute force over `rows`: span, measured time, gaps and LAeq.

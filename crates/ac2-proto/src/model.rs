@@ -592,6 +592,98 @@ pub struct SplConfig {
     pub peak_weighting: PeakWeighting,
     /// Rolling Leq windows (`docs/design/leq.md`).
     pub leq: LeqConfig,
+    /// Measuring-position correction: added to every level the meter reports once
+    /// calibrated (the log keeps what was measured, with the correction in force).
+    pub position: Option<PositionCorrection>,
+}
+
+/// The level difference from where the mic is to where a limit applies (the loudest
+/// audience position, read from a mic at FOH), added to what the meter measures. The
+/// energy levels (Leq, LAF…, LAFmax) and the peak levels (LCpeak, LZpeak) take separate
+/// differences, as DIN 15905-5 has K1 and K2: a peak travels differently from the energy.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PositionCorrection {
+    /// Added to the energy levels (dB).
+    pub level: Db,
+    /// Added to the peak levels (dB).
+    pub peak: Db,
+}
+
+impl PositionCorrection {
+    /// Largest correction either way, dB: a measuring position more than this far from
+    /// where the limit applies is not that position.
+    pub const MAX_DB: f64 = 30.0;
+
+    /// Both differences the same.
+    pub fn both(db: f64) -> Self {
+        Self {
+            level: Db(db),
+            peak: Db(db),
+        }
+    }
+
+    /// Whether both are finite and within ±[`Self::MAX_DB`].
+    pub fn is_valid(&self) -> bool {
+        [self.level.0, self.peak.0]
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= Self::MAX_DB)
+    }
+}
+
+/// What a peak limit is set on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PeakQuantity {
+    /// C-weighted peak (LCpeak).
+    #[serde(rename = "lcpeak")]
+    LcPeak,
+    /// Highest A-weighted Fast level (LAFmax).
+    #[serde(rename = "lafmax")]
+    LafMax,
+}
+
+impl PeakQuantity {
+    /// Both, in display order.
+    pub const ALL: [PeakQuantity; 2] = [PeakQuantity::LcPeak, PeakQuantity::LafMax];
+}
+
+/// A limit on the highest LCpeak or LAFmax of any second: over as soon as one second
+/// exceeds it (`docs/design/leq.md`, *Peak limits*).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeakLimit {
+    /// Limit; judged only while the meter reads dB SPL.
+    pub limit: DbSpl,
+    /// "Near" within this much below the limit (≥ 0).
+    pub warn_margin: Db,
+}
+
+/// The peak limits of an SPL meter.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeakLimits {
+    /// On LCpeak.
+    pub lcpeak: Option<PeakLimit>,
+    /// On LAFmax.
+    pub lafmax: Option<PeakLimit>,
+}
+
+impl PeakLimits {
+    /// The limit on `q`.
+    pub fn get(&self, q: PeakQuantity) -> Option<PeakLimit> {
+        match q {
+            PeakQuantity::LcPeak => self.lcpeak,
+            PeakQuantity::LafMax => self.lafmax,
+        }
+    }
+
+    /// The limit on `q`, to change.
+    pub fn get_mut(&mut self, q: PeakQuantity) -> &mut Option<PeakLimit> {
+        match q {
+            PeakQuantity::LcPeak => &mut self.lcpeak,
+            PeakQuantity::LafMax => &mut self.lafmax,
+        }
+    }
 }
 
 /// One rolling Leq window of an SPL meter.
@@ -617,6 +709,8 @@ pub struct LeqConfig {
     /// Headroom horizon: the steady level allowed over this much of the future
     /// (whole seconds, 1 s … 1 h).
     pub horizon: Seconds,
+    /// Limits on the highest LCpeak and LAFmax.
+    pub peaks: PeakLimits,
 }
 
 /// Judgement of a rolling Leq window against its limit.
@@ -635,18 +729,19 @@ pub enum LeqJudgement {
     Over,
 }
 
-/// Informational presets of published limits, each on one or more windows. Not legal
-/// advice: each rule has more to it (peak limits, measuring position, duties);
+/// Informational presets of published limits, each on one or more windows and the peak
+/// limits the rule sets. Not legal advice: each rule has more to it (measuring position,
+/// duties);
 /// `docs/design/leq.md` lists the sources and what is not covered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LeqPreset {
-    /// DIN 15905-5: LAeq 30 min ≤ 99 dB.
+    /// DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB.
     Din15905,
-    /// Swiss V-NISSG, first category: LAeq 60 min ≤ 93 dB.
+    /// Swiss V-NISSG, first category: LAeq 60 min ≤ 93 dB, LAFmax ≤ 125 dB.
     Swiss93,
-    /// Swiss V-NISSG, second category: LAeq 60 min ≤ 96 dB.
+    /// Swiss V-NISSG, second category: LAeq 60 min ≤ 96 dB, LAFmax ≤ 125 dB.
     Swiss96,
-    /// Swiss V-NISSG, third category: LAeq 60 min ≤ 100 dB.
+    /// Swiss V-NISSG, third category: LAeq 60 min ≤ 100 dB, LAFmax ≤ 125 dB.
     Swiss100,
     /// WHO safe listening venues and events (2022): LAeq 15 min ≤ 100 dB.
     Who,
@@ -871,7 +966,20 @@ impl SplConfig {
             time_weighting,
             peak_weighting: PeakWeighting::C,
             leq: LeqConfig::default_windows(),
+            position: None,
         }
+    }
+
+    /// Why the configuration cannot run, if it cannot.
+    pub fn check(&self) -> Result<(), String> {
+        self.leq.check()?;
+        if self.position.is_some_and(|p| !p.is_valid()) {
+            return Err(format!(
+                "a position correction is at most ±{} dB",
+                PositionCorrection::MAX_DB
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -936,6 +1044,7 @@ impl LeqConfig {
         Self {
             windows: [1, 5, 10, 30, 60].map(LeqWindow::minutes).to_vec(),
             horizon: Seconds(Self::DEFAULT_HORIZON_S),
+            peaks: PeakLimits::default(),
         }
     }
 
@@ -963,6 +1072,18 @@ impl LeqConfig {
         }
         if self.horizon_seconds().is_none() {
             return Err("the headroom horizon is 1 s … 1 h in whole seconds".into());
+        }
+        let bad = |p: &PeakLimit| {
+            !(p.limit.0.is_finite() && p.warn_margin.0.is_finite() && p.warn_margin.0 >= 0.0)
+        };
+        if [self.peaks.lcpeak, self.peaks.lafmax]
+            .iter()
+            .flatten()
+            .any(bad)
+        {
+            return Err(
+                "a peak limit needs a finite limit and a warn margin of 0 dB or more".into(),
+            );
         }
         Ok(())
     }
@@ -1088,6 +1209,43 @@ impl LeqPreset {
             LeqPreset::NetherlandsCovenant14To15 => vec![w(15, A, Some(96.0))],
             LeqPreset::NetherlandsCovenantTo13 => vec![w(15, A, Some(91.0))],
         }
+    }
+
+    /// The peak limits the rule sets (none for most: their texts limit Leq windows only).
+    pub fn peaks(self) -> PeakLimits {
+        let p = |l: f64| {
+            Some(PeakLimit {
+                limit: DbSpl(l),
+                warn_margin: Db(LeqWindow::DEFAULT_WARN_MARGIN_DB),
+            })
+        };
+        match self {
+            LeqPreset::Din15905 => PeakLimits {
+                lcpeak: p(135.0),
+                lafmax: None,
+            },
+            LeqPreset::Swiss93 | LeqPreset::Swiss96 | LeqPreset::Swiss100 => PeakLimits {
+                lcpeak: None,
+                lafmax: p(125.0),
+            },
+            _ => PeakLimits::default(),
+        }
+    }
+
+    /// The peak limits a meter has once `presets` are applied: exactly theirs, the lower
+    /// where two set the same quantity (both rules met).
+    pub fn peaks_of(presets: &[LeqPreset]) -> PeakLimits {
+        let mut out = PeakLimits::default();
+        for p in presets.iter().map(|p| p.peaks()) {
+            for q in PeakQuantity::ALL {
+                let slot = out.get_mut(q);
+                *slot = match (*slot, p.get(q)) {
+                    (Some(a), Some(b)) => Some(if b.limit.0 < a.limit.0 { b } else { a }),
+                    (a, b) => a.or(b),
+                };
+            }
+        }
+        out
     }
 
     /// The windows a meter has once `presets` are applied: exactly theirs, shortest first
@@ -2506,8 +2664,48 @@ pub struct SplLog {
     pub started_at: Option<WallNs>,
     /// Each configured window's state, in configuration order.
     pub windows: Vec<LeqWindowState>,
+    /// The peak limits' states.
+    pub peaks: PeakStates,
     /// Over and recovered events, oldest first (the newest [`SplLog::MAX_ALARMS`]).
     pub alarms: Vec<LeqAlarm>,
+}
+
+/// State of a peak limit.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqPeakState {
+    /// Current judgement (`no_limit` without a limit).
+    pub judgement: LeqJudgement,
+    /// When the judgement began.
+    pub since: WallNs,
+}
+
+/// The states of an SPL meter's peak limits.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PeakStates {
+    /// LCpeak.
+    pub lcpeak: LeqPeakState,
+    /// LAFmax.
+    pub lafmax: LeqPeakState,
+}
+
+impl PeakStates {
+    /// The state of `q`.
+    pub fn get(&self, q: PeakQuantity) -> LeqPeakState {
+        match q {
+            PeakQuantity::LcPeak => self.lcpeak,
+            PeakQuantity::LafMax => self.lafmax,
+        }
+    }
+
+    /// The state of `q`, to change.
+    pub fn get_mut(&mut self, q: PeakQuantity) -> &mut LeqPeakState {
+        match q {
+            PeakQuantity::LcPeak => &mut self.lcpeak,
+            PeakQuantity::LafMax => &mut self.lafmax,
+        }
+    }
 }
 
 impl SplLog {
@@ -2539,22 +2737,51 @@ pub enum LeqAlarmKind {
     Recovered,
 }
 
-/// A window going over its limit, or recovering.
+/// What an alarm is about.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AlarmSubject {
+    /// A rolling Leq window.
+    Window {
+        /// Window length.
+        duration: Seconds,
+        /// Window weighting.
+        weighting: Weighting,
+    },
+    /// A peak limit.
+    Peak {
+        /// LCpeak or LAFmax.
+        quantity: PeakQuantity,
+    },
+}
+
+impl AlarmSubject {
+    /// A window's length; `None` for a peak limit.
+    pub fn duration(&self) -> Option<Seconds> {
+        match self {
+            AlarmSubject::Window { duration, .. } => Some(*duration),
+            AlarmSubject::Peak { .. } => None,
+        }
+    }
+}
+
+/// A window or a peak limit going over its limit, or recovering.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LeqAlarm {
     /// When (wall time of the end of the second that decided it).
     pub at: WallNs,
-    /// Window length.
-    pub duration: Seconds,
-    /// Window weighting.
-    pub weighting: Weighting,
+    /// The window or the peak limit.
+    pub subject: AlarmSubject,
     /// Over or recovered.
     pub kind: LeqAlarmKind,
-    /// The window's Leq then.
-    pub leq: DbSpl,
+    /// The level judged then (a window's Leq, a peak limit's highest second within its
+    /// hold), with `position` added.
+    pub level: DbSpl,
     /// Its limit.
     pub limit: DbSpl,
+    /// The measuring-position correction included in `level` (dB), if any.
+    pub position: Option<Db>,
 }
 
 /// One second of an SPL meter's log.
@@ -2571,8 +2798,15 @@ pub struct SplLogRow {
     pub lceq: Dbfs,
     /// LZeq over the measured time.
     pub lzeq: Dbfs,
+    /// Highest C-weighted peak of the second.
+    pub lcpeak: Dbfs,
+    /// Highest A-weighted Fast level of the second.
+    pub lafmax: Dbfs,
     /// Sensitivity in force (dB SPL of 0 dBFS); `None` uncalibrated.
     pub sensitivity: Option<Db>,
+    /// Measuring-position correction in force: not in the levels (a row is what was
+    /// measured); `None` without one or uncalibrated.
+    pub position: Option<PositionCorrection>,
 }
 
 /// Which of an SPL meter's logs `spl.log_get` reads.

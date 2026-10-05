@@ -514,6 +514,31 @@ fn calibrations_view() {
     });
     h.state_mut().state.toasts.clear();
     snapshot(&mut h, "calibrations_view");
+    // C on the mic's input: the acoustic calibration dialog, the mic prefilled.
+    for _ in 0..8 {
+        let on_input = match &h.state().state.overlay {
+            Overlay::Calibrations(v) => h
+                .state()
+                .state
+                .daemon()
+                .and_then(|s| v.focused(s))
+                .is_some_and(|l| l == ac2_ui::cal_view::CalLine::Input(1)),
+            _ => false,
+        };
+        if on_input {
+            break;
+        }
+        h.key_press(Key::ArrowDown);
+    }
+    h.key_press(Key::C);
+    h.event(Event::Text("c".into()));
+    step_until(
+        &mut h,
+        "the acoustic dialog",
+        |a| matches!(&a.state.overlay, Overlay::Calibrations(v) if v.acoustic.is_some()),
+    );
+    h.state_mut().state.toasts.clear();
+    snapshot(&mut h, "acoustic_calibration_dialog");
 }
 
 /// X on an ambiguous finding: the candidate list over the transfer pane (decision 1c), the
@@ -1427,7 +1452,7 @@ impl LeqPublisher {
                     let mut st = fake.lock();
                     let frame = Frame {
                         stamp: st.stamp(seq, None),
-                        data: FrameData::Leq(data),
+                        data: FrameData::Leq(Box::new(data)),
                     };
                     st.publish(&frame);
                     seq += 1;
@@ -1518,6 +1543,9 @@ fn leq_frame(
                 lceq: f64::from(leq[4]) + 6.0,
                 lzeq: f64::from(leq[4]) + 9.0,
             }),
+            lcpeak: None,
+            lafmax: None,
+            position: None,
         },
         leq: leq.to_vec(),
         elapsed: elapsed.to_vec(),
@@ -1715,11 +1743,14 @@ fn leq_tiles_from_an_empty_daemon() {
     leq.set(over_frame.clone());
     let alarm = |at: u64, duration: f64, kind, leq: f64, limit: f64| LeqAlarm {
         at: WallNs(at),
-        duration: Seconds(duration),
-        weighting: ac2_proto::model::Weighting::A,
+        subject: ac2_proto::model::AlarmSubject::Window {
+            duration: Seconds(duration),
+            weighting: ac2_proto::model::Weighting::A,
+        },
         kind,
-        leq: DbSpl(leq),
+        level: DbSpl(leq),
         limit: DbSpl(limit),
+        position: None,
     };
     let mut log = fake.lock().state.spl_logs[0].clone();
     log.windows[0].judgement = LeqJudgement::Over;
@@ -1895,6 +1926,75 @@ fn leq_tiles_from_an_empty_daemon() {
         a.state.layout.maximized && !a.state.stage_view()
     });
     snapshot_when(&mut h, "spl_meter_leq", pin, held);
+
+    // Shift+L again: ↑↑ from the preset row to the position correction, 4 dB; Shift+Tab ×2
+    // to the LCpeak limit, 135; the dialog with its settings under the windows.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+    step_until(&mut h, "the Leq dialog again", |a| {
+        matches!(a.state.overlay, Overlay::Leq(_))
+    });
+    h.key_press(Key::ArrowUp);
+    h.key_press(Key::ArrowUp);
+    h.event(Event::Text("4".into()));
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    h.event(Event::Text("135".into()));
+    step_until(&mut h, "the peak limit and the correction typed", |a| {
+        matches!(&a.state.overlay, Overlay::Leq(d)
+            if d.extra_text(ac2_ui::leq_dialog::Extra::LcPeak) == "135"
+                && d.extra_text(ac2_ui::leq_dialog::Extra::Position) == "4")
+    });
+    h.event(Event::PointerGone);
+    snapshot_when(&mut h, "leq_dialog_peaks_position", pin, |_| true);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the peak limit and the correction set", |a| {
+        a.state.overlay == Overlay::None
+            && a.state.measurements().iter().any(|m| match &m.config.kind {
+                MeasKind::Spl { config } => {
+                    config.position.is_some() && config.leq.peaks.lcpeak.is_some()
+                }
+                _ => false,
+            })
+    });
+    // The daemon's view: every level 4 dB up, LCpeak held over its limit.
+    let mut corrected = leq_frame(
+        meas,
+        [103.1, 99.6, 98.7, 99.4, 97.2],
+        [Some(LeqFlags::OVER), None, None, Some(LeqFlags::OVER), None],
+        [102.0, f32::NAN, f32::NAN, 85.3, f32::NAN],
+        full,
+        cal_at,
+    );
+    let pos = ac2_proto::model::PositionCorrection::both(4.0);
+    corrected.meta.position = Some(pos);
+    corrected.meta.lcpeak = Some(ac2_proto::frame::LeqPeak {
+        level: 136.4,
+        judgement: LeqJudgement::Over,
+    });
+    leq.set(corrected);
+    let mut meter = spl_frame_at(meas, 101.84, cal_at);
+    meter.meta.position = Some(pos);
+    leq.set_spl(meter);
+    let peaked = move |a: &ac2_ui::App| {
+        held(a)
+            && a.state.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Data {
+                        meas,
+                        stream: Stream::Leq,
+                    })
+                    .is_some_and(|f| {
+                        matches!(&f.frame.data,
+                            ac2_proto::FrameData::Leq(l) if l.meta.lcpeak.is_some())
+                    })
+            })
+    };
+    snapshot_when(&mut h, "leq_columns_peak_corrected", pin, peaked);
     drop(leq);
 }
 
@@ -1923,6 +2023,7 @@ fn spl_frame_at(meas: MeasId, level: f64, calibrated_at: u64) -> ac2_proto::fram
                 },
             },
             mic_curve: false,
+            position: None,
         },
     }
 }

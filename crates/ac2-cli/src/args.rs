@@ -8,7 +8,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
     ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg,
-    LevelDbfs, MicSensitivityArg, SampleCount, SplLevel, Time, VoltsArg,
+    LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel, Time,
+    VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -848,6 +849,18 @@ pub struct LeqSet {
     /// Headroom horizon: the steady level allowed over this much of the future, e.g. `1min`.
     #[arg(long, value_name = "WINDOW")]
     pub horizon: Option<LeqWindowArg>,
+    /// A peak limit, judged on the highest second of the last 10 s: `lcpeak=135db`,
+    /// `lafmax=125db`, `lcpeak=none` removes it; repeatable. A preset sets its rule's.
+    #[arg(long = "peak-limit", value_name = "QUANTITY=LIMIT")]
+    pub peak_limits: Vec<PeakLimitArg>,
+    /// Measuring-position correction added to every level the meter reports (and judges)
+    /// once calibrated: the difference from the mic to where the limit applies, e.g. `4db`
+    /// (FOH → loudest audience spot); `none` removes it. The log keeps what was measured.
+    #[arg(long, value_name = "DB")]
+    pub position: Option<PositionArg>,
+    /// The correction of the peak levels (LCpeak), when it differs from `--position`'s.
+    #[arg(long, value_name = "DB")]
+    pub position_peak: Option<Gain>,
 }
 
 /// `spl leq export`.

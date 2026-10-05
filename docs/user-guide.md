@@ -622,8 +622,11 @@ Two things are stored, in the calibration store of the daemon's machine:
   chain, preamp gain included, so it belongs to that input and that gain: change the gain
   and calibrate again. There are two ways to get it:
   - **acoustic**: put a 94 dB (or 114 dB) calibrator on the mic and run
-    `ac2 cal spl --input 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz). This is
-    the reference method; the app has no calibrator dialog yet, so it is done from the CLI;
+    `ac2 cal spl --input 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz), or in
+    the app **C** on the input in the Calibrations view: the dialog shows the input's level
+    live, takes the mic name (prefilled when the input has one), the calibrator's level
+    (←/→ 94 / 114 dB) and tone (1 kHz / 250 Hz); Enter reads and stores, and while the
+    level is still settling it says so and Enter tries again. This is the reference method;
   - **electrical** ([below](#calibrating-without-a-calibrator-electrical)): no calibrator,
     but a true-RMS voltmeter at the input and the mic's data-sheet sensitivity, with a stated
     uncertainty (±1 dB). **E** in the Calibrations view, or `ac2 cal electrical`.
@@ -665,7 +668,7 @@ input) lists what each input uses, every mic with its curves (file, points, rang
 sheet sensitivity, which inputs use it) and every sensitivity calibration (device, input,
 mic, calibrator level and frequency, reading, age). **↑/↓** move; **←/→** choose an input's
 curve; **N** names the mic on an input; **I** imports a curve file for the focused mic (type
-the path); **R** renames a curve; **E** calibrates an input electrically (below); **Delete** (twice) deletes a curve or a sensitivity
+the path); **R** renames a curve; **C** calibrates an input with a calibrator (above); **E** calibrates an input electrically (below); **Delete** (twice) deletes a curve or a sensitivity
 calibration. On the command line: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`,
 `ac2 cal rm --input 3` (a sensitivity calibration).
 
@@ -891,20 +894,35 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   log or a daemon restart.
 - **Shift+L** (or "Leq windows and limits…" in Ctrl+K) sets them: the window lengths and
   weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
-  **preset** row and the headroom horizon. ↑/↓ moves between rows, Tab between cells,
+  **preset** row and the headroom horizon; under the windows the **LCpeak** and **LAFmax**
+  limits and the **position correction**. ↑/↓ moves between rows, Tab between cells,
   **Insert** adds a window, **Delete** removes one, Enter applies.
+- **Peak limits** (LCpeak, LAFmax): over as soon as any second's C-weighted peak (A-weighted
+  Fast level) is above the limit, and held over for 10 s after the last such second, so a
+  single kick drum near the limit does not flicker. They show as columns (tiles) of their
+  own right of the windows, named `LCpeak`, `LAFmax`, with "highest of the last 10 s".
+- **States settle before they drop**: a window or peak goes amber or red at once, but comes
+  back down only when it is 0.3 dB under the line or has been under it 10 s in a row, so a
+  window hovering on its limit does not toggle over / recovered every second.
+- **Position correction**: the difference from your mic to where the limit applies (the
+  loudest audience spot, measured with pink noise at both places beforehand), e.g. *4* dB,
+  and for the peaks when different (DIN 15905-5's K2). Every level of the meter then
+  includes it and says so — *corrected +4.0 dB* in the caption, `dB(A) corr.` on every
+  value, alarms *(corrected +4.0 dB)* — and limits are judged on it. The per-second log
+  keeps what the mic measured, with the correction in force beside each second.
 - A preset **replaces the windows** with exactly the rule's — its windows and limits, and a
   window it wants shown without a limit — shortest first; windows and limits the rule does
-  not state go. Informational only — not legal advice: each rule also has peak limits, a
-  measuring position and duties of its own (`docs/design/leq.md` lists them). ←/→ on the
+  not state go, and its peak limits are set too (DIN: LCpeak 135 dB; V-NISSG: LAFmax 125
+  dB). Informational only — not legal advice: each rule also has a measuring position and
+  duties of its own (`docs/design/leq.md` lists them). ←/→ on the
   preset row shows each preset's windows; back at "none" the windows return as they were;
   editing a window keeps the preset's. **Insert** adds more windows afterwards. The log
   carries on: the new windows are rebuilt from it.
 
   | preset (`--preset`) | windows and limits |
   |---|---|
-  | DIN 15905-5 (`din15905`) | LAeq 30 min ≤ 99 dB |
-  | Swiss V-NISSG (`swiss93`, `swiss96`, `swiss100`) | LAeq 60 min ≤ 93 / 96 / 100 dB |
+  | DIN 15905-5 (`din15905`) | LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB |
+  | Swiss V-NISSG (`swiss93`, `swiss96`, `swiss100`) | LAeq 60 min ≤ 93 / 96 / 100 dB, LAFmax ≤ 125 dB |
   | WHO safe listening, 2022 (`who`) | LAeq 15 min ≤ 100 dB |
   | France R1336-1 (`france`) | LAeq 15 min ≤ 102 dB, LCeq 15 min ≤ 118 dB |
   | France R1336-1, children up to 6 (`france-children`) | LAeq 15 min ≤ 94 dB, LCeq 15 min ≤ 104 dB |
@@ -916,9 +934,8 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   | NL covenant, voluntary (`nl-covenant`) | LAeq 15 min ≤ 103 dB |
   | NL covenant, ages 16–17 / 14–15 / up to 13 (`nl-covenant-16-17`, `nl-covenant-14-15`, `nl-covenant-13`) | LAeq 15 min ≤ 100 / 96 / 91 dB |
 
-  Wallonia has no preset: its 2018 rule is not in force. No measuring-position correction
-  is applied: a mic at FOH reading for the loudest audience position (or for the rule's
-  measuring position) needs the difference added to the limit by hand.
+  Wallonia has no preset: its 2018 rule is not in force. A preset leaves the position
+  correction as it is: it is your measurement, not the rule's.
 - Limits are judged only on a calibrated input (dB SPL, see above); an uncalibrated meter
   shows its windows in dBFS, marked "not calibrated".
 
@@ -926,7 +943,8 @@ In the terminal: `ac2 spl leq watch` (big numbers; `--json` for one line per sec
 `ac2 spl leq set --preset france --windows 1min --limit 1min=102db` (the preset's windows
 and an LAeq 1 min of your own; several `--preset` give the windows of all, a shared window
 at the lower limit; without `--preset`, `--windows 1min,5min,c:30s` sets the windows; also
-`--warn 3db`, `--horizon 1min`), `ac2 spl leq export -o show.csv` (the per-second log as
+`--warn 3db`, `--horizon 1min`, `--peak-limit lcpeak=135db`, `--position 4db
+[--position-peak 2db]`), `ac2 spl leq export -o show.csv` (the per-second log as
 CSV, for the record), `ac2 spl leq new --yes --export soundcheck.csv` (a new log, the ended
 one written first; without `--yes` it only says what would end). Each takes `--meas` or
 `--input` when there is more than one meter.

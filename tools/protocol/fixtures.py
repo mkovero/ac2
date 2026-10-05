@@ -212,6 +212,7 @@ def frames():
                     "basis": {"type": "acoustic", "calibrator_level": 114.0},
                 },
                 "mic_curve": True,
+                "position": {"level": 2.5, "peak": 1.5},
             },
             [],
         ),
@@ -245,6 +246,9 @@ def frames():
                     "lceq": 110.25,
                     "lzeq": 112.5,
                 },
+                "lcpeak": {"level": 133.5, "judgement": "near"},
+                "lafmax": None,
+                "position": {"level": 2.5, "peak": 1.5},
             },
             [
                 (arr("leq", "db_spl"), [96.5, 99.25, 101.5]),
@@ -374,7 +378,12 @@ SPL_MEASUREMENT = {
                         {"duration": 1800.0, "weighting": "a", "limit": 99.0, "warn_margin": 3.0},
                     ],
                     "horizon": 60.0,
+                    "peaks": {
+                        "lcpeak": {"limit": 135.0, "warn_margin": 3.0},
+                        "lafmax": None,
+                    },
                 },
+                "position": {"level": 2.5, "peak": 1.5},
             },
         },
     },
@@ -402,15 +411,27 @@ SPL_LOG = {
             "since": 1790000600000000000,
         },
     ],
+    "peaks": {
+        "lcpeak": {"judgement": "near", "since": 1790000500000000000},
+        "lafmax": {"judgement": "no_limit", "since": 1790000000000000000},
+    },
     "alarms": [
         {
             "at": 1790000600000000000,
-            "duration": 1800.0,
-            "weighting": "a",
+            "subject": {"type": "window", "duration": 1800.0, "weighting": "a"},
             "kind": "over",
-            "leq": 99.25,
+            "level": 99.25,
             "limit": 99.0,
-        }
+            "position": 2.5,
+        },
+        {
+            "at": 1790000610000000000,
+            "subject": {"type": "peak", "quantity": "lcpeak"},
+            "kind": "recovered",
+            "level": 133.5,
+            "limit": 135.0,
+            "position": None,
+        },
     ],
 }
 

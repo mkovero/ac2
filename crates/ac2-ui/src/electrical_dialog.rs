@@ -369,7 +369,7 @@ pub fn key(
         Key::Enter => {
             return d
                 .submit()
-                .map(|c| crate::cal_view::CalAction::Electrical(c, d.what()));
+                .map(|c| crate::cal_view::CalAction::Calibrate(c, d.what()));
         }
         _ => {}
     }

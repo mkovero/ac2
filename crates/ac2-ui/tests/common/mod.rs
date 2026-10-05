@@ -241,6 +241,7 @@ fn spl_frame(meas: u32) -> SplFrame {
             duration: Seconds(83.0),
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            position: None,
         },
     }
 }
@@ -387,6 +388,7 @@ impl Rig {
                             time_weighting: TimeWeighting::Fast,
                             peak_weighting: PeakWeighting::C,
                             leq: LeqConfig::default_windows(),
+                            position: None,
                         },
                     },
                     None,

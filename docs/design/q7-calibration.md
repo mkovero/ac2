@@ -1,6 +1,6 @@
 # Q7 — Calibration store, mic curves and SPL correction
 
-Status: implemented (phase 5; several curves per mic and the active curve per input, §10; electrical calibration, §11, verified on the pupu rig — `docs/rigs/pupu.md`). Answers Q7 in `open-questions.md` within decisions 7a/7b
+Status: implemented (phase 5; several curves per mic and the active curve per input, §10; electrical calibration, §11; the acoustic calibration dialog in the app, §12; verified on the pupu rig — `docs/rigs/pupu.md`). Answers Q7 in `open-questions.md` within decisions 7a/7b
 (calibration tied to device + input channel + mic name; mismatch → "cal from other mic /
 input", otherwise cal age; no gain/phantom fields, no prompts), 7c (mic curve: TF /
 spectrum / RTA subtract the file's dB from the displayed magnitude; SPL applies it as a
@@ -470,3 +470,24 @@ electrical basis, acoustic precedence, persistence), `ac2-scene::cal` wording, C
 electrical` parse and run, `cal list`), UI reducer (the dialog: prefill, refusal, retry,
 success, injected and typed) and the end-to-end UI test `electrical_calibration_from_the_app`
 from an empty daemon.
+
+## 12. Acoustic calibration in the app
+
+The calibrator flow of §2 (`cal.spl`) has a dialog in the Calibrations view beside the
+electrical one (§11), built the same way (`ac2_ui::acoustic_dialog`): **C** on an input of
+the open session opens it — the input's level meter live, the **mic** (the input's name
+prefilled; typed when the input has none, since `cal.spl` names the mic on the input), the
+calibrator's **level** (←/→ 94 ↔ 114 dB, or typed, 70 … 150 dB SPL) and **tone** (←/→ 1 kHz ↔
+250 Hz, or typed). Above the fields what to do (calibrator on snugly, switched on, the gain
+you will measure with); when the input's calibration of this mic is electrical, a line says
+the calibrator replaces it (it measures the capsule too, §11 *Precedence*). Enter sends
+`cal.spl`; a refusal (no signal, not steady yet, clipping) stays in the dialog and Enter
+retries; success closes it with what to do next ("take the calibrator off; keep the gain").
+Esc closes it back to the view. Every string is `ac2_scene::cal` (`acoustic_steps`,
+`acoustic_after`) or the dialog's own, tested headless.
+
+Tests: the dialog's reducer (prefill, stepping, a refusal kept, invalid level and missing
+mic focusing their fields), the window-ownership tests (arrows and Esc stay in the dialog;
+Shift+Esc stops), the end-to-end UI test `acoustic_calibration_from_the_app` from an empty
+daemon (the simulated rig's tone as the calibrator: stored, the mic named, the SPL meter at
+94.0 dB SPL with `cal 94 dB`) and a GPU snapshot (`acoustic_calibration_dialog`).

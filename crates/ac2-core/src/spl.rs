@@ -425,6 +425,9 @@ pub struct SplMeter {
     correction: Option<PartitionedFir>,
     corrected: Vec<f64>,
     seconds: SecondIntegrator,
+    /// LAF for the per-second LAFmax: its own detector, so freezing the displayed values
+    /// (which holds `detectors`) never holds what the log records.
+    log_af: TimeWeightedDetector,
     frozen: bool,
 }
 
@@ -448,6 +451,7 @@ impl SplMeter {
             correction: None,
             corrected: Vec::new(),
             seconds: SecondIntegrator::new(fs),
+            log_af: TimeWeightedDetector::new(TimeWeighting::Fast, fs),
             frozen: false,
             cfg,
         })
@@ -554,14 +558,14 @@ impl SplMeter {
                 .min(CHUNK)
                 .min(usize::try_from(self.seconds.room()).unwrap_or(usize::MAX));
             let (r, c) = (&raw[i..], &xc[i..]);
-            let energy = if self.frozen {
+            let (energy, max) = if self.frozen {
                 self.weigh::<CORR>(&r[..n], &c[..n])
             } else {
                 if let Some(s) = self.settle_left.iter().copied().filter(|&s| s > 0).min() {
                     n = n.min(usize::try_from(s).unwrap_or(usize::MAX));
                 }
                 let e = self.detect::<CORR>(&r[..n], &c[..n]);
-                for (l, &ew) in self.leq.iter_mut().zip(&e) {
+                for (l, &ew) in self.leq.iter_mut().zip(&e.0) {
                     l.push_energy(ew, n as u64);
                 }
                 for s in &mut self.settle_left {
@@ -569,32 +573,39 @@ impl SplMeter {
                 }
                 e
             };
-            self.seconds.add(energy, n as u64, emit);
+            self.seconds.add(energy, max, n as u64, emit);
             i += n;
         }
     }
 
-    /// Filters a run without detecting (frozen); returns its Σy² per weighting.
-    fn weigh<const CORR: bool>(&mut self, raw: &[f64], xc: &[f64]) -> [f64; 3] {
+    /// Filters a run without detecting (frozen); returns its Σy² per weighting and its
+    /// highest C peak² and LAF mean square (the log's per-second maxima run on).
+    fn weigh<const CORR: bool>(&mut self, raw: &[f64], xc: &[f64]) -> ([f64; 3], [f64; 2]) {
         let mut e = [0.0; 3];
+        let mut max = [0.0f64; 2];
         for (&x, &c) in raw.iter().zip(xc) {
             let ya = self.weight_a.process_sample(c);
             let yc = self.weight_c.process_sample(c);
-            if CORR {
-                self.peak_c.process_sample(x);
-            }
+            let pc = if CORR {
+                self.peak_c.process_sample(x)
+            } else {
+                yc
+            };
+            max[0] = max[0].max(pc * pc);
+            max[1] = max[1].max(self.log_af.push_square(ya * ya));
             e[0] += ya * ya;
             e[1] += yc * yc;
             e[2] += c * c;
         }
-        e
+        (e, max)
     }
 
     /// Filters and detects a run within one Lmin settling state; returns its Σy² per
-    /// weighting.
-    fn detect<const CORR: bool>(&mut self, raw: &[f64], xc: &[f64]) -> [f64; 3] {
+    /// weighting and its highest C peak² and LAF mean square.
+    fn detect<const CORR: bool>(&mut self, raw: &[f64], xc: &[f64]) -> ([f64; 3], [f64; 2]) {
         let settled = self.settle_left.map(|n| n == 0);
         let mut e = [0.0; 3];
+        let mut max = [0.0f64; 2];
         let mut pk = [self.peak[0].peak, self.peak[1].peak];
         for (&x, &c) in raw.iter().zip(xc) {
             let ya = self.weight_a.process_sample(c);
@@ -606,6 +617,8 @@ impl SplMeter {
             };
             pk[0] = pk[0].max(pc.abs());
             pk[1] = pk[1].max(x.abs());
+            max[0] = max[0].max(pc * pc);
+            max[1] = max[1].max(self.log_af.push_square(ya * ya));
             let sq = [ya * ya, yc * yc, c * c];
             for (w, &s) in sq.iter().enumerate() {
                 e[w] += s;
@@ -625,7 +638,7 @@ impl SplMeter {
         }
         self.peak[0].peak = pk[0];
         self.peak[1].peak = pk[1];
-        e
+        (e, max)
     }
 
     /// Current levels in dBFS, in the weightings reported.
@@ -689,6 +702,7 @@ impl SplMeter {
         for d in self.detectors.iter_mut().flatten() {
             d.reset();
         }
+        self.log_af.reset();
         self.reset_interval();
         self.max_ms = [[0.0; 3]; 3];
         self.settle_left = self.settle_samples;
@@ -1323,6 +1337,8 @@ mod tests {
         levels: [[Levels; 3]; 3],
         leq: [f64; 3],
         seconds: Vec<[f64; 3]>,
+        /// Per second: highest C peak² and LAF mean square.
+        maxima: Vec<[f64; 2]>,
     }
 
     fn reference(x: &[f64], fs: f64, taps: Option<&[f64]>) -> Reference {
@@ -1348,15 +1364,22 @@ mod tests {
         let mut sec: [Exact; 3] = Default::default();
         let mut seconds = Vec::new();
         let mut pk_c = 0.0f64;
+        let mut sec_max = [0.0f64; 2];
+        let mut maxima = Vec::new();
         let per = fs as usize;
         for (n, (&xr, &xv)) in x.iter().zip(&xc).enumerate() {
             let y = [a.process_sample(xv), c.process_sample(xv), xv];
-            pk_c = pk_c.max(pc.process_sample(xr).abs());
+            let p = pc.process_sample(xr);
+            pk_c = pk_c.max(p.abs());
+            sec_max[0] = sec_max[0].max(p * p);
             for w in 0..3 {
                 leq[w].add(y[w] * y[w]);
                 sec[w].add(y[w] * y[w]);
                 for t in 0..3 {
                     let ms = det[w][t].push(y[w]);
+                    if (w, t) == (0, 0) {
+                        sec_max[1] = sec_max[1].max(ms);
+                    }
                     max[w][t] = max[w][t].max(ms);
                     if n as u64 >= settle[t] {
                         min[w][t] = min[w][t].min(ms);
@@ -1366,6 +1389,8 @@ mod tests {
             if (n + 1) % per == 0 {
                 seconds.push([0, 1, 2].map(|w| sec[w].get() / fs));
                 sec = Default::default();
+                maxima.push(sec_max);
+                sec_max = [0.0; 2];
             }
         }
         let levels = [0, 1, 2].map(|w| {
@@ -1383,6 +1408,7 @@ mod tests {
             levels,
             leq: [0, 1, 2].map(|w| leq[w].get()),
             seconds,
+            maxima,
         }
     }
 
@@ -1458,6 +1484,35 @@ mod tests {
                     assert!((g / v - 1.0).abs() < 1e-12, "{fs} w{w}");
                 }
             }
+            // Each second's LCpeak and LAFmax: the same filters and detector, bit for bit.
+            for (k, (s, want)) in secs.iter().zip(&r.maxima).enumerate() {
+                assert_eq!(s.c_peak_sq.to_bits(), want[0].to_bits(), "{fs} second {k}");
+                assert_eq!(s.af_max_ms.to_bits(), want[1].to_bits(), "{fs} second {k}");
+            }
+            // Loud and quiet stretches alternate every 0.7 s: the maxima follow them.
+            let lcpeak: Vec<f64> = secs.iter().map(Second::lcpeak_dbfs).collect();
+            assert!(
+                lcpeak.iter().all(|l| l.is_finite() && *l > -20.0),
+                "{lcpeak:?}"
+            );
+        }
+    }
+
+    /// Freezing holds the displayed values only: the per-second LCpeak and LAFmax the log
+    /// records are those of a meter never frozen.
+    #[test]
+    fn frozen_meter_logs_the_same_maxima() {
+        let fs = 48_000.0;
+        let x = stepped_noise(fs, 4.0);
+        let (_, live) = run_meter(&x, fs, None);
+        let mut m = meter(fs, Weighting::A, TimeWeighting::Fast, PeakWeighting::C);
+        m.set_frozen(true);
+        let mut frozen = Vec::new();
+        m.process(&x, |s| frozen.push(s));
+        assert_eq!(frozen.len(), live.len());
+        for (a, b) in frozen.iter().zip(&live) {
+            assert_eq!(a.c_peak_sq.to_bits(), b.c_peak_sq.to_bits());
+            assert_eq!(a.af_max_ms.to_bits(), b.af_max_ms.to_bits());
         }
     }
 

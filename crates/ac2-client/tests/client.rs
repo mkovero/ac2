@@ -50,6 +50,7 @@ fn meas_config(name: &str) -> MeasConfig {
                 time_weighting: TimeWeighting::Fast,
                 peak_weighting: PeakWeighting::C,
                 leq: LeqConfig::default_windows(),
+                position: None,
             },
         },
     }

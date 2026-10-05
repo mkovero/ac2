@@ -16,7 +16,8 @@ use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
     AverageMethod, BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale,
-    PeakWeighting, Smoothing, SmoothingFraction, TimeWeighting, TimingState, TimingStatus,
+    PeakWeighting, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting, TimingState,
+    TimingStatus,
     Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
@@ -436,6 +437,9 @@ pub struct SplMeta {
     pub cal: CalStatus,
     /// The mic-curve correction filter ran before frequency weighting (never on `lpeak`).
     pub mic_curve: bool,
+    /// The measuring-position correction included in every level (`lpeak` takes its
+    /// `peak` difference, the others its `level`); only while calibrated.
+    pub position: Option<PositionCorrection>,
 }
 
 /// Rolling Leq metadata; the arrays hold one column per window of the meter's
@@ -455,6 +459,30 @@ pub struct LeqMeta {
     pub logged: u64,
     /// The whole log: its run clock and total; `None` before its first second.
     pub run: Option<LeqRun>,
+    /// The LCpeak limit's state, when the meter has one.
+    pub lcpeak: Option<LeqPeak>,
+    /// The LAFmax limit's state, when the meter has one.
+    pub lafmax: Option<LeqPeak>,
+    /// The measuring-position correction included in every level of the frame (windows,
+    /// headroom, run, peaks); only while calibrated.
+    pub position: Option<PositionCorrection>,
+}
+
+/// A peak limit's state: the highest second within the hold, judged against the limit.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LeqPeak {
+    /// The highest LCpeak (LAFmax) of any second within the newest
+    /// [`LeqPeak::HOLD_S`] seconds, in the frame's `scale`; NaN before anything was
+    /// measured.
+    pub level: f64,
+    /// Its judgement (`not_calibrated` with dBFS).
+    pub judgement: LeqJudgement,
+}
+
+impl LeqPeak {
+    /// Seconds a peak level is held for judging and display.
+    pub const HOLD_S: u32 = 10;
 }
 
 /// An SPL meter's log as a whole: from its oldest kept second to its newest, the time
@@ -814,7 +842,7 @@ pub enum FrameData {
     /// `d/<meas>/spl`.
     Spl(SplFrame),
     /// `d/<meas>/leq`.
-    Leq(LeqFrame),
+    Leq(Box<LeqFrame>),
     /// `d/<meas>/levels`.
     Levels(LevelsFrame),
     /// `session/levels`.
@@ -1428,7 +1456,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
         FrameMeta::Leq(meta) => {
             let unit = level_unit(meta.scale);
-            FrameData::Leq(LeqFrame {
+            FrameData::Leq(Box::new(LeqFrame {
                 meas,
                 meta,
                 leq: a.f32(ArrayName::Leq, unit)?,
@@ -1439,7 +1467,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
                 least: a.f32(ArrayName::Least, unit)?,
                 over_in: a.f32(ArrayName::OverIn, Unit::Seconds)?,
                 flags: a.mask(ArrayName::LeqFlags)?,
-            })
+            }))
         }
         FrameMeta::Levels(meta) => {
             if meta.channels.len() != h.n as usize {

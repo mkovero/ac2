@@ -10,15 +10,19 @@
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use ac2_core::leq::{Headroom, Judgement, Latch, RollingLeq, Second, WindowSpec, judge_window};
+use ac2_core::leq::{
+    Headroom, Judgement, Latch, PEAK_HOLD_S, PeakHold, RollingLeq, Second, WindowSpec, judge,
+    judge_window,
+};
 use ac2_core::mic_curve::Correction;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
 use ac2_proto::frame::{
-    FrameData, LeqFlags, LeqFrame, LeqMeta, LeqRun, ProtectionFlags, SplFrame, SplMeta,
+    FrameData, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, ProtectionFlags, SplFrame, SplMeta,
 };
 use ac2_proto::model::{
-    LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, SplConfig, SplLogRow,
+    AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, PeakQuantity,
+    PositionCorrection, SplConfig, SplLogRow,
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
@@ -31,6 +35,9 @@ use crate::fanout::Block;
 use crate::leq_log::{self, SharedLog};
 
 const NS: f64 = 1e9;
+
+// The frame states the hold the job judges peaks over.
+const _: () = assert!(PEAK_HOLD_S as u32 == LeqPeak::HOLD_S);
 
 /// Most `spl` frames per second. The fastest time weighting (F, 125 ms) moves little in
 /// 50 ms, and the number on screen updates every half second or slower (it holds a reading
@@ -75,6 +82,10 @@ struct LeqWindows {
     latches: Vec<Latch>,
     /// Per window: filling and on course to end over its limit (judged near).
     on_course: Vec<bool>,
+    /// The newest seconds' LCpeak and LAFmax, which the peak limits are judged on.
+    peaks: PeakHold,
+    /// Judgement of the LCpeak and LAFmax limits ([`PeakQuantity::ALL`] order).
+    peak_judgements: [LeqJudgement; 2],
     /// The log's epoch the windows and judgements belong to.
     epoch: u64,
     done: Vec<Second>,
@@ -122,6 +133,16 @@ pub(crate) struct LeqSetup {
     /// The windows' judgements as the `spl_log` entity holds them: a restarted job
     /// reports only what changes from there.
     pub(crate) judgements: Vec<LeqJudgement>,
+    /// The peak limits' judgements likewise ([`PeakQuantity::ALL`] order).
+    pub(crate) peak_judgements: [LeqJudgement; 2],
+}
+
+/// Index of `q` in [`PeakQuantity::ALL`].
+fn q_index(q: PeakQuantity) -> usize {
+    match q {
+        PeakQuantity::LcPeak => 0,
+        PeakQuantity::LafMax => 1,
+    }
 }
 
 impl LeqWindows {
@@ -141,6 +162,8 @@ impl LeqWindows {
             on_course: vec![false; judgements.len()],
             latches: judgements.iter().map(|j| latch_of(*j)).collect(),
             judgements,
+            peaks: PeakHold::default(),
+            peak_judgements: setup.peak_judgements,
             epoch,
             done: Vec::with_capacity(4),
             fresh: false,
@@ -173,10 +196,16 @@ impl LeqWindows {
             .collect();
         self.latches = self.judgements.iter().map(|j| latch_of(*j)).collect();
         self.on_course = vec![false; self.judgements.len()];
+        // A peak limit set as before keeps its state; a new or changed one is judged anew.
+        for q in PeakQuantity::ALL {
+            if old_cfg.peaks.get(q) != self.cfg.peaks.get(q) {
+                self.peak_judgements[q_index(q)] = LeqJudgement::NoLimit;
+            }
+        }
         self.ring = ring_for(&self.cfg);
         if let Some(start) = self.second_start {
             let now = self.wall_of(start, fs);
-            leq_log::lock(&self.log).rebuild(&mut self.ring, now);
+            leq_log::lock(&self.log).rebuild(&mut self.ring, &mut self.peaks, now);
         }
         self.fresh = true;
     }
@@ -248,7 +277,7 @@ impl Spl {
                 l.second_start = Some(b.start_sample);
                 l.next = b.start_sample;
                 l.next_wall = block_wall;
-                leq_log::lock(&l.log).rebuild(&mut l.ring, block_wall);
+                leq_log::lock(&l.log).rebuild(&mut l.ring, &mut l.peaks, block_wall);
             }
             Some(_) if b.start_sample > l.next => {
                 // Lost samples: the second grid moves on without energy or measured time.
@@ -279,7 +308,10 @@ impl Spl {
                 laeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::A)),
                 lceq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::C)),
                 lzeq: Dbfs(s.level_dbfs(ac2_core::weighting::Weighting::Z)),
+                lcpeak: Dbfs(s.lcpeak_dbfs()),
+                lafmax: Dbfs(s.lafmax_dbfs()),
                 sensitivity: self.cal.sensitivity.map(ac2_proto::units::Db),
+                position: self.position(),
             });
             let (epoch, first) = {
                 let mut log = leq_log::lock(&self.leq.log);
@@ -303,8 +335,12 @@ impl Spl {
                     .collect();
                 self.leq.latches = vec![Latch::default(); self.leq.judgements.len()];
                 self.leq.on_course = vec![false; self.leq.judgements.len()];
+                self.leq.peaks.clear();
+                self.leq.peak_judgements = PeakQuantity::ALL
+                    .map(|q| leq_log::initial_peak_judgement(&self.leq.cfg, q, calibrated));
             }
             self.leq.ring.push(*s);
+            self.leq.peaks.push(s);
             if first {
                 self.report(WallNs(self.leq.wall_of(end, fs)), Vec::new());
             }
@@ -315,10 +351,48 @@ impl Spl {
         self.leq.fresh = true;
     }
 
+    /// The measuring-position correction in force: the configured one while calibrated (a
+    /// correction to dB SPL means nothing on dBFS).
+    fn position(&self) -> Option<PositionCorrection> {
+        self.cfg.position.filter(|_| self.cal.sensitivity.is_some())
+    }
+
+    /// What turns the dBFS energy levels into the reported unit: the sensitivity and the
+    /// position correction's energy difference; `None` uncalibrated.
+    fn level_offset(&self) -> Option<f64> {
+        self.cal
+            .sensitivity
+            .map(|s| s + self.position().map_or(0.0, |p| p.level.0))
+    }
+
+    /// The same for the peak levels (the correction's peak difference).
+    fn peak_offset(&self) -> Option<f64> {
+        self.cal
+            .sensitivity
+            .map(|s| s + self.position().map_or(0.0, |p| p.peak.0))
+    }
+
+    /// The offset of peak quantity `q`.
+    fn offset_of(&self, q: PeakQuantity) -> Option<f64> {
+        match q {
+            PeakQuantity::LcPeak => self.peak_offset(),
+            PeakQuantity::LafMax => self.level_offset(),
+        }
+    }
+
+    /// The correction included in `q`'s level.
+    fn position_of(&self, q: PeakQuantity) -> Option<ac2_proto::units::Db> {
+        self.position().map(|p| match q {
+            PeakQuantity::LcPeak => p.peak,
+            PeakQuantity::LafMax => p.level,
+        })
+    }
+
     /// Judges every window after a second (a filling window on its budget,
-    /// [`judge_window`]); transitions go to the control thread.
+    /// [`judge_window`]) and the peak limits; transitions go to the control thread.
     fn judge(&mut self, at: WallNs) {
-        let offset = self.cal.sensitivity;
+        let offset = self.level_offset();
+        let window_position = self.position().map(|p| p.level);
         let mut alarms = Vec::new();
         let mut changed = false;
         for (i, w) in self.leq.cfg.windows.iter().enumerate() {
@@ -362,11 +436,55 @@ impl Spl {
             if let (Some(kind), Some(limit), Some(o)) = (kind, w.limit, offset) {
                 alarms.push(LeqAlarm {
                     at,
-                    duration: w.duration,
-                    weighting: w.weighting,
+                    subject: AlarmSubject::Window {
+                        duration: w.duration,
+                        weighting: w.weighting,
+                    },
                     kind,
-                    leq: DbSpl(v.leq_dbfs + o),
+                    level: DbSpl(v.leq_dbfs + o),
                     limit,
+                    position: window_position,
+                });
+            }
+        }
+        let held = self.leq.peaks.max_dbfs();
+        for q in PeakQuantity::ALL {
+            let i = q_index(q);
+            let limit = self.leq.cfg.peaks.get(q);
+            let o = self.offset_of(q);
+            let level = held[i] + o.unwrap_or(0.0);
+            // The hold is the dwell: a second over stays in the level judged for
+            // PEAK_HOLD_S seconds, so no latch is needed on top.
+            let j = match (limit, o) {
+                (None, _) => LeqJudgement::NoLimit,
+                (Some(_), None) => LeqJudgement::NotCalibrated,
+                (Some(l), Some(_)) => match judge(level, l.limit.0, l.warn_margin.0) {
+                    None | Some(Judgement::Ok) => LeqJudgement::Ok,
+                    Some(Judgement::Near) => LeqJudgement::Near,
+                    Some(Judgement::Over) => LeqJudgement::Over,
+                },
+            };
+            let prev = self.leq.peak_judgements[i];
+            if j == prev {
+                continue;
+            }
+            changed = true;
+            self.leq.peak_judgements[i] = j;
+            let kind = match (prev, j) {
+                (p, LeqJudgement::Over) if p != LeqJudgement::Over => Some(LeqAlarmKind::Over),
+                (LeqJudgement::Over, LeqJudgement::Ok | LeqJudgement::Near) => {
+                    Some(LeqAlarmKind::Recovered)
+                }
+                _ => None,
+            };
+            if let (Some(kind), Some(l)) = (kind, limit) {
+                alarms.push(LeqAlarm {
+                    at,
+                    subject: AlarmSubject::Peak { quantity: q },
+                    kind,
+                    level: DbSpl(level),
+                    limit: l.limit,
+                    position: self.position_of(q),
                 });
             }
         }
@@ -382,15 +500,18 @@ impl Spl {
             config_rev: self.config_rev,
             at,
             judgements: self.leq.judgements.clone(),
+            peak_judgements: self.leq.peak_judgements,
             alarms,
         });
     }
 
     fn spl_frame(&self) -> SplFrame {
         let mut l = self.meter.levels();
-        let scale = match self.cal.sensitivity {
+        let scale = match self.level_offset() {
             Some(offset_db) => {
                 l = l.calibrated(Sensitivity { offset_db });
+                // The peak takes the correction's peak difference, not the energy one.
+                l.lpeak += self.peak_offset().unwrap_or(offset_db) - offset_db;
                 LevelScale::DbSpl
             }
             None => LevelScale::Dbfs,
@@ -410,13 +531,21 @@ impl Spl {
                 duration: Seconds(l.duration_s),
                 cal: self.cal.status,
                 mic_curve: self.meter.has_correction(),
+                position: self.position(),
             },
         }
     }
 
     fn leq_frame(&self) -> LeqFrame {
-        let offset = self.cal.sensitivity;
+        let offset = self.level_offset();
         let o = offset.unwrap_or(0.0);
+        let held = self.leq.peaks.max_dbfs();
+        let peak = |q: PeakQuantity| {
+            self.leq.cfg.peaks.get(q).map(|_| LeqPeak {
+                level: held[q_index(q)] + self.offset_of(q).unwrap_or(0.0),
+                judgement: self.leq.peak_judgements[q_index(q)],
+            })
+        };
         let n = self.leq.cfg.windows.len();
         let (logged, run) = {
             let log = leq_log::lock(&self.leq.log);
@@ -445,6 +574,9 @@ impl Spl {
                     lceq: r.levels_dbfs[1] + o,
                     lzeq: r.levels_dbfs[2] + o,
                 }),
+                lcpeak: peak(PeakQuantity::LcPeak),
+                lafmax: peak(PeakQuantity::LafMax),
+                position: self.position(),
             },
             leq: Vec::with_capacity(n),
             elapsed: Vec::with_capacity(n),
@@ -528,11 +660,16 @@ impl Analysis for Spl {
                     conv::peak_weighting(config.peak_weighting),
                 );
                 let leq_changed = config.leq != self.cfg.leq;
+                let position_changed = config.position != self.cfg.position;
                 self.cfg = *config;
-                if !leq_changed {
+                if !leq_changed && !position_changed {
                     return;
                 }
-                self.leq.set_config(self.cfg.leq.clone(), self.fs);
+                if leq_changed {
+                    self.leq.set_config(self.cfg.leq.clone(), self.fs);
+                } else {
+                    self.leq.fresh = true;
+                }
                 // The rebuilt windows are judged at once: a new limit below the level is
                 // an alarm now, not a second later, and the next frame carries the state.
                 let at = if self.wall > 0 {
@@ -581,7 +718,7 @@ impl Analysis for Spl {
         };
         // A second not sent stays fresh, so a new subscriber gets the windows at once.
         if self.leq.fresh && e.wants(leq_topic) {
-            self.leq.fresh = !e.send(stamp, FrameData::Leq(self.leq_frame()));
+            self.leq.fresh = !e.send(stamp, FrameData::Leq(Box::new(self.leq_frame())));
         }
         self.levels.send(e, self.meas, stamp);
         Flush::from_due(due)

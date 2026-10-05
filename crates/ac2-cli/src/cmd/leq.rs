@@ -2,8 +2,9 @@
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
-    LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, SplConfig, SplLogPage,
-    SplLogRow, SplLogWhich, State, TimeWeighting, Weighting,
+    LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, PeakLimit, PeakQuantity,
+    PositionCorrection, SplConfig, SplLogPage, SplLogRow, SplLogWhich, State, TimeWeighting,
+    Weighting,
 };
 use ac2_proto::units::{Db, Seconds};
 use ac2_proto::{Command, ReplyBody};
@@ -149,9 +150,39 @@ fn preset(p: PresetArg) -> LeqPreset {
     }
 }
 
-/// The windows `s` asks for, from the meter's `cur`. Presets replace the windows with
-/// theirs (several: the union, a shared window at the lower limit); `--windows` with them
-/// adds windows to the preset's, without limits; then `--limit`, `--warn`, `--horizon`.
+/// The measuring-position correction `s` asks for, from the meter's `cur`: `--position`
+/// sets both differences (or removes the correction), `--position-peak` then the peaks'.
+pub(crate) fn apply_position(
+    cur: Option<PositionCorrection>,
+    s: &LeqSet,
+) -> Result<Option<PositionCorrection>, CliError> {
+    let mut p = match s.position {
+        Some(a) => a.0.map(|d| PositionCorrection::both(d.0)),
+        None => cur,
+    };
+    if let Some(peak) = s.position_peak {
+        match &mut p {
+            Some(p) => p.peak = peak.0,
+            None => {
+                return Err(CliError::Usage(
+                    "--position-peak needs a correction of the levels: give --position too".into(),
+                ));
+            }
+        }
+    }
+    if p.is_some_and(|p| !p.is_valid()) {
+        return Err(CliError::Usage(format!(
+            "a position correction is at most ±{} dB",
+            PositionCorrection::MAX_DB
+        )));
+    }
+    Ok(p)
+}
+
+/// The windows `s` asks for, from the meter's `cur`. Presets replace the windows and peak
+/// limits with theirs (several: the union, a shared window or quantity at the lower limit);
+/// `--windows` with them adds windows to the preset's, without limits; then `--limit`,
+/// `--peak-limit`, `--warn`, `--horizon`.
 pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> {
     let mut cfg = cur.clone();
     let blank = |w: &crate::units::LeqWindowArg| LeqWindow {
@@ -173,6 +204,7 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
         }
         LeqWindow::sort(&mut ws);
         cfg.windows = ws;
+        cfg.peaks = LeqPreset::peaks_of(&presets);
     } else if let Some(ws) = &s.windows {
         cfg.windows = ws
             .iter()
@@ -206,9 +238,24 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
         };
         w.limit = l.limit;
     }
+    for p in &s.peak_limits {
+        let margin = cfg
+            .peaks
+            .get(p.quantity)
+            .map_or(Db(LeqWindow::DEFAULT_WARN_MARGIN_DB), |l| l.warn_margin);
+        *cfg.peaks.get_mut(p.quantity) = p.limit.map(|limit| PeakLimit {
+            limit,
+            warn_margin: margin,
+        });
+    }
     if let Some(m) = s.warn {
         for w in &mut cfg.windows {
             w.warn_margin = m.0;
+        }
+        for q in PeakQuantity::ALL {
+            if let Some(l) = cfg.peaks.get_mut(q) {
+                l.warn_margin = m.0;
+            }
         }
     }
     if let Some(h) = s.horizon {
@@ -218,21 +265,36 @@ pub(crate) fn apply(cur: &LeqConfig, s: &LeqSet) -> Result<LeqConfig, CliError> 
     Ok(cfg)
 }
 
-/// The windows as a table: name, limit, warn margin.
-fn windows_table(cfg: &LeqConfig) -> String {
+/// The windows and peak limits as a table (name, limit, warn margin), the horizon and the
+/// measuring-position correction.
+fn windows_table(cfg: &LeqConfig, position: Option<PositionCorrection>) -> String {
     let mut t = output::table(&["window", "limit", "warn within"]);
+    let db = |v: f64| format!("{} dB", ac2_scene::format::level(v));
     for w in &cfg.windows {
         t.add_row(vec![
             ac2_scene::leq::window_name(w),
-            w.limit.map_or_else(
-                || "none".to_owned(),
-                |l| format!("{} dB", ac2_scene::format::level(l.0)),
-            ),
-            format!("{} dB", ac2_scene::format::level(w.warn_margin.0)),
+            w.limit.map_or_else(|| "none".to_owned(), |l| db(l.0)),
+            db(w.warn_margin.0),
         ]);
     }
+    for q in PeakQuantity::ALL {
+        if let Some(l) = cfg.peaks.get(q) {
+            t.add_row(vec![
+                format!("{} (highest second of 10 s)", ac2_scene::leq::peak_name(q)),
+                db(l.limit.0),
+                db(l.warn_margin.0),
+            ]);
+        }
+    }
+    let position = match position {
+        Some(p) => format!(
+            "\nposition: {} (the log keeps what was measured)",
+            ac2_scene::leq::position_text(&p)
+        ),
+        None => "\nposition: as measured (no correction)".to_owned(),
+    };
     format!(
-        "{t}\nheadroom over the next {}",
+        "{t}\nheadroom over the next {}{position}",
         ac2_scene::leq::length(cfg.horizon.0)
     )
 }
@@ -245,6 +307,7 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
     })?;
     let cfg = spl_config(m)?;
     let leq = apply(&cfg.leq, s)?;
+    let position = apply_position(cfg.position, s)?;
     let r = c
         .call(Command::MeasUpdate {
             meas: m.id,
@@ -253,6 +316,7 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
                 kind: MeasKind::Spl {
                     config: SplConfig {
                         leq: leq.clone(),
+                        position,
                         ..cfg.clone()
                     },
                 },
@@ -276,7 +340,7 @@ async fn set(cli: &Cli, s: &LeqSet, out: &mut Out<'_>) -> Result<(), CliError> {
         let mut text = format!(
             "{}: Leq windows set\n{}",
             m.config.name,
-            windows_table(&leq)
+            windows_table(&leq, position)
         );
         for p in &presets {
             text.push('\n');
@@ -576,6 +640,11 @@ mod tests {
         cur.windows[0].limit = Some(ac2_proto::units::DbSpl(110.0));
         let c = apply(&cur, &set_args(&["--preset", "din15905"])).expect("valid");
         assert_eq!(names(&c), ["LAeq 30 min ≤ 99"]);
+        assert_eq!(c.peaks.lcpeak.map(|l| l.limit.0), Some(135.0));
+        assert_eq!(c.peaks.lafmax, None);
+        let c = apply(&cur, &set_args(&["--preset", "swiss100"])).expect("valid");
+        assert_eq!(c.peaks.lafmax.map(|l| l.limit.0), Some(125.0));
+        assert_eq!(c.peaks.lcpeak, None, "a preset's peaks replace the meter's");
         assert_eq!(c.horizon, cur.horizon);
         let c = apply(&cur, &set_args(&["--preset", "france"])).expect("valid");
         assert_eq!(names(&c), ["LAeq 15 min ≤ 102", "LCeq 15 min ≤ 118"]);
@@ -607,6 +676,45 @@ mod tests {
         let s = set_args(&["--preset", "din15905", "--windows", "60min,1min,30min"]);
         let c = apply(&cur, &s).expect("valid");
         assert_eq!(names(&c), ["LAeq 1 min", "LAeq 30 min ≤ 99", "LAeq 60 min"]);
+    }
+
+    /// `--peak-limit` sets and removes a peak limit (its margin kept, `--warn` sets it too);
+    /// `--position` and `--position-peak` the correction.
+    #[test]
+    fn peak_limits_and_the_position() {
+        let cur = LeqConfig::default_windows();
+        let s = set_args(&[
+            "--peak-limit",
+            "lcpeak=135db",
+            "--peak-limit",
+            "lafmax=125db",
+        ]);
+        let c = apply(&cur, &s).expect("valid");
+        assert_eq!(c.peaks.lcpeak.map(|l| l.limit.0), Some(135.0));
+        assert_eq!(c.peaks.lafmax.map(|l| l.warn_margin), Some(Db(3.0)));
+        let d = apply(
+            &c,
+            &set_args(&["--peak-limit", "lcpeak=none", "--warn", "2db"]),
+        )
+        .expect("valid");
+        assert_eq!(d.peaks.lcpeak, None);
+        assert_eq!(d.peaks.lafmax.map(|l| l.warn_margin), Some(Db(2.0)));
+        let table = windows_table(&c, Some(PositionCorrection::both(4.0)));
+        assert!(table.contains("LCpeak (highest second of 10 s)"), "{table}");
+        assert!(table.contains("position: corrected +4.0 dB"), "{table}");
+        let p = apply_position(None, &set_args(&["--position", "4db"])).expect("valid");
+        assert_eq!(p, Some(PositionCorrection::both(4.0)));
+        let p = apply_position(p, &set_args(&["--position-peak", "2db"])).expect("valid");
+        assert_eq!(p.map(|p| (p.level, p.peak)), Some((Db(4.0), Db(2.0))));
+        assert_eq!(
+            apply_position(p, &set_args(&["--windows", "1min"])).expect("kept"),
+            p
+        );
+        assert_eq!(
+            apply_position(p, &set_args(&["--position", "none"])).expect("removed"),
+            None
+        );
+        assert!(apply_position(None, &set_args(&["--position-peak", "2db"])).is_err());
     }
 
     /// Every preset has a `--preset` name, in the app's order.

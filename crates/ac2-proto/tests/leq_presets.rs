@@ -118,3 +118,33 @@ fn windows_sort_shortest_first() {
         ]
     );
 }
+
+/// The peak limits each rule sets: DIN 15905-5 LCpeak 135 dB (§4.3.2), V-NISSG LAFmax 125
+/// dB for every category (art. 19); the others' cited articles limit Leq windows only.
+#[test]
+fn presets_carry_their_peak_limits() {
+    use ac2_proto::model::PeakQuantity;
+    for p in LeqPreset::ALL {
+        let peaks = p.peaks();
+        let want = match p {
+            LeqPreset::Din15905 => (Some(135.0), None),
+            LeqPreset::Swiss93 | LeqPreset::Swiss96 | LeqPreset::Swiss100 => (None, Some(125.0)),
+            _ => (None, None),
+        };
+        let got = (
+            peaks.get(PeakQuantity::LcPeak).map(|l| l.limit.0),
+            peaks.get(PeakQuantity::LafMax).map(|l| l.limit.0),
+        );
+        assert_eq!(got, want, "{p:?}");
+        let cfg = LeqConfig {
+            windows: LeqPreset::windows_of(&[p]),
+            peaks,
+            ..LeqConfig::default_windows()
+        };
+        cfg.check().expect("valid");
+    }
+    // Together: both quantities.
+    let both = LeqPreset::peaks_of(&[LeqPreset::Din15905, LeqPreset::Swiss100]);
+    assert_eq!(both.lcpeak.map(|l| l.limit), Some(DbSpl(135.0)));
+    assert_eq!(both.lafmax.map(|l| l.limit), Some(DbSpl(125.0)));
+}

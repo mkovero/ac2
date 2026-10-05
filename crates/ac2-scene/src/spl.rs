@@ -168,8 +168,12 @@ pub struct SplReadout {
     pub value: String,
     /// `dB SPL` or `dBFS`.
     pub unit: String,
-    /// `LAF · dB SPL`, under the number.
+    /// `LAF · dB SPL`, under the number; `LAF · dB SPL corrected +5.0 dB` with a
+    /// measuring-position correction in the levels.
     pub caption: String,
+    /// `corrected +5.0 dB` (`crate::leq::position_text`): every level of the readout
+    /// includes the measuring-position correction.
+    pub corrected: Option<String>,
     /// Leq, Lpeak, Lmax, Lmin in the meter's weightings, over the meter's interval.
     pub stats: Vec<SplStat>,
     /// `meter since 4:01 · R resets`: the statistics' interval, stated once over them (the
@@ -250,8 +254,13 @@ pub fn spl_readout(
         LevelScale::DbSpl => "dB SPL",
     }
     .to_string();
+    let corrected = m.position.as_ref().map(crate::leq::position_text);
     SplReadout {
-        caption: format!("{metric} · {unit}"),
+        caption: match &corrected {
+            Some(c) => format!("{metric} · {unit} {c}"),
+            None => format!("{metric} · {unit}"),
+        },
+        corrected,
         value: format::level(m.level),
         unit,
         stats: vec![
@@ -659,6 +668,7 @@ mod tests {
                     },
                 },
                 mic_curve: false,
+                position: None,
             },
         }
     }
@@ -704,6 +714,13 @@ mod tests {
         assert_eq!(r.value, "94.0");
         assert_eq!(r.unit, "dB SPL");
         assert_eq!(r.caption, "LAF · dB SPL");
+        assert_eq!(r.corrected, None);
+        // A measuring-position correction is in every level: the caption says so.
+        let mut fc = frame(LevelScale::DbSpl);
+        fc.meta.position = Some(ac2_proto::model::PositionCorrection::both(3.0));
+        let rc = readout(&fc, "cal 94 dB · 3 h ago", Some(0.2));
+        assert_eq!(rc.caption, "LAF · dB SPL corrected +3.0 dB");
+        assert_eq!(rc.corrected.as_deref(), Some("corrected +3.0 dB"));
         let stats: Vec<String> = r
             .stats
             .iter()

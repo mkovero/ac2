@@ -736,7 +736,10 @@ fn session_sample() -> Session {
                     laeq: Dbfs(-25.5 + k as f64),
                     lceq: Dbfs(-23.25),
                     lzeq: Dbfs(-22.0),
+                    lcpeak: Dbfs(-5.5),
+                    lafmax: Dbfs(-20.25),
                     sensitivity: Some(Db(120.0)),
+                    position: Some(ac2_proto::model::PositionCorrection::both(3.0)),
                 })
                 .collect(),
         }],

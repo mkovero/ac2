@@ -13,6 +13,7 @@
 //! This crate has no DSP and computes no displayed value; `ac2-scene` does display math.
 #![forbid(unsafe_code)]
 
+pub mod acoustic_dialog;
 pub mod anim;
 pub mod app;
 pub mod cal_view;

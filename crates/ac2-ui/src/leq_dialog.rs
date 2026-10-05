@@ -1,12 +1,14 @@
 //! The Leq windows dialog of an SPL meter (`docs/design/leq.md`): one row per window —
 //! its length and weighting picked from named choices, its limit and warn margin typed in
-//! dB — a preset row that replaces the windows with a published rule's, and the headroom
-//! horizon.
+//! dB — a preset row that replaces the windows (and peak limits) with a published rule's,
+//! the headroom horizon, and under the windows the LCpeak and LAFmax limits and the
+//! measuring-position correction, typed.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
 
 use ac2_proto::model::{
-    LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, SplConfig, Weighting,
+    LeqConfig, LeqPreset, LeqWindow, MeasConfig, MeasKind, Measurement, PeakLimit, PeakLimits,
+    PeakQuantity, PositionCorrection, SplConfig, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
 
@@ -46,6 +48,78 @@ impl Col {
     }
 }
 
+/// A typed setting under the windows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Extra {
+    /// The LCpeak limit.
+    LcPeak,
+    /// The LAFmax limit.
+    LafMax,
+    /// The measuring-position correction of the energy levels.
+    Position,
+    /// The measuring-position correction of the peak levels.
+    PositionPeak,
+}
+
+impl Extra {
+    /// Top to bottom.
+    pub const ALL: [Extra; 4] = [
+        Extra::LcPeak,
+        Extra::LafMax,
+        Extra::Position,
+        Extra::PositionPeak,
+    ];
+
+    fn index(self) -> usize {
+        match self {
+            Extra::LcPeak => 0,
+            Extra::LafMax => 1,
+            Extra::Position => 2,
+            Extra::PositionPeak => 3,
+        }
+    }
+
+    /// Its label in the dialog.
+    pub fn title(self) -> &'static str {
+        match self {
+            Extra::LcPeak => "LCpeak limit (dB)",
+            Extra::LafMax => "LAFmax limit (dB)",
+            Extra::Position => "Position correction (dB)",
+            Extra::PositionPeak => "… for peaks (dB)",
+        }
+    }
+
+    /// What an empty field means.
+    pub fn empty(self) -> &'static str {
+        match self {
+            Extra::LcPeak | Extra::LafMax => "no limit",
+            Extra::Position => "none",
+            Extra::PositionPeak => "as above",
+        }
+    }
+
+    /// What the field does, beside it.
+    pub fn note(self) -> &'static str {
+        match self {
+            Extra::LcPeak => "over when a second's C-weighted peak exceeds it (held 10 s)",
+            Extra::LafMax => "over when a second's A-weighted Fast level exceeds it (held 10 s)",
+            Extra::Position => {
+                "added to every level: from the mic to where the limit applies (FOH → \
+                 loudest audience spot); the log keeps what was measured"
+            }
+            Extra::PositionPeak => "a peak may differ (DIN 15905-5: K2 beside K1)",
+        }
+    }
+
+    fn quantity(self) -> Option<PeakQuantity> {
+        match self {
+            Extra::LcPeak => Some(PeakQuantity::LcPeak),
+            Extra::LafMax => Some(PeakQuantity::LafMax),
+            Extra::Position | Extra::PositionPeak => None,
+        }
+    }
+}
+
 /// Where the focus is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
@@ -55,6 +129,8 @@ pub enum Focus {
     Horizon,
     /// Window `row`, column `col`.
     Window { row: usize, col: Col },
+    /// A setting under the windows.
+    Extra(Extra),
 }
 
 /// One window being edited.
@@ -146,9 +222,11 @@ pub struct LeqDialog {
     pub horizon: usize,
     /// Index into [`LeqPreset::ALL`], or `None`: "keep these windows".
     pub preset: Option<usize>,
-    /// The windows before the preset row was first changed: back at "none" they return.
-    /// Dropped on any edit of a window, which keeps what the preset set.
-    before_preset: Option<Vec<Row>>,
+    /// Typed settings under the windows, in [`Extra::ALL`] order.
+    pub extra: [String; 4],
+    /// The windows and peak limits before the preset row was first changed: back at "none"
+    /// they return. Dropped on any edit of a window, which keeps what the preset set.
+    before_preset: Option<(Vec<Row>, [String; 2])>,
     pub focus: Focus,
     /// The focused text cell's text is selected: typing replaces it.
     pub selected: bool,
@@ -169,6 +247,18 @@ impl LeqDialog {
             .enumerate()
             .min_by_key(|(_, x)| x.abs_diff(h))
             .map_or(2, |(i, _)| i);
+        let peak = |q: PeakQuantity| {
+            config
+                .leq
+                .peaks
+                .get(q)
+                .map_or_else(String::new, |l| number_text(l.limit.0))
+        };
+        let (position, position_peak) = match config.position {
+            Some(p) if p.peak == p.level => (number_text(p.level.0), String::new()),
+            Some(p) => (number_text(p.level.0), number_text(p.peak.0)),
+            None => (String::new(), String::new()),
+        };
         Some(Self {
             meas: m.id,
             name: m.config.name.clone(),
@@ -176,6 +266,12 @@ impl LeqDialog {
             rows: config.leq.windows.iter().map(Row::of).collect(),
             horizon,
             preset: None,
+            extra: [
+                peak(PeakQuantity::LcPeak),
+                peak(PeakQuantity::LafMax),
+                position,
+                position_peak,
+            ],
             before_preset: None,
             focus: Focus::Preset,
             selected: false,
@@ -211,8 +307,8 @@ impl LeqDialog {
     }
 
     fn rows_count(&self) -> usize {
-        // Preset, horizon, then the windows.
-        2 + self.rows.len()
+        // Preset, horizon, the windows, then the settings under them.
+        2 + self.rows.len() + Extra::ALL.len()
     }
 
     fn row_index(&self) -> usize {
@@ -220,6 +316,21 @@ impl LeqDialog {
             Focus::Preset => 0,
             Focus::Horizon => 1,
             Focus::Window { row, .. } => 2 + row,
+            Focus::Extra(e) => 2 + self.rows.len() + e.index(),
+        }
+    }
+
+    /// The text typed in setting `e`.
+    pub fn extra_text(&self, e: Extra) -> String {
+        self.extra[e.index()].clone()
+    }
+
+    /// The focus is on typed text.
+    fn on_text(&self) -> bool {
+        match self.focus {
+            Focus::Window { col, .. } => col.is_text(),
+            Focus::Extra(_) => true,
+            Focus::Preset | Focus::Horizon => false,
         }
     }
 
@@ -231,12 +342,14 @@ impl LeqDialog {
     }
 
     fn set_row(&mut self, i: usize, col: Col) {
+        let n = self.rows.len();
         self.focus = match i {
             0 => Focus::Preset,
             1 => Focus::Horizon,
-            r => Focus::Window { row: r - 2, col },
+            r if r < 2 + n => Focus::Window { row: r - 2, col },
+            r => Focus::Extra(Extra::ALL[(r - 2 - n).min(Extra::ALL.len() - 1)]),
         };
-        self.selected = col.is_text() && matches!(self.focus, Focus::Window { .. });
+        self.selected = self.on_text();
     }
 
     /// ↑ / ↓: the row above or below, keeping the column; wraps.
@@ -248,25 +361,28 @@ impl LeqDialog {
 
     /// Tab / Shift+Tab: the next or previous cell, row by row; wraps.
     pub fn move_cell(&mut self, d: i32) {
-        // Cells in order: preset, horizon, then four per window.
-        let cells = 2 + 4 * self.rows.len() as i32;
+        // Cells in order: preset, horizon, four per window, then the settings under them.
+        let w = 4 * self.rows.len() as i32;
+        let cells = 2 + w + Extra::ALL.len() as i32;
         let at = match self.focus {
             Focus::Preset => 0,
             Focus::Horizon => 1,
             Focus::Window { row, col } => {
                 2 + 4 * row as i32 + Col::ALL.iter().position(|c| *c == col).unwrap_or(0) as i32
             }
+            Focus::Extra(e) => 2 + w + e.index() as i32,
         };
         let next = (at + d).rem_euclid(cells);
         self.focus = match next {
             0 => Focus::Preset,
             1 => Focus::Horizon,
-            k => Focus::Window {
+            k if k < 2 + w => Focus::Window {
                 row: ((k - 2) / 4) as usize,
                 col: Col::ALL[((k - 2) % 4) as usize],
             },
+            k => Focus::Extra(Extra::ALL[(k - 2 - w) as usize]),
         };
-        self.selected = self.col().is_text() && matches!(self.focus, Focus::Window { .. });
+        self.selected = self.on_text();
     }
 
     /// Focuses window `row`, column `col` (the mouse).
@@ -286,21 +402,32 @@ impl LeqDialog {
                 let cur = self.preset.map_or(0, |i| i + 1);
                 let next = step(cur, n);
                 self.preset = next.checked_sub(1);
+                let peaks_now = [self.extra[0].clone(), self.extra[1].clone()];
                 let before = self
                     .before_preset
-                    .get_or_insert_with(|| self.rows.clone())
+                    .get_or_insert_with(|| (self.rows.clone(), peaks_now))
                     .clone();
                 match self.preset.and_then(|i| LeqPreset::ALL.get(i)) {
                     Some(p) => {
                         self.rows = LeqPreset::windows_of(&[*p]).iter().map(Row::of).collect();
+                        let peaks = p.peaks();
+                        for (k, q) in PeakQuantity::ALL.into_iter().enumerate() {
+                            self.extra[k] = peaks
+                                .get(q)
+                                .map_or_else(String::new, |l| number_text(l.limit.0));
+                        }
                     }
                     None => {
-                        self.rows = before;
+                        let (rows, [lc, laf]) = before;
+                        self.rows = rows;
+                        self.extra[0] = lc;
+                        self.extra[1] = laf;
                         self.before_preset = None;
                     }
                 }
             }
             Focus::Horizon => self.horizon = step(self.horizon, HORIZONS.len()),
+            Focus::Extra(_) => return,
             Focus::Window { row, col } => {
                 self.before_preset = None;
                 let Some(r) = self.rows.get_mut(row) else {
@@ -338,6 +465,12 @@ impl LeqDialog {
     }
 
     fn text_mut(&mut self) -> Option<&mut String> {
+        if let Focus::Extra(e) = self.focus {
+            if e.quantity().is_some() {
+                self.before_preset = None;
+            }
+            return Some(&mut self.extra[e.index()]);
+        }
         let Focus::Window { row, col } = self.focus else {
             return None;
         };
@@ -377,7 +510,7 @@ impl LeqDialog {
 
     /// Ctrl+A on a text cell.
     pub fn select_all(&mut self) {
-        self.selected = self.col().is_text() && matches!(self.focus, Focus::Window { .. });
+        self.selected = self.on_text();
     }
 
     /// Insert: a new window after the focused one (or at the end), one length longer.
@@ -394,6 +527,7 @@ impl LeqDialog {
             Focus::Window { row, .. } => row,
             _ => self.rows.len().saturating_sub(1),
         };
+        let after = after.min(self.rows.len().saturating_sub(1));
         let from = self.rows.get(after).cloned().unwrap_or(Row {
             seconds: 60,
             weighting: Weighting::A,
@@ -450,21 +584,84 @@ impl LeqDialog {
             .enumerate()
             .map(|(i, r)| r.window(i + 1))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut peaks = PeakLimits::default();
+        for e in [Extra::LcPeak, Extra::LafMax] {
+            let Some(q) = e.quantity() else { continue };
+            let t = self.extra[e.index()].trim();
+            if t.is_empty() {
+                continue;
+            }
+            let name = ac2_scene::leq::peak_name(q);
+            let v = crate::state::parse_number(t, &["db spl", "dbspl", "db"])
+                .map_err(|err| format!("{name} limit: {err}"))?;
+            if !(60.0..=170.0).contains(&v) {
+                return Err(format!(
+                    "{name}: a limit is 60 … 170 dB SPL (empty for none)"
+                ));
+            }
+            // A margin set before (from the CLI) stays; a new limit warns 3 dB under.
+            let warn_margin = self
+                .base
+                .leq
+                .peaks
+                .get(q)
+                .map_or(Db(LeqWindow::DEFAULT_WARN_MARGIN_DB), |l| l.warn_margin);
+            *peaks.get_mut(q) = Some(PeakLimit {
+                limit: DbSpl(v),
+                warn_margin,
+            });
+        }
         let cfg = LeqConfig {
             windows,
             horizon: Seconds(f64::from(self.horizon_s())),
+            peaks,
         };
         cfg.check()?;
         Ok(cfg)
     }
 
-    /// The meter's configuration with the new windows.
+    /// The measuring-position correction as typed: none when empty; the peaks' the same
+    /// as the energy levels' unless typed.
+    pub fn position(&self) -> Result<Option<PositionCorrection>, String> {
+        let parse = |t: &str, what: &str| {
+            crate::state::parse_number(t, &["db"]).map_err(|e| format!("{what}: {e}"))
+        };
+        let level = self.extra[Extra::Position.index()].trim();
+        let peak = self.extra[Extra::PositionPeak.index()].trim();
+        if level.is_empty() {
+            return if peak.is_empty() {
+                Ok(None)
+            } else {
+                Err("a correction for peaks needs one for the levels too".into())
+            };
+        }
+        let level = parse(level, "position correction")?;
+        let peak = if peak.is_empty() {
+            level
+        } else {
+            parse(peak, "position correction for peaks")?
+        };
+        let p = PositionCorrection {
+            level: Db(level),
+            peak: Db(peak),
+        };
+        if !p.is_valid() {
+            return Err(format!(
+                "a position correction is at most ±{} dB",
+                PositionCorrection::MAX_DB
+            ));
+        }
+        Ok(Some(p))
+    }
+
+    /// The meter's configuration with the new windows, peak limits and correction.
     pub fn meas_config(&self) -> Result<MeasConfig, String> {
         Ok(MeasConfig {
             name: self.name.clone(),
             kind: MeasKind::Spl {
                 config: SplConfig {
                     leq: self.leq_config()?,
+                    position: self.position()?,
                     ..self.base.clone()
                 },
             },
@@ -526,7 +723,10 @@ mod tests {
         assert!(d.preset_note().contains("replaces the windows"));
         // → on the preset row: DIN 15905-5 is its 30 min window, nothing else.
         d.cycle(1);
-        assert_eq!(d.preset_text(), "DIN 15905-5: LAeq 30 min ≤ 99 dB");
+        assert_eq!(
+            d.preset_text(),
+            "DIN 15905-5: LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB"
+        );
         assert!(
             d.preset_source()
                 .expect("source")
@@ -682,5 +882,95 @@ mod tests {
         }
         d.add_window();
         assert!(d.error.as_deref().is_some_and(|e| e.contains("at most 8")));
+    }
+
+    /// Under the windows: the peak limits and the position correction, reached with ↓ and
+    /// Tab, typed; a preset sets its peak limits and back at "none" they return; the
+    /// correction is the operator's and no preset touches it.
+    #[test]
+    fn peak_limits_and_the_position_correction() {
+        let mut d = LeqDialog::new(&meter(), true).expect("spl");
+        // ↑ from the preset row wraps to the last setting: the peaks' correction.
+        d.move_row(-1);
+        assert_eq!(d.focus, Focus::Extra(Extra::PositionPeak));
+        d.move_row(-1);
+        assert_eq!(d.focus, Focus::Extra(Extra::Position));
+        assert!(d.selected);
+        d.type_text("4 dB");
+        // Shift+Tab twice: LCpeak's limit.
+        d.move_cell(-1);
+        d.move_cell(-1);
+        assert_eq!(d.focus, Focus::Extra(Extra::LcPeak));
+        d.type_text("130");
+        let MeasKind::Spl { config } = d.meas_config().expect("valid").kind else {
+            panic!()
+        };
+        assert_eq!(config.leq.peaks.lcpeak.map(|l| l.limit), Some(DbSpl(130.0)));
+        assert_eq!(
+            config.leq.peaks.lcpeak.map(|l| l.warn_margin),
+            Some(Db(3.0))
+        );
+        assert_eq!(config.leq.peaks.lafmax, None);
+        assert_eq!(config.position, Some(PositionCorrection::both(4.0)));
+        // A different peak correction.
+        d.focus = Focus::Extra(Extra::PositionPeak);
+        d.type_text("2");
+        assert_eq!(
+            d.position().expect("valid").map(|p| (p.level, p.peak)),
+            Some((Db(4.0), Db(2.0)))
+        );
+        // Swiss 100: its LAFmax 125 replaces the peak limits; the correction stays.
+        d.focus = Focus::Preset;
+        for _ in 0..4 {
+            d.cycle(1);
+        }
+        assert_eq!(
+            d.preset_text(),
+            "Swiss V-NISSG 100 dB: LAeq 60 min ≤ 100 dB, LAFmax ≤ 125 dB"
+        );
+        assert_eq!(d.extra_text(Extra::LcPeak), "");
+        assert_eq!(d.extra_text(Extra::LafMax), "125");
+        assert_eq!(d.extra_text(Extra::Position), "4 dB");
+        for _ in 0..4 {
+            d.cycle(-1);
+        }
+        assert_eq!(d.extra_text(Extra::LcPeak), "130", "back at none");
+        // Refusals name the field.
+        d.focus = Focus::Extra(Extra::LafMax);
+        d.type_text("loud");
+        assert!(
+            d.leq_config()
+                .expect_err("a word")
+                .starts_with("LAFmax limit")
+        );
+        d.select_all();
+        d.type_text("200");
+        assert!(d.leq_config().expect_err("range").contains("60 … 170"));
+        d.select_all();
+        d.backspace();
+        d.focus = Focus::Extra(Extra::Position);
+        d.select_all();
+        d.type_text("40");
+        assert!(d.meas_config().expect_err("range").contains("±30"));
+        d.select_all();
+        d.backspace();
+        assert!(
+            d.meas_config()
+                .expect_err("a peak correction alone")
+                .contains("needs one for the levels")
+        );
+        // A meter with a correction opens with it.
+        let mut m = meter();
+        if let MeasKind::Spl { config } = &mut m.config.kind {
+            config.position = Some(PositionCorrection::both(-2.5));
+        }
+        let d = LeqDialog::new(&m, true).expect("spl");
+        assert_eq!(
+            (
+                d.extra_text(Extra::Position),
+                d.extra_text(Extra::PositionPeak)
+            ),
+            ("-2.5".to_owned(), String::new())
+        );
     }
 }

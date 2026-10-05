@@ -9,6 +9,9 @@ export".
 
 Each SPL meter carries a list of rolling windows — by default LAeq over 1, 5, 10, 30 and
 60 min, no limits. A window may have a limit (dB SPL) and a warn margin (default 3 dB).
+The meter may also have a limit on its highest LCpeak and on its highest LAFmax (*Peak
+limits*), and a measuring-position correction added to everything it reports
+(*Measuring-position correction*).
 Every second the daemon publishes, per window: the Leq, how much of the window has elapsed
 and how much of it was measured, its state (ok / near / over; a window still filling is
 judged on its energy budget, *Judging a filling window*), and the **headroom**: the
@@ -29,8 +32,11 @@ second grid without adding energy, so the seconds it touches have `m < 1`. A gap
 silence: it adds neither energy nor measured time.
 
 Every block becomes a **log row**: wall time of its start, `m`, LAeq,1s, LCeq,1s, LZeq,1s
-(dBFS, `10·lg(2·e/m)`, decision 4a), and the sensitivity in force (dB SPL of 0 dBFS, if
-calibrated). The log is the record: it lives with the meter in the daemon (last 48 h), is
+(dBFS, `10·lg(2·e/m)`, decision 4a), the second's highest LCpeak and LAFmax (dBFS; from
+the meter's C-weighted peak path, uncorrected by the mic curve as Lpeak is, and from an LAF
+detector of the log's own, so freezing the display never holds them), the sensitivity in
+force (dB SPL of 0 dBFS, if calibrated) and the measuring-position correction in force
+(recorded, never added to the row's levels). The log is the record: it lives with the meter in the daemon (last 48 h), is
 saved with the session and the autosave (one CSV per meter, which the autosave appends to), and is
 exported with `spl.log_get` (`ac2 spl leq export`). Frozen or reset meters keep logging:
 freeze and reset are display operations, a compliance record is not.
@@ -218,6 +224,77 @@ full anyway (*Judging a filling window*). A job that restarts carries the states
 the `spl_log` entity (no recovery reported just because the job restarted); the history
 replay (`spl.history_get`) runs the same latches over the rows it reads.
 
+## Peak limits
+
+DIN 15905-5 and the Swiss V-NISSG limit more than an Leq: DIN the C-weighted peak
+(LCpeak ≤ 135 dB "in keinem Beurteilungszeitraum", in no assessment period), V-NISSG the
+A-weighted Fast maximum (LAFmax ≤ 125 dB "zu keinem Zeitpunkt", at no time; *Sources*). A
+meter may carry either or both (`LeqConfig.peaks`, each a limit and a warn margin); the
+presets of those rules set them.
+
+A peak is an instant, not an average: the limit is broken by one second whose peak
+exceeds it. So a peak limit is judged every second on the **highest LCpeak (LAFmax) of the
+newest 10 seconds** (`PEAK_HOLD_S`), with the sensitivity and the correction added, at 0.1
+dB as the windows:
+
+    over ⇔ round₁(max of 10 s) > L        near ⇔ L − μ < round₁(…) ≤ L        else ok
+
+The hold is the dwell (*Hysteresis*): judged on its own second, a peak over would be red
+for one second and back the next — too short to be seen from a desk, and a flicker with
+every kick drum near the limit. Held 10 s, one peak over stays over long enough to be
+noticed, and peaks recurring within 10 s keep it over without toggling. The value shown is
+that held figure, so the state never disagrees with the number. Going over and recovering
+are alarms like a window's (`AlarmSubject::Peak`), in the entity (`SplLog.peaks`), the
+daemon's log and the toasts.
+
+The `leq` frame carries each limited quantity (`LeqMeta.lcpeak`, `lafmax`: the held level
+and its judgement). The app draws them as columns (or tiles) of their own, right of the
+windows — `LCpeak`, `LAFmax`, never shortened —, worded as a window but with no headroom
+(a peak has no budget to spend: the limit is the instruction) and "highest of the last 10
+s" where a window shows its progress; they share the windows' scale, which then reaches
+6 dB above the peak limit. `ac2 spl leq watch` lists them after the windows (`peaks` in
+`--json`), `ac2 spl leq set --peak-limit lcpeak=135db` sets one (`=none` removes it), and
+the CSV log has `lcpeak_1s` and `lafmax_1s`. The meter's own LCpeak / LAFmax (since its
+reset) are unchanged; the peak limits run on the log's seconds, which neither freeze nor
+reset touches.
+
+Not judged: DIN 15905-5 assesses fixed half hours (from :00 and :30), not a sliding one;
+its LCpeak limit holds per assessment period, which a held 10 s maximum covers at any
+moment but does not report per period (the CSV log has every second's LCpeak).
+
+## Measuring-position correction
+
+Both rules apply their limits at the loudest audience position (DIN: "maßgeblicher
+Immissionsort"; V-NISSG: "Ermittlungsort", the loudest place at ear height), and both
+allow measuring elsewhere — at FOH — with the level difference between the two added to
+what is measured there: DIN as K1 for the A-weighted Leq and K2 for the C-weighted peak,
+V-NISSG as one difference (Schallpegeldifferenz) determined beforehand with pink noise and
+written down (*Sources*). A meter carries that as its **position correction**
+(`SplConfig.position`: `level` and `peak`, ±30 dB): once calibrated, every level it reports
+— the meter's number, Lmax, Lmin, Leq, the windows, the headroom, the run total, LAFmax —
+has `level` added, and its peak levels (Lpeak, LCpeak) `peak`; limits are judged on the
+corrected levels. Uncalibrated it does nothing (a difference in dB SPL means nothing on
+dBFS).
+
+A corrected number never passes for a measured one:
+
+- Frames carry the correction applied (`SplMeta.position`, `LeqMeta.position`); the app
+  writes `corrected +3.0 dB` (or `corrected +3.0 dB, peaks +1.5 dB`) in the caption of the
+  meter and of the windows, and every window's and peak's unit reads `dB(A) corr.`; the CLI
+  says it in its head line (`position_text` in `--json`) and under `ac2 spl watch`.
+- Alarms carry the correction in their level (`LeqAlarm.position`), and the toasts and
+  the daemon's log say "(corrected +3.0 dB)".
+- The log keeps what was measured: its levels never include the correction; each row
+  records the correction in force (CSV `position_db`, `position_peak_db`), so the
+  corrected figure of any second is its level plus its recorded correction.
+- A change of the correction is a change of unit for the history strip: the rebuilt
+  history starts at the last change, as at a calibration.
+
+Each meter has its own correction, so a second meter on the same input without one shows
+what the FOH mic measures beside the corrected one. App: the Leq windows dialog (Shift+L),
+"Position correction" and "… for peaks" under the windows. CLI: `ac2 spl leq set
+--position 3db [--position-peak 1db]`, `--position none`.
+
 ## Where it shows
 
 - App: **G** steps the SPL pane meter → windows → meter + windows (the meter's number over
@@ -225,15 +302,14 @@ replay (`spl.history_get`) runs the same latches over the rows it reads.
   windows out as columns or tiles, **Shift+B** shows the history strip (rebuilt from the
   log, *The history strip* below), both remembered in `ui.toml`; **W** steps split → the pane
   alone → full screen (the stage view); **F11** puts the window full screen in any layout. **Shift+L** opens the windows
-  dialog (lengths and weightings picked, limits typed, a preset row, the horizon). Over /
-  recovered alarms are toasts. See *Display* below.
+  dialog (lengths and weightings picked, limits typed, a preset row, the horizon, the peak
+  limits and the position correction). Over / recovered alarms are toasts. See *Display*
+  below.
 - CLI: `ac2 spl leq watch` (block digits on a terminal, `--json` a line a second, with the
-  run), `ac2 spl leq set` (`--windows`, `--preset`, `--limit 30min=99db`, `--warn`,
-  `--horizon`), `ac2 spl leq export` (the CSV; `--previous` the ended log), `ac2 spl leq
-  new` (`--yes`, `--export FILE`).
-
-What is left: `docs/design/backlog.md` (peak limits, position correction, alarm
-hysteresis).
+  run, the peaks and the correction), `ac2 spl leq set` (`--windows`, `--preset`, `--limit
+  30min=99db`, `--peak-limit lcpeak=135db`, `--warn`, `--horizon`, `--position 3db`,
+  `--position-peak 1db`), `ac2 spl leq export` (the CSV; `--previous` the ended log), `ac2
+  spl leq new` (`--yes`, `--export FILE`).
 
 ## The history strip
 
@@ -355,8 +431,10 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
 
 A preset **replaces** the meter's windows with exactly the rule's: its windows with their
 weightings and limits, plus any window the rule wants shown without a limit (Flanders 100
-dB shows LAeq 15 min), shortest first (equal lengths A, C, Z). Windows and limits the rule
-does not state go: left in place they would read as part of it. The windows change in
+dB shows LAeq 15 min), shortest first (equal lengths A, C, Z), and its peak limits (none
+for most). Windows and limits the rule does not state go: left in place they would read as
+part of it. The position correction is the operator's measurement, not the rule's: a preset
+leaves it as it is. The windows change in
 place (`meas.update`): the log carries on and the new windows are rebuilt from it, as for
 any change of windows. Windows can be added afterwards (Insert in the dialog, `--windows`
 with `--preset`). In the app, ←/→ on the preset row shows each preset's windows in the
@@ -369,13 +447,14 @@ distinct windows across all presets, within the eight a meter may have. `--windo
 `--preset` adds windows (without limits) to the preset's.
 
 Every preset is a starting point for the operator, who owns the rest of the rule:
-ac2 judges only the Leq windows below, with no position correction, and is not a
-type-approved instrument (see the last section). Retrieved 2026-10-03.
+ac2 judges only the Leq windows and peak limits below, corrected by what the operator
+measured as the position difference (none unless set), and is not a type-approved
+instrument (see the last section). Retrieved 2026-10-03; the peak limits 2026-10-05.
 
 | preset (`--preset`) | windows | source |
 |---|---|---|
-| DIN 15905-5 (`din15905`) | LAeq 30 min ≤ 99 dB | DIN 15905-5:2007, loudest audience position |
-| Swiss V-NISSG 93 / 96 / 100 (`swiss93` …) | LAeq 60 min ≤ 93 / 96 / 100 dB | V-NISSG (SR 814.711), by event category |
+| DIN 15905-5 (`din15905`) | LAeq 30 min ≤ 99 dB, LCpeak ≤ 135 dB | [5] DIN 15905-5:2007 §4.3.2, loudest audience position |
+| Swiss V-NISSG 93 / 96 / 100 (`swiss93` …) | LAeq 60 min ≤ 93 / 96 / 100 dB, LAFmax ≤ 125 dB | [6] V-NISSG (SR 814.711) art. 19, by event category |
 | WHO safe listening (`who`) | LAeq 15 min ≤ 100 dB | WHO Global standard for safe listening venues and events (2022) |
 | France R1336-1 (`france`) | LAeq 15 min ≤ 102 dB **and** LCeq 15 min ≤ 118 dB | [1] art. R1336-1 II 1° |
 | France R1336-1, children up to 6 (`france-children`) | LAeq 15 min ≤ 94 dB **and** LCeq 15 min ≤ 104 dB | [1] art. R1336-1 II 1°, second sentence |
@@ -471,6 +550,46 @@ years); sharing the results with the registering party (art. 3.2.6); facilitatin
 protection from 88 dB(A) for minors and 92.5 dB(A) for adults (art. 3.3); visitor
 information (art. 3.4); the lower levels in the parties' own appendices (e.g. cinemas).
 
+**[5] DIN 15905-5** — DIN 15905-5:2007-11, Veranstaltungstechnik – Tontechnik – Teil 5:
+Maßnahmen zum Vermeiden einer Gehörgefährdung des Publikums durch hohe Schallemissionen
+elektroakustischer Beschallungstechnik. The standard itself is sold by Beuth / DIN Media
+and not in this repository; the figures were checked against the account of its §4.3 in
+Bayerisches Landesamt für Umwelt, *Untersuchungsprojekt Schallpegelüberwachung bei mobilen
+elektroakustischen Beschallungsanlagen* (UmweltSpezial, Bericht M81 441/1, 2010), §4.3.2
+"Richtwerte": "Der Richtwert für den Beurteilungspegel LAr von 99 dB(A) darf an keinem dem
+Publikum zugänglichen Ort innerhalb der Beurteilungszeit von 30 bzw. 120 Minuten
+überschritten werden. Der Spitzenschalldruckpegel LCpeak darf in keinem
+Beurteilungszeitraum 135 dB(C) überschreiten." §4.3.3–4.3.4: measured at a substitute
+position (e.g. the mixing desk), the levels are converted to the loudest audience position
+by adding correction values determined by comparison measurements (pink noise, 40 Hz – 20
+kHz): K1 for the A-weighted equivalent level, K2 for the C-weighted peak. (Hosted copy:
+<https://www.hamburg.de/resource/blob/88326/dd826297c0352a4c782f6902dfb42ad2/schallpegelueberwachung-mobile-anlagen-data.pdf>.)
+Not checked by ac2: the fixed assessment periods (the averaging starts at the half and the
+full hour and runs 30 minutes; 120 minutes for the LAr variant), the rating level's
+adjustments, the measuring position itself, the meter class, the record keeping.
+
+**[6] Switzerland** — Verordnung zum Bundesgesetz über den Schutz vor Gefährdungen durch
+nichtionisierende Strahlung und Schall (V-NISSG, SR 814.711), art. 19, and Bundesamt für
+Gesundheit, *Vollzugshilfe zur V-NISSG – 4. Abschnitt: Veranstaltungen mit Schall*
+(21.05.2024), §3.2.1: "Der momentane Schallpegel LAF,max von 125 dB(A) darf zu keinem
+Zeitpunkt überschritten werden (Frequenzbewertung: A, Zeitbewertung Fast: t = 125 ms)",
+for every event with electroacoustically amplified sound, whatever its LAeq,1h category
+(§3.2.2: 93, 96 or 100 dB(A), over any 60-minute interval). §4.3 (Anhang 4 Ziffer 5.1
+V-NISSG): the limits hold at the loudest place at ear height (Ermittlungsort); measuring
+elsewhere, e.g. at the mixing desk, needs the level difference (Offset) between the two
+determined beforehand with pink noise or an equivalent method and written down (mind the
+sign). (Copy hosted by the canton of Zurich:
+<https://www.zh.ch/content/dam/zhweb/bilder-dokumente/themen/umwelt-tiere/laerm-schall/schall---laser/V-NISSG_Vollzugshilfe_Schall_DE.pdf>.)
+Not checked by ac2: which category an event falls in, the duty to notify, recording and
+keeping the levels and the position difference for six months, hearing protection and
+information, the children's events limit (93 dB(A), art. 19 al. 2, the 93 dB preset's
+figure).
+
+The other presets' cited articles limit Leq windows only: France R1336-1 II 1°, Brussels
+art. 3–5, the Netherlands covenant art. 3.1.2–3.1.3 and WHO feature 1 state no peak
+figure; Flanders' LAmax,slow figures are an alternative way to meet the LAeq limit
+("deemed met"), not a limit of their own.
+
 **Not added**
 - Wallonia: no preset. The arrêté du Gouvernement wallon du 13 décembre 2018 fixant les
   conditions de diffusion du son amplifié électroniquement dans les établissements ouverts
@@ -489,5 +608,8 @@ information (art. 3.4); the lower levels in the parties' own appendices (e.g. ci
   filters meet class 1 tolerances at 44.1/48/96 kHz (`ac2_core::weighting` tests). The
   instrument as a whole is not a type-approved sound level meter: the microphone, its
   calibration and the interface are the operator's.
-- Windows move in one-second steps. No measuring-position correction (FOH → audience) is
-  applied; a regulation that wants one needs it added to the limit by hand.
+- Windows move in one-second steps. A measuring-position correction is the operator's
+  figure, applied as typed (*Measuring-position correction*); ac2 does not measure it.
+- Peak limits are judged on one-second maxima held 10 s: LCpeak is a sample peak of the
+  C-weighted signal (within half a sample period of the true crest at 1 kHz, `ac2_core::spl`
+  tests), LAFmax the IEC 61672-1 Fast time-weighted maximum.

@@ -68,7 +68,9 @@ fn meter(windows: Vec<LeqWindow>) -> MeasConfig {
                 leq: LeqConfig {
                     windows,
                     horizon: Seconds(2.0),
+                    peaks: Default::default(),
                 },
+                position: None,
             },
         },
     }
@@ -88,7 +90,7 @@ async fn leq_until(c: &Client, what: &str, ok: impl Fn(&LeqFrame) -> bool) -> Le
             && let FrameData::Leq(l) = &f.frame.data
             && ok(l)
         {
-            return l.clone();
+            return (**l).clone();
         }
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -239,7 +241,7 @@ async fn windows_go_over_and_recover_and_survive() {
     assert!(l.windows.iter().all(|w| w.judgement == LeqJudgement::Over));
     let a = l.alarms[0];
     assert_eq!(a.limit, DbSpl(90.0));
-    assert!(a.leq.0 > 90.0);
+    assert!(a.level.0 > 90.0);
 
     // Turned down 20 dB (74 dB SPL): the 5 s window recovers first, then the 10 s one;
     // each recovery is an alarm entry with the window's value then.
@@ -251,10 +253,10 @@ async fn windows_go_over_and_recover_and_survive() {
     let rec = l
         .alarms
         .iter()
-        .find(|a| a.kind == LeqAlarmKind::Recovered && a.duration == Seconds(5.0))
+        .find(|a| a.kind == LeqAlarmKind::Recovered && a.subject.duration() == Some(Seconds(5.0)))
         .copied()
         .expect("recovery of the 5 s window");
-    assert!(rec.leq.0 <= 90.0 + 1e-9, "{rec:?}");
+    assert!(rec.level.0 <= 90.0 + 1e-9, "{rec:?}");
     let l = log_until(&c, "10 s window recovered", |l| {
         l.windows.iter().all(|w| w.judgement == LeqJudgement::Ok)
     })
@@ -778,7 +780,7 @@ async fn a_filling_window_goes_over_when_its_budget_is_spent() {
     assert!(
         l.alarms
             .iter()
-            .all(|a| a.duration == Seconds(4.0) && a.kind == LeqAlarmKind::Over),
+            .all(|a| a.subject.duration() == Some(Seconds(4.0)) && a.kind == LeqAlarmKind::Over),
         "{:?}",
         l.alarms
     );
@@ -786,12 +788,18 @@ async fn a_filling_window_goes_over_when_its_budget_is_spent() {
 
     // The 30 s window over once the budget is spent, about 13 s into the log.
     let l = log_until(&c, "the 30 s window over", |l| {
-        l.alarms.iter().any(|a| a.duration == Seconds(30.0))
+        l.alarms
+            .iter()
+            .any(|a| a.subject.duration() == Some(Seconds(30.0)))
     })
     .await;
     let start = page(&c, 0).await.rows[0].start.0;
     let over_at = |d: f64| {
-        let a = l.alarms.iter().find(|a| a.duration == Seconds(d)).unwrap();
+        let a = l
+            .alarms
+            .iter()
+            .find(|a| a.subject.duration() == Some(Seconds(d)))
+            .unwrap();
         assert_eq!(a.kind, LeqAlarmKind::Over);
         (a.at.0 - start) as f64 / 1e9
     };
@@ -835,7 +843,10 @@ async fn a_long_log_in_pages_and_its_history() {
             laeq: Dbfs(-30.0 - (k % 10) as f64),
             lceq: Dbfs(-28.0),
             lzeq: Dbfs(-27.0),
+            lcpeak: Dbfs(-12.0),
+            lafmax: Dbfs(-25.0),
             sensitivity: Some(Db(120.0)),
+            position: None,
         })
         .collect();
     let path = dir.path().join("long");
@@ -913,6 +924,192 @@ async fn a_long_log_in_pages_and_its_history() {
         &leq[..5]
     );
     assert!(hist.over[0].iter().all(|o| !o));
+    tokio::task::spawn_blocking(move || h.shutdown())
+        .await
+        .unwrap();
+}
+
+/// Peak limits and the measuring-position correction (`docs/design/leq.md`, *Peak limits*,
+/// *Measuring-position correction*). A calibrated 1 kHz tone at 94 dB SPL has LCpeak 97.0
+/// and LAFmax 94.0 dB: near a 99 dB LCpeak limit and a 96 dB LAFmax limit. 6 dB louder the
+/// LCpeak limit goes over (an alarm naming LCpeak) and stays over for the 10 s hold after
+/// the tone is turned back down, then recovers. A position correction of +5 dB (energy)
+/// and +1 dB (peak) moves every level the meter reports, the LAFmax limit goes over on the
+/// corrected level, and the log keeps what was measured with the correction beside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn peak_limits_and_the_position_correction() {
+    use ac2_proto::model::{AlarmSubject, PeakLimit, PeakLimits, PeakQuantity, PositionCorrection};
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(realtime_rig(), local_tcp());
+    cfg.cal_store = Some(dir.path().join("calibrations.json"));
+    let h = Daemon::start(cfg).unwrap();
+    let c = connect(&h).await;
+    c.call(Command::SessionOpen {
+        config: session(false),
+    })
+    .await
+    .unwrap();
+    let limit = |l: f64| {
+        Some(PeakLimit {
+            limit: DbSpl(l),
+            warn_margin: Db(3.0),
+        })
+    };
+    let with = |position: Option<PositionCorrection>| {
+        let mut m = meter(vec![window(5.0, None)]);
+        let MeasKind::Spl { config } = &mut m.kind else {
+            unreachable!()
+        };
+        config.leq.peaks = PeakLimits {
+            lcpeak: limit(99.0),
+            lafmax: limit(96.0),
+        };
+        config.position = position;
+        m
+    };
+    c.call(Command::MeasCreate { config: with(None) })
+        .await
+        .unwrap();
+    let l = log_until(&c, "entity", |_| true).await;
+    assert_eq!(l.peaks.lcpeak.judgement, LeqJudgement::NotCalibrated);
+    // A correction beyond ±30 dB is refused.
+    let e = c
+        .call(Command::MeasUpdate {
+            meas: M,
+            config: with(Some(PositionCorrection::both(31.0))),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
+    c.call(Command::MeasStart { meas: M }).await.unwrap();
+    c.subscribe(Subscription::Meas(M)).unwrap();
+    let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
+    set_level(&lease, -20.0).await;
+    leq_until(&c, "the tone at the input", |f| {
+        (f.leq[0] + 26.02).abs() < 0.2
+    })
+    .await;
+    calibrate(&c).await;
+
+    let f = leq_until(&c, "peaks judged near", |f| {
+        f.meta.scale == LevelScale::DbSpl
+            && f.meta
+                .lcpeak
+                .is_some_and(|p| p.judgement == LeqJudgement::Near)
+            && f.meta
+                .lafmax
+                .is_some_and(|p| p.judgement == LeqJudgement::Near)
+    })
+    .await;
+    let (lc, laf) = (f.meta.lcpeak.unwrap(), f.meta.lafmax.unwrap());
+    assert!((lc.level - 97.0).abs() < 0.2, "{lc:?}");
+    assert!((laf.level - 94.0).abs() < 0.2, "{laf:?}");
+    assert_eq!(f.meta.position, None);
+
+    // 6 dB louder: LCpeak 103 over its 99 dB limit (LAFmax 100 over 96 too).
+    set_level(&lease, -14.0).await;
+    let l = log_until(&c, "LCpeak over", |l| {
+        l.peaks.lcpeak.judgement == LeqJudgement::Over
+    })
+    .await;
+    let a = l
+        .alarms
+        .iter()
+        .find(|a| {
+            a.subject
+                == AlarmSubject::Peak {
+                    quantity: PeakQuantity::LcPeak,
+                }
+        })
+        .copied()
+        .expect("an LCpeak alarm");
+    assert_eq!(
+        (a.kind, a.limit, a.position),
+        (LeqAlarmKind::Over, DbSpl(99.0), None)
+    );
+    assert!((a.level.0 - 103.0).abs() < 0.3, "{a:?}");
+    // Back down: over for the hold (the loud seconds are still in it), then recovered.
+    set_level(&lease, -20.0).await;
+    let down = Instant::now();
+    let l = log_until(&c, "LCpeak recovered", |l| {
+        l.peaks.lcpeak.judgement == LeqJudgement::Near
+    })
+    .await;
+    let held = down.elapsed().as_secs_f64();
+    assert!((8.0..=14.0).contains(&held), "held {held:.1} s");
+    assert!(l.alarms.iter().any(|a| a.kind == LeqAlarmKind::Recovered
+        && a.subject
+            == AlarmSubject::Peak {
+                quantity: PeakQuantity::LcPeak
+            }));
+
+    // The correction: +5 dB on the energy levels, +1 dB on the peaks.
+    let pos = PositionCorrection {
+        level: Db(5.0),
+        peak: Db(1.0),
+    };
+    let ReplyBody::Measurement(m) = c
+        .call(Command::MeasUpdate {
+            meas: M,
+            config: with(Some(pos)),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    let s = spl_until(&c, "a corrected spl frame", |_, rev| rev >= m.config_rev).await;
+    assert_eq!(s.meta.position, Some(pos));
+    assert!((s.meta.level - 99.0).abs() < 0.2, "{:?}", s.meta);
+    // The meter's peak since it started: the loud stretch's 103 dB with the peak's +1 dB.
+    assert!((s.meta.lpeak - 104.0).abs() < 0.3, "{:?}", s.meta);
+    let f = leq_until(&c, "corrected windows and peaks", |f| {
+        f.meta.position == Some(pos)
+            && f.meta
+                .lafmax
+                .is_some_and(|p| p.judgement == LeqJudgement::Over)
+    })
+    .await;
+    assert!((f.leq[0] - 99.0).abs() < 0.3, "{:?}", f.leq);
+    assert!(
+        (f.meta.lcpeak.unwrap().level - 98.0).abs() < 0.2,
+        "{:?}",
+        f.meta
+    );
+    assert!(
+        (f.meta.lafmax.unwrap().level - 99.0).abs() < 0.2,
+        "{:?}",
+        f.meta
+    );
+    let l = log_until(&c, "LAFmax over, corrected", |l| {
+        l.alarms.iter().any(|a| {
+            a.subject
+                == AlarmSubject::Peak {
+                    quantity: PeakQuantity::LafMax,
+                }
+                && a.position == Some(Db(5.0))
+        })
+    })
+    .await;
+    assert_eq!(l.peaks.lafmax.judgement, LeqJudgement::Over);
+    // The log: what was measured (94 dB SPL), the correction beside it, from the first
+    // second logged after the change.
+    let deadline = Instant::now() + WAIT;
+    let last = loop {
+        let last = page(&c, 0).await.rows.last().copied().unwrap();
+        if last.position.is_some() {
+            break last;
+        }
+        assert!(Instant::now() < deadline, "no row with the correction");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    assert_eq!(last.position, Some(pos));
+    let sens = last.sensitivity.unwrap().0;
+    assert!((last.laeq.0 + sens - 94.0).abs() < 0.2, "{last:?}");
+    assert!((last.lcpeak.0 + sens - 97.0).abs() < 0.2, "{last:?}");
+    assert!((last.lafmax.0 + sens - 94.0).abs() < 0.2, "{last:?}");
+    drop(lease);
     tokio::task::spawn_blocking(move || h.shutdown())
         .await
         .unwrap();

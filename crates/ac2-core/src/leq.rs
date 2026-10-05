@@ -31,13 +31,18 @@ pub fn mean_square(level_dbfs: f64) -> f64 {
     10f64.powf(level_dbfs / 10.0) / 2.0
 }
 
-/// One second of weighted energy.
+/// One second of weighted energy, and the second's highest C-weighted peak and A-weighted
+/// Fast level (the quantities peak limits are set on: LCpeak, LAFmax).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Second {
     /// Σ y² / fs per weighting of [`WEIGHTINGS`] (FS²·s).
     pub energy: [f64; 3],
     /// Time actually measured within the second (s); 0 for a second lost to a gap.
     pub measured: f64,
+    /// Highest |y_C|² of the second (the C-weighted peak, squared; FS²).
+    pub c_peak_sq: f64,
+    /// Highest A-weighted Fast mean square of the second (FS²).
+    pub af_max_ms: f64,
 }
 
 impl Second {
@@ -45,7 +50,20 @@ impl Second {
     pub const GAP: Self = Self {
         energy: [0.0; 3],
         measured: 0.0,
+        c_peak_sq: 0.0,
+        af_max_ms: 0.0,
     };
+
+    /// LCpeak of the second, dBFS (`10·lg(2·peak²)`, as [`crate::spl::PeakDetector`]);
+    /// −∞ without one.
+    pub fn lcpeak_dbfs(&self) -> f64 {
+        power_dbfs(self.c_peak_sq)
+    }
+
+    /// LAFmax of the second, dBFS; −∞ without one.
+    pub fn lafmax_dbfs(&self) -> f64 {
+        power_dbfs(self.af_max_ms)
+    }
 
     /// From per-weighting levels over `measured` seconds (a log row read back).
     pub fn from_levels(levels_dbfs: [f64; 3], measured: f64) -> Self {
@@ -57,6 +75,21 @@ impl Second {
         Self {
             energy: [e(levels_dbfs[0]), e(levels_dbfs[1]), e(levels_dbfs[2])],
             measured: m,
+            c_peak_sq: 0.0,
+            af_max_ms: 0.0,
+        }
+    }
+
+    /// With the second's LCpeak and LAFmax (dBFS) as logged.
+    pub fn with_maxima(self, lcpeak_dbfs: f64, lafmax_dbfs: f64) -> Self {
+        let ms = |l: f64| {
+            let v = mean_square(l);
+            if v.is_finite() { v } else { 0.0 }
+        };
+        Self {
+            c_peak_sq: ms(lcpeak_dbfs),
+            af_max_ms: ms(lafmax_dbfs),
+            ..self
         }
     }
 
@@ -86,6 +119,8 @@ pub struct SecondIntegrator {
     pos: u64,
     measured: u64,
     acc: [f64; 3],
+    /// Highest C peak² and A Fast mean square so far in the second.
+    max: [f64; 2],
 }
 
 impl SecondIntegrator {
@@ -97,6 +132,7 @@ impl SecondIntegrator {
             pos: 0,
             measured: 0,
             acc: [0.0; 3],
+            max: [0.0; 2],
         }
     }
 
@@ -116,12 +152,16 @@ impl SecondIntegrator {
     }
 
     /// Adds `n` measured samples (at most [`Self::room`]) whose Σy² per weighting of
-    /// [`WEIGHTINGS`] is `energy`; a completed second goes to `emit`.
+    /// [`WEIGHTINGS`] is `energy` and whose highest C peak² and A Fast mean square are
+    /// `max`; a completed second goes to `emit`.
     #[inline]
-    pub fn add(&mut self, energy: [f64; 3], n: u64, emit: &mut impl FnMut(Second)) {
+    pub fn add(&mut self, energy: [f64; 3], max: [f64; 2], n: u64, emit: &mut impl FnMut(Second)) {
         debug_assert!(n <= self.room());
         for (a, e) in self.acc.iter_mut().zip(energy) {
             *a += e;
+        }
+        for (a, m) in self.max.iter_mut().zip(max) {
+            *a = a.max(m);
         }
         self.measured += n;
         self.pos += n;
@@ -135,8 +175,11 @@ impl SecondIntegrator {
         emit(Second {
             energy: [self.acc[0] / fs, self.acc[1] / fs, self.acc[2] / fs],
             measured: self.measured as f64 / self.per_second as f64,
+            c_peak_sq: self.max[0],
+            af_max_ms: self.max[1],
         });
         self.acc = [0.0; 3];
+        self.max = [0.0; 2];
         self.measured = 0;
         self.pos = 0;
     }
@@ -473,6 +516,8 @@ impl RollingLeq {
                         o.energy[2] + s.energy[2],
                     ],
                     measured: o.measured + s.measured,
+                    c_peak_sq: o.c_peak_sq.max(s.c_peak_sq),
+                    af_max_ms: o.af_max_ms.max(s.af_max_ms),
                 },
                 None => s,
             });
@@ -798,6 +843,51 @@ pub fn judge_window(
             on_course: false,
         },
     })
+}
+
+/// Seconds a peak limit is judged over: its level is the highest LCpeak (LAFmax) of the
+/// newest this many seconds. A peak is an instant: judged on its own second it would be
+/// over for one second and back the next, too short to be seen from a desk and a flicker
+/// with every kick drum near the limit. Held this long, the same dwell as
+/// [`RELEASE_HOLD_S`], one peak over keeps the state over long enough to be noticed, and
+/// peaks recurring within the hold keep it over without toggling.
+pub const PEAK_HOLD_S: usize = 10;
+
+/// The newest [`PEAK_HOLD_S`] seconds' LCpeak and LAFmax. No allocation.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PeakHold {
+    ring: [[f64; 2]; PEAK_HOLD_S],
+    head: usize,
+    len: usize,
+}
+
+impl PeakHold {
+    /// Adds the newest second (a gap adds nothing: its maxima are zero).
+    pub fn push(&mut self, s: &Second) {
+        self.ring[self.head] = [s.c_peak_sq, s.af_max_ms];
+        self.head = (self.head + 1) % PEAK_HOLD_S;
+        self.len = (self.len + 1).min(PEAK_HOLD_S);
+    }
+
+    /// Forgets every second.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The highest LCpeak and LAFmax over the seconds held, dBFS; NaN before any second,
+    /// −∞ when none of them had signal.
+    pub fn max_dbfs(&self) -> [f64; 2] {
+        if self.len == 0 {
+            return [f64::NAN; 2];
+        }
+        let mut m = [0.0f64; 2];
+        for k in 0..self.len {
+            let i = (self.head + PEAK_HOLD_S - 1 - k) % PEAK_HOLD_S;
+            m[0] = m[0].max(self.ring[i][0]);
+            m[1] = m[1].max(self.ring[i][1]);
+        }
+        m.map(power_dbfs)
+    }
 }
 
 /// A judged state is lowered at once only when its level is this far under the state's

@@ -415,6 +415,7 @@ mod tests {
                         time_weighting: TimeWeighting::Fast,
                         peak_weighting: PeakWeighting::C,
                         leq: ac2_proto::model::LeqConfig::default_windows(),
+                        position: None,
                     },
                 },
             },
@@ -438,7 +439,10 @@ mod tests {
             laeq: Dbfs(-30.0 - (k % 17) as f64 * 0.37),
             lceq: Dbfs(-28.0),
             lzeq: Dbfs(-27.0),
+            lcpeak: Dbfs(-12.0),
+            lafmax: Dbfs(-25.0),
             sensitivity: Some(Db(120.0)),
+            position: None,
         }
     }
 
@@ -534,7 +538,7 @@ mod tests {
         assert_eq!(restore(&dir).expect("restore").data.saved_at, WallNs(1));
         let fresh = root.path().join("fresh");
         fs::create_dir_all(fresh.join("spl")).expect("dir");
-        fs::write(fresh.join("spl/1-5.csv"), b"# ac2 spl log v1\n").expect("log");
+        fs::write(fresh.join("spl/1-5.csv"), b"# ac2 spl log v2\n").expect("log");
         assert!(restore(&fresh).is_none());
         assert!(fresh.exists());
     }
@@ -782,6 +786,7 @@ mod tests {
                             time_weighting: TimeWeighting::Fast,
                             peak_weighting: PeakWeighting::C,
                             leq: ac2_proto::model::LeqConfig::default_windows(),
+                            position: None,
                         },
                     },
                 },

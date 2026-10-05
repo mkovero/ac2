@@ -95,6 +95,7 @@ async fn spl_watch_reads_its_input_on_a_fresh_meter() {
                         time_weighting: TimeWeighting::Fast,
                         peak_weighting: PeakWeighting::C,
                         leq: ac2_proto::model::LeqConfig::default_windows(),
+                        position: None,
                     },
                 },
             },

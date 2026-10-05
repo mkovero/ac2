@@ -4372,7 +4372,7 @@ fn leq_data_logged(
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::frame::{Frame, FrameData, LeqFrame, LeqMeta, LeqRun};
     let n = 5;
-    let data = FrameData::Leq(LeqFrame {
+    let data = FrameData::Leq(Box::new(LeqFrame {
         meas: MeasId(4),
         meta: LeqMeta {
             scale: LevelScale::DbSpl,
@@ -4396,6 +4396,9 @@ fn leq_data_logged(
                 lceq: f64::from(leq) + 3.0,
                 lzeq: f64::from(leq) + 5.0,
             }),
+            lcpeak: None,
+            lafmax: None,
+            position: None,
         },
         leq: vec![leq; n],
         elapsed: vec![60.0; n],
@@ -4405,7 +4408,7 @@ fn leq_data_logged(
         least: vec![leq; n],
         over_in: vec![f32::NAN; n],
         flags: vec![flags; n],
-    });
+    }));
     let mut stamp = ac2_proto::samples::stamp(None);
     stamp.seq = seq;
     stamp.capture_wall_ns = WallNs(at_s * 1_000_000_000);
@@ -4723,17 +4726,30 @@ fn leq_history_and_alarm_toasts() {
     let mut s = with_spl();
     let old = LeqAlarm {
         at: WallNs(5),
-        duration: Seconds(1800.0),
-        weighting: Weighting::A,
+        subject: ac2_proto::model::AlarmSubject::Window {
+            duration: Seconds(1800.0),
+            weighting: Weighting::A,
+        },
         kind: LeqAlarmKind::Over,
-        leq: DbSpl(99.4),
+        level: DbSpl(99.4),
         limit: DbSpl(99.0),
+        position: None,
     };
     s.spl_logs = vec![SplLog {
         meas: MeasId(4),
         started_at: Some(WallNs(1)),
         windows: vec![],
         alarms: vec![old],
+        peaks: ac2_proto::model::PeakStates {
+            lcpeak: ac2_proto::model::LeqPeakState {
+                judgement: ac2_proto::model::LeqJudgement::NoLimit,
+                since: ac2_proto::units::WallNs(0),
+            },
+            lafmax: ac2_proto::model::LeqPeakState {
+                judgement: ac2_proto::model::LeqJudgement::NoLimit,
+                since: ac2_proto::units::WallNs(0),
+            },
+        },
     }];
     t.conn(mirror(s.clone()));
     let toasts = t.st.toasts.len();
@@ -4764,7 +4780,7 @@ fn leq_history_and_alarm_toasts() {
     s.spl_logs[0].alarms.push(LeqAlarm {
         at: WallNs(20),
         kind: LeqAlarmKind::Recovered,
-        leq: DbSpl(98.9),
+        level: DbSpl(98.9),
         ..old
     });
     t.conn(mirror(s));
@@ -4854,6 +4870,16 @@ fn a_new_log_or_new_windows_rebuild_the_history() {
         started_at: Some(WallNs(400_000_000_000)),
         windows: vec![],
         alarms: vec![],
+        peaks: ac2_proto::model::PeakStates {
+            lcpeak: ac2_proto::model::LeqPeakState {
+                judgement: ac2_proto::model::LeqJudgement::NoLimit,
+                since: ac2_proto::units::WallNs(0),
+            },
+            lafmax: ac2_proto::model::LeqPeakState {
+                judgement: ac2_proto::model::LeqJudgement::NoLimit,
+                since: ac2_proto::units::WallNs(0),
+            },
+        },
     }];
     t.conn(mirror(s.clone()));
     t.conn(leq_data(600, 1000, 80.0, flags));
@@ -5102,6 +5128,7 @@ fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> Co
             duration: Seconds(60.0),
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            position: None,
         },
     });
     let mut stamp = ac2_proto::samples::stamp(None);

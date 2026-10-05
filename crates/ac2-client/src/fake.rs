@@ -545,10 +545,29 @@ impl Shared {
                     })
             })
             .collect();
+        let peak = |q: ac2_proto::model::PeakQuantity| {
+            let judgement = if config.leq.peaks.get(q).is_some() {
+                LeqJudgement::NotCalibrated
+            } else {
+                LeqJudgement::NoLimit
+            };
+            prev.as_ref()
+                .map(|p| p.peaks.get(q))
+                .filter(|s| s.judgement == judgement)
+                .unwrap_or(ac2_proto::model::LeqPeakState {
+                    judgement,
+                    since: now,
+                })
+        };
+        let peaks = ac2_proto::model::PeakStates {
+            lcpeak: peak(ac2_proto::model::PeakQuantity::LcPeak),
+            lafmax: peak(ac2_proto::model::PeakQuantity::LafMax),
+        };
         let l = SplLog {
             meas: m.id,
             started_at: prev.as_ref().and_then(|p| p.started_at),
             windows,
+            peaks,
             alarms: prev.map(|p| p.alarms).unwrap_or_default(),
         };
         if self.state.spl_logs.iter().find(|x| x.meas == m.id) != Some(&l) {

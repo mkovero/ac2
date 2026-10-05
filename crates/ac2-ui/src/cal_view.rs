@@ -5,7 +5,8 @@
 //! - ↑/↓ move between lines, PageUp / PageDown a page, Home / End to the first / last;
 //! - ←/→ on an input steps its mic curve: off → 0° → 90° … (applied at once: the
 //!   correction is a display correction, so averages need no reset);
-//! - E on an input opens the electrical calibration dialog ([`crate::electrical_dialog`]);
+//! - C on an input opens the acoustic calibration dialog ([`crate::acoustic_dialog`]: a
+//!   calibrator on the mic), E the electrical one ([`crate::electrical_dialog`]);
 //! - N names the mic on an input; I imports a curve file for the focused mic (path);
 //!   R renames the focused curve; Delete deletes the focused curve or sensitivity
 //!   calibration (pressed twice);
@@ -17,6 +18,7 @@
 use ac2_proto::cal;
 use ac2_proto::model::{CalKey, CurveChoice, InputSetup, MicCurveId, State};
 
+use crate::acoustic_dialog::AcousticDialog;
 use crate::electrical_dialog::ElectricalDialog;
 
 /// One line of the view.
@@ -95,9 +97,9 @@ pub enum CalAction {
     DeleteCurve(MicCurveId),
     /// `cal.delete`.
     DeleteSensitivity(CalKey),
-    /// `cal.spl_electrical` from the electrical calibration dialog; the reply comes back by
+    /// `cal.spl` or `cal.spl_electrical` from a calibration dialog; the reply comes back by
     /// `what`.
-    Electrical(ac2_proto::Command, String),
+    Calibrate(ac2_proto::Command, String),
 }
 
 /// The view's own state: focus, a typed edit, a pending deletion.
@@ -111,6 +113,8 @@ pub struct CalView {
     pub error: Option<String>,
     /// The electrical calibration dialog, over the view.
     pub electrical: Option<ElectricalDialog>,
+    /// The acoustic calibration dialog, over the view.
+    pub acoustic: Option<AcousticDialog>,
 }
 
 fn input_no(c: u16) -> u32 {
@@ -224,9 +228,38 @@ impl CalView {
         true
     }
 
-    /// Typing goes to a typed edit or the electrical dialog.
+    /// Typing goes to a typed edit or a calibration dialog.
     pub fn typing(&self) -> bool {
-        self.edit.is_some() || self.electrical.is_some()
+        self.edit.is_some() || self.electrical.is_some() || self.acoustic.is_some()
+    }
+
+    /// Closes an open calibration dialog (Esc); `false` when none was open.
+    pub fn close_dialog(&mut self) -> bool {
+        self.electrical.take().is_some() || self.acoustic.take().is_some()
+    }
+
+    /// C on an input of the open session: the acoustic calibration dialog (the mic named
+    /// there, or typed in it).
+    pub fn start_acoustic(&mut self, s: &State) -> bool {
+        self.clear();
+        let Some(CalLine::Input(c)) = self.focused(s) else {
+            self.notice = Some("C calibrates an input with a calibrator: on an input line".into());
+            return false;
+        };
+        let captured = s
+            .session
+            .open
+            .as_ref()
+            .is_some_and(|o| o.config.input_channels.contains(&c));
+        if !captured {
+            self.notice = Some(format!(
+                "input {} is not in the open session: a calibration reads the input live",
+                input_no(c)
+            ));
+            return false;
+        }
+        self.acoustic = Some(AcousticDialog::new(s, c));
+        true
     }
 
     /// E on an input of the open session with a mic name: the electrical calibration
@@ -263,6 +296,13 @@ impl CalView {
     /// A command's reply: the electrical dialog's own closes it on success and says what
     /// to do next.
     pub fn reply(&mut self, what: &str, result: &Result<(), String>) {
+        if let Some(d) = &mut self.acoustic
+            && d.reply(what, result)
+        {
+            let after = ac2_scene::cal::acoustic_after();
+            self.notice = Some(format!("{what}: stored. {after}"));
+            self.acoustic = None;
+        }
         let Some(d) = &mut self.electrical else {
             return;
         };
@@ -324,7 +364,9 @@ impl CalView {
     }
 
     pub fn type_text(&mut self, t: &str) {
-        if let Some(d) = &mut self.electrical {
+        if let Some(d) = &mut self.acoustic {
+            d.type_text(t);
+        } else if let Some(d) = &mut self.electrical {
             d.type_text(t);
         } else if let Some(e) = &mut self.edit {
             e.text.extend(t.chars().filter(|c| !c.is_control()));
@@ -333,7 +375,9 @@ impl CalView {
     }
 
     pub fn backspace(&mut self) {
-        if let Some(d) = &mut self.electrical {
+        if let Some(d) = &mut self.acoustic {
+            d.backspace();
+        } else if let Some(d) = &mut self.electrical {
             d.backspace();
         } else if let Some(e) = &mut self.edit {
             e.text.pop();

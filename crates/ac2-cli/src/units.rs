@@ -515,9 +515,85 @@ impl FromStr for LeqLimitArg {
     }
 }
 
+/// A peak limit: `lcpeak=135db`, `lafmax=125db`; `lcpeak=none` removes it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PeakLimitArg {
+    pub quantity: ac2_proto::model::PeakQuantity,
+    pub limit: Option<DbSpl>,
+}
+
+impl FromStr for PeakLimitArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        use ac2_proto::model::PeakQuantity;
+        let Some((q, l)) = s.split_once('=') else {
+            return fail(format!(
+                "{s:?}: expected lcpeak=LIMIT or lafmax=LIMIT, e.g. lcpeak=135db (or =none)"
+            ));
+        };
+        let quantity = match q.trim().to_lowercase().as_str() {
+            "lcpeak" => PeakQuantity::LcPeak,
+            "lafmax" => PeakQuantity::LafMax,
+            other => return fail(format!("{other:?}: a peak limit is on lcpeak or lafmax")),
+        };
+        let limit = if l.trim().eq_ignore_ascii_case("none") {
+            None
+        } else {
+            Some(l.parse::<SplLevel>()?.0)
+        };
+        Ok(Self { quantity, limit })
+    }
+}
+
+/// A measuring-position correction: `4db`, `-2.5db`, or `none`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PositionArg(pub Option<Db>);
+
+impl FromStr for PositionArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        if s.trim().eq_ignore_ascii_case("none") {
+            return Ok(Self(None));
+        }
+        let (n, u) = split(s)?;
+        if u != "db" {
+            return need_unit(s, &u, "db");
+        }
+        let max = ac2_proto::model::PositionCorrection::MAX_DB;
+        Ok(Self(Some(Db(in_range(
+            s,
+            n,
+            -max,
+            max,
+            "position correction",
+        )?))))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peak_limits_and_positions() {
+        use ac2_proto::model::PeakQuantity;
+        let p: PeakLimitArg = ok("lcpeak=135db");
+        assert_eq!(
+            (p.quantity, p.limit),
+            (PeakQuantity::LcPeak, Some(DbSpl(135.0)))
+        );
+        let p: PeakLimitArg = ok("LAFmax=none");
+        assert_eq!((p.quantity, p.limit), (PeakQuantity::LafMax, None));
+        for bad in ["lzpeak=130db", "lcpeak", "lcpeak=135"] {
+            assert!(bad.parse::<PeakLimitArg>().is_err(), "{bad}");
+        }
+        assert_eq!(ok::<PositionArg>("4db").0, Some(Db(4.0)));
+        assert_eq!(ok::<PositionArg>("-2.5 dB").0, Some(Db(-2.5)));
+        assert_eq!(ok::<PositionArg>("none").0, None);
+        for bad in ["4", "31db", "4dbfs"] {
+            assert!(bad.parse::<PositionArg>().is_err(), "{bad}");
+        }
+    }
 
     fn ok<T: FromStr<Err = UnitError>>(s: &str) -> T {
         match s.parse::<T>() {

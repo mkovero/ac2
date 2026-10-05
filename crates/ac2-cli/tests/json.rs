@@ -243,8 +243,10 @@ async fn session_meas_delay_trace_flow() -> R {
                         "windows": ([60.0, 300.0, 600.0, 1800.0, 3600.0].map(|d| json!({
                             "duration": d, "weighting": "a", "limit": null, "warn_margin": 3.0
                         }))),
-                        "horizon": 60.0
-                    }
+                        "horizon": 60.0,
+                        "peaks": { "lcpeak": null, "lafmax": null }
+                    },
+                    "position": null
                 }}
             },
             "config_rev": 2,

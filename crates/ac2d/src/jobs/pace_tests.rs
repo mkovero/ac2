@@ -321,6 +321,7 @@ fn spl() -> Spl {
             time_weighting: TimeWeighting::Fast,
             peak_weighting: PeakWeighting::Z,
             leq: LeqConfig::default_windows(),
+            position: None,
         },
         FS,
         0,
@@ -331,6 +332,7 @@ fn spl() -> Spl {
             log: Arc::new(Mutex::new(crate::leq_log::LeqLog::default())),
             to_control,
             judgements: Vec::new(),
+            peak_judgements: [ac2_proto::model::LeqJudgement::NoLimit; 2],
         },
     )
     .expect("spl")

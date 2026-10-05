@@ -247,7 +247,7 @@ async fn leq_set_watch_and_export() {
     assert!(n >= 12, "{summary}");
     let csv = std::fs::read_to_string(&file).unwrap();
     let mut it = csv.lines();
-    assert_eq!(it.next(), Some("# ac2 spl log v1"));
+    assert_eq!(it.next(), Some("# ac2 spl log v2"));
     assert!(csv.contains("# name: FOH SPL"));
     assert!(csv.contains("# mic: M30"));
     let rows: Vec<&str> = csv
@@ -366,6 +366,57 @@ async fn leq_set_watch_and_export() {
         assert_eq!(w0["judgement"], "over", "{w0}");
         assert_eq!(w0["on_course"], false, "{w0}");
     }
+
+    // A peak limit and a measuring-position correction: the tone's LCpeak is 97 dB, +1 dB
+    // for the peaks' position makes 98, over a 96 dB limit; the windows read 94 + 3 dB,
+    // said in the JSON; the log keeps the 94 dB measured and the correction beside it.
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "leq",
+            "set",
+            "--peak-limit",
+            "lcpeak=96db",
+            "--position",
+            "3db",
+            "--position-peak",
+            "1db",
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let set = document(&text);
+    let cfg = &set["config"]["kind"]["config"];
+    assert_eq!(cfg["leq"]["peaks"]["lcpeak"]["limit"], 96.0);
+    assert_eq!(cfg["position"]["level"], 3.0);
+    assert_eq!(cfg["position"]["peak"], 1.0);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (code, text) = run(&ep, &["spl", "leq", "watch", "--for", "2.5s"]).await;
+    assert_eq!(code, 0, "{text}");
+    let last = lines(&text)
+        .into_iter()
+        .rev()
+        .find(|v| v["peaks"].is_array())
+        .expect("a line with the peaks");
+    assert_eq!(
+        last["position_text"], "corrected +3.0 dB, peaks +1.0 dB",
+        "{last}"
+    );
+    let p = &last["peaks"][0];
+    assert_eq!(p["name"], "LCpeak", "{p}");
+    assert_eq!(p["judgement"], "over", "{p}");
+    assert!((p["level"].as_f64().unwrap() - 98.0).abs() < 0.3, "{p}");
+    assert_eq!(p["text"]["unit"], "dB(C) corr.", "{p}");
+    assert_eq!(p["text"]["held"], "highest of the last 10 s", "{p}");
+    let w0 = &last["windows"][0];
+    assert!((w0["leq"].as_f64().unwrap() - 97.0).abs() < 0.3, "{w0}");
+    let (code, csv) = run(&ep, &["spl", "leq", "export"]).await;
+    assert_eq!(code, 0);
+    let f: Vec<&str> = csv.lines().last().unwrap().split(',').collect();
+    assert!((f[4].parse::<f64>().unwrap() - 94.0).abs() < 0.2, "{f:?}");
+    assert!((f[7].parse::<f64>().unwrap() - 97.0).abs() < 0.2, "{f:?}");
+    assert_eq!((f[10], f[11]), ("3.0000", "1.0000"), "{f:?}");
 
     lease.end().await.unwrap();
     drop(c);

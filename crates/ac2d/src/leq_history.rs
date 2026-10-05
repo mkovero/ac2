@@ -65,7 +65,11 @@ pub(crate) fn history(
     let mut latches = vec![Latch::default(); n];
     for r in rows {
         replay.push(r.start.0, row_second(r));
-        let offset = r.sensitivity.map(|s| s.0);
+        // In the unit the frames carried: the sensitivity and the position correction in
+        // force then.
+        let offset = r
+            .sensitivity
+            .map(|s| s.0 + r.position.map_or(0.0, |p| p.level.0));
         let windows = replay.windows();
         let over: Vec<bool> = cfg
             .windows
@@ -93,11 +97,14 @@ pub(crate) fn history(
         if !replay.settled() {
             continue;
         }
-        let s = if offset.is_some() {
-            LevelScale::DbSpl
-        } else {
-            LevelScale::Dbfs
-        };
+        let s = (
+            if offset.is_some() {
+                LevelScale::DbSpl
+            } else {
+                LevelScale::Dbfs
+            },
+            r.position.filter(|_| offset.is_some()),
+        );
         if scale != Some(s) {
             // A change of unit starts the history over, as it does for a client live.
             h.at.clear();
@@ -120,7 +127,7 @@ pub(crate) fn history(
         h.leq.iter_mut().for_each(|v| drop(v.drain(..from)));
         h.over.iter_mut().for_each(|v| drop(v.drain(..from)));
     }
-    h.scale = scale.unwrap_or(LevelScale::Dbfs);
+    h.scale = scale.map_or(LevelScale::Dbfs, |s| s.0);
     h
 }
 
@@ -148,6 +155,7 @@ mod tests {
                 w(300.0, Weighting::A, Some(85.0)),
             ],
             horizon: Seconds(30.0),
+            peaks: Default::default(),
         }
     }
 
@@ -175,7 +183,10 @@ mod tests {
                 laeq: Dbfs(a),
                 lceq: Dbfs(a + 4.0),
                 lzeq: Dbfs(a + 6.0),
+                lcpeak: Dbfs(a + 15.0),
+                lafmax: Dbfs(a + 3.0),
                 sensitivity: Some(Db(120.0)),
+                position: None,
             });
         }
         v
