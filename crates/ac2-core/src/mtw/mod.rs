@@ -1,9 +1,17 @@
 //! Multi-time-window (MTW) dual-channel H1 / coherence engine (PLAN.md §5.1).
 //!
 //! # Pipeline
-//! 1. **Alignment** at full rate by one signed integer delay ([`Mtw::set_delay`]). Changing
-//!    the delay restarts the whole ladder (the decimators and block grid are defined on the
-//!    aligned stream).
+//! 1. **Alignment** at full rate by a signed delay in samples ([`Mtw::set_delay`]): the
+//!    whole-sample part shifts the reference in the time domain before decimation, so the
+//!    windows of both channels cover the same sound however large the delay; the fraction
+//!    (|φ| ≤ ½ sample) rotates each block's cross-spectrum by `e^{j2πfφ/fs}`, which is
+//!    exact in phase and leaves a window misalignment far too small to bias anything.
+//!    A delay change keeps the stream running: the reference is spliced to the new
+//!    alignment, blocks straddling the splice are dropped, and each stage keeps its averages
+//!    (rotated to the new delay) while its held blocks' window misalignment against the new
+//!    delay stays within [`KEEP_MIN_WINDOW_CORRELATION`]; stages beyond that start over, and
+//!    when no stage can keep held blocks the ladder restarts
+//!    (`docs/design/delay-no-resettle.md`).
 //! 2. **Stages** ([`Layout`]): full rate plus ~12 kHz and ~4 kHz stages, factor
 //!    `round(sr / target)`, all at NFFT 4096 with 50 / 75 / 87.5 % overlap. Each decimated
 //!    stage is fed independently from the aligned full-rate pair by a Kaiser FIR (90 dB)
@@ -50,8 +58,64 @@ pub struct MtwConfig {
     pub depth: DepthPolicy,
     /// Output grid (48 ppo base-2 for the display).
     pub grid: LogGrid,
-    /// Alignment delay in full-rate samples; positive = measurement late.
-    pub delay_samples: i64,
+    /// Alignment delay in full-rate samples, fractions allowed; positive = measurement late.
+    pub delay_samples: f64,
+}
+
+/// Normalised correlation `Σ w[n]·w[n+r] / Σ w²` of a stage's Hann window with itself
+/// shifted by `r` that every held block must keep for a delay change to rotate the stage's
+/// averages instead of starting the stage over. A block whose windows were cut `r` samples
+/// off the new alignment carries its cross-spectrum scaled by this correlation (white-noise
+/// model), so 0.995 bounds the bias at −0.044 dB in |H1| and ×0.990 in γ². For the NFFT 4096
+/// Hann window it allows 112 stage samples (2.7 % of the window): 112 samples at full rate
+/// and the decimation factor times that on the deeper stages.
+pub const KEEP_MIN_WINDOW_CORRELATION: f64 = 0.995;
+
+/// What a delay change did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DelayChange {
+    /// The ladder restarted: every stage settles from scratch.
+    pub restarted: bool,
+    /// Bit `s` set: stage `s` kept its averages, rotated to the new delay. A stage that
+    /// held no blocks counts as kept.
+    pub kept: u32,
+}
+
+impl DelayChange {
+    /// Whether stage `stage` kept its averages.
+    pub fn kept(&self, stage: usize) -> bool {
+        !self.restarted && self.kept & (1 << stage) != 0
+    }
+}
+
+/// Whole-sample part (nearest, so the fraction is within ±½) and fraction of a delay.
+fn split_delay(d: f64) -> (i64, f64) {
+    let whole = d.round();
+    (whole as i64, d - whole)
+}
+
+/// Largest shift, in samples, at which `window` keeps a normalised self-correlation of at
+/// least `min` (for Hann the correlation falls monotonically with the shift).
+fn keep_lag(window: &[f64], min: f64) -> usize {
+    let e2: f64 = window.iter().map(|v| v * v).sum();
+    let rho = |r: usize| {
+        window
+            .iter()
+            .zip(&window[r..])
+            .map(|(a, b)| a * b)
+            .sum::<f64>()
+            / e2
+    };
+    let (mut lo, mut hi) = (0, window.len() - 1);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if rho(mid) >= min {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
 }
 
 /// Configuration errors.
@@ -63,6 +127,8 @@ pub enum ConfigError {
     InvalidAveraging(Averaging),
     /// A `FastLf` span cap that is not positive and finite.
     InvalidDepthPolicy(DepthPolicy),
+    /// A delay that is not finite.
+    InvalidDelay(f64),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -71,6 +137,7 @@ impl std::fmt::Display for ConfigError {
             ConfigError::Layout(e) => write!(f, "{e}"),
             ConfigError::InvalidAveraging(a) => write!(f, "invalid averaging {a:?}"),
             ConfigError::InvalidDepthPolicy(p) => write!(f, "invalid depth policy {p:?}"),
+            ConfigError::InvalidDelay(d) => write!(f, "invalid delay {d} samples"),
         }
     }
 }
@@ -268,6 +335,9 @@ pub struct StageDepth {
 #[derive(Debug)]
 struct StageRuntime {
     spec: StageSpec,
+    /// Largest window misalignment, in full-rate samples, at which a delay change keeps this
+    /// stage's averages.
+    keep_lag: f64,
     averaging: StageAveraging,
     capped: bool,
     decimator: Option<PairDecimator>,
@@ -313,12 +383,16 @@ impl Mtw {
             .map(|s| OverlapModel::new(&crate::window::Window::Hann.coefficients(s.nfft), s.hop))
             .collect();
         let per_stage = stage_averaging(&layout, &models, config.averaging, config.depth)?;
-        let stages = layout
+        let stages: Vec<StageRuntime> = layout
             .stages
             .iter()
             .zip(per_stage)
             .zip(models)
             .map(|((spec, (averaging, capped)), model)| StageRuntime {
+                keep_lag: (keep_lag(
+                    &crate::window::Window::Hann.coefficients(spec.nfft),
+                    KEEP_MIN_WINDOW_CORRELATION,
+                ) * spec.factor) as f64,
                 decimator: spec
                     .decimator
                     .as_ref()
@@ -330,8 +404,18 @@ impl Mtw {
             })
             .collect();
         let plan = column_plan(&layout, &config.grid);
-        Ok(Self {
-            aligner: align::Aligner::new(config.delay_samples),
+        if !config.delay_samples.is_finite() {
+            return Err(ConfigError::InvalidDelay(config.delay_samples));
+        }
+        // A splice to a larger delay reaches back at most as far as the deepest stage can
+        // keep its averages; any further and every stage starts over anyway.
+        let history = stages
+            .iter()
+            .map(|s| s.keep_lag as usize)
+            .max()
+            .unwrap_or(0);
+        let mut m = Self {
+            aligner: align::Aligner::new(split_delay(config.delay_samples).0, history),
             config,
             layout,
             stages,
@@ -344,7 +428,9 @@ impl Mtw {
             deint_r: Vec::new(),
             deint_m: Vec::new(),
             neff_memo: Vec::new(),
-        })
+        };
+        m.restart();
+        Ok(m)
     }
 
     /// The configuration in force.
@@ -397,11 +483,87 @@ impl Mtw {
         self.stages[stage].est.neff(bins)
     }
 
-    /// Change the alignment delay. Restarts the ladder: the block grid and decimator phase
-    /// are defined on the aligned stream. (A later improvement may avoid the resettle.)
-    pub fn set_delay(&mut self, delay_samples: i64) {
+    /// Largest window misalignment, in full-rate samples, at which a delay change keeps
+    /// stage `stage`'s averages ([`KEEP_MIN_WINDOW_CORRELATION`]).
+    pub fn keep_lag(&self, stage: usize) -> f64 {
+        self.stages[stage].keep_lag
+    }
+
+    /// Change the alignment delay (full-rate samples, fractions allowed). A delay that is
+    /// not finite is ignored.
+    ///
+    /// The stream is not restarted: from the next pair on the reference is taken at the new
+    /// whole-sample delay, blocks straddling that splice never enter an average, and new
+    /// blocks get the new fraction's rotation. A stage keeps its averages, rotated by
+    /// `e^{j2πfΔ/fs}` so that they read as measured at the new delay, while the window of
+    /// every held block lies within [`Mtw::keep_lag`] of the new alignment; otherwise it
+    /// starts over (framing continues). When no stage can keep held blocks, or the reference
+    /// history does not reach back far enough, the whole ladder restarts.
+    pub fn set_delay(&mut self, delay_samples: f64) -> DelayChange {
+        let all = (1u32 << self.stages.len()) - 1;
+        let old = self.config.delay_samples;
+        if !delay_samples.is_finite() || delay_samples == old {
+            return DelayChange {
+                restarted: false,
+                kept: all,
+            };
+        }
         self.config.delay_samples = delay_samples;
-        self.restart();
+        let restarted = DelayChange {
+            restarted: true,
+            kept: 0,
+        };
+        let (whole_old, _) = split_delay(old);
+        let (whole, frac) = split_delay(delay_samples);
+        let mut kept = 0u32;
+        let mut keeps_blocks = false;
+        for (i, s) in self.stages.iter().enumerate() {
+            let held = s.est.held() > 0;
+            if !held || s.est.max_misalignment(delay_samples) <= s.keep_lag {
+                kept |= 1 << i;
+                keeps_blocks |= held;
+            }
+        }
+        if !keeps_blocks {
+            self.restart();
+            return restarted;
+        }
+        if whole != whole_old {
+            let Some(p0) = self.aligner.splice(whole) else {
+                self.restart();
+                return restarted;
+            };
+            for (i, s) in self.stages.iter_mut().enumerate() {
+                // Stage sample j depends on pairs [j·M, j·M + L): those with
+                // j·M < p0 < j·M + L mix both alignments. At full rate there are none, and
+                // the empty cut at p0 still drops every block with samples on both sides.
+                let m = s.spec.factor as u64;
+                let l = s.spec.filter_len() as u64;
+                let lo = (p0 + 1).saturating_sub(l).div_ceil(m);
+                let hi = p0.div_ceil(m).max(lo);
+                s.est.cut(lo, hi);
+                if kept & (1 << i) != 0 && !s.est.begin_segment(whole) {
+                    kept &= !(1 << i);
+                }
+            }
+        }
+        let delta = delay_samples - old;
+        for (i, s) in self.stages.iter_mut().enumerate() {
+            // A delay of d full-rate samples is d / M stage samples: e^{j2πk·d/(M·N)} at bin k.
+            let per_bin = 1.0 / (s.spec.factor * s.spec.nfft) as f64;
+            if kept & (1 << i) != 0 {
+                s.est.rotate_averages(delta * per_bin);
+            } else {
+                s.est.reset_averages(s.averaging);
+                s.est.begin_segment(whole);
+            }
+            s.est.set_block_rotation(frac * per_bin);
+        }
+        self.neff_memo.clear();
+        DelayChange {
+            restarted: false,
+            kept,
+        }
     }
 
     /// Change averaging. Clears the averages; framing continues.
@@ -453,13 +615,18 @@ impl Mtw {
         self.neff_memo.clear();
     }
 
-    fn restart(&mut self) {
-        self.aligner.reset(self.config.delay_samples);
+    /// Restart the ladder at the current delay: alignment, decimators, framing and averages
+    /// start over, as after a gap in the stream.
+    pub fn restart(&mut self) {
+        let (whole, frac) = split_delay(self.config.delay_samples);
+        self.aligner.reset(whole);
         for s in &mut self.stages {
             if let Some(d) = &mut s.decimator {
                 d.reset();
             }
-            s.est.reset_stream(s.averaging);
+            s.est.reset_stream(s.averaging, whole);
+            s.est
+                .set_block_rotation(frac / (s.spec.factor * s.spec.nfft) as f64);
         }
         self.neff_memo.clear();
     }

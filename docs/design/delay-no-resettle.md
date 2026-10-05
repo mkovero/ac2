@@ -1,0 +1,178 @@
+# Delay change without a full resettle; sub-sample delay
+
+Status: implemented (`ac2_core::mtw` — `Mtw::set_delay`, `KEEP_MIN_WINDOW_CORRELATION`,
+the aligner's splice; `delay.nudge`; `applied_samples` fractional; the app's Ctrl / Alt +
+`,` `.` keys; `ac2 delay nudge`). Answers PLAN.md §3.3 "Delay change without full ladder
+resettle; sub-sample delay" and the §12 risk "MTW resettle on delay change (~2.4 s)".
+Tests: `crates/ac2-core/tests/mtw_delay.rs` (analytic systems), the aligner's splice test,
+`crates/ac2d/tests/transfer.rs` (daemon), `crates/ac2-ui/src/state_tests.rs` (keys).
+
+## What the operator gets
+
+Changing a measurement's delay used to restart the whole MTW ladder: every stage went back
+to *settling* and the curve was untrustworthy for about 2.4 s (the deepest stage's fill).
+Now:
+
+- **Ctrl+,** / **Ctrl+.** move the delay by one sample, **Alt+,** / **Alt+.** by a tenth
+  (`delay.nudge`, `ac2 delay nudge main-l -0.25samples`). The phase moves at once — no
+  block needs to arrive — and no column goes back to settling.
+- Delays carry fractions of a sample everywhere: the finder's fractional estimate is
+  inserted exactly, `ac2 delay set main-l 600.25samples` works, the measurement list shows
+  the delay to the microsecond when it has a fine part (`12.502 ms`), a captured trace records the exact value.
+- A larger correction keeps what it can: each stage keeps its averages while the change is
+  small next to its window (at 48 kHz: 2.4 ms at full rate, 9.4 ms on the 12 kHz stage,
+  28 ms on the 4 kHz stage); only the stages beyond that settle again. Beyond every stage's
+  limit (a fresh insert from 0, a wrong arrival corrected) the ladder restarts as before.
+
+The per-trace display nudge (`,` `.`, decision 8a) is unchanged: it shifts how a trace is
+drawn; the new keys change what the measurement aligns to.
+
+## The two halves of a delay
+
+The delay `D` (full-rate samples) is split into the nearest whole number `D₀` and a fraction
+`φ = D − D₀`, |φ| ≤ ½.
+
+- **Whole samples in the time domain, before decimation** (as before, PLAN §5.1): pair `n`
+  is `(x[n − D₀], y[n])`. Both channels' windows then cover the same sound however large the
+  delay, so the coherence is not biased by a window offset (PLAN §1.2: phase rotation alone
+  is biased for large delays). Unchanged regression: "large delay doesn't bias coherence"
+  still holds bit for bit for whole-sample delays.
+- **The fraction as a phase rotation of each new block's cross-spectrum**,
+  `G_xy ← G_xy · e^{j2πfφ/fs}` (f the bin's frequency in Hz, the same formula on every
+  stage: `e^{j2πkφ/(M·N)}` at bin k of a stage decimated by M). For a block whose windows
+  are offset by `r` samples, the expected cross-spectrum of white input is exactly
+  `e^{−j2πfr/fs} · ρ(r) · G_xx` with `ρ(r) = Σ w[n]·w[n+r] / Σ w²` real — the rotation
+  removes the phase exactly and leaves only `ρ`. With |φ| ≤ ½,
+  `1 − ρ(½) ≈ 6.6·(½/4096)² = 1.6·10⁻⁸`: nothing.
+
+### Rotation vs a fractional-delay FIR
+
+| | rotation of G_xy (chosen) | fractional-delay FIR on the reference |
+|---|---|---|
+| phase accuracy to 0.45·fs | exact in expectation; measured per-bin scatter ≤ 0.03° (window offset ≤ ½ sample) | set by the design: a windowed sinc flat to 0.1° and 0.01 dB up to 0.45·fs needs ~64 taps or more; band edge is the hard part |
+| magnitude | untouched | FIR ripple and roll-off near 0.45·fs (enters H1 directly: only the reference is filtered) |
+| cost | one complex multiply per bin per block, folded into the cross-spectrum loop (≈ 0.1 M cmul/s at 48 kHz) | ≥ 64 MAC per reference sample at full rate (≥ 3 M MAC/s at 48 kHz) plus its group delay |
+| on a change | new phasor table (N/2+1 sin/cos per stage) | filter state transient through every decimator |
+
+The FIR would also have to be applied before the decimators, so a fraction change would
+disturb every stage's stream; the rotation acts per block and per stage. The fraction is
+only ever an alignment parameter here — no audio is produced from it.
+
+## On a delay change: rotate and keep, per stage
+
+Δ = D' − D. Held averages are sums over blocks cut at older whole-sample alignments. A
+stage's held cross-spectra (running sum and, for FIFO, every block in the ring) are rotated
+by `e^{j2πfΔ/fs}`, so they read as if measured at D'. Gxx and Gyy carry no phase and are
+kept as they are. What the rotation cannot undo is each old block's window offset against
+the new alignment: a block cut at `D_b` sits `r = |D' − D_b|` samples off, and (white-noise
+model) contributes its cross-spectrum scaled by `ρ(r/M)` on a stage decimated by M:
+
+- |H1| biased by `20·log10 ρ`, γ² by `ρ²`;
+- extra scatter of H1 like that of a measurement with γ² = ρ² at the stage's effective
+  averages (the unshared part of the two windows behaves as uncorrelated noise).
+
+**Rule.** A stage keeps its averages when every held block with a non-negligible share has
+`ρ(r/M) ≥ KEEP_MIN_WINDOW_CORRELATION = 0.995` (−0.044 dB, γ² × 0.990); otherwise that
+stage starts over (framing continues, it shows *settling* and refills in its own fill
+time). For the NFFT 4096 Hann window this is r ≤ 113 stage samples (2.76 % of the window):
+
+| stage (48 kHz) | M | keeps up to | | at 96 kHz |
+|---|---|---|---|---|
+| full rate | 1 | 113 samples | 2.35 ms | 1.18 ms |
+| ~12 kHz | 4 (8) | 452 samples | 9.4 ms | 9.4 ms |
+| ~4 kHz | 12 (24) | 1356 samples | 28.3 ms | 28.3 ms |
+
+When no stage can keep held blocks the ladder restarts exactly as before.
+
+**Why per stage and not a decaying blend.** The bias of a kept block is fixed by its window
+offset and leaves with the block; a blend would mix the same old blocks with weights that
+model nothing physical, and the effective-averages model could no longer describe the
+estimate. Keep-or-reset per stage leaves every stage's estimate an ordinary average of
+real blocks, with an explicit bound on the old ones' bias.
+
+**Bookkeeping.** Each stage keeps a short list of *segments* — the whole-sample delay its
+blocks were cut at and their averaging weight (FIFO: block count, decremented as blocks
+leave the ring; exponential: decayed weight, dropped below 10⁻³ of the total, which moves
+the average by at most 0.01 dB). The keep test uses the largest offset among them, so
+repeated nudges accumulate honestly: two quick 100-sample steps reset the full-rate stage
+(its oldest blocks are then 200 samples off), but once its average has turned over another
+100-sample step keeps it. A stage needing more than 16 segments is reset instead.
+
+**Honest indication.** A kept stage keeps its block count, so its effective averages
+(`eff_avg`, a model of block overlap and weighting) stay as they were: the blocks are real
+and still averaged. The bias bound above is what the model does not cover; it is small
+next to the coherence the frame reports at the same time (the old blocks' offset shows in
+γ² directly). Reset stages report *settling* until their first new block, exactly as after
+`meas.reset`.
+
+### The splice
+
+The aligner switches to the new whole-sample delay from the next pair without restarting
+the pair stream (`Aligner::splice`): pairs stay contiguous in the measurement index, the
+reference leg keeps a history of the deepest stage's keep limit so that a larger delay
+finds its samples, and a smaller delay just waits for the reference to arrive. Every stage
+sample that mixes both alignments (decimator output j with `j·M < p₀ < j·M + L`) and every
+block holding samples from both sides of the splice is dropped like a rejected block (at
+full rate an empty cut at `p₀`): 2 blocks at full rate, 4 at the 12 kHz stage, 8 at the
+4 kHz stage. A change of the fraction alone needs no splice and drops nothing; blocks
+already buffered are cut at the same whole-sample delay and just get the new phasor.
+
+## Interactions
+
+- **Tracking** compares the finder's whole-sample estimates with the applied delay rounded
+  to the nearest sample; it moves the delay in whole samples (and so, when the arrival
+  moves by a sample or two, without a resettle). A fraction the operator set stays until
+  the arrival moves by a sample or more.
+- **Finder** runs on the raw, unaligned pair: the applied delay never enters it.
+- **IR view**: built from the full-rate stage's averaged H1, whose time origin is now the
+  exact applied delay including the fraction (`IrMeta::inserted_delay`).
+- **Traces** record `TfMeta::delay` = the exact applied delay in seconds; phase comparison
+  (decision 8a) therefore refers overlays to the exact value.
+- **Protocol** (PROTO_VERSION 15): `DelayState::applied_samples` is a float (samples at the
+  session rate, fractions included); `delay.nudge {meas, by: Seconds}` moves the delay by a
+  step (an operator action that keeps the last finding: it refines it). The daemon snaps the
+  delay in samples to 10⁻⁶ sample so whole-sample values stay exactly whole (no rotation is
+  applied to them at all).
+- **Sessions**: the saved form (`applied: Seconds`) is unchanged — the session format does
+  not change; a loaded delay is no longer rounded to whole samples.
+- **TF frame shape** is unchanged (the live spatial average and other consumers see the same
+  frames; the curve just stops going back to settling).
+
+## Validation (`crates/ac2-core/tests/mtw_delay.rs`)
+
+Inputs are periodic and band-limited (period 2¹⁹, nothing at Nyquist), built in the
+frequency domain as `Y_k = X_k·H(f_k)·e^{−j2πf_kτ/fs}`: every sample is exactly the
+analytic system's output for any fractional τ, so expected values are analytic. 48 kHz,
+FIFO 8 (and exponential where marked).
+
+| case | result |
+|---|---|
+| pure delay τ ∈ {37.3, −12.7, 480.5, 0.25}, aligned exactly | per bin of every stage to its served band (0.45·fs at full rate): ≤ 0.028° and 0.0034 dB; γ² ≥ 0.99999 |
+| same, aligned to the nearest whole sample | the fraction's linear phase stays: 48.6° at 0.45·fs for 0.3 samples |
+| nudges +1, −1, −1, +0.3, −0.3, −0.3, +1.3 samples (FIFO and exponential) | every stage kept; each bin's H1 equals the old one × `e^{j2πfΔ/fs}` to 10⁻¹²; per bin vs analytic ≤ 0.06° and 0.009 dB at once, no column settling |
+| peaking-EQ system, nudge +1 and −0.3 | per-bin RMS phase error at once 0.077° / 0.074° / 0.047° (stages 0/1/2) vs a fresh settled measurement's 0.099° / 0.070° / 0.044°; mean magnitude error < 0.0003 dB |
+| whole-sample change | exactly 14 blocks dropped (2 + 4 + 8); fraction-only change drops none |
+| corrected by 300 samples | full-rate stage resets (its columns *settling*), 12 kHz and 4 kHz stages kept: mean bias −0.023 dB and −0.004 dB vs model −0.019 / −0.002 dB |
+| corrected by 113 / 114 samples | 113 keeps the full-rate stage: mean −0.050 dB (model −0.044), mean γ² 0.990; 114 resets it |
+| corrected by 2000 samples | ladder restarts |
+| two quick 100-sample steps, then one after the average turned over (FIFO, exponential) | reset of the full-rate stage on the second, kept on the third |
+
+Unchanged: `partial_coherence_matches_theory_and_large_delay_does_not_bias_it` (bit for
+bit across ±0.2 s), the golden and loopback suites in `tests/mtw.rs`.
+
+## Cost
+
+`crates/ac2-core/tests/mtw_timing.rs` (opt-in, release; this machine was shared with other
+builds, so runs vary by ±30 %): MTW per second of input at 48 kHz — main 2.7–3.9 ms,
+branch 3.9 ms with a whole-sample delay and 3.9 ms with a fraction; at 96 kHz main 4.5–5.9
+ms, branch 5.9 / 5.4 ms: no difference beyond the noise. One kept delay change (rotating
+every held block, FIFO 16 at full rate, all stages) costs ≈ 0.5 ms on the job thread, never
+in the audio callback.
+
+## Open questions
+
+- The 0.995 window-correlation bound is a choice: 0.999 would shrink the keep limits to
+  45 % (50 samples at full rate) and cut the inherited scatter; field use will say
+  whether medium corrections (2–30 ms) should keep the low stages more or less eagerly.
+- Tracking could insert the finder's fractional estimate instead of whole samples once its
+  agreement is sub-sample; it stays whole-sample for now.

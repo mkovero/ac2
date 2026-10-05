@@ -324,6 +324,70 @@ fn empty_embedded_daemon_measures_from_the_app() -> R {
     Ok(())
 }
 
+/// The measurement's own delay from the keys: Ctrl+. a sample later, Alt+, a tenth earlier.
+/// The daemon keeps the averages, so the very next frames carry the new delay with the
+/// 1 kHz column still valid (never back to settling), and the measurement list shows the
+/// delay to the microsecond.
+#[test]
+fn delay_nudges_from_the_keys_keep_the_curve() -> R {
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
+    // The level typed there stays: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.tf_frames(m.id, 240)?;
+    let applied = |s: &AppState| {
+        s.selected_meas()
+            .and_then(|m| m.delay.as_ref())
+            .map(|d| (d.applied.0, d.applied_samples))
+    };
+    let (_, before) = applied(&d.st).ok_or("delay")?;
+    for k in ["Ctrl+.", "Ctrl+.", "Ctrl+.", "Alt+,"] {
+        d.key(k);
+    }
+    let want = before + 2.9;
+    d.until("the nudged delay", |s| {
+        applied(s).is_some_and(|(_, n)| (n - want).abs() < 1e-6)
+    })?;
+    let (secs, _) = applied(&d.st).ok_or("delay")?;
+    let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
+    assert!((secs - want / rate).abs() < 1e-12);
+    assert_eq!(
+        ac2_scene::format::delay(secs),
+        format!("{:.3} ms", want / rate * 1000.0)
+    );
+    let topic = Topic::Data {
+        meas: m.id,
+        stream: Stream::Tf,
+    };
+    d.until("a frame at the new delay, 1 kHz still valid", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Tf(tf) => {
+                    (tf.meta.delay.0 - secs).abs() < 1e-12
+                        && tf.validity[240] == ac2_proto::frame::ValidityMask::NONE
+                }
+                _ => false,
+            })
+        })
+    })?;
+    assert!(
+        d.st.toasts
+            .iter()
+            .any(|t| t.text.ends_with("delay −0.1 sample")),
+        "{:?}",
+        d.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
+    );
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 #[test]
 fn empty_local_daemon_measures_from_the_app() -> R {
     // A stand-alone daemon as `ac2 daemon start` runs it, here on the simulated rig.

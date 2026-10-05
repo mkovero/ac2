@@ -109,7 +109,7 @@ fn engine_with(sr: f64, averaging: Averaging, depth: DepthPolicy, delay: i64) ->
         averaging,
         depth,
         grid: grid48(),
-        delay_samples: delay,
+        delay_samples: delay as f64,
     })
     .expect("engine")
 }
@@ -204,7 +204,7 @@ fn golden_transfer_h1_biquad_delay() {
         averaging: Averaging::Fifo { blocks: 10_000 },
         depth: DepthPolicy::EqualConfidence,
         grid: grid48(),
-        delay_samples: 0,
+        delay_samples: 0.0,
     })
     .expect("engine");
     push_chunked(&mut m, 0, &x, &y);
@@ -1082,7 +1082,7 @@ fn fast_lf_parameter_validation() {
             averaging: Averaging::Fifo { blocks: 8 },
             depth: p,
             grid: grid48(),
-            delay_samples: 0,
+            delay_samples: 0.0,
         });
         assert!(
             matches!(r, Err(ConfigError::InvalidDepthPolicy(_))),

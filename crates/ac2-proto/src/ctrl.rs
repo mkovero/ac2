@@ -226,6 +226,15 @@ pub enum Command {
         /// Delay.
         delay: Seconds,
     },
+    /// Move the applied delay by `by` (either sign, fractions of a sample allowed). The
+    /// transfer function keeps its averages where it can, so the curve moves at once.
+    #[serde(rename = "delay.nudge")]
+    DelayNudge {
+        /// Measurement.
+        meas: MeasId,
+        /// Step.
+        by: Seconds,
+    },
     /// Enable or disable tracking.
     #[serde(rename = "delay.track")]
     DelayTrack {
@@ -516,6 +525,7 @@ impl Command {
             Self::DelayFind { .. } => "delay.find",
             Self::DelayInsert { .. } => "delay.insert",
             Self::DelaySet { .. } => "delay.set",
+            Self::DelayNudge { .. } => "delay.nudge",
             Self::DelayTrack { .. } => "delay.track",
             Self::TraceCapture { .. } => "trace.capture",
             Self::TraceList => "trace.list",

@@ -135,6 +135,17 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Delay change without a full resettle; sub-sample delay (operator, 2026-10-05: "delay change
+without resettle sounds useful too"; `docs/design/delay-no-resettle.md`):
+- **A delay change restarted the whole MTW ladder** (~2.4 s of settling) → the reference is
+  spliced to the new delay and each stage keeps its averages, rotated to it, while its held
+  blocks' window correlation stays ≥ 0.995 (full rate 113 samples, 452 and 1356 on the
+  decimated stages); only the stages beyond that settle again.
+- **Delays were whole samples** → the fraction rotates each block's cross-spectrum (pure
+  delay flat within 0.03° per bin to 0.45·fs); the finder's estimate is inserted exactly;
+  `applied_samples` is fractional, `delay.nudge`, PROTO 15; Ctrl / Alt + `,` `.` move the
+  measurement's delay by 1 / 0.1 sample, `ac2 delay nudge`.
+
 Laptop / Pi performance pass (2026-10-04/05; a0d015d … 9dc4274, PLAN §9.0 has the numbers):
 - **Autosave rewrote the whole SPL log every minute** (≈15 MB/min at 48 h retention) → the
   log is appended to its own file, traces written only when changed (c8406c7); resuming on

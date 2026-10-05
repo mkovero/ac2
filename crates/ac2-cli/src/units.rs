@@ -294,13 +294,14 @@ impl Celsius {
 }
 
 /// A delay given as time, samples or the distance sound travels: `12.5ms`, `600samples`,
-/// `4.3m`. Time may be negative (|t| ≤ 10 s).
+/// `600.25samples`, `4.3m`. Time and samples may be negative (|t| ≤ 10 s); samples may have
+/// a fraction (the analyzer aligns to fractions of a sample).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DelayAmount {
     /// Seconds.
     Time(Seconds),
-    /// Samples at the session rate.
-    Samples(i64),
+    /// Samples at the session rate, fractions allowed.
+    Samples(f64),
     /// Metres of sound travel.
     Distance(f64),
 }
@@ -312,8 +313,14 @@ impl FromStr for DelayAmount {
         if let Some(sec) = seconds_of(n, &u) {
             return Ok(Self::Time(Seconds(in_range(s, sec, -10.0, 10.0, "delay")?)));
         }
-        if let Some(r) = samples_of(s, n, &u) {
-            return r.map(Self::Samples);
+        if matches!(u.as_str(), "samples" | "sample" | "smp") {
+            return Ok(Self::Samples(in_range(
+                s,
+                n,
+                -2_147_483_648.0,
+                2_147_483_648.0,
+                "sample count",
+            )?));
         }
         if let Some(m) = metres_of(n, &u) {
             return Ok(Self::Distance(in_range(s, m, 0.0, 1000.0, "distance")?));
@@ -329,7 +336,7 @@ impl DelayAmount {
         match self {
             Self::Time(t) => Ok(t),
             Self::Samples(n) => match rate_hz {
-                Some(r) if r > 0 => Ok(Seconds(n as f64 / f64::from(r))),
+                Some(r) if r > 0 => Ok(Seconds(n / f64::from(r))),
                 _ => fail("a delay in samples needs an open session (sample rate)"),
             },
             Self::Distance(m) => Ok(Seconds(m / temp.speed_of_sound())),
@@ -571,6 +578,10 @@ mod tests {
             Ok(Seconds(0.01))
         );
         assert!(ok::<DelayAmount>("480samples").seconds(None, c20).is_err());
+        assert_eq!(
+            ok::<DelayAmount>("-0.25samples").seconds(Some(48_000), c20),
+            Ok(Seconds(-0.25 / 48_000.0))
+        );
         let d = ok::<DelayAmount>("3.432m")
             .seconds(None, c20)
             .unwrap_or(Seconds(0.0));

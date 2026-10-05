@@ -294,10 +294,13 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(d["finding"]["confidence"]["psr_db"], 24.0);
     assert_eq!(d["finding"]["candidates"].as_array().map(Vec::len), Some(2));
     assert_eq!(d["inserted"]["delay"]["applied"], 0.0125);
-    assert_eq!(d["inserted"]["delay"]["applied_samples"], 600);
+    assert_eq!(d["inserted"]["delay"]["applied_samples"], 600.0);
 
     let d = ok_json(&f, &["delay", "set", "main-l", "480samples", "--json"]).await?;
     assert_eq!(d["delay"]["applied"], 0.01);
+    let d = ok_json(&f, &["delay", "nudge", "main-l", "-0.25samples", "--json"]).await?;
+    let n = d["delay"]["applied_samples"].as_f64().unwrap_or(f64::NAN);
+    assert!((n - 479.75).abs() < 1e-9, "{n}");
     let d = ok_json(&f, &["delay", "track", "2", "on", "--json"]).await?;
     assert_eq!(d["delay"]["tracking"], true);
     // Delay commands refuse non-transfer measurements.
@@ -313,7 +316,9 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(t["edit"]["name"], "l-pre-eq");
     assert_eq!(t["source"]["type"], "captured");
     assert_eq!(t["source"]["meas"], 2);
-    assert_eq!(t["delay"], 0.01);
+    // The trace records the exact applied delay, fraction included (480 − 0.25 samples).
+    let td = t["delay"].as_f64().unwrap_or(f64::NAN);
+    assert!((td - 479.75 / 48_000.0).abs() < 1e-12, "{td}");
     let traces = ok_json(&f, &["trace", "list", "--json"]).await?;
     assert_eq!(traces.as_array().map(Vec::len), Some(1));
     let csv = ac2(&f, &["trace", "export", "l-pre-eq", "--csv", "-"]).await?;

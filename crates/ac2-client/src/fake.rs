@@ -759,7 +759,7 @@ impl Shared {
                         (
                             Some(DelayState {
                                 applied: Seconds(0.0),
-                                applied_samples: Samples(0),
+                                applied_samples: 0.0,
                                 tracking: false,
                                 awaiting_pick: false,
                                 last_finding: None,
@@ -854,6 +854,16 @@ impl Shared {
                 if let Some(d) = &mut m.delay {
                     d.last_finding = None;
                 }
+                self.put_meas(m)
+            }
+            C::DelayNudge { meas, by } => {
+                let mut m = self.meas(meas)?;
+                let now = m
+                    .delay
+                    .as_ref()
+                    .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?
+                    .applied;
+                set_delay(&mut m, Seconds(now.0 + by.0))?;
                 self.put_meas(m)
             }
             C::DelayTrack { meas, enabled } => {
@@ -1250,7 +1260,7 @@ fn set_delay(m: &mut Measurement, d: Seconds) -> Result<(), ProtoError> {
         .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?;
     st.awaiting_pick = false;
     st.applied = d;
-    st.applied_samples = Samples((d.0 * 48_000.0).round() as i64);
+    st.applied_samples = d.0 * 48_000.0;
     Ok(())
 }
 

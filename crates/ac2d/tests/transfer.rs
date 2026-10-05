@@ -242,14 +242,20 @@ fn transfer_magnitude_delay_timing_and_ir() {
             other => panic!("{other:?}"),
         }
     }
-    let rev = match c.ok(Command::DelayInsert {
+    // The finder's estimate goes in exactly, fraction included.
+    let (rev, inserted) = match c.ok(Command::DelayInsert {
         meas: MeasId(1),
         pick: ac2_proto::model::DelayPick::FirstArrival,
     }) {
         ReplyBody::Measurement(m) => {
             let d = m.delay.unwrap();
-            assert_eq!(d.applied_samples, Samples(i64::from(ACOUSTIC_DELAY)));
-            m.config_rev.0
+            assert!(
+                (d.applied_samples - f64::from(ACOUSTIC_DELAY)).abs() < 0.5,
+                "{}",
+                d.applied_samples
+            );
+            assert!((d.applied.0 * f64::from(FS) - d.applied_samples).abs() < 1e-6);
+            (m.config_rev.0, d.applied_samples)
         }
         other => panic!("{other:?}"),
     };
@@ -260,7 +266,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
     let f = run_tf(&mut d, &sub, 0.5, rev);
     let t = tf(&f);
     assert!(f.stamp.config_applied_at.0 > 0);
-    assert!((t.meta.delay.0 - f64::from(ACOUSTIC_DELAY) / f64::from(FS)).abs() < 1e-12);
+    assert!((t.meta.delay.0 - inserted / f64::from(FS)).abs() < 1e-12);
     let cols = band(t, 10_000.0);
     assert!(cols.len() > 200, "settled columns: {}", cols.len());
     for &i in &cols {
@@ -284,6 +290,46 @@ fn transfer_magnitude_delay_timing_and_ir() {
         );
     }
 
+    // A one-sample nudge keeps the averages: the very next frame shows the phase of the
+    // one-sample residual (−360°·f/fs) with no column settling, and a nudge back restores it.
+    let nudge = |c: &mut Client, by: f64| match c.ok(Command::DelayNudge {
+        meas: MeasId(1),
+        by: Seconds(by / f64::from(FS)),
+    }) {
+        ReplyBody::Measurement(m) => (m.config_rev.0, m.delay.unwrap().applied_samples),
+        other => panic!("{other:?}"),
+    };
+    let (rev, applied) = nudge(&mut c, 1.0);
+    assert!((applied - (inserted + 1.0)).abs() < 1e-6, "{applied}");
+    let f = run_tf(&mut d, &sub, 0.05, rev);
+    let t = tf(&f);
+    assert!((t.meta.delay.0 - applied / f64::from(FS)).abs() < 1e-12);
+    let cols = band(t, 10_000.0);
+    assert!(
+        cols.len() > 200,
+        "valid columns right after the nudge: {}",
+        cols.len()
+    );
+    assert!(
+        t.validity
+            .iter()
+            .all(|v| !v.contains(ValidityMask::SETTLING))
+    );
+    for &i in &cols {
+        let f_hz = grid_freq(i);
+        let want = (360.0 * f_hz / f64::from(FS) + 180.0).rem_euclid(360.0) - 180.0;
+        assert!(
+            (f64::from(t.phase[i]) - want).abs() < 3.0,
+            "phase at {f_hz:.0} Hz: {} vs {want}",
+            t.phase[i]
+        );
+    }
+    let (rev, applied) = nudge(&mut c, -1.0);
+    assert!((applied - inserted).abs() < 1e-6, "{applied}");
+    let t = run_tf(&mut d, &sub, 0.05, rev);
+    let t = tf(&t);
+    assert!(band(t, 10_000.0).iter().all(|&i| t.phase[i].abs() < 3.0));
+
     // Tracking: two agreeing windows at the inserted delay leave it where it is.
     match c.ok(Command::DelayTrack {
         meas: MeasId(1),
@@ -300,7 +346,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
                 .as_ref()
                 .unwrap()
                 .applied_samples,
-            Samples(i64::from(ACOUSTIC_DELAY))
+            inserted
         ),
         other => panic!("{other:?}"),
     }

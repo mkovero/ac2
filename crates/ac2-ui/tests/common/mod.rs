@@ -340,14 +340,14 @@ impl Rig {
             // Main L tracks without a current finding: NO DELAY ESTIMATE is up.
             let tracking = DelayState {
                 applied: Seconds(0.0125),
-                applied_samples: Samples(600),
+                applied_samples: 600.0,
                 tracking: true,
                 awaiting_pick: false,
                 last_finding: None,
             };
             let fixed = DelayState {
                 applied: Seconds(0.0141),
-                applied_samples: Samples(677),
+                applied_samples: 677.0,
                 tracking: false,
                 awaiting_pick: false,
                 last_finding: None,

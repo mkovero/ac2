@@ -182,7 +182,7 @@ pub fn measurement(m: &Measurement) -> String {
         s.push_str(&format!(
             "  delay {} ({} samples){}",
             ms(d.applied.0),
-            d.applied_samples.0,
+            format::fixed(d.applied_samples, 2),
             if d.tracking { ", tracking" } else { "" }
         ));
     }

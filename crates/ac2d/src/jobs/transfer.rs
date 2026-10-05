@@ -137,7 +137,8 @@ pub(crate) struct Transfer {
     smoother: Option<(Smoother, SmoothingMode)>,
     grid_id: GridId,
     delay_s: f64,
-    delay_samples: i64,
+    /// Applied delay in samples, fractions included.
+    delay_samples: f64,
     frozen: bool,
     config_rev: Rev,
     applied_at: u64,
@@ -195,6 +196,13 @@ fn smoother(
     })
 }
 
+/// The delay tracking compares its whole-sample estimates with: the applied delay to the
+/// nearest sample (tracking moves in whole samples; a fraction the operator set stays until
+/// the arrival moves by a sample or more).
+fn held(delay_samples: f64) -> i64 {
+    delay_samples.round() as i64
+}
+
 /// Why a transfer job cannot start.
 pub(crate) type StartError = String;
 
@@ -206,7 +214,7 @@ impl Transfer {
         sample_rate: u32,
         ref_idx: usize,
         meas_idx: usize,
-        delay_samples: i64,
+        delay_samples: f64,
         delay_s: f64,
         frozen: bool,
         config_rev: Rev,
@@ -241,7 +249,7 @@ impl Transfer {
         }
         .id();
         let mut finder = Finder::new(fs);
-        finder.track(tracking, delay_samples);
+        finder.track(tracking, held(delay_samples));
         finder.set_paused(awaiting_pick);
         let frame = mtw.frame();
         Ok(Self {
@@ -432,7 +440,7 @@ impl Analysis for Transfer {
             if contiguous {
                 // An xrun or overflow can leave the counter contiguous while audio was lost;
                 // the block grid must restart all the same.
-                self.mtw.set_delay(self.delay_samples);
+                self.mtw.restart();
             }
             self.mark_discontinuity(b.start_sample);
             self.finder.restart();
@@ -487,8 +495,17 @@ impl Analysis for Transfer {
                 self.delay_s = seconds;
                 self.config_rev = rev;
                 self.apply_pending = true;
-                self.mtw.set_delay(samples);
-                self.finder.set_held(samples);
+                let change = self.mtw.set_delay(samples);
+                tracing::debug!(
+                    "measurement {}: delay {samples} samples ({})",
+                    self.meas.0,
+                    if change.restarted {
+                        "restarted".to_owned()
+                    } else {
+                        format!("stages kept {:#b}", change.kept)
+                    }
+                );
+                self.finder.set_held(held(samples));
                 if resume {
                     self.finder.set_paused(false);
                 }
@@ -498,14 +515,16 @@ impl Analysis for Transfer {
                 band,
                 observation,
             } => {
-                let result = self.finder.find(band, observation, self.delay_samples);
+                let result = self
+                    .finder
+                    .find(band, observation, held(self.delay_samples));
                 let _ = self.to_control.send(ControlMsg::DelayFound {
                     token,
                     result: Box::new(result),
                 });
             }
             JobCmd::Track { enabled } => {
-                self.finder.track(enabled, self.delay_samples);
+                self.finder.track(enabled, held(self.delay_samples));
             }
             JobCmd::Freeze(f) => {
                 self.frozen = f;

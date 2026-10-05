@@ -17,7 +17,7 @@ use crate::session_dialog::{InputRole, RoleKey, Row, SessionDialog};
 fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     let delay = matches!(kind, MeasKind::Transfer { .. }).then(|| DelayState {
         applied: Seconds(0.0125),
-        applied_samples: Samples(600),
+        applied_samples: 600.0,
         tracking: false,
         awaiting_pick: false,
         last_finding: None,
@@ -439,10 +439,33 @@ fn transfer_commands() {
     t.key(".");
     t.key(",");
     assert!((t.st.edit(MeasId(1)).nudge_s - 0.000_1).abs() < 1e-15);
+    // Ctrl / Alt on the same keys move the measurement's own delay: a whole sample, a tenth.
+    for (key, samples, what) in [
+        ("Ctrl+.", 1.0, "+1 sample"),
+        ("Ctrl+,", -1.0, "−1 sample"),
+        ("Alt+.", 0.1, "+0.1 sample"),
+        ("Alt+,", -0.1, "−0.1 sample"),
+    ] {
+        let r = t.key(key);
+        match r.as_slice() {
+            [
+                Request::Call {
+                    cmd: Command::DelayNudge { meas, by },
+                    what: w,
+                },
+            ] => {
+                assert_eq!(*meas, MeasId(1));
+                assert!((by.0 - samples / 48_000.0).abs() < 1e-15, "{key}");
+                assert!(w.ends_with(&format!("delay {what}")), "{w}");
+            }
+            r => panic!("{key}: {r:?}"),
+        }
+    }
+    assert!((t.st.edit(MeasId(1)).nudge_s - 0.000_1).abs() < 1e-15);
     // Typed delay.
     t.type_key("D", "d");
     match &t.st.overlay {
-        Overlay::Prompt(p) => assert_eq!(p.text, "12.50"),
+        Overlay::Prompt(p) => assert_eq!(p.text, "12.5"),
         o => panic!("{o:?}"),
     }
     let r = t.key("Enter");

@@ -642,6 +642,18 @@ pub enum DelayCmd {
         #[arg(long, default_value = "20c", allow_hyphen_values = true)]
         temp: Celsius,
     },
+    /// Move the delay by a step: `1sample`, `-0.25samples`, `-20us`, `1cm`. The curve moves
+    /// at once; the averages are kept where the change is small next to each analysis window.
+    Nudge {
+        /// Transfer measurement.
+        meas: MeasRef,
+        /// Step (either sign for time and samples).
+        #[arg(allow_hyphen_values = true)]
+        by: DelayAmount,
+        /// Air temperature for distances.
+        #[arg(long, default_value = "20c", allow_hyphen_values = true)]
+        temp: Celsius,
+    },
     /// Track the delay continuously.
     Track {
         /// Transfer measurement.

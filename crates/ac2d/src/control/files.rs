@@ -13,13 +13,13 @@ use ac2_proto::model::{
     DelayState, GenAction, MeasKind, Measurement, Session, SessionFile, SessionRef, SweepFailure,
     TraceSource,
 };
-use ac2_proto::units::{ClientId, MeasId, Rev, Samples, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
-use super::{Control, static_grid, validate_meas};
+use super::{Control, delay_samples, static_grid, validate_meas};
 use crate::util::{perr, perr_detail, wall_ns};
 
 fn session_err(e: SessionError) -> ProtoError {
@@ -256,10 +256,10 @@ impl Control {
                     applied: Seconds(0.0),
                     tracking: false,
                 });
-                let samples = fs.map_or(0, |fs| (d.applied.0 * fs).round() as i64);
+                let samples = fs.map_or(0.0, |fs| delay_samples(d.applied.0, fs));
                 DelayState {
-                    applied: fs.map_or(d.applied, |fs| Seconds(samples as f64 / fs)),
-                    applied_samples: Samples(samples),
+                    applied: fs.map_or(d.applied, |fs| Seconds(samples / fs)),
+                    applied_samples: samples,
                     tracking: d.tracking,
                     awaiting_pick: false,
                     last_finding: None,

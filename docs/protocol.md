@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 14`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 15`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -92,6 +92,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | |
 | `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `measurement` | |
 | `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
+| `delay.nudge` | `meas`, `by: Seconds` | `measurement` | |
 | `delay.track` | `meas`, `enabled` | `measurement` | |
 | `trace.capture` | `meas`, `name`, `slot` (1…9 \| nil) | `trace` | |
 | `trace.list` | — | `traces` | |
@@ -348,9 +349,17 @@ Every finding is stored as the measurement's `delay.last_finding`. `delay.insert
 it: `first_arrival` takes the accepted first arrival or, when ambiguous, the pre-selected
 `ranked[0]`; `strongest` the strongest arrival; `ranked{index}` an entry of the ambiguous
 list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an explicit operator
-value) clears `last_finding`; a delay tracking moves keeps it.
+value) clears `last_finding`; a delay tracking moves keeps it. `delay.nudge` moves the
+applied delay by `by` (either sign, fractions of a sample allowed) and keeps
+`last_finding` (it refines that delay); like `delay.insert` and `delay.set` it resolves
+`awaiting_pick`. Delays are not rounded to whole samples: the finder's fractional estimate
+is inserted as found, and the delay in samples is kept to 10⁻⁶ sample. A change of the
+delay does not restart the transfer function: each analysis stage keeps its averages,
+turned to the new delay, while the change is small next to its window, and only the other
+stages show `settling` again (`docs/design/delay-no-resettle.md`).
 
-`DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`,
+`DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`
+(f64: samples at the session rate, fraction included),
 `tracking` (the operator's switch), `awaiting_pick`, `last_finding: DelayFinding | nil`. An
 `ambiguous` finding sets `awaiting_pick` (decision 1c): tracking is paused — it moves nothing
 — until the operator resolves it with `delay.insert` or `delay.set`, or runs `delay.find`

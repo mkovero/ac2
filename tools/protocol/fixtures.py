@@ -452,7 +452,7 @@ def measurement():
         "frozen": False,
         "delay": {
             "applied": 0.0125,
-            "applied_samples": 600,
+            "applied_samples": 600.25,
             "tracking": True,
             "awaiting_pick": False,
             "last_finding": finding(),
@@ -591,6 +591,7 @@ def requests():
             },
         ),
         req(51, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
+        req(52, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
     ]
 
 

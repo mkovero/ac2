@@ -550,6 +550,14 @@ pub(crate) async fn delay(cli: &Cli, cmd: &DelayCmd, out: &mut Out<'_>) -> Resul
             let m = meas_call(&c, Command::DelaySet { meas: id, delay: d }).await?;
             out.emit(&m, || output::measurement(&m))?;
         }
+        DelayCmd::Nudge { meas, by, temp } => {
+            let id = transfer(&s, meas)?.id;
+            let by = by
+                .seconds(rate(&s), *temp)
+                .map_err(|e| CliError::Usage(e.0))?;
+            let m = meas_call(&c, Command::DelayNudge { meas: id, by }).await?;
+            out.emit(&m, || output::measurement(&m))?;
+        }
         DelayCmd::Track { meas, state: on } => {
             let id = transfer(&s, meas)?.id;
             let m = meas_call(

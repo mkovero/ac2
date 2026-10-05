@@ -346,6 +346,10 @@ pub fn commands() -> Vec<Command> {
             meas: MeasId(4),
             seconds: 14_400,
         },
+        Command::DelayNudge {
+            meas: MeasId(1),
+            by: Seconds(-0.25 / 48_000.0),
+        },
     ]
 }
 
@@ -358,7 +362,7 @@ fn measurement() -> Measurement {
         frozen: false,
         delay: Some(DelayState {
             applied: Seconds(0.0125),
-            applied_samples: Samples(600),
+            applied_samples: 600.25,
             tracking: true,
             awaiting_pick: false,
             last_finding: Some(finding()),

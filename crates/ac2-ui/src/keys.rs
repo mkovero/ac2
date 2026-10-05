@@ -450,6 +450,10 @@ commands! {
     InsertStrongest => "insert_strongest", "Delay: find and insert strongest peak", [Transfer];
     TypeDelay => "type_delay", "Delay: type value (ms)…", [Transfer];
     TrackDelay => "track_delay", "Delay tracking on / off", [Transfer];
+    DelayDown => "delay_down", "Delay of the measurement −1 sample (the curve moves at once)", [Transfer];
+    DelayUp => "delay_up", "Delay of the measurement +1 sample (the curve moves at once)", [Transfer];
+    DelayDownFine => "delay_down_fine", "Delay of the measurement −0.1 sample", [Transfer];
+    DelayUpFine => "delay_up_fine", "Delay of the measurement +0.1 sample", [Transfer];
     FinderAuto => "finder_auto", "Delay finder: auto band (full → mid → sub)", [Transfer];
     FinderFull => "finder_full", "Delay finder: full band (2–16 kHz)", [Transfer];
     FinderMid => "finder_mid", "Delay finder: mid band (300 Hz – 3 kHz)", [Transfer];
@@ -637,6 +641,12 @@ pub fn defaults() -> Vec<Binding> {
         (C::Offset, S::Spectrum, k(K::J)),
         (C::NudgeEarlier, S::Transfer, k(K::Comma)),
         (C::NudgeLater, S::Transfer, k(K::Period)),
+        // The measurement's own delay on the same two keys as the display nudge: Ctrl for a
+        // whole sample, Alt for a tenth (Shift is never combined with punctuation).
+        (C::DelayDown, S::Transfer, cmd(K::Comma)),
+        (C::DelayUp, S::Transfer, cmd(K::Period)),
+        (C::DelayDownFine, S::Transfer, alt(K::Comma)),
+        (C::DelayUpFine, S::Transfer, alt(K::Period)),
         (C::PhaseReference, S::Transfer, k(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
         // Shift+I shows or hides the impulse response wherever there is one (plain I zooms).

@@ -702,6 +702,10 @@ pub const PAN_OCTAVES: f64 = 1.0 / 3.0;
 pub const ZOOM_FACTOR: f64 = 1.5;
 /// Delay nudge step.
 pub const NUDGE_S: f64 = 0.000_1;
+
+/// Fine step of a measurement's own delay, in samples: 0.1 sample is 7.5° at 10 kHz and
+/// 48 kHz, fine enough to align by the phase trace by eye.
+pub const DELAY_FINE_STEP: f64 = 0.1;
 /// How far ↑/↓ scroll the help overlay, points (about a row).
 pub const HELP_LINE: f32 = 20.0;
 /// PageUp / PageDown in the help overlay until the view has measured its page.
@@ -2415,7 +2419,7 @@ impl AppState {
                         meas: id,
                         delay: Seconds(v / 1000.0),
                     },
-                    what: format!("delay {} ms", format::fixed(v, 2)),
+                    what: format!("delay {}", format::delay(v / 1000.0)),
                 });
                 Ok(())
             }),
@@ -2845,6 +2849,29 @@ impl AppState {
                 .unwrap_or_default(),
             channel,
         )
+    }
+
+    /// Moves the selected transfer measurement's delay by `samples` (`delay.nudge`); the
+    /// daemon keeps the averages where it can, so the curve moves at once.
+    fn nudge_delay(&mut self, samples: f64, out: &mut Vec<Request>) {
+        let Some(m) = self.need_tf() else {
+            return;
+        };
+        let Some(rate) = self.open_session().map(|s| f64::from(s.sample_rate_hz)) else {
+            self.error(format!(
+                "{}: no audio session (a delay in samples needs its rate)",
+                m.config.name
+            ));
+            return;
+        };
+        self.call(
+            out,
+            Command::DelayNudge {
+                meas: m.id,
+                by: Seconds(samples / rate),
+            },
+            format!("{}: delay {}", m.config.name, format::sample_step(samples)),
+        );
     }
 
     fn need_tf(&mut self) -> Option<Measurement> {
@@ -3583,10 +3610,19 @@ impl AppState {
                     let text = m
                         .delay
                         .as_ref()
-                        .map(|d| format::fixed(d.applied.0 * 1000.0, 2))
+                        .map(|d| format::delay_entry_ms(d.applied.0))
                         .unwrap_or_default();
                     self.prompt(PromptKind::Delay(m.id), text);
                 }
+            }
+            C::DelayDown | C::DelayUp | C::DelayDownFine | C::DelayUpFine => {
+                let step = match c {
+                    C::DelayDown => -1.0,
+                    C::DelayUp => 1.0,
+                    C::DelayDownFine => -DELAY_FINE_STEP,
+                    _ => DELAY_FINE_STEP,
+                };
+                self.nudge_delay(step, out);
             }
             C::TrackDelay => {
                 if let Some(m) = self.need_tf() {

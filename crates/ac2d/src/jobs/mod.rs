@@ -272,7 +272,7 @@ pub(crate) enum JobCmd {
     /// New alignment delay (transfer); `rev` is the commit that set it. `resume`: the
     /// operator inserted or typed it, which resolves an ambiguous finding.
     SetDelay {
-        samples: i64,
+        samples: f64,
         seconds: f64,
         rev: Rev,
         resume: bool,

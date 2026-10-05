@@ -31,8 +31,8 @@ use ac2_proto::model::{
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{
-    ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, SampleIndex, Samples,
-    Seconds, SessionEpoch, SweepId, WallNs,
+    ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, SampleIndex, Seconds,
+    SessionEpoch, SweepId, WallNs,
 };
 use ac2_proto::{
     Command, ErrorCode, ErrorDetail, PROTO_VERSION, ProtoError, Reply, ReplyBody, Welcome,
@@ -172,6 +172,9 @@ enum DelaySource {
     Insert,
     /// `delay.set`: a value the operator typed.
     Typed,
+    /// `delay.nudge`: the operator moved the applied delay by a step; the finding it
+    /// refines still stands.
+    Nudge,
     /// Tracking agreed on a new delay.
     Tracking,
 }
@@ -237,6 +240,14 @@ pub(crate) struct Control {
 }
 
 const MAX_DELAY_S: f64 = 10.0;
+
+/// A delay in samples at `fs`, fractions kept. Snapped to a millionth of a sample: a delay
+/// given in seconds or built from fractional steps lands within float rounding of the value
+/// meant, and a whole-sample delay must stay exactly whole (the engine then applies no phase
+/// rotation at all). A millionth of a sample is 0.0002° at 20 kHz and 48 kHz.
+fn delay_samples(seconds: f64, fs: f64) -> f64 {
+    (seconds * fs * 1e6).round() / 1e6
+}
 /// Largest difference between the fast and slow input mean squares a calibration accepts,
 /// dB.
 const MAX_CAL_UNSETTLED_DB: f64 = 0.05;
@@ -850,7 +861,7 @@ impl Control {
                 let grid_id = static_grid(&config.kind).map(|g| self.register_grid(g));
                 let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
                     applied: Seconds(0.0),
-                    applied_samples: Samples(0),
+                    applied_samples: 0.0,
                     tracking: false,
                     awaiting_pick: false,
                     last_finding: None,
@@ -911,7 +922,7 @@ impl Control {
                 } else if !was_transfer {
                     m.delay = Some(DelayState {
                         applied: Seconds(0.0),
-                        applied_samples: Samples(0),
+                        applied_samples: 0.0,
                         tracking: false,
                         awaiting_pick: false,
                         last_finding: None,
@@ -1009,6 +1020,14 @@ impl Control {
                 self.set_delay(meas, delay, DelaySource::Insert)
             }
             Command::DelaySet { meas, delay } => self.set_delay(meas, delay, DelaySource::Typed),
+            Command::DelayNudge { meas, by } => {
+                let d = self.transfer_delay(meas)?;
+                if !by.0.is_finite() {
+                    return Err(perr(ErrorCode::Invalid, "the step must be finite"));
+                }
+                let delay = Seconds(d.applied.0 + by.0);
+                self.set_delay(meas, delay, DelaySource::Nudge)
+            }
             Command::DelayTrack { meas, enabled } => {
                 self.transfer_delay(meas)?;
                 let mut m = self.meas(meas)?.clone();
@@ -1195,10 +1214,10 @@ impl Control {
         for mut m in ms {
             let mut changed = false;
             if let Some(d) = &mut m.delay {
-                let samples = (d.applied.0 * fs).round() as i64;
-                if samples != d.applied_samples.0 {
-                    d.applied_samples = Samples(samples);
-                    d.applied = Seconds(samples as f64 / fs);
+                let samples = delay_samples(d.applied.0, fs);
+                if samples != d.applied_samples {
+                    d.applied_samples = samples;
+                    d.applied = Seconds(samples / fs);
                     m.config_rev = Rev(self.store.rev().0 + 1);
                     changed = true;
                 }
@@ -1556,7 +1575,7 @@ impl Control {
             MeasKind::Transfer { config } => {
                 let d = m.delay.clone().unwrap_or(DelayState {
                     applied: Seconds(0.0),
-                    applied_samples: Samples(0),
+                    applied_samples: 0.0,
                     tracking: false,
                     awaiting_pick: false,
                     last_finding: None,
@@ -1567,7 +1586,7 @@ impl Control {
                     fs,
                     idx(config.reference_input)?,
                     idx(config.measurement_input)?,
-                    d.applied_samples.0,
+                    d.applied_samples,
                     d.applied.0,
                     m.frozen,
                     m.config_rev,
@@ -1740,13 +1759,13 @@ impl Control {
                 "no open session: the delay in samples depends on its sample rate",
             ));
         };
-        let samples = (delay.0 * fs).round() as i64;
+        let samples = delay_samples(delay.0, fs);
         let mut m = self.meas(meas)?.clone();
         let rev = Rev(self.store.rev().0 + 1);
         let operator = source != DelaySource::Tracking;
         if let Some(d) = &mut m.delay {
-            d.applied = Seconds(samples as f64 / fs);
-            d.applied_samples = Samples(samples);
+            d.applied = Seconds(samples / fs);
+            d.applied_samples = samples;
             if source == DelaySource::Typed {
                 d.last_finding = None;
             }
@@ -1758,7 +1777,7 @@ impl Control {
         if let Some(j) = self.jobs.get(&meas) {
             j.send(JobCmd::SetDelay {
                 samples,
-                seconds: samples as f64 / fs,
+                seconds: samples / fs,
                 rev,
                 resume: operator,
             });
@@ -1840,7 +1859,7 @@ impl Control {
             return;
         };
         if d.tracking
-            && d.applied_samples.0 != samples
+            && d.applied_samples.round() as i64 != samples
             && let Err(e) =
                 self.set_delay(meas, Seconds(samples as f64 / fs), DelaySource::Tracking)
         {

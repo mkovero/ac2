@@ -299,10 +299,20 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   band without the crossover (palette: *Delay finder: mid / sub band* or a custom band, CLI
   `--band`) and compare.
 - **D** types a delay (`12.5ms`, `600samples`, or a distance such as `4.3m`, converted with
-  the speed of sound at the set temperature); **,** and **.** nudge by 0.1 ms; **Y** tracks
-  the delay continuously.
+  the speed of sound at the set temperature); **,** and **.** nudge the selected trace's
+  display by 0.1 ms; **Y** tracks the delay continuously.
+- **Ctrl+,** and **Ctrl+.** move the measurement's own delay by one sample, **Alt+,** and
+  **Alt+.** by a tenth of a sample. The curve moves at once: the transfer function keeps its
+  averages and turns them to the new delay instead of starting over, so you can walk the
+  phase into place by eye. Delays are kept to fractions of a sample (the finder's estimate is
+  inserted exactly, `600.25samples` can be typed), shown in the measurement list to the
+  microsecond.
+- A larger change keeps what it can: a stage of the analysis keeps its averages while the
+  change is small next to its window (about 2.4 ms at full rate, 9 ms and 28 ms for the
+  lower ranges at 48 kHz); only the stages beyond that start over and show *settling*.
 - From the CLI: `ac2 delay find main-l --insert`, or limit the band:
-  `ac2 delay find sub --band 40hz-120hz`.
+  `ac2 delay find sub --band 40hz-120hz`; `ac2 delay nudge main-l -0.25samples` moves it by
+  a step.
 
 The inserted delay is also the time origin of the impulse-response pane (**Shift+I** shows or
 hides it).
@@ -960,6 +970,10 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+X` | Delay: find and insert strongest peak | `insert_strongest` |
 | `D` | Delay: type value (ms)… | `type_delay` |
 | `Y` | Delay tracking on / off | `track_delay` |
+| `Ctrl+,` | Delay of the measurement −1 sample (the curve moves at once) | `delay_down` |
+| `Ctrl+.` | Delay of the measurement +1 sample (the curve moves at once) | `delay_up` |
+| `Alt+,` | Delay of the measurement −0.1 sample | `delay_down_fine` |
+| `Alt+.` | Delay of the measurement +0.1 sample | `delay_up_fine` |
 | `U` | Invert polarity of selected trace (display) | `invert` |
 | `J` | Type dB offset of selected trace… | `offset` |
 | `,` | Nudge selected trace 0.1 ms earlier | `nudge_earlier` |
@@ -1096,7 +1110,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 session open / close / status / inputs / save / load / list` | the audio session, each input's mic and active curve, saved sessions |
 | `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
-| `ac2 delay find / insert / set / track` | the delay finder and delay of a transfer measurement |
+| `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
 | `ac2 trace capture / list / show / rename / display / slot / rm / average / math / import / export / smooth / mic` | stored traces |
 | `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |

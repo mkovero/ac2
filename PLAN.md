@@ -292,8 +292,12 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
   blend of per-stage estimates, not a new estimator.
 - Stage served band ≤ 0.45 × its rate. Grid 48 ppo base-2; columns thin rather than
   interpolate where resolution runs out.
-- Alignment: one signed integer delay per pair at full rate, before decimation.
-  Negative delays first-class. Fractional/no-resettle delay is a later improvement.
+- Alignment: one signed delay per pair; its whole samples shift the reference at full
+  rate, before decimation; its fraction (≤ ½ sample) rotates each block's cross-spectrum.
+  Negative delays first-class. A delay change splices the stream and keeps each stage's
+  averages (rotated to the new delay) while every held block's window correlation with the
+  new alignment stays ≥ 0.995; other stages start over, and only when none can keep does
+  the ladder restart (`docs/design/delay-no-resettle.md`).
 - Absolute levels never go through the decimated ladder.
 
 ### 5.2 Delay finder & tracking
@@ -558,7 +562,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); open — ASIO, ISO 3382 room metrics, spectrograph, spatial average, raw capture files, multi-device | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
 transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,
@@ -622,7 +626,7 @@ Q7 calibration store (phase 5), Q8 phase comparison time reference (phase 4).
 | Delay finder picks a reflection | first-arrival target, candidate list, scenario acceptance numbers (§5.2, Q1) |
 | GPU UI testability (killed `ac`'s first GPU UI) | scene layer + software-adapter render tests in CI |
 | ZMQ PUB queueing defeats latest-wins | daemon slot + client-side drain, frame age, STALE (§4.3); `CONFLATE` unusable with multipart |
-| MTW resettle on delay change (~2.4 s) | accept for 1.0; phase 7 improvement |
+| MTW resettle on delay change (~2.4 s) | **resolved** (phase 7): stages keep their averages, rotated, while the change is small next to their window; only larger changes resettle (`docs/design/delay-no-resettle.md`) |
 | Clock drift between devices (~600 µs in 6–30 s) | one clock domain required; drift detection warns |
 | libzmq / CURVE build on Windows/macOS | phase 0 spike, vendored |
 | Scope creep before 1.0 | §9.1 slice; phase 7 is explicitly post-1.0 |

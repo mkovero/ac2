@@ -147,6 +147,36 @@ pub fn coherence_readout(g2: f64) -> String {
     fixed(g2, 2)
 }
 
+/// A step of a delay in samples, signed, with as few decimals as it needs (up to 3):
+/// `+1 sample`, `−0.1 sample`, `+2 samples`.
+pub fn sample_step(samples: f64) -> String {
+    if !samples.is_finite() {
+        return NO_VALUE.to_string();
+    }
+    let unit = if samples.abs() > 1.0 {
+        "samples"
+    } else {
+        "sample"
+    };
+    format!("{} {unit}", signed(samples, needed_decimals(samples, 3)))
+}
+
+/// An applied delay: milliseconds to 10 µs as everywhere else, with a third decimal when
+/// the delay has a finer part, so that a step of a tenth of a sample (2 µs at 48 kHz)
+/// shows: `12.50 ms`, `12.502 ms`.
+pub fn delay(seconds: f64) -> String {
+    let ms_value = seconds * 1000.0;
+    ms(seconds, needed_decimals(ms_value, 3).max(2))
+}
+
+/// An applied delay as the number a delay prompt starts from, in ms without the unit and
+/// with as many decimals as it needs up to 5 (10 ns), so that confirming it unchanged keeps
+/// a fractional-sample delay: `12.5`, `12.50208`.
+pub fn delay_entry_ms(seconds: f64) -> String {
+    let ms = seconds * 1000.0;
+    fixed(ms, needed_decimals(ms, 5))
+}
+
 /// Milliseconds with `decimals`: `12.34 ms`.
 pub fn ms(seconds: f64, decimals: usize) -> String {
     with_unit(fixed(seconds * 1000.0, decimals), " ms")
@@ -287,6 +317,24 @@ mod tests {
         assert_eq!(signed(-3.0, 1), "−3.0");
         assert_eq!(fixed(f64::NAN, 1), "—");
         assert_eq!(signed(f64::INFINITY, 1), "—");
+    }
+
+    #[test]
+    fn delay_steps_and_readout() {
+        assert_eq!(sample_step(1.0), "+1 sample");
+        assert_eq!(sample_step(-1.0), "−1 sample");
+        assert_eq!(sample_step(0.1), "+0.1 sample");
+        assert_eq!(sample_step(-0.1), "−0.1 sample");
+        assert_eq!(sample_step(2.0), "+2 samples");
+        assert_eq!(sample_step(-0.25), "−0.25 sample");
+        assert_eq!(sample_step(f64::NAN), "—");
+        assert_eq!(delay(0.012_502_083), "12.502 ms");
+        assert_eq!(delay(0.0125), "12.50 ms");
+        assert_eq!(delay(-0.000_002_083), "−0.002 ms");
+        assert_eq!(delay(0.0), "0.00 ms");
+        assert_eq!(delay_entry_ms(0.0125), "12.5");
+        assert_eq!(delay_entry_ms(600.1 / 48_000.0), "12.50208");
+        assert_eq!(delay_entry_ms(0.0), "0");
     }
 
     #[test]

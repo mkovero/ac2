@@ -38,7 +38,7 @@
     "frozen": false,
     "delay": {
      "applied": 0.0125,
-     "applied_samples": 600,
+     "applied_samples": 600.25,
      "tracking": true,
      "awaiting_pick": false,
      "last_finding": {

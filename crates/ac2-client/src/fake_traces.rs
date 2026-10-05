@@ -604,7 +604,7 @@ impl Shared {
             };
             let delay = sm.delay.map(|d| DelayState {
                 applied: d.applied,
-                applied_samples: Samples((d.applied.0 * 48_000.0).round() as i64),
+                applied_samples: d.applied.0 * 48_000.0,
                 tracking: d.tracking,
                 awaiting_pick: false,
                 last_finding: None,

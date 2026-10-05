@@ -275,6 +275,13 @@ impl Spectra {
         }
     }
 
+    /// Multiply the cross-spectrum by `rot` bin by bin (the auto-spectra carry no phase).
+    fn rotate(&mut self, rot: &[Complex64]) {
+        for (a, r) in self.xy.iter_mut().zip(rot) {
+            *a *= r;
+        }
+    }
+
     fn scale(&mut self, s: f64) {
         self.xx.iter_mut().for_each(|v| *v *= s);
         self.yy.iter_mut().for_each(|v| *v *= s);
@@ -302,6 +309,35 @@ enum AvgState {
     },
 }
 
+/// Most alignment segments a stage tracks. A stage whose average would span more delay
+/// changes than this is reset instead: the bookkeeping that bounds the misalignment of its
+/// held blocks stays small and exact.
+pub(crate) const MAX_SEGMENTS: usize = 16;
+
+/// An exponential average's segment whose share of the total weight falls below this no
+/// longer counts towards the misalignment bound: its blocks move the averaged cross-spectrum
+/// by at most this fraction, about 0.01 dB.
+const NEGLIGIBLE_SHARE: f64 = 1e-3;
+
+/// Blocks of the average that share one time-domain alignment, oldest first: the integer
+/// delay their windows were cut at and their total averaging weight (FIFO: block count;
+/// exponential: decayed weight).
+#[derive(Debug, Clone)]
+struct Segments(VecDeque<(i64, f64)>);
+
+impl Segments {
+    fn new(delay: i64) -> Self {
+        let mut v = VecDeque::with_capacity(MAX_SEGMENTS);
+        v.push_back((delay, 0.0));
+        Self(v)
+    }
+
+    fn reset(&mut self, delay: i64) {
+        self.0.clear();
+        self.0.push_back((delay, 0.0));
+    }
+}
+
 /// Framing, FFT and averaging for one stage.
 pub(crate) struct StageEstimator {
     nfft: usize,
@@ -321,6 +357,13 @@ pub(crate) struct StageEstimator {
     /// Stage-sample intervals `[lo, hi)` that must not enter any block.
     rejected: VecDeque<(u64, u64)>,
     avg: AvgState,
+    /// Per-bin phasor applied to every new block's cross-spectrum: the fractional part of
+    /// the delay, which the time-domain alignment (whole samples) cannot apply. `None` for
+    /// a whole-sample delay, so the integer path stays exactly as computed.
+    block_rot: Option<Vec<Complex64>>,
+    /// Scratch phasors for rotating the held averages.
+    rot_scratch: Vec<Complex64>,
+    segments: Segments,
     pub model: OverlapModel,
     /// Start (stage samples) of the newest block that was accumulated.
     pub last_block_start: Option<u64>,
@@ -367,6 +410,9 @@ impl StageEstimator {
             buf_start: 0,
             rejected: VecDeque::new(),
             avg: Self::fresh_avg(averaging, bins),
+            block_rot: None,
+            rot_scratch: vec![Complex64::new(1.0, 0.0); bins],
+            segments: Segments::new(0),
             model,
             last_block_start: None,
         }
@@ -398,10 +444,104 @@ impl StageEstimator {
     pub fn reset_averages(&mut self, averaging: StageAveraging) {
         self.avg = Self::fresh_avg(averaging, self.bins());
         self.last_block_start = None;
+        let d = self.segment_delay();
+        self.segments.reset(d);
     }
 
-    /// Drop everything: averages, framing and rejection marks.
-    pub fn reset_stream(&mut self, averaging: StageAveraging) {
+    /// Integer delay the newest blocks are cut at.
+    fn segment_delay(&self) -> i64 {
+        self.segments.0.back().map_or(0, |s| s.0)
+    }
+
+    /// Blocks from now on are cut at integer delay `delay`. `false` when that would need
+    /// more than [`MAX_SEGMENTS`] segments: the caller resets the stage instead.
+    pub fn begin_segment(&mut self, delay: i64) -> bool {
+        let v = &mut self.segments.0;
+        let full = v.len() >= MAX_SEGMENTS;
+        match v.back_mut() {
+            Some(b) if b.0 == delay => true,
+            Some(b) if b.1 == 0.0 => {
+                b.0 = delay;
+                true
+            }
+            _ if full => false,
+            _ => {
+                v.push_back((delay, 0.0));
+                true
+            }
+        }
+    }
+
+    /// Largest distance, in full-rate samples, between `delay` and the integer delay any
+    /// held block with a non-negligible share was cut at: the worst window misalignment the
+    /// held blocks have against blocks cut at `delay`.
+    pub fn max_misalignment(&self, delay: f64) -> f64 {
+        let total: f64 = self.segments.0.iter().map(|s| s.1).sum();
+        self.segments
+            .0
+            .iter()
+            .filter(|s| s.1 > 0.0 && s.1 >= NEGLIGIBLE_SHARE * total)
+            .map(|s| (delay - s.0 as f64).abs())
+            .fold(0.0, f64::max)
+    }
+
+    /// Fill `rot` with `e^{j·2π·k·cycles_per_bin}` for every bin `k`.
+    fn phasors(rot: &mut [Complex64], cycles_per_bin: f64) {
+        for (k, r) in rot.iter_mut().enumerate() {
+            *r = Complex64::from_polar(1.0, std::f64::consts::TAU * cycles_per_bin * k as f64);
+        }
+    }
+
+    /// Rotate every new block's cross-spectrum by `e^{j·2π·k·cycles_per_bin}`; zero turns
+    /// the rotation off.
+    pub fn set_block_rotation(&mut self, cycles_per_bin: f64) {
+        if cycles_per_bin == 0.0 {
+            self.block_rot = None;
+            return;
+        }
+        let bins = self.bins();
+        let rot = self
+            .block_rot
+            .get_or_insert_with(|| vec![Complex64::new(1.0, 0.0); bins]);
+        Self::phasors(rot, cycles_per_bin);
+    }
+
+    /// Rotate the held cross-spectra (running sum and every held block) by
+    /// `e^{j·2π·k·cycles_per_bin}`, so they read as if measured at the new delay.
+    pub fn rotate_averages(&mut self, cycles_per_bin: f64) {
+        if cycles_per_bin == 0.0 {
+            return;
+        }
+        Self::phasors(&mut self.rot_scratch, cycles_per_bin);
+        let rot = &self.rot_scratch;
+        match &mut self.avg {
+            AvgState::Fifo { ring, sum, .. } => {
+                sum.rotate(rot);
+                for b in ring.iter_mut() {
+                    b.rotate(rot);
+                }
+            }
+            AvgState::Exponential { sum, .. } => sum.rotate(rot),
+        }
+    }
+
+    /// Keep every block that straddles the cut out of the averages: blocks that hold a
+    /// sample of `[lo, hi)`, or for `lo == hi` samples on both sides of `lo`.
+    pub fn cut(&mut self, lo: u64, hi: u64) {
+        if let Some(last) = self.rejected.back_mut()
+            && lo <= last.1
+        {
+            last.0 = last.0.min(lo);
+            last.1 = last.1.max(hi);
+            return;
+        }
+        self.rejected.push_back((lo, hi));
+    }
+
+    /// Drop everything: averages, framing and rejection marks; new blocks are cut at
+    /// integer delay `delay`.
+    pub fn reset_stream(&mut self, averaging: StageAveraging, delay: i64) {
+        self.segments.reset(delay);
         self.reset_averages(averaging);
         self.buf_x.clear();
         self.buf_y.clear();
@@ -411,17 +551,9 @@ impl StageEstimator {
 
     /// Mark stage samples `[lo, hi)` as not to be analysed.
     pub fn reject(&mut self, lo: u64, hi: u64) {
-        if hi <= lo {
-            return;
+        if hi > lo {
+            self.cut(lo, hi);
         }
-        if let Some(last) = self.rejected.back_mut()
-            && lo <= last.1
-        {
-            last.0 = last.0.min(lo);
-            last.1 = last.1.max(hi);
-            return;
-        }
-        self.rejected.push_back((lo, hi));
     }
 
     /// Feed stage-rate samples; `on_block` is told the fate and start of every completed
@@ -486,8 +618,20 @@ impl StageEstimator {
         for (k, (x, y)) in self.fft_out.iter().zip(&self.fft_out_y).enumerate() {
             self.block.xx[k] = x.norm_sqr();
             self.block.yy[k] = y.norm_sqr();
-            // Convention conj(X)·Y, so Gxy/Gxx = H for y = h * x.
-            self.block.xy[k] = x.conj() * y;
+        }
+        // Convention conj(X)·Y, so Gxy/Gxx = H for y = h * x.
+        let pairs = self.fft_out.iter().zip(&self.fft_out_y);
+        match &self.block_rot {
+            None => {
+                for (g, (x, y)) in self.block.xy.iter_mut().zip(pairs) {
+                    *g = x.conj() * y;
+                }
+            }
+            Some(rot) => {
+                for ((g, (x, y)), r) in self.block.xy.iter_mut().zip(pairs).zip(rot) {
+                    *g = x.conj() * y * r;
+                }
+            }
         }
         match &mut self.avg {
             AvgState::Fifo {
@@ -502,6 +646,15 @@ impl StageEstimator {
                     ring.push(self.block.clone());
                     *next = ring.len() % *cap;
                 } else {
+                    // The evicted block is the oldest one, so it belongs to the oldest
+                    // segment.
+                    let segs = &mut self.segments.0;
+                    if let Some(f) = segs.front_mut() {
+                        f.1 -= 1.0;
+                    }
+                    while segs.len() > 1 && segs.front().is_some_and(|f| f.1 <= 0.0) {
+                        segs.pop_front();
+                    }
                     sum.add_scaled(&ring[*next], -1.0);
                     sum.add_scaled(&self.block, 1.0);
                     ring[*next].clone_from(&self.block);
@@ -527,7 +680,19 @@ impl StageEstimator {
                 sum.add_scaled(&self.block, 1.0);
                 *weight = *weight * (1.0 - *alpha) + 1.0;
                 *received += 1;
+                let segs = &mut self.segments.0;
+                for s in segs.iter_mut() {
+                    s.1 *= 1.0 - *alpha;
+                }
+                let total = *weight;
+                while segs.len() > 1 && segs.front().is_some_and(|f| f.1 < NEGLIGIBLE_SHARE * total)
+                {
+                    segs.pop_front();
+                }
             }
+        }
+        if let Some(b) = self.segments.0.back_mut() {
+            b.1 += 1.0;
         }
     }
 

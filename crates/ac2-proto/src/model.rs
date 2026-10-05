@@ -1262,8 +1262,9 @@ impl DelayFinding {
 pub struct DelayState {
     /// Delay applied to the reference before the estimator.
     pub applied: Seconds,
-    /// Applied delay in samples (exact value used by DSP).
-    pub applied_samples: Samples,
+    /// Applied delay in samples at the session rate (exact value used by DSP, fractions
+    /// included: the whole samples shift the reference, the fraction rotates the phase).
+    pub applied_samples: f64,
     /// Tracking enabled.
     pub tracking: bool,
     /// The last finding is ambiguous and the operator has not picked yet (decision 1c):

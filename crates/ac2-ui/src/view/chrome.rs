@@ -546,7 +546,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             let mut text = format!("{kind}  {}\n     {state}", m.config.name);
             if let Some(d) = &m.delay {
                 // Distance stays in the transfer legend's reference line.
-                text.push_str(&format!(" · {}", format::ms(d.applied.0, 2)));
+                text.push_str(&format!(" · {}", format::delay(d.applied.0)));
                 if d.tracking && d.awaiting_pick {
                     text.push_str(" · tracking paused");
                 } else if d.tracking {

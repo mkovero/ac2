@@ -502,7 +502,7 @@ pub(crate) mod tests {
             frozen: false,
             delay: Some(DelayState {
                 applied: Seconds(0.0),
-                applied_samples: Samples(0),
+                applied_samples: 0.0,
                 tracking: false,
                 awaiting_pick: false,
                 last_finding: Some(refused),
