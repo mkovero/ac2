@@ -41,6 +41,7 @@ pub mod generator;
 pub mod history;
 pub mod level;
 pub mod output;
+pub mod replay;
 pub mod stream;
 pub mod timer;
 
@@ -69,4 +70,5 @@ pub use history::{HistoryError, HistoryReader};
 pub use jack_host::{JackBackend, JackConfig, pipewire_socket};
 pub use level::{Gain, LevelError, MaxLevel};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
+pub use replay::{FrameSource, OpenSource, ReplayBackend, ReplayConfig, ReplayMark, ReplaySpeed};
 pub use stream::{DuplexStream, OutputPatch, PatchLink, PatchState, StopOutcome};

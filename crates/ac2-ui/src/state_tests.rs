@@ -88,6 +88,7 @@ fn daemon_state() -> State {
         buffer_frames: 256,
         clock: ClockRelation::SingleCallback,
         opened_at: WallNs(0),
+        replay: None,
     });
     s
 }
@@ -3249,6 +3250,82 @@ fn sweep_progress_strip_counts_steps_and_time_left() {
     t.conn(mirror(s));
     assert_eq!(t.st.operation(), None);
     assert_eq!(t.st.sweep.step_seen, None);
+}
+
+#[test]
+fn record_toggles_and_the_indicator_names_the_inputs() {
+    let mut t = T::new();
+    assert_eq!(t.st.recording_label(), None);
+    let r = t.st.update(Msg::Command(CommandId::Record), &t.keys);
+    let [
+        Request::Call {
+            cmd: Command::RecStart { request },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
+    };
+    assert_eq!(request.inputs, vec![0, 1], "every input of the session");
+    assert_eq!(request.max_duration, Seconds(RECORD_MAX_S));
+
+    let mut s = daemon_state();
+    s.recording = Some(RecordingRun {
+        name: "rec-x".into(),
+        path: "/r/rec-x.wav".into(),
+        inputs: vec![0, 1],
+        sample_rate_hz: 48_000,
+        session_epoch: s.session.epoch,
+        start_sample: SampleIndex(0),
+        started_at: WallNs(0),
+        started_by: ClientId("c1".into()),
+        frames: 48_000 * 5,
+        bytes: 116 + 48_000 * 5 * 8,
+        discontinuities: 0,
+        max_duration: Seconds(RECORD_MAX_S),
+        max_bytes: None,
+        status: RecordingStatus::Recording,
+    });
+    t.conn(mirror(s.clone()));
+    let l = t.st.recording_label().expect("indicator");
+    assert_eq!(l.text, "REC 0:05 · 1.9 MB");
+    assert!(
+        l.detail
+            .starts_with("Recording Input 1, Input 2 to /r/rec-x.wav"),
+        "{}",
+        l.detail
+    );
+    let r = t.st.update(Msg::Command(CommandId::Record), &t.keys);
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Call {
+                cmd: Command::RecStop,
+                ..
+            }]
+        ),
+        "{r:?}"
+    );
+
+    // No session, nothing recording: the toggle says how to open one.
+    t.conn(mirror(no_session_state()));
+    assert!(
+        t.st.update(Msg::Command(CommandId::Record), &t.keys)
+            .is_empty()
+    );
+    assert!(t.last_toast().contains("no audio session to record"));
+
+    // Replay asks for the recording and plays it in real time.
+    t.st.update(Msg::Command(CommandId::ReplayRecording), &t.keys);
+    t.text("rec-x");
+    let r = t.key("Enter");
+    assert!(
+        matches!(r.as_slice(), [Request::Call { cmd: Command::SessionReplay {
+            recording: RecordingRef::Name { name },
+            pace: ReplayPace::Realtime,
+        }, .. }] if name == "rec-x"),
+        "{r:?}"
+    );
 }
 
 #[test]

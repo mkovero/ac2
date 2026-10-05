@@ -13,6 +13,7 @@ pub mod columns;
 pub mod meta;
 pub mod mic;
 pub mod ops;
+pub mod raw;
 pub mod session;
 pub mod smooth;
 pub mod spl_log;

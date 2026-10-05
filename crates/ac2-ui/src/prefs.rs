@@ -446,6 +446,7 @@ impl UiPrefs {
             B::Jack => "jack",
             B::Cpal => "cpal",
             B::Fake => "fake",
+            B::Replay => "replay",
         };
         format!("{b}/{device}")
     }

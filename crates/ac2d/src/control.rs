@@ -59,6 +59,7 @@ mod autosave;
 mod cal;
 mod files;
 mod leq;
+mod recording;
 mod sweeps;
 mod traces;
 
@@ -118,6 +119,10 @@ pub(crate) enum ControlMsg {
         judgements: Vec<ac2_proto::model::LeqJudgement>,
         alarms: Vec<ac2_proto::model::LeqAlarm>,
     },
+    /// The recording under `token` has more audio in its file.
+    RecordingProgress { token: u64 },
+    /// The recording under `token` ended by itself and is finalised.
+    RecordingEnded { token: u64 },
     /// The network sockets are gone (ZAP handler exited); shut down.
     Fatal(String),
     /// Orderly shutdown.
@@ -148,6 +153,9 @@ pub(crate) struct Setup {
     pub(crate) cal_store: Option<std::path::PathBuf>,
     /// Autosave directory and whether to restore it at start.
     pub(crate) autosave: Option<crate::config::AutosaveConfig>,
+    /// Where `rec.start` writes and `session.replay` finds recordings by name; `None`:
+    /// this daemon does not record.
+    pub(crate) recording_dir: Option<std::path::PathBuf>,
 }
 
 /// A request answered when a worker thread reports back.
@@ -237,6 +245,10 @@ pub(crate) struct Control {
     spl_logs: HashMap<MeasId, crate::leq_log::SharedLog>,
     /// The log `spl.log_new` ended last, per SPL meter.
     spl_prev_logs: HashMap<MeasId, crate::leq_log::LeqLog>,
+    /// The raw capture being written.
+    recording: Option<recording::ActiveRecording>,
+    /// The recording a replay session plays (`session.replay`).
+    replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
 }
 
 const MAX_DELAY_S: f64 = 10.0;
@@ -485,12 +497,15 @@ impl Control {
             restore,
             spl_logs: HashMap::new(),
             spl_prev_logs: HashMap::new(),
+            recording: None,
+            replay_backend: None,
             s,
         }
     }
 
     pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) {
         self.start_autosave();
+        self.recover_recordings();
         loop {
             let now = Instant::now();
             if self
@@ -575,6 +590,8 @@ impl Control {
                     judgements,
                     alarms,
                 }) => self.leq_reported(meas, epoch, config_rev, at, &judgements, alarms),
+                Ok(ControlMsg::RecordingProgress { token }) => self.recording_progress(token),
+                Ok(ControlMsg::RecordingEnded { token }) => self.recording_ended(token),
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
                     break;
@@ -589,6 +606,7 @@ impl Control {
     fn shutdown(&mut self) {
         tracing::info!("shutting down");
         self.abort_sweep(SweepFailure::Stopped, "the daemon is shutting down");
+        self.end_recording(ac2_proto::model::RecordingEnd::DaemonShutdown);
         self.close_preview();
         self.stop_output();
         self.stop_all_jobs();
@@ -603,6 +621,7 @@ impl Control {
 
     fn commit(&mut self, change: Change) -> Rev {
         let saved = matches!(change, Change::Measurement(_) | Change::Trace(_));
+        self.note_for_recording(&change);
         let ev = self.store.commit(change, Instant::now());
         match ac2_proto::encode_event(&ev) {
             Ok(b) => self.s.outbox.event(&b),
@@ -1138,6 +1157,12 @@ impl Control {
             Command::FileSave { session } => self.file_save(&session),
             Command::FileLoad { session } => self.file_load(client, &session),
             Command::FileList => self.file_list(),
+            Command::RecStart { request } => self.rec_start(client, request),
+            Command::RecStop => self.rec_stop(),
+            Command::RecList => self.rec_list(),
+            Command::SessionReplay { recording, pace } => {
+                self.session_replay(client, &recording, pace)
+            }
         }
     }
 
@@ -1172,6 +1197,23 @@ impl Control {
         client: &ClientId,
         config: SessionConfig,
     ) -> Result<ReplyBody, ProtoError> {
+        if config.backend == Some(ac2_proto::model::BackendKind::Replay) {
+            return Err(perr(
+                ErrorCode::Invalid,
+                "a recording is played with session.replay",
+            ));
+        }
+        self.open_session(client, config, None)
+            .map(ReplyBody::Session)
+    }
+
+    /// Opens a session on `config` (a replay of `replay`, on the replay backend).
+    fn open_session(
+        &mut self,
+        client: &ClientId,
+        config: SessionConfig,
+        replay: Option<ac2_proto::model::ReplayInfo>,
+    ) -> Result<Session, ProtoError> {
         session::validate(&config)?;
         let backend = self.backend_for(config.backend)?;
         // The preview may hold the very device the session is about to open.
@@ -1180,7 +1222,7 @@ impl Control {
             self.session_close(client);
         }
         let epoch = SessionEpoch(self.epoch().0 + 1);
-        let rt = match Runtime::open(
+        let mut rt = match Runtime::open(
             &*backend,
             &config,
             &[],
@@ -1195,6 +1237,7 @@ impl Control {
                 return Err(e);
             }
         };
+        rt.open.replay = replay;
         let s = Session {
             epoch,
             open: Some(rt.open.clone()),
@@ -1202,7 +1245,8 @@ impl Control {
         self.session = Some(rt);
         self.commit(Change::Session(s.clone()));
         self.after_open();
-        Ok(ReplyBody::Session(s))
+        self.release_replay();
+        Ok(s)
     }
 
     /// Starts jobs and re-derives sample-rate dependent state for a freshly opened stream.
@@ -1245,6 +1289,7 @@ impl Control {
 
     fn session_close(&mut self, client: &ClientId) {
         self.abort_sweep(SweepFailure::SessionClosed, "the audio session closed");
+        self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
         self.stop_all_jobs();
         let g = self.store.state().generator.clone();
         if g.armed || g.firing {
@@ -1280,8 +1325,16 @@ impl Control {
             return Err(perr(ErrorCode::Invalid, "no open session"));
         };
         let config = rt.open.config.clone();
-        let backend = self.backend_for(Some(rt.open.backend))?;
+        let replay = rt.open.replay.clone();
+        let backend = match self.backend_for(Some(rt.open.backend)) {
+            Ok(b) => b,
+            Err(e) => {
+                self.session = Some(rt);
+                return Err(e);
+            }
+        };
         self.abort_sweep(SweepFailure::SessionClosed, "the audio session reopened");
+        self.end_recording(ac2_proto::model::RecordingEnd::SessionReopened);
         self.stop_all_jobs();
         self.level = None;
         self.source = None;
@@ -1298,7 +1351,8 @@ impl Control {
             self.s.to_self.clone(),
             self.s.fps,
         ) {
-            Ok(rt) => {
+            Ok(mut rt) => {
+                rt.open.replay = replay;
                 let s = Session {
                     epoch,
                     open: Some(rt.open.clone()),
@@ -1306,6 +1360,7 @@ impl Control {
                 self.session = Some(rt);
                 self.commit(Change::Session(s));
                 self.after_open();
+                self.release_replay();
                 Ok(())
             }
             Err(e) => {
@@ -1331,6 +1386,9 @@ impl Control {
         kind: Option<ac2_proto::model::BackendKind>,
     ) -> Result<Arc<dyn Backend>, ProtoError> {
         match kind {
+            Some(ac2_proto::model::BackendKind::Replay) => {
+                self.replay_backend.clone().map(|b| b as Arc<dyn Backend>)
+            }
             None => self.s.backends.first().cloned(),
             Some(k) => self
                 .s

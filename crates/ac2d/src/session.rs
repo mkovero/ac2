@@ -115,6 +115,7 @@ impl Runtime {
             buffer_frames: n.buffer_frames.or(cfg.buffer_frames).unwrap_or(0),
             clock: conv::clock(n.clock),
             opened_at: WallNs(wall_ns()),
+            replay: None,
         };
         tracing::info!(
             "session open: {} in / {} out @ {} Hz on {:?}/{:?} ({:?}), epoch {}",
@@ -126,7 +127,8 @@ impl Runtime {
             n.clock,
             epoch.0
         );
-        let fanout = Fanout::spawn(stream, epoch, to_control, fps)
+        let lossless = backend.kind() == ac2_audio::BackendKind::Replay;
+        let fanout = Fanout::spawn(stream, epoch, to_control, fps, lossless)
             .map_err(|e| perr(ErrorCode::Internal, format!("cannot start fan-out: {e}")))?;
         let rt = Self {
             epoch,

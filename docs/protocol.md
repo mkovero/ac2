@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 16`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 17`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -121,6 +121,10 @@ Lease column: **L** = `lease_token` required (Q6).
 | `file.save` | `session: SessionRef` | `session_file` | |
 | `file.load` | `session: SessionRef` | `session_file`; loads disarmed, no owner, new epoch | |
 | `file.list` | — | `sessions` | |
+| `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
+| `rec.stop` | — | `recording` (the run, finished) | |
+| `rec.list` | — | `recordings` | |
+| `session.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `session` | |
 
 Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries the full
 desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 s after
@@ -261,7 +265,8 @@ started_at`; it carries on across app and daemon restarts as the log does.
 #### Devices, preview and loopback detection (`session.*`)
 
 `session.devices` answers `[BackendInfo]`, one per backend the daemon offers, the one it was
-started on first: `kind: BackendKind` (`jack` \| `cpal` \| `fake`), `description` (for the
+started on first: `kind: BackendKind` (`jack` \| `cpal` \| `fake`; `replay` is the kind of a
+replay session and is never listed), `description` (for the
 operator), `availability` (tagged by `type`: `available` \| `unavailable` {`reason`}: why,
 in plain words with the remedy, e.g. `No JACK server: start JACK (e.g. `jackd -d alsa`) or
 use PipeWire`) and `devices: [DeviceInfo]` (empty while unavailable). A daemon started on
@@ -280,7 +285,10 @@ nothing).
 `output_device` (`DeviceSelector`: `default` \| `id` {`id`}), `input_channels` ([u16],
 zero-based), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`,
 `loopback` ({`output`, `input`} \| nil). `OpenSession` adds `backend` (the one used),
-`input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`.
+`input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
+`replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
+files). `session.open` with `backend: replay` is `invalid`: recordings open with
+`session.replay`.
 
 While a session is open the daemon meters every captured input on `session/levels` (§5.1)
 whether or not a measurement runs: per-interval sample peak, 300 ms integrated RMS and clip
@@ -517,6 +525,66 @@ directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or 
 - `file.list`: the sessions in the session directory, by name.
 - The daemon also keeps an autosave of the same content (§7.3); its status is the
   `autosave` entity.
+
+#### Raw capture files (`rec.*`, `session.replay`)
+
+Design: `docs/design/raw-capture.md`; file format §7.5. A daemon has a recording directory
+(`ac2d`: `recordings` in the data directory, `--recordings <dir>`); one without (an
+embedded or test daemon not given one) answers `rec.start` `unsupported`, `rec.list` with
+nothing and `session.replay` by name `not_found`.
+
+`RecordRequest`: `inputs` ([u16] device inputs, each captured by the open session, in file
+channel order), `name` (string \| nil: a file stem like a session name; nil =
+`rec-<UTC date>T<hh-mm-ss>`, made unique), `max_duration` (Seconds, 0 < d ≤ 86 400),
+`max_bytes` (u64 \| nil, at least one second of audio).
+
+- `rec.start` refuses (`refused`) without an open session, while another recording runs,
+  or when a recording of that name exists (never overwritten); `invalid` for an empty,
+  repeated or uncaptured input, a bound out of range, a bad name. The file and sidecar are
+  created before the reply; the first captured block after the reply is the file's first
+  frame.
+- The recording ends with `rec.stop` (everything captured until the request is kept), at
+  its bounds, on a write failure (disk full), when the session closes or reopens (device
+  or configuration change, `session.open`, `session.replay`, `file.load`) and at daemon
+  shutdown; the file and sidecar are always finalised and say why. A daemon that dies while
+  recording leaves a sidecar without an end; the next one to start with that directory
+  finishes it (`interrupted`) once its audio file has not been written for 30 s, and
+  mirrors it as the `recording` entity.
+- `rec.stop` without a recording is `refused`.
+- Progress and outcome are the `recording` entity (§4.1), `RecordingRun`: `name`, `path`
+  (the audio file on the daemon host), `inputs`, `sample_rate_hz`, `session_epoch`,
+  `start_sample` (session sample of the file's first frame), `started_at`, `started_by`,
+  `frames`, `bytes` (file size), `discontinuities`, `max_duration`, `max_bytes`, `status`
+  (tagged by `type`: `recording` \| `ended` {`reason`: `RecordingEnd`}). `frames`, `bytes`
+  and `discontinuities` are updated about once a second while recording. `RecordingEnd`
+  (tagged by `type`): `stopped`, `duration_limit`, `size_limit`, `write_failed` {`msg`},
+  `session_closed`, `session_reopened`, `daemon_shutdown`, `interrupted`.
+- `rec.list` → [`RecordingFile`]: `name`, `path`, `sample_rate_hz`, `inputs`, `frames`,
+  `started_at`, `discontinuities`, `end` (`RecordingEnd` \| nil while being written),
+  oldest first.
+- Every committed change of a measurement, the generator, the input setup or a calibration
+  while recording goes into the sidecar's timeline at the newest captured sample. Every
+  block that does not follow the previous one (xrun, device gap, capture overflow,
+  configuration change, or the recorder falling behind the fan-out by more than 10 s of
+  audio) goes into its discontinuity list with the samples lost; the file holds only
+  captured frames, never filler.
+
+`RecordingRef` (tagged by `type`): `name` {`name`} in the recording directory, or `path`
+{`path`}: the absolute path of the `.wav` or `.ac2rec.json` file, local transports only
+(`refused` in network mode). `session.replay` closes any session and opens a new epoch on a
+`replay` backend: the recorded device's id (so its calibrations apply), the recorded inputs
+under their device numbers (an input not recorded cannot be captured), the recorded rate
+and period, no outputs (the generator cannot be armed). Running measurements restart on it
+as on any reopen; one whose input was not recorded stays stopped. Sample 0 is the file's
+first frame; at each recorded discontinuity the sample index jumps by the samples lost and
+the block carries the recorded flags (a configuration change replays as a plain
+discontinuity), so analyses reset where they reset live. `pace`: `realtime` (one second
+per second) or `fast` (as fast as every running measurement takes the audio; nothing is
+dropped). The replay starts once the measurements are attached and stops after the last
+frame; the session stays open. `ReplayInfo`: `name`, `path`, `frames`, `end_sample` (one
+past the last sample index), `pace`, `recorded_start_sample`, `recorded_at`. Errors:
+`not_found` (no such recording), `refused` (still being recorded), `invalid` (a sidecar or
+audio file this build does not read, or that disagree).
 #### Calibration (`cal.*`, `session.inputs`)
 
 Design: `docs/design/q7-calibration.md`. Two stores: **sensitivity calibrations**, keyed by
@@ -604,7 +672,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log_page`, `spl_history`,
 `snapshot`, `events`,
-`grid`, `session_file`, `sessions`, `sweep`.
+`grid`, `session_file`, `sessions`, `sweep`, `recording`, `recordings`.
 
 ### 3.4 Errors
 
@@ -638,14 +706,14 @@ meter: `meas`, `started_at`, `windows`, `alarms`; §3.2), `timing` (`TimingStatu
 WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
 committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
-nil`; see §7.3).
+nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2).
 
 ### 4.2 Snapshot and events
 
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `mic`, `inputs`, `spl_log`, `timing`, `sweep`, `autosave`. `payload` is the entity's
+`generator`, `calibration`, `mic`, `inputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`. `payload` is the entity's
 full new value (`inputs`: the whole list); for keyed entities (`measurement`, `trace`,
 `calibration`, `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -930,6 +998,35 @@ row per logged second: ISO 8601 UTC time of the second's start, the same in Unix
 measured time, `dB SPL` or `dBFS`, the three levels in that unit (4 decimals; `-inf` for
 digital silence) and the sensitivity (empty uncalibrated). Reading it back takes
 `start_ns`, `measured_s`, the levels and the sensitivity.
+
+### 7.5 Raw capture files (`rec.start`)
+
+Design and replay tolerance: `docs/design/raw-capture.md`. A recording `<name>` is two files
+in the recording directory:
+
+- `<name>.wav`: 32-bit IEEE float, little-endian, interleaved, the channels in
+  `RecordRequest.inputs` order, exactly the captured values. `WAVE_FORMAT_EXTENSIBLE`
+  (float subformat, channel mask 0) with a `fact` chunk; a fixed 116-byte header (`RIFF`,
+  `WAVE`, a 28-byte `JUNK` chunk, `fmt ` of 40 bytes, `fact`, `data`). Past 4 GiB the file
+  becomes RF64 (EBU Tech 3306): `RIFF` → `RF64`, `JUNK` → `ds64` with the 64-bit sizes, the
+  32-bit sizes 0xFFFFFFFF; the audio never moves.
+- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 1`
+  (another version is refused), `software` {`ac2`, `build`, `protocol`}, `audio`
+  {`file`, `sample_rate`, `channels`: [{`input`, `name`, `mic`, `roles`: [{type: loopback
+  \| reference \| measured \| analysed, `measurement`}]}]}, `device` {`backend`,
+  `input_device`, `output_device`, `buffer_frames`, `clock`, `session_epoch`, `loopback`},
+  `start` and `end.at` (`Mark` {`session_sample`, `wall_ns`, `utc`}), `end` {`at`,
+  `frames`, `reason`: RecordingEnd} \| nil while recording, `limits` {`max_duration`,
+  `max_bytes`}, `started_by`, `initial` {`measurements`, `generator`, `inputs`,
+  `calibrations` (of the recorded inputs on that device)}, `timeline` [{`at_sample`,
+  `frame`, `wall_ns`, `change`: {type: measurement \| generator \| inputs \| calibration,
+  value}}], `discontinuities` [{`frame` (first file frame after it), `session_sample`,
+  `lost_frames`, `estimated`, `causes`: [xrun \| gap \| overflow \| config_change \|
+  recorder_behind]}]. Entity values are the protocol types of `software.protocol` in JSON.
+
+The sidecar is written when recording starts and replaced atomically when it ends. Session
+sample of file frame f: `start.session_sample + f + Σ lost_frames` of the discontinuities at
+or before f.
 
 ## 8. Cross-language fixtures
 

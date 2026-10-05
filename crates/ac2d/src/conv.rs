@@ -193,6 +193,7 @@ pub(crate) fn backend_kind(k: audio::BackendKind) -> pm::BackendKind {
         audio::BackendKind::Jack => pm::BackendKind::Jack,
         audio::BackendKind::Cpal => pm::BackendKind::Cpal,
         audio::BackendKind::Fake => pm::BackendKind::Fake,
+        audio::BackendKind::Replay => pm::BackendKind::Replay,
     }
 }
 

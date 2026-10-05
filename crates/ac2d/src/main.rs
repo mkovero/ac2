@@ -40,6 +40,8 @@ Audio / WASAPI) on macOS and Windows.
   --no-restore           start empty: the autosave is not loaded but moved aside to
                          <dir>.unrestored
   --no-autosave          keep measurements and traces in memory only
+  --recordings <dir>     where raw capture files are recorded (default: recordings in
+                         the ac2 data directory, ~/.local/share/ac2 on Linux)
   -V, --version          print the version and build id
   -h, --help             this text
 
@@ -58,6 +60,7 @@ struct Args {
     name: Option<String>,
     mdns: bool,
     autosave: Option<PathBuf>,
+    recordings: Option<PathBuf>,
     restore: bool,
     no_autosave: bool,
 }
@@ -77,6 +80,7 @@ fn parse() -> Result<Option<Args>, String> {
         name: None,
         mdns: true,
         autosave: None,
+        recordings: None,
         restore: true,
         no_autosave: false,
     };
@@ -102,6 +106,7 @@ fn parse() -> Result<Option<Args>, String> {
             "--name" => a.name = Some(val()?),
             "--no-mdns" => a.mdns = false,
             "--autosave" => a.autosave = Some(PathBuf::from(val()?)),
+            "--recordings" => a.recordings = Some(PathBuf::from(val()?)),
             "--no-restore" => a.restore = false,
             "--no-autosave" => a.no_autosave = true,
             "--max-level" => {
@@ -197,6 +202,11 @@ fn main() -> ExitCode {
             .unwrap_or_else(ac2_paths::autosave_dir),
         restore: args.restore,
     });
+    config.recording_dir = Some(
+        args.recordings
+            .clone()
+            .unwrap_or_else(ac2_paths::recording_dir),
+    );
     let handle = match Daemon::start(config) {
         Ok(h) => h,
         Err(e) => {

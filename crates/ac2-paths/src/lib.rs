@@ -62,6 +62,12 @@ pub fn autosave_dir() -> PathBuf {
     data_dir().join("autosave")
 }
 
+/// The daemon's raw capture files (`<name>.wav` + `<name>.ac2rec.json`):
+/// `<data>/recordings`.
+pub fn recording_dir() -> PathBuf {
+    data_dir().join("recordings")
+}
+
 /// A network-mode daemon's CURVE key pair: `<config>/server.key`.
 pub fn server_key() -> PathBuf {
     config_dir().join("server.key")

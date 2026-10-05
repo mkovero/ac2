@@ -416,6 +416,7 @@ impl Daemon {
             network,
             cal_store: config.cal_store.clone(),
             autosave: config.autosave.clone(),
+            recording_dir: config.recording_dir.clone(),
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

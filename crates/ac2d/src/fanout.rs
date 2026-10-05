@@ -187,6 +187,8 @@ pub(crate) struct Queue {
     /// Queued frames at which a job sleeping through hand-offs is woken
     /// ([`crate::jobs::Analysis::frames_needed`]); 0 while it wakes for every hand-off.
     pub(crate) wake_at: AtomicU64,
+    /// Frames this consumer may have queued; 0 = [`JOB_QUEUE_S`] of audio.
+    pub(crate) limit: AtomicU64,
 }
 
 /// What the fan-out feeds one job through.
@@ -199,6 +201,8 @@ pub(crate) struct JobFeed {
 
 pub(crate) enum FanoutMsg {
     Attach(u64, JobFeed),
+    /// Run this once every message sent before it is handled.
+    Then(Box<dyn FnOnce() + Send>),
     Detach(u64),
     /// Publish the session input meters of a session capturing `input_map`, stamped with
     /// `config_rev`.
@@ -295,11 +299,15 @@ impl Discontinuities {
 }
 
 impl Fanout {
+    /// A `lossless` stream (a replay, which can wait) is popped only as fast as every
+    /// consumer takes its audio, so nobody ever loses a block; a device stream is popped
+    /// whole at every hand-off, and a consumer that falls behind loses batches.
     pub(crate) fn spawn(
         stream: DuplexStream,
         epoch: SessionEpoch,
         to_control: Sender<ControlMsg>,
         fps: u32,
+        lossless: bool,
     ) -> std::io::Result<Self> {
         let n = stream.negotiated();
         let channels = usize::from(n.input_channels);
@@ -320,6 +328,7 @@ impl Fanout {
             rate,
             sample_rate: n.sample_rate,
             handoff: handoff_period(fps, block_period),
+            lossless: lossless.then(|| u64::from(n.buffer_frames.unwrap_or(4096).max(1))),
         };
         let thread = std::thread::Builder::new()
             .name("ac2d-fanout".into())
@@ -347,6 +356,12 @@ impl Fanout {
 
     pub(crate) fn detach(&self, id: u64) {
         self.send(FanoutMsg::Detach(id));
+    }
+
+    /// Runs `f` on the fan-out thread after the messages sent before it (consumers
+    /// attached by then receive every block popped after `f` ran).
+    pub(crate) fn then(&self, f: Box<dyn FnOnce() + Send>) {
+        self.send(FanoutMsg::Then(f));
     }
 
     /// Starts publishing the session input meters.
@@ -407,6 +422,8 @@ struct Config {
     rate: f64,
     sample_rate: u32,
     handoff: Duration,
+    /// Lossless: the largest block the stream delivers, frames.
+    lossless: Option<u64>,
 }
 
 /// Batches handed out and the spare blocks they return, so steady operation allocates
@@ -485,6 +502,7 @@ fn run(
                 FanoutMsg::Detach(id) => {
                     jobs.remove(&id);
                 }
+                FanoutMsg::Then(f) => f(),
                 FanoutMsg::Levels {
                     env,
                     input_map,
@@ -519,11 +537,27 @@ fn run(
         pool.reclaim();
         let mut batch = pool.batch();
         let mut frames = 0u64;
+        // Lossless: pop no more than the fullest consumer has room for, counting the next
+        // block at the largest size the stream delivers.
+        let room = cfg.lossless.and_then(|_| {
+            jobs.values()
+                .map(|f| {
+                    consumer_limit(&f.queue, queue_limit)
+                        .saturating_sub(f.queue.frames.load(Ordering::Acquire))
+                })
+                .min()
+        });
         while batch.len() < MAX_BATCH {
+            if let (Some(room), Some(block)) = (room, cfg.lossless)
+                && frames + block > room
+            {
+                break;
+            }
             let Some(block) = pop_block_into(&mut stream, pool.spare_blocks.pop()) else {
                 break;
             };
             bursts.observe(now, block.frames);
+            frames += u64::from(block.frames);
             if block.flags.contains(BlockFlags::CONFIG_CHANGE) {
                 tracing::warn!(
                     "audio configuration changed at sample {}",
@@ -546,7 +580,6 @@ fn run(
             if let Some((l, _)) = &mut levels {
                 l.push(block);
             }
-            frames += u64::from(block.frames);
         }
         if batch.is_empty() || jobs.is_empty() {
             pool.give_back(batch);
@@ -554,7 +587,7 @@ fn run(
             let batch: Batch = Arc::new(batch);
             jobs.retain(|id, feed| {
                 let q = feed.queue.frames.load(Ordering::Acquire);
-                if q > 0 && q + frames > queue_limit {
+                if q > 0 && q + frames > consumer_limit(&feed.queue, queue_limit) {
                     // The job is behind; it sees the gap and restarts.
                     return true;
                 }
@@ -583,6 +616,14 @@ fn run(
             tracing::error!("audio stream ended by the host");
             let _ = to_control.send(ControlMsg::DeviceChanged { epoch: cfg.epoch });
         }
+    }
+}
+
+/// Frames `queue`'s consumer may have queued.
+fn consumer_limit(queue: &Queue, default: u64) -> u64 {
+    match queue.limit.load(Ordering::Relaxed) {
+        0 => default,
+        l => l,
     }
 }
 

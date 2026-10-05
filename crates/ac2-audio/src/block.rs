@@ -270,6 +270,13 @@ impl BlockProducer {
         self.channels
     }
 
+    /// Whether a block of `frames` frames would fit now. Only a source that can wait (a
+    /// replay) asks; a device callback pushes and lets a full ring drop the block.
+    pub(crate) fn has_room(&self, frames: u32) -> bool {
+        self.headers.slots() > 0
+            && self.samples.slots() >= frames as usize * usize::from(self.channels.max(1))
+    }
+
     fn drop_block(&mut self, frames: u32) -> PushOutcome {
         self.carry |= BlockFlags::OVERFLOW | BlockFlags::DISCONTINUITY;
         self.counters.blocks_dropped.fetch_add(1, Ordering::Relaxed);

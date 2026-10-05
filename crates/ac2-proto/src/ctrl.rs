@@ -15,9 +15,9 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MathOp,
-    MeasConfig, Measurement, Mic, MicCurveId, Preview, Session, SessionConfig, SessionFile,
-    SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit,
-    TraceMeta,
+    MeasConfig, Measurement, Mic, MicCurveId, Preview, RecordRequest, RecordingFile, RecordingRef,
+    RecordingRun, ReplayPace, Session, SessionConfig, SessionFile, SessionRef, SplHistory,
+    SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
@@ -495,6 +495,33 @@ pub enum Command {
     /// Sessions in the daemon's session directory.
     #[serde(rename = "file.list")]
     FileList,
+
+    // -- rec ----------------------------------------------------------------------------
+    /// Record inputs of the open session to a raw capture file (f32 WAV / RF64 and a JSON
+    /// sidecar) in the daemon's recording directory. One recording at a time; the reply is
+    /// the started run, whose progress and end follow as `recording` events.
+    #[serde(rename = "rec.start")]
+    RecStart {
+        /// What to record and its bounds.
+        request: RecordRequest,
+    },
+    /// End the recording and finalise its file.
+    #[serde(rename = "rec.stop")]
+    RecStop,
+    /// Recordings in the daemon's recording directory.
+    #[serde(rename = "rec.list")]
+    RecList,
+    /// Open a session that plays a recording instead of a device (new epoch): its inputs
+    /// are the recorded ones under their device numbers, it has no outputs, and the running
+    /// measurements analyse it as they would the device. A replay never reopens itself: it
+    /// stops after the last frame.
+    #[serde(rename = "session.replay")]
+    SessionReplay {
+        /// Which recording.
+        recording: RecordingRef,
+        /// How fast.
+        pace: ReplayPace,
+    },
 }
 
 impl Command {
@@ -554,6 +581,10 @@ impl Command {
             Self::FileSave { .. } => "file.save",
             Self::FileLoad { .. } => "file.load",
             Self::FileList => "file.list",
+            Self::RecStart { .. } => "rec.start",
+            Self::RecStop => "rec.stop",
+            Self::RecList => "rec.list",
+            Self::SessionReplay { .. } => "session.replay",
         }
     }
 
@@ -579,6 +610,7 @@ impl Command {
                 | Self::SplLogGet { .. }
                 | Self::SplHistoryGet { .. }
                 | Self::FileList
+                | Self::RecList
         )
     }
 
@@ -685,6 +717,10 @@ pub enum ReplyBody {
     SessionFile(SessionFile),
     /// `file.list`.
     Sessions(Vec<SessionFile>),
+    /// `rec.start` / `rec.stop`: the run.
+    Recording(RecordingRun),
+    /// `rec.list`.
+    Recordings(Vec<RecordingFile>),
 }
 
 /// Error codes.

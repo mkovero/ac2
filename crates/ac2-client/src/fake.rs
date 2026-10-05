@@ -171,6 +171,7 @@ pub fn empty_state() -> State {
             state: AutosaveState::Off,
             saved_at: None,
         },
+        recording: None,
     }
 }
 
@@ -642,6 +643,7 @@ impl Shared {
                         clock: ClockRelation::SingleCallback,
                         opened_at: WallNs(self.now_ns()),
                         config,
+                        replay: None,
                     }),
                 };
                 self.commit(Change::Session(s.clone()));
@@ -908,6 +910,15 @@ impl Shared {
             C::FileSave { session } => self.file_save(&session)?,
             C::FileLoad { session } => self.file_load(client, &session)?,
             C::FileList => self.file_list()?,
+            C::RecStart { request } => self.rec_start(client, request)?,
+            C::RecStop => self.rec_stop()?,
+            C::RecList => ReplyBody::Recordings(Vec::new()),
+            C::SessionReplay { .. } => {
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake daemon has no recordings to replay",
+                ));
+            }
             C::CalSpl {
                 input,
                 mic,

@@ -592,6 +592,24 @@ def requests():
         ),
         req(51, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
         req(52, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
+        req(
+            53,
+            "rec.start",
+            {
+                "request": {
+                    "inputs": [0, 1],
+                    "name": "soundcheck",
+                    "max_duration": 600.0,
+                    "max_bytes": None,
+                }
+            },
+        ),
+        req(55, "rec.list", mutation=False),
+        req(
+            56,
+            "session.replay",
+            {"recording": {"type": "name", "name": "soundcheck"}, "pace": "fast"},
+        ),
     ]
 
 
@@ -636,6 +654,26 @@ def events():
                 "gate": None,
                 "status": {"type": "done", "trace": 9},
                 "started_at": 1790000000000000000,
+            },
+        },
+        {
+            "kind": "recording",
+            "rev": 60,
+            "payload": {
+                "name": "soundcheck",
+                "path": "/home/op/.local/share/ac2/recordings/soundcheck.wav",
+                "inputs": [0, 1],
+                "sample_rate_hz": 48000,
+                "session_epoch": 2,
+                "start_sample": 96000,
+                "started_at": 1789999100000000000,
+                "started_by": "alice",
+                "frames": 480000,
+                "bytes": 3840116,
+                "discontinuities": 1,
+                "max_duration": 10.0,
+                "max_bytes": 1073741824,
+                "status": {"type": "ended", "reason": {"type": "duration_limit"}},
             },
         },
         {

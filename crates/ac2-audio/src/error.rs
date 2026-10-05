@@ -106,6 +106,12 @@ pub enum Unsupported {
         /// Channels the device has.
         available: u16,
     },
+    /// A replay was asked for an input its recording does not hold.
+    #[error("input {channel} was not recorded")]
+    InputNotRecorded {
+        /// Zero-based device channel asked for.
+        channel: u16,
+    },
     /// More output channels than the device has.
     #[error("{requested} output channels (device has {available})")]
     OutputChannels {

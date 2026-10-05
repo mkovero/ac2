@@ -111,6 +111,7 @@ pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
         ac2_audio::BackendKind::Fake => {
             "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)".into()
         }
+        ac2_audio::BackendKind::Replay => "A recording played back (capture only)".into(),
     }
 }
 

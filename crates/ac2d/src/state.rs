@@ -60,6 +60,7 @@ impl Store {
                     state: AutosaveState::Off,
                     saved_at: None,
                 },
+                recording: None,
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -173,6 +174,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Timing(t) => s.timing = *t,
         Change::Sweep(r) => s.sweep = Some(r.clone()),
         Change::Autosave(a) => s.autosave = a.clone(),
+        Change::Recording(r) => s.recording = Some(r.clone()),
     }
 }
 

@@ -36,6 +36,10 @@ pub struct DaemonConfig {
     pub cal_store: Option<PathBuf>,
     /// Autosave of the measurements and traces; `None` keeps them in memory only.
     pub autosave: Option<AutosaveConfig>,
+    /// Where raw capture files are written (`rec.start`) and found by name
+    /// (`session.replay`); unfinished ones found there at start are finished as
+    /// interrupted. `None`: this daemon does not record.
+    pub recording_dir: Option<PathBuf>,
     /// mDNS advert of a network-mode daemon (`_ac2._tcp`); ignored in local modes, which
     /// are not reachable from the network. `None` advertises nothing.
     pub advertise: Option<Advertise>,
@@ -80,6 +84,7 @@ impl fmt::Debug for DaemonConfig {
             .field("session_dir", &self.session_dir)
             .field("cal_store", &self.cal_store)
             .field("autosave", &self.autosave)
+            .field("recording_dir", &self.recording_dir)
             .field("advertise", &self.advertise)
             .finish()
     }
@@ -101,6 +106,7 @@ impl DaemonConfig {
             session_dir: ac2_paths::session_dir(),
             cal_store: None,
             autosave: None,
+            recording_dir: None,
             advertise: None,
         }
     }

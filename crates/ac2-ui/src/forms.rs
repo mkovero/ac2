@@ -810,6 +810,7 @@ mod tests {
             buffer_frames: 256,
             clock: ClockRelation::SingleCallback,
             opened_at: WallNs(0),
+            replay: None,
         }
     }
 

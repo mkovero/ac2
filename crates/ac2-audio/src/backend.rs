@@ -19,6 +19,8 @@ pub enum BackendKind {
     Cpal,
     /// The simulated device of [`crate::fake`].
     Fake,
+    /// A recording played back by [`crate::replay`].
+    Replay,
 }
 
 /// Capture or playback.

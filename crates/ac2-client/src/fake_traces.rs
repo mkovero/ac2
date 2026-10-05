@@ -103,6 +103,68 @@ impl Shared {
 
     /// `ir.capture` (lease already checked): needs the generator armed and a level, then
     /// stores a synthetic sweep trace and reports the run playing, then done.
+    /// `rec.start`: a recording that never grows (the fake writes no file); its size is
+    /// the header alone.
+    pub(super) fn rec_start(
+        &mut self,
+        client: &ClientId,
+        req: RecordRequest,
+    ) -> Result<ReplyBody, ProtoError> {
+        if self
+            .state
+            .recording
+            .as_ref()
+            .is_some_and(RecordingRun::active)
+        {
+            return Err(err(ErrorCode::Refused, "a recording is running"));
+        }
+        let Some(open) = self.state.session.open.clone() else {
+            return Err(err(ErrorCode::Refused, "no open session to record"));
+        };
+        if req.inputs.is_empty()
+            || req
+                .inputs
+                .iter()
+                .any(|i| !open.config.input_channels.contains(i))
+        {
+            return Err(err(
+                ErrorCode::Invalid,
+                "inputs not captured by the session",
+            ));
+        }
+        let name = req.name.clone().unwrap_or_else(|| "rec-fake".into());
+        let run = RecordingRun {
+            path: format!("/fake/recordings/{name}.wav"),
+            name,
+            inputs: req.inputs,
+            sample_rate_hz: open.sample_rate_hz,
+            session_epoch: self.state.session.epoch,
+            start_sample: SampleIndex(0),
+            started_at: WallNs(self.now_ns()),
+            started_by: client.clone(),
+            frames: 0,
+            bytes: 116,
+            discontinuities: 0,
+            max_duration: req.max_duration,
+            max_bytes: req.max_bytes,
+            status: RecordingStatus::Recording,
+        };
+        self.commit(Change::Recording(run.clone()));
+        Ok(ReplyBody::Recording(run))
+    }
+
+    /// `rec.stop`.
+    pub(super) fn rec_stop(&mut self) -> Result<ReplyBody, ProtoError> {
+        let Some(mut run) = self.state.recording.clone().filter(RecordingRun::active) else {
+            return Err(err(ErrorCode::Refused, "nothing is being recorded"));
+        };
+        run.status = RecordingStatus::Ended {
+            reason: RecordingEnd::Stopped,
+        };
+        self.commit(Change::Recording(run.clone()));
+        Ok(ReplyBody::Recording(run))
+    }
+
     pub(super) fn ir_capture(
         &mut self,
         client: &ClientId,

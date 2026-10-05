@@ -350,6 +350,22 @@ pub fn commands() -> Vec<Command> {
             meas: MeasId(1),
             by: Seconds(-0.25 / 48_000.0),
         },
+        Command::RecStart {
+            request: RecordRequest {
+                inputs: vec![0, 1],
+                name: Some("soundcheck".into()),
+                max_duration: Seconds(600.0),
+                max_bytes: None,
+            },
+        },
+        Command::RecStop,
+        Command::RecList,
+        Command::SessionReplay {
+            recording: RecordingRef::Name {
+                name: "soundcheck".into(),
+            },
+            pace: ReplayPace::Fast,
+        },
     ]
 }
 
@@ -731,6 +747,65 @@ fn session() -> Session {
             buffer_frames: 256,
             clock: ClockRelation::SingleCallback,
             opened_at: WallNs(1_789_999_000_000_000_000),
+            replay: None,
+        }),
+    }
+}
+
+/// A session replaying a recording.
+fn replay_session() -> Session {
+    let mut s = session();
+    if let Some(o) = &mut s.open {
+        o.backend = BackendKind::Replay;
+        o.config.backend = Some(BackendKind::Replay);
+        o.config.output_channels = 0;
+        o.config.loopback = None;
+        o.replay = Some(ReplayInfo {
+            name: "soundcheck".into(),
+            path: "/home/op/.local/share/ac2/recordings/soundcheck.wav".into(),
+            frames: 480_000,
+            end_sample: SampleIndex(481_000),
+            pace: ReplayPace::Fast,
+            recorded_start_sample: SampleIndex(96_000),
+            recorded_at: WallNs(1_789_999_100_000_000_000),
+        });
+    }
+    s
+}
+
+/// A recording that ended at its duration limit.
+pub fn recording_run() -> RecordingRun {
+    RecordingRun {
+        name: "soundcheck".into(),
+        path: "/home/op/.local/share/ac2/recordings/soundcheck.wav".into(),
+        inputs: vec![0, 1],
+        sample_rate_hz: 48_000,
+        session_epoch: SessionEpoch(2),
+        start_sample: SampleIndex(96_000),
+        started_at: WallNs(1_789_999_100_000_000_000),
+        started_by: ClientId("alice".into()),
+        frames: 480_000,
+        bytes: 3_840_116,
+        discontinuities: 1,
+        max_duration: Seconds(10.0),
+        max_bytes: Some(1 << 30),
+        status: RecordingStatus::Ended {
+            reason: RecordingEnd::DurationLimit,
+        },
+    }
+}
+
+fn recording_file() -> RecordingFile {
+    RecordingFile {
+        name: "soundcheck".into(),
+        path: "/home/op/.local/share/ac2/recordings/soundcheck.wav".into(),
+        sample_rate_hz: 48_000,
+        inputs: vec![0, 1],
+        frames: 480_000,
+        started_at: WallNs(1_789_999_100_000_000_000),
+        discontinuities: 1,
+        end: Some(RecordingEnd::WriteFailed {
+            msg: "No space left on device (os error 28)".into(),
         }),
     }
 }
@@ -889,6 +964,10 @@ pub fn state() -> State {
             state: AutosaveState::Saved,
             saved_at: Some(WallNs(1_790_000_000_000_000_000)),
         },
+        recording: Some(RecordingRun {
+            status: RecordingStatus::Recording,
+            ..recording_run()
+        }),
     }
 }
 
@@ -925,6 +1004,8 @@ pub fn events() -> Vec<Event> {
         ),
         ev(58, Change::Mic(Patch::Deleted("ECM".into()))),
         ev(59, Change::Measurement(Patch::Set(spl_measurement()))),
+        ev(60, Change::Recording(recording_run())),
+        ev(61, Change::Session(replay_session())),
     ]
 }
 
@@ -1060,6 +1141,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Grid(grids().remove(1))),
         Ok(ReplyBody::SessionFile(session_file())),
         Ok(ReplyBody::Sessions(vec![session_file()])),
+        Ok(ReplyBody::Recording(recording_run())),
+        Ok(ReplyBody::Recordings(vec![recording_file()])),
         Err(ProtoError {
             code: ErrorCode::Conflict,
             msg: "state moved".into(),

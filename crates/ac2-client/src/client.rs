@@ -236,6 +236,8 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::SessionFile(_) => "session_file",
         ReplyBody::Sessions(_) => "sessions",
         ReplyBody::Sweep(_) => "sweep",
+        ReplyBody::Recording(_) => "recording",
+        ReplyBody::Recordings(_) => "recordings",
     }
 }
 

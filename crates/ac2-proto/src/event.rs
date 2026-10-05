@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Mic, Session, SplLog, State,
-    SweepRun, TimingStatus, TraceMeta,
+    Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Mic, RecordingRun, Session,
+    SplLog, State, SweepRun, TimingStatus, TraceMeta,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
 
@@ -56,6 +56,8 @@ pub enum Change {
     Sweep(SweepRun),
     /// Autosave status (never deleted).
     Autosave(Autosave),
+    /// The latest recording (never deleted; a new recording replaces it).
+    Recording(RecordingRun),
 }
 
 /// One committed state change.
@@ -149,6 +151,13 @@ pub enum WireEvent {
         /// Payload.
         payload: Autosave,
     },
+    /// [`Change::Recording`].
+    Recording {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: RecordingRun,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -166,6 +175,7 @@ impl From<Event> for WireEvent {
             Change::Timing(payload) => Self::Timing { rev, payload },
             Change::Sweep(payload) => Self::Sweep { rev, payload },
             Change::Autosave(payload) => Self::Autosave { rev, payload },
+            Change::Recording(payload) => Self::Recording { rev, payload },
         }
     }
 }
@@ -184,6 +194,7 @@ impl From<WireEvent> for Event {
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
             WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
             WireEvent::Autosave { rev, payload } => (rev, Change::Autosave(payload)),
+            WireEvent::Recording { rev, payload } => (rev, Change::Recording(payload)),
         };
         Event { rev, change }
     }
@@ -204,6 +215,7 @@ impl Change {
             Self::Timing(_) => "timing",
             Self::Sweep(_) => "sweep",
             Self::Autosave(_) => "autosave",
+            Self::Recording(_) => "recording",
         }
     }
 }
