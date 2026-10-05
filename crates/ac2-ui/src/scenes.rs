@@ -358,6 +358,9 @@ fn with_spectrum<R>(
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
         t.offset_db = st.edit(c.meas.id).offset_db;
+        if matches!(t.quantity, Quantity::Tone | Quantity::SmoothedTone(_)) {
+            t.bin_hz = c.cols.bin_hz;
+        }
         traces.push(t);
     }
     // Stored spectra / RTA bands, drawn under the live ones' axis rules.
@@ -408,6 +411,10 @@ fn with_spectrum<R>(
             peak: None,
             scale: *scale,
             quantity: *quantity,
+            bin_hz: match quantity {
+                Quantity::Band => None,
+                _ => cols.bin_hz,
+            },
             caption: match ac2_scene::trace::curve_note(
                 data.meta.mic.as_ref(),
                 data.meta.mic_curve.as_deref(),

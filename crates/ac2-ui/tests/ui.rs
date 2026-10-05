@@ -796,7 +796,7 @@ fn smoothed_phase_and_spectrum() {
         assert_eq!(s.legend[0].text, "Main L · ref · 1/6 oct");
 
         let sp = ac2_ui::scenes::spectrum(st, &theme, size, now);
-        assert_eq!(sp.unit, "dBFS (tone, 1/6 oct smoothed)");
+        assert_eq!(sp.unit, "dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)");
         assert_eq!(sp.caption, "Hann window");
     }
     snapshot(&mut h, "smoothed_phase_and_spectrum");

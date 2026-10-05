@@ -124,6 +124,7 @@ fn scene_for(
     };
     let now = super::now();
     let st = &app.state;
+    let mut unit_tip = None;
     let (scene, axes) = match pane {
         PaneKind::Transfer => {
             let s = scenes::transfer(st, theme, vp, now);
@@ -143,6 +144,13 @@ fn scene_for(
         }
         PaneKind::Spectrum if st.view.spectrum.spectrograph.shown => {
             let s = scenes::spectrograph(st, theme, vp, now);
+            let r = s.spectrum.unit_rect;
+            unit_tip = s.spectrum.unit_help.clone().map(|h| {
+                (
+                    egui::Rect::from_min_size(egui::pos2(r.x, r.y), egui::vec2(r.w, r.h)),
+                    h,
+                )
+            });
             (
                 s.scene,
                 Axes {
@@ -154,6 +162,13 @@ fn scene_for(
         }
         PaneKind::Spectrum => {
             let s = scenes::spectrum(st, theme, vp, now);
+            let r = s.unit_rect;
+            unit_tip = s.unit_help.map(|h| {
+                (
+                    egui::Rect::from_min_size(egui::pos2(r.x, r.y), egui::vec2(r.w, r.h)),
+                    h,
+                )
+            });
             (
                 s.scene,
                 Axes {
@@ -189,6 +204,7 @@ fn scene_for(
             x_axis: axes.x,
             y_level: axes.y_level,
             time_axis: axes.time,
+            unit_tip,
         },
     );
     Some((scene, axes))
@@ -344,6 +360,19 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             scene_for(app, pane, plot_rect.size(), theme)
         } else {
             None
+        };
+        // What the level axis means, over its unit (a spectrum's per-bin levels).
+        let tip = app.scenes.get(&pane).and_then(|c| c.unit_tip.clone());
+        let resp = match tip {
+            Some((r, text))
+                if built.is_some()
+                    && resp
+                        .hover_pos()
+                        .is_some_and(|p| r.translate(plot_rect.min.to_vec2()).contains(p)) =>
+            {
+                resp.on_hover_text(text)
+            }
+            _ => resp,
         };
         match &built {
             Some((scene, _)) => plot::paint(ui, slot(pane), plot_rect, scene.clone()),

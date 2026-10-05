@@ -12,7 +12,7 @@ use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis};
 use crate::banner::{BannerRow, Status};
-use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label, visible_columns};
+use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label, text_width, visible_columns};
 use crate::format;
 use crate::grid::nearest_column;
 use crate::primitives::{
@@ -65,14 +65,85 @@ pub fn cal_caption(cal: CalStatus, curve: Option<&str>, captured: WallNs) -> Str
     s
 }
 
-/// Axis unit: `dBFS (tone)`, `dB SPL (band)`, `dBFS (tone, 1/6 oct smoothed)`.
-pub fn level_unit(scale: LevelScale, q: Quantity) -> String {
-    let what = match q {
-        Quantity::Tone => "tone".to_string(),
-        Quantity::SmoothedTone(f) => format!("tone, {} smoothed", format::octave_fraction(f)),
-        Quantity::Band => "band".to_string(),
+/// What a narrowband level is "per": the FFT bin spacing of its grid.
+///
+/// The width named is the bin spacing `fs / N`, not the window's equivalent noise bandwidth.
+/// With tone normalisation a broadband signal of density `S` reads `S · ENBW` in a bin, and
+/// ENBW is 1.5 bins for Hann (1.76 dB above `S · fs / N`), 1.0 for rectangular, about 3.8
+/// for flat-top: it is a property of the window, while the spacing is what the FFT length
+/// sets and what every spectrum grid, live or stored, carries. The label's job is to say
+/// which readings are comparable (same spacing and window: same broadband reading) and how
+/// a change of FFT length moves broadband sound (3 dB per doubling, whatever the window);
+/// a noise density would need the window's ENBW and is not what this axis claims.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BinWidth {
+    /// Not an FFT grid (an imported spectrum on another grid).
+    Unknown,
+    /// Spacing, Hz.
+    Hz(f64),
+    /// Curves on different spacings share the axis.
+    Mixed,
+}
+
+impl BinWidth {
+    pub fn of(bin_hz: Option<f64>) -> Self {
+        bin_hz.map_or(BinWidth::Unknown, BinWidth::Hz)
+    }
+}
+
+/// Axis unit, longest form: `dBFS per 1.46 Hz bin (tone)`, `dB SPL (band)`,
+/// `dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)`.
+pub fn level_unit(scale: LevelScale, q: Quantity, bin: BinWidth) -> String {
+    level_unit_forms(scale, q, bin).swap_remove(0)
+}
+
+/// The axis unit from its longest form to its shortest, for a pane too narrow for the full
+/// one: what goes first is what the pane title or the RTA's own axis also says (`tone`,
+/// the smoothing), the scale always stays.
+pub fn level_unit_forms(scale: LevelScale, q: Quantity, bin: BinWidth) -> Vec<String> {
+    let s = scale_unit(scale);
+    let smoothed = match q {
+        Quantity::SmoothedTone(f) => Some(format!("{} smoothed", format::octave_fraction(f))),
+        _ => None,
     };
-    format!("{} ({what})", scale_unit(scale))
+    let tone = match &smoothed {
+        Some(sm) => format!("tone, {sm}"),
+        None => "tone".to_string(),
+    };
+    let mut v = match (q, bin) {
+        (Quantity::Band, _) => vec![format!("{s} (band)")],
+        (_, BinWidth::Unknown) => vec![format!("{s} ({tone})")],
+        (_, BinWidth::Hz(b)) => {
+            let per = format!("{s} per {} bin", format::freq_readout(b));
+            let mut v = vec![format!("{per} ({tone})")];
+            if let Some(sm) = &smoothed {
+                v.push(format!("{per} ({sm})"));
+            }
+            v.push(per);
+            v.push(format!("{s}/bin"));
+            v
+        }
+        (_, BinWidth::Mixed) => {
+            let per = format!("{s} per bin, mixed widths");
+            vec![format!("{per} ({tone})"), per, format!("{s}/bin")]
+        }
+    };
+    v.push(s.to_string());
+    v.dedup();
+    v
+}
+
+/// What the level axis of a narrowband spectrum means, for its tooltip and the help.
+pub fn tone_unit_help(bin: BinWidth) -> String {
+    let per = match bin {
+        BinWidth::Hz(b) => format!("per FFT bin ({} wide)", format::freq_readout(b)),
+        BinWidth::Mixed | BinWidth::Unknown => "per FFT bin".to_string(),
+    };
+    format!(
+        "Level {per}: a sine reads its RMS level. Broadband sound reads lower than its band \
+         or total level, and lower with finer bins (3 dB per doubling of the FFT length). \
+         Use an RTA for band levels in dB SPL."
+    )
 }
 
 pub(crate) fn scale_unit(scale: LevelScale) -> &'static str {
@@ -120,6 +191,9 @@ pub struct SpectrumTrace<'a> {
     pub peak: Option<&'a [f32]>,
     pub scale: LevelScale,
     pub quantity: Quantity,
+    /// FFT bin spacing of a narrowband trace's grid ([`crate::grid::bin_spacing`]): its
+    /// levels are per bin, and the axis names the width.
+    pub bin_hz: Option<f64>,
     /// `1/3 oct · A-weighted`, `Hann window`.
     pub caption: String,
     pub freshness: Option<Freshness>,
@@ -165,6 +239,7 @@ impl<'a> SpectrumTrace<'a> {
             peak: None,
             scale: frame.meta.scale,
             quantity: Quantity::Band,
+            bin_hz: None,
             caption: format!(
                 "{} · {}{}{}",
                 fraction_label(frame.meta.fraction),
@@ -202,6 +277,7 @@ impl<'a> SpectrumTrace<'a> {
             peak: None,
             scale: frame.meta.scale,
             quantity: Quantity::tone(frame.meta.smoothing),
+            bin_hz: None,
             // The axis unit says whether the level is smoothed (`level_unit`).
             caption: format!(
                 "{}{}{}",
@@ -332,8 +408,12 @@ pub struct SpectrumScene {
     pub plot: Rect,
     pub x_axis: Axis,
     pub y_axis: Axis,
-    /// Axis unit as drawn.
+    /// Axis unit as drawn ([`level_unit_forms`]: the longest that fits).
     pub unit: String,
+    /// Where the unit is drawn, and what it means ([`tone_unit_help`]) for a narrowband
+    /// spectrum, for a tooltip over it.
+    pub unit_rect: Rect,
+    pub unit_help: Option<String>,
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
     /// One line per trace drawn with a display offset ([`offset_note`]), top left of the
@@ -342,6 +422,28 @@ pub struct SpectrumScene {
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+}
+
+/// The axis unit's forms ([`level_unit_forms`]) for the curves shown, and its help for a
+/// narrowband spectrum. Curves that differ only in their bin spacing share `per bin, mixed
+/// widths`; any other difference is `mixed units`.
+fn unit_forms(traces: &[SpectrumTrace<'_>]) -> (Vec<String>, Option<String>) {
+    let Some(first) = traces.first() else {
+        return (vec![String::new()], None);
+    };
+    if traces
+        .iter()
+        .any(|t| t.scale != first.scale || t.quantity != first.quantity)
+    {
+        return (vec!["mixed units".to_string()], None);
+    }
+    let bin = if traces.iter().all(|t| t.bin_hz == first.bin_hz) {
+        BinWidth::of(first.bin_hz)
+    } else {
+        BinWidth::Mixed
+    };
+    let help = (first.quantity != Quantity::Band).then(|| tone_unit_help(bin));
+    (level_unit_forms(first.scale, first.quantity, bin), help)
 }
 
 /// Line pitch of the offset notes.
@@ -371,16 +473,24 @@ pub(crate) fn spectrum_scene_in(
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
     let plot = canvas::plot_area(size, strip.rect.bottom(), right);
-    let units: Vec<String> = traces
-        .iter()
-        .map(|t| level_unit(t.scale, t.quantity))
-        .collect();
-    let unit = match units.first() {
-        None => String::new(),
-        Some(u) if units.iter().all(|x| x == u) => u.clone(),
-        Some(_) => "mixed units".to_string(),
-    };
     let caption = traces.first().map_or(String::new(), |t| t.caption.clone());
+    // The unit shares the plot's top line with the caption (right): it takes its longest
+    // form that leaves the caption room.
+    let font = theme.small_font_size;
+    let room = plot.w
+        - 12.0
+        - if caption.is_empty() {
+            0.0
+        } else {
+            text_width(&caption, font) + 12.0
+        };
+    let (forms, unit_help) = unit_forms(traces);
+    let unit = forms
+        .iter()
+        .find(|f| text_width(f, font) <= room)
+        .or(forms.last())
+        .cloned()
+        .unwrap_or_default();
     let x_axis = axis::freq_axis(view.freq.range(), plot.x, plot.right());
     let y_axis = axis::linear_axis(view.spectrum.level, plot.bottom(), plot.y, &unit);
     canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, &unit, theme);
@@ -557,7 +667,14 @@ pub(crate) fn spectrum_scene_in(
         plot,
         x_axis,
         y_axis,
+        unit_rect: Rect::new(
+            plot.x + 6.0,
+            plot.y + 4.0,
+            text_width(&unit, font),
+            font * 1.25,
+        ),
         unit,
+        unit_help,
         caption,
         cursor,
         offsets,
@@ -607,6 +724,7 @@ mod tests {
             peak: None,
             scale,
             quantity: Quantity::Band,
+            bin_hz: None,
             caption: format!(
                 "{} · {}",
                 fraction_label(BandFraction::Third),
@@ -774,25 +892,58 @@ mod tests {
 
     #[test]
     fn unit_labels() {
-        assert_eq!(level_unit(LevelScale::Dbfs, Quantity::Tone), "dBFS (tone)");
-        assert_eq!(level_unit(LevelScale::Dbfs, Quantity::Band), "dBFS (band)");
+        use BinWidth as B;
+        let bin = B::Hz(48_000.0 / 32_768.0);
         assert_eq!(
-            level_unit(LevelScale::DbSpl, Quantity::Band),
+            level_unit(LevelScale::Dbfs, Quantity::Tone, bin),
+            "dBFS per 1.46 Hz bin (tone)"
+        );
+        assert_eq!(
+            level_unit(LevelScale::Dbfs, Quantity::Tone, B::Unknown),
+            "dBFS (tone)"
+        );
+        assert_eq!(
+            level_unit(LevelScale::Dbfs, Quantity::Band, B::Unknown),
+            "dBFS (band)"
+        );
+        assert_eq!(
+            level_unit(LevelScale::DbSpl, Quantity::Band, B::Unknown),
             "dB SPL (band)"
         );
         assert_eq!(
             level_unit(
                 LevelScale::Dbfs,
-                Quantity::SmoothedTone(SmoothingFraction::Sixth)
+                Quantity::SmoothedTone(SmoothingFraction::Sixth),
+                B::Hz(48_000.0 / 4096.0)
             ),
-            "dBFS (tone, 1/6 oct smoothed)"
+            "dBFS per 11.7 Hz bin (tone, 1/6 oct smoothed)"
         );
         assert_eq!(
-            level_unit(
+            level_unit_forms(
                 LevelScale::DbSpl,
-                Quantity::tone(Some(SmoothingFraction::Third))
+                Quantity::tone(Some(SmoothingFraction::Third)),
+                bin
             ),
-            "dB SPL (tone, 1/3 oct smoothed)"
+            [
+                "dB SPL per 1.46 Hz bin (tone, 1/3 oct smoothed)",
+                "dB SPL per 1.46 Hz bin (1/3 oct smoothed)",
+                "dB SPL per 1.46 Hz bin",
+                "dB SPL/bin",
+                "dB SPL",
+            ]
+        );
+        assert_eq!(
+            level_unit_forms(LevelScale::Dbfs, Quantity::Tone, B::Mixed),
+            [
+                "dBFS per bin, mixed widths (tone)",
+                "dBFS per bin, mixed widths",
+                "dBFS/bin",
+                "dBFS",
+            ]
+        );
+        assert_eq!(
+            level_unit_forms(LevelScale::DbSpl, Quantity::Band, B::Unknown),
+            ["dB SPL (band)", "dB SPL"]
         );
         assert_eq!(fraction_label(BandFraction::TwentyFourth), "1/24 oct");
         assert_eq!(window_label(Window::FlatTop), "flat-top window");
@@ -930,6 +1081,97 @@ mod tests {
             SIZE,
         );
         assert_eq!(s.unit, "mixed units");
+    }
+
+    /// A spectrum's axis names its bin width; a narrower pane shortens the unit to what
+    /// fits beside the caption, down to the bare scale, and never runs it into the caption.
+    #[test]
+    fn tone_unit_names_the_bin_and_fits_narrow_panes() {
+        let g = GridDef::LogBins {
+            fs: Hz(48_000.0),
+            n: 32_768,
+            ppo: 96,
+        };
+        let cols = crate::grid::columns(&g);
+        let level = vec![-60.0f32; cols.freqs.len()];
+        let mut t = SpectrumTrace {
+            key: TraceKey::Stored(ac2_proto::units::TraceId(1)),
+            name: "Main L".into(),
+            color: Color::WHITE,
+            freqs: &cols.freqs,
+            edges: &cols.edges,
+            level: &level,
+            validity: None,
+            peak: None,
+            scale: LevelScale::DbSpl,
+            quantity: Quantity::tone(Some(SmoothingFraction::Third)),
+            bin_hz: cols.bin_hz,
+            caption: "Hann window".into(),
+            freshness: None,
+            offset_db: 0.0,
+        };
+        let theme = Theme::dark();
+        let scene = |traces: &[SpectrumTrace<'_>], w: f32| {
+            spectrum_scene(
+                traces,
+                &Status::default(),
+                &ViewState::default(),
+                &theme,
+                Viewport {
+                    width: w,
+                    height: 300.0,
+                },
+            )
+        };
+        let wide = scene(std::slice::from_ref(&t), 900.0);
+        assert_eq!(wide.unit, "dB SPL per 1.46 Hz bin (tone, 1/3 oct smoothed)");
+        let help = wide.unit_help.as_deref().expect("help");
+        assert!(help.contains("1.46 Hz") && help.contains("RTA"), "{help}");
+        let mut seen = Vec::new();
+        for w in [900.0, 480.0, 440.0, 400.0, 330.0, 260.0, 200.0, 120.0] {
+            let s = scene(std::slice::from_ref(&t), w);
+            let caption = s
+                .scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.labels)
+                .find(|l| l.text == "Hann window")
+                .expect("caption");
+            let cap = crate::canvas::tests::label_box(caption);
+            // The unit fits left of the caption whenever any form does.
+            if s.unit != "dB SPL" {
+                assert!(s.unit_rect.right() < cap.x, "{w}: {:?} vs {cap:?}", s.unit);
+            }
+            seen.push(s.unit);
+        }
+        seen.dedup();
+        assert_eq!(
+            seen,
+            [
+                "dB SPL per 1.46 Hz bin (tone, 1/3 oct smoothed)",
+                "dB SPL per 1.46 Hz bin (1/3 oct smoothed)",
+                "dB SPL per 1.46 Hz bin",
+                "dB SPL/bin",
+                "dB SPL",
+            ]
+        );
+        // Spectra on two FFT lengths share the axis as per bin, mixed widths.
+        let g2 = GridDef::LogBins {
+            fs: Hz(48_000.0),
+            n: 4096,
+            ppo: 96,
+        };
+        let cols2 = crate::grid::columns(&g2);
+        let level2 = vec![-60.0f32; cols2.freqs.len()];
+        let mut u = t.clone();
+        u.freqs = &cols2.freqs;
+        u.edges = &cols2.edges;
+        u.level = &level2;
+        u.bin_hz = cols2.bin_hz;
+        t.quantity = Quantity::Tone;
+        u.quantity = Quantity::Tone;
+        let s = scene(&[t, u], 900.0);
+        assert_eq!(s.unit, "dB SPL per bin, mixed widths (tone)");
     }
 
     #[test]

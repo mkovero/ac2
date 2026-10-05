@@ -2162,6 +2162,18 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
         ac2_ui::scenes::frame(s, sp, Stream::Spec).is_some()
     })?;
     d.key("Alt+2");
+    // Its levels are per FFT bin: the axis names the bin width, the tooltip what it means.
+    let pane = ac2_ui::scenes::spectrum(&d.st, &theme, size, now());
+    assert!(
+        pane.unit.starts_with("dBFS per ") && pane.unit.ends_with(" Hz bin (tone)"),
+        "{}",
+        pane.unit
+    );
+    assert!(
+        pane.unit_help.as_deref().is_some_and(|h| h.contains("RTA")),
+        "{:?}",
+        pane.unit_help
+    );
     let level = |s: &AppState| s.view.spectrum.level;
     // The new spectrum's first frame framed the level axis (as Shift+Home).
     let default = ac2_scene::view::ViewState::default().spectrum.level;

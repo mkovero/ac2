@@ -64,6 +64,19 @@ pub struct GridColumns {
     pub freqs: Vec<f64>,
     /// [`column_edges`].
     pub edges: Vec<(f64, f64)>,
+    /// [`bin_spacing`].
+    pub bin_hz: Option<f64>,
+}
+
+/// FFT bin spacing `fs / n` of a grid of FFT bins (gathered for display or not); `None`
+/// for band and log grids, whose columns are no FFT's bins.
+pub fn bin_spacing(g: &GridDef) -> Option<f64> {
+    match g {
+        GridDef::Linear { fs, n } | GridDef::LogBins { fs, n, .. } if *n > 0 => {
+            Some(fs.0 / f64::from(*n))
+        }
+        _ => None,
+    }
 }
 
 /// Most grids [`columns`] remembers: a session has a handful (one per measurement kind and
@@ -86,6 +99,7 @@ pub fn columns(g: &GridDef) -> Arc<GridColumns> {
     let c = Arc::new(GridColumns {
         freqs: column_frequencies(g),
         edges: column_edges(g),
+        bin_hz: bin_spacing(g),
     });
     map.insert(id, Arc::clone(&c));
     c
@@ -151,6 +165,19 @@ mod tests {
             [0.0, 6000.0, 12000.0, 18000.0, 24000.0]
         );
         assert_eq!(column_edges(&g)[0], (0.0, 3000.0));
+        assert_eq!(bin_spacing(&g), Some(6000.0));
+        let g = GridDef::LogBins {
+            fs: Hz(48_000.0),
+            n: 32_768,
+            ppo: 96,
+        };
+        assert_eq!(bin_spacing(&g), Some(48_000.0 / 32_768.0));
+        let g = GridDef::Log {
+            ppo: 48,
+            k_min: -240,
+            k_max: 239,
+        };
+        assert_eq!(bin_spacing(&g), None);
     }
 
     #[test]

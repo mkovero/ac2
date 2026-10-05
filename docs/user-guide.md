@@ -225,6 +225,19 @@ distortion) is its own and is kept while the app runs:
   on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
+**What the spectrum's level means.** A narrowband spectrum's levels are **per FFT bin**,
+and its axis says how wide a bin is: `dBFS per 1.46 Hz bin (tone)` (48 kHz / 32 768
+points), `dB SPL per 0.73 Hz bin (tone)`. A sine reads its RMS level whatever the FFT length
+(*tone* level), but broadband sound — pink noise, programme, a crowd — spreads its power over
+many bins, so each bin reads far below the band or total level, and lower the finer the bins:
+3 dB lower per doubling of the FFT length. That is why a calibrated spectrum of a loud room
+can sit at 40 dB SPL, and an uncalibrated one below −100 dBFS. **Use an RTA for band levels
+in dB SPL** (its axis says `(band)`); hovering over the spectrum's unit says the same. The
+width named is the bin spacing (sample rate / FFT length); with the Hann window broadband
+sound reads 1.8 dB above what that spacing alone would give (the window's noise bandwidth
+is 1.5 bins). Curves on different FFT lengths share `per bin, mixed widths`; a narrow pane
+shortens the unit (`dBFS per 1.46 Hz bin`, `dBFS/bin`, `dBFS`).
+
 A live **narrowband spectrum** is drawn from display columns, not from every FFT bin: each
 bin is its own column while bins are wider than 1/96 octave (up to about 100 Hz at the
 default 65 536 points and 48 kHz), above that a column spans 1/96 octave and shows the
@@ -279,8 +292,8 @@ curve.
   `mag only` and keeps the measured phase.
 - **Spectra** (narrowband FFT) are smoothed as power over a fractional-octave window on the
   FFT bins. A smoothed spectrum no longer reads as the tone level of a bin — a sine is spread
-  over the window and reads lower — so the level axis says so: `dBFS (tone, 1/6 oct
-  smoothed)`. Spectra start unsmoothed (the New spectrum dialog and `ac2 meas new spectrum
+  over the window and reads lower — so the level axis says so: `dBFS per 1.46 Hz bin (tone,
+  1/6 oct smoothed)`. Spectra start unsmoothed (the New spectrum dialog and `ac2 meas new spectrum
   --smooth 6` can set it). At the lowest bins the window is narrower than one bin and the
   bins pass through unchanged.
 - **RTA** bands already are fractional-octave: **K** in an RTA says so and changes nothing.

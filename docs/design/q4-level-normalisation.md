@@ -24,8 +24,11 @@ matches the amplitude convention.
 
 ## Views (decision 4b)
 
-- **Narrowband spectrum:** amplitude in dBFS, with the axis labelled "dBFS (tone)". A tone
-  reads its level and noise reads lower as N grows. That is printed as a hint, not hidden.
+- **Narrowband spectrum:** amplitude in dBFS, with the axis labelled "dBFS per 1.46 Hz bin
+  (tone)" — the bin spacing fs/N from the frame's grid (not the window's ENBW: the spacing is
+  what the FFT length sets and every grid carries; with Hann, broadband reads 1.76 dB above
+  `S · fs/N`). A tone reads its level and noise reads lower as N grows (3 dB per doubling);
+  the axis's tooltip says so and points to the RTA for band levels.
 - **RTA:** band power in dBFS (or dB SPL when calibrated), with the axis labelled "dBFS (band)".
   FFT-banded and IEC-filterbank RTAs both use this unit. Which method was used is part of
   the label.
