@@ -127,6 +127,7 @@ mod tests {
             alpha: vec![1.0; n],
             freshness: None,
             smoothing: None,
+            note: None,
         }
     }
 

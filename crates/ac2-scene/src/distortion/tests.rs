@@ -118,6 +118,7 @@ fn status() -> Status {
         timing: None,
         clock_drift_ppm: None,
         no_delay_estimate: None,
+        average: None,
     }
 }
 

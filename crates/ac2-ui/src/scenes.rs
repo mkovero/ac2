@@ -8,9 +8,10 @@ use std::time::Instant;
 use ac2_client::TopicFrame;
 use ac2_proto::FrameData;
 use ac2_proto::frame::ProtectionFlags;
-use ac2_proto::model::{LevelScale, MeasKind, Measurement, Polarity, TraceKind, TraceSource};
+use ac2_proto::model::{LevelScale, MeasKind, Measurement, Polarity, TraceKind};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
+use ac2_scene::average::AverageStatus;
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::format;
@@ -108,11 +109,27 @@ pub fn status(
             .filter(|d| d.warning)
             .map(|d| d.ppm),
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
+        average: None,
     }
 }
 
 fn is_tf(m: &Measurement) -> bool {
-    matches!(m.config.kind, MeasKind::Transfer { .. })
+    m.config.kind.publishes_tf()
+}
+
+/// What a spatial average's frame averaged, members named as the measurement list names
+/// them; `None` for any other frame.
+fn average_status(st: &AppState, frame: &FrameData) -> Option<AverageStatus> {
+    let FrameData::Tf(f) = frame else {
+        return None;
+    };
+    let a = f.meta.average.as_ref()?;
+    let ms = st.measurements();
+    Some(AverageStatus::new(a, |id| {
+        ms.iter()
+            .find(|m| m.id == id)
+            .map_or_else(|| format!("measurement {id}"), |m| m.config.name.clone())
+    }))
 }
 
 /// The TF measurement the IR pane and the delay banner follow: the one the transfer pane
@@ -192,26 +209,32 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             Polarity::Normal
         };
         t.nudge = Seconds(e.nudge_s);
+        t.note = average_status(st, &l.tf.frame.data).map(|a| a.tag());
         traces.push(t);
     }
     for (data, cols) in &stored {
         let mut t = TfTrace::stored(data, &cols.freqs);
         t.selected = st.selected_trace == Some(data.meta.id);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
-        if let (
-            TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. },
-            Some(cur),
-        ) = (
-            &data.meta.source,
+        if let (Some(epoch), Some(cur)) = (
+            data.meta.source.shared_epoch(),
             st.mirror.as_ref().and_then(|m| m.session_epoch),
-        ) && *epoch != cur
+        ) && epoch != cur
         {
             t.time_base = TimeBase::Independent;
         }
         traces.push(t);
     }
     let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
-    let status = status(st, &shown, focus_tf(st), now);
+    let focus = focus_tf(st);
+    let mut status = status(st, &shown, focus, now);
+    // The shown average's positions, unless it is stopped (its last frame is history).
+    status.average = focus.and_then(|m| {
+        let l = live
+            .iter()
+            .find(|l| l.meas.id == m.id && !stopped(st, l.tf))?;
+        Some((m.config.name.clone(), average_status(st, &l.tf.frame.data)?))
+    });
     transfer_scene(&traces, &st.tf_display, &status, &st.view, theme, size)
 }
 
@@ -325,7 +348,7 @@ fn with_spectrum<R>(
                 FrameData::Rta(f) => f.meta.mic_curve,
                 _ => false,
             };
-            st.curve_note(crate::state::meas_input(&c.meas.config.kind), applied)
+            crate::state::meas_input(&c.meas.config.kind).and_then(|i| st.curve_note(i, applied))
         })
         .collect();
     let mut traces = Vec::new();

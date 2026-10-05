@@ -114,6 +114,13 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+- **Live spatial average of N transfer functions** (PLAN §3.3, phase 7; 2026-10-05): a
+  measurement kind naming 2 … 16 transfer measurements, averaged in the daemon per frame
+  with `trace.average`'s mathematics (power / complex / coherence-weighted, each member
+  re-referred from its own delay), members left out by name and reason, no average below two;
+  app dialog by name, legend and banners, `ac2 meas new avg`, captures naming their
+  positions. PROTO 19, session format 9 (`docs/design/spatial-average.md`).
+
 ISO 3382-1 room parameters from the sweep IR (2026-10-05, `docs/design/room-metrics.md`):
 - EDT / T20 / T30 / C50 / C80 / D50 per octave and one-third octave and broadband, band
   filters run backwards, own trigger per band, Lundeby truncation with tail correction,

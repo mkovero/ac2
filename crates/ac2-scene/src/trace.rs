@@ -82,6 +82,9 @@ pub struct TfTrace<'a> {
     pub freshness: Option<Freshness>,
     /// Display smoothing the columns arrived with (the daemon applied it).
     pub smoothing: Option<Smoothing>,
+    /// What the legend says after the name about where the curve comes from: a spatial
+    /// average's `3 of 4 positions · power avg`.
+    pub note: Option<String>,
     /// The stored trace the columns are borrowed from: they are then fixed for as long as
     /// it lives, so its display math can be kept between frames ([`DisplayCache`]).
     pub stored: Option<&'a Arc<TraceData>>,
@@ -118,6 +121,7 @@ impl<'a> TfTrace<'a> {
             },
             freshness: Some(freshness),
             smoothing: frame.meta.smoothing,
+            note: None,
             stored: None,
             selected: false,
         }
@@ -128,14 +132,22 @@ impl<'a> TfTrace<'a> {
     /// independent (decision 8a).
     pub fn stored(data: &'a Arc<TraceData>, freqs: &'a [f64]) -> Self {
         let m = &data.meta;
-        let time_base = match m.source {
-            TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
-                TimeBase::Shared {
-                    epoch,
-                    delay: m.delay,
-                }
-            }
-            _ => TimeBase::Independent,
+        let time_base = match m.source.shared_epoch() {
+            Some(epoch) => TimeBase::Shared {
+                epoch,
+                delay: m.delay,
+            },
+            None => TimeBase::Independent,
+        };
+        let note = match &m.source {
+            TraceSource::SpatialAverage {
+                method, members, ..
+            } => Some(format!(
+                "{} positions · {} avg",
+                members.len(),
+                crate::average::method_name(*method)
+            )),
+            _ => None,
         };
         let c = m.edit.color;
         Self {
@@ -153,6 +165,7 @@ impl<'a> TfTrace<'a> {
             time_base,
             freshness: None,
             smoothing: m.edit.smoothing,
+            note,
             stored: Some(data),
             selected: false,
         }
@@ -261,6 +274,8 @@ pub struct DisplayTrace {
     pub alpha: Vec<f32>,
     pub freshness: Option<Freshness>,
     pub smoothing: Option<Smoothing>,
+    /// See [`TfTrace::note`].
+    pub note: Option<String>,
 }
 
 impl DisplayTrace {
@@ -413,6 +428,7 @@ pub fn display_trace(
         alpha,
         freshness: t.freshness,
         smoothing: t.smoothing,
+        note: t.note.clone(),
     }
 }
 
@@ -696,6 +712,7 @@ mod tests {
                 time_base,
                 freshness: None,
                 smoothing: None,
+                note: None,
                 stored: None,
                 selected: false,
             }

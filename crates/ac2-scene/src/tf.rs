@@ -108,7 +108,7 @@ pub struct TfScene {
 }
 
 fn legend_entry(t: &DisplayTrace, nudge_s: f64, selected: bool) -> LegendEntry {
-    let mut tags = Vec::new();
+    let mut tags: Vec<String> = t.note.iter().cloned().collect();
     match t.relation {
         PhaseRelation::Reference => tags.push("ref".to_string()),
         PhaseRelation::Independent => tags.push("indep.".to_string()),
@@ -619,6 +619,7 @@ mod tests {
             },
             freshness: Some(Freshness::from_age(0.1)),
             smoothing: None,
+            note: None,
             stored: None,
             selected: false,
         }

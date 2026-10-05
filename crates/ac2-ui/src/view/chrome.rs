@@ -478,6 +478,7 @@ pub(super) fn kind_tag(k: &MeasKind) -> &'static str {
         MeasKind::Spectrum { .. } => "FFT",
         MeasKind::Rta { .. } => "RTA",
         MeasKind::Spl { .. } => "SPL",
+        MeasKind::SpatialAverage { .. } => "AVG",
     }
 }
 

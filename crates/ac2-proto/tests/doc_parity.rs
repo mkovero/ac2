@@ -215,6 +215,18 @@ fn protocol_doc_names_everything() {
         &doc,
         &mut missing,
     );
+    check(
+        "average member status",
+        &names_of::<frame::MemberStatus, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "average reference",
+        &names_of::<model::AverageReference, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
     for (group, fields) in [
         (
             "delay finding field",

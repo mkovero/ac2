@@ -428,6 +428,7 @@ commands! {
     NewSpectrum => "meas_new_spectrum", "New spectrum…", [Global];
     NewRta => "meas_new_rta", "New RTA…", [Global];
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
+    NewAverage => "meas_new_average", "New spatial average of transfer measurements (several mic positions)…", [Global];
     DeleteMeasurement => "meas_delete", "Delete selected measurement", [Global];
     InputSetup => "input_setup", "Input setup: mic, mic curve and calibration of each input…", [Global];
     Calibrations => "calibrations", "Calibrations: mics, curves and sensitivity calibrations…", [Global];
@@ -1080,6 +1081,7 @@ mod tests {
             CommandId::NewSpectrum,
             CommandId::NewRta,
             CommandId::NewSpl,
+            CommandId::NewAverage,
             CommandId::DeleteMeasurement,
             CommandId::AverageComplex,
             CommandId::AverageCoherence,

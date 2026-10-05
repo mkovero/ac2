@@ -3180,3 +3180,165 @@ fn record_and_replay_from_the_app() -> R {
     handle.shutdown();
     Ok(())
 }
+
+/// From an empty daemon: two transfer measurements (two positions of the room mic), a
+/// spatial average of them made in its dialog by name, the average drawn as a transfer
+/// curve whose legend counts its positions; a position stopped is named in a banner and,
+/// with one left, the average says it has none.
+#[test]
+fn spatial_average_from_an_empty_daemon() -> R {
+    use ac2_proto::Command;
+    use ac2_proto::frame::MemberStatus;
+    use ac2_scene::trace::TraceKey;
+    use ac2_ui::conn::Request;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+
+    // No average of one position: the palette says what is missing.
+    d.send(Msg::Command(CommandId::NewAverage));
+    assert!(!matches!(d.st.overlay, Overlay::Form(_)));
+    assert!(
+        d.st.toasts
+            .iter()
+            .any(|t| t.text.contains("needs at least 2 transfer measurements")),
+        "{:?}",
+        d.st.toasts
+    );
+
+    // A second position, from the transfer dialog.
+    d.send(Msg::Command(CommandId::NewTransfer));
+    d.key("Enter");
+    d.until("two transfer measurements", |s| {
+        s.measurements()
+            .iter()
+            .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }) && m.running)
+            .count()
+            == 2
+    })?;
+    let second =
+        d.st.measurements()
+            .iter()
+            .map(|m| m.id)
+            .find(|id| *id != first)
+            .ok_or("second")?;
+
+    // The average's dialog lists both by name, in; Enter makes and starts it.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spatial average".into()));
+    d.key("Enter");
+    let Overlay::Form(f) = &d.st.overlay else {
+        return Err(format!("{:?}", d.st.overlay).into());
+    };
+    assert_eq!(f.kind, FormKind::Average);
+    let rows: Vec<(String, String)> = f
+        .fields
+        .iter()
+        .map(|x| (x.label.clone(), x.display()))
+        .collect();
+    assert_eq!(
+        rows[0],
+        (
+            "Reference \u{2192} Room mic".into(),
+            "in the average".into()
+        )
+    );
+    assert_eq!(rows[1].1, "in the average");
+    d.key("Enter");
+    d.until("the average, running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::SpatialAverage { .. }) && m.running)
+    })?;
+    let avg =
+        d.st.measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::SpatialAverage { .. }))
+            .map(|m| (m.id, m.config.name.clone()))
+            .ok_or("average")?;
+    assert_eq!(avg.1, "Average 1");
+
+    // Two positions of the same −6 dB path average to −6 dB (the level is still typed).
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    d.tf_frames(avg.0, 240)?;
+    let theme = Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 600.0,
+    };
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let legend = |s: &AppState| {
+        ac2_ui::scenes::transfer(s, &theme, size, now())
+            .legend
+            .iter()
+            .find(|e| e.key == TraceKey::Live(avg.0))
+            .map(|e| e.text.clone())
+            .unwrap_or_default()
+    };
+    assert!(
+        legend(&d.st).starts_with("Average 1 · 2 positions · power avg"),
+        "{}",
+        legend(&d.st)
+    );
+
+    // One position stopped: no average, and the banner says which and why.
+    d.conn.send(Request::Call {
+        cmd: Command::MeasStop { meas: second },
+        what: "stopped".into(),
+    });
+    let topic = Topic::Data {
+        meas: avg.0,
+        stream: Stream::Tf,
+    };
+    d.until("the average without its second position", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Tf(tf) => {
+                    tf.meta.average.as_ref().is_some_and(|a| {
+                        a.members.iter().any(|m| m.status == MemberStatus::Stopped)
+                    })
+                }
+                _ => false,
+            })
+        })
+    })?;
+    let second_name =
+        d.st.measurements()
+            .iter()
+            .find(|m| m.id == second)
+            .map(|m| m.config.name.clone())
+            .unwrap_or_default();
+    // The transfer pane's banners follow its measurement: the average, once selected.
+    d.st.selected = Some(avg.0);
+    d.st.pane_meas
+        .insert(ac2_ui::state::PaneKind::Transfer, avg.0);
+    let scene = ac2_ui::scenes::transfer(&d.st, &theme, size, now());
+    let banners: Vec<(String, Option<String>)> = scene
+        .banners
+        .iter()
+        .map(|b| (b.text.clone(), b.detail.clone()))
+        .collect();
+    assert!(
+        banners.contains(&(
+            "NO AVERAGE · 1 OF 2 POSITIONS".into(),
+            Some(format!("Average 1: left out {second_name}: stopped"))
+        )),
+        "{banners:?}"
+    );
+    assert!(
+        legend(&d.st).starts_with("Average 1 · 1 of 2 positions"),
+        "{}",
+        legend(&d.st)
+    );
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

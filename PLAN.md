@@ -125,7 +125,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Multiple measurement pairs live at once | P0 | ac | 3 |
 | Fault banners: NO REFERENCE / NO SIGNAL / CHECK ROUTING / CLIP / STALE (frame age) / NO DELAY ESTIMATE | P0 | ac + new | 4 |
 | Delay change without full ladder resettle; sub-sample delay | P1 | new | 7 |
-| Live spatial average of N transfer functions | P1 | new | 7 |
+| Live spatial average of N transfer functions (done: `docs/design/spatial-average.md`) | P1 | new | 7 |
 
 ### 3.4 Spectrum / RTA
 | Feature | Pri | Src | Phase |
@@ -562,7 +562,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); ISO 3382-1 room parameters per band from the sweep IR (`docs/design/room-metrics.md`); open — ASIO, spatial average, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history (`docs/design/leq.md`); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); ISO 3382-1 room parameters per band from the sweep IR (`docs/design/room-metrics.md`); live spatial average of transfer functions (`docs/design/spatial-average.md`); open — ASIO, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
 transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,

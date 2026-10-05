@@ -18,7 +18,7 @@ use ac2_proto::model::{
     AverageMethod, CalKey, CurveChoice, DelayFinding, DelayOutcome, DelayPick, DelayReference,
     FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathOp, MeasKind,
     Measurement, MicCurveId, Polarity, SessionRef, Signal, Smoothing, SmoothingFraction,
-    SmoothingMode, State, SweepStatus, TraceData, TraceKind, TraceMeta,
+    SmoothingMode, SpatialAverageConfig, State, SweepStatus, TraceData, TraceKind, TraceMeta,
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
@@ -94,7 +94,9 @@ impl PaneKind {
     /// pane's measurement).
     pub fn shows(self, k: &MeasKind) -> bool {
         match self {
-            PaneKind::Transfer | PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
+            PaneKind::Transfer => k.publishes_tf(),
+            // A spatial average has no impulse response of its own.
+            PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
             PaneKind::Spectrum => matches!(k, MeasKind::Spectrum { .. } | MeasKind::Rta { .. }),
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
             // Sweep traces, not measurements.
@@ -113,7 +115,7 @@ impl PaneKind {
     /// The pane that shows measurements of kind `k`.
     pub fn for_kind(k: &MeasKind) -> PaneKind {
         match k {
-            MeasKind::Transfer { .. } => PaneKind::Transfer,
+            MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. } => PaneKind::Transfer,
             MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => PaneKind::Spectrum,
             MeasKind::Spl { .. } => PaneKind::Spl,
         }
@@ -179,7 +181,7 @@ impl SmoothTarget {
                 TraceKind::Target => Smoothable::No,
             },
             SmoothTarget::Meas(m) => match m.config.kind {
-                MeasKind::Transfer { .. } => Smoothable::Transfer,
+                MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. } => Smoothable::Transfer,
                 MeasKind::Spectrum { .. } => Smoothable::Spectrum,
                 MeasKind::Rta { .. } => Smoothable::Rta,
                 MeasKind::Spl { .. } => Smoothable::No,
@@ -200,6 +202,7 @@ impl SmoothTarget {
             SmoothTarget::Trace(t) => t.edit.smoothing,
             SmoothTarget::Meas(m) => match &m.config.kind {
                 MeasKind::Transfer { config } => config.smoothing,
+                MeasKind::SpatialAverage { config } => config.smoothing,
                 MeasKind::Spectrum { config } => config.smoothing.map(spectrum_smoothing),
                 _ => None,
             },
@@ -1192,7 +1195,7 @@ impl AppState {
                 }
                 let m = self.pane_meas(pane)?;
                 let stream = match m.config.kind {
-                    MeasKind::Transfer { .. } => Stream::Tf,
+                    MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. } => Stream::Tf,
                     MeasKind::Spectrum { .. } => Stream::Spec,
                     MeasKind::Rta { .. } => Stream::Rta,
                     MeasKind::Spl { .. } => Stream::Spl,
@@ -1207,7 +1210,7 @@ impl AppState {
                         ac2_proto::FrameData::Rta(x) => x.meta.mic_curve,
                         _ => false,
                     });
-                self.curve_note(meas_input(&m.config.kind), applied)
+                meas_input(&m.config.kind).and_then(|i| self.curve_note(i, applied))
             }
             PaneKind::Distortion => self.shown_sweep().and_then(|(d, _)| stored(&d.meta)),
             PaneKind::Ir | PaneKind::Spl => None,
@@ -1679,6 +1682,19 @@ impl AppState {
                 MeasKind::Spectrum { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Rta { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Spl { config } => vec![(config.input, InputUse::Measurement)],
+                // Every member's inputs.
+                MeasKind::SpatialAverage { config } => ms
+                    .iter()
+                    .filter(|x| config.members.contains(&x.id))
+                    .filter_map(|x| match &x.config.kind {
+                        MeasKind::Transfer { config } => Some([
+                            (config.reference_input, InputUse::Reference),
+                            (config.measurement_input, InputUse::Measurement),
+                        ]),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect(),
             },
             (None, None) => Vec::new(),
         };
@@ -2895,8 +2911,8 @@ impl AppState {
     /// mic name.
     fn cal_delete_text(&self) -> String {
         self.selected_meas()
-            .map(|m| {
-                let input = meas_input(&m.config.kind);
+            .and_then(|m| meas_input(&m.config.kind))
+            .map(|input| {
                 let mic = self.input_setup(input).mic.unwrap_or_default();
                 format!("{}={mic}", u32::from(input) + 1)
             })
@@ -3618,6 +3634,31 @@ impl AppState {
                     }
                 }
             }
+            C::NewAverage => {
+                let form = {
+                    let ms = self.measurements();
+                    let transfers: Vec<&Measurement> = ms
+                        .iter()
+                        .copied()
+                        .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+                        .collect();
+                    let n = transfers.len();
+                    if n < SpatialAverageConfig::MIN_MEMBERS {
+                        Err(format!(
+                            "a spatial average needs at least {} transfer measurements (one per \
+                             mic position); there {} {n}: palette \"New transfer measurement\"",
+                            SpatialAverageConfig::MIN_MEMBERS,
+                            if n == 1 { "is" } else { "are" }
+                        ))
+                    } else {
+                        Ok(Form::average(&transfers, &ms))
+                    }
+                };
+                match form {
+                    Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+                    Err(e) => self.error(e),
+                }
+            }
             C::DeleteMeasurement => match self.selected_meas().cloned() {
                 Some(m) => self.call(
                     out,
@@ -3661,7 +3702,10 @@ impl AppState {
                 Some(s) => {
                     // Input setup starts on the input the selected measurement listens on.
                     let on = (c == C::InputSetup)
-                        .then(|| self.selected_meas().map(|m| meas_input(&m.config.kind)))
+                        .then(|| {
+                            self.selected_meas()
+                                .and_then(|m| meas_input(&m.config.kind))
+                        })
                         .flatten();
                     let v = CalView::new(s, on);
                     self.overlay = Overlay::Calibrations(Box::new(v));
@@ -3671,7 +3715,8 @@ impl AppState {
             C::MicCurveInput => {
                 let text = self
                     .selected_meas()
-                    .map(|m| format!("{}=", u32::from(meas_input(&m.config.kind)) + 1))
+                    .and_then(|m| meas_input(&m.config.kind))
+                    .map(|i| format!("{}=", u32::from(i) + 1))
                     .unwrap_or_default();
                 self.prompt(PromptKind::MicCurveInput, text);
             }
@@ -3714,8 +3759,8 @@ impl AppState {
                         )
                     }],
                     "transfer, spectrum, RTA or SPL",
-                ) {
-                    let input = meas_input(&m.config.kind);
+                ) && let Some(input) = meas_input(&m.config.kind)
+                {
                     let mut row = self.input_setup(input);
                     let Some(mic) = row.mic.clone() else {
                         self.error(format!(
@@ -3735,10 +3780,9 @@ impl AppState {
 
             C::Freeze => {
                 if let Some(m) = self.need_meas(
-                    &[
-                        |k| matches!(k, MeasKind::Transfer { .. }),
-                        |k| matches!(k, MeasKind::Spectrum { .. } | MeasKind::Rta { .. }),
-                    ],
+                    &[MeasKind::publishes_tf, |k| {
+                        matches!(k, MeasKind::Spectrum { .. } | MeasKind::Rta { .. })
+                    }],
                     "transfer or spectrum",
                 ) {
                     let frozen = !m.frozen;
@@ -3751,7 +3795,20 @@ impl AppState {
                 }
             }
             C::ResetAverage => {
-                if let Some(m) = self.focused_pane_meas() {
+                let m = self.focused_pane_meas();
+                if let Some(m) = &m
+                    && let MeasKind::SpatialAverage { config } = &m.config.kind
+                {
+                    // An average holds no averaging of its own: starting it over means
+                    // starting its positions over.
+                    for meas in &config.members {
+                        self.call(
+                            out,
+                            Command::MeasReset { meas: *meas },
+                            format!("{}: positions' averaging reset", m.config.name),
+                        );
+                    }
+                } else if let Some(m) = m {
                     self.call(
                         out,
                         Command::MeasReset { meas: m.id },
@@ -5468,13 +5525,15 @@ pub fn parse_number(text: &str, units: &[&str]) -> Result<f64, String> {
     }
 }
 
-/// The input a measurement's mic curve belongs to (a transfer function's measurement input).
-pub fn meas_input(k: &MeasKind) -> u16 {
+/// The input a measurement's mic curve belongs to (a transfer function's measurement
+/// input); a spatial average has several, its members'.
+pub fn meas_input(k: &MeasKind) -> Option<u16> {
     match k {
-        MeasKind::Transfer { config } => config.measurement_input,
-        MeasKind::Spectrum { config } => config.input,
-        MeasKind::Rta { config } => config.input,
-        MeasKind::Spl { config } => config.input,
+        MeasKind::Transfer { config } => Some(config.measurement_input),
+        MeasKind::Spectrum { config } => Some(config.input),
+        MeasKind::Rta { config } => Some(config.input),
+        MeasKind::Spl { config } => Some(config.input),
+        MeasKind::SpatialAverage { .. } => None,
     }
 }
 

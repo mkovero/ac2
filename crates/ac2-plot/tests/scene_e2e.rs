@@ -86,6 +86,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         },
         freshness: Some(Freshness::from_age(0.1)),
         smoothing: None,
+        note: None,
         stored: None,
         selected: false,
     }

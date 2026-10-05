@@ -562,7 +562,7 @@ fn form(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     .show(ui, |ui| {
                         for (i, field) in f.fields.iter().enumerate() {
                             let focused = i == f.focus;
-                            let label = RichText::new(field.label).color(if focused {
+                            let label = RichText::new(field.label.as_str()).color(if focused {
                                 ch.text
                             } else {
                                 ch.dim

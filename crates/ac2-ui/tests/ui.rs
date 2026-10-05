@@ -157,6 +157,11 @@ fn snapshot_when(
 }
 
 fn live(app: &App) -> bool {
+    live_with(app, 4)
+}
+
+/// [`live`] with `count` measurements listed.
+fn live_with(app: &App, count: usize) -> bool {
     let st = &app.state;
     let synced = st.mirror.as_ref().is_some_and(|m| m.synced());
     let have = |m: u32, s: Stream| {
@@ -176,7 +181,7 @@ fn live(app: &App) -> bool {
     };
     matches!(st.conn, ConnState::Connected { .. })
         && synced
-        && st.measurements().len() == 4
+        && st.measurements().len() == count
         && have(1, Stream::Tf)
         && have(2, Stream::Tf)
         && have(1, Stream::Ir)
@@ -260,6 +265,71 @@ fn recording_indicator() {
         Some("REC 1:23 · 31.9 MB · 1 dropout".to_owned())
     );
     snapshot(&mut h, "recording_indicator");
+}
+
+#[test]
+fn spatial_average_legend_and_banner() {
+    if !have_gpu("spatial_average_legend_and_banner") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.add_spatial_average();
+    let mut h = harness(options(Some(&rig)));
+    let has_average = |app: &App| {
+        app.state.measurements().len() == 6
+            && app.state.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Data {
+                        meas: MeasId(6),
+                        stream: Stream::Tf,
+                    })
+                    .is_some()
+            })
+    };
+    step_until(&mut h, "the average's frames", |a| {
+        live_with(a, 6) && has_average(a)
+    });
+    // The transfer pane shows the average: its banner names the position left out.
+    h.state_mut()
+        .state
+        .pane_meas
+        .insert(PaneKind::Transfer, MeasId(6));
+    h.state_mut().state.selected = Some(MeasId(6));
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::transfer(
+            st,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let legend: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+        assert!(
+            legend
+                .iter()
+                .any(|l| l.starts_with("Audience · 2 of 3 positions · power avg")),
+            "{legend:?}"
+        );
+        let banners: Vec<(&str, Option<&str>)> = s
+            .banners
+            .iter()
+            .map(|b| (b.text.as_str(), b.detail.as_deref()))
+            .collect();
+        assert_eq!(
+            banners,
+            [(
+                "AVERAGE · 2 OF 3 POSITIONS",
+                Some("Audience: left out Seat 3: stopped")
+            )]
+        );
+    }
+    snapshot(&mut h, "transfer_spatial_average");
 }
 
 #[test]

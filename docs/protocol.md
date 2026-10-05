@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 18`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 19`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -176,6 +176,24 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   weighting settled, and its `lmax`, `lmin`, `leq`, `lpeak` and `duration` cover the same
   interval as before the change (since the meter started or `meas.reset`). A new `input`
   restarts the meter.
+- **Spatial average** (`spatial_average`, `SpatialAverageConfig`: `members` [MeasId],
+  `method` `power` \| `complex` \| `coherence_weighted`, `reference`: `AverageReference`
+  (tagged by `type`: `member` {`meas`} = that member's inserted delay, or `fixed`
+  {`delay`}), `smoothing`: `Smoothing` \| nil). Design: `docs/design/spatial-average.md`.
+  2 … 16 distinct transfer measurements on one grid (`invalid` / `not_found` otherwise; the
+  reference member must be one of them); its `grid_id` is theirs. It publishes `tf` only:
+  whenever a frame is due the daemon asks every member for its current unsmoothed result
+  and combines them as `trace.average` does — every member's phase re-referred from its own
+  inserted delay to the reference, a column valid only where every included member's is
+  (otherwise its validity is the union of theirs), then the average's own `smoothing`.
+  `TfMeta.delay` is the reference delay used, `TfMeta.average` says which members went in
+  (§5.4); `coh` is the plain mean of the included members' γ² (a display mask, not a
+  coherence of the average). A member stopped, without a usable result, or whose frame
+  carries `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING` or `NO_SIGNAL` is left out of that frame;
+  with fewer than two left every column is NaN with `FEW_MEMBERS`. While an average names a
+  measurement, `meas.delete` of it, and a `meas.update` that makes it another kind or moves
+  it to another grid, are `refused`. `meas.reset` of an average is `invalid` (reset its
+  members); `meas.freeze` holds its last average. Only `smoothing` changes in place.
 
 #### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 
@@ -423,15 +441,20 @@ display edits and are never applied to the stored data.
   name and the mic curve applied to the captured columns as its full `MicCurveRef` — label,
   file, content hash —, nil without a mic name; a sweep
   names no curve, its analysis works on the raw recordings), `mic_curve` (nil: see
-  *Mic curve after capture*), `created_at`.
+  *Mic curve after capture*), `created_at`. A spatial average captures as `kind: transfer`
+  with `source.spatial_average` {`meas`, `meas_name`, `epoch`, `at_sample`, `method`,
+  `members`: [`AverageMember` {`meas`, `name`}] — the members averaged into the captured
+  result}, `delay` its reference delay, `depth`, `mic` nil, `uncalibrated`; `refused` when
+  fewer than two members are in.
 - **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
   `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
   `refused`.
-- **Time base (decisions 8a / 8b).** Captured traces share the time base of their session
-  epoch; every other source (`imported`, `average`, `math`) is independent.
+- **Time base (decisions 8a / 8b).** Captured traces (`captured`, `spatial_average`,
+  `ir_capture`) share the time base of their session epoch; every other source
+  (`imported`, `average`, `math`) is independent.
 - `trace.average`: ≥ 2 distinct traces of one kind (no targets). Transfer: `power` (RMS
   magnitude, phase of the complex mean), `complex`, `coherence_weighted` (weight
   γ²/(1 − γ²), γ² capped at 0.999); every input's phase is re-referred to `reference`
@@ -709,7 +732,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
-polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported | average |
+polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | spatial_average | imported | average |
 math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
@@ -830,7 +853,7 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve` |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve`, `average` (`TfAverage` \| nil: a spatial average's `method` and `members` [{`meas`, `status`: `MemberStatus`}], below) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
@@ -847,6 +870,12 @@ subtracted from `mag` (tf, measurement input only; phase untouched) or `level` (
 bin, rta per band as a log-frequency power average), or, for `spl`, run as a minimum-phase
 filter before frequency weighting — never on `lpeak`, which stays uncorrected.
 
+`MemberStatus` (tagged by `type`), one per configured member in configuration order:
+`included` (averaged into this frame), `stopped` (not running), `settling` (running without
+a usable result: no valid column yet, or no answer in time), `refused` {`protection`: the
+member's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`, `NO_SIGNAL`}. A spatial
+average's own `protection` is always 0: its members' faults are in their statuses.
+
 The unit of `level` must match `meta.scale`. A required array missing, an array listed
 twice or one that does not belong to the kind refuses the frame.
 
@@ -856,7 +885,7 @@ Undefined bits refuse the frame.
 
 `validity` (0 = valid): `THINNED` 1, `OUT_OF_BAND` 2, `SETTLING` 4, `NO_REFERENCE` 8,
 `NO_MEASUREMENT` 16, `PROTECTED` 32, `BELOW_FLOOR` 64, `INSUFFICIENT_RESOLUTION` 128,
-`ABOVE_NYQUIST` 256.
+`ABOVE_NYQUIST` 256, `FEW_MEMBERS` 512 (a spatial average with fewer than two usable members).
 
 `protection`: `NO_REFERENCE` 1, `NO_SIGNAL` 2, `CLIP` 4, `WEAK_REFERENCE` 8,
 `DISCONTINUITY` 16 (averages restarted after a stream gap), `CHECK_ROUTING` 32 (reference
@@ -975,8 +1004,8 @@ spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impu
 in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a capture's
 curve by name only, without its label, file and content hash, version 6 had no Leq windows
 and no SPL logs, version 7 named files by save generation and its autosave kept the
-previous one as a separate directory — are refused). A directory that holds other files is
-never written into.
+previous one as a separate directory, version 8 had no spatial averages — are refused). A
+directory that holds other files is never written into.
 
 ### 7.3 Autosave
 

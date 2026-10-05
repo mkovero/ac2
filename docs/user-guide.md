@@ -327,7 +327,39 @@ A − B combine the unsmoothed curves and start with the smoothing their inputs 
 
 The banners say what is wrong rather than showing a misleading curve: **NO REFERENCE**, **NO
 SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (no fresh frame; the age is shown), **NO
-DELAY ESTIMATE**.
+DELAY ESTIMATE**, and for a spatial average **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE**
+(below).
+
+### Spatial average
+
+A speaker sounds different from seat to seat, so tune to the average of several mic
+positions rather than to one spot. Make one transfer measurement per mic (same reference,
+each its own mic input), then the palette's *New spatial average…*: it lists every transfer
+measurement by name, all in the average to start with (**←/→** leaves one out), with a name,
+a method and smoothing; **Enter** creates and starts it. It is drawn in the transfer pane
+like any transfer function, updating with its positions, and its legend counts them:
+`Average 1 · 4 positions · power avg`.
+
+- **power** (default): the level over the positions, without cancellation between them;
+  the right one to EQ against.
+- **complex**: what one point summing the arrivals would hear — positions whose arrivals
+  differ in time cancel at some frequencies.
+- **coherence-weighted**: the complex mean with cleaner positions (higher coherence)
+  counting more.
+
+The phase is referred to the first position's delay: each position keeps its arrival
+relative to it. A position that is stopped, still settling, or showing CLIP, NO REFERENCE,
+CHECK ROUTING or NO SIGNAL is left out and named: the banner **AVERAGE · 3 OF 4 POSITIONS**
+says which and why, and the legend says `3 of 4 positions`. With fewer than two positions in
+there is no average (**NO AVERAGE**, no curve) rather than one position passed off as an
+average. A position cannot be deleted, or moved to another grid, while an average names it.
+**F** freezes the average; **R** on it resets its positions' averaging. **Ctrl+1 … 9**
+captures it as a stored trace that names the positions it averaged.
+
+One mic moved from seat to seat: capture each position to a slot and average the captures
+(**M**, *Traces and slots*) — the same mathematics. From a script: `ac2 meas new avg --name
+Audience --of "Seat 1,Seat 2,Seat 3" [--method power|complex|coherence] [--phase-ref
+"Seat 2" | --ref-delay 12ms] [--smooth 6] --start`.
 
 ## Delay finder
 
@@ -1126,6 +1158,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
+| New spatial average of transfer measurements (several mic positions)… | `meas_new_average` |
 | Delete selected measurement | `meas_delete` |
 | Input setup: mic, mic curve and calibration of each input… | `input_setup` |
 | Calibrations: mics, curves and sensitivity calibrations… | `calibrations` |
@@ -1185,7 +1218,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 |---|---|
 | `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
 | `ac2 session open / close / status / inputs / save / load / list` | the audio session, each input's mic and active curve, saved sessions |
-| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements |
+| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements, and spatial averages of transfer measurements (`avg --of A,B,C`) |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |

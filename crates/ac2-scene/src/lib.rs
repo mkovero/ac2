@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 pub mod autosave;
+pub mod average;
 pub mod axis;
 pub mod banner;
 pub mod cal;

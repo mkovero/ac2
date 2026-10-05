@@ -3529,7 +3529,7 @@ fn new_measurements_start_and_become_selected() {
             MeasKind::Spectrum { config } => ("spectrum", config.input),
             MeasKind::Rta { config } => ("rta", config.input),
             MeasKind::Spl { config } => ("spl", config.input),
-            MeasKind::Transfer { .. } => ("tf", 99),
+            MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. } => ("tf", 99),
         };
         assert_eq!(kind, (want, 1));
     }

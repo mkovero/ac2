@@ -59,6 +59,8 @@ impl AppState {
                 MeasKind::Rta { .. } if spectrum => &[Stream::Rta],
                 MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => &[],
                 MeasKind::Spl { .. } => &[Stream::Spl, Stream::Leq],
+                MeasKind::SpatialAverage { .. } if shows(PaneKind::Transfer) => &[Stream::Tf],
+                MeasKind::SpatialAverage { .. } => &[],
             };
             out.extend(
                 streams

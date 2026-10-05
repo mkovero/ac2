@@ -16,12 +16,14 @@ use ac2_proto::frame::{IrFrame, SpecFrame, SplFrame, TfFrame};
 use ac2_proto::frame::{IrMeta, SpecMeta, SplMeta, TfMeta, ValidityMask};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Change, Frame, FrameData, GridDef, Patch};
+use ac2_proto::{Change, Frame, FrameData, GridDef, GridId, Patch};
 
 pub struct Rig {
     pub fake: Arc<FakeDaemon>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// Further frames published with the rig's own, each round.
+    extra: Arc<std::sync::Mutex<Vec<(FrameData, Option<GridId>)>>>,
 }
 
 impl Drop for Rig {
@@ -392,7 +394,8 @@ impl Rig {
             }
         }
         let stop = Arc::new(AtomicBool::new(false));
-        let (f, st) = (fake.clone(), stop.clone());
+        let extra: Arc<std::sync::Mutex<Vec<(FrameData, Option<GridId>)>>> = Arc::default();
+        let (f, st, more) = (fake.clone(), stop.clone(), extra.clone());
         let thread = std::thread::spawn(move || {
             let tf = |meas, gain, tau, bump| {
                 if smoothed {
@@ -419,8 +422,9 @@ impl Rig {
             let mut seq = 1;
             while !st.load(Ordering::Acquire) {
                 {
+                    let more = more.lock().unwrap().clone();
                     let mut s = f.lock();
-                    for (data, grid) in &frames {
+                    for (data, grid) in frames.iter().chain(&more) {
                         let stamp = s.stamp(seq, *grid);
                         let mut data = data.clone();
                         // The meter has run since a fixed instant, as a real one runs since
@@ -441,6 +445,54 @@ impl Rig {
             fake,
             stop,
             thread: Some(thread),
+            extra,
         }
+    }
+
+    /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a power
+    /// spatial average of Main L, Delay tower and Seat 3, whose frames say Seat 3 was left
+    /// out (stopped): two of three positions averaged.
+    pub fn add_spatial_average(&self) {
+        use ac2_proto::frame::{AverageMemberState, MemberStatus, TfAverage};
+        {
+            let mut s = self.fake.lock();
+            let mut seat = measurement(5, "Seat 3", transfer(3), None, Some(&TF_GRID));
+            seat.running = false;
+            s.commit(Change::Measurement(Patch::Set(seat)));
+            let avg = measurement(
+                6,
+                "Audience",
+                MeasKind::SpatialAverage {
+                    config: SpatialAverageConfig {
+                        smoothing: Some(Smoothing {
+                            fraction: SmoothingFraction::Sixth,
+                            mode: SmoothingMode::MagnitudePhase,
+                        }),
+                        ..SpatialAverageConfig::power_of(vec![MeasId(1), MeasId(2), MeasId(5)])
+                    },
+                },
+                None,
+                Some(&TF_GRID),
+            );
+            s.commit(Change::Measurement(Patch::Set(avg)));
+        }
+        let mut f = tf_frame(6, -1.5, 0.0, 1300.0);
+        f.meta.average = Some(TfAverage {
+            method: AverageMethod::Power,
+            members: [
+                (1, MemberStatus::Included),
+                (2, MemberStatus::Included),
+                (5, MemberStatus::Stopped),
+            ]
+            .map(|(m, status)| AverageMemberState {
+                meas: MeasId(m),
+                status,
+            })
+            .to_vec(),
+        });
+        self.extra
+            .lock()
+            .unwrap()
+            .push((FrameData::Tf(f), Some(TF_GRID.id())));
     }
 }

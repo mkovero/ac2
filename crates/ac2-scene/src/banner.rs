@@ -10,10 +10,12 @@
 //! | 3 | NO REFERENCE | fault | protection `NO_REFERENCE` |
 //! | 4 | CHECK ROUTING | fault | protection `CHECK_ROUTING` (inputs identical or swapped) |
 //! | 5 | NO SIGNAL | fault | protection `NO_SIGNAL` |
-//! | 6 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
-//! | 7 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
-//! | 8 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
-//! | 9 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//! | 6 | NO AVERAGE · n OF m POSITIONS | fault | the shown spatial average has fewer than two usable positions |
+//! | 7 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
+//! | 8 | AVERAGE · n OF m POSITIONS | warning | the shown spatial average left positions out (the detail names them and why) |
+//! | 9 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
+//! | 10 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
+//! | 11 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
 //!
 //! CLOCK DRIFT sits under OUTPUT TIMING JUMP: both are output-side timing, a jump is the
 //! newer event, and drift does not touch a transfer function on the measured loopback
@@ -33,6 +35,7 @@
 use ac2_proto::frame::ProtectionFlags;
 use ac2_proto::model::{MeasKind, Measurement, NoEstimateReason, TimingState};
 
+use crate::average::AverageStatus;
 use crate::format;
 use crate::primitives::{Anchor, FillRect, HAlign, Layer, Rect, VAlign, Viewport};
 use crate::theme::Theme;
@@ -63,7 +66,9 @@ pub enum BannerKind {
     NoReference,
     CheckRouting,
     NoSignal,
+    NoAverage,
     Stale,
+    AverageIncomplete,
     OutputTimingJump,
     ClockDrift,
     NoDelayEstimate,
@@ -76,8 +81,11 @@ impl BannerKind {
             | Self::Clip
             | Self::NoReference
             | Self::CheckRouting
-            | Self::NoSignal => Severity::Fault,
-            Self::Stale | Self::OutputTimingJump | Self::ClockDrift => Severity::Warning,
+            | Self::NoSignal
+            | Self::NoAverage => Severity::Fault,
+            Self::Stale | Self::AverageIncomplete | Self::OutputTimingJump | Self::ClockDrift => {
+                Severity::Warning
+            }
             Self::NoDelayEstimate => Severity::Info,
         }
     }
@@ -106,6 +114,8 @@ pub struct Status {
     /// (`TimingStatus.drift`).
     pub clock_drift_ppm: Option<f64>,
     pub no_delay_estimate: Option<NoDelayEstimate>,
+    /// The shown spatial average (its name and what its newest frame averaged).
+    pub average: Option<(String, AverageStatus)>,
 }
 
 /// Why a TF measurement has no delay the operator can rely on.
@@ -193,6 +203,16 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             "NO SIGNAL".into(),
             Some("measurement input below its floor; check mic and input".into()),
         ));
+    }
+    if let Some((name, a)) = &s.average
+        && let Some((fault, text, detail)) = a.banner(name)
+    {
+        let kind = if fault {
+            BannerKind::NoAverage
+        } else {
+            BannerKind::AverageIncomplete
+        };
+        out.push(banner(kind, text, Some(detail)));
     }
     if let Some(age) = s.frame_age_s
         && age > STALE_AFTER_S
@@ -402,6 +422,7 @@ pub(crate) mod tests {
             }),
             clock_drift_ppm: Some(-52.4),
             no_delay_estimate: Some(NoDelayEstimate::NotFound),
+            average: None,
         }
     }
 
@@ -736,5 +757,74 @@ pub(crate) mod tests {
         assert_eq!(narrow.labels.len(), 1);
         assert_eq!(narrow.labels[0].text, "NO DELAY ESTIMATE");
         assert!(rows[0].detail.is_some());
+    }
+
+    /// A spatial average without enough positions is a fault right under the signal
+    /// faults; one missing positions is a warning after STALE; a full one says nothing.
+    #[test]
+    fn spatial_average_banners() {
+        use crate::average::AverageStatus;
+        use ac2_proto::frame::{AverageMemberState, MemberStatus, TfAverage};
+        use ac2_proto::model::AverageMethod;
+        use ac2_proto::units::MeasId;
+        let avg = |s: &[MemberStatus]| {
+            let a = TfAverage {
+                method: AverageMethod::Power,
+                members: s
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| AverageMemberState {
+                        meas: MeasId(i as u32 + 1),
+                        status: *s,
+                    })
+                    .collect(),
+            };
+            Some((
+                "Audience".to_string(),
+                AverageStatus::new(&a, |m| format!("Seat {}", m.0)),
+            ))
+        };
+        let base = Status {
+            protection: ProtectionFlags::NO_SIGNAL,
+            frame_age_s: Some(2.0),
+            ..Status::default()
+        };
+        let none = Status {
+            average: avg(&[MemberStatus::Included, MemberStatus::Stopped]),
+            ..base.clone()
+        };
+        let b = banners(&none);
+        assert_eq!(
+            texts(&b),
+            [
+                "NO SIGNAL",
+                "NO AVERAGE · 1 OF 2 POSITIONS",
+                "STALE · 2.0 s"
+            ]
+        );
+        assert_eq!(b[1].severity, Severity::Fault);
+        assert_eq!(
+            b[1].detail.as_deref(),
+            Some("Audience: left out Seat 2: stopped")
+        );
+        let short = Status {
+            average: avg(&[
+                MemberStatus::Included,
+                MemberStatus::Included,
+                MemberStatus::Settling,
+            ]),
+            ..base.clone()
+        };
+        let b = banners(&short);
+        assert_eq!(
+            texts(&b),
+            ["NO SIGNAL", "STALE · 2.0 s", "AVERAGE · 2 OF 3 POSITIONS"]
+        );
+        assert_eq!(b[2].severity, Severity::Warning);
+        let full = Status {
+            average: avg(&[MemberStatus::Included; 3]),
+            ..base
+        };
+        assert_eq!(texts(&banners(&full)), ["NO SIGNAL", "STALE · 2.0 s"]);
     }
 }

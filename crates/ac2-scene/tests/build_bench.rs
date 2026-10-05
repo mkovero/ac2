@@ -235,6 +235,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         },
         freshness: Some(Freshness::from_age(0.1)),
         smoothing: None,
+        note: None,
         stored: None,
         selected: false,
     };
