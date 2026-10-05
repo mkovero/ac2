@@ -94,6 +94,9 @@ fn slot(p: PaneKind) -> PlotSlot {
 struct Axes {
     x: Option<Mapping>,
     y_level: Option<Mapping>,
+    /// The spectrograph's time axis (seconds before the newest frame), when shown: a
+    /// click there puts the cursor on a time as well as a frequency.
+    time: Option<Mapping>,
 }
 
 /// Scene for `pane` at `size`, from the cache when nothing changed.
@@ -111,6 +114,7 @@ fn scene_for(
         let axes = Axes {
             x: c.x_axis,
             y_level: c.y_level,
+            time: c.time_axis,
         };
         return Some((c.scene.clone(), axes));
     }
@@ -133,6 +137,18 @@ fn scene_for(
                 Axes {
                     x: Some(s.x_axis.mapping),
                     y_level: y,
+                    time: None,
+                },
+            )
+        }
+        PaneKind::Spectrum if st.view.spectrum.spectrograph.shown => {
+            let s = scenes::spectrograph(st, theme, vp, now);
+            (
+                s.scene,
+                Axes {
+                    x: Some(s.x_axis.mapping),
+                    y_level: Some(s.spectrum.y_axis.mapping),
+                    time: Some(s.time_axis.mapping),
                 },
             )
         }
@@ -143,6 +159,7 @@ fn scene_for(
                 Axes {
                     x: Some(s.x_axis.mapping),
                     y_level: Some(s.y_axis.mapping),
+                    time: None,
                 },
             )
         }
@@ -156,6 +173,7 @@ fn scene_for(
             let axes = Axes {
                 x: s.x_axis(),
                 y_level: s.y_level(st.view.distortion.unit),
+                time: None,
             };
             (s.scene(), axes)
         }
@@ -170,6 +188,7 @@ fn scene_for(
             scene: scene.clone(),
             x_axis: axes.x,
             y_level: axes.y_level,
+            time_axis: axes.time,
         },
     );
     Some((scene, axes))
@@ -862,7 +881,19 @@ fn navigate(
     if resp.clicked()
         && let Some(p) = resp.interact_pointer_pos()
     {
-        app.dispatch(Msg::CursorAt(Some(hz_at(p))));
+        let y = p.y - plot_rect.min.y;
+        let in_time = axes.time.filter(|t| {
+            let (a, b) = (t.px_lo.min(t.px_hi), t.px_lo.max(t.px_hi));
+            let x = p.x - plot_rect.min.x;
+            (a..=b).contains(&y) && (m.px_lo..=m.px_hi).contains(&x)
+        });
+        match in_time {
+            Some(t) => app.dispatch(Msg::SpectrographCursor {
+                hz: hz_at(p),
+                before_s: t.from_px(y).max(0.0),
+            }),
+            None => app.dispatch(Msg::CursorAt(Some(hz_at(p)))),
+        }
     }
     if resp.dragged() {
         let dx = resp.drag_delta().x;

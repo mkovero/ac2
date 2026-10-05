@@ -71,6 +71,8 @@ pub(crate) struct CachedScene {
     /// The level axis mapping in dB (transfer magnitude, spectrum, distortion in dB), for
     /// zooming about the pointer.
     pub y_level: Option<ac2_scene::axis::Mapping>,
+    /// The spectrograph's time axis, when the spectrum pane shows it.
+    pub time_axis: Option<ac2_scene::axis::Mapping>,
 }
 
 pub struct App {

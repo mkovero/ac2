@@ -744,6 +744,12 @@ pub enum Msg {
     ToggleShown(TraceId),
     /// A stored trace double-clicked in the list: selected, and its name asked for.
     RenameTrace(TraceId),
+    /// A click in the spectrograph: the cursor at `hz`, `before_s` seconds before the
+    /// newest frame.
+    SpectrographCursor {
+        hz: f64,
+        before_s: f64,
+    },
     /// A click in a pane: focuses it and selects the measurement it shows.
     FocusPane(PaneKind),
     /// The pane title chip: opens (or closes) the pane's measurement list.
@@ -881,6 +887,9 @@ pub struct AppState {
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
     /// time.
     pub peaks: BTreeMap<MeasId, (u64, u64, PeakHold)>,
+    /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
+    /// shown.
+    pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,
     pub stimulus: Stimulus,
     pub sweep: SweepUi,
     /// Remembered between runs (stimulus outputs per device).
@@ -979,6 +988,7 @@ impl AppState {
             selected_trace: None,
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
+            spectrographs: BTreeMap::new(),
             stimulus: Stimulus::default(),
             sweep: SweepUi::default(),
             prefs: UiPrefs::default(),
@@ -1900,6 +1910,10 @@ impl AppState {
                 self.view.freq = t;
             }
             Msg::CursorAt(hz) => self.view.cursor_hz = hz,
+            Msg::SpectrographCursor { hz, before_s } => {
+                self.view.cursor_hz = Some(hz);
+                self.view.spectrum.spectrograph.cursor_s = Some(before_s);
+            }
             Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
         }
     }
@@ -3324,6 +3338,8 @@ impl AppState {
                     Some(_) => None,
                     None => Some((t.lo * t.hi).sqrt()),
                 };
+                // Off takes the spectrograph's time with it; on starts on frequency alone.
+                self.view.spectrum.spectrograph.cursor_s = None;
             }
             C::CursorLeft | C::CursorRight => {
                 let t = self.nav.target;
@@ -3773,6 +3789,26 @@ impl AppState {
             C::PeakHold => {
                 self.view.spectrum.peak_hold = !self.view.spectrum.peak_hold;
                 self.peaks.clear();
+            }
+            C::Spectrograph => {
+                let sg = &mut self.view.spectrum.spectrograph;
+                sg.shown = !sg.shown;
+                // The history starts with the view: nothing is kept for a hidden one.
+                self.spectrographs.clear();
+                if self.view.spectrum.spectrograph.shown
+                    && let Some(d) = self.data.clone()
+                {
+                    self.fold_spectrographs(&d);
+                }
+            }
+            C::SpectrographSpan => {
+                let sg = &mut self.view.spectrum.spectrograph;
+                sg.span_s = ac2_scene::view::SpectrographView::next_span(sg.span_s);
+                sg.cursor_s = sg.cursor_s.filter(|t| *t <= f64::from(sg.span_s));
+                let span = sg.span_s;
+                // Slots of another length cannot hold the frames already placed.
+                self.spectrographs.clear();
+                self.toast(format!("spectrograph: last {span} s"));
             }
             C::IrMode => {
                 self.view.ir.mode = match self.view.ir.mode {
@@ -4328,6 +4364,9 @@ impl AppState {
             ConnEvent::Data(d) => {
                 if self.view.spectrum.peak_hold {
                     self.fold_peaks(&d);
+                }
+                if self.view.spectrum.spectrograph.shown {
+                    self.fold_spectrographs(&d);
                 }
                 // A new log clears the history before its first frame goes in.
                 self.follow_leq_logs(Some(&d), out);
@@ -4944,6 +4983,57 @@ impl AppState {
             .get(&Topic::Data { meas: id, stream })
     }
 
+    /// Folds the newest spectrum / RTA frames into the spectrograph histories. A stream
+    /// that is STALE, or whose measurement is not running, marks a break: the time until
+    /// its next frame is a gap in the picture.
+    fn fold_spectrographs(&mut self, d: &DataSnapshot) {
+        use ac2_proto::FrameData;
+        use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
+        let span = self.view.spectrum.spectrograph.span_s;
+        let running: BTreeMap<MeasId, bool> = self
+            .measurements()
+            .iter()
+            .map(|m| (m.id, m.running))
+            .collect();
+        self.spectrographs.retain(|id, _| running.contains_key(id));
+        for tf in d.latest.frames.values() {
+            let (meas, scale, level, validity) = match &tf.frame.data {
+                FrameData::Spec(f) => (f.meas, f.meta.scale, &f.level, None),
+                FrameData::Rta(f) => (f.meas, f.meta.scale, &f.level, Some(f.validity.as_slice())),
+                _ => continue,
+            };
+            let Some(&live) = running.get(&meas) else {
+                continue;
+            };
+            let Some((grid, def)) = tf
+                .frame
+                .stamp
+                .grid_id
+                .and_then(|g| d.grids.get(&g).map(|def| (g, def)))
+            else {
+                continue;
+            };
+            let h = self
+                .spectrographs
+                .entry(meas)
+                .or_insert_with(|| SpectrographHistory::new(span));
+            if tf.stale || !live {
+                h.mark_break();
+                continue;
+            }
+            let cols = ac2_scene::grid::columns(def);
+            h.push(&SpectrographFrame {
+                seq: tf.frame.stamp.seq,
+                at: tf.frame.stamp.capture_wall_ns,
+                grid,
+                edges: &cols.edges,
+                scale,
+                level,
+                validity,
+            });
+        }
+    }
+
     fn fold_peaks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         for tf in d.latest.frames.values() {
@@ -4969,7 +5059,7 @@ impl AppState {
 }
 
 /// The stream a spectrum / RTA measurement's curve comes on; `None` for other kinds.
-fn spectrum_stream(m: &Measurement) -> Option<Stream> {
+pub(crate) fn spectrum_stream(m: &Measurement) -> Option<Stream> {
     match m.config.kind {
         MeasKind::Spectrum { .. } => Some(Stream::Spec),
         MeasKind::Rta { .. } => Some(Stream::Rta),

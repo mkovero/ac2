@@ -235,6 +235,31 @@ spectrum small enough for a laptop on WiFi. For finer detail, zoom in on a **cap
 window — about 6 times a second at 65 536 points — since windows overlapping more than that
 add work but no new information; short FFTs update about 30 times a second.
 
+### Spectrograph
+
+**G** in the spectrum pane shows the **spectrograph** of the pane's measurement under the
+spectrum: frequency across on the spectrum's own axis (zoom and pan move both), time down with
+the newest frame at the top, level as colour. The colour bar on the right spans the pane's
+level axis, so **Ctrl+I / Ctrl+O**, **Ctrl+↑/↓**, **Shift+Home** and **Ctrl+Home** change the
+colours as they change the curve's axis; the colours are a perceptual, colour-blind-safe map
+(viridis): equal steps in dB look like equal steps. **Shift+G** steps the history through 10,
+30 (the default), 60 and 120 s; it starts afresh at each length and when the spectrograph is
+switched on.
+
+- A click in the spectrograph puts the cursor there: above the plot it reads frequency, time
+  before the newest frame and level (`1.00 kHz · 4.2 s ago · −32.0 dBFS`); **C** turns it
+  off. The spectrum's cursor line runs through both.
+- Time without frames — the stream went STALE, the measurement was stopped — is a gap (the
+  plot's background), never the last spectrum stretched over it. A long FFT that updates a few
+  times a second fills the time between its frames with each frame.
+- Where a pixel covers several frames or frequencies it shows the highest level among them,
+  as the spectrum's line does: a short event or a narrow tone is never lost between pixels.
+- A stopped measurement keeps its spectrograph, and the caption says `stopped`; a STALE one is
+  dimmed like its curve. Changing the FFT length, band fraction or calibration (dBFS ↔ dB SPL)
+  starts the history over.
+- The history is kept by the app, from the frames it already receives: nothing extra on the
+  wire, and nothing kept while the spectrograph is hidden.
+
 ### Smoothing
 
 **K** makes the smoothing coarser and **Shift+K** finer, through off, 1/48, 1/24, 1/12, 1/6
@@ -1001,6 +1026,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `B` | RTA: bars / line | `spectrum_style` |
 | `P` | Peak hold on / off | `peak_hold` |
+| `G` | Spectrograph under the spectrum on / off | `spectrograph` |
+| `Shift+G` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 
 #### Impulse response
 
@@ -1090,7 +1117,7 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Pane | Hint line |
 |---|---|
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `K` smoothing · `Shift+I` IR · `W` maximise · `Alt+↑` offset · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `K` smoothing · `B` bars/line · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq/both · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` linear/log/ETC · `Shift+I` IR/distortion · `W` maximise · `Shift+W` hide pane · `H` all keys |

@@ -30,8 +30,8 @@ impl AppState {
     /// The streams to receive now:
     /// - each transfer measurement's TF while the transfer pane is in view, and the IR of the
     ///   one the IR pane follows while that pane is;
-    /// - each spectrum / RTA while the spectrum pane is in view or peak hold is on (the hold
-    ///   folds every frame);
+    /// - each spectrum / RTA while the spectrum pane is in view or peak hold or the
+    ///   spectrograph is on (both fold every frame, so a hidden pane keeps its history);
     /// - each SPL meter's readout and Leq windows always: the held reading, the Leq history
     ///   and its alarms follow every frame, shown or not.
     ///
@@ -42,7 +42,9 @@ impl AppState {
         let ir_of = shows(PaneKind::Ir)
             .then(|| crate::scenes::focus_tf(self).map(|m| m.id))
             .flatten();
-        let spectrum = shows(PaneKind::Spectrum) || self.view.spectrum.peak_hold;
+        let spectrum = shows(PaneKind::Spectrum)
+            || self.view.spectrum.peak_hold
+            || self.view.spectrum.spectrograph.shown;
         let mut out = HashSet::new();
         for m in self.measurements() {
             let streams: &[Stream] = match m.config.kind {

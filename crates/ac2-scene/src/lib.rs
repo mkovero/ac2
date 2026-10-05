@@ -10,7 +10,8 @@
 //! Nothing here reads a clock, opens a socket or touches the GPU; the caller passes "now"
 //! and the clock offset ([`time`]).
 //!
-//! Builders: [`tf::transfer_scene`], [`spectrum::spectrum_scene`], [`ir::ir_scene`],
+//! Builders: [`tf::transfer_scene`], [`spectrum::spectrum_scene`],
+//! [`spectrograph::spectrograph_scene`], [`ir::ir_scene`],
 //! [`spl::spl_scene`], [`leq::leq_scene`], [`meter_leq::meter_leq_scene`],
 //! [`distortion::distortion_scene`]. Strings without geometry: [`readout`], [`banner::banners`],
 //! [`spl::spl_readout`].
@@ -33,6 +34,7 @@ pub mod meter_leq;
 pub mod primitives;
 pub mod progress;
 pub mod readout;
+pub mod spectrograph;
 pub mod spectrum;
 pub mod spl;
 pub mod tf;

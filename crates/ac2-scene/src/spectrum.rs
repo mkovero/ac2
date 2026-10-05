@@ -75,7 +75,7 @@ pub fn level_unit(scale: LevelScale, q: Quantity) -> String {
     format!("{} ({what})", scale_unit(scale))
 }
 
-fn scale_unit(scale: LevelScale) -> &'static str {
+pub(crate) fn scale_unit(scale: LevelScale) -> &'static str {
     match scale {
         LevelScale::Dbfs => "dBFS",
         LevelScale::DbSpl => "dB SPL",
@@ -354,10 +354,23 @@ pub fn spectrum_scene(
     theme: &Theme,
     size: Viewport,
 ) -> SpectrumScene {
+    spectrum_scene_in(traces, status, view, theme, size, MARGINS.right)
+}
+
+/// [`spectrum_scene`] with `right` logical pixels right of the plot: room for what a
+/// composed view draws beside a plot under it, so the two frequency axes line up.
+pub(crate) fn spectrum_scene_in(
+    traces: &[SpectrumTrace<'_>],
+    status: &Status,
+    view: &ViewState,
+    theme: &Theme,
+    size: Viewport,
+    right: f32,
+) -> SpectrumScene {
     let mut c = Canvas::new(size, theme);
-    let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
-    let plot = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
+    let plot = canvas::plot_area(size, strip.rect.bottom(), right);
     let units: Vec<String> = traces
         .iter()
         .map(|t| level_unit(t.scale, t.quantity))

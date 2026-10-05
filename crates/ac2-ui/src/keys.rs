@@ -487,6 +487,8 @@ commands! {
 
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
     PeakHold => "peak_hold", "Peak hold on / off", [Spectrum];
+    Spectrograph => "spectrograph", "Spectrograph under the spectrum on / off", [Spectrum];
+    SpectrographSpan => "spectrograph_span", "Spectrograph history: 10 → 30 → 60 → 120 s", [Spectrum];
 
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
 
@@ -672,6 +674,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::SpectrumStyle, S::Spectrum, k(K::B)),
         (C::StartStop, S::Spectrum, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::P)),
+        // G is the view key of every pane (IR mode, SPL view): here the spectrograph, and
+        // with Shift how much history it shows.
+        (C::Spectrograph, S::Spectrum, k(K::G)),
+        (C::SpectrographSpan, S::Spectrum, sh(K::G)),
         (C::IrMode, S::Ir, k(K::G)),
         (C::SplLeqView, S::Spl, k(K::G)),
         // B as the RTA's bars / line (C is the global cursor); Shift+B the other change of
@@ -750,8 +756,10 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::StartStop, "start/stop", 70),
                     hint(C::Freeze, "freeze", 80),
                     hint(C::PeakHold, "peak hold", 75),
+                    // The RTA's bars / line (B) is in the help and the palette: the line
+                    // holds eight.
+                    hint(C::Spectrograph, "spectrograph", 65),
                     hint(C::SmoothCoarser, "smoothing", 60),
-                    hint(C::SpectrumStyle, "bars/line", 50),
                     hint(C::LevelFit, "fit level", 55),
                     hint(C::Slot1, "capture", 85),
                     hint(C::MaximizePane, "maximise", 40),

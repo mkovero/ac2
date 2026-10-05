@@ -247,6 +247,42 @@ pub struct SpectrumView {
     /// a dBFS-sized axis.
     pub level_spl: Range,
     pub peak_hold: bool,
+    pub spectrograph: SpectrographView,
+}
+
+/// The history lengths the spectrograph steps through, seconds.
+pub const SPECTROGRAPH_SPANS_S: [u32; 4] = [10, 30, 60, 120];
+
+/// The spectrograph under the spectrum: whether it is shown, how much history it keeps, and
+/// the time of the cursor in it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpectrographView {
+    pub shown: bool,
+    /// History shown, seconds (one of [`SPECTROGRAPH_SPANS_S`]).
+    pub span_s: u32,
+    /// The cursor's time, seconds before the newest frame (with `cursor_hz`, a point).
+    pub cursor_s: Option<f64>,
+}
+
+impl Default for SpectrographView {
+    fn default() -> Self {
+        Self {
+            shown: false,
+            span_s: 30,
+            cursor_s: None,
+        }
+    }
+}
+
+impl SpectrographView {
+    /// The next history length, wrapping to the shortest.
+    pub fn next_span(span_s: u32) -> u32 {
+        SPECTROGRAPH_SPANS_S
+            .iter()
+            .copied()
+            .find(|s| *s > span_s)
+            .unwrap_or(SPECTROGRAPH_SPANS_S[0])
+    }
 }
 
 impl SpectrumView {
@@ -273,6 +309,7 @@ impl Default for SpectrumView {
             level: Range::new(-100.0, 0.0),
             level_spl: Range::new(20.0, 120.0),
             peak_hold: false,
+            spectrograph: SpectrographView::default(),
         }
     }
 }

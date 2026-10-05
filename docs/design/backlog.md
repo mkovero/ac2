@@ -135,6 +135,14 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Spectrograph (operator, 2026-10-05: "spectrograph interests me"; PLAN §3.4, design in
+`docs/design/spectrograph.md`):
+- **G** in the spectrum pane: the spectrograph of the pane's measurement under the spectrum,
+  on its frequency axis, colours over the pane's level range with a colour bar, cursor reads
+  frequency · time ago · level; **Shift+G** 10 / 30 / 60 / 120 s. Built from the frames the
+  app already receives (no wire or session change); gaps where frames stop; one GPU column
+  per new frame (heatmap columns uploaded by identity), max over cells a pixel covers.
+
 Clock drift detection (2026-10-05, `docs/design/multi-device.md`):
 - **Drift above one sample per hop read as timing jumps** (83 ppm at 48 kHz: PLAN §12's
   100 ppm example gave 14 OUTPUT TIMING JUMPs in 20 s and no drift) and **a one-sample step

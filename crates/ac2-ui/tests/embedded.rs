@@ -2678,3 +2678,117 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// The spectrograph from an empty daemon: a spectrum from the palette, G shows the
+/// spectrograph under it, the rig's noise fills it from the frames, the cursor reads a level
+/// back, Shift+G changes the history length, a stopped measurement says so and G hides it
+/// and lets the history go.
+#[test]
+fn spectrograph_from_an_empty_daemon() -> R {
+    use ac2_scene::primitives::HeatmapAxes;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spectrum".into()));
+    d.key("Enter");
+    d.until(
+        "the spectrum dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
+    )?;
+    d.key("Enter");
+    d.until("the spectrum measurement, running", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }) && m.running)
+    })?;
+    let (sp, name) =
+        d.st.measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            .map(|m| (m.id, m.config.name.clone()))
+            .ok_or("spectrum")?;
+    d.key("Alt+2");
+    assert!(
+        hint_line(&d.st).iter().any(|h| h == "G spectrograph"),
+        "{:?}",
+        hint_line(&d.st)
+    );
+    d.key("G");
+    assert!(d.st.view.spectrum.spectrograph.shown);
+    // The level typed for the transfer measurement is still set: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    let filled = |s: &AppState, n: usize| {
+        s.spectrographs
+            .get(&sp)
+            .is_some_and(|h| h.ring().iter().flatten().count() >= n)
+    };
+    // A second of history (30 slots a second at 30 s).
+    d.until("a second of spectrograph", |s| filled(s, 30))?;
+
+    let theme = Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 1000.0,
+        height: 600.0,
+    };
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    assert_eq!(s.caption, format!("{name} · last 30 s · dBFS"));
+    assert_eq!(s.message, None);
+    let history = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| &l.heatmaps)
+        .find(|h| h.axes == HeatmapAxes::TimeUp)
+        .ok_or("the history in the scene")?;
+    assert!(history.data.iter().flatten().count() >= 30);
+    // Its colours span the pane's level axis, the one the level keys move.
+    let r = d.st.view.spectrum.level;
+    assert_eq!(history.range, [r.lo as f32, r.hi as f32]);
+    // The rig's noise at 1 kHz, just now.
+    d.send(Msg::SpectrographCursor {
+        hz: 1000.0,
+        before_s: 0.1,
+    });
+    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    let text = s.cursor.ok_or("cursor")?.text;
+    assert!(
+        text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS"),
+        "{text}"
+    );
+    // C turns the cursor off, time and all.
+    d.key("C");
+    assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
+
+    // Shift+G: a minute of history, started afresh.
+    d.key("Shift+G");
+    assert_eq!(d.st.view.spectrum.spectrograph.span_s, 60);
+    assert!(!filled(&d.st, 1));
+    d.until("frames in the minute", |s| filled(s, 10))?;
+    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    assert!(s.caption.contains("last 60 s"), "{}", s.caption);
+
+    // Stopped: the picture stays and says so.
+    d.stop()?;
+    d.key("S");
+    d.until("the spectrum stopped", |s| {
+        s.measurements().iter().any(|m| m.id == sp && !m.running)
+    })?;
+    let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    assert!(s.caption.ends_with(" · stopped"), "{}", s.caption);
+    assert!(filled(&d.st, 10));
+    // G hides it and nothing is kept.
+    d.key("G");
+    assert!(!d.st.view.spectrum.spectrograph.shown);
+    assert!(d.st.spectrographs.is_empty());
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

@@ -19,6 +19,9 @@ use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::leq::{LeqScene, LeqView, leq_scene, leq_tiles};
 use ac2_scene::meter_leq::{MeterLeqScene, meter_leq_scene};
 use ac2_scene::primitives::{Scene, Viewport};
+use ac2_scene::spectrograph::{
+    SpectrographHistory, SpectrographInput, SpectrographScene, spectrograph_scene,
+};
 use ac2_scene::spectrum::{Quantity, SpectrumScene, SpectrumTrace, spectrum_scene};
 use ac2_scene::spl::{SplReadout, SplScene, cal_text, spl_readout, spl_scene};
 use ac2_scene::tf::{TfScene, transfer_scene};
@@ -245,6 +248,42 @@ pub fn spectrum_scale(st: &AppState) -> LevelScale {
 }
 
 pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SpectrumScene {
+    with_spectrum(st, theme, now, |traces, status, view| {
+        spectrum_scene(traces, status, view, theme, size)
+    })
+}
+
+/// The spectrum pane with the spectrograph of the pane's measurement under it.
+pub fn spectrograph(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SpectrographScene {
+    let shown = st.pane_meas(PaneKind::Spectrum).and_then(|m| {
+        let stream = crate::state::spectrum_stream(m)?;
+        Some((m, stream))
+    });
+    let empty = SpectrographHistory::new(st.view.spectrum.spectrograph.span_s);
+    let input = shown.map(|(m, stream)| {
+        let history = st.spectrographs.get(&m.id).unwrap_or(&empty);
+        let scale = history.scale().unwrap_or_else(|| spectrum_scale(st));
+        SpectrographInput {
+            history,
+            name: m.config.name.clone(),
+            range: st.view.spectrum.range(scale),
+            offset_db: st.edit(m.id).offset_db,
+            freshness: frame(st, m.id, stream).map(|tf| freshness(st, tf)),
+        }
+    });
+    with_spectrum(st, theme, now, |traces, status, view| {
+        spectrograph_scene(traces, status, input.as_ref(), view, theme, size)
+    })
+}
+
+/// Calls `f` with the spectrum pane's traces (live, then stored), its banner status and
+/// the view on the level range of the scale its curves are in.
+fn with_spectrum<R>(
+    st: &AppState,
+    theme: &Theme,
+    now: Now,
+    f: impl FnOnce(&[SpectrumTrace<'_>], &Status, &ac2_scene::ViewState) -> R,
+) -> R {
     let grids = st.data.as_ref().map(|d| &d.grids);
     struct Col<'a> {
         meas: &'a Measurement,
@@ -385,7 +424,7 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
     // The pane draws on the level range of the scale its curves are in.
     let mut view = st.view;
     view.spectrum.level = st.view.spectrum.range(spectrum_scale(st));
-    spectrum_scene(&traces, &status, &view, theme, size)
+    f(&traces, &status, &view)
 }
 
 /// The IR of the focused transfer measurement; `None` without one or without its IR frame.
