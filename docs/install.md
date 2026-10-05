@@ -100,15 +100,25 @@ distribution configures in `/etc/security/limits.d`.
    is opened; allow it (ac2 reads your audio interface's inputs, nothing else).
 
 Unsigned builds (every build so far: the project has no Developer ID yet): macOS refuses
-to open them at first. Open **System Settings → Privacy & Security** and click **Open
-Anyway** for ac2, or run `xattr -dr com.apple.quarantine /Applications/ac2.app`. For the CLI
-tools: `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
+to open them at first. There is no need to allow unsigned software in general; let ac2
+through on its own, one of these ways:
+
+- **Right-click (or Control-click) ac2.app in Applications → Open**, then **Open** in the
+  dialog. macOS asks for this one app and remembers the answer (macOS 14 and earlier; on
+  macOS 15 the dialog has no Open button, use the next way).
+- **System Settings → Privacy & Security**, scroll down and click **Open Anyway** for ac2
+  after a first refused start.
+- In Terminal: `xattr -dr com.apple.quarantine /Applications/ac2.app`.
+
+For the CLI tools: `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
 
 The daemon can run as a launchd agent: `launchd/io.github.mkovero.ac2d.plist` in the disk
 image has the instructions in its header. A daemon started by launchd cannot show the
 microphone prompt, so either let the app host its daemon or start `ac2d` from Terminal.
 
-macOS builds are compiled and tested in CI but not yet verified with a real audio interface.
+Verified by a tester (2026-10-05): the disk image installs, the app starts, and macOS asks
+for microphone access on the first start. Measuring with a real audio interface on macOS is
+not yet verified.
 
 ## Windows (10 1809 or newer, x64)
 
