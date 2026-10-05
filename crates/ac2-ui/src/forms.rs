@@ -84,6 +84,8 @@ pub enum FieldId {
     To,
     Duration,
     Repeats,
+    /// Silence recorded after each sweep: the room's decay and its noise.
+    Tail,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
@@ -202,6 +204,14 @@ const DURATIONS: [(&str, f64); 4] = [
 /// The CLI's default duration, 3 s.
 const DEFAULT_DURATION: usize = 1;
 const REPEATS: [(&str, u8); 4] = [("1", 1), ("2", 2), ("4", 4), ("8", 8)];
+/// Silence after each sweep, shortest first: the room parameters need the decay and some
+/// noise after it inside it (a hall's 2 s decay needs about 4 s).
+const TAILS: [(&str, f64); 4] = [
+    ("1 s (small rooms)", 1.0),
+    ("2 s", 2.0),
+    ("4 s (halls)", 4.0),
+    ("8 s (large halls, churches)", 8.0),
+];
 
 /// `20`, `20 Hz`, `20k`, `1.5 kHz`.
 pub fn parse_freq(text: &str) -> Result<f64, String> {
@@ -467,6 +477,7 @@ impl Form {
                 DEFAULT_DURATION,
             ),
             Field::choice(FieldId::Repeats, "Repeats", &REPEATS.map(|r| r.0), 0),
+            Field::choice(FieldId::Tail, "Silence after", &TAILS.map(|t| t.0), 0),
             Field::text(FieldId::Name, "Name", format!("Sweep {}", sweeps + 1), ""),
         ];
         Self::new(FormKind::Sweep, fields)
@@ -545,6 +556,7 @@ impl Form {
             .unwrap_or(DEFAULT_DURATION)]
         .1;
         let repeats = REPEATS[self.choice_index(FieldId::Repeats).unwrap_or(0)].1;
+        let tail = TAILS[self.choice_index(FieldId::Tail).unwrap_or(0)].1;
         let name = self.text(FieldId::Name).trim();
         if name.is_empty() {
             return Err("type a name".into());
@@ -560,6 +572,7 @@ impl Form {
                 sweep: EssSpec::with_fades(Hz(from), Hz(to), Seconds(duration)),
                 repeats,
                 gate: None,
+                tail: Some(Seconds(tail)),
             },
             name: name.to_owned(),
         })

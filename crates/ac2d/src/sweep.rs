@@ -3,11 +3,13 @@
 //! of the core analysis into a stored trace.
 
 use ac2_core::grid::LogGrid;
+use ac2_core::room::{BandMetrics, Metric, Refusal};
 use ac2_core::sweep::{
     DEFAULT_MAX_ORDER, FLOOR_MARGIN_DB, SweepAnalysis, SweepError, SweepSpec, SweepTiming,
 };
 use ac2_proto::model::{
-    DistortionCurve, EssSpec, HarmonicCurve, SweepData, SweepFailure, SweepInfo, SweepIr,
+    DistortionCurve, EssSpec, HarmonicCurve, RoomAcoustics, RoomBand, RoomRefusal, RoomValue,
+    SweepData, SweepFailure, SweepInfo, SweepIr,
 };
 use ac2_proto::units::{Db, Hz, Seconds};
 use ac2_proto::{ErrorCode, GridDef, ProtoError};
@@ -34,6 +36,7 @@ pub(crate) fn spec(
     sweep: EssSpec,
     level_dbfs: f64,
     gate: Option<Seconds>,
+    tail: Option<Seconds>,
     fs: f64,
 ) -> Result<(SweepSpec, SweepTiming), ProtoError> {
     let ess = conv::ess(sweep);
@@ -51,7 +54,7 @@ pub(crate) fn spec(
         sample_rate: fs,
         max_order: DEFAULT_MAX_ORDER,
         gate_s: gate.map(|g| g.0),
-        tail_s: None,
+        tail_s: tail.map(|t| t.0),
         grid: LogGrid::covering(PPO, ess.start_hz, ess.end_hz),
     };
     let timing = SweepTiming::new(&spec).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
@@ -128,8 +131,70 @@ pub(crate) fn trace_data(a: &SweepAnalysis) -> (Columns, SweepData) {
             floor_margin: Db(FLOOR_MARGIN_DB),
             clipped: a.clipped,
         },
+        room: Some(room(a)),
     };
     (columns, data)
+}
+
+/// A finite number for the wire and the session's JSON (a value is never infinite; a
+/// defensive refusal keeps one from making a session unreadable).
+fn room_value(m: Metric) -> RoomValue {
+    match m {
+        Ok(value) if value.is_finite() => RoomValue::Value { value },
+        Ok(_) => RoomValue::Refused {
+            reason: RoomRefusal::NoDecay,
+        },
+        Err(Refusal::NoDecay) => RoomValue::Refused {
+            reason: RoomRefusal::NoDecay,
+        },
+        Err(Refusal::InsufficientRange {
+            range_db,
+            needed_db,
+        }) => RoomValue::Refused {
+            reason: RoomRefusal::InsufficientRange {
+                range: Db(range_db.clamp(-999.0, 999.0)),
+                needed: Db(needed_db),
+            },
+        },
+        Err(Refusal::FilterLimited { bandwidth_decay }) => RoomValue::Refused {
+            reason: RoomRefusal::FilterLimited {
+                bandwidth_decay: if bandwidth_decay.is_finite() {
+                    bandwidth_decay
+                } else {
+                    0.0
+                },
+            },
+        },
+    }
+}
+
+fn room_band(b: &BandMetrics) -> RoomBand {
+    RoomBand {
+        centre: b.centre_hz.map(Hz),
+        onset: Seconds(b.onset_s),
+        truncation: Seconds(b.truncation_s),
+        decay_range: b
+            .decay_range_db
+            .filter(|r| r.is_finite())
+            .map(|r| Db(r.clamp(-999.0, 999.0))),
+        edt: room_value(b.edt_s),
+        t20: room_value(b.t20_s),
+        t30: room_value(b.t30_s),
+        c50: room_value(b.c50_db),
+        c80: room_value(b.c80_db),
+        d50: room_value(b.d50),
+        curvature: b.curvature_pct.filter(|c| c.is_finite()),
+    }
+}
+
+/// The room parameters of an analysis.
+pub(crate) fn room(a: &SweepAnalysis) -> RoomAcoustics {
+    RoomAcoustics {
+        broadband: room_band(&a.room.broadband),
+        octave: a.room.octave.iter().map(room_band).collect(),
+        third: a.room.third.iter().map(room_band).collect(),
+        span_end: Seconds(a.room_end_s),
+    }
 }
 
 /// Runs the analysis of `rec`.

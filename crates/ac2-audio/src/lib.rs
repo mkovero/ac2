@@ -61,7 +61,7 @@ pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
 pub use cpal_host::CpalBackend;
 pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};
 pub use events::EventSnapshot;
-pub use fake::{FakeBackend, FakeConfig, FakeDriver};
+pub use fake::{FakeBackend, FakeConfig, FakeDriver, FakeReverb};
 pub use generator::{
     GeneratorHandle, GeneratorPort, MAX_ROUTED_CHANNELS, RouteError, SignalSource, generator,
 };

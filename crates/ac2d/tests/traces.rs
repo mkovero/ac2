@@ -295,7 +295,7 @@ fn capture_average_math_export_import() {
     assert_eq!(file_name, "aligned.csv");
     let csv = String::from_utf8(content.0.clone()).unwrap();
     assert!(
-        csv.starts_with("# ac2 trace export v2\n# name: aligned\n"),
+        csv.starts_with("# ac2 trace export v3\n# name: aligned\n"),
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
@@ -972,7 +972,7 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 8", "\"version\": 9")).unwrap();
+    std::fs::write(&manifest, text.replace("\"version\": 9", "\"version\": 10")).unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -984,8 +984,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 9,
-            supported: 8
+            found: 10,
+            supported: 9
         })
     );
     assert_eq!(traces(c).len(), n);

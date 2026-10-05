@@ -1,4 +1,5 @@
-//! `ir capture`: a sweep measurement in the foreground (`docs/design/sweep-distortion.md`).
+//! `ir capture`: a sweep measurement in the foreground (`docs/design/sweep-distortion.md`);
+//! `ir metrics`: the room parameters of a stored sweep (`docs/design/room-metrics.md`).
 //!
 //! Safety as `gen`: the level is a required typed dBFS value, checked against the daemon's
 //! ceiling before the lease is acquired; the command acquires and *arms* with the sweep
@@ -14,14 +15,15 @@ use ac2_proto::model::{
 use ac2_proto::units::{SweepId, TraceId};
 use ac2_proto::{Command, ReplyBody};
 use ac2_scene::distortion::{self, Reading};
+use ac2_scene::room::{BandSet, room_table};
 use ac2_scene::view::DistortionUnit;
 use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::gen_::{Input, input, say};
-use super::{connect, find_meas, state};
+use super::{connect, find_meas, find_trace, state};
 use crate::CliError;
-use crate::args::{Cli, IrCaptureArgs, IrCmd};
+use crate::args::{Cli, IrCaptureArgs, IrCmd, IrMetricsArgs};
 use crate::output::{self, Out};
 use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
@@ -29,7 +31,45 @@ use crate::watch::{Key, RawTerm, quit_signal};
 pub(crate) async fn run(cli: &Cli, cmd: &IrCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
         IrCmd::Capture(a) => capture(cli, a, out).await,
+        IrCmd::Metrics(a) => metrics(cli, a, out).await,
     }
+}
+
+async fn metrics(cli: &Cli, a: &IrMetricsArgs, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let st = state(&c).await?;
+    let t = find_trace(&st, &a.trace)?;
+    let data = c.call(Command::TraceGet { trace: t.id }).await?;
+    let data = expect_body!("trace.get", data, ReplyBody::TraceData(d) => d)?;
+    let set = if a.third {
+        BandSet::Third
+    } else {
+        BandSet::Octave
+    };
+    print_room(out, &data, set)
+}
+
+/// The room parameters of a sweep trace: the table, or `{trace, name, room}` as JSON (every
+/// band of both sets, refusals tagged with their reason).
+pub fn print_room(out: &mut Out<'_>, data: &TraceData, set: BandSet) -> Result<(), CliError> {
+    let Some(s) = &data.sweep else {
+        return Err(CliError::Usage(format!(
+            "trace {} is not a sweep: room parameters come from a sweep's impulse response \
+             (`ac2 ir capture`)",
+            data.meta.id
+        )));
+    };
+    let Some(r) = &s.room else {
+        return Err(CliError::Refused(format!(
+            "trace {} has no room parameters (imported from an export written without them)",
+            data.meta.id
+        )));
+    };
+    out.emit(
+        &json!({ "trace": data.meta.id, "name": data.meta.edit.name, "room": r }),
+        || room_table(r, set).text().trim_end().to_owned(),
+    )?;
+    Ok(())
 }
 
 /// The request `ir capture` sends, validated without a daemon; inputs from `--meas` are
@@ -68,6 +108,7 @@ pub fn request(a: &IrCaptureArgs) -> Result<SweepRequest, CliError> {
         sweep: EssSpec::with_fades(from, to, a.duration.0),
         repeats: a.repeats,
         gate: a.gate.map(|g| g.0),
+        tail: a.tail.map(|t| t.0),
     })
 }
 
@@ -323,6 +364,7 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
                 "hz": p.map(|x| x.0),
                 "db": p.map(|x| x.1),
             })).collect::<Vec<_>>(),
+            "room": s.room,
         });
         let _ = out.json_line(&j);
         return;
@@ -371,11 +413,17 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
         };
         t.push_str(&line);
     }
+    if let Some(r) = &s.room {
+        for l in room_table(r, BandSet::Octave).text().lines() {
+            t.push_str(&format!("  {l}\n"));
+        }
+    }
     let _ = std::fmt::Write::write_fmt(
         &mut t,
         format_args!(
-            "  every curve: ac2 trace export {} --csv FILE",
-            data.meta.id
+            "  every curve: ac2 trace export {} --csv FILE\n  \
+             one-third octaves: ac2 ir metrics {} --third",
+            data.meta.id, data.meta.id
         ),
     );
     let _ = writeln!(out.w, "{t}");
@@ -400,6 +448,7 @@ mod tests {
             duration: Time(Seconds(3.0)),
             repeats: 1,
             gate: None,
+            tail: None,
             name: "sweep".into(),
             force: false,
         }
@@ -480,7 +529,7 @@ mod tests {
                 "--backend",
                 "fake",
                 "--in",
-                "1-2",
+                "1-3",
                 "--loopback-out",
                 "1",
                 "--loopback-in",
@@ -561,6 +610,50 @@ mod tests {
         let csv = std::fs::read_to_string(&path)?;
         assert!(csv.contains("# kind: sweep"));
         assert!(csv.contains(",h2_db,h2_floor_db,h3_db,h3_floor_db,h4_db,h4_floor_db,h5_db,h5_floor_db,thd_db,thd_floor_db"));
+        assert!(csv.contains("\n# room_metrics: {"));
+
+        // The rig's hall (in 3, T60 0.8 s): a sweep with 2 s of silence after it, then its
+        // room parameters by name, as a table and as JSON.
+        let mut a = args();
+        a.reference = Some(Channel(0));
+        a.mic = Some(Channel(2));
+        a.outputs = Channels(vec![0]);
+        a.level = LevelDbfs(Dbfs(-20.0));
+        a.from = Freq(Hz(100.0));
+        a.to = Freq(Hz(10_000.0));
+        a.duration = Time(Seconds(1.0));
+        a.tail = Some(Time(Seconds(2.0)));
+        a.name = "hall".into();
+        let req = request(&a)?;
+        assert_eq!(req.tail, Some(Seconds(2.0)));
+        let lease = c.acquire_lease(false, OnDrop::StopAndRelease).await?;
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut buf = Vec::new();
+        let mut out = Out::new(true, &mut buf);
+        tx.send(Input::Key(Key::Enter))?;
+        foreground(&c, lease, req, a.name.clone(), &mut out, (None, rx)).await?;
+        let (code, text) = ac2(&ep, &["ir", "metrics", "hall"]).await?;
+        assert_eq!(code, 0, "{text}");
+        eprintln!("{text}");
+        assert!(
+            text.starts_with("Room (ISO 3382-1) · octave bands · decay to "),
+            "{text}"
+        );
+        assert!(text.contains("\nT30 (s)"), "{text}");
+        let (code, text) = ac2(&ep, &["--json", "ir", "metrics", "hall"]).await?;
+        assert_eq!(code, 0, "{text}");
+        let j: serde_json::Value = serde_json::from_str(&text)?;
+        let t30_1k = j["room"]["octave"]
+            .as_array()
+            .and_then(|b| b.iter().find(|b| b["centre"] == 1000.0))
+            .map(|b| b["t30"].clone())
+            .ok_or("no 1 kHz band")?;
+        assert_eq!(t30_1k["type"], "value", "{t30_1k}");
+        let t30 = t30_1k["value"].as_f64().unwrap_or(f64::NAN);
+        assert!((t30 / 0.8 - 1.0).abs() < 0.1, "T30 at 1 kHz {t30}");
+        let (code, text) = ac2(&ep, &["ir", "metrics", "rig sweep", "--third"]).await?;
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("⅓-octave bands"), "{text}");
         drop(c);
         h.shutdown();
         Ok(())

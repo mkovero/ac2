@@ -691,8 +691,13 @@ pub fn ir_frame(d: &TraceData) -> Option<ac2_proto::frame::IrFrame> {
     })
 }
 
+/// Shortest IR plot left above the room table, logical pixels; a shorter pane shows the
+/// IR alone.
+const MIN_IR_HEIGHT: f32 = 140.0;
+
 /// The sweep's impulse response in the IR view, with each harmonic's impulse marked at
-/// `−L·ln k` and time zero named as the arrival.
+/// `−L·ln k` and time zero named as the arrival; below it, when the pane is tall enough,
+/// the room parameters of its octave bands ([`crate::room`]).
 pub fn sweep_ir_scene(
     d: &TraceData,
     color: Color,
@@ -703,7 +708,32 @@ pub fn sweep_ir_scene(
 ) -> Option<crate::ir::IrScene> {
     let s = d.sweep.as_ref()?;
     let frame = ir_frame(d)?;
-    let mut sc = crate::ir::ir_scene(&frame, color, None, status, view, theme, size);
+    let table = s
+        .room
+        .as_ref()
+        .map(|r| crate::room::room_table(r, crate::room::BandSet::Octave))
+        .filter(|t| size.height - crate::room::table_height(t, theme) >= MIN_IR_HEIGHT);
+    let ir_size = Viewport {
+        height: size.height
+            - table
+                .as_ref()
+                .map_or(0.0, |t| crate::room::table_height(t, theme)),
+        ..size
+    };
+    let mut sc = crate::ir::ir_scene(&frame, color, None, status, view, theme, ir_size);
+    sc.room = table.clone();
+    if let Some(t) = &table {
+        let rect = Rect::new(
+            MARGINS.left,
+            ir_size.height,
+            (size.width - MARGINS.left - MARGINS.right).max(1.0),
+            size.height - ir_size.height,
+        );
+        sc.scene.viewport = size;
+        sc.scene
+            .layers
+            .push(crate::room::table_layer(t, rect, theme));
+    }
     let origin = format!(
         "t = 0 at the arrival {}",
         crate::readout::delay_readout(s.info.arrival.0, view.temperature_c)

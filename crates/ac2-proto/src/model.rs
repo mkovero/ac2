@@ -1841,9 +1841,16 @@ pub struct SweepRequest {
     /// Linear-response gate after the arrival; `None` = the whole response up to the noise
     /// window.
     pub gate: Option<Seconds>,
+    /// Silence recorded after each sweep (the room's decay and its noise; room parameters
+    /// are computed up to its end), at most [`SweepRequest::MAX_TAIL`]; `None` or anything
+    /// shorter = the shortest the analysis needs (1 s or more).
+    pub tail: Option<Seconds>,
 }
 
 impl SweepRequest {
+    /// Longest silence after each sweep.
+    pub const MAX_TAIL: Seconds = Seconds(20.0);
+
     /// Most repeats.
     pub const MAX_REPEATS: u8 = 8;
 }
@@ -2028,6 +2035,106 @@ pub struct SweepData {
     pub ir: SweepIr,
     /// Analysis facts.
     pub info: SweepInfo,
+    /// ISO 3382-1 room parameters of the impulse response; `None` for a sweep imported from
+    /// an export written without them.
+    pub room: Option<RoomAcoustics>,
+}
+
+// ---------------------------------------------------------------------------------------
+// Room acoustics (ISO 3382-1, docs/design/room-metrics.md)
+
+/// Why a room parameter is not given.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RoomRefusal {
+    /// The band carries no decay (no energy, or none falling).
+    NoDecay,
+    /// The decay meets the noise too soon: the parameter needs `needed` of decay range.
+    InsufficientRange {
+        /// Decay range measured.
+        range: Db,
+        /// Decay range needed.
+        needed: Db,
+    },
+    /// The decay is too short for the band's filter (bandwidth × decay time below 8).
+    FilterLimited {
+        /// Bandwidth × decay time found.
+        bandwidth_decay: f64,
+    },
+}
+
+/// A room parameter, or why it is not given.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RoomValue {
+    /// The parameter (unit: the field's).
+    Value {
+        /// Value.
+        value: f64,
+    },
+    /// Not given.
+    Refused {
+        /// Why.
+        reason: RoomRefusal,
+    },
+}
+
+impl RoomValue {
+    /// The value, if given.
+    pub fn value(self) -> Option<f64> {
+        match self {
+            RoomValue::Value { value } => Some(value),
+            RoomValue::Refused { .. } => None,
+        }
+    }
+}
+
+/// One band's room parameters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoomBand {
+    /// Mid-band frequency; `None` = broadband (the impulse response as captured).
+    pub centre: Option<Hz>,
+    /// The band's onset, re the arrival.
+    pub onset: Seconds,
+    /// Where its decay meets the noise (truncation point), re the arrival.
+    pub truncation: Seconds,
+    /// Depth of its decay curve at the truncation point; `None` without a decay.
+    pub decay_range: Option<Db>,
+    /// Early decay time, seconds.
+    pub edt: RoomValue,
+    /// T20, seconds.
+    pub t20: RoomValue,
+    /// T30, seconds.
+    pub t30: RoomValue,
+    /// Clarity C50, dB.
+    pub c50: RoomValue,
+    /// Clarity C80, dB.
+    pub c80: RoomValue,
+    /// Definition D50, ratio 0…1.
+    pub d50: RoomValue,
+    /// Curvature 100·(T30/T20 − 1), percent, when both are given.
+    pub curvature: Option<f64>,
+}
+
+/// ISO 3382-1 room parameters of a sweep's impulse response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoomAcoustics {
+    /// The impulse response as captured (band: the sweep's).
+    pub broadband: RoomBand,
+    /// Octave bands 63 Hz … 8 kHz inside the sweep's range.
+    pub octave: Vec<RoomBand>,
+    /// One-third-octave bands 50 Hz … 10 kHz inside the sweep's range.
+    pub third: Vec<RoomBand>,
+    /// End of the impulse response analysed (the end of the silence after the sweep), re
+    /// the arrival.
+    pub span_end: Seconds,
+}
+
+impl RoomAcoustics {
+    /// Curvature above which a decay is not straight, percent.
+    pub const CURVATURE_LIMIT: f64 = 10.0;
 }
 
 // ---------------------------------------------------------------------------------------

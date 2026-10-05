@@ -801,6 +801,68 @@ fn synthetic_sweep(grid: &GridDef, f2: f64, rate: f64, repeats: u8) -> (Columns,
             floor_margin: Db(6.0),
             clipped: false,
         },
+        room: Some(synthetic_room(f2)),
     };
     (columns, sweep)
+}
+
+/// Synthetic room parameters: a hall of T ≈ 1.1 s falling to 0.7 s at the top, 52 dB of
+/// decay range in the octaves (40 dB at 63 Hz: T30 refused there; the 63 Hz EDT too short
+/// for its band), octave bands up to `f2`.
+fn synthetic_room(f2: f64) -> RoomAcoustics {
+    let band = |centre: Option<f64>, t: f64, range: f64| {
+        let v = |value: f64| RoomValue::Value { value };
+        let need = |needed: f64, x: f64| {
+            if range >= needed {
+                v(x)
+            } else {
+                RoomValue::Refused {
+                    reason: RoomRefusal::InsufficientRange {
+                        range: Db(range),
+                        needed: Db(needed),
+                    },
+                }
+            }
+        };
+        let k = 6.0 * std::f64::consts::LN_10 / t;
+        let c = |ms: f64| {
+            10.0 * ((0.3 + 1.0 - (-k * ms / 1000.0).exp()) / (-k * ms / 1000.0).exp()).log10()
+        };
+        let early = 0.3 + 1.0 - (-k * 0.05f64).exp();
+        RoomBand {
+            centre: centre.map(Hz),
+            onset: Seconds(0.0),
+            truncation: Seconds(t * range / 60.0),
+            decay_range: Some(Db(range)),
+            edt: if centre.is_some_and(|c| c < 70.0) {
+                RoomValue::Refused {
+                    reason: RoomRefusal::FilterLimited {
+                        bandwidth_decay: 6.5,
+                    },
+                }
+            } else {
+                v(t * 0.95)
+            },
+            t20: need(35.0, t),
+            t30: need(45.0, t * 1.02),
+            c50: v(c(50.0)),
+            c80: v(c(80.0)),
+            d50: v(early / 1.3),
+            curvature: (range >= 45.0).then_some(2.0),
+        }
+    };
+    let octave = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+        .iter()
+        .filter(|&&f| f * std::f64::consts::SQRT_2 <= f2)
+        .map(|&f| {
+            let t = 1.1 - 0.4 * ((f / 63.0).log2() / 7.0);
+            band(Some(f), t, if f < 100.0 { 40.0 } else { 52.0 })
+        })
+        .collect();
+    RoomAcoustics {
+        broadband: band(None, 0.95, 58.0),
+        octave,
+        third: Vec::new(),
+        span_end: Seconds(0.99),
+    }
 }

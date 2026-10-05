@@ -104,6 +104,20 @@ pub struct FakePath {
     /// sample before the FIR; empty = linear. A sine of peak `A` then has a second harmonic of
     /// `c2·A²/2` and a third of `c3·A³/4` (with `¾·c3·A³` added to the fundamental).
     pub nonlinearity: Vec<f64>,
+    /// A diffuse room tail added after the FIR; `None` = none.
+    pub reverb: Option<FakeReverb>,
+}
+
+/// A diffuse room tail: a Schroeder reverberator (eight parallel feedback combs, then four
+/// series all-passes). Every comb's loop gain is set so its energy falls 60 dB in `t60_s`,
+/// at every frequency, and the all-passes change no level: the tail decays with exactly
+/// that reverberation time, which a room measurement can be checked against.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FakeReverb {
+    /// Reverberation time, seconds.
+    pub t60_s: f32,
+    /// Gain of the tail re the path's direct sound.
+    pub level: f32,
 }
 
 impl FakePath {
@@ -116,6 +130,7 @@ impl FakePath {
             fir: vec![1.0],
             noise_rms: 0.0,
             nonlinearity: Vec::new(),
+            reverb: None,
         }
     }
 
@@ -134,6 +149,7 @@ impl FakePath {
             fir,
             noise_rms,
             nonlinearity: Vec::new(),
+            reverb: None,
         }
     }
 
@@ -141,6 +157,12 @@ impl FakePath {
     /// [`FakePath::nonlinearity`]).
     pub fn distorting(mut self, coefficients: Vec<f64>) -> Self {
         self.nonlinearity = coefficients;
+        self
+    }
+
+    /// This path with a diffuse room tail ([`FakeReverb`]).
+    pub fn reverberant(mut self, reverb: FakeReverb) -> Self {
+        self.reverb = Some(reverb);
         self
     }
 }
@@ -329,6 +351,8 @@ impl FakeConfig {
                 return Err(FakeConfigError::EmptyFir(i));
             }
             if !ok(f64::from(p.noise_rms))
+                || p.reverb
+                    .is_some_and(|r| !(r.t60_s.is_finite() && r.t60_s > 0.0 && r.level.is_finite()))
                 || p.fir.iter().any(|c| !c.is_finite())
                 || p.nonlinearity.iter().any(|c| !c.is_finite())
             {
@@ -724,6 +748,89 @@ struct PathRt {
     /// `[c2, c3, …]`; empty = linear.
     poly: Box<[f64]>,
     rng: Rng,
+    reverb: Option<Reverb>,
+}
+
+/// One delay line of the reverberator: a feedback comb (`gain` = loop gain) or a
+/// Schroeder all-pass (`gain` = its coefficient).
+struct DelayLine {
+    buf: Box<[f32]>,
+    pos: usize,
+    gain: f32,
+}
+
+impl DelayLine {
+    fn new(len: usize, gain: f32) -> Self {
+        Self {
+            buf: vec![0.0; len.max(1)].into_boxed_slice(),
+            pos: 0,
+            gain,
+        }
+    }
+
+    #[inline]
+    fn comb(&mut self, x: f32) -> f32 {
+        let y = self.buf[self.pos];
+        self.buf[self.pos] = x + self.gain * y;
+        self.pos = (self.pos + 1) % self.buf.len();
+        y
+    }
+
+    #[inline]
+    fn allpass(&mut self, x: f32) -> f32 {
+        let v = self.buf[self.pos];
+        let y = v - self.gain * x;
+        self.buf[self.pos] = x + self.gain * y;
+        self.pos = (self.pos + 1) % self.buf.len();
+        y
+    }
+}
+
+/// [`FakeReverb`] at a sample rate.
+struct Reverb {
+    combs: Box<[DelayLine]>,
+    allpasses: Box<[DelayLine]>,
+    level: f32,
+}
+
+impl Reverb {
+    /// Comb and all-pass lengths at 44.1 kHz (mutually prime-ish, as in the classic
+    /// designs): echoes from different combs rarely coincide.
+    const COMBS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+    const ALLPASSES: [usize; 4] = [556, 441, 341, 225];
+
+    fn new(r: FakeReverb, fs: f64) -> Self {
+        let scale = fs / 44_100.0;
+        let len = |d: usize| ((d as f64 * scale).round() as usize).max(1);
+        Self {
+            combs: Self::COMBS
+                .iter()
+                .map(|&d| {
+                    let n = len(d);
+                    // Energy −60 dB (amplitude 10⁻³) after t60: g^(t60·fs/n) = 10⁻³.
+                    let g = 10f64.powf(-3.0 * n as f64 / (f64::from(r.t60_s) * fs));
+                    DelayLine::new(n, g as f32)
+                })
+                .collect(),
+            allpasses: Self::ALLPASSES
+                .iter()
+                .map(|&d| DelayLine::new(len(d), 0.5))
+                .collect(),
+            level: r.level / Self::COMBS.len() as f32,
+        }
+    }
+
+    #[inline]
+    fn tick(&mut self, x: f32) -> f32 {
+        let mut y = 0.0;
+        for c in self.combs.iter_mut() {
+            y += c.comb(x);
+        }
+        for a in self.allpasses.iter_mut() {
+            y = a.allpass(y);
+        }
+        y * self.level
+    }
 }
 
 /// `x + c2·x² + c3·x³ + …` by Horner's rule.
@@ -815,6 +922,7 @@ impl Sim {
                 noise_rms: f64::from(p.noise_rms),
                 poly: p.nonlinearity.clone().into_boxed_slice(),
                 rng: Rng::new(seeds.next_u64()),
+                reverb: p.reverb.map(|r| Reverb::new(r, f64::from(cfg.sample_rate))),
             })
             .collect();
         let input_rngs = (0..device_inputs)
@@ -1070,6 +1178,9 @@ impl Sim {
                     acc += coef * shape(&self.paths[p].poly, x);
                 }
             }
+        }
+        if let Some(r) = self.paths[p].reverb.as_mut() {
+            acc += r.tick(acc);
         }
         if noise_rms > 0.0 {
             acc += (noise_rms * self.paths[p].rng.gaussian()) as f32;

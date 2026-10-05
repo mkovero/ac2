@@ -549,6 +549,7 @@ def requests():
                     "sweep": SWEEP,
                     "repeats": 2,
                     "gate": 0.005,
+                    "tail": 3.0,
                 },
                 "name": "1083 sweep",
             },

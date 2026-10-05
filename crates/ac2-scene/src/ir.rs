@@ -31,6 +31,8 @@ pub struct IrScene {
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+    /// Room parameters drawn under the plot (a sweep trace's IR), if any.
+    pub room: Option<crate::room::RoomTable>,
 }
 
 /// Time of every point, ms re the inserted delay.
@@ -216,6 +218,7 @@ pub fn ir_scene(
         note,
         strip: strip.rect,
         banners: strip.rows,
+        room: None,
     }
 }
 

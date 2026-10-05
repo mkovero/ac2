@@ -1227,8 +1227,22 @@ impl FromStr for TraceSmoothing {
 pub enum IrCmd {
     /// Play a synchronised sweep in the foreground (Enter plays, Esc/Ctrl-C stops), record
     /// the reference and the mic, and store a sweep trace with harmonic distortion H2 … H5
-    /// and THD vs frequency; prints a summary.
+    /// and THD vs frequency, and the room parameters (ISO 3382-1) of its impulse response;
+    /// prints a summary.
     Capture(IrCaptureArgs),
+    /// Room parameters (ISO 3382-1: EDT, T20, T30, C50, C80, D50) of a stored sweep trace,
+    /// per octave band (or one-third octave) and broadband.
+    Metrics(IrMetricsArgs),
+}
+
+/// `ir metrics`.
+#[derive(Debug, Args)]
+pub struct IrMetricsArgs {
+    /// Sweep trace id or name.
+    pub trace: MeasRef,
+    /// One-third-octave bands instead of octave bands.
+    #[arg(long)]
+    pub third: bool,
 }
 
 /// `rec …`.
@@ -1304,6 +1318,11 @@ pub struct IrCaptureArgs {
     /// response); default: the whole response.
     #[arg(long, value_name = "TIME")]
     pub gate: Option<Time>,
+    /// Silence recorded after each sweep (the room's decay and its noise; the room
+    /// parameters are computed up to its end), e.g. `3s` for a hall; default: 1 s (or
+    /// what the sweep needs), at most 20 s.
+    #[arg(long, value_name = "TIME")]
+    pub tail: Option<Time>,
     /// Name of the stored trace.
     #[arg(long, default_value = "sweep")]
     pub name: String,

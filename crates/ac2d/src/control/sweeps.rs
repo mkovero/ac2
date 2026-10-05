@@ -134,7 +134,7 @@ impl Control {
             ));
         }
         let fs = f64::from(rt.sample_rate);
-        let (spec, timing) = sweep::spec(req.sweep, level.0, req.gate, fs)?;
+        let (spec, timing) = sweep::spec(req.sweep, level.0, req.gate, req.tail, fs)?;
         let sweeps = (0..req.repeats)
             .map(|_| {
                 CoreGenerator::new(&GeneratorConfig {

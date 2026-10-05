@@ -9,7 +9,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use ac2_audio::fake::{FakeDrive, FakePath, Pace};
+use ac2_audio::fake::{FakeDrive, FakePath, FakeReverb, Pace};
 use ac2_audio::{Backend, FakeBackend, FakeConfig};
 
 /// A backend by name.
@@ -68,9 +68,19 @@ impl FromStr for BackendChoice {
 /// cable (32 samples) and output 1 → input 2 through an "acoustic" path (5 ms, −6 dB, a
 /// little noise), so a transfer measurement with reference 1 and measurement 2 shows a
 /// real delay and magnitude once a stimulus plays. The acoustic path's driver distorts
-/// ([`FAKE_RIG_DISTORTION`]): a sweep measurement shows known H2 and H3.
+/// ([`FAKE_RIG_DISTORTION`]): a sweep measurement shows known H2 and H3. Output 1 → input 3
+/// is a mic in a hall ([`FAKE_RIG_HALL`]): direct sound after 10 ms and a diffuse tail of a
+/// known reverberation time, for the room parameters of a sweep.
 pub const FAKE_RIG: &str = "fake rig: out 1 → in 1 loopback (32 samples), out 1 → in 2 \
-                            acoustic (5 ms, −6 dB; H2 −40 dB, H3 −50 dB at −20 dBFS)";
+                            acoustic (5 ms, −6 dB; H2 −40 dB, H3 −50 dB at −20 dBFS), out 1 → \
+                            in 3 hall (10 ms, T60 0.8 s)";
+
+/// The fake rig's hall (output 1 → input 3): its tail falls 60 dB in 0.8 s at every
+/// frequency.
+pub const FAKE_RIG_HALL: FakeReverb = FakeReverb {
+    t60_s: 0.8,
+    level: 2.0,
+};
 
 /// The fake rig's acoustic path is `y = x + c2·x² + c3·x³` before the room: at a sweep of
 /// −20 dBFS (peak 0.1) the second harmonic is `c2·0.1/2` = −40 dB and the third
@@ -87,8 +97,9 @@ fn fake_config() -> FakeConfig {
             FakePath::loopback(0, 0, LOOP),
             FakePath::acoustic(0, 1, LOOP + 240, vec![0.5], 1e-4)
                 .distorting(FAKE_RIG_DISTORTION.to_vec()),
+            FakePath::acoustic(0, 2, LOOP + 480, vec![0.25], 1e-5).reverberant(FAKE_RIG_HALL),
         ],
-        input_names: names(&["Loop return", "Room mic", "Line 3", "Line 4"]),
+        input_names: names(&["Loop return", "Room mic", "Hall mic", "Line 4"]),
         output_names: names(&["Out 1 (speaker + loop)", "Out 2"]),
         ..FakeConfig::default()
     }

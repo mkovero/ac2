@@ -3545,6 +3545,7 @@ fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
                 floor_margin: Db(6.0),
                 clipped: false,
             },
+            room: None,
         }),
     };
     (Arc::new(data), Arc::new(grid))

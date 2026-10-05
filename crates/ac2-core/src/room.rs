@@ -53,6 +53,11 @@ pub const MIN_BANDWIDTH_DECAY: f64 = 8.0;
 /// A non-straight decay: T30 more than this much longer than T20, percent (ISO 3382-2
 /// curvature).
 pub const CURVATURE_LIMIT_PCT: f64 = 10.0;
+/// Shortest time a decay curve may take to fall through an evaluation range, s. Faster is a
+/// step, not a decay: a room whose curve falls 10 dB in 2 ms would have T60 = 12 ms, while
+/// a strong direct sound drops it that far within a few samples, and a fit through those
+/// samples would report that as an early decay time.
+pub const MIN_FIT_S: f64 = 0.002;
 /// Octave bands analysed: mid-band frequencies, Hz.
 pub const OCTAVE_SPAN_HZ: (f64, f64) = (63.0, 8000.0);
 /// One-third-octave bands analysed: mid-band frequencies, Hz.
@@ -137,8 +142,8 @@ pub struct BandMetrics {
     pub onset_s: f64,
     /// Where the decay meets the noise (truncation), s on the caller's time axis.
     pub truncation_s: f64,
-    /// Depth of the decay curve at the truncation point, dB.
-    pub decay_range_db: f64,
+    /// Depth of the decay curve at the truncation point, dB; `None` without a decay.
+    pub decay_range_db: Option<f64>,
     /// Early decay time, s.
     pub edt_s: Metric,
     /// T20, s.
@@ -161,7 +166,7 @@ impl BandMetrics {
             centre_hz,
             onset_s,
             truncation_s: onset_s,
-            decay_range_db: 0.0,
+            decay_range_db: None,
             edt_s: Err(Refusal::NoDecay),
             t20_s: Err(Refusal::NoDecay),
             t30_s: Err(Refusal::NoDecay),
@@ -256,11 +261,13 @@ fn fit(points: impl Iterator<Item = (f64, f64)>) -> Option<(f64, f64)> {
 
 /// Decay time from a decay curve sampled at `fs`: the least-squares slope over the samples
 /// from where it first falls to `top` dB to where it first falls to `bottom` dB, as the
-/// time a 60 dB fall takes. `None` when the curve does not reach `bottom` or does not fall.
+/// time a 60 dB fall takes. `None` when the curve does not reach `bottom` or does not fall,
+/// or falls through the range in less than [`MIN_FIT_S`] (a step: the direct sound, not a
+/// decay).
 pub fn decay_time(edc_db: &[f64], fs: f64, top: f64, bottom: f64) -> Option<f64> {
     let i0 = edc_db.iter().position(|v| *v <= top)?;
     let i1 = edc_db.iter().position(|v| *v <= bottom)?;
-    if i1 <= i0 + 1 {
+    if i1 <= i0 + 1 || ((i1 - i0) as f64) < MIN_FIT_S * fs {
         return None;
     }
     let (_, b) = fit((i0..=i1).map(|i| (i as f64 / fs, edc_db[i])))?;
@@ -533,7 +540,7 @@ fn band_metrics(
         centre_hz: centre,
         onset_s: time(d.onset),
         truncation_s: time(d.end),
-        decay_range_db: d.range_db,
+        decay_range_db: Some(d.range_db),
         edt_s,
         t20_s,
         t30_s,

@@ -105,6 +105,7 @@ pub(crate) fn data() -> TraceData {
                 floor_margin: Db(6.0),
                 clipped: false,
             },
+            room: None,
         }),
     }
 }

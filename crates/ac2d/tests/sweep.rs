@@ -51,6 +51,7 @@ fn request(level: Option<f64>) -> SweepRequest {
         sweep: EssSpec::with_fades(Hz(100.0), Hz(5000.0), Seconds(1.0)),
         repeats: 1,
         gate: None,
+        tail: None,
     }
 }
 
@@ -357,4 +358,136 @@ fn a_failed_sweep_leaves_the_generator_disarmed() {
     };
     assert!(!st.generator.armed && !st.generator.firing);
     assert!(st.traces.is_empty(), "nothing stored");
+}
+
+/// Room parameters end to end: a rig whose third input hears the output through a hall
+/// with a known reverberation time (`ac2_audio::FakeReverb`, 0.8 s at every frequency); a
+/// sweep with 2 s of silence after it reads T20 / T30 within 8 % of it in the octave bands
+/// (its EDT is longer: the reverberator's field takes tens of ms to build up)
+/// it excites, the export carries the table and the import restores it.
+#[test]
+fn a_sweep_in_a_hall_reads_its_reverberation_time() {
+    use ac2_audio::FakeReverb;
+    init_log();
+    let t60 = 0.8;
+    let backend = FakeBackend::new(FakeConfig {
+        sample_rate: FS,
+        block_frames: BLOCK,
+        inputs: 4,
+        outputs: 2,
+        drive: FakeDrive::Manual,
+        seed: 12,
+        paths: vec![
+            FakePath::loopback(0, 0, LOOP_DELAY),
+            FakePath::acoustic(0, 2, LOOP_DELAY + ACOUSTIC_DELAY, vec![0.25], 1e-5).reverberant(
+                FakeReverb {
+                    t60_s: t60 as f32,
+                    level: 2.0,
+                },
+            ),
+        ],
+        ..FakeConfig::default()
+    })
+    .unwrap();
+    let h = Daemon::start(config(backend.clone(), inproc("sweep-hall"))).unwrap();
+    let (mut c, sub) = connect(&h, &[b"evt"]);
+    c.ok(Command::Hello {
+        client: "hall test".into(),
+    });
+    c.ok(Command::SessionOpen {
+        config: ac2_proto::model::SessionConfig {
+            input_channels: vec![0, 1, 2],
+            ..session(true)
+        },
+    });
+    let mut d = driver(&backend);
+    let token = match c.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    arm(&mut c, token);
+    let req = SweepRequest {
+        inputs: SweepInputs::Channels {
+            reference: 0,
+            measurement: 2,
+        },
+        sweep: EssSpec::with_fades(Hz(100.0), Hz(10_000.0), Seconds(1.0)),
+        tail: Some(Seconds(2.0)),
+        ..request(Some(LEVEL))
+    };
+    let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
+        lease_token: token,
+        request: req,
+        name: "hall".into(),
+    }) else {
+        panic!("not a sweep");
+    };
+    assert!((r.post_roll.0 - 2.0).abs() < 1e-3, "{:?}", r.post_roll);
+    let done = run_until(&mut d, &mut c, &sub, token, |x| x.id == r.id && !x.active());
+    let SweepStatus::Done { trace } = done.status else {
+        panic!("sweep failed: {:?}", done.status);
+    };
+    let data = match c.ok(Command::TraceGet { trace }) {
+        ReplyBody::TraceData(t) => *t,
+        other => panic!("{other:?}"),
+    };
+    let s = data.sweep.expect("sweep data");
+    let room = s.room.clone().expect("room parameters");
+    assert!(
+        room.span_end.0 > 1.9 && room.span_end.0 < 2.0,
+        "{:?}",
+        room.span_end
+    );
+    let centres: Vec<f64> = room
+        .octave
+        .iter()
+        .filter_map(|b| b.centre.map(|c| c.0))
+        .collect();
+    assert_eq!(centres.len(), 5, "250 Hz … 4 kHz: {centres:?}");
+    let mut bad = false;
+    for b in room.octave.iter().chain(std::iter::once(&room.broadband)) {
+        for (name, v) in [("T20", b.t20), ("T30", b.t30)] {
+            let t = v
+                .value()
+                .unwrap_or_else(|| panic!("{:?} {name}: {v:?}", b.centre));
+            eprintln!(
+                "hall {:?} {name} {t:.3} s (T60 {t60})",
+                b.centre.map(|c| c.0.round())
+            );
+            bad |= (t / t60 - 1.0).abs() >= 0.08;
+        }
+        assert!(
+            b.decay_range.is_some_and(|r| r.0 > 45.0),
+            "{:?}",
+            b.decay_range
+        );
+    }
+    assert!(!bad, "reverberation time off by 8 % or more");
+    // The export carries the parameters, the import restores them.
+    let csv = match c.ok(Command::TraceExport {
+        trace,
+        format: ac2_proto::model::ExportFormat::Ac2Csv,
+    }) {
+        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    assert!(csv.contains("\n# room_metrics: {"), "no room_metrics line");
+    assert!(
+        csv.contains("\n# band_hz,edt_s,t20_s,t30_s,"),
+        "no room table"
+    );
+    let back = match c.ok(Command::TraceImport {
+        file_name: "hall.csv".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Trace,
+        content: Blob(csv.into_bytes()),
+    }) {
+        ReplyBody::Trace(t) => t,
+        other => panic!("{other:?}"),
+    };
+    let again = match c.ok(Command::TraceGet { trace: back.id }) {
+        ReplyBody::TraceData(t) => *t,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(again.sweep.and_then(|s| s.room), Some(room));
 }

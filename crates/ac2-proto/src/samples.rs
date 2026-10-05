@@ -289,6 +289,7 @@ pub fn commands() -> Vec<Command> {
                 sweep: sweep(),
                 repeats: 2,
                 gate: Some(Seconds(0.005)),
+                tail: Some(Seconds(3.0)),
             },
             name: "1083 sweep".into(),
         },
@@ -599,6 +600,33 @@ fn sweep_data() -> SweepData {
             floor_margin: Db(6.0),
             clipped: false,
         },
+        room: Some(RoomAcoustics {
+            broadband: room_band(None),
+            octave: vec![room_band(Some(Hz(1000.0)))],
+            third: Vec::new(),
+            span_end: Seconds(0.98),
+        }),
+    }
+}
+
+fn room_band(centre: Option<Hz>) -> RoomBand {
+    RoomBand {
+        centre,
+        onset: Seconds(0.0),
+        truncation: Seconds(0.75),
+        decay_range: Some(Db(52.5)),
+        edt: RoomValue::Value { value: 0.875 },
+        t20: RoomValue::Value { value: 0.9 },
+        t30: RoomValue::Refused {
+            reason: RoomRefusal::InsufficientRange {
+                range: Db(42.5),
+                needed: Db(45.0),
+            },
+        },
+        c50: RoomValue::Value { value: -1.5 },
+        c80: RoomValue::Value { value: 2.25 },
+        d50: RoomValue::Value { value: 0.4375 },
+        curvature: None,
     }
 }
 

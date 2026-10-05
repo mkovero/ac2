@@ -3,7 +3,7 @@
 //! # ac2 CSV
 //!
 //! ```text
-//! # ac2 trace export v2
+//! # ac2 trace export v3
 //! # name: Main L pre EQ
 //! # kind: transfer
 //! # source: captured from "main-l" (measurement 1), session epoch 3, sample 480000
@@ -33,10 +33,14 @@
 //! ```
 //!
 //! (`t_s` = `t0 + i·dt` re the arrival, written for reading; the import uses `t0`/`dt`).
-//! Such an export re-imports as the sweep trace it was. A version 1 export (written before
-//! the analysis facts were exported) is still read: a sweep among them imports as its
-//! transfer function with the distortion dropped and [`ImportNote::SweepWithoutAnalysis`]
-//! on the trace.
+//! Its ISO 3382-1 room parameters are one JSON header line (`# room_metrics: {…}`,
+//! [`RoomAcoustics`]) and, for reading, a table of comment lines after the impulse
+//! response (`# band_hz,edt_s,…`; a refused value reads `refused:<why>`).
+//! Such an export re-imports as the sweep trace it was. A version 2 export (written before
+//! the room parameters were exported) imports as a sweep without them. A version 1 export
+//! (written before the analysis facts were exported) is still read: a sweep among them
+//! imports as its transfer function with the distortion dropped and
+//! [`ImportNote::SweepWithoutAnalysis`] on the trace.
 //!
 //! # Analyzer text
 //!
@@ -56,8 +60,8 @@ use ac2_proto::ImportProblem;
 use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{
     CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportNote, ImportRole,
-    MicState, Polarity, SmoothingFraction, SmoothingMode, SweepData, SweepInfo, SweepIr, TraceKind,
-    TraceMicCurve, TraceSource,
+    MicState, Polarity, RoomAcoustics, RoomRefusal, RoomValue, SmoothingFraction, SmoothingMode,
+    SweepData, SweepInfo, SweepIr, TraceKind, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::Seconds;
 use serde::{Deserialize, Serialize};
@@ -65,9 +69,12 @@ use serde::{Deserialize, Serialize};
 use crate::columns::{Columns, StoredTrace, frequencies, resample, wrap_deg};
 
 /// First line of an ac2 CSV file of this format version.
-pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v2";
-/// First line of the previous version, still read: it has no sweep analysis facts and no
-/// impulse response (and nothing else differs).
+pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v3";
+/// First line of the previous version, still read: it has no room parameters (and nothing
+/// else differs).
+const AC2_CSV_MAGIC_V2: &str = "# ac2 trace export v2";
+/// First line of the version before, still read: it has no sweep analysis facts and no
+/// impulse response either.
 const AC2_CSV_MAGIC_V1: &str = "# ac2 trace export v1";
 const AC2_CSV_PREFIX: &str = "# ac2 trace export";
 /// Column header of a sweep export's impulse-response table.
@@ -534,11 +541,11 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         .find(|(_, l)| !l.trim().is_empty())
         .ok_or_else(|| fail(None, ImportProblem::NoData, "empty file"))?;
     let magic = first.1.trim();
-    if magic != AC2_CSV_MAGIC && magic != AC2_CSV_MAGIC_V1 {
+    if ![AC2_CSV_MAGIC, AC2_CSV_MAGIC_V2, AC2_CSV_MAGIC_V1].contains(&magic) {
         let msg = if magic.starts_with(AC2_CSV_PREFIX) {
             format!(
-                "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?} and \
-                 {AC2_CSV_MAGIC_V1:?}"
+                "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?}, \
+                 {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
             )
         } else {
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
@@ -550,6 +557,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     let mut kind = TraceKind::Transfer;
     let mut delay = None;
     let mut info: Option<SweepInfo> = None;
+    let mut room: Option<RoomAcoustics> = None;
     let mut ir_head: Option<(usize, IrHeader)> = None;
     let mut mic_curve = false;
     let mut header = None;
@@ -574,6 +582,8 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
                 delay = Some(Seconds(ms / 1000.0));
             } else if let Some(v) = m.strip_prefix("sweep_info: ") {
                 info = Some(serde_json::from_str(v).map_err(|e| bad(no, "sweep_info", &e))?);
+            } else if let Some(v) = m.strip_prefix("room_metrics: ") {
+                room = Some(serde_json::from_str(v).map_err(|e| bad(no, "room_metrics", &e))?);
             } else if let Some(v) = m.strip_prefix("sweep_ir: ") {
                 ir_head = Some((
                     no,
@@ -693,6 +703,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
                 thd,
                 ir,
                 info,
+                room,
             }),
             _ => {
                 notes.push(ImportNote::SweepWithoutAnalysis);
@@ -1029,6 +1040,12 @@ pub fn export_csv(t: &StoredTrace) -> String {
             "sweep_ir",
             serde_json::to_string(&h).unwrap_or_else(|_| "null".into()),
         );
+        if let Some(r) = &sw.room {
+            line(
+                "room_metrics",
+                serde_json::to_string(r).unwrap_or_else(|_| "null".into()),
+            );
+        }
     }
     let mut out = format!("{AC2_CSV_MAGIC}\n{s}");
     let c = &t.columns;
@@ -1086,8 +1103,58 @@ pub fn export_csv(t: &StoredTrace) -> String {
             let at = sw.ir.t0.0 + i as f64 * sw.ir.dt.0;
             let _ = writeln!(out, "{at},{},{}", num32(*l), num32(*e));
         }
+        if let Some(r) = &sw.room {
+            room_table(&mut out, r);
+        }
     }
     out
+}
+
+/// The room parameters as comment lines, for reading (the import uses `room_metrics`).
+fn room_table(out: &mut String, r: &RoomAcoustics) {
+    let value = |v: RoomValue| match v {
+        RoomValue::Value { value } => format!("{value}"),
+        RoomValue::Refused { reason } => match reason {
+            RoomRefusal::NoDecay => "refused:no_decay".into(),
+            RoomRefusal::InsufficientRange { range, needed } => {
+                format!("refused:decay_range_{}_of_{}_db", range.0, needed.0)
+            }
+            RoomRefusal::FilterLimited { .. } => "refused:decay_too_short_for_band".into(),
+        },
+    };
+    out.push_str(
+        "# room parameters (ISO 3382-1), decay times in s, C50/C80 in dB, D50 0..1, times \
+         re the arrival:\n",
+    );
+    out.push_str(
+        "# band_hz,edt_s,t20_s,t30_s,c50_db,c80_db,d50,decay_range_db,curvature_pct,onset_s,\
+         truncation_s\n",
+    );
+    for (set, bands) in [
+        ("broadband", std::slice::from_ref(&r.broadband)),
+        ("octave", r.octave.as_slice()),
+        ("third", r.third.as_slice()),
+    ] {
+        for b in bands {
+            let band = b
+                .centre
+                .map_or_else(|| set.to_owned(), |c| format!("{}", c.0));
+            let curvature = b.curvature.map_or_else(|| "nan".into(), |c| format!("{c}"));
+            let _ = writeln!(
+                out,
+                "# {band},{},{},{},{},{},{},{},{curvature},{},{}",
+                value(b.edt),
+                value(b.t20),
+                value(b.t30),
+                value(b.c50),
+                value(b.c80),
+                value(b.d50),
+                b.decay_range.map_or(f64::NAN, |r| r.0),
+                b.onset.0,
+                b.truncation.0
+            );
+        }
+    }
 }
 
 /// The `# mic:` header: the mic at capture with the curve its columns carry, or the curve

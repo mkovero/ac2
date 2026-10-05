@@ -218,7 +218,7 @@ fn typed_refusals() {
     assert_eq!(e.problem, ImportProblem::NoData);
     let e = bad("20 1 0 1.5\n30 2 0 0.5\n");
     assert_eq!(e.problem, ImportProblem::BadCoherence);
-    let e = bad("# ac2 trace export v3\nfreq_hz,mag_db\n20,1\n30,2\n");
+    let e = bad("# ac2 trace export v4\nfreq_hz,mag_db\n20,1\n30,2\n");
     assert_eq!((e.line, e.problem), (Some(1), ImportProblem::BadHeader));
     let e = import(b"20 1\n30 2\n", ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
     assert_eq!(e.problem, ImportProblem::BadHeader);
@@ -235,7 +235,7 @@ fn ac2_csv_round_trips_bit_for_bit() {
     t.columns.mag_db[11] = -2.718_281_7e-3;
     t.meta.edit.name = "Main L, pre EQ".into();
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v2\n# name: Main L, pre EQ\n"));
+    assert!(csv.starts_with("# ac2 trace export v3\n# name: Main L, pre EQ\n"));
     assert!(csv.contains("# delay_ms: 12\n"));
     assert!(csv.contains("freq_hz,mag_db,phase_deg,coherence\n"));
     let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();
@@ -834,16 +834,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format (files named by generation) is refused with its
     // version named, never read best-effort.
-    std::fs::write(&m, text.replace("\"version\": 8", "\"version\": 7")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 9", "\"version\": 8")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 7
+            found: 8
         }
     );
-    assert!(e.to_string().contains("reads version 8 only"), "{e}");
+    assert!(e.to_string().contains("reads version 9 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -921,8 +921,43 @@ fn sweep_trace(id: u32) -> StoredTrace {
                 floor_margin: Db(6.0),
                 clipped: false,
             },
+            room: Some(room()),
         }),
         mic_curve: None,
+    }
+}
+
+fn room() -> RoomAcoustics {
+    let band = |centre: Option<f64>, t: f64| RoomBand {
+        centre: centre.map(Hz),
+        onset: Seconds(-0.000_125),
+        truncation: Seconds(0.875),
+        decay_range: Some(Db(52.25)),
+        edt: RoomValue::Value { value: t * 0.9 },
+        t20: RoomValue::Value { value: t },
+        t30: RoomValue::Refused {
+            reason: RoomRefusal::InsufficientRange {
+                range: Db(42.5),
+                needed: Db(45.0),
+            },
+        },
+        c50: RoomValue::Value { value: -1.25 },
+        c80: RoomValue::Value { value: 2.5 },
+        d50: RoomValue::Value { value: 0.4375 },
+        curvature: None,
+    };
+    RoomAcoustics {
+        broadband: band(None, 0.95),
+        octave: vec![band(Some(1000.0), 0.9)],
+        third: vec![RoomBand {
+            edt: RoomValue::Refused {
+                reason: RoomRefusal::FilterLimited {
+                    bandwidth_decay: 6.5,
+                },
+            },
+            ..band(Some(1000.0), 0.9)
+        }],
+        span_end: Seconds(0.99),
     }
 }
 
@@ -948,6 +983,14 @@ fn sweep_csv_and_session_round_trip() {
         &csv[..800]
     );
     assert!(csv.contains("\nt_s,linear,etc_db\n-0.75,0,-200\n"));
+    // The room parameters: one JSON line, and a table for reading after the IR.
+    assert!(csv.contains("\n# room_metrics: {\"broadband\":{\"centre\":null,"));
+    assert!(csv.contains(
+        "\n# band_hz,edt_s,t20_s,t30_s,c50_db,c80_db,d50,decay_range_db,curvature_pct,onset_s,\
+         truncation_s\n# broadband,0.855,0.95,refused:decay_range_42.5_of_45_db,-1.25,2.5,0.4375,\
+         52.25,nan,-0.000125,0.875\n# 1000,"
+    ));
+    assert!(csv.contains("\n# 1000,refused:decay_too_short_for_band,0.9,"));
     let imp = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
     assert_eq!(imp.kind, TraceKind::Sweep);
     assert_eq!(imp.grid, t.grid);
@@ -961,6 +1004,18 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(back.thd, s.thd);
     assert_eq!(back.ir, s.ir);
     assert_eq!(back.info, s.info);
+    assert_eq!(back.room, s.room);
+    // An export written before the room parameters (v2) is the same sweep without them.
+    let v2: String = csv
+        .replacen("# ac2 trace export v3", "# ac2 trace export v2", 1)
+        .lines()
+        .filter(|l| !l.starts_with("# room_metrics"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let old = import(v2.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    let old = old.sweep.unwrap();
+    assert!(old.room.is_none());
+    assert_eq!(old.info, s.info);
     // As a target it is a magnitude only, with nothing of the sweep.
     let tgt = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Target).unwrap();
     assert_eq!(tgt.kind, TraceKind::Target);
@@ -982,6 +1037,7 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(b.meta, t.meta);
     let bs = b.sweep.as_ref().unwrap();
     assert_eq!((&bs.ir, &bs.info, &bs.thd), (&s.ir, &s.info, &s.thd));
+    assert_eq!(bs.room, s.room);
     assert_eq!(bs.harmonics[1], s.harmonics[1]);
     // The served data carries the sweep.
     assert!(b.data().sweep.is_some());

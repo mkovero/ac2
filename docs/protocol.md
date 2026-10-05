@@ -469,15 +469,18 @@ Design: `docs/design/sweep-distortion.md`. `SweepRequest`: `inputs` (`SweepInput
 `type`: `measurement` {`meas`} — a transfer measurement's reference and measurement inputs —
 or `channels` {`reference`, `measurement`}), `outputs` ([u16], the speaker's and the
 loopback's), `level: Dbfs | nil`, `sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`,
-`fade_in`, `fade_out`}, `repeats` (1…8), `gate: Seconds | nil`.
+`fade_in`, `fade_out`}, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`
+(silence recorded after each sweep: the room's decay and its noise, at most 20 s; nil or
+shorter = the analysis minimum, ≥ 1 s).
 
 - Refused (`refused`) without a level, above the ceiling, or while the generator is not
   armed by the caller (arm with `gen.set` first: like firing, the capture needs it), while it
   fires, while a loopback detection or another sweep runs, or without an open session.
   `invalid`: inputs not captured or equal, outputs empty / repeated / not in the session,
-  repeats outside 1…8, sweep parameters the generator refuses, a gate ≤ 0.
+  repeats outside 1…8, sweep parameters the generator refuses, a gate ≤ 0, a tail above
+  20 s.
 - The daemon routes the generator to `outputs`, plays `repeats` synchronised sweeps each
-  followed by its silence (`post_roll`, ≥ 1 s), records both inputs, analyses on a job thread
+  followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records both inputs, analyses on a job thread
   and stores a trace of `kind: sweep` (source `ir_capture` {`run`, `epoch`, `sweep`, `level`,
   `repeats`, `reference_input`, `measurement_input`}, `delay` = the arrival). While it plays
   the generator is `firing` with the sweep as its settings; once the recording is in it is
@@ -499,8 +502,22 @@ loopback's), `level: Dbfs | nil`, `sweep: EssSpec` {`start: Hz`, `end: Hz`, `dur
   end of the linear window, at most 16384 points, peak-preserving); `info` (`SweepInfo`:
   `sample_rate`, `rate` (L: harmonic k's impulse at −L·ln k), `duration`, `repeats`,
   `arrival`, `reference_level` (loopback gain), `window_pre`, `window_post`, `gate_pre`,
-  `gate`, `floor_margin`, `clipped`). A distortion point is valid when
+  `gate`, `floor_margin`, `clipped`); `room` (`RoomAcoustics | nil`, below; nil only for a
+  sweep imported from an export written without it). A distortion point is valid when
   `level_db ≥ floor_db + floor_margin`; otherwise it reads "< floor".
+- `RoomAcoustics` (ISO 3382-1 room parameters of the full-rate impulse response, design
+  `docs/design/room-metrics.md`): `broadband` (`RoomBand` of the IR as captured), `octave`
+  ([`RoomBand`], 63 Hz…8 kHz) and `third` ([`RoomBand`], 50 Hz…10 kHz), each only bands
+  whose edges lie inside the sweep's range; `span_end` (`Seconds`, end of the IR analysed re
+  the arrival: the end of the silence after the sweep). `RoomBand`: `centre: Hz | nil` (nil =
+  broadband), `onset` and `truncation` (`Seconds` re the arrival: the band's trigger and where
+  its decay meets the noise), `decay_range` (`Db`: depth of the decay curve there), `edt`,
+  `t20`, `t30` (seconds), `c50`, `c80` (dB), `d50` (ratio 0…1), each a `RoomValue` (tagged by
+  `type`: `value` {`value`} or `refused` {`reason`}), and `curvature` (`f64 | nil`, percent
+  100·(T30/T20 − 1) when both are given). `RoomRefusal` (tagged by `type`): `no_decay`,
+  `insufficient_range` {`range`, `needed`} (`Db`; EDT, C50, C80, D50 need 20 dB, T20 35 dB,
+  T30 45 dB), `filter_limited` {`bandwidth_decay`} (bandwidth × decay time below 8). A refused
+  value is never sent as a number.
 - Smoothing, average and A − B treat a sweep trace as a transfer function (magnitude and
   phase; the distortion stays with the sweep trace).
 
@@ -898,23 +915,28 @@ columns) = `0x79ec3d16ae0e94d0`.
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
 **ac2 CSV** (`ac2_csv`, what `trace.export` writes): the first line is exactly
-`# ac2 trace export v2` (`v1` is read too; another version is `bad_header`); then
+`# ac2 trace export v3` (`v2` and `v1` are read too; another version is `bad_header`); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
 applied), `depth`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
 columns for a capture with a curve, or applied after capture as a display edit, not in the
 columns), `mic_curve` (the
 JSON `TraceMicCurve`, only when one is applied after capture), `created_ns`, `note`, `grid`
-as the JSON `GridDef`); a sweep trace adds `sweep_info` (the JSON `SweepInfo`) and
-`sweep_ir` (JSON `{t0, dt, points}`). Then the header
+as the JSON `GridDef`); a sweep trace adds `sweep_info` (the JSON `SweepInfo`),
+`sweep_ir` (JSON `{t0, dt, points}`) and `room_metrics` (the JSON `RoomAcoustics`). Then the
+header
 `freq_hz,mag_db[,phase_deg][,coherence]` and one row per grid column; a sweep trace
 (`kind: sweep`) adds `h2_db,h2_floor_db,…,h5_db,h5_floor_db,thd_db,thd_floor_db` after
 `phase_deg` (dB re the fundamental at the row's fundamental frequency), and after the
 frequency rows its impulse response: the header `t_s,linear,etc_db` and `points` rows
-(`t_s` = `t0 + i·dt`, for reading). Values are written in their shortest exact form and gaps
+(`t_s` = `t0 + i·dt`, for reading), then the room parameters as comment lines for reading
+(`# band_hz,edt_s,t20_s,t30_s,c50_db,c80_db,d50,decay_range_db,curvature_pct,onset_s,
+truncation_s`, one per band, broadband first; a refused value reads `refused:<why>`).
+Values are written in their shortest exact form and gaps
 as `nan`, so an export re-imports bit for bit onto the grid named in its header. Import
-reads `name`, `kind`, `grid`, `delay_ms` and, for a sweep, `sweep_info`, `sweep_ir`, the
-distortion columns and the impulse response; a v1 sweep export (no `sweep_info`) imports as
+reads `name`, `kind`, `grid`, `delay_ms` and, for a sweep, `sweep_info`, `sweep_ir`,
+`room_metrics`, the distortion columns and the impulse response; a v2 sweep export imports
+as a sweep without room parameters; a v1 sweep export (no `sweep_info`) imports as
 its transfer function (note `sweep_without_analysis`).
 
 **Analyzer text** (`analyzer_text`): columns separated by `,`, `;` (decimal commas
@@ -935,7 +957,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.csv         one SPL log per SPL meter (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 8, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 9, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], spl_logs:
 [{meas, file}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
