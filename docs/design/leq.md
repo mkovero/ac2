@@ -294,7 +294,9 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   low in the track** — the same place at any level, since a figure riding the bar's top
   moves every second and draws the eye for nothing — smaller than the window's name under
   the column (`NAME_RATIO`), at most 0.8 of the state's size (`VALUE_RATIO`) and well under
-  the meter's number above the windows (≤ 0.3 of it, tested). Its colour is judged on what
+  the meter's number above the windows (≤ 0.3 of it, tested). Every window's value is one
+  size, a window without a limit too, though its column is then mostly empty: values read as
+  one row only when they match. Its colour is judged on what
   is behind it (`Behind`): on the fill (the usual case: the bar is above it) the theme ink
   of highest contrast with the fill, ≥ 4.5:1 (white on red, black on amber or green, never
   red on red); on the track (the level below it) the bar's own colour where that reads
