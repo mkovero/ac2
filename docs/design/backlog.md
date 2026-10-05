@@ -8,6 +8,11 @@ the commit when it lands.
 Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SPL (PLAN
 decision 4). Measured numbers: PLAN §9.0.
 
+- **Audio continuity is not in `ac2 status`**: xruns and capture discontinuities are only
+  logged by the daemon (`capture discontinuity at sample …`); a long-run check has to grep the
+  log. Counters since the session opened (and the last one's time) in `status` / `--json`
+  would make the 24 h check (`docs/rigs/pupu.md`) one command. Memory over time is likewise
+  only a `/proc` sample.
 - **macOS not verified with an audio interface**: a tester has the dev.9 disk image and
   `testing/macos/README.md` (two cables, four tests, a report table). Results pending.
 - **App Nap**: the macOS hand-off timer is no longer coalesced (kqueue `NOTE_CRITICAL`,

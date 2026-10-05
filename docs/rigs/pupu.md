@@ -187,3 +187,23 @@ Daemon ceiling lifted to −30 dBFS for this only (operator's approval), 1 kHz s
 0 dBFS = 271.3 mV; with the data-sheet 15.0 mV/Pa → **0 dBFS = 119.1 dB SPL** on input 1
 (±1 dB, labelled "electrical in-line, data sheet"). The tone was ≈ 83.2 dB SPL at the mic.
 Ceiling back at −50 dBFS afterwards. The calibration holds only at this preamp gain.
+
+## SPL log over 32 h (2026-10-04/05, ac2d b97a2c9, `spl leq export`)
+
+FOH SPL (in 1, MM1 34804, electrical cal) logged 2026-10-04 08:59:44 → 2026-10-05 17:13:11 UTC,
+exported over the network in 0.5 s (115 995 rows, 10 MB CSV). Checked with a script against the
+CSV, not against ac2's own summary:
+- **One gap, 13.1 s**, at 2026-10-04 15:15:14 UTC: the daemon redeploy (ac2d started 15:15:16).
+  Since then 26 h of continuous run with no capture discontinuity in `d-net.log` (the fan-out
+  logs every one).
+- Every row a whole measured second (`measured_s` = 1), no non-finite values, LAeq and LCeq never
+  above LZeq, one sensitivity (119.13 dB) throughout, no stuck values. Totals over the log:
+  LAeq 40.1, LCeq 52.7, LZeq 55.8 dB.
+- Row times step by 1 s ± one JACK period (2.67 ms at 96 kHz / 256): the wall time is read per
+  period; the steps alternate and never accumulate.
+- **The interface's sample clock runs +5.56 ppm against the system clock** (NTP), stable to
+  ±0.3 ppm over 20+ stretches of 1 000–25 000 s: 0.48 s per day. A single device is one clock
+  domain, so this is harmless; it is the size of drift `docs/design/multi-device.md` must tell
+  apart from device-to-device drift.
+- After 26 h: ac2d RSS 167 MB, of which 105 MB JACK shared memory and 54 MB its own (one
+  sample, not a trend); the data directory (autosave, log, traces) 9.1 MB in all.
