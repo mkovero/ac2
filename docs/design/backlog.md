@@ -135,6 +135,16 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Raw capture files (2026-10-05, `docs/design/raw-capture.md`, PROTO 17):
+- **Record and replay** → `rec.start/stop/list` write chosen inputs to f32 WAV (RF64 past
+  4 GiB) + JSON sidecar (devices, channel roles, config timeline, every discontinuity at
+  its sample) from a fan-out consumer with a 10 s queue; disk full, bounds, session close,
+  shutdown and a killed daemon all leave a finished file. `session.replay` plays one as a
+  capture-only device; replayed TF/spectrum/SPL match live to rounding, samples bit-exact.
+  CLI `ac2 rec …`, `ac2 session replay`; app palette *Record* / *Replay a recording…* and a
+  REC indicator. Left: generator output as a channel, re-applying the timeline on replay,
+  fetching files over the protocol.
+
 Spectrograph (operator, 2026-10-05: "spectrograph interests me"; PLAN §3.4, design in
 `docs/design/spectrograph.md`):
 - **G** in the spectrum pane: the spectrograph of the pane's measurement under the spectrum,

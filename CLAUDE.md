@@ -17,14 +17,14 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | crate | role |
 |---|---|
 | `ac2-core` | pure DSP/acoustics math (MTW, delay finder, spectrum/RTA, SPL, rolling Leq, sweep, mic curves, generator); no I/O, no threads, `forbid(unsafe_code)` |
-| `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), cpal (macOS, Windows), fake |
+| `ac2-audio` | backend trait + capabilities, sample-indexed blocks; jack (Linux only), cpal (macOS, Windows), fake, replay (a recording as a capture-only device) |
 | `ac2-proto` | typed protocol: commands, events, frame headers, version |
 | `ac2-zmq` | the only crate linking libzmq: safe typed sockets, CURVE behind `SecureContext` (ZAP handler first) |
 | `ac2-client` | async client |
 | `ac2-discovery` | mDNS advert (`_ac2._tcp`, network mode only) and browse; names rigs, never trusts them |
 | `ac2d` | daemon (`ac2d` binary): session, jobs, state, calibration store, autosave, SPL log and Leq history |
 | `ac2-cli` | CLI (`ac2` binary) |
-| `ac2-traces` | stored traces: capture columns, average / A−B, smoothing, mic curve after capture, text import/export, per-second SPL log files, session files |
+| `ac2-traces` | stored traces: capture columns, average / A−B, smoothing, mic curve after capture, text import/export, per-second SPL log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
 | `ac2-paths` | where files live (platform config / data dirs) and atomic writes; shared by the daemon and the UI |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
