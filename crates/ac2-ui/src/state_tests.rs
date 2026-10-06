@@ -5550,3 +5550,195 @@ fn session_dialog_notes_separate_clocks() {
         )
     );
 }
+
+/// The top bar's hint for the stimulus keys, as the scene words it.
+fn next_hint(t: &T) -> Option<String> {
+    t.st.stimulus_next()
+        .map(|(n, w)| ac2_scene::stimulus::hint(n, &w, "L").0)
+}
+
+/// One sweep from the dialog (−50 dBFS, 3 s, out 1), played and stored as trace 7: the
+/// request it played.
+fn sweep_once(t: &mut T) -> SweepRequest {
+    t.type_key("Shift+S", "S");
+    let Overlay::Form(f) = &mut t.st.overlay else {
+        panic!("no dialog");
+    };
+    f.set_text(crate::forms::FieldId::Level, "-50");
+    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
+    t.key("Enter");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert_eq!(
+        next_hint(t).as_deref(),
+        Some("Enter fires: sweep 3 s −50 dBFS")
+    );
+    let r = t.key("Enter");
+    let [Request::Sweep { request, .. }] = r.as_slice() else {
+        panic!("{r:?}");
+    };
+    let request = request.clone();
+    t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
+        sweep_run(SweepStatus::Playing { repeat: 1 }),
+    ))));
+    let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("c1".into()));
+    s.traces = vec![sweep_meta(7)];
+    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(7) }));
+    t.conn(mirror(s));
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    request
+}
+
+/// On the sweep view Space arms a re-sweep with the last sweep's parameters and Enter plays
+/// it, without the dialog; the top bar names it before it plays.
+#[test]
+fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
+    let mut t = T::new();
+    let first = sweep_once(&mut t);
+    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    assert!(t.st.sweep_view());
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space arms: re-sweep 3 s −50 dBFS")
+    );
+    let r = t.key("Space");
+    assert_eq!(t.st.overlay, Overlay::None, "no dialog");
+    let settings = match r.as_slice() {
+        [Request::StimArm { settings, force }] => {
+            assert!(!force);
+            settings.clone()
+        }
+        other => panic!("{other:?}"),
+    };
+    assert!(matches!(settings.signal, Signal::Ess { sweep } if sweep == first.sweep));
+    assert_eq!(settings.level, Dbfs(-50.0));
+    assert_eq!(settings.outputs, first.outputs);
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Enter fires: re-sweep 3 s −50 dBFS")
+    );
+    let r = t.key("Enter");
+    match r.as_slice() {
+        [Request::Sweep { request, name }] => {
+            assert_eq!(*request, first, "the same parameters");
+            assert_eq!(name, "Sweep 2");
+        }
+        other => panic!("{other:?}"),
+    }
+    // Its usual flow: stored, selected, the lease given back, nothing armed again.
+    t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
+        sweep_run(SweepStatus::Playing { repeat: 1 }),
+    ))));
+    let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("c1".into()));
+    s.traces = vec![sweep_meta(7), sweep_meta(8)];
+    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(8) }));
+    let r = t.conn(mirror(s));
+    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    assert_eq!(t.st.selected_trace, Some(TraceId(8)));
+    // Space while that stop is on its way: the re-sweep arms once it has landed.
+    assert!(t.key("Space").is_empty());
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(
+        r.iter().any(|x| matches!(
+            x,
+            Request::StimArm { settings, .. } if matches!(settings.signal, Signal::Ess { .. })
+        )),
+        "{r:?}"
+    );
+}
+
+/// On the sweep view with no sweep yet, Space opens the sweep dialog.
+#[test]
+fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
+    let mut t = T::new();
+    t.st.stimulus.level = Some(Dbfs(-40.0));
+    t.key("Alt+5");
+    assert!(t.st.sweep_view(), "{:?}", t.st.layout.focus);
+    assert_eq!(next_hint(&t).as_deref(), Some("Space sets up a sweep"));
+    let r = t.key("Space");
+    assert!(
+        !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
+        "{r:?}"
+    );
+    assert!(
+        matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+        "{:?}",
+        t.st.overlay
+    );
+}
+
+/// On the transfer, spectrum and spectrograph views Space/Enter drive the generator (pink
+/// at the operator's level), never the sweep; a re-sweep armed on the sweep view and still
+/// silent turns into the noise on Space there.
+#[test]
+fn space_on_the_live_views_drives_the_generator() {
+    let mut t = T::new();
+    sweep_once(&mut t);
+    for (key, pane) in [("Alt+1", PaneKind::Transfer), ("Alt+2", PaneKind::Spectrum)] {
+        t.key(key);
+        assert_eq!(t.st.layout.focus, pane);
+        assert_eq!(
+            next_hint(&t).as_deref(),
+            Some("Space arms: pink −50 dBFS → out 1"),
+            "{pane:?}"
+        );
+    }
+    // The spectrograph is the spectrum pane's: the same rule.
+    t.key("G");
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space arms: pink −50 dBFS → out 1")
+    );
+    t.key("Alt+1");
+    let r = t.key("Space");
+    match r.as_slice() {
+        [Request::StimArm { settings, .. }] => {
+            assert_eq!(settings.signal, Signal::Pink);
+            assert_eq!(settings.level, Dbfs(-50.0));
+        }
+        other => panic!("{other:?}"),
+    }
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Enter fires: pink −50 dBFS → out 1")
+    );
+    // Over to the sweep view while armed and silent: Space there re-sets it to the re-sweep.
+    t.key("Alt+5");
+    let r = t.key("Space");
+    assert!(
+        r.iter().any(|x| matches!(
+            x,
+            Request::StimSet(d)
+                if matches!(d.settings.signal, Signal::Ess { .. }) && d.armed && !d.firing
+        )),
+        "{r:?}"
+    );
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Enter fires: re-sweep 3 s −50 dBFS")
+    );
+    // And back: Space on the transfer view makes it the noise again; Enter fires the noise.
+    t.key("Alt+1");
+    let r = t.key("Space");
+    assert!(
+        r.iter().any(|x| matches!(
+            x,
+            Request::StimSet(d) if d.settings.signal == Signal::Pink && d.armed && !d.firing
+        )),
+        "{r:?}"
+    );
+    assert!(t.st.sweep.plan.is_none());
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|x| matches!(
+            x,
+            Request::StimSet(d) if d.settings.signal == Signal::Pink && d.firing
+        )),
+        "{r:?}"
+    );
+    assert!(!r.iter().any(|x| matches!(x, Request::Sweep { .. })));
+}

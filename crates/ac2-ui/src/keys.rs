@@ -345,8 +345,8 @@ commands! {
     Fullscreen => "fullscreen", "Window full screen on / off", [Global];
     KeyHints => "key_hints", "Key hints on / off", [Global];
 
-    StimulusArm => "stimulus_arm", "Stimulus: arm (needs a typed level)", [Global];
-    StimulusFire => "stimulus_fire", "Stimulus: fire (when armed)", [Global];
+    StimulusArm => "stimulus_arm", "Stimulus: arm what the view plays (sweep view: re-sweep; others: the generator)", [Global];
+    StimulusFire => "stimulus_fire", "Stimulus: fire what is armed (named in the top bar)", [Global];
     StimulusStop => "stimulus_stop", "Stimulus: stop and disarm (no window open)", [Global];
     StopAnywhere => "stimulus_stop_anywhere", "Stimulus: stop and disarm, also with a window open", [Global];
     LevelUp => "level_up", "Stimulus level +1 dB", [Global];
@@ -437,7 +437,7 @@ commands! {
     MicCurveInput => "mic_curve_input", "Mic curve on input N… (e.g. 2=90°, 2=off)", [Global];
     CalDelete => "cal_delete", "Calibration: delete a sensitivity calibration (input=mic)…", [Global];
     TraceMicCurve => "trace_mic_curve", "Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)…", [Global];
-    SweepNew => "sweep_new", "Sweep measurement: response and harmonic distortion…", [Global];
+    SweepNew => "sweep_new", "New sweep measurement: response and harmonic distortion…", [Global];
     LeqWindows => "leq_windows", "Leq windows and limits of the SPL meter…", [Global];
     SplFast => "spl_fast", "SPL meter: Fast time weighting (125 ms)", [Global];
     SplSlow => "spl_slow", "SPL meter: Slow time weighting (1 s)", [Global];

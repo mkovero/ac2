@@ -3698,3 +3698,145 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     handle.shutdown();
     Ok(())
 }
+
+/// The stimulus follows the view, from an empty daemon on the simulated rig: one sweep from
+/// the dialog; then on the sweep view Space arms and Enter plays a re-sweep with the same
+/// settings (a second result, no dialog); on the transfer view Space and Enter play pink
+/// noise at the level typed for the sweep, and the transfer measurement sees the rig's path.
+#[test]
+fn the_stimulus_follows_the_view_from_the_app() -> R {
+    use ac2_proto::model::{Signal, TraceKind, TraceSource};
+    use ac2_ui::forms::FieldId;
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        f.set_text(FieldId::Level, "-26");
+        f.set_text(FieldId::From, "100 Hz");
+        f.set_text(FieldId::To, "5 kHz");
+        f.focus = f
+            .fields
+            .iter()
+            .position(|x| x.id == FieldId::Duration)
+            .ok_or("duration")?;
+        f.cycle(-1);
+    }
+    d.key("Enter");
+    d.until("armed with the sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed
+    })?;
+    d.key("Enter");
+    let sweeps = |s: &AppState| {
+        s.daemon().map_or(Vec::new(), |x| {
+            x.traces
+                .iter()
+                .filter(|t| t.kind == TraceKind::Sweep)
+                .map(|t| (t.edit.name.clone(), t.source.clone()))
+                .collect::<Vec<_>>()
+        })
+    };
+    d.until("the first sweep stored, the stimulus off", |s| {
+        sweeps(s).len() == 1
+            && s.sweep.run.is_none()
+            && s.stimulus.phase == StimPhase::Idle
+            && s.daemon().is_some_and(|x| x.generator.owner.is_none())
+    })?;
+    assert_eq!(d.st.layout.focus, PaneKind::Distortion);
+    let hint = |s: &AppState| {
+        s.stimulus_next()
+            .map(|(n, w)| ac2_scene::stimulus::hint(n, &w, "L").0)
+    };
+    assert_eq!(
+        hint(&d.st).as_deref(),
+        Some("Space arms: re-sweep 1 s −26 dBFS")
+    );
+
+    // The sweep view: Space arms the re-sweep (no dialog), Enter plays it.
+    d.key("Space");
+    assert_eq!(d.st.overlay, Overlay::None);
+    d.until("armed with the re-sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed
+            && s.daemon().is_some_and(|x| {
+                x.generator.settings.as_ref().is_some_and(|g| {
+                    matches!(g.signal, Signal::Ess { .. }) && (g.level.0 + 26.0).abs() < 1e-9
+                })
+            })
+    })?;
+    assert_eq!(
+        hint(&d.st).as_deref(),
+        Some("Enter fires: re-sweep 1 s −26 dBFS")
+    );
+    d.key("Enter");
+    d.until("the second sweep stored", |s| {
+        sweeps(s).len() == 2 && s.sweep.run.is_none() && s.stimulus.phase == StimPhase::Idle
+    })?;
+    let all = sweeps(&d.st);
+    let settings = |src: &TraceSource| match src {
+        TraceSource::IrCapture {
+            sweep,
+            level,
+            repeats,
+            reference_input,
+            measurement_input,
+            ..
+        } => Some((
+            *sweep,
+            *level,
+            *repeats,
+            *reference_input,
+            *measurement_input,
+        )),
+        _ => None,
+    };
+    assert_eq!(all[1].0, "Sweep 2");
+    assert!(settings(&all[0].1).is_some());
+    assert_eq!(
+        settings(&all[0].1),
+        settings(&all[1].1),
+        "the same settings"
+    );
+
+    // The transfer view: Space and Enter play pink noise on the sweep's outputs (the
+    // speaker and the loopback); the measurement gets signal.
+    d.until("the lease given back", |s| {
+        s.daemon().is_some_and(|x| x.generator.owner.is_none())
+            && s.stimulus.phase == StimPhase::Idle
+    })?;
+    d.key("Alt+1");
+    assert_eq!(
+        hint(&d.st).as_deref(),
+        Some("Space arms: pink −26 dBFS → out 2, 1")
+    );
+    d.key("Space");
+    d.until("armed with the noise", |s| {
+        s.stimulus.phase == StimPhase::Armed
+    })?;
+    assert_eq!(
+        hint(&d.st).as_deref(),
+        Some("Enter fires: pink −26 dBFS → out 2, 1")
+    );
+    d.key("Enter");
+    d.until("pink noise playing", |s| {
+        s.daemon().is_some_and(|x| {
+            x.generator.firing
+                && x.generator
+                    .settings
+                    .as_ref()
+                    .is_some_and(|g| g.signal == Signal::Pink)
+        })
+    })?;
+    d.tf_frames(meas, 240)?;
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

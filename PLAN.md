@@ -519,6 +519,10 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
   window only; none of them reaches the stimulus. `Shift+Esc` stops the stimulus from
   anywhere, windows included (fixed, not remappable). Closing a dialog that arms (the sweep)
   disarms what is armed and not playing; a playing stimulus keeps playing until stopped.
+  The focused view decides what `Space` arms: the sweep view a re-sweep with the last
+  sweep's parameters (the dialog when there is none), every other view the generator for
+  live measuring; `Enter` fires what is armed, named in the top bar (`Enter fires: re-sweep
+  3 s −50 dBFS`).
 - Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `B` coherence mask, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change (`H` IR became `Shift+I` when `H` became help).
 
 ### 8.3 Lightweight targets

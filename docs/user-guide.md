@@ -144,6 +144,17 @@ make it play by accident:
 - the daemon has a global maximum level (`ac2d --max-level`, default −10 dBFS RMS);
 - loading a session or restarting the daemon always comes up disarmed.
 
+**What Space and Enter start depends on the focused view.** On the transfer, spectrum /
+RTA (spectrograph included), IR and SPL views they drive the generator for live measuring:
+Space arms pink noise (or the chosen signal) at the operator's level on the stimulus outputs,
+Enter plays it. On the sweep view (the **Sweep / distortion** pane focused, maximised or
+not) Space arms a **re-sweep** with the last sweep's parameters — outputs, level, length,
+range, repeats, silence after, reference — without opening the dialog, and Enter plays it
+(with no sweep yet, Space opens the sweep dialog). Enter fires what is armed; armed and
+still silent, Space on a view of the other kind re-sets the armed stimulus to that view's.
+The top bar says what the keys will do: `Space arms: re-sweep 3 s −50 dBFS`,
+`Enter fires: pink −50 dBFS → out 1`. Esc and Shift+Esc stop as always.
+
 ## Transfer measurement
 
 The transfer pane shows **magnitude**, **phase** and **coherence** of measurement / reference
@@ -509,7 +520,7 @@ speaker's output and on the loopback output; ac2 records the loopback (reference
 divides one by the other, and separates the harmonics, which arrive before the linear impulse
 response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md).
 
-- **App:** **Shift+S** (or **Sweep measurement** in the palette) opens the dialog: reference,
+- **App:** **Shift+S** (or **New sweep measurement** in the palette) opens the dialog: reference,
   mic and the speaker's output by name (the session's loopback output always plays too), the
   **level** (typed, no default), 20 Hz – 20 kHz, duration (1 s quick look, 3 s default; 6 s
   and 12 s lower the noise floor), repeats (each doubling lowers the floor by 3 dB), name.
@@ -521,8 +532,9 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   **Esc** in the dialog closes it; anything armed and not yet playing is disarmed with it,
   so nothing stays armed behind a closed window, while a stimulus already playing keeps
   playing (**Shift+Esc** or the strip's **Stop** stops it). Once the sweep has played
-  the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed, and
-  **Shift+S** sets up the next sweep. The result opens the
+  the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed. On the
+  sweep view **Space** then arms the same sweep again (named `Sweep 2`, …) and **Enter**
+  plays it; **Shift+S** sets up a different one. The result opens the
   **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
   below. Where an order is within the noise it is drawn dashed at its own floor; the shading
   is the noise under every order's floor. The **dB | %** toggle in the pane's title (or
@@ -1013,8 +1025,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+Q` | Quit | `quit` |
 | `F11` | Window full screen on / off | `fullscreen` |
 | `Shift+H` | Key hints on / off | `key_hints` |
-| `Space` | Stimulus: arm (needs a typed level) | `stimulus_arm` |
-| `Enter` | Stimulus: fire (when armed) | `stimulus_fire` |
+| `Space` | Stimulus: arm what the view plays (sweep view: re-sweep; others: the generator) | `stimulus_arm` |
+| `Enter` | Stimulus: fire what is armed (named in the top bar) | `stimulus_fire` |
 | `Esc` | Stimulus: stop and disarm (no window open) | `stimulus_stop` |
 | `Shift+Esc` | Stimulus: stop and disarm, also with a window open | `stimulus_stop_anywhere` |
 | `↑` | Stimulus level +1 dB | `level_up` |
@@ -1078,7 +1090,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
 | `Shift+O` | Open audio session… | `session_open` |
-| `Shift+S` | Sweep measurement: response and harmonic distortion… | `sweep_new` |
+| `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
 | `Shift+L` | Leq windows and limits of the SPL meter… | `leq_windows` |
 
 #### Transfer function

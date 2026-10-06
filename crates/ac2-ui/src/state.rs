@@ -23,6 +23,7 @@ use ac2_proto::model::{
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 use ac2_scene::spectrum::PeakHold;
+use ac2_scene::stimulus::{Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
@@ -879,6 +880,11 @@ pub struct SweepUi {
     /// The mirrored run's step (any client's run) and when this client first saw it, in
     /// `now_s`: the progress strip counts the time within a step from it.
     pub step_seen: Option<(SweepId, SweepStatus, f64)>,
+    /// The last sweep this client played, as played (level and outputs as fired): Space on
+    /// the sweep view arms it again.
+    pub last: Option<SweepPlan>,
+    /// The armed sweep is a re-sweep from the sweep view (not one the dialog set up).
+    pub again: bool,
 }
 
 /// Everything the UI holds.
@@ -2605,6 +2611,165 @@ impl AppState {
         self.resend_stimulus(out);
     }
 
+    /// The sweep view (the sweep pane focused, maximised or not): there the stimulus keys
+    /// re-sweep; on every other view they drive the generator for live measuring.
+    pub fn sweep_view(&self) -> bool {
+        self.layout.focus == PaneKind::Distortion
+    }
+
+    /// What the stimulus keys start next, for the top bar: armed, what Enter fires; idle,
+    /// what Space arms on the focused view. `None` while a request is in flight or playing.
+    pub fn stimulus_next(&self) -> Option<(NextKey, NextStimulus)> {
+        let level = self.stimulus.level;
+        match self.stimulus.phase {
+            StimPhase::Armed => Some((
+                NextKey::Enter,
+                match &self.sweep.plan {
+                    Some(p) => NextStimulus::Sweep {
+                        again: self.sweep.again,
+                        duration_s: p.request.sweep.duration.0,
+                        level,
+                    },
+                    None => self.generator_stimulus(),
+                },
+            )),
+            StimPhase::Idle if self.sweep_view() => Some((
+                NextKey::Space,
+                self.sweep
+                    .last
+                    .as_ref()
+                    .map_or(NextStimulus::SweepDialog, |p| NextStimulus::Sweep {
+                        again: true,
+                        duration_s: p.request.sweep.duration.0,
+                        level: p.request.level,
+                    }),
+            )),
+            StimPhase::Idle => Some((NextKey::Space, self.generator_stimulus())),
+            _ => None,
+        }
+    }
+
+    /// The generator as the live views play it: never a sweep signal.
+    fn generator_stimulus(&self) -> NextStimulus {
+        NextStimulus::Generator {
+            signal: match self.stimulus.signal {
+                Signal::Ess { .. } => Signal::Pink,
+                s => s,
+            },
+            level: self.stimulus.level,
+            outputs: self.stimulus.outputs.clone(),
+        }
+    }
+
+    /// Space: arms what the focused view plays (the sweep view a re-sweep, the others the
+    /// generator). Armed with the other kind and still silent, Space re-sets the armed
+    /// stimulus to this view's, so what Enter fires is always what a Space on this view
+    /// chose; a playing stimulus is never changed by it.
+    fn space(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
+        if self.sweep_view() {
+            self.space_sweep(force, keymap, out);
+        } else {
+            self.space_generator(force, keymap, out);
+        }
+    }
+
+    fn space_sweep(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
+        // Already set up with a sweep (arming, armed, playing, or queued behind a stop).
+        if self.sweep.run.is_some()
+            || (self.sweep.plan.is_some()
+                && (self.stimulus.phase != StimPhase::Idle || self.sweep.arm_after_stop))
+        {
+            return;
+        }
+        let Some(last) = self.sweep.last.clone() else {
+            self.open_sweep_dialog(keymap, out);
+            return;
+        };
+        if !self.connected() {
+            self.error("not connected");
+            return;
+        }
+        if self.daemon().is_some_and(|s| s.session.open.is_none()) {
+            self.error(format!(
+                "no audio session to sweep: {}",
+                open_session_hint(keymap)
+            ));
+            return;
+        }
+        // The level was typed for that sweep; the ceiling may have come down since.
+        if let (Some(l), Some(c)) = (last.request.level, self.ceiling())
+            && l.0 > c.0
+        {
+            self.error(format!(
+                "the last sweep's {} is above the daemon's ceiling {}: Shift+S sets a new one",
+                dbfs(l.0),
+                dbfs(c.0)
+            ));
+            return;
+        }
+        let plan = SweepPlan {
+            name: self.resweep_name(&last.name),
+            request: last.request,
+        };
+        let phase = self.stimulus.phase;
+        // A noise queued behind the stop gives way to the sweep this view arms.
+        self.stimulus.arm_after_stop = false;
+        self.sweep.again = true;
+        self.arm_sweep(plan, force, out);
+        match phase {
+            StimPhase::Stopping => {
+                self.toast("stopping… arms the re-sweep once the stop is done (Esc cancels)");
+            }
+            StimPhase::Armed => self.toast(format!(
+                "armed: re-{} · Enter plays the sweep · Esc stops",
+                self.stimulus.describe()
+            )),
+            _ => {}
+        }
+    }
+
+    fn space_generator(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
+        if self.sweep.run.is_some() {
+            return;
+        }
+        if self.sweep.plan.is_some() {
+            match self.stimulus.phase {
+                StimPhase::Armed => {
+                    self.end_sweep_mode();
+                    self.resend_stimulus(out);
+                    self.toast(format!(
+                        "armed: {} · Enter fires · Esc stops",
+                        self.stimulus.describe()
+                    ));
+                    return;
+                }
+                StimPhase::Stopping | StimPhase::Idle => {
+                    self.sweep.arm_after_stop = false;
+                    self.end_sweep_mode();
+                }
+                _ => return,
+            }
+        }
+        self.arm(force, keymap, out);
+    }
+
+    /// `Sweep 1` → `Sweep 2`: the last name's stem with the first number no stored trace
+    /// has taken.
+    fn resweep_name(&self, last: &str) -> String {
+        let stem = match last.rsplit_once(' ') {
+            Some((s, n)) if !s.is_empty() && n.parse::<u32>().is_ok() => s,
+            _ => last,
+        };
+        let taken: Vec<&str> = self
+            .daemon()
+            .map(|s| s.traces.iter().map(|t| t.edit.name.as_str()).collect())
+            .unwrap_or_default();
+        (2u32..)
+            .map(|n| format!("{stem} {n}"))
+            .find(|n| !taken.contains(&n.as_str()))
+            .unwrap_or_else(|| last.to_string())
+    }
+
     fn arm(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
         if !self.connected() {
             self.error("not connected");
@@ -2706,7 +2871,7 @@ impl AppState {
 
     /// The dialog's sweep becomes the stimulus: armed with it (or re-sent when already
     /// armed); Enter then plays it.
-    fn arm_sweep(&mut self, plan: SweepPlan, out: &mut Vec<Request>) {
+    fn arm_sweep(&mut self, plan: SweepPlan, force: bool, out: &mut Vec<Request>) {
         let r = &plan.request;
         self.stimulus.signal = Signal::Ess { sweep: r.sweep };
         self.stimulus.level = r.level;
@@ -2717,10 +2882,7 @@ impl AppState {
                 if let Some(settings) = self.stimulus.settings() {
                     self.stimulus.phase = StimPhase::Arming;
                     self.armed_with = Some(settings.clone());
-                    out.push(Request::StimArm {
-                        settings,
-                        force: false,
-                    });
+                    out.push(Request::StimArm { settings, force });
                 }
             }
             StimPhase::Firing | StimPhase::FireRequested => {
@@ -2749,6 +2911,10 @@ impl AppState {
         }
         let name = plan.name.clone();
         self.stimulus.phase = StimPhase::FireRequested;
+        self.sweep.last = Some(SweepPlan {
+            request: request.clone(),
+            name: name.clone(),
+        });
         out.push(Request::Sweep { request, name });
     }
 
@@ -3323,8 +3489,8 @@ impl AppState {
                 }
             }
 
-            C::StimulusArm => self.arm(false, keymap, out),
-            C::StimulusTakeOver => self.arm(true, keymap, out),
+            C::StimulusArm => self.space(false, keymap, out),
+            C::StimulusTakeOver => self.space(true, keymap, out),
             C::StimulusFire => match self.stimulus.phase {
                 StimPhase::Armed if self.sweep.plan.is_some() => self.fire_sweep(out),
                 StimPhase::Armed => {
@@ -3342,6 +3508,7 @@ impl AppState {
             },
             C::StimulusStop | C::StopAnywhere => {
                 self.stimulus.arm_after_stop = false;
+                self.sweep.arm_after_stop = false;
                 if self.stimulus_live() {
                     self.stimulus.phase = StimPhase::Stopping;
                     out.push(Request::StimStop);
@@ -4666,7 +4833,8 @@ impl AppState {
             match f.sweep_plan(open.as_ref(), ceiling) {
                 Ok(plan) => {
                     self.overlay = Overlay::None;
-                    self.arm_sweep(plan, out);
+                    self.sweep.again = false;
+                    self.arm_sweep(plan, false, out);
                 }
                 Err(e) => f.error = Some(e),
             }
@@ -5095,7 +5263,7 @@ impl AppState {
                 let releasing = std::mem::take(&mut self.sweep.releasing);
                 let pending = std::mem::take(&mut self.sweep.arm_after_stop);
                 match self.sweep.plan.take() {
-                    Some(plan) if pending => self.arm_sweep(plan, out),
+                    Some(plan) if pending => self.arm_sweep(plan, false, out),
                     plan => {
                         self.sweep.plan = plan;
                         self.end_sweep_mode();

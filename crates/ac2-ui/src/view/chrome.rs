@@ -361,19 +361,25 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         .and_then(|s| s.sweep.as_ref())
         .filter(|r| r.active());
     let sweep = st.sweep.plan.is_some();
-    // What the keys do next. With a window open the window has Space, Enter and Esc.
+    // What the keys do next, as the focused view decides. With a window open the window
+    // has Space, Enter and Esc; only the missing level is said then.
     let window = st.overlay != crate::state::Overlay::None;
-    let hint = match (run, st.stimulus.phase) {
-        (Some(_), _) => None,
-        (None, StimPhase::Idle) if st.stimulus.level.is_none() => Some(format!(
-            "{} types a level",
-            key_hint(app, CommandId::StimulusLevel)
-        )),
-        (None, StimPhase::Idle) if !window => Some("Space arms".to_string()),
-        (None, StimPhase::Armed) if sweep && !window => Some("Enter plays the sweep".to_string()),
-        (None, StimPhase::Armed) if !window => Some("Enter fires".to_string()),
-        _ => None,
-    };
+    let hint = st
+        .stimulus_next()
+        .filter(|_| run.is_none())
+        .filter(|(next, what)| {
+            !window
+                || matches!(
+                    (next, what),
+                    (
+                        ac2_scene::stimulus::Next::Space,
+                        ac2_scene::stimulus::Stimulus::Generator { level: None, .. }
+                    )
+                )
+        })
+        .map(|(next, what)| {
+            ac2_scene::stimulus::hint(next, &what, &key_hint(app, CommandId::StimulusLevel))
+        });
     // While anything is armed or playing: the stop that works from anywhere, windows
     // included (Esc stops too while no window is open).
     let live = run.is_some() || st.stimulus_live();
@@ -406,8 +412,8 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
             ],
         ));
     }
-    if let Some(h) = hint {
-        v.push(Item::new(20, vec![dim_text(h, ch)]));
+    if let Some((long, short)) = hint {
+        v.push(Item::new(20, vec![dim_text(long, ch), dim_text(short, ch)]));
     }
     if live {
         let stop = STOP_ANYWHERE.label();
