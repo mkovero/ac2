@@ -697,3 +697,99 @@ fn stopped_audio_shows_a_banner_until_the_session_is_back() {
     assert!(ac2_scene::banner::banners(&st).is_empty());
     assert!(crate::scenes::audio_stopped(&t.st, WallNs(0)).is_none());
 }
+
+/// The IR pane follows its transfer measurement's state: the transfer stream's NO
+/// REFERENCE as a banner and as the reason there is no IR; a stopped measurement says so and
+/// which key starts it; a kept IR of a stopped measurement is tagged `stopped`, no STALE.
+#[test]
+fn the_ir_pane_says_why_there_is_no_ir() {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{IrFrame, IrMeta, ProtectionFlags};
+    use ac2_proto::{Frame, FrameData};
+    let theme = Theme::dark();
+    let snapshot = |frames: Vec<Frame>| {
+        let mut latest = Latest::default();
+        for f in frames {
+            let f = TopicFrame {
+                topic: f.data.topic(),
+                frame: Arc::new(f),
+                received: Instant::now(),
+                since_new: std::time::Duration::ZERO,
+                age: Some(0.0),
+                stale: false,
+            };
+            latest.frames.insert(f.topic.to_string().into(), f);
+        }
+        ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+            latest,
+            grids: std::collections::BTreeMap::new(),
+            drained: Instant::now(),
+        }))
+    };
+    let mut tf = ac2_proto::samples::tf_frame();
+    tf.stamp.protection = ProtectionFlags::NO_REFERENCE;
+    let ir = Frame {
+        stamp: ac2_proto::samples::stamp(None),
+        data: FrameData::Ir(IrFrame {
+            meas: MeasId(1),
+            meta: IrMeta {
+                sample_rate: Hz(48_000.0),
+                t0: Seconds(-0.0005),
+                dt: Seconds(0.0001),
+                inserted_delay: Seconds(0.0125),
+            },
+            linear: vec![0.0, 0.5, 0.1, -0.05, 0.0],
+            etc: None,
+        }),
+    };
+    let mut t = T::new();
+    t.key("Alt+3");
+    let texts = |s: &ac2_scene::ir::IrScene| -> Vec<String> {
+        s.banners.iter().map(|b| b.text.clone()).collect()
+    };
+    // Nothing yet from a running measurement.
+    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    assert_eq!(s.note.as_deref(), Some("Main L: no IR frame yet"));
+    // Its transfer stream says nothing drives the reference: banner and reason.
+    t.conn(snapshot(vec![tf.clone()]));
+    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    assert_eq!(
+        s.note.as_deref(),
+        Some("no reference: nothing is driving the loopback")
+    );
+    assert!(
+        texts(&s).contains(&"NO REFERENCE".to_owned()),
+        "{:?}",
+        texts(&s)
+    );
+    // Stopped: no fault from a measurement that no longer runs, and the key that starts it.
+    let mut st = daemon_state();
+    st.measurements[1].running = false;
+    t.conn(mirror(st.clone()));
+    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
+    assert!(!texts(&s).contains(&"NO REFERENCE".to_owned()));
+    let r = t.key("S");
+    assert!(
+        r.iter().any(|x| matches!(
+            x,
+            Request::Call { cmd: Command::MeasStart { meas }, .. } if *meas == MeasId(1)
+        )),
+        "{r:?}"
+    );
+    // Its kept IR: drawn, tagged as its transfer curve is, never STALE.
+    t.conn(snapshot(vec![tf, ir]));
+    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    assert_eq!(s.note, None);
+    assert_eq!(s.tag.as_deref(), Some("stopped"));
+    assert!(texts(&s).iter().all(|b| !b.starts_with("STALE")));
+    let line = format!("{} · stopped", s.origin);
+    assert!(
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .any(|l| l.text == line),
+        "{line}"
+    );
+}

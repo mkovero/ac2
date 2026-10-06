@@ -180,7 +180,10 @@ fn scene_for(
                 },
             )
         }
-        PaneKind::Ir => (scenes::ir(st, theme, vp, now)?.scene, Axes::default()),
+        PaneKind::Ir => (
+            scenes::ir(st, &app.keymap, theme, vp, now)?.scene,
+            Axes::default(),
+        ),
         PaneKind::Spl => (
             scenes::spl_pane(st, &app.keymap, theme, vp, now)?,
             Axes::default(),
@@ -214,8 +217,7 @@ fn scene_for(
 
 fn placeholder(pane: PaneKind, app: &App) -> &'static str {
     match pane {
-        PaneKind::Ir if scenes::focus_tf(&app.state).is_none() => "no transfer measurement",
-        PaneKind::Ir => "no IR frame yet",
+        PaneKind::Ir => "no transfer measurement",
         PaneKind::Spl if app.state.view.spl.mode == SplMode::Leq && scenes::has_spl(&app.state) => {
             "no Leq windows yet: they show once the meter has measured a second"
         }

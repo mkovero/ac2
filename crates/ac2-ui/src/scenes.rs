@@ -498,23 +498,57 @@ fn with_spectrum<R>(
     f(&traces, &status, &view)
 }
 
-/// The IR of the focused transfer measurement; `None` without one or without its IR frame.
-pub fn ir(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<IrScene> {
+/// The IR of the focused transfer measurement, under the banners of its transfer stream
+/// (protection flags, stopped, audio stopped, daemon silence), tagged as its transfer curve
+/// is; without its IR frame, an empty plot that says why. `None` without a transfer
+/// measurement.
+pub fn ir(
+    st: &AppState,
+    keymap: &crate::keys::Keymap,
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Option<IrScene> {
+    use ac2_scene::ir::{IrMissing, missing_scene, missing_text};
     let m = focus_tf(st)?;
-    let tf = frame(st, m.id, Stream::Ir)?;
-    let FrameData::Ir(f) = &tf.frame.data else {
-        return None;
+    let tf = frame(st, m.id, Stream::Tf);
+    let ir = frame(st, m.id, Stream::Ir);
+    let shown: Vec<&TopicFrame> = [tf, ir].into_iter().flatten().collect();
+    let status = status(st, &shown, Some(m), now);
+    if let Some(ir) = ir
+        && let FrameData::Ir(f) = &ir.frame.data
+    {
+        let i = st
+            .measurements()
+            .iter()
+            .position(|x| x.id == m.id)
+            .unwrap_or(0);
+        return Some(ir_scene(
+            f,
+            theme.trace_color(i),
+            Some(freshness(st, ir)),
+            &status,
+            &st.view,
+            theme,
+            size,
+        ));
+    }
+    let why = if !m.running {
+        IrMissing::Stopped
+    } else if status.audio_stopped.is_some() {
+        IrMissing::AudioStopped
+    } else if status.protection.contains(ProtectionFlags::NO_REFERENCE) {
+        IrMissing::NoReference
+    } else if status.protection.contains(ProtectionFlags::NO_SIGNAL) {
+        IrMissing::NoSignal
+    } else {
+        IrMissing::NotYet
     };
-    let i = st
-        .measurements()
-        .iter()
-        .position(|x| x.id == m.id)
-        .unwrap_or(0);
-    let status = status(st, &[tf], Some(m), now);
-    Some(ir_scene(
-        f,
-        theme.trace_color(i),
-        Some(freshness(st, tf)),
+    let start = keymap
+        .first_chord(crate::keys::CommandId::StartStop, crate::keys::Scope::Ir)
+        .map_or_else(|| "the palette".to_owned(), |c| c.label());
+    Some(missing_scene(
+        missing_text(&m.config.name, why, &start),
         &status,
         &st.view,
         theme,

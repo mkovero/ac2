@@ -229,6 +229,49 @@ fn transfer_view_two_traces_and_banner() {
     snapshot(&mut h, "transfer_two_traces_banner");
 }
 
+/// The IR pane of a stopped transfer measurement, maximised: its kept IR tagged `stopped`
+/// after the origin, as its transfer curve is, with no STALE banner; S starts it from here.
+#[test]
+fn ir_pane_of_a_stopped_measurement() {
+    if !have_gpu("ir_pane_of_a_stopped_measurement") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::ALT, Key::Num3);
+    h.key_press(Key::W);
+    h.key_press(Key::S);
+    step_until(&mut h, "the IR pane alone, its measurement stopped", |a| {
+        let st = &a.state;
+        st.layout.maximized
+            && st.layout.focus == PaneKind::Ir
+            && st.meas(MeasId(1)).is_some_and(|m| !m.running)
+    });
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::ir(
+            st,
+            &h.state().keymap,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        )
+        .expect("IR scene");
+        assert_eq!(s.tag.as_deref(), Some("stopped"));
+        assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
+    }
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "ir_stopped");
+}
+
 /// The top bar while recording: `REC` with the audio's length and size in the record
 /// colour, with a dropout counted.
 #[test]

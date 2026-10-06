@@ -448,7 +448,7 @@ commands! {
 
     Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
-    StartStop => "start_stop", "Start / stop selected measurement", [Transfer, Spectrum, Spl];
+    StartStop => "start_stop", "Start / stop selected measurement", [Transfer, Spectrum, Ir, Spl];
 
     InsertDelay => "insert_delay", "Delay: find and insert first arrival", [Transfer];
     InsertStrongest => "insert_strongest", "Delay: find and insert strongest peak", [Transfer];
@@ -678,6 +678,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spl, k(K::S)),
         (C::SpectrumStyle, S::Spectrum, k(K::B)),
         (C::StartStop, S::Spectrum, k(K::S)),
+        // The IR pane shows the transfer measurement: S starts and stops it there too.
+        (C::StartStop, S::Ir, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::P)),
         // G is the view key of every pane (IR mode, SPL view): here the spectrograph, and
         // with Shift how much history it shows.

@@ -28,8 +28,8 @@ pub struct Sent {
 
 impl AppState {
     /// The streams to receive now:
-    /// - each transfer measurement's TF while the transfer pane is in view, and the IR of the
-    ///   one the IR pane follows while that pane is;
+    /// - each transfer measurement's TF while the transfer pane is in view, and the IR and
+    ///   TF of the one the IR pane follows while that pane is;
     /// - each spectrum / RTA while the spectrum pane is in view or peak hold or the
     ///   spectrograph is on (both fold every frame, so a hidden pane keeps its history);
     /// - each SPL meter's readout and Leq windows always: the held reading, the Leq history
@@ -52,7 +52,9 @@ impl AppState {
                 {
                     (true, true) => &[Stream::Tf, Stream::Ir],
                     (true, false) => &[Stream::Tf],
-                    (false, true) => &[Stream::Ir],
+                    // The IR pane carries its transfer stream's banners (no reference, no
+                    // signal), which only the transfer frames say.
+                    (false, true) => &[Stream::Tf, Stream::Ir],
                     (false, false) => &[],
                 },
                 MeasKind::Spectrum { .. } if spectrum => &[Stream::Spec],

@@ -408,7 +408,11 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   a step.
 
 The inserted delay is also the time origin of the impulse-response pane (**Shift+I** shows or
-hides it).
+hides it). The IR pane follows the transfer measurement and carries its banners (NO
+REFERENCE, NO SIGNAL, AUDIO STOPPED, DAEMON NOT RESPONDING); a kept IR is tagged and dimmed as
+its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it says why: `Main
+L stopped — S starts it` (**S** starts and stops it from the IR pane too), `no reference:
+nothing is driving the loopback`, `no signal: …`.
 
 ## Traces and slots
 
@@ -1148,6 +1152,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
+| `S` | Start / stop selected measurement | `start_stop` |
 | `Shift+I` | Show / hide IR pane | `toggle_ir` |
 | `G` | IR: linear → log → ETC | `ir_mode` |
 
