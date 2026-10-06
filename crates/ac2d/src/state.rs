@@ -27,7 +27,7 @@ pub(crate) struct Store {
 
 impl Store {
     /// Fresh state of a new incarnation: no session, disarmed generator with no owner.
-    pub(crate) fn new(ceiling: Dbfs, limits: ReplayLimits) -> Self {
+    pub(crate) fn new(ceiling: Dbfs, ceiling_bound: Dbfs, limits: ReplayLimits) -> Self {
         Self {
             state: State {
                 session: Session {
@@ -43,11 +43,13 @@ impl Store {
                     firing: false,
                     settings: None,
                     ceiling,
+                    ceiling_bound,
                     last_action: None,
                 },
                 calibrations: Vec::new(),
                 mics: Vec::new(),
                 inputs: Vec::new(),
+                outputs: Vec::new(),
                 spl_logs: Vec::new(),
                 timing: TimingStatus {
                     epoch: 0,
@@ -74,6 +76,12 @@ impl Store {
         self.state.calibrations = c.calibrations;
         self.state.mics = c.mics;
         self.state.inputs = c.inputs;
+        self
+    }
+
+    /// The initial state carries the rig settings' output labels (rev 0, no events).
+    pub(crate) fn with_outputs(mut self, outputs: Vec<ac2_proto::model::OutputSetup>) -> Self {
+        self.state.outputs = outputs;
         self
     }
 
@@ -171,6 +179,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),
         Change::Mic(p) => upsert(&mut s.mics, p, |m| m.name.clone()),
         Change::Inputs(i) => s.inputs = i.clone(),
+        Change::Outputs(o) => s.outputs = o.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,
         Change::Sweep(r) => s.sweep = Some(r.clone()),
@@ -186,6 +195,7 @@ mod tests {
 
     fn store(events: usize) -> Store {
         Store::new(
+            Dbfs(-10.0),
             Dbfs(-10.0),
             ReplayLimits {
                 events,

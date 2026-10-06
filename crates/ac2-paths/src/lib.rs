@@ -51,6 +51,11 @@ pub fn cal_store() -> PathBuf {
     config_dir().join("calibrations.json")
 }
 
+/// The daemon's rig settings (system max level, output labels): `<config>/rig.json`.
+pub fn rig_settings() -> PathBuf {
+    config_dir().join("rig.json")
+}
+
 /// Saved sessions: `$AC2_SESSION_DIR`, else `<data>/sessions`.
 pub fn session_dir() -> PathBuf {
     env_dir("AC2_SESSION_DIR").unwrap_or_else(|| data_dir().join("sessions"))

@@ -51,7 +51,7 @@ use crate::jobs::{
 };
 use crate::outbox::Outbox;
 use crate::preview::Preview;
-use crate::session::{self, Runtime};
+use crate::session::{self, Limits, Runtime};
 use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
 use crate::sweep::Recording;
@@ -64,6 +64,7 @@ mod leq;
 mod maths;
 mod recording;
 mod recovery;
+pub(crate) mod rig;
 mod sweeps;
 mod traces;
 
@@ -156,8 +157,18 @@ pub(crate) struct Setup {
     /// Offered backends, the default first.
     pub(crate) backends: Vec<Arc<dyn Backend>>,
     pub(crate) incarnation: DaemonIncarnation,
+    /// The system max level in force, dBFS RMS, and its sample-peak limit: start values
+    /// (the bound); [`Control::new`] takes the rig settings' value.
     pub(crate) ceiling_dbfs: f64,
     pub(crate) max_level: MaxLevel,
+    /// The hard upper bound of the system max level (`--max-level`) and its peak limit,
+    /// which every stream opens with.
+    pub(crate) ceiling_bound: f64,
+    pub(crate) bound_level: MaxLevel,
+    /// Rig settings file; `None`: in memory only.
+    pub(crate) rig_settings: Option<std::path::PathBuf>,
+    /// How the daemon serves clients (`server.*`).
+    pub(crate) server: rig::ServerSetup,
     pub(crate) lease_expiry: Duration,
     pub(crate) keepalive: Duration,
     pub(crate) replay: ReplayLimits,
@@ -178,6 +189,16 @@ pub(crate) struct Setup {
     /// Where `rec.start` writes and `session.replay` finds recordings by name; `None`:
     /// this daemon does not record.
     pub(crate) recording_dir: Option<std::path::PathBuf>,
+}
+
+impl Setup {
+    /// The output path's limits a stream opens with now.
+    pub(crate) fn limits(&self) -> Limits {
+        Limits {
+            open: self.bound_level,
+            now: self.max_level,
+        }
+    }
 }
 
 /// A request answered when a worker thread reports back.
@@ -273,6 +294,11 @@ pub(crate) struct Control {
     spl_prev_logs: HashMap<MeasId, crate::leq_log::LeqLog>,
     /// The raw capture being written.
     recording: Option<recording::ActiveRecording>,
+    /// Where the rig settings are kept.
+    rig: crate::rig::RigStore,
+    /// The system max level a client last set (kept in the rig settings); `None`: never
+    /// set, the bound applies.
+    ceiling_set: Option<f64>,
     /// The recording a replay session plays (`session.replay`).
     replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
 }
@@ -494,7 +520,33 @@ impl Control {
             },
         };
         let restore = s.autosave.as_ref().is_some_and(|c| c.restore);
-        let store = Store::new(Dbfs(s.ceiling_dbfs), s.replay)
+        let (rig, saved) = match &s.rig_settings {
+            Some(p) => crate::rig::RigStore::open(p),
+            None => (
+                crate::rig::RigStore::memory(),
+                crate::rig::RigSettings::default(),
+            ),
+        };
+        let mut s = s;
+        let ceiling = crate::rig::start_ceiling(saved.ceiling_dbfs, s.ceiling_bound);
+        match crate::stimulus::peak_limit(ceiling) {
+            Ok(m) => {
+                s.ceiling_dbfs = ceiling;
+                s.max_level = m;
+            }
+            // Unreachable for a checked file; the bound stays in force.
+            Err(e) => tracing::error!("system max level {ceiling} dBFS: {e}"),
+        }
+        if s.ceiling_dbfs < s.ceiling_bound {
+            tracing::info!(
+                target: "ac2d::audit",
+                "system max level {:.1} dBFS (bound {:.1} dBFS, --max-level)",
+                s.ceiling_dbfs,
+                s.ceiling_bound
+            );
+        }
+        let store = Store::new(Dbfs(s.ceiling_dbfs), Dbfs(s.ceiling_bound), s.replay)
+            .with_outputs(saved.outputs)
             .with_calibrations(contents)
             .with_autosave(Autosave {
                 state: status,
@@ -533,6 +585,8 @@ impl Control {
             spl_prev_logs: HashMap::new(),
             recording: None,
             replay_backend: None,
+            rig,
+            ceiling_set: saved.ceiling_dbfs,
             s,
         }
     }
@@ -781,6 +835,24 @@ impl Control {
                 return;
             }
         };
+        if let Some(name) = &user_id
+            && self.s.server.revoked(name)
+        {
+            // The handshake check refuses it from now on; a connection already up must
+            // not keep acting on the rig until it drops.
+            tracing::warn!(target: "ac2d::auth", "request from revoked client {name:?} refused");
+            self.send_reply(
+                routing_id,
+                &Reply::new(
+                    id,
+                    Err(perr(
+                        ErrorCode::Refused,
+                        format!("the key of client {name:?} was revoked on this rig"),
+                    )),
+                ),
+            );
+            return;
+        }
         let client = ClientId(user_id.unwrap_or_else(|| format!("local-{}", hex(routing_id))));
         if let Some(stored) = self.dedup.get(&client, req.id, now) {
             let stored = stored.to_vec();
@@ -940,6 +1012,14 @@ impl Control {
                 self.audit(&mut g, GenAction::Release, Some(client));
                 ack(self.commit(Change::Generator(g)))
             }
+            Command::GenCeiling {
+                ceiling,
+                confirm_raise,
+            } => self.gen_ceiling(client, ceiling, confirm_raise),
+            Command::SessionOutputs { outputs } => self.session_outputs(outputs),
+            Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
+            Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
+            Command::ServerRevoke { name } => self.server_revoke(client, &name),
             Command::GenStop => {
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();
@@ -1312,7 +1392,7 @@ impl Control {
             &*backend,
             &config,
             &[],
-            self.s.max_level,
+            self.s.limits(),
             epoch,
             self.s.to_self.clone(),
             self.s.fps,
@@ -1351,6 +1431,11 @@ impl Control {
 
     /// Starts jobs and re-derives sample-rate dependent state for a freshly opened stream.
     fn after_open(&mut self) {
+        // A stream opened on another thread (recovery) may predate a change of the system
+        // max level.
+        if let Some(rt) = &self.session {
+            rt.gen_handle.set_max_level(self.s.max_level);
+        }
         let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
             return;
         };
@@ -1451,7 +1536,7 @@ impl Control {
             &*backend,
             &config,
             routes,
-            self.s.max_level,
+            self.s.limits(),
             epoch,
             self.s.to_self.clone(),
             self.s.fps,

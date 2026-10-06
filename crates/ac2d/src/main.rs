@@ -30,7 +30,12 @@ Audio / WASAPI) on macOS and Windows.
                          (default: ac2 on <hostname>)
   --no-mdns              network mode without the mDNS advert (clients then need the
                          address; pairing is required either way)
-  --max-level <dBFS>     global generator maximum, dBFS RMS (default -10)
+  --max-level <dBFS>     hard upper bound of the system max level, dBFS RMS (default -10);
+                         clients lower the level in force at run time (and raise it up
+                         to this bound after a confirmation), kept in the rig settings
+  --settings <path>      rig settings: system max level, output labels (default
+                         rig.json in the ac2 config directory); an unreadable file is
+                         never overwritten
   --cal-store <path>     calibration store (default calibrations.json in the ac2 config
                          directory, ~/.config/ac2 on Linux); an unreadable
                          file is never overwritten
@@ -57,6 +62,7 @@ struct Args {
     authorized: Option<PathBuf>,
     max_level: f64,
     cal_store: Option<PathBuf>,
+    settings: Option<PathBuf>,
     name: Option<String>,
     mdns: bool,
     autosave: Option<PathBuf>,
@@ -77,6 +83,7 @@ fn parse() -> Result<Option<Args>, String> {
         authorized: None,
         max_level: -10.0,
         cal_store: None,
+        settings: None,
         name: None,
         mdns: true,
         autosave: None,
@@ -103,6 +110,7 @@ fn parse() -> Result<Option<Args>, String> {
             "--key-file" => a.key_file = Some(PathBuf::from(val()?)),
             "--authorized" => a.authorized = Some(PathBuf::from(val()?)),
             "--cal-store" => a.cal_store = Some(PathBuf::from(val()?)),
+            "--settings" => a.settings = Some(PathBuf::from(val()?)),
             "--name" => a.name = Some(val()?),
             "--no-mdns" => a.mdns = false,
             "--autosave" => a.autosave = Some(PathBuf::from(val()?)),
@@ -195,6 +203,11 @@ fn main() -> ExitCode {
     config.backends = backends;
     config.advertise = advertise;
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
+    config.rig_settings = Some(
+        args.settings
+            .clone()
+            .unwrap_or_else(ac2_paths::rig_settings),
+    );
     config.autosave = (!args.no_autosave).then(|| AutosaveConfig {
         dir: args
             .autosave

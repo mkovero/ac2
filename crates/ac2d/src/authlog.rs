@@ -7,9 +7,9 @@
 //! key and address is logged at most once per [`REFUSAL_LOG_EVERY`], with the count of the
 //! refusals in between.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ac2_zmq::{DenyReason, Mechanism, PublicKey, Verdict, ZapDecision};
@@ -102,11 +102,72 @@ impl RefusalLimiter {
     }
 }
 
+/// Refused peers kept for clients to see (`server.info`): enough to find a new client's
+/// key among a few retrying peers, bounded against a peer cycling through keys.
+pub const REFUSED_KEPT: usize = 32;
+
+/// One refused peer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refused {
+    /// Its key; `None` when it did not use CURVE.
+    pub key: Option<PublicKey>,
+    /// Its address.
+    pub address: String,
+    /// Refusals since the daemon started.
+    pub count: u64,
+    /// The latest, wall-clock ns.
+    pub last_at_ns: u64,
+}
+
+/// The peers refused lately, newest first; shared between the ZAP thread and the control
+/// thread.
+#[derive(Clone, Debug, Default)]
+pub struct RefusedList(Arc<Mutex<VecDeque<Refused>>>);
+
+impl RefusedList {
+    fn note(&self, key: Option<PublicKey>, address: &str, at_ns: u64) {
+        let mut l = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let count = match l.iter().position(|r| r.key == key && r.address == address) {
+            Some(i) => l.remove(i).map_or(0, |r| r.count),
+            None => 0,
+        };
+        l.push_front(Refused {
+            key,
+            address: address.to_owned(),
+            count: count + 1,
+            last_at_ns: at_ns,
+        });
+        l.truncate(REFUSED_KEPT);
+    }
+
+    /// The list, newest first.
+    pub fn snapshot(&self) -> Vec<Refused> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Forgets the refusals of `key` (it was just authorized).
+    pub fn forget(&self, key: &PublicKey) {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|r| r.key.as_ref() != Some(key));
+    }
+}
+
 /// The audit hook of the daemon's ZAP handler: accepted clients at info, refused ones at
 /// warn, rate-limited.
 pub struct AuthLog {
     authorized_file: PathBuf,
     limiter: Mutex<RefusalLimiter>,
+    refused: RefusedList,
 }
 
 impl AuthLog {
@@ -115,7 +176,13 @@ impl AuthLog {
         Self {
             authorized_file: authorized_file.to_owned(),
             limiter: Mutex::new(RefusalLimiter::new(REFUSAL_LOG_EVERY)),
+            refused: RefusedList::default(),
         }
+    }
+
+    /// The peers it refused lately (shared: it keeps filling).
+    pub fn refused(&self) -> RefusedList {
+        self.refused.clone()
     }
 
     /// Logs `d` (called on the ZAP thread for every handshake).
@@ -138,6 +205,8 @@ impl AuthLog {
             }
             Verdict::Denied(r) => *r,
         };
+        self.refused
+            .note(d.client_key, &d.address, crate::util::wall_ns());
         let admitted = self
             .limiter
             .lock()
@@ -225,6 +294,24 @@ mod tests {
         assert_eq!(l.admit(key(1), "10.0.0.2", s(10_001)), None);
         assert_eq!(l.admit(key(1), "10.0.0.2", s(25_000)), Some(1));
         assert_eq!(l.admit(key(1), "10.0.0.2", s(40_000)), Some(0));
+    }
+
+    #[test]
+    fn refused_list_counts_per_peer_newest_first_and_is_bounded() {
+        let l = RefusedList::default();
+        l.note(key(1), "a", 10);
+        l.note(key(2), "a", 20);
+        l.note(key(1), "a", 30);
+        let s = l.snapshot();
+        assert_eq!(s.len(), 2);
+        assert_eq!((s[0].key, s[0].count, s[0].last_at_ns), (key(1), 2, 30));
+        assert_eq!((s[1].key, s[1].count), (key(2), 1));
+        for b in 0..100u8 {
+            l.note(key(b), "b", 40);
+        }
+        assert_eq!(l.snapshot().len(), REFUSED_KEPT);
+        l.forget(&PublicKey::from_bytes([99; 32]));
+        assert!(l.snapshot().iter().all(|r| r.key != key(99)));
     }
 
     #[test]

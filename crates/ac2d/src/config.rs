@@ -16,9 +16,14 @@ pub struct DaemonConfig {
     pub backends: Vec<Arc<dyn Backend>>,
     /// Where the ctrl and data sockets listen.
     pub listen: Listen,
-    /// Global maximum generator level, dBFS RMS (0 dBFS = RMS of a full-scale sine).
-    /// Requests above it are refused; the output path enforces the matching sample peak.
+    /// The hard upper bound of the system max level, dBFS RMS (0 dBFS = RMS of a full-scale
+    /// sine). The level clients set at run time (`gen.ceiling`, kept in `rig_settings`)
+    /// never exceeds it; requests above the level in force are refused, and the output path
+    /// enforces the matching sample peak.
     pub max_level_dbfs: f64,
+    /// Rig settings file (system max level, output labels); `None` keeps them in memory
+    /// only, and the system max level starts at `max_level_dbfs`.
+    pub rig_settings: Option<PathBuf>,
     /// Stimulus lease expiry after the last refresh (Q6: 1.5 s).
     pub lease_expiry: Duration,
     /// State-event replay buffer.
@@ -76,6 +81,7 @@ impl fmt::Debug for DaemonConfig {
             )
             .field("listen", &self.listen)
             .field("max_level_dbfs", &self.max_level_dbfs)
+            .field("rig_settings", &self.rig_settings)
             .field("lease_expiry", &self.lease_expiry)
             .field("replay", &self.replay)
             .field("dedup", &self.dedup)
@@ -98,6 +104,7 @@ impl DaemonConfig {
             backends: vec![backend],
             listen,
             max_level_dbfs,
+            rig_settings: None,
             lease_expiry: Duration::from_millis(1500),
             replay: ReplayLimits::default(),
             dedup: DedupLimits::default(),

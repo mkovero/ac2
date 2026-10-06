@@ -303,6 +303,12 @@ impl SecureContext {
             .unwrap_or_else(PoisonError::into_inner) = keys;
     }
 
+    /// A handle on the authorized keys that other threads keep: what an operator adds or
+    /// revokes while the daemon runs reaches the handler through it.
+    pub fn authorized_handle(&self) -> AuthorizedHandle {
+        AuthorizedHandle(Arc::clone(&self.zap.keys))
+    }
+
     /// A copy of the current authorized keys.
     pub fn authorized(&self) -> AuthorizedKeys {
         self.zap
@@ -324,6 +330,33 @@ impl SecureContext {
             std::thread::yield_now();
         }
         Ok(())
+    }
+}
+
+/// The keys a [`SecureContext`]'s handler checks, readable and replaceable from any thread.
+/// Replacing them applies to handshakes from then on; established connections are not
+/// re-checked.
+#[derive(Clone)]
+pub struct AuthorizedHandle(Arc<RwLock<AuthorizedKeys>>);
+
+impl fmt::Debug for AuthorizedHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthorizedHandle").finish_non_exhaustive()
+    }
+}
+
+impl AuthorizedHandle {
+    /// A copy of the current keys.
+    pub fn get(&self) -> AuthorizedKeys {
+        self.0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replaces the keys.
+    pub fn set(&self, keys: AuthorizedKeys) {
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = keys;
     }
 }
 

@@ -74,6 +74,17 @@ pub(crate) fn validate(cfg: &SessionConfig) -> Result<(), ProtoError> {
     Ok(())
 }
 
+/// The output path's sample-peak limits a stream opens with.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Limits {
+    /// The stream's own limit, from the hard bound (`--max-level`): fixed for the daemon's
+    /// life, so a raised system max level never needs a reopen.
+    pub(crate) open: MaxLevel,
+    /// The limit of the system max level in force, set on the generator before the stream
+    /// starts; it follows every later change of the level at once.
+    pub(crate) now: MaxLevel,
+}
+
 impl Runtime {
     /// Opens the stream with the generator routed to `routes`; silent until a source is set
     /// and started. The stream carries every output of the session, so a later routing
@@ -82,7 +93,7 @@ impl Runtime {
         backend: &dyn Backend,
         cfg: &SessionConfig,
         routes: &[u16],
-        max_level: MaxLevel,
+        limits: Limits,
         epoch: SessionEpoch,
         to_control: Sender<ControlMsg>,
         fps: u32,
@@ -90,6 +101,7 @@ impl Runtime {
         validate(cfg)?;
         let (gen_handle, port) =
             generator(routes.to_vec()).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        gen_handle.set_max_level(limits.now);
         let req = DuplexRequest {
             input_device: conv::device_selector(&cfg.input_device),
             output_device: conv::device_selector(&cfg.output_device),
@@ -99,7 +111,7 @@ impl Runtime {
             buffer_frames: cfg.buffer_frames,
             ring_seconds: DuplexRequest::DEFAULT_RING_SECONDS,
             output: OutputSource::Generator(port),
-            max_level,
+            max_level: limits.open,
             history: cfg.loopback.map(|l| HistoryRequest::channel(l.output)),
         };
         let stream = backend.open(req).map_err(audio_err)?;

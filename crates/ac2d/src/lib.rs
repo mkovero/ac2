@@ -48,6 +48,7 @@ mod leq_history;
 mod leq_log;
 mod outbox;
 mod preview;
+mod rig;
 mod session;
 mod state;
 mod stimulus;
@@ -293,7 +294,7 @@ impl Daemon {
         if config.backends.is_empty() {
             return Err(StartError::NoBackend);
         }
-        let max_level = stimulus::peak_limit(config.max_level_dbfs)
+        let bound_level = stimulus::peak_limit(config.max_level_dbfs)
             .map_err(|e| StartError::Level(e.to_string()))?;
         if config.max_level_dbfs > 0.0 {
             return Err(StartError::Level(
@@ -303,6 +304,8 @@ impl Daemon {
         let incarnation = DaemonIncarnation(util::random_u64());
         let network = config.listen.is_network();
 
+        // Network mode: what `server.*` reports and changes while the daemon runs.
+        let mut network_parts = None;
         let (ctx, secure, router, xpub, server_key) = match &config.listen {
             Listen::Inproc { name } => {
                 let ctx = Context::new().map_err(zerr("context"))?;
@@ -331,8 +334,14 @@ impl Daemon {
                     kp.public.fingerprint()
                 );
                 let log = authlog::AuthLog::new(&security.authorized_clients_file);
+                let refused = log.refused();
                 let sc = SecureContext::new(ZAP_DOMAIN, authorized, move |d| log.record(d))
                     .map_err(zerr("ZAP handler"))?;
+                network_parts = Some((
+                    sc.authorized_handle(),
+                    security.authorized_clients_file.clone(),
+                    refused,
+                ));
                 let router = sc
                     .curve_server_socket(SocketType::Router, &kp)
                     .map_err(zerr("CURVE ROUTER"))?;
@@ -381,6 +390,22 @@ impl Daemon {
         pull.bind(&pull_ep).map_err(zerr("bind internal pipe"))?;
         let outbox = Outbox::connect(&ctx, &pull_ep, 100_000).map_err(zerr("internal pipe"))?;
 
+        let advertised_as = Arc::new(std::sync::Mutex::new(None));
+        let server = match (&config.listen, network_parts, server_key) {
+            (Listen::Network { .. }, Some((authorized, authorized_file, refused)), Some(key)) => {
+                control::rig::ServerSetup::Network(Box::new(control::rig::NetworkSetup {
+                    ctrl: ctrl.clone(),
+                    data: data.clone(),
+                    server_key: key,
+                    authorized,
+                    authorized_file,
+                    refused,
+                    advertised_as: Arc::clone(&advertised_as),
+                }))
+            }
+            (Listen::Inproc { .. }, ..) => control::rig::ServerSetup::Embedded,
+            _ => control::rig::ServerSetup::Local { ctrl: ctrl.clone() },
+        };
         let fps = config
             .publish_fps
             .unwrap_or(if network { 30 } else { 60 })
@@ -403,7 +428,11 @@ impl Daemon {
             backends: config.backends.clone(),
             incarnation,
             ceiling_dbfs: config.max_level_dbfs,
-            max_level,
+            max_level: bound_level,
+            ceiling_bound: config.max_level_dbfs,
+            bound_level,
+            rig_settings: config.rig_settings.clone(),
+            server,
             lease_expiry: config.lease_expiry,
             keepalive: config.keepalive,
             replay: config.replay,
@@ -428,6 +457,11 @@ impl Daemon {
             (Some(a), Some(key)) => advertise(a, &key, &ctrl),
             _ => None,
         };
+        if let Some(a) = &advert {
+            *advertised_as
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(a.fullname().to_owned());
+        }
         tracing::info!(
             "ac2d {} up: ctrl {ctrl}, data {data}, backends {:?}, incarnation {:016x}",
             env!("CARGO_PKG_VERSION"),

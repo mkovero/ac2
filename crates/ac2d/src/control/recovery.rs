@@ -247,7 +247,7 @@ impl Control {
             }
         };
         let to_self = self.s.to_self.clone();
-        let max_level = self.s.max_level;
+        let limits = self.s.limits();
         let fps = self.s.fps;
         let spawned = std::thread::Builder::new()
             .name("ac2d-reopen".into())
@@ -259,7 +259,7 @@ impl Control {
                     &*backend,
                     &config,
                     &routes,
-                    max_level,
+                    limits,
                     epoch,
                     to_self.clone(),
                     fps,
