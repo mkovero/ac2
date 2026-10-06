@@ -96,6 +96,32 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+From the 645f5ec deploy on pupu and the operator (2026-10-06):
+- **"arm+fire to re-sweep with same parameters on sweep view; drive the gen for live
+  transfer on transfer view and on spectrum/spectrograph"; "New sweep measurement" in the
+  palette** → the focused view decides what Space arms: the sweep view a re-sweep with the
+  last sweep's parameters (the dialog when there is none), every other view the generator;
+  Enter fires what is armed; the top bar names it (`Enter fires: re-sweep 3 s −50 dBFS`).
+  0f9f4ac.
+- **Spectrum caption over the per-bin unit in a narrow pane** (long calibration text) → the
+  caption shortens (details, window, tail) before the unit leaves `dB SPL/bin`. 137b8e9.
+- **STALE tags under AUDIO STOPPED** → curves and readouts say `audio stopped`
+  (`Freshness::AudioStopped`), dimmed, no age. ac1cf10.
+- **AUDIO STOPPED banner clipped in the SPL pane** → banner headlines drop their parts from
+  the end to fit their row. b28deb4.
+- **Reopen waited for the next backoff step (12–30 s) after the server returned** → a cheap
+  probe (JACK socket, cpal device list) every second during waits of 4 s or more reopens at
+  once when the device comes back. 2507777.
+- **"G … spectrum pane, spectrograph pane both as individual panes … fullscreen
+  spectrograph"** → G steps spectrum → spectrum + spectrograph → spectrograph, remembered.
+  878f330.
+- **"sweep pane could also G change each view by itself"** → G steps response & distortion
+  → impulse response → room table (full pane, large type), remembered; IR scale on Shift+G.
+  ee5d794.
+- **"should impulse response also say NO REFERENCE when nothing is driving?"** → the IR pane
+  carries its transfer measurement's banners and tags, and says why there is no IR.
+  b3e545d, f005562.
+
 Audio that stops (operator, 2026-10-05: "ac2-ui on ketunkolo went stale, it would be cool if
 it knew how to recover by itself"; `docs/design/audio-recovery.md`):
 - **A device that stops delivering was not reported or recovered** (FF400 reset, jackd hung:
