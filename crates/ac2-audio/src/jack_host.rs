@@ -24,8 +24,8 @@ use jack::{
 
 use crate::backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
-    StaticLatency,
+    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, Presence, RateRange,
+    SampleFormat, StaticLatency,
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
@@ -85,6 +85,29 @@ fn unavailable(reason: Unavailability) -> AudioError {
 
 /// PipeWire's native socket, where PipeWire puts it: `$PIPEWIRE_RUNTIME_DIR`, else
 /// `$XDG_RUNTIME_DIR`, named `$PIPEWIRE_REMOTE` or `pipewire-0`.
+/// The JACK2 server's socket: `jack_<server>_<uid>_0` in `$JACK_TMPDIR` (else `/dev/shm`),
+/// the server named by `$JACK_DEFAULT_SERVER` (else `default`). It exists while the server
+/// runs, and a restarted server makes a new one.
+fn jack_server_socket() -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    let dir = std::env::var_os("JACK_TMPDIR").unwrap_or_else(|| "/dev/shm".into());
+    let server = std::env::var("JACK_DEFAULT_SERVER").unwrap_or_else(|_| "default".into());
+    // This process's user, as the server names its socket.
+    let uid = std::fs::metadata("/proc/self").ok()?.uid();
+    Some(Path::new(&dir).join(format!("jack_{server}_{uid}_0")))
+}
+
+/// A socket file's identity: a server started anew makes a new file (another inode or
+/// change time), so a server restarted between two looks still reads as back.
+fn socket_generation(p: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(p).ok()?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (m.ino(), m.ctime(), m.ctime_nsec()).hash(&mut h);
+    Some(h.finish())
+}
+
 pub fn pipewire_socket() -> Option<PathBuf> {
     let dir =
         std::env::var_os("PIPEWIRE_RUNTIME_DIR").or_else(|| std::env::var_os("XDG_RUNTIME_DIR"))?;
@@ -309,6 +332,19 @@ impl Backend for JackBackend {
             latency: static_latency(&client, &capture, &playback),
             notes: vec!["rate and buffer size are the server's".into()],
         }])
+    }
+
+    /// The server's socket, without connecting a client: JACK2's own, else PipeWire's (whose
+    /// libjack serves JACK clients). The ports are not looked at: a server that is back
+    /// is worth one real attempt, which names a missing port itself.
+    fn probe(&self, _device: &DeviceSelector) -> Presence {
+        [jack_server_socket(), pipewire_socket()]
+            .into_iter()
+            .flatten()
+            .find_map(|p| socket_generation(&p))
+            .map_or(Presence::Absent, |generation| Presence::Present {
+                generation,
+            })
     }
 
     fn open(&self, mut request: DuplexRequest) -> Result<DuplexStream, AudioError> {

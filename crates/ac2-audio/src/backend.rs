@@ -389,6 +389,20 @@ pub enum Delivery {
     Stepped,
 }
 
+/// What a cheap look at the audio host says about a device, without opening a client or a
+/// stream: a stopped session's recovery looks this often and reopens at once when the
+/// device comes back, instead of waiting out a long backoff step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Presence {
+    /// Not there: no server, or the device not listed.
+    Absent,
+    /// There. `generation` changes when it came back under the same name (a restarted
+    /// server's new socket), so a server replaced between two looks still reads as back.
+    Present { generation: u64 },
+    /// This host has no look cheaper than opening: only the reopen attempts find it back.
+    Unknown,
+}
+
 /// An audio backend.
 ///
 /// Deliberately small: the transport, clocks, event latches and the output path are shared
@@ -404,6 +418,11 @@ pub trait Backend: Send + Sync + fmt::Debug {
     /// Opens one duplex stream. Capture starts immediately; the output emits silence until
     /// a generator in the request is started.
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError>;
+
+    /// Whether the capture device `device` is there, by the cheapest look the host offers
+    /// (a server's socket, a device list). Opens nothing and emits nothing; may block on a
+    /// hung host, so callers look off any thread that must stay responsive.
+    fn probe(&self, device: &DeviceSelector) -> Presence;
 }
 
 #[cfg(test)]

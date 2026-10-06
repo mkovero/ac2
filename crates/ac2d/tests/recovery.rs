@@ -285,6 +285,44 @@ async fn a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     );
 }
 
+/// A device that comes back in the middle of a 30 s wait is reopened within about the
+/// probe's second, not at the end of the wait; while it stays away, the attempts keep their
+/// backoff (the probe never starts one of its own).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_device_back_mid_wait_is_reopened_at_once() {
+    let backend = realtime_rig();
+    let (_h, c, _, _) = start(&backend).await;
+    let epoch = state(&c).session.epoch;
+    backend.vanish(None);
+    let waiting = |s: &State| match s.session.stopped.as_ref().map(|x| &x.recovery) {
+        Some(Recovery::Waiting {
+            attempt, next_at, ..
+        }) => Some((*attempt, *next_at)),
+        _ => None,
+    };
+    // Attempts at about 0, 1, 3, 7, 15 and 31 s; the sixth failed waits 30 s.
+    let s = until(&c, "the 30 s wait", Duration::from_secs(60), |s| {
+        waiting(s).is_some_and(|(a, _)| a >= 6)
+    })
+    .await;
+    let (attempt, next_at) = waiting(&s).unwrap();
+    assert_eq!(attempt, 6, "no attempt besides the backoff's");
+    let left = next_at.0.saturating_sub(wall_now_ns()) as f64 / 1e9;
+    assert!(left > 25.0, "{left}");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        waiting(&state(&c)).map(|(a, _)| a),
+        Some(6),
+        "the device still away: no early attempt"
+    );
+    let back = Instant::now();
+    backend.restore();
+    let s = until(&c, "reopened", WAIT, |s| s.session.stopped.is_none()).await;
+    let took = back.elapsed();
+    assert!(s.session.epoch.0 > epoch.0);
+    assert!(took < Duration::from_millis(2500), "{took:?}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_close_ends_the_attempts() {
     let backend = realtime_rig();

@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use crate::backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
-    StaticLatency,
+    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, Presence, RateRange,
+    SampleFormat, StaticLatency,
 };
 use crate::block::{BlockFlags, BlockStamp};
 use crate::error::{AudioError, Operation, Unsupported};
@@ -137,6 +137,11 @@ impl ReplayBackend {
 impl Backend for ReplayBackend {
     fn kind(&self) -> BackendKind {
         BackendKind::Replay
+    }
+
+    /// A recording does not come and go: a replay that stopped is reopened by its attempts.
+    fn probe(&self, _device: &DeviceSelector) -> Presence {
+        Presence::Unknown
     }
 
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {

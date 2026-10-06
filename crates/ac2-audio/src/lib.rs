@@ -53,7 +53,7 @@ mod rng;
 
 pub use backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, HistoryRequest, IndexExactness, Negotiated,
+    DirectionCaps, DuplexRequest, FrameRange, HistoryRequest, IndexExactness, Negotiated, Presence,
     RateRange, SHORT_BUFFER_AT_48K, SampleFormat, StaticLatency, short_buffer_frames,
 };
 pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};

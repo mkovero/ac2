@@ -21,8 +21,8 @@ use cpal::{
 
 use crate::backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
-    StaticLatency, short_buffer_frames,
+    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, Presence, RateRange,
+    SampleFormat, StaticLatency, short_buffer_frames,
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::TimestampClock;
@@ -279,6 +279,16 @@ impl Backend for CpalBackend {
             });
         }
         Ok(out)
+    }
+
+    /// The device listed by the host (its default input device, or the one with this id).
+    /// Listing opens no stream; the generation stays 0, as a device keeps its id.
+    fn probe(&self, device: &DeviceSelector) -> Presence {
+        let host = cpal::default_host();
+        match find_device(&host, device, Direction::Input) {
+            Ok(_) => Presence::Present { generation: 0 },
+            Err(_) => Presence::Absent,
+        }
     }
 
     fn open(&self, mut request: DuplexRequest) -> Result<DuplexStream, AudioError> {

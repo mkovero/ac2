@@ -35,8 +35,8 @@ use thiserror::Error;
 
 use crate::backend::{
     Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
-    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
-    StaticLatency,
+    DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, Presence, RateRange,
+    SampleFormat, StaticLatency,
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
@@ -501,6 +501,22 @@ impl Outage {
         }
     }
 
+    /// The device as a server socket would show it: gone while vanished; there while
+    /// stalled (a hung server keeps its socket) and after, a new generation once an outage
+    /// has ended (the server came back).
+    fn presence(&self) -> Presence {
+        let begun = self.begun.load(Ordering::Acquire);
+        match self.active() {
+            Some(OutageKind::Vanish) => Presence::Absent,
+            Some(OutageKind::Stall) => Presence::Present {
+                generation: (2 * begun).saturating_sub(1),
+            },
+            None => Presence::Present {
+                generation: 2 * begun,
+            },
+        }
+    }
+
     /// Waits out a stall (an open behind a hung server), then refuses while vanished.
     fn admit(&self) -> Result<(), AudioError> {
         let mut g = self
@@ -674,6 +690,13 @@ impl FakeBackend {
 impl Backend for FakeBackend {
     fn kind(&self) -> BackendKind {
         BackendKind::Fake
+    }
+
+    fn probe(&self, device: &DeviceSelector) -> Presence {
+        match device {
+            DeviceSelector::Id(id) if id.0 != FAKE_DEVICE_ID => Presence::Absent,
+            _ => self.outage.presence(),
+        }
     }
 
     fn enumerate(&self) -> Result<Vec<DeviceCaps>, AudioError> {
@@ -1348,6 +1371,28 @@ impl Sim {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The probe sees what a server socket would show: gone while vanished, there while
+    /// stalled, a new generation once back; another device is never there.
+    #[test]
+    fn probe_follows_the_outages() {
+        let b = FakeBackend::new(FakeConfig::default()).expect("fake");
+        let any = DeviceSelector::Default;
+        let p0 = b.probe(&any);
+        assert!(matches!(p0, Presence::Present { .. }));
+        b.vanish(None);
+        assert_eq!(b.probe(&any), Presence::Absent);
+        b.restore();
+        let p1 = b.probe(&any);
+        assert!(matches!(p1, Presence::Present { .. }) && p1 != p0);
+        b.stall(None);
+        let p2 = b.probe(&any);
+        assert!(matches!(p2, Presence::Present { .. }) && p2 != p1);
+        b.restore();
+        assert!(b.probe(&any) != p2);
+        let other = DeviceSelector::Id(DeviceId("elsewhere".into()));
+        assert_eq!(b.probe(&other), Presence::Absent);
+    }
 
     #[test]
     fn config_validation() {

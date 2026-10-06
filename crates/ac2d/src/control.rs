@@ -88,6 +88,11 @@ pub(crate) enum ControlMsg {
         token: u64,
         result: Box<Result<Runtime, ProtoError>>,
     },
+    /// Availability probe `token` of a stopped session's device answered.
+    Probed {
+        token: u64,
+        presence: ac2_audio::Presence,
+    },
     /// The timing monitor of `epoch` changed state.
     Timing {
         epoch: SessionEpoch,
@@ -559,6 +564,14 @@ impl Control {
             {
                 self.start_attempt(None);
             }
+            if self
+                .recovery
+                .as_ref()
+                .and_then(recovery::Recovery::probe_due)
+                .is_some_and(|d| d <= now)
+            {
+                self.start_probe();
+            }
             if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
                 tracing::info!("preview not renewed: closing it");
                 self.close_preview();
@@ -574,6 +587,13 @@ impl Control {
                 wake = wake.min(d);
             }
             if let Some(d) = self.recovery.as_ref().and_then(recovery::Recovery::due) {
+                wake = wake.min(d);
+            }
+            if let Some(d) = self
+                .recovery
+                .as_ref()
+                .and_then(recovery::Recovery::probe_due)
+            {
                 wake = wake.min(d);
             }
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
@@ -601,6 +621,7 @@ impl Control {
                     cause,
                 }) => self.audio_stopped(epoch, since, cause),
                 Ok(ControlMsg::Reopened { token, result }) => self.reopened(token, *result),
+                Ok(ControlMsg::Probed { token, presence }) => self.probed(token, presence),
                 Ok(ControlMsg::Timing { epoch, status }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch)
                         && self.store.state().timing != status

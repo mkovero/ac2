@@ -44,6 +44,10 @@ impl Backend for Recording {
         self.inner.enumerate()
     }
 
+    fn probe(&self, device: &ac2_audio::DeviceSelector) -> ac2_audio::Presence {
+        self.inner.probe(device)
+    }
+
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
         let generator = matches!(request.output, OutputSource::Generator(_));
         self.opened
@@ -384,6 +388,10 @@ impl Backend for AsJack {
 
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {
         self.0.open(request)
+    }
+
+    fn probe(&self, device: &ac2_audio::DeviceSelector) -> ac2_audio::Presence {
+        self.0.probe(device)
     }
 }
 

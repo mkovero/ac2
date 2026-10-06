@@ -36,6 +36,14 @@ const CLOSE_WAIT: Duration = Duration::from_secs(2);
 /// What a closing caller waits for at most before it lets the close finish on its own.
 pub(crate) const CLOSE_BOUND: Duration = Duration::from_secs(2);
 
+/// Waits this long or longer are watched by a probe: a shorter one ends about as soon as a
+/// probe would notice the device back.
+const PROBE_FROM: Duration = Duration::from_secs(4);
+
+/// How often a probe looks during a long wait: a device back is reopened within about this,
+/// and a look (a socket's metadata, a device list) costs next to nothing.
+const PROBE_EVERY: Duration = Duration::from_secs(1);
+
 /// While at the cap, a failure that says the same as the last one logged is logged only
 /// every this many attempts (every 5 min at 30 s).
 const QUIET_REPEATS: u32 = 10;
@@ -92,6 +100,21 @@ pub(crate) struct Recovery {
     phase: Phase,
     /// The last failure logged: its wait and text.
     logged: Option<(Duration, String, u32)>,
+    /// What the device looked like last, and the look under way.
+    probe: Probe,
+}
+
+/// The cheap look at the device during a long wait ([`ac2_audio::Backend::probe`]). Only a
+/// change to present (absent → present, or a new generation) starts an attempt early: a
+/// device that looks present all along (a stale socket, a hung server) gets its attempts
+/// on the backoff, never one per look.
+#[derive(Default)]
+struct Probe {
+    last: Option<ac2_audio::Presence>,
+    /// The look under way; a look that never answers (a hung host) is not repeated.
+    pending: Option<u64>,
+    /// When the next look is due while waiting.
+    next: Option<Instant>,
 }
 
 impl Recovery {
@@ -101,6 +124,20 @@ impl Recovery {
             Phase::Waiting { at } => Some(at),
             Phase::Opening { .. } => None,
         }
+    }
+
+    /// When the control loop must look at the device next: during a long wait, every
+    /// [`PROBE_EVERY`], one look at a time, not when the attempt is about due anyway.
+    pub(crate) fn probe_due(&self) -> Option<Instant> {
+        let Phase::Waiting { at } = self.phase else {
+            return None;
+        };
+        if self.probe.pending.is_some() {
+            return None;
+        }
+        self.probe
+            .next
+            .filter(|n| at.saturating_duration_since(*n) >= PROBE_EVERY)
     }
 }
 
@@ -142,6 +179,7 @@ impl Control {
             attempt: 0,
             phase: Phase::Waiting { at: Instant::now() },
             logged: None,
+            probe: Probe::default(),
         });
         self.start_attempt(Some(closed));
     }
@@ -165,6 +203,7 @@ impl Control {
             attempt: 1,
             phase: Phase::Opening { token: 0 },
             logged: None,
+            probe: Probe::default(),
         });
         self.attempt_failed(e);
     }
@@ -193,6 +232,9 @@ impl Control {
         let epoch = SessionEpoch(r.epoch.0 + 1);
         r.attempt += 1;
         r.phase = Phase::Opening { token };
+        // A look still under way answers into the attempt; its answer is dropped.
+        r.probe.pending = None;
+        r.probe.next = None;
         let attempt = r.attempt;
         let config = r.open.config.clone();
         let routes = r.routes.clone();
@@ -287,9 +329,11 @@ impl Control {
             return;
         };
         let wait = backoff(r.attempt);
-        r.phase = Phase::Waiting {
-            at: Instant::now() + wait,
-        };
+        let now = Instant::now();
+        r.phase = Phase::Waiting { at: now + wait };
+        // The first look at once: it sets what "back" is measured against, before the
+        // device can return unseen.
+        r.probe.next = (wait >= PROBE_FROM).then_some(now);
         let attempt = r.attempt;
         // Logged once per backoff step; at the cap only a new error or every so often.
         let quiet = r.logged.as_ref().is_some_and(|(w, m, at)| {
@@ -309,6 +353,62 @@ impl Control {
             error: e.msg.clone(),
             next_at,
         });
+    }
+
+    /// Looks at the stopped session's device on a thread of its own (a hung host may not
+    /// answer a device list either).
+    pub(super) fn start_probe(&mut self) {
+        let token = self.next_token;
+        self.next_token += 1;
+        let Some(r) = self.recovery.as_mut() else {
+            return;
+        };
+        r.probe.pending = Some(token);
+        r.probe.next = None;
+        let device = crate::conv::device_selector(&r.open.config.input_device);
+        let kind = r.open.backend;
+        // No backend to look with: the attempts alone find the device back.
+        let Ok(backend) = self.backend_for(Some(kind)) else {
+            return;
+        };
+        let to_self = self.s.to_self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("ac2d-probe".into())
+            .spawn(move || {
+                let presence = backend.probe(&device);
+                let _ = to_self.send(ControlMsg::Probed { token, presence });
+            });
+        if let Err(e) = spawned {
+            tracing::error!("cannot start a thread to look at the audio device: {e}");
+            if let Some(r) = self.recovery.as_mut() {
+                r.probe.pending = None;
+            }
+        }
+    }
+
+    /// Probe `token` answered: a device that came back is reopened now, not at the end of
+    /// the wait.
+    pub(super) fn probed(&mut self, token: u64, presence: ac2_audio::Presence) {
+        use ac2_audio::Presence;
+        let Some(r) = self.recovery.as_mut() else {
+            return;
+        };
+        if r.probe.pending != Some(token) {
+            return;
+        }
+        r.probe.pending = None;
+        let back = matches!(presence, Presence::Present { .. })
+            && r.probe.last.is_some_and(|l| l != presence);
+        r.probe.last = Some(presence);
+        let Phase::Waiting { at } = r.phase else {
+            return;
+        };
+        if back {
+            tracing::info!("the audio device is back: reopening now");
+            self.start_attempt(None);
+        } else if presence != Presence::Unknown {
+            r.probe.next = Some(Instant::now() + PROBE_EVERY).filter(|n| *n < at);
+        }
     }
 
     /// A session file loaded while the audio is stopped: the stopped session shows the
@@ -350,5 +450,12 @@ mod tests {
         let s: Vec<u64> = (1..=8).map(|a| backoff(a).as_secs()).collect();
         assert_eq!(s, [1, 2, 4, 8, 16, 30, 30, 30]);
         assert_eq!(backoff(u32::MAX).as_secs(), 30);
+    }
+
+    /// Long waits are watched, short ones are not: from the 4 s step on.
+    #[test]
+    fn probes_watch_the_long_waits() {
+        let watched: Vec<bool> = (1..=6).map(|a| backoff(a) >= PROBE_FROM).collect();
+        assert_eq!(watched, [false, false, true, true, true, true]);
     }
 }

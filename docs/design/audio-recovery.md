@@ -66,6 +66,18 @@ There is no limit: the attempts end when one succeeds or a client sends `session
 `session.open` (an attempt still running then closes what it opens). A session file loaded
 meanwhile keeps the recovery, in the load's epoch.
 
+A long wait is watched: once a failed attempt's wait is 4 s or more, the daemon looks at the
+device every second (`Backend::probe`, on a thread of its own like the attempts) and starts
+the next attempt at once when the device **comes back** — absent → present, or present
+under a new generation — so a server restarted during a 30 s wait is reopened within about
+a second, not up to 30 s later. The look opens nothing: JACK checks the server's socket
+(`jack_<server>_<uid>_0` in `$JACK_TMPDIR` or `/dev/shm`, else PipeWire's), its inode and
+change time as the generation (a restarted server makes a new one); cpal lists the host's
+devices; a replay has no cheaper look (`Unknown`: the attempts alone). Only a change starts
+an early attempt: a device that looks present all along (a stale socket, a hung server)
+keeps the backoff, never one attempt per look; the first look comes right after the failed
+attempt, so a device that returns at once is still seen arriving.
+
 Each failure is logged once per backoff step (at the cap, again when the error changes or
 every 10 attempts); the state carries `recovery: waiting {attempt, error, next_at}` with
 the backend's own words, which say what it waits for ("No JACK server: start JACK …").
@@ -85,7 +97,10 @@ instead of closing the session.
   `AUDIO STOPPED · device not delivering since 20:36`, detail
   `attempt 3 failed: No JACK server: start JACK … · next in 8 s · measurements paused`;
   an attempt with no answer for 5 s says so (`attempt 1 has had no answer from the audio
-  host for 12 s`).
+  host for 12 s`). In a narrow pane the headline drops its parts from the end
+  (`AUDIO STOPPED`), like every banner, and never leaves its row.
+- Curves and readouts under it: dimmed, tagged `audio stopped` (legend) and `AUDIO
+  STOPPED` (SPL readout, Leq view) instead of a STALE age — the banner has the time.
 - Top bar: the session item in fault colour, `audio stopped · reopening (attempt 3, next in
   8 s)`.
 - `ac2 status`: `audio        STOPPED: device not delivering since 20:36; attempt 3 failed:
@@ -102,7 +117,8 @@ A stream running when an outage began never delivers again, as a client of a res
 Tests, all from an empty daemon on the fake: stall → AUDIO STOPPED within the bound, the
 control thread answering while an attempt hangs, the device back → same measurements, new
 epoch, generator disarmed, SPL log gap (`crates/ac2d/tests/recovery.rs`); vanish → reopen
-after the device returns; `ac2 status` (`crates/ac2-cli/tests/recovery_rig.rs`); the app's
+after the device returns; the device back in the middle of a 30 s wait → reopened within
+2.5 s, with no early attempt while it stays away; `ac2 status` (`crates/ac2-cli/tests/recovery_rig.rs`); the app's
 banner appears and clears without user action (`crates/ac2-ui/tests/embedded.rs`).
 
 ## Open
