@@ -370,6 +370,28 @@ pub fn layout_banners(banners: &[Banner], area: Rect) -> Vec<BannerRow> {
 
 /// Draws placed rows: a filled bar, the text on the left, the detail on the right. In a row
 /// too narrow for both, the detail is left out: the fault itself must stay readable.
+/// A banner's headline as it fits `width` at `size`: whole, else its ` · ` parts from the
+/// end off (`AUDIO STOPPED · audio host ended the stream at 22:36` → `AUDIO STOPPED`), the
+/// first part cut with `…` only when even it does not fit. The full text stays in the row.
+pub fn fit_headline(text: &str, width: f32, size: f32) -> String {
+    let fits = |t: &str| crate::canvas::text_width(t, size) <= width;
+    if fits(text) {
+        return text.to_string();
+    }
+    let parts: Vec<&str> = text.split(" · ").collect();
+    for n in (1..parts.len()).rev() {
+        let t = parts[..n].join(" · ");
+        if fits(&t) {
+            return t;
+        }
+    }
+    let mut out = parts[0].to_string();
+    while !out.is_empty() && !fits(&format!("{out}…")) {
+        out.pop();
+    }
+    format!("{}…", out.trim_end())
+}
+
 pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
     for r in rows {
         let colors = match r.severity {
@@ -383,18 +405,22 @@ pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
             clip: None,
         });
         let cy = r.rect.y + r.rect.h / 2.0;
-        layer.labels.push(crate::canvas::label(
-            r.text.clone(),
-            [r.rect.x + 10.0, cy],
-            Anchor {
-                h: HAlign::Left,
-                v: VAlign::Center,
-            },
-            theme.font_size,
-            colors.text,
-        ));
+        let text = fit_headline(&r.text, r.rect.w - 20.0, theme.font_size);
+        layer.labels.push(crate::primitives::Label {
+            clip: Some(r.rect),
+            ..crate::canvas::label(
+                text.clone(),
+                [r.rect.x + 10.0, cy],
+                Anchor {
+                    h: HAlign::Left,
+                    v: VAlign::Center,
+                },
+                theme.font_size,
+                colors.text,
+            )
+        });
         let fits = |d: &str| {
-            10.0 + crate::canvas::text_width(&r.text, theme.font_size)
+            10.0 + crate::canvas::text_width(&text, theme.font_size)
                 + 16.0
                 + crate::canvas::text_width(d, theme.small_font_size)
                 + 10.0
@@ -789,6 +815,41 @@ pub(crate) mod tests {
         assert_eq!(layer.rects[0].color, theme.banner_fault.background);
         assert_eq!(layer.labels[0].text, "DAEMON NOT RESPONDING");
         assert_eq!(layer.labels[0].color, theme.banner_fault.text);
+    }
+
+    /// A long headline (the audio host's stop with its time) shortens part by part in a
+    /// narrow pane, as the SPL pane at its default split is, and never leaves its row.
+    #[test]
+    fn long_headlines_shorten_to_their_row() {
+        let theme = Theme::dark();
+        let text = "AUDIO STOPPED · audio host ended the stream at 22:36";
+        let s = Status {
+            audio_stopped: Some(crate::audio::AudioStoppedText {
+                banner: text.into(),
+                detail: "reopening (attempt 2) · measurements paused".into(),
+                bar: [String::new(), String::new()],
+                status: String::new(),
+            }),
+            ..Status::default()
+        };
+        let mut seen = Vec::new();
+        for w in [200.0, 300.0, 360.0, 420.0, 600.0, 900.0, 1300.0] {
+            let rows = layout_banners(&banners(&s), Rect::new(0.0, 0.0, w, 200.0));
+            let mut layer = Layer::default();
+            draw_banners(&mut layer, &rows, &theme);
+            let l = &layer.labels[0];
+            let right = l.pos[0] + crate::canvas::text_width(&l.text, l.size);
+            assert!(
+                right <= rows[0].rect.right() - 10.0 + 0.01,
+                "{w}: {}",
+                l.text
+            );
+            assert_eq!(rows[0].text, text);
+            seen.push(l.text.clone());
+        }
+        assert_eq!(seen[0], "AUDIO STOPPED");
+        assert_eq!(seen.last().map(String::as_str), Some(text));
+        assert_eq!(fit_headline("AUDIO STOPPED", 60.0, 14.0), "AUDIO…");
     }
 
     #[test]
