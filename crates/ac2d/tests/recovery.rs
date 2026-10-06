@@ -59,8 +59,16 @@ async fn until(c: &Client, what: &str, wait: Duration, ok: impl Fn(&State) -> bo
 /// An empty daemon on `backend` with a session open (loopback), a transfer measurement and
 /// an SPL meter running.
 async fn start(backend: &FakeBackend) -> (Handle, Client, MeasId, MeasId) {
+    start_with(backend, None).await
+}
+
+async fn start_with(
+    backend: &FakeBackend,
+    recordings: Option<std::path::PathBuf>,
+) -> (Handle, Client, MeasId, MeasId) {
     init_log();
     let mut cfg = config(backend.clone(), local_tcp());
+    cfg.recording_dir = recordings;
     cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -216,8 +224,25 @@ async fn a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     let backend = realtime_rig();
-    let (_h, c, _, _) = start(&backend).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (_h, c, _, _) = start_with(&backend, Some(dir.path().to_owned())).await;
     let epoch = state(&c).session.epoch;
+    // A recording across the outage ends with it: the audio after the reopen is never
+    // spliced onto the file.
+    c.call(Command::RecStart {
+        request: ac2_proto::model::RecordRequest {
+            inputs: vec![0, 1],
+            name: Some("across".into()),
+            max_duration: ac2_proto::units::Seconds(60.0),
+            max_bytes: None,
+        },
+    })
+    .await
+    .unwrap();
+    until(&c, "recording", WAIT, |s| {
+        s.recording.as_ref().is_some_and(|r| r.frames > 0)
+    })
+    .await;
     let t0 = Instant::now();
     backend.vanish(Some(Duration::from_millis(3500)));
     let s = until(&c, "host ended", WAIT, |s| stopped(&s.session)).await;
@@ -225,6 +250,16 @@ async fn a_vanished_device_is_reopened_with_backoff_until_it_returns() {
         s.session.stopped.as_ref().unwrap().cause,
         StopCause::HostEnded
     );
+    let s = until(&c, "the recording ended", WAIT, |s| {
+        s.recording.as_ref().is_some_and(|r| {
+            r.status
+                == ac2_proto::model::RecordingStatus::Ended {
+                    reason: ac2_proto::model::RecordingEnd::AudioStopped,
+                }
+        })
+    })
+    .await;
+    assert_eq!(s.recording.as_ref().unwrap().name, "across");
     let s = until(&c, "a failed attempt", WAIT, |s| {
         matches!(
             s.session.stopped.as_ref().map(|x| &x.recovery),

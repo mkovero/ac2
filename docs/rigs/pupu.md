@@ -227,7 +227,7 @@ In 1 is the MM1 (phantom, mic gain 20); ins 3–4 are empty. Session:
 `session open --backend jack --in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
 
 **An FF400 reset (front-panel or bus) takes three steps to recover**, as on 2026-10-05. Since
-protocol 17 ac2 does its part by itself (`docs/design/audio-recovery.md`): within a second of
+protocol 21 ac2 does its part by itself (`docs/design/audio-recovery.md`): within a second of
 the last block the app shows AUDIO STOPPED (`ac2 status`: `audio STOPPED: …`), ac2d closes
 its JACK client off its control thread and keeps reopening the same session (backoff 1 s …
 30 s, the state saying what it waits for, e.g. no JACK server), so after step 1 the session,
@@ -238,7 +238,7 @@ the generator comes back disarmed. Restarting jackd and steps 2–3 stay the ope
    times out) and ac2 gets no audio and no error — the app shows STALE. Stop jackd
    (`pkill -TERM -x jackd`; it exited cleanly), wait for the bus to settle, start it again with
    the same command line (`/usr/bin/jackd -R -P 80 -S -n default -t 2000 -d alsa -d
-   hw:Fireface400 -r 96000 -p 256 -n 3`). Before protocol 17 ac2d closed the session after one
+   hw:Fireface400 -r 96000 -p 256 -n 3`). Before protocol 21 ac2d closed the session after one
    failed reopen and `session open` as above was needed; now it reopens by itself once jackd
    answers.
 2. The control service (`snd-fireface-ctl`, user unit) dies with the reset:

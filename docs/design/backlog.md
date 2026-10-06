@@ -104,7 +104,7 @@ it knew how to recover by itself"; `docs/design/audio-recovery.md`):
   (`session.stopped`, banner, top bar, `ac2 status`); the stream is closed off the control
   thread and the same configuration reopened with backoff (1 s … 30 s) until it opens or a
   client closes the session; same measurements in a new epoch, generator disarmed, SPL log
-  gap. Fake backend stall / vanish outages; PROTO 17. Left: how libjack's client open and
+  gap. Fake backend stall / vanish outages; PROTO 21. Left: how libjack's client open and
   close behave against the hung server (rig only); `session.devices` still enumerates on
   the control thread.
 - **Live spatial average of N transfer functions** (PLAN §3.3, phase 7; 2026-10-05): a

@@ -1,6 +1,6 @@
 # Audio that stops: detection and recovery
 
-Status: implemented (protocol 17). Wire format: `docs/protocol.md` §4.1.1.
+Status: implemented (protocol 21). Wire format: `docs/protocol.md` §4.1.1.
 
 ## What happened
 
@@ -44,8 +44,9 @@ again: blocks that arrive late cannot splice onto the audio before the gap.
    thread does not wait (it serves every client and the keepalives), and the audio path is
    not involved. Wherever else the control thread closes a stream (session close, a device
    change, shutdown) it waits at most 2 s, then lets the close finish on its thread.
-2. Jobs stop, the sweep in progress is aborted, the session's published frames are
-   cleared. Measurements keep `running`: they are paused, not stopped, and restart with
+2. Jobs stop, the sweep in progress is aborted, a raw recording ends (`audio_stopped`:
+   the file ends with the last audio received; what comes after the reopen is never spliced
+   onto it), the session's published frames are cleared. Measurements keep `running`: they are paused, not stopped, and restart with
    fresh averages when the audio is back (nothing averages across the gap; the sync
    contract's discontinuity rule, applied at session scope).
 3. The generator is **disarmed** at once (principle 9: a reconnect never leaves outputs
