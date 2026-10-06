@@ -231,6 +231,40 @@ pub fn ir_scene(
     }
 }
 
+/// `note` as it fits `width`: one line at the pane's font, else at the small font, else
+/// broken after its name (`: ` or ` — `) into two lines, each cut with `…` if need be.
+pub fn note_lines(note: &str, width: f32, theme: &Theme) -> (Vec<String>, f32) {
+    let fits = |t: &str, size: f32| canvas::text_width(t, size) <= width;
+    if fits(note, theme.font_size) {
+        return (vec![note.to_string()], theme.font_size);
+    }
+    let size = theme.small_font_size;
+    if fits(note, size) {
+        return (vec![note.to_string()], size);
+    }
+    let cut = |t: &str| {
+        if fits(t, size) {
+            return t.to_string();
+        }
+        let mut out = t.to_string();
+        while !out.is_empty() && !fits(&format!("{out}…"), size) {
+            out.pop();
+        }
+        format!("{}…", out.trim_end())
+    };
+    let split = note
+        .split_once(" — ")
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .or_else(|| {
+            note.split_once(": ")
+                .map(|(a, b)| (format!("{a}:"), b.to_string()))
+        });
+    match split {
+        Some((a, b)) => (vec![cut(&a), cut(&b)], size),
+        None => (vec![cut(note)], size),
+    }
+}
+
 /// Why the IR pane has no picture of its transfer measurement's impulse response.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IrMissing {
@@ -278,13 +312,21 @@ pub fn missing_scene(
     let x_axis = axis::linear_axis(trange, plot.x, plot.right(), "ms");
     let y_axis = axis::linear_axis(Range::new(-1.0, 1.0), plot.bottom(), plot.y, "FS");
     canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, "", theme);
-    c.overlay.labels.push(label(
-        note.clone(),
-        [plot.x + plot.w / 2.0, plot.y + plot.h / 2.0],
-        anchor(HAlign::Center, VAlign::Center),
-        theme.font_size,
-        theme.text_dim,
-    ));
+    let (lines, font) = note_lines(&note, plot.w - 12.0, theme);
+    let pitch = font * 1.4;
+    let top = plot.y + plot.h / 2.0 - pitch * (lines.len() as f32 - 1.0) / 2.0;
+    for (i, line) in lines.into_iter().enumerate() {
+        c.overlay.labels.push(crate::primitives::Label {
+            clip: Some(plot),
+            ..label(
+                line,
+                [plot.x + plot.w / 2.0, top + pitch * i as f32],
+                anchor(HAlign::Center, VAlign::Center),
+                font,
+                theme.text_dim,
+            )
+        });
+    }
     IrScene {
         scene: c.into_scene(size),
         plot,
@@ -553,6 +595,28 @@ mod tests {
             .flat_map(|l| l.labels.iter().map(|x| x.text.as_str()))
             .collect();
         assert!(labels.contains(&"no reference: nothing is driving the loopback"));
+    }
+
+    /// A long reason in a narrow pane breaks after the measurement's name and never leaves
+    /// the plot.
+    #[test]
+    fn a_long_reason_fits_a_narrow_pane() {
+        let theme = Theme::dark();
+        let note = missing_text("Reference → M30 FOH", IrMissing::NotYet, "S");
+        let (wide, size) = note_lines(&note, 700.0, &theme);
+        assert_eq!((wide, size), (vec![note.clone()], theme.font_size));
+        let (narrow, size) = note_lines(&note, 190.0, &theme);
+        assert_eq!(narrow, ["Reference → M30 FOH:", "no IR frame yet"]);
+        assert_eq!(size, theme.small_font_size);
+        let stopped = missing_text("Reference → M30 FOH", IrMissing::Stopped, "S");
+        let (lines, _) = note_lines(&stopped, 190.0, &theme);
+        assert_eq!(lines, ["Reference → M30 FOH stopped", "S starts it"]);
+        for w in [60.0, 120.0, 190.0] {
+            let (lines, size) = note_lines(&stopped, w, &theme);
+            for l in lines {
+                assert!(crate::canvas::text_width(&l, size) <= w, "{w}: {l}");
+            }
+        }
     }
 
     /// A kept IR is dimmed and tagged as its transfer curve: stopped is a final result (not

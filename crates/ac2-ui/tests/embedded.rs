@@ -2192,7 +2192,7 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     assert!(sw.contains(&"U dB/%".to_owned()), "{sw:?}");
     d.key("Shift+I");
     let sw = hint_line(&d.st);
-    assert!(sw.contains(&"G linear/log/ETC".to_owned()), "{sw:?}");
+    assert!(sw.contains(&"Shift+G linear/log/ETC".to_owned()), "{sw:?}");
     // H: every key, and closed again.
     d.key("H");
     assert_eq!(d.st.overlay, Overlay::Help);
