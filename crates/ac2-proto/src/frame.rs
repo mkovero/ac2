@@ -17,8 +17,7 @@ use crate::grid::GridId;
 use crate::model::{
     AverageMethod, BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale,
     PeakWeighting, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting, TimingState,
-    TimingStatus,
-    Weighting, Window,
+    TimingStatus, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{

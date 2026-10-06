@@ -188,7 +188,7 @@ Laptop / Pi performance pass (2026-10-04/05; a0d015d … 9dc4274, PLAN §9.0 has
   (c5484e3, ed189b2, 9dc4274) after being red since at least 2026-10-03.
 
 Leq windows and limits, the rest of the first version (operator: "Leq changes yes";
-`leq.md`, `q7-calibration.md` §12; PROTO 17, session format 9, SPL log CSV v2):
+`leq.md`, `q7-calibration.md` §12; PROTO 20, session format 9, SPL log CSV v2):
 - **Peak limits not judged** → LCpeak and LAFmax limits per meter (DIN 15905-5 LCpeak 135
   dB, V-NISSG LAFmax 125 dB set by their presets; `--peak-limit`, the Leq dialog), judged on
   the highest second of the last 10 s; columns / tiles of their own, alarms, `peaks` in

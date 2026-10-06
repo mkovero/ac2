@@ -1,7 +1,7 @@
 {
  "topic": "d/4/spl",
  "header": {
-  "v": 19,
+  "v": 20,
   "kind": "spl",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -34,7 +34,11 @@
       "calibrator_level": 114.0
      }
     },
-    "mic_curve": true
+    "mic_curve": true,
+    "position": {
+     "level": 2.5,
+     "peak": 1.5
+    }
    }
   }
  },

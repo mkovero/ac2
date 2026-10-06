@@ -1,7 +1,7 @@
 {
  "topic": "d/4/leq",
  "header": {
-  "v": 19,
+  "v": 20,
   "kind": "leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -81,6 +81,15 @@
      "laeq": 97.8,
      "lceq": 110.25,
      "lzeq": 112.5
+    },
+    "lcpeak": {
+     "level": 133.5,
+     "judgement": "near"
+    },
+    "lafmax": null,
+    "position": {
+     "level": 2.5,
+     "peak": 1.5
     }
    }
   }

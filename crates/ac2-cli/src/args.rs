@@ -8,8 +8,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
     ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg,
-    LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel, Time,
-    VoltsArg,
+    LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel, Time, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
