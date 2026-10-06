@@ -72,6 +72,10 @@ pub(crate) struct OutputShared {
     /// The stream is stopping: fade out and stay silent for good.
     pub(crate) shutdown: AtomicBool,
     pub(crate) gain_bits: AtomicU32,
+    /// Sample-peak limit set while the stream runs (linear, `f32` bits): the callback
+    /// enforces the lower of it and the limit the stream was opened with, so it can tighten
+    /// the open limit but never loosen it.
+    pub(crate) limit_bits: AtomicU32,
     state: AtomicU8,
     /// Anything other than zeros was ever written.
     emitted: AtomicBool,
@@ -86,6 +90,7 @@ impl Default for OutputShared {
             run: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
             gain_bits: AtomicU32::new(Gain::UNITY.to_bits()),
+            limit_bits: AtomicU32::new(1.0f32.to_bits()),
             state: AtomicU8::new(OutputState::Silent.to_u8()),
             emitted: AtomicBool::new(false),
             limited_samples: AtomicU64::new(0),
@@ -359,6 +364,9 @@ impl OutputRenderer {
             // Nothing audible: jump to the new gain, the fade-in provides the ramp.
             self.gain = gain_target;
         }
+        let max = self
+            .max
+            .min(f32::from_bits(sh.limit_bits.load(Ordering::Acquire)));
         let inv_fade = 1.0 / self.fade_frames as f32;
         let history_routed = self.is_routed(self.history_channel);
 
@@ -386,9 +394,9 @@ impl OutputRenderer {
                     *v = if !x.is_finite() {
                         limited = limited.saturating_add(1);
                         0.0
-                    } else if x.abs() > self.max {
+                    } else if x.abs() > max {
                         limited = limited.saturating_add(1);
-                        x.clamp(-self.max, self.max)
+                        x.clamp(-max, max)
                     } else {
                         x
                     };
@@ -595,6 +603,28 @@ mod tests {
             parts.ticks.pop().map(|t| u64::from(t.limited_samples)),
             Ok(limited)
         );
+    }
+
+    #[test]
+    fn a_limit_set_while_running_tightens_but_never_loosens() {
+        let (mut handle, port) = generator([0]).expect("routes");
+        handle
+            .set_source(Box::new(Sine::new(1000.0, RATE, 1.0)))
+            .expect("queue");
+        handle.start();
+        let (mut r, _parts) = renderer(OutputSource::Generator(port), -20.0);
+        let open = MaxLevel::from_peak_db(-20.0).expect("level").linear();
+        run(&mut r, 0, 4800);
+        handle.set_max_level(MaxLevel::from_peak_db(-30.0).expect("level"));
+        let tight = MaxLevel::from_peak_db(-30.0).expect("level").linear();
+        let out = run(&mut r, 4800, 4800);
+        assert!(out.iter().all(|f| f[0].abs() <= tight));
+        assert!(peak(out.iter().map(|f| f[0])) > tight * 0.99);
+        // Above the limit the stream was opened with: that one still holds.
+        handle.set_max_level(MaxLevel::from_peak_db(0.0).expect("level"));
+        let out = run(&mut r, 9600, 4800);
+        assert!(out.iter().all(|f| f[0].abs() <= open));
+        assert!(peak(out.iter().map(|f| f[0])) > open * 0.99);
     }
 
     #[test]

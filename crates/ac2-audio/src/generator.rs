@@ -15,7 +15,7 @@ use std::sync::atomic::Ordering;
 
 use thiserror::Error;
 
-use crate::level::Gain;
+use crate::level::{Gain, MaxLevel};
 use crate::output::{OutputShared, OutputState};
 use crate::rng::Rng;
 
@@ -196,6 +196,16 @@ impl GeneratorHandle {
         self.shared
             .gain_bits
             .store(gain.to_bits(), Ordering::Release);
+    }
+
+    /// Sets the sample-peak limit from the next block on. The callback enforces the lower of
+    /// this and the limit the stream was opened with ([`crate::DuplexRequest::max_level`]):
+    /// a running stream's limit can be tightened at once, and never raised above the one it
+    /// was opened with.
+    pub fn set_max_level(&self, max: MaxLevel) {
+        self.shared
+            .limit_bits
+            .store(max.linear().to_bits(), Ordering::Release);
     }
 
     /// What the callback reported for its most recent block.
