@@ -491,7 +491,7 @@ commands! {
 
     SpectrumStyle => "spectrum_style", "RTA: bars / line", [Spectrum];
     PeakHold => "peak_hold", "Peak hold on / off", [Spectrum];
-    Spectrograph => "spectrograph", "Spectrograph under the spectrum on / off", [Spectrum];
+    Spectrograph => "spectrograph", "Spectrum pane: spectrum → spectrum + spectrograph → spectrograph", [Spectrum];
     SpectrographSpan => "spectrograph_span", "Spectrograph history: 10 → 30 → 60 → 120 s", [Spectrum];
 
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
@@ -762,7 +762,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::PeakHold, "peak hold", 75),
                     // The RTA's bars / line (B) is in the help and the palette: the line
                     // holds eight.
-                    hint(C::Spectrograph, "spectrograph", 65),
+                    hint(C::Spectrograph, "spectrum/both/spectrograph", 65),
                     hint(C::SmoothCoarser, "smoothing", 60),
                     hint(C::LevelFit, "fit level", 55),
                     hint(C::Slot1, "capture", 85),

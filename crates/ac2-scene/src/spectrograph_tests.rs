@@ -264,9 +264,10 @@ fn the_picture_follows_the_frequency_axis_without_new_columns() {
     assert!((g.rect.right() - xm.to_px(rows.hi_hz())).abs() < 0.1);
     assert_eq!(g.clip, Some(a.plot));
     // Lined up with the spectrum above.
-    assert_eq!(a.spectrum.plot.x, a.plot.x);
-    assert_eq!(a.spectrum.plot.w, a.plot.w);
-    assert!(a.spectrum.plot.bottom() < a.plot.y);
+    let sp = a.spectrum.as_ref().expect("the spectrum above");
+    assert_eq!(sp.plot.x, a.plot.x);
+    assert_eq!(sp.plot.w, a.plot.w);
+    assert!(sp.plot.bottom() < a.plot.y);
     // Zoomed: the rect moves, the columns are the very same.
     view.freq = FreqRange::default().zoom(1000.0, 4.0);
     let b = scene_of(&h, &view);
@@ -391,7 +392,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
             height: 500.0,
         },
     );
-    let sp = &s.spectrum;
+    let sp = s.spectrum.as_ref().expect("the spectrum above");
     assert_eq!(sp.unit, "dBFS per 2.93 Hz bin (tone)");
     assert_eq!(sp.legend_shown, ["Main L S1", "Main L S2"]);
     let selected: Vec<bool> = sp.legend.iter().map(|e| e.selected).collect();
@@ -416,5 +417,103 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
             theme.trace_width,
             theme.trace_width * crate::tf::SELECTED_WIDTH
         ]
+    );
+}
+
+/// G's third view: the spectrograph alone takes the whole pane under its banners, on the
+/// same frequency axis, colour bar and cursor; its caption carries the calibration the
+/// spectrum's would, shortened before it ever meets the cursor readout.
+#[test]
+fn the_spectrograph_alone_takes_the_pane() {
+    let mut h = SpectrographHistory::new(30);
+    let mut f = Feed::new(&third_octaves());
+    f.push(&mut h, T0, -23.5);
+    let mut view = ViewState::default();
+    let split = scene_of(&h, &view);
+    view.spectrum.mode = SpectrumMode::Spectrograph;
+    let alone = scene_of(&h, &view);
+    assert!(alone.spectrum.is_none());
+    assert!(alone.banners.is_empty());
+    assert!(alone.plot.y < 40.0, "{:?}", alone.plot);
+    assert!(alone.plot.h > split.plot.h * 1.5);
+    assert_eq!(alone.plot.x, split.plot.x);
+    assert_eq!(alone.plot.w, split.plot.w);
+    assert_eq!(alone.caption, "Main · last 30 s · dBFS");
+    assert_eq!((alone.bar.y, alone.bar.h), (alone.plot.y, alone.plot.h));
+    view.cursor_hz = Some(1000.0);
+    view.spectrum.spectrograph.cursor_s = Some(0.0);
+    let s = scene_of(&h, &view);
+    assert!(s.cursor.is_some());
+
+    // Banners above it, and the calibration of the pane's curve in its caption.
+    let g = third_octaves();
+    let (freqs, edges) = (crate::grid::column_frequencies(&g), column_edges(&g));
+    let level = vec![-40.0f32; freqs.len()];
+    let rig = "1/3 oct · Z · electrical cal 1 kHz (data sheet 15.0 mV/Pa) ±1 dB · 2 d ago";
+    let trace = SpectrumTrace {
+        key: crate::trace::TraceKey::Stored(ac2_proto::units::TraceId(1)),
+        name: "Main".into(),
+        color: crate::primitives::Color::WHITE,
+        freqs: &freqs,
+        edges: &edges,
+        level: &level,
+        validity: None,
+        peak: None,
+        scale: LevelScale::Dbfs,
+        quantity: crate::spectrum::Quantity::Band,
+        bin_hz: None,
+        caption: rig.into(),
+        freshness: None,
+        offset_db: 0.0,
+        selected: false,
+    };
+    let input = SpectrographInput {
+        history: &h,
+        name: "Main".into(),
+        range: Range::new(-100.0, 0.0),
+        offset_db: 0.0,
+        freshness: Some(Freshness::AudioStopped { age_s: 4.8 }),
+    };
+    view.cursor_hz = None;
+    let status = Status {
+        no_delay_estimate: Some(crate::banner::NoDelayEstimate::NotFound),
+        ..Status::default()
+    };
+    let draw = |w: f32| {
+        spectrograph_scene(
+            std::slice::from_ref(&trace),
+            &status,
+            Some(&input),
+            &view,
+            &Theme::dark(),
+            Viewport {
+                width: w,
+                height: 500.0,
+            },
+        )
+    };
+    let s = draw(1200.0);
+    assert_eq!(s.banners.len(), 1);
+    assert!(s.banners[0].rect.bottom() < s.plot.y);
+    assert_eq!(
+        s.caption,
+        format!("Main · last 30 s · dBFS · audio stopped · {rig}")
+    );
+    let shown = |s: &SpectrographScene| {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .find(|l| l.pos == [s.plot.x, s.plot.y - 3.0])
+            .map(|l| l.text.clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(shown(&s), s.caption);
+    let narrow = draw(420.0);
+    let text = shown(&narrow);
+    assert!(text.starts_with("Main") || text.is_empty(), "{text}");
+    assert!(
+        crate::canvas::text_width(&text, Theme::dark().small_font_size) <= narrow.plot.w,
+        "{text}"
     );
 }

@@ -125,7 +125,7 @@ mod tests {
                 "S start/stop",
                 "F freeze",
                 "P peak hold",
-                "G spectrograph",
+                "G spectrum/both/spectrograph",
                 "K smoothing",
                 "Shift+Home fit level",
                 "Ctrl+1 capture",

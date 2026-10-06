@@ -18,7 +18,7 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::MeasId;
 use ac2_scene::primitives::Color;
 use ac2_scene::theme::Theme;
-use ac2_scene::view::LeqStyle;
+use ac2_scene::view::{LeqStyle, SpectrumMode};
 use ac2_ui::conn::{Conn, Target};
 use ac2_ui::embedded::{
     EmbeddedBackend, EmbeddedError, Setup, start_embedded, start_embedded_with,
@@ -3263,12 +3263,14 @@ fn spectrograph_from_an_empty_daemon() -> R {
             .ok_or("spectrum")?;
     d.key("Alt+2");
     assert!(
-        hint_line(&d.st).iter().any(|h| h == "G spectrograph"),
+        hint_line(&d.st)
+            .iter()
+            .any(|h| h == "G spectrum/both/spectrograph"),
         "{:?}",
         hint_line(&d.st)
     );
     d.key("G");
-    assert!(d.st.view.spectrum.spectrograph.shown);
+    assert_eq!(d.st.view.spectrum.mode, SpectrumMode::Split);
     // The level typed for the transfer measurement is still set: arm and fire.
     d.key("Space");
     d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
@@ -3337,9 +3339,35 @@ fn spectrograph_from_an_empty_daemon() -> R {
     let s = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
     assert!(s.caption.ends_with(" · stopped"), "{}", s.caption);
     assert!(filled(&d.st, 10));
-    // G hides it and nothing is kept.
+    // G: the spectrograph alone, its history kept; W makes it the only pane, full size.
     d.key("G");
-    assert!(!d.st.view.spectrum.spectrograph.shown);
+    assert_eq!(d.st.view.spectrum.mode, SpectrumMode::Spectrograph);
+    assert!(filled(&d.st, 10));
+    d.key("W");
+    assert_eq!(d.st.layout.visible(), [ac2_ui::state::PaneKind::Spectrum]);
+    let alone = ac2_ui::scenes::spectrograph(&d.st, &theme, size, now());
+    assert!(alone.spectrum.is_none());
+    assert!(
+        alone.plot.h > s.plot.h * 1.5,
+        "{:?} vs {:?}",
+        alone.plot,
+        s.plot
+    );
+    assert!(
+        alone
+            .caption
+            .starts_with(&format!("{name} · last 60 s · dBFS · stopped · ")),
+        "{}",
+        alone.caption
+    );
+    // The level keys still move the colours.
+    let before = d.st.view.spectrum.level;
+    d.key("Ctrl+I");
+    assert_ne!(d.st.view.spectrum.level, before);
+    d.key("W");
+    // G again hides it and nothing is kept.
+    d.key("G");
+    assert_eq!(d.st.view.spectrum.mode, SpectrumMode::Spectrum);
     assert!(d.st.spectrographs.is_empty());
     drop(d);
     drop(daemon);

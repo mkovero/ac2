@@ -247,17 +247,49 @@ pub struct SpectrumView {
     /// a dBFS-sized axis.
     pub level_spl: Range,
     pub peak_hold: bool,
+    /// What the pane shows: the spectrum, the spectrograph or both.
+    pub mode: SpectrumMode,
     pub spectrograph: SpectrographView,
+}
+
+/// What the spectrum pane shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SpectrumMode {
+    /// The spectrum (or RTA) alone.
+    #[default]
+    Spectrum,
+    /// The spectrum on top, the spectrograph of the pane's measurement under it, on the same
+    /// frequency pixels.
+    Split,
+    /// The spectrograph alone, the whole pane (full screen with W / F11).
+    Spectrograph,
+}
+
+impl SpectrumMode {
+    /// G: spectrum → spectrum + spectrograph → spectrograph → spectrum. The spectrograph
+    /// first comes in beside the curve it is made of, so its history (kept only while it is
+    /// shown) builds while the spectrum is still in view; it then takes the whole pane
+    /// with its history, and the last step back hides it.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Spectrum => Self::Split,
+            Self::Split => Self::Spectrograph,
+            Self::Spectrograph => Self::Spectrum,
+        }
+    }
+
+    /// The spectrograph is drawn (and its history kept).
+    pub fn spectrograph(self) -> bool {
+        self != Self::Spectrum
+    }
 }
 
 /// The history lengths the spectrograph steps through, seconds.
 pub const SPECTROGRAPH_SPANS_S: [u32; 4] = [10, 30, 60, 120];
 
-/// The spectrograph under the spectrum: whether it is shown, how much history it keeps, and
-/// the time of the cursor in it.
+/// The spectrograph: how much history it keeps, and the time of the cursor in it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpectrographView {
-    pub shown: bool,
     /// History shown, seconds (one of [`SPECTROGRAPH_SPANS_S`]).
     pub span_s: u32,
     /// The cursor's time, seconds before the newest frame (with `cursor_hz`, a point).
@@ -267,7 +299,6 @@ pub struct SpectrographView {
 impl Default for SpectrographView {
     fn default() -> Self {
         Self {
-            shown: false,
             span_s: 30,
             cursor_s: None,
         }
@@ -309,6 +340,7 @@ impl Default for SpectrumView {
             level: Range::new(-100.0, 0.0),
             level_spl: Range::new(20.0, 120.0),
             peak_hold: false,
+            mode: SpectrumMode::Spectrum,
             spectrograph: SpectrographView::default(),
         }
     }

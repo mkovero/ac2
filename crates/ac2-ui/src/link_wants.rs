@@ -44,7 +44,7 @@ impl AppState {
             .flatten();
         let spectrum = shows(PaneKind::Spectrum)
             || self.view.spectrum.peak_hold
-            || self.view.spectrum.spectrograph.shown;
+            || self.view.spectrum.mode.spectrograph();
         let mut out = HashSet::new();
         for m in self.measurements() {
             let streams: &[Stream] = match m.config.kind {

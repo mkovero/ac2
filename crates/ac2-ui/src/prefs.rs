@@ -30,6 +30,7 @@
 //! maximized = true
 //! fullscreen = true
 //! spl_view = "meter_leq"
+//! spectrum_view = "spectrograph"
 //! ir_mode = "etc"
 //! distortion_unit = "percent"
 //!
@@ -59,7 +60,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use ac2_scene::axis::Range;
-use ac2_scene::view::{DistortionUnit, IrMode, LeqLayout, LeqStyle, SplMode, ViewState, level};
+use ac2_scene::view::{
+    DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SplMode, ViewState, level,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::state::PaneKind;
@@ -92,6 +95,8 @@ pub struct LayoutPrefs {
     pub fullscreen: bool,
     /// What the SPL pane shows: the meter, the Leq windows or both.
     pub spl_view: SplMode,
+    /// What the spectrum pane shows: the spectrum, the spectrograph or both.
+    pub spectrum_view: SpectrumMode,
     pub ir_mode: IrMode,
     pub distortion_unit: DistortionUnit,
     /// The measurement each pane shows, by name (transfer, spectrum, SPL).
@@ -105,6 +110,7 @@ impl Default for LayoutPrefs {
             maximized: false,
             fullscreen: false,
             spl_view: SplMode::MeterLeq,
+            spectrum_view: SpectrumMode::Spectrum,
             ir_mode: IrMode::Linear,
             distortion_unit: DistortionUnit::Db,
             measurements: BTreeMap::new(),
@@ -313,6 +319,15 @@ enum SplViewFile {
     MeterLeq,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SpectrumViewFile {
+    #[default]
+    Spectrum,
+    SpectrumSpectrograph,
+    Spectrograph,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum IrModeFile {
@@ -353,6 +368,8 @@ struct LayoutFile {
     fullscreen: bool,
     #[serde(default = "spl_meter_leq")]
     spl_view: SplViewFile,
+    #[serde(default)]
+    spectrum_view: SpectrumViewFile,
     #[serde(default = "ir_linear")]
     ir_mode: IrModeFile,
     #[serde(default = "unit_db")]
@@ -395,6 +412,11 @@ impl LayoutFile {
                 SplViewFile::Leq => SplMode::Leq,
                 SplViewFile::MeterLeq => SplMode::MeterLeq,
             },
+            spectrum_view: match self.spectrum_view {
+                SpectrumViewFile::Spectrum => SpectrumMode::Spectrum,
+                SpectrumViewFile::SpectrumSpectrograph => SpectrumMode::Split,
+                SpectrumViewFile::Spectrograph => SpectrumMode::Spectrograph,
+            },
             ir_mode: match self.ir_mode {
                 IrModeFile::Linear => IrMode::Linear,
                 IrModeFile::Log => IrMode::Log,
@@ -418,6 +440,11 @@ impl LayoutFile {
                 SplMode::Meter => SplViewFile::Meter,
                 SplMode::Leq => SplViewFile::Leq,
                 SplMode::MeterLeq => SplViewFile::MeterLeq,
+            },
+            spectrum_view: match l.spectrum_view {
+                SpectrumMode::Spectrum => SpectrumViewFile::Spectrum,
+                SpectrumMode::Split => SpectrumViewFile::SpectrumSpectrograph,
+                SpectrumMode::Spectrograph => SpectrumViewFile::Spectrograph,
             },
             ir_mode: match l.ir_mode {
                 IrMode::Linear => IrModeFile::Linear,
@@ -773,6 +800,7 @@ mod tests {
             maximized: true,
             fullscreen: true,
             spl_view: SplMode::Leq,
+            spectrum_view: SpectrumMode::Spectrograph,
             ir_mode: IrMode::Etc,
             distortion_unit: DistortionUnit::Percent,
             measurements: [
@@ -793,6 +821,7 @@ mod tests {
             "focus = \"spl\"",
             "fullscreen = true",
             "spl_view = \"leq\"",
+            "spectrum_view = \"spectrograph\"",
             "ir_mode = \"etc\"",
             "distortion_unit = \"percent\"",
             "[layout.measurements]",
@@ -850,6 +879,33 @@ mod tests {
             assert!(text.contains(&format!("spl_view = \"{name}\"")), "{text}");
             assert_eq!(
                 UiPrefs::from_toml(&text).expect("parse").layout.spl_view,
+                mode
+            );
+        }
+    }
+
+    /// The spectrum pane starts on the spectrum; a remembered view stays, by name.
+    #[test]
+    fn spectrum_view_defaults_to_the_spectrum_and_keeps_a_choice() {
+        assert_eq!(LayoutPrefs::default().spectrum_view, SpectrumMode::Spectrum);
+        for (mode, name) in [
+            (SpectrumMode::Spectrum, "spectrum"),
+            (SpectrumMode::Split, "spectrum_spectrograph"),
+            (SpectrumMode::Spectrograph, "spectrograph"),
+        ] {
+            let mut p = UiPrefs::default();
+            p.layout.spectrum_view = mode;
+            p.layout.focus = PaneKind::Spectrum;
+            let text = p.to_toml();
+            assert!(
+                text.contains(&format!("spectrum_view = \"{name}\"")),
+                "{text}"
+            );
+            assert_eq!(
+                UiPrefs::from_toml(&text)
+                    .expect("parse")
+                    .layout
+                    .spectrum_view,
                 mode
             );
         }

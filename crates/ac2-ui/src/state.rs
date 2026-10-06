@@ -1475,6 +1475,7 @@ impl AppState {
             maximized: self.layout.maximized,
             fullscreen: self.fullscreen,
             spl_view: self.view.spl.mode,
+            spectrum_view: self.view.spectrum.mode,
             ir_mode: self.view.ir.mode,
             distortion_unit: self.view.distortion.unit,
             measurements,
@@ -1561,6 +1562,7 @@ impl AppState {
         self.layout.maximized = l.maximized;
         self.fullscreen = l.fullscreen;
         self.view.spl.mode = l.spl_view;
+        self.view.spectrum.mode = l.spectrum_view;
         self.view.ir.mode = l.ir_mode;
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
@@ -4188,15 +4190,20 @@ impl AppState {
                 self.peaks.clear();
             }
             C::Spectrograph => {
-                let sg = &mut self.view.spectrum.spectrograph;
-                sg.shown = !sg.shown;
-                // The history starts with the view: nothing is kept for a hidden one.
-                self.spectrographs.clear();
-                if self.view.spectrum.spectrograph.shown
+                let before = self.view.spectrum.mode;
+                let mode = before.next();
+                self.view.spectrum.mode = mode;
+                // The history starts with the view and goes with it: nothing is kept for a
+                // hidden spectrograph; from the split to the spectrograph alone it stays.
+                if !mode.spectrograph() {
+                    self.spectrographs.clear();
+                    self.view.spectrum.spectrograph.cursor_s = None;
+                } else if !before.spectrograph()
                     && let Some(d) = self.data.clone()
                 {
                     self.fold_spectrographs(&d);
                 }
+                self.focus(PaneKind::Spectrum);
             }
             C::SpectrographSpan => {
                 let sg = &mut self.view.spectrum.spectrograph;
@@ -4758,7 +4765,7 @@ impl AppState {
                 if self.view.spectrum.peak_hold {
                     self.fold_peaks(&d);
                 }
-                if self.view.spectrum.spectrograph.shown {
+                if self.view.spectrum.mode.spectrograph() {
                     self.fold_spectrographs(&d);
                 }
                 // A new log clears the history before its first frame goes in.

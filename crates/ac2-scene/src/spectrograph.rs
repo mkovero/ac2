@@ -34,7 +34,7 @@ use crate::primitives::{
 use crate::spectrum::{SpectrumScene, SpectrumTrace, offset_note, scale_unit, spectrum_scene_in};
 use crate::theme::Theme;
 use crate::time::Freshness;
-use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, ViewState};
+use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, SpectrumMode, ViewState};
 
 /// Time slots in the history, whatever its length: 30 s at 33 ms, about the spectrum's
 /// fastest update, and well inside the 4096 texels a Pi 4 class GPU allows per texture side.
@@ -319,10 +319,15 @@ pub struct SpectrographCursor {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpectrographScene {
-    /// The whole picture: the spectrum on top, the spectrograph under it.
+    /// The whole picture: the spectrum on top, the spectrograph under it (or the
+    /// spectrograph alone).
     pub scene: Scene,
-    /// The spectrum part as built; its `scene` is empty (its layers are in `scene`).
-    pub spectrum: SpectrumScene,
+    /// The spectrum part as built; its `scene` is empty (its layers are in `scene`). `None`
+    /// when the spectrograph is shown alone.
+    pub spectrum: Option<SpectrumScene>,
+    /// Banners above the spectrograph shown alone (the spectrum part carries them in the
+    /// split).
+    pub banners: Vec<crate::banner::BannerRow>,
     /// The spectrograph's plot rectangle.
     pub plot: Rect,
     /// Frequency, as the spectrum's (same pixels).
@@ -353,11 +358,12 @@ const BAR_STEPS: usize = 256;
 const HISTORY_ID: HeatmapId = HeatmapId(1);
 const BAR_ID: HeatmapId = HeatmapId(2);
 
-/// The spectrum pane with the spectrograph under it: the spectrum (`traces`, as
-/// [`crate::spectrum::spectrum_scene`] draws them) in the top [`SPECTRUM_SHARE`], the
-/// spectrograph of `sg` below on the same frequency pixels, a colour bar with the level
-/// range right of it. `None` (no spectrum or RTA measurement) draws an empty plot that
-/// says so.
+/// The spectrum pane with the spectrograph: in [`SpectrumMode::Split`] the spectrum
+/// (`traces`, as [`crate::spectrum::spectrum_scene`] draws them) in the top
+/// [`SPECTRUM_SHARE`], the spectrograph of `sg` below on the same frequency pixels; in
+/// [`SpectrumMode::Spectrograph`] the banners and the spectrograph alone, its caption
+/// carrying the calibration the spectrum's would. A colour bar with the level range right of
+/// it. `None` (no spectrum or RTA measurement) draws an empty plot that says so.
 pub fn spectrograph_scene(
     traces: &[SpectrumTrace<'_>],
     status: &Status,
@@ -366,26 +372,42 @@ pub fn spectrograph_scene(
     theme: &Theme,
     size: Viewport,
 ) -> SpectrographScene {
-    let top_h = ((size.height - PANE_GAP) * SPECTRUM_SHARE).floor().max(1.0);
-    let mut spectrum = spectrum_scene_in(
-        traces,
-        status,
-        view,
-        theme,
-        Viewport {
-            width: size.width,
-            height: top_h,
-        },
-        RIGHT_MARGIN,
-    );
-    let mut layers = std::mem::take(&mut spectrum.scene.layers);
+    let alone = view.spectrum.mode == SpectrumMode::Spectrograph;
+    let (spectrum, mut layers, banners, top) = if alone {
+        let mut c0 = Canvas::new(size, theme);
+        let plot_w = (size.width - MARGINS.left - RIGHT_MARGIN).max(1.0);
+        let strip = canvas::banner_strip(&mut c0, status, MARGINS.left, plot_w, size, theme);
+        let top = strip.rect.bottom() + MARGINS.top;
+        (None, c0.into_scene(size).layers, strip.rows, top)
+    } else {
+        let top_h = ((size.height - PANE_GAP) * SPECTRUM_SHARE).floor().max(1.0);
+        let mut spectrum = spectrum_scene_in(
+            traces,
+            status,
+            view,
+            theme,
+            Viewport {
+                width: size.width,
+                height: top_h,
+            },
+            RIGHT_MARGIN,
+        );
+        let layers = std::mem::take(&mut spectrum.scene.layers);
+        (Some(spectrum), layers, Vec::new(), top_h + PANE_GAP)
+    };
     let mut c = Canvas::default();
-    let top = top_h + PANE_GAP;
-    c.base.rects.push(FillRect {
-        rect: Rect::new(0.0, top_h, size.width, (size.height - top_h).max(0.0)),
-        color: theme.background,
-        clip: None,
-    });
+    if !alone {
+        c.base.rects.push(FillRect {
+            rect: Rect::new(
+                0.0,
+                top - PANE_GAP,
+                size.width,
+                (size.height - top + PANE_GAP).max(0.0),
+            ),
+            color: theme.background,
+            clip: None,
+        });
+    }
     let plot = Rect::new(
         MARGINS.left,
         top + CAPTION_H,
@@ -479,8 +501,15 @@ pub fn spectrograph_scene(
             if let Some(scale) = s.history.scale() {
                 caption.push_str(&format!(" · {}", scale_unit(scale)));
             }
-            if s.freshness.is_some_and(|f| f.is_stopped()) {
-                caption.push_str(" · stopped");
+            // In the split the spectrum's legend tags the curve; alone, the caption does.
+            let tag = match s.freshness {
+                Some(f) if alone => f.tag(),
+                Some(f) if f.is_stopped() => f.tag(),
+                _ => None,
+            };
+            if let Some(tag) = tag {
+                caption.push_str(" · ");
+                caption.push_str(&tag);
             }
             match s.history.rows() {
                 Some(rows) if !s.history.is_empty() && range.is_valid() => {
@@ -533,15 +562,36 @@ pub fn spectrograph_scene(
             }
         }
     }
-    // The cursor readout wins the line above the plot when both do not fit.
+    // Alone, the caption also says what the spectrum's would: the window and the
+    // calibration of the pane's first curve, shortened as the spectrum shortens it.
+    let own = caption.clone();
+    let mut forms = Vec::new();
+    if alone
+        && !caption.is_empty()
+        && let Some(cal) = traces.first().map(|t| t.caption.as_str())
+        // A stopped curve's caption says so; the spectrograph's own already has.
+        && let cal = cal.strip_suffix(" · stopped").unwrap_or(cal)
+        && !cal.is_empty()
+    {
+        for f in crate::spectrum::caption_forms(cal) {
+            if !f.is_empty() {
+                forms.push(format!("{caption} · {f}"));
+            }
+        }
+        if let Some(full) = forms.first() {
+            caption = full.clone();
+        }
+    }
+    forms.extend([caption.clone(), own, String::new()]);
+    // The cursor readout wins the line above the plot when both do not fit; the caption
+    // gives up its details first, its name last.
     let room = cursor.as_ref().map_or(plot.w, |cur| {
         plot.w - canvas::text_width(&cur.text, theme.small_font_size) - 12.0
     });
-    let shown_caption = if canvas::text_width(&caption, theme.small_font_size) <= room {
-        caption.clone()
-    } else {
-        String::new()
-    };
+    let shown_caption = forms
+        .into_iter()
+        .find(|c| canvas::text_width(c, theme.small_font_size) <= room)
+        .unwrap_or_default();
     c.base.labels.push(label(
         shown_caption,
         [plot.x, plot.y - 3.0],
@@ -586,6 +636,7 @@ pub fn spectrograph_scene(
             layers,
         },
         spectrum,
+        banners,
         plot,
         x_axis,
         time_axis,

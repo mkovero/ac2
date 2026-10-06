@@ -142,20 +142,22 @@ fn scene_for(
                 },
             )
         }
-        PaneKind::Spectrum if st.view.spectrum.spectrograph.shown => {
+        PaneKind::Spectrum if st.view.spectrum.mode.spectrograph() => {
             let s = scenes::spectrograph(st, theme, vp, now);
-            let r = s.spectrum.unit_rect;
-            unit_tip = s.spectrum.unit_help.clone().map(|h| {
-                (
-                    egui::Rect::from_min_size(egui::pos2(r.x, r.y), egui::vec2(r.w, r.h)),
-                    h,
-                )
-            });
+            if let Some(sp) = &s.spectrum {
+                let r = sp.unit_rect;
+                unit_tip = sp.unit_help.clone().map(|h| {
+                    (
+                        egui::Rect::from_min_size(egui::pos2(r.x, r.y), egui::vec2(r.w, r.h)),
+                        h,
+                    )
+                });
+            }
             (
                 s.scene,
                 Axes {
                     x: Some(s.x_axis.mapping),
-                    y_level: Some(s.spectrum.y_axis.mapping),
+                    y_level: s.spectrum.as_ref().map(|sp| sp.y_axis.mapping),
                     time: Some(s.time_axis.mapping),
                 },
             )

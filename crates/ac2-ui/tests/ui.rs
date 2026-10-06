@@ -2265,7 +2265,7 @@ fn spectrograph() {
             let st = &a.state;
             st.layout.maximized
                 && st.layout.focus == PaneKind::Spectrum
-                && st.view.spectrum.spectrograph.shown
+                && st.view.spectrum.mode == ac2_scene::view::SpectrumMode::Split
                 && st.meas(MeasId(3)).is_some_and(|m| !m.running)
         },
     );
@@ -2324,4 +2324,31 @@ fn spectrograph() {
         );
     }
     snapshot_when(&mut h, "spectrograph", pin, same);
+
+    // G again: the spectrograph alone, maximised, its history kept; the caption carries the
+    // spectrum's window.
+    h.key_press(Key::G);
+    step_until(&mut h, "the spectrograph alone", |a| {
+        a.state.view.spectrum.mode == ac2_scene::view::SpectrumMode::Spectrograph
+    });
+    {
+        pin(h.state_mut());
+        let st = &h.state().state;
+        let now = ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        };
+        let theme = ac2_scene::theme::Theme::dark();
+        let size = ac2_scene::primitives::Viewport {
+            width: 1000.0,
+            height: 600.0,
+        };
+        let s = ac2_ui::scenes::spectrograph(st, &theme, size, now);
+        assert!(s.spectrum.is_none());
+        assert_eq!(
+            s.caption,
+            "Mic 1 FFT · last 30 s · dBFS · stopped · Hann window"
+        );
+    }
+    snapshot_when(&mut h, "spectrograph_alone", pin, same);
 }

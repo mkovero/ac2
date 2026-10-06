@@ -5742,3 +5742,43 @@ fn space_on_the_live_views_drives_the_generator() {
     );
     assert!(!r.iter().any(|x| matches!(x, Request::Sweep { .. })));
 }
+
+/// G in the spectrum pane steps its views: spectrum → spectrum + spectrograph →
+/// spectrograph → spectrum. The history is kept from the split to the spectrograph alone and
+/// dropped with it; the view is remembered.
+#[test]
+fn g_steps_the_spectrum_panes_views() {
+    use ac2_scene::view::SpectrumMode;
+    let mut t = T::new();
+    t.key("Alt+2");
+    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Spectrum);
+    t.key("G");
+    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Split);
+    t.st.spectrographs.insert(
+        MeasId(2),
+        ac2_scene::spectrograph::SpectrographHistory::new(30),
+    );
+    t.key("G");
+    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Spectrograph);
+    assert!(!t.st.spectrographs.is_empty(), "the history stays");
+    t.key("W");
+    assert_eq!(t.st.layout.visible(), [PaneKind::Spectrum]);
+    assert_eq!(
+        t.st.layout_prefs().spectrum_view,
+        SpectrumMode::Spectrograph
+    );
+    t.key("W");
+    t.key("G");
+    assert_eq!(t.st.view.spectrum.mode, SpectrumMode::Spectrum);
+    assert!(
+        t.st.spectrographs.is_empty(),
+        "nothing kept for a hidden one"
+    );
+
+    // Remembered: a new app on these preferences opens on the spectrograph.
+    let mut prefs = crate::prefs::UiPrefs::default();
+    prefs.layout.spectrum_view = SpectrumMode::Spectrograph;
+    let mut u = T::new();
+    u.st.set_prefs(prefs);
+    assert_eq!(u.st.view.spectrum.mode, SpectrumMode::Spectrograph);
+}

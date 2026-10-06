@@ -271,14 +271,16 @@ add work but no new information; short FFTs update about 30 times a second.
 
 ### Spectrograph
 
-**G** in the spectrum pane shows the **spectrograph** of the pane's measurement under the
-spectrum: frequency across on the spectrum's own axis (zoom and pan move both), time down with
+**G** in the spectrum pane steps its views: the spectrum → the spectrum with the
+**spectrograph** of the pane's measurement under it → the spectrograph alone (the whole pane;
+**W** or F11 for the whole screen) → the spectrum; the view is remembered. Frequency across on the spectrum's own axis (zoom and pan move both), time down with
 the newest frame at the top, level as colour. The colour bar on the right spans the pane's
 level axis, so **Ctrl+I / Ctrl+O**, **Ctrl+↑/↓**, **Shift+Home** and **Ctrl+Home** change the
 colours as they change the curve's axis; the colours are a perceptual, colour-blind-safe map
 (viridis): equal steps in dB look like equal steps. **Shift+G** steps the history through 10,
-30 (the default), 60 and 120 s; it starts afresh at each length and when the spectrograph is
-switched on.
+30 (the default), 60 and 120 s; it starts afresh at each length and when the spectrograph
+comes into view (from the split to the spectrograph alone it is kept). Alone, the caption
+above it also names the spectrum's window and calibration.
 
 - A click in the spectrograph puts the cursor there: above the plot it reads frequency, time
   before the newest frame and level (`1.00 kHz · 4.2 s ago · −32.0 dBFS`); **C** turns it
@@ -1135,7 +1137,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `B` | RTA: bars / line | `spectrum_style` |
 | `P` | Peak hold on / off | `peak_hold` |
-| `G` | Spectrograph under the spectrum on / off | `spectrograph` |
+| `G` | Spectrum pane: spectrum → spectrum + spectrograph → spectrograph | `spectrograph` |
 | `Shift+G` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 
 #### Impulse response
@@ -1230,7 +1232,7 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Pane | Hint line |
 |---|---|
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `K` smoothing · `Shift+I` IR · `W` maximise · `Alt+↑` offset · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq/both · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` linear/log/ETC · `Shift+I` IR/distortion · `W` maximise · `Shift+W` hide pane · `H` all keys |

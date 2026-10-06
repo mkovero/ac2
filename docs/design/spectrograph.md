@@ -5,8 +5,14 @@ colormap LUT"). User-facing description: `docs/user-guide.md` → *Spectrograph*
 
 ## What the operator sees
 
-**G** in the spectrum pane splits it: the spectrum in the top 40 %, the spectrograph of the
-pane's measurement under it. Frequency runs across on the spectrum's own log axis — the
+**G** steps the spectrum pane's views, as it steps the SPL pane's: spectrum → spectrum +
+spectrograph → spectrograph alone → spectrum (remembered in `ui.toml` as `spectrum_view`).
+The split puts the spectrum in the top 40 %, the spectrograph of the pane's measurement under
+it; alone, the spectrograph takes the whole pane under the banners (with **W** / F11, the
+whole screen), its caption carrying the spectrum's window and calibration and its
+freshness tag. The order adds the spectrograph beside the curve it is made of first, so its
+history (kept only while it is shown) builds while the spectrum is still in view; it then
+takes the pane with that history, and the last step hides it. Frequency runs across on the spectrum's own log axis — the
 same plot left and right edges, so a frequency is at the same pixel in both, and zoom and
 pan move both. Time runs down, the newest frame at the top, over the history length
 (**Shift+G**: 10 → 30 → 60 → 120 s, default 30 s). Level is colour, through the theme's
@@ -16,7 +22,7 @@ keys (Ctrl+I/O, Ctrl+↑/↓, Shift+Home, Ctrl+Home) and the mouse already move.
 the right shows that range with its dB labels. A click in the spectrograph sets the cursor's
 frequency and time; the line above the plot reads `1.00 kHz · 4.2 s ago · −32.0 dBFS`.
 
-Why a split and not a replacement: the curve is what the level axis and the cursor were
+Why the split comes first, not a replacement: the curve is what the level axis and the cursor were
 built around, and an operator reading a spectrograph wants the instantaneous curve beside it
 (Smaart does the same). The colour bar sits beside the spectrograph, and the spectrum above
 keeps the same right margin, so the frequency axes line up.
@@ -94,7 +100,8 @@ and the picture cannot disagree.
   pixel shows its highest cell; the golden `heatmap_scroll` is unchanged.
 - `ac2-ui`: `tests/embedded.rs` `spectrograph_from_an_empty_daemon` (session, spectrum
   from the palette, G, the rig's noise fills it, cursor readout, C, Shift+G, stopped caption,
-  G clears); GPU snapshot `tests/ui.rs` `spectrograph` from a pinned 25 s sweep with a gap.
+  G alone, W full size, level keys, G clears); GPU snapshots `tests/ui.rs` `spectrograph`
+  and `spectrograph_alone` from a pinned 25 s sweep with a gap.
 
 ## Open
 
