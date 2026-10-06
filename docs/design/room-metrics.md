@@ -113,7 +113,7 @@ CLI prints the octave table after the distortion summary of `ac2 ir capture` and
 ## Storage
 
 `SweepData.room` (`RoomAcoustics`, nil only for an import from a v2 export) on the wire
-(PROTO_VERSION 15). The ac2 CSV export v3 adds `# room_metrics: {…}` (the JSON
+(PROTO_VERSION 18). The ac2 CSV export v3 adds `# room_metrics: {…}` (the JSON
 `RoomAcoustics`, what import reads) and, after the IR table, a readable table of comment lines
 (`# band_hz,edt_s,…`; refused values `refused:<why>`). Sessions (format 9) keep it in the
 trace's CSV.
