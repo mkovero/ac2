@@ -230,7 +230,7 @@
  },
  {
   "kind": "measurement",
-  "rev": 60,
+  "rev": 62,
   "payload": {
    "type": "set",
    "value": {
@@ -257,7 +257,7 @@
       }
      }
     },
-    "config_rev": 60,
+    "config_rev": 62,
     "running": true,
     "frozen": false,
     "delay": null,

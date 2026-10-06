@@ -1004,8 +1004,9 @@ spectrum smoothing, version 3 had no sweep traces, version 4 kept a sweep's impu
 in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a capture's
 curve by name only, without its label, file and content hash, version 6 had no Leq windows
 and no SPL logs, version 7 named files by save generation and its autosave kept the
-previous one as a separate directory, version 8 had no spatial averages — are refused). A
-directory that holds other files is never written into.
+previous one as a separate directory, version 8 had no spatial averages and no room
+parameters on sweeps — are refused). A directory that holds other files is never written
+into.
 
 ### 7.3 Autosave
 
