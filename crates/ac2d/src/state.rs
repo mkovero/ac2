@@ -33,6 +33,7 @@ impl Store {
                 session: Session {
                     epoch: SessionEpoch(0),
                     open: None,
+                    stopped: None,
                 },
                 measurements: Vec::new(),
                 traces: Vec::new(),

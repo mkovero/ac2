@@ -179,8 +179,20 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         }
     };
     let dim = |s: String| RichText::new(s).color(ch.dim);
-    let session = match st.daemon().and_then(|s| s.session.open.as_ref()) {
-        Some(o) => {
+    let stopped = crate::scenes::audio_stopped(st, super::now().wall);
+    let session = match (st.daemon().and_then(|s| s.session.open.as_ref()), stopped) {
+        (Some(_), Some(t)) => {
+            let mut it = Item::new(
+                75,
+                t.bar
+                    .iter()
+                    .map(|b| RichText::new(b.clone()).color(ch.fault))
+                    .collect(),
+            );
+            it.hover = Some(format!("{} · {}", t.banner, t.detail));
+            it
+        }
+        (Some(o), None) => {
             let rate = format::fixed(f64::from(o.sample_rate_hz) / 1000.0, 1);
             Item::new(
                 40,
@@ -193,7 +205,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 ],
             )
         }
-        None if st.daemon().is_some() => Item::new(
+        (None, _) if st.daemon().is_some() => Item::new(
             60,
             vec![
                 dim(format!(
@@ -203,7 +215,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 dim("no audio session".into()),
             ],
         ),
-        None => Item::new(40, vec![dim("—".into())]),
+        (None, _) => Item::new(40, vec![dim("—".into())]),
     };
     let mut link = Item::new(
         70,

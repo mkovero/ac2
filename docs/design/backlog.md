@@ -12,11 +12,6 @@ decision 4). Measured numbers: PLAN §9.0.
   phase 1 run on pupu, `docs/rigs/pupu.md`). Stable over the hour, so not a leak, but large
   for a Pi 4 class daemon: account for the MTW ladders' buffers (and the 65536-point
   spectrum) per job.
-- **A device that stops delivering is not reported or recovered**: after an FF400 reset jackd
-  hung, ac2 got no audio and no error (the app only said STALE); when jackd was stopped ac2d
-  closed the session and tried one reopen. Wanted: an "audio stopped" state when blocks stop
-  arriving while a session is open, and reopening with backoff until the device is back
-  (`docs/rigs/pupu.md`, *Wiring and FF400 reset recovery*).
 - **Audio continuity is not in `ac2 status`**: xruns and capture discontinuities are only
   logged by the daemon (`capture discontinuity at sample …`); a long-run check has to grep the
   log. Counters since the session opened (and the last one's time) in `status` / `--json`
@@ -101,6 +96,17 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Audio that stops (operator, 2026-10-05: "ac2-ui on ketunkolo went stale, it would be cool if
+it knew how to recover by itself"; `docs/design/audio-recovery.md`):
+- **A device that stops delivering was not reported or recovered** (FF400 reset, jackd hung:
+  no audio, no error, only STALE; jackd stopped: one reopen, then the session closed) → no
+  block for max(1 s, 20 periods) or the host ending the stream is AUDIO STOPPED
+  (`session.stopped`, banner, top bar, `ac2 status`); the stream is closed off the control
+  thread and the same configuration reopened with backoff (1 s … 30 s) until it opens or a
+  client closes the session; same measurements in a new epoch, generator disarmed, SPL log
+  gap. Fake backend stall / vanish outages; PROTO 17. Left: how libjack's client open and
+  close behave against the hung server (rig only); `session.devices` still enumerates on
+  the control thread.
 - **Live spatial average of N transfer functions** (PLAN §3.3, phase 7; 2026-10-05): a
   measurement kind naming 2 … 16 transfer measurements, averaged in the daemon per frame
   with `trace.average`'s mathematics (power / complex / coherence-weighted, each member

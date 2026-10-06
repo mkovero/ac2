@@ -657,3 +657,43 @@ fn committed_clock_drift_shows_a_banner() {
         .collect();
     assert_eq!(texts, ["CLOCK DRIFT · 50 ppm"]);
 }
+
+/// A stopped session's audio reaches every pane's banners in place of STALE, and the top
+/// bar's texts; it clears when the daemon reopens the session.
+#[test]
+fn stopped_audio_shows_a_banner_until_the_session_is_back() {
+    use ac2_proto::model::{AudioStopped, Recovery, StopCause};
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.session.stopped = Some(AudioStopped {
+        since: WallNs(0),
+        cause: StopCause::NotDelivering { after_ms: 1000 },
+        recovery: Recovery::Waiting {
+            attempt: 2,
+            error: "No JACK server: start JACK".into(),
+            next_at: WallNs(5_000_000_000),
+        },
+    });
+    t.st.local_zone = crate::scenes::LocalZone::Fixed { offset_s: 0 };
+    t.conn(mirror(s.clone()));
+    let st = crate::scenes::status(&t.st, &[], None, now());
+    let b = ac2_scene::banner::banners(&st);
+    assert_eq!(
+        b[0].text,
+        "AUDIO STOPPED · device not delivering since 0:00"
+    );
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some("attempt 2 failed: No JACK server: start JACK · next in 5 s · measurements paused")
+    );
+    let bar = crate::scenes::audio_stopped(&t.st, WallNs(0)).map(|a| a.bar);
+    assert_eq!(
+        bar.as_ref().map(|b| b[0].as_str()),
+        Some("audio stopped · reopening (attempt 2, next in 5 s)")
+    );
+    s.session.stopped = None;
+    t.conn(mirror(s));
+    let st = crate::scenes::status(&t.st, &[], None, now());
+    assert!(ac2_scene::banner::banners(&st).is_empty());
+    assert!(crate::scenes::audio_stopped(&t.st, WallNs(0)).is_none());
+}

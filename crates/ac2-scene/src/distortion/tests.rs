@@ -117,6 +117,7 @@ fn status() -> Status {
         frame_age_s: None,
         timing: None,
         clock_drift_ppm: None,
+        audio_stopped: None,
         no_delay_estimate: None,
         average: None,
     }

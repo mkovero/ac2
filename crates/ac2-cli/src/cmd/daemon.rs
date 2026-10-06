@@ -86,6 +86,17 @@ fn status_text(
         w.rev,
         output::session(session)
     ));
+    if let Some(stopped) = &session.stopped {
+        s.push('\n');
+        s.push_str(
+            &ac2_scene::audio::audio_stopped_text(
+                stopped,
+                crate::watch::now_wall(),
+                output::local_offset_s,
+            )
+            .status,
+        );
+    }
     if let Some(c) = output::clock(session, &st.timing) {
         s.push('\n');
         s.push_str(&c);

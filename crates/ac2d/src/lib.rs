@@ -68,7 +68,9 @@ pub use config::{
     NetworkSecurity, ReplayLimits, pid_file, runtime_dir,
 };
 
-pub use backend::{BackendChoice, FAKE_RIG, FAKE_RIG_DISTORTION, FAKE_RIG_HALL, backend, backends};
+pub use backend::{
+    BackendChoice, FAKE_RIG, FAKE_RIG_DISTORTION, FAKE_RIG_HALL, backend, backends, fake_rig,
+};
 use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};
 use outbox::Outbox;

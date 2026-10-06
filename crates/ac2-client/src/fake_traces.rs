@@ -647,6 +647,7 @@ impl Shared {
         let session = Session {
             epoch: SessionEpoch(self.state.session.epoch.0.max(newest) + 1),
             open: self.state.session.open.clone(),
+            stopped: None,
         };
         self.commit(Change::Session(session));
         for sm in s.measurements {

@@ -324,6 +324,23 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
     });
     assert!(!t.st.stimulus.arm_after_stop);
     assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
+
+    // The audio stopped meanwhile: the daemon disarmed it, and nothing arms after the stop.
+    let mut t = T::new();
+    stopping(&mut t);
+    let mut s = daemon_state();
+    s.session.stopped = Some(ac2_proto::model::AudioStopped {
+        since: WallNs(0),
+        cause: ac2_proto::model::StopCause::HostEnded,
+        recovery: ac2_proto::model::Recovery::Opening {
+            attempt: 1,
+            started: WallNs(0),
+        },
+    });
+    t.conn(mirror(s));
+    assert!(!t.st.stimulus.arm_after_stop);
+    assert!(t.last_toast().contains("the audio stopped"));
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
 }
 
 #[test]

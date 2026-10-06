@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 20`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 21`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -629,7 +629,8 @@ channel order), `name` (string \| nil: a file stem like a session name; nil =
   (tagged by `type`: `recording` \| `ended` {`reason`: `RecordingEnd`}). `frames`, `bytes`
   and `discontinuities` are updated about once a second while recording. `RecordingEnd`
   (tagged by `type`): `stopped`, `duration_limit`, `size_limit`, `write_failed` {`msg`},
-  `session_closed`, `session_reopened`, `daemon_shutdown`, `interrupted`.
+  `session_closed`, `session_reopened`, `audio_stopped` (the session's audio stopped, §4.1.1;
+  the file ends at the last audio received), `daemon_shutdown`, `interrupted`.
 - `rec.list` → [`RecordingFile`]: `name`, `path`, `sample_rate_hz`, `inputs`, `frames`,
   `started_at`, `discontinuities`, `end` (`RecordingEnd` \| nil while being written),
   oldest first.
@@ -760,7 +761,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 ### 4.1 Entities
 
-The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`),
+The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
+AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | spatial_average | imported | average |
@@ -778,6 +780,28 @@ WallNs of the newest window; kept after the stimulus stops and for the rest of t
 committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2).
+
+
+#### 4.1.1 Audio stopped and recovery
+
+While a session is open the daemon watches its audio (`docs/design/audio-recovery.md`).
+`session.stopped` is set when the stream stops delivering and stays set until the same
+configuration is open again or a client closes the session; `session.open` keeps the
+session as last opened throughout. `AudioStopped`: `since` (WallNs, the last audio
+received, or the open when none came), `cause` (tagged by `type`): `not_delivering`
+{`after_ms`: u32, the silence that counts as stopped: max(1 s, 20 periods)} \| `host_ended`
+(the audio host ended the stream: server shut down, device removed) \| `device_changed`
+(a device or configuration change whose reopen failed); `recovery` (tagged by `state`):
+`opening` {`attempt`: u32 from 1, `started`: WallNs} \| `waiting` {`attempt`, `error`:
+string (what the backend said, e.g. that no JACK server runs), `next_at`: WallNs}.
+
+The daemon tears the stopped stream down off its control thread (closing a client of a hung
+server may block) and reopens the same configuration attempt after attempt, backing off
+1, 2, 4, 8, 16 then every 30 s, until it succeeds or a client sends `session.close` or
+`session.open`. Running measurements stay `running` and pause: no frames, nothing averaged
+across the gap. When an attempt succeeds the session gets a new epoch with `stopped: nil`,
+the same measurements restart from fresh averages (an SPL meter's log shows the outage as
+gap time), and the generator is disarmed (it was disarmed when the audio stopped).
 
 ### 4.2 Snapshot and events
 

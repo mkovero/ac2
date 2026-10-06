@@ -20,8 +20,9 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use ac2_audio::timer::{Sleeper, Waker};
-use ac2_audio::{BlockFlags, DuplexStream};
-use ac2_proto::units::{Rev, SessionEpoch};
+use ac2_audio::{BlockFlags, Delivery, DuplexStream};
+use ac2_proto::model::StopCause;
+use ac2_proto::units::{Rev, SessionEpoch, WallNs};
 
 use crate::burst::BurstDetector;
 use crate::control::ControlMsg;
@@ -248,6 +249,23 @@ pub(crate) fn handoff_period(fps: u32, block_period: Option<Duration>) -> Durati
     block_period.map_or(p, |b| p.max(b))
 }
 
+/// Silence that counts as a stopped stream: 20 device periods, never under 1 s. A device
+/// on its own clock delivers a block every period, so 20 missing in a row is no scheduling
+/// hiccup (an overloaded machine late by a few periods catches up with a burst) but a
+/// device or server that stopped; the 1 s floor keeps short periods (2.7 ms at 128 / 48 kHz)
+/// from calling a page fault or a busy CPU an outage, and bounds the wait at large ones
+/// (8192 / 44.1 kHz = 186 ms, 3.7 s) so the operator learns of it within seconds. A
+/// stream a test steps by hand ([`Delivery::Stepped`]) is never stopped: its pauses are
+/// the test's.
+pub(crate) fn stall_after(delivery: Delivery, block_period: Option<Duration>) -> Option<Duration> {
+    const PERIODS: u32 = 20;
+    const FLOOR: Duration = Duration::from_secs(1);
+    match delivery {
+        Delivery::Stepped => None,
+        Delivery::Device => Some(block_period.map_or(FLOOR, |p| (p * PERIODS).max(FLOOR))),
+    }
+}
+
 /// Discontinuity warnings at most this often; the rest are counted into a summary.
 const DISCONTINUITY_WARN_EVERY: Duration = Duration::from_secs(10);
 
@@ -329,6 +347,7 @@ impl Fanout {
             sample_rate: n.sample_rate,
             handoff: handoff_period(fps, block_period),
             lossless: lossless.then(|| u64::from(n.buffer_frames.unwrap_or(4096).max(1))),
+            stall_after: stall_after(n.delivery, block_period),
         };
         let thread = std::thread::Builder::new()
             .name("ac2d-fanout".into())
@@ -424,6 +443,8 @@ struct Config {
     handoff: Duration,
     /// Lossless: the largest block the stream delivers, frames.
     lossless: Option<u64>,
+    /// No block for this long means the stream stopped ([`stall_after`]).
+    stall_after: Option<Duration>,
 }
 
 /// Batches handed out and the spare blocks they return, so steady operation allocates
@@ -482,7 +503,6 @@ fn run(
 ) {
     let mut jobs: BTreeMap<u64, JobFeed> = BTreeMap::new();
     let mut ms: Vec<(f64, f64)> = vec![(0.0, 0.0); meters.ms.len()];
-    let mut ended_reported = false;
     let mut levels: Option<(SessionLevels, Emitter)> = None;
     let mut gaps = Discontinuities::default();
     let mut pool = Pool::default();
@@ -491,6 +511,10 @@ fn run(
     // its slot, so a hand-off a little early takes it rather than the one after.
     let meter_early = cfg.handoff / 2;
     let mut next = Instant::now();
+    // When audio last arrived, on both clocks; the open counts as the first arrival, so a
+    // stream that never delivers is stopped too.
+    let mut last_audio = (Instant::now(), wall_ns());
+    let mut stop_reported = false;
     loop {
         // Control messages wake the thread at once; otherwise it sleeps until the next
         // hand-off.
@@ -573,6 +597,7 @@ fn run(
         gaps.flush(now);
         if let Some(b) = batch.last() {
             latest.store(b.end_sample(), Ordering::Release);
+            last_audio = (now, b.wall_ns);
         }
         stamp_arrivals(&mut batch, cfg.rate);
         for block in &batch {
@@ -611,10 +636,33 @@ fn run(
 
         // Output timing records are not used yet; keep the ring from overflowing.
         while stream.pop_output_tick().is_some() {}
-        if !ended_reported && stream.events().ended {
-            ended_reported = true;
+        // Once either is reported the control thread tears this stream down; it is never
+        // trusted again, so blocks arriving late cannot splice onto the audio before the gap.
+        if !stop_reported && stream.events().ended {
+            stop_reported = true;
             tracing::error!("audio stream ended by the host");
-            let _ = to_control.send(ControlMsg::DeviceChanged { epoch: cfg.epoch });
+            let _ = to_control.send(ControlMsg::AudioStopped {
+                epoch: cfg.epoch,
+                since: WallNs(last_audio.1),
+                cause: StopCause::HostEnded,
+            });
+        }
+        if let Some(after) = cfg.stall_after
+            && !stop_reported
+            && now.duration_since(last_audio.0) > after
+        {
+            stop_reported = true;
+            tracing::error!(
+                "audio stopped: no audio for {} ms and no error from the backend",
+                now.duration_since(last_audio.0).as_millis()
+            );
+            let _ = to_control.send(ControlMsg::AudioStopped {
+                epoch: cfg.epoch,
+                since: WallNs(last_audio.1),
+                cause: StopCause::NotDelivering {
+                    after_ms: u32::try_from(after.as_millis()).unwrap_or(u32::MAX),
+                },
+            });
         }
     }
 }
@@ -696,6 +744,22 @@ mod tests {
         assert_eq!(ms(handoff_period(120, None)), 8.3);
         let long_block = Duration::from_secs_f64(2048.0 / 48_000.0);
         assert_eq!(handoff_period(60, Some(long_block)), long_block);
+    }
+
+    #[test]
+    fn a_stream_is_stopped_after_twenty_periods_but_never_under_a_second_nor_when_stepped() {
+        let p = |frames: u32| Some(Duration::from_secs_f64(f64::from(frames) / 48_000.0));
+        assert_eq!(
+            stall_after(Delivery::Device, p(128)),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            stall_after(Delivery::Device, None),
+            Some(Duration::from_secs(1))
+        );
+        let long = stall_after(Delivery::Device, p(8192)).unwrap_or_default();
+        assert!((long.as_secs_f64() - 20.0 * 8192.0 / 48_000.0).abs() < 1e-6);
+        assert_eq!(stall_after(Delivery::Stepped, p(128)), None);
     }
 
     #[test]

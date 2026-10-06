@@ -63,6 +63,7 @@ mod cal;
 mod files;
 mod leq;
 mod recording;
+mod recovery;
 mod sweeps;
 mod traces;
 
@@ -74,8 +75,19 @@ pub(crate) enum ControlMsg {
         user_id: Option<String>,
         payload: Vec<u8>,
     },
-    /// The stream of `epoch` reported a configuration change or ended.
+    /// The stream of `epoch` reported a configuration change.
     DeviceChanged { epoch: SessionEpoch },
+    /// The stream of `epoch` stopped: no audio since `since`, for `cause`.
+    AudioStopped {
+        epoch: SessionEpoch,
+        since: WallNs,
+        cause: ac2_proto::model::StopCause,
+    },
+    /// Reopen attempt `token` of a stopped session finished.
+    Reopened {
+        token: u64,
+        result: Box<Result<Runtime, ProtoError>>,
+    },
     /// The timing monitor of `epoch` changed state.
     Timing {
         epoch: SessionEpoch,
@@ -222,6 +234,8 @@ pub(crate) struct Control {
     cal: CalStore,
     dedup: Dedup,
     session: Option<Runtime>,
+    /// The open session's audio stopped and is being reopened; `session` is `None` meanwhile.
+    recovery: Option<recovery::Recovery>,
     jobs: BTreeMap<MeasId, JobHandle>,
     /// How spatial averages reach their running members.
     probes: Arc<Probes>,
@@ -487,6 +501,7 @@ impl Control {
             cal,
             dedup,
             session: None,
+            recovery: None,
             jobs: BTreeMap::new(),
             probes: Arc::new(Probes::default()),
             timing_job: None,
@@ -536,6 +551,14 @@ impl Control {
                 self.send_ka();
                 self.next_ka = now + self.s.keepalive;
             }
+            if self
+                .recovery
+                .as_ref()
+                .and_then(recovery::Recovery::due)
+                .is_some_and(|d| d <= now)
+            {
+                self.start_attempt(None);
+            }
             if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
                 tracing::info!("preview not renewed: closing it");
                 self.close_preview();
@@ -548,6 +571,9 @@ impl Control {
                 wake = wake.min(p.deadline);
             }
             if let Some(d) = self.autosave.as_ref().and_then(Autosaver::due) {
+                wake = wake.min(d);
+            }
+            if let Some(d) = self.recovery.as_ref().and_then(recovery::Recovery::due) {
                 wake = wake.min(d);
             }
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
@@ -569,6 +595,12 @@ impl Control {
                         }
                     }
                 }
+                Ok(ControlMsg::AudioStopped {
+                    epoch,
+                    since,
+                    cause,
+                }) => self.audio_stopped(epoch, since, cause),
+                Ok(ControlMsg::Reopened { token, result }) => self.reopened(token, *result),
                 Ok(ControlMsg::Timing { epoch, status }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch)
                         && self.store.state().timing != status
@@ -633,8 +665,9 @@ impl Control {
         self.close_preview();
         self.stop_output();
         self.stop_all_jobs();
+        self.recovery = None;
         if let Some(rt) = self.session.take() {
-            rt.close();
+            recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         }
         self.flush_autosave();
         self.s.outbox.stop();
@@ -1251,7 +1284,7 @@ impl Control {
         let backend = self.backend_for(config.backend)?;
         // The preview may hold the very device the session is about to open.
         self.close_preview();
-        if self.session.is_some() {
+        if self.session.is_some() || self.recovery.is_some() {
             self.session_close(client);
         }
         let epoch = SessionEpoch(self.epoch().0 + 1);
@@ -1274,12 +1307,26 @@ impl Control {
         let s = Session {
             epoch,
             open: Some(rt.open.clone()),
+            stopped: None,
         };
         self.session = Some(rt);
         self.commit(Change::Session(s.clone()));
         self.after_open();
         self.release_replay();
         Ok(s)
+    }
+
+    /// Stops what runs on a stream about to close: the sweep, the jobs, the generator source
+    /// and the published frames of the session.
+    fn wind_down(&mut self, recording: ac2_proto::model::RecordingEnd) {
+        self.abort_sweep(SweepFailure::SessionClosed, "the audio session reopened");
+        self.end_recording(recording);
+        self.stop_all_jobs();
+        self.level = None;
+        self.source = None;
+        self.s.outbox.clear(b"d/");
+        self.s.outbox.clear(b"timing");
+        self.s.outbox.clear(b"session/levels");
     }
 
     /// Starts jobs and re-derives sample-rate dependent state for a freshly opened stream.
@@ -1335,13 +1382,24 @@ impl Control {
         } else {
             self.stop_output();
         }
-        if let Some(rt) = self.session.take() {
-            rt.close();
+        // A close ends the attempts to reopen a stopped session too; an attempt still
+        // running closes what it opens.
+        let recovering = self.recovery.take().is_some();
+        let rt = self.session.take();
+        let had = rt.is_some() || recovering;
+        if let Some(rt) = rt {
+            recovery::close_bounded(rt, recovery::CLOSE_BOUND);
+        }
+        if had {
             self.s.outbox.clear(b"d/");
             self.s.outbox.clear(b"timing");
             self.s.outbox.clear(b"session/levels");
             let epoch = SessionEpoch(self.epoch().0 + 1);
-            self.commit(Change::Session(Session { epoch, open: None }));
+            self.commit(Change::Session(Session {
+                epoch,
+                open: None,
+                stopped: None,
+            }));
         }
     }
 
@@ -1359,6 +1417,7 @@ impl Control {
         };
         let config = rt.open.config.clone();
         let replay = rt.open.replay.clone();
+        let last_open = rt.open.clone();
         let backend = match self.backend_for(Some(rt.open.backend)) {
             Ok(b) => b,
             Err(e) => {
@@ -1366,15 +1425,8 @@ impl Control {
                 return Err(e);
             }
         };
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio session reopened");
-        self.end_recording(ac2_proto::model::RecordingEnd::SessionReopened);
-        self.stop_all_jobs();
-        self.level = None;
-        self.source = None;
-        rt.close();
-        self.s.outbox.clear(b"d/");
-        self.s.outbox.clear(b"timing");
-        self.s.outbox.clear(b"session/levels");
+        self.wind_down(ac2_proto::model::RecordingEnd::SessionReopened);
+        recovery::close_bounded(rt, recovery::CLOSE_BOUND);
         match Runtime::open(
             &*backend,
             &config,
@@ -1389,6 +1441,7 @@ impl Control {
                 let s = Session {
                     epoch,
                     open: Some(rt.open.clone()),
+                    stopped: None,
                 };
                 self.session = Some(rt);
                 self.commit(Change::Session(s));
@@ -1397,15 +1450,8 @@ impl Control {
                 Ok(())
             }
             Err(e) => {
-                self.commit(Change::Session(Session { epoch, open: None }));
-                let g = self.store.state().generator.clone();
-                if g.armed || g.firing {
-                    let mut g = g;
-                    g.armed = false;
-                    g.firing = false;
-                    self.audit(&mut g, GenAction::Stop, None);
-                    self.commit(Change::Generator(g));
-                }
+                // The session stays open, its audio stopped, and the attempts carry on.
+                self.reopen_failed(last_open, routes.to_vec(), epoch, &e);
                 Err(e)
             }
         }

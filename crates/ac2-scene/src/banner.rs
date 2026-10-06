@@ -6,16 +6,21 @@
 //! | # | banner | severity | from |
 //! |---|---|---|---|
 //! | 1 | DAEMON NOT RESPONDING | fault | no keepalive for > 1.5 s |
-//! | 2 | CLIP | fault | protection `CLIP` |
-//! | 3 | NO REFERENCE | fault | protection `NO_REFERENCE` |
-//! | 4 | CHECK ROUTING | fault | protection `CHECK_ROUTING` (inputs identical or swapped) |
-//! | 5 | NO SIGNAL | fault | protection `NO_SIGNAL` |
-//! | 6 | NO AVERAGE · n OF m POSITIONS | fault | the shown spatial average has fewer than two usable positions |
-//! | 7 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
-//! | 8 | AVERAGE · n OF m POSITIONS | warning | the shown spatial average left positions out (the detail names them and why) |
-//! | 9 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
-//! | 10 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
-//! | 11 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//! | 2 | AUDIO STOPPED · what, since | fault | `session.stopped` (the daemon is reopening the session) |
+//! | 3 | CLIP | fault | protection `CLIP` |
+//! | 4 | NO REFERENCE | fault | protection `NO_REFERENCE` |
+//! | 5 | CHECK ROUTING | fault | protection `CHECK_ROUTING` (inputs identical or swapped) |
+//! | 6 | NO SIGNAL | fault | protection `NO_SIGNAL` |
+//! | 7 | NO AVERAGE · n OF m POSITIONS | fault | the shown spatial average has fewer than two usable positions |
+//! | 8 | STALE · age | warning | newest live frame older than 1 s (decision 2a) |
+//! | 9 | AVERAGE · n OF m POSITIONS | warning | the shown spatial average left positions out (the detail names them and why) |
+//! | 10 | OUTPUT TIMING JUMP | warning | loopback timing `jumped` |
+//! | 11 | CLOCK DRIFT · ppm | warning | loopback timing drift `warning` (output and input on different clocks) |
+//! | 12 | NO DELAY ESTIMATE | info | TF measurement without a delay, the finder refused, or an ambiguous finding awaits a pick (the detail says which) |
+//!
+//! AUDIO STOPPED comes right after the daemon itself: no audio invalidates everything
+//! measured, and the daemon is already working on it. It replaces STALE, whose cause it
+//! names: every frame is old because none can come.
 //!
 //! CLOCK DRIFT sits under OUTPUT TIMING JUMP: both are output-side timing, a jump is the
 //! newer event, and drift does not touch a transfer function on the measured loopback
@@ -62,6 +67,7 @@ pub enum Severity {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BannerKind {
     DaemonNotResponding,
+    AudioStopped,
     Clip,
     NoReference,
     CheckRouting,
@@ -78,6 +84,7 @@ impl BannerKind {
     pub fn severity(self) -> Severity {
         match self {
             Self::DaemonNotResponding
+            | Self::AudioStopped
             | Self::Clip
             | Self::NoReference
             | Self::CheckRouting
@@ -113,6 +120,8 @@ pub struct Status {
     /// Output-vs-input clock drift, ppm, when the daemon judged it a warning
     /// (`TimingStatus.drift`).
     pub clock_drift_ppm: Option<f64>,
+    /// The open session's audio stopped ([`crate::audio::audio_stopped_text`]).
+    pub audio_stopped: Option<crate::audio::AudioStoppedText>,
     pub no_delay_estimate: Option<NoDelayEstimate>,
     /// The shown spatial average (its name and what its newest frame averaged).
     pub average: Option<(String, AverageStatus)>,
@@ -173,6 +182,13 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             )),
         ));
     }
+    if let Some(a) = &s.audio_stopped {
+        out.push(banner(
+            BannerKind::AudioStopped,
+            a.banner.clone(),
+            Some(a.detail.clone()),
+        ));
+    }
     let p = s.protection;
     if p.contains(ProtectionFlags::CLIP) {
         out.push(banner(
@@ -216,6 +232,7 @@ pub fn banners(s: &Status) -> Vec<Banner> {
     }
     if let Some(age) = s.frame_age_s
         && age > STALE_AFTER_S
+        && s.audio_stopped.is_none()
     {
         out.push(banner(
             BannerKind::Stale,
@@ -421,6 +438,7 @@ pub(crate) mod tests {
                 to: Samples(-512),
             }),
             clock_drift_ppm: Some(-52.4),
+            audio_stopped: None,
             no_delay_estimate: Some(NoDelayEstimate::NotFound),
             average: None,
         }
@@ -442,6 +460,44 @@ pub(crate) mod tests {
         );
         assert_eq!(drift_ppm(150.4), "150 ppm");
         assert_eq!(drift_ppm(-9.94), "9.9 ppm");
+    }
+
+    #[test]
+    fn audio_stopped_follows_the_daemon_and_replaces_stale() {
+        use ac2_proto::model::{AudioStopped, Recovery, StopCause};
+        use ac2_proto::units::WallNs;
+        let stopped = AudioStopped {
+            since: WallNs(1_791_232_572_000_000_000),
+            cause: StopCause::NotDelivering { after_ms: 1000 },
+            recovery: Recovery::Opening {
+                attempt: 1,
+                started: WallNs(1_791_232_573_000_000_000),
+            },
+        };
+        let b = banners(&Status {
+            daemon_silence_s: 2.0,
+            frame_age_s: Some(4.0),
+            protection: ProtectionFlags::NO_SIGNAL,
+            audio_stopped: Some(crate::audio::audio_stopped_text(
+                &stopped,
+                WallNs(1_791_232_574_000_000_000),
+                |_| 0,
+            )),
+            ..Status::default()
+        });
+        assert_eq!(
+            texts(&b),
+            [
+                "DAEMON NOT RESPONDING",
+                "AUDIO STOPPED · device not delivering since 20:36",
+                "NO SIGNAL"
+            ]
+        );
+        assert_eq!(b[1].severity, Severity::Fault);
+        assert_eq!(
+            b[1].detail.as_deref(),
+            Some("reopening the session (attempt 1) · measurements paused")
+        );
     }
 
     #[test]

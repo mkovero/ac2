@@ -343,6 +343,7 @@ impl Rig {
                     opened_at: WallNs(0),
                     replay: None,
                 }),
+                stopped: None,
             };
             s.commit(Change::Session(session));
             // Main L tracks without a current finding: NO DELAY ESTIMATE is up.

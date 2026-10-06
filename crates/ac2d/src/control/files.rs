@@ -248,13 +248,21 @@ impl Control {
         let epoch = SessionEpoch(self.epoch().0.max(newest) + 1);
         if self.session.is_some() {
             // The stream reopens without generator routes: nothing is armed after a load.
-            // A device that fails to reopen leaves the session closed (committed by
-            // `reopen_at`); the saved state still loads, its measurements waiting for one.
+            // A device that fails to reopen leaves the session open with its audio stopped
+            // and being reopened (`reopen_at`); the saved state still loads.
             if let Err(e) = self.reopen_at(&[], epoch) {
                 tracing::warn!("session load: the audio stream did not reopen: {}", e.msg);
             }
+        } else if self.recovery.is_some() {
+            // The session's audio is stopped: it stays open and keeps being reopened, now in
+            // the loaded state's epoch.
+            self.rebase_recovery(epoch);
         } else {
-            self.commit(Change::Session(Session { epoch, open: None }));
+            self.commit(Change::Session(Session {
+                epoch,
+                open: None,
+                stopped: None,
+            }));
         }
 
         // In with the new: the SPL logs first, so a meter's job carries on from its log.

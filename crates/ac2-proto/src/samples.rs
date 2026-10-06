@@ -804,6 +804,15 @@ fn session() -> Session {
             opened_at: WallNs(1_789_999_000_000_000_000),
             replay: None,
         }),
+        stopped: Some(AudioStopped {
+            since: WallNs(1_789_999_500_000_000_000),
+            cause: StopCause::NotDelivering { after_ms: 1000 },
+            recovery: Recovery::Waiting {
+                attempt: 3,
+                error: "No JACK server: start JACK".into(),
+                next_at: WallNs(1_789_999_508_000_000_000),
+            },
+        }),
     }
 }
 

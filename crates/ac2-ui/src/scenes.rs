@@ -108,9 +108,42 @@ pub fn status(
             .and_then(|d| d.timing.drift)
             .filter(|d| d.warning)
             .map(|d| d.ppm),
+        audio_stopped: audio_stopped(st, now.wall),
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
         average: None,
     }
+}
+
+/// The daemon's offset estimate as the scene takes it.
+fn clock_offset(st: &AppState) -> ClockOffset {
+    ClockOffset(
+        st.mirror
+            .as_ref()
+            .and_then(|v| v.clock_offset_ns)
+            .map_or(0, |o| {
+                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            }),
+    )
+}
+
+/// What the AUDIO STOPPED banner and the top bar say while the open session's audio is
+/// stopped and the daemon reopens it; `None` while it runs.
+pub fn audio_stopped(
+    st: &AppState,
+    client_now: WallNs,
+) -> Option<ac2_scene::audio::AudioStoppedText> {
+    let stopped = st.daemon()?.session.stopped.as_ref()?;
+    Some(ac2_scene::audio::audio_stopped_text(
+        stopped,
+        daemon_wall(st, client_now),
+        |t| st.local_zone.offset_s(t),
+    ))
+}
+
+/// `client_now` on the daemon's clock.
+pub fn daemon_wall(st: &AppState, client_now: WallNs) -> WallNs {
+    let t = ac2_scene::time::daemon_now(client_now, clock_offset(st));
+    WallNs(t.clamp(0, i128::from(u64::MAX)) as u64)
 }
 
 fn is_tf(m: &Measurement) -> bool {

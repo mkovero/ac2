@@ -437,8 +437,64 @@ pub struct OpenSession {
 pub struct Session {
     /// Current epoch.
     pub epoch: SessionEpoch,
-    /// `None` while closed.
+    /// `None` while closed. Kept through an audio outage: the session stays open, with its
+    /// configuration, until a client closes it.
     pub open: Option<OpenSession>,
+    /// The open session's audio has stopped and the daemon is reopening it
+    /// (`docs/design/audio-recovery.md`); `None` while audio runs or no session is open.
+    pub stopped: Option<AudioStopped>,
+}
+
+/// An open session whose audio stopped: since when, why, and how reopening it goes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioStopped {
+    /// Wall time of the last audio received (the open, if none ever came).
+    pub since: WallNs,
+    /// Why the stream is considered stopped.
+    pub cause: StopCause,
+    /// Where reopening the same configuration stands.
+    pub recovery: Recovery,
+}
+
+/// Why a session's audio stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum StopCause {
+    /// No audio for `after` while the backend reported nothing (a hung audio server, a
+    /// device reset under it).
+    NotDelivering {
+        /// The silence that counts as stopped for this stream.
+        after_ms: u32,
+    },
+    /// The audio host ended the stream (its server shut down, the device was removed).
+    HostEnded,
+    /// The device or its configuration changed, and opening it again failed.
+    DeviceChanged,
+}
+
+/// Reopening a stopped session's configuration, attempt by attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Recovery {
+    /// Attempt `attempt` (1-based) is opening the stream since `started`; an audio server
+    /// that hangs may keep it there.
+    Opening {
+        /// Attempt number.
+        attempt: u32,
+        /// When it began.
+        started: WallNs,
+    },
+    /// Attempt `attempt` failed with `error`; the next begins at `next_at`.
+    Waiting {
+        /// Attempt number that failed.
+        attempt: u32,
+        /// What the backend said, which names what it waits for (a server to start, a
+        /// device to return).
+        error: String,
+        /// When the next attempt begins.
+        next_at: WallNs,
+    },
 }
 
 /// Reply of `session.preview`: capture-only meters of a device before a session opens on it.
@@ -3045,6 +3101,10 @@ pub enum RecordingEnd {
     SessionClosed,
     /// The audio session reopened (device or configuration change, `session.open`).
     SessionReopened,
+    /// The session's audio stopped (the device stopped delivering or the host ended the
+    /// stream); the file ends with the last audio received, and the audio after the outage,
+    /// once the daemon reopens the session, is not spliced onto it.
+    AudioStopped,
     /// The daemon shut down.
     DaemonShutdown,
     /// Found unfinished when the daemon started (it was killed or crashed while

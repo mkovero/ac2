@@ -144,6 +144,7 @@ pub fn empty_state() -> State {
         session: Session {
             epoch: SessionEpoch(1),
             open: None,
+            stopped: None,
         },
         measurements: vec![],
         traces: vec![],
@@ -664,6 +665,7 @@ impl Shared {
                         config,
                         replay: None,
                     }),
+                    stopped: None,
                 };
                 self.commit(Change::Session(s.clone()));
                 ReplyBody::Session(s)
@@ -672,6 +674,7 @@ impl Shared {
                 let s = Session {
                     epoch: SessionEpoch(self.state.session.epoch.0 + 1),
                     open: None,
+                    stopped: None,
                 };
                 let rev = self.commit(Change::Session(s));
                 ReplyBody::Ack { rev }

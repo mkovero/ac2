@@ -149,6 +149,11 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
                     RecordingTone::Warning,
                     "the audio session reopened (device or configuration change)",
                 ),
+                RecordingEnd::AudioStopped => (
+                    format!("{saved} (audio stopped)"),
+                    RecordingTone::Warning,
+                    "the audio stopped (the device stopped delivering or its host ended the stream)",
+                ),
                 RecordingEnd::DaemonShutdown => (
                     format!("{saved} (daemon stopped)"),
                     RecordingTone::Quiet,

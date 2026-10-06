@@ -105,6 +105,12 @@ fn fake_config() -> FakeConfig {
     }
 }
 
+/// The simulated rig ([`FAKE_RIG`]) as itself, for a test that makes its device stall or
+/// vanish (`FakeBackend::stall`, `vanish`) under a daemon running on a clone of it.
+pub fn fake_rig() -> Result<FakeBackend, String> {
+    FakeBackend::new(fake_config()).map_err(|e| e.to_string())
+}
+
 /// What a backend is, for the operator choosing one.
 pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
     match kind {
@@ -136,9 +142,7 @@ pub fn backends(choice: BackendChoice) -> Result<Vec<Arc<dyn Backend>>, String> 
 /// with what to use instead.
 pub fn backend(choice: BackendChoice) -> Result<Arc<dyn Backend>, String> {
     match choice {
-        BackendChoice::Fake => Ok(Arc::new(
-            FakeBackend::new(fake_config()).map_err(|e| e.to_string())?,
-        )),
+        BackendChoice::Fake => Ok(Arc::new(fake_rig()?)),
         #[cfg(target_os = "linux")]
         BackendChoice::Jack => Ok(Arc::new(ac2_audio::JackBackend::new(
             ac2_audio::JackConfig::default(),

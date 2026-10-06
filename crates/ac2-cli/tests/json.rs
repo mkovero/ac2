@@ -365,7 +365,10 @@ async fn status_reports_build_ids() -> R {
     // Not a local daemon: "stale" is not judged.
     assert_eq!(v["stale"], Value::Null);
     assert_eq!(v["daemon_incarnation"], "000000005eed0001");
-    assert_eq!(v["session"], json!({ "epoch": 1, "open": null }));
+    assert_eq!(
+        v["session"],
+        json!({ "epoch": 1, "open": null, "stopped": null })
+    );
     assert_eq!(
         v["autosave"],
         json!({ "state": { "type": "off" }, "saved_at": null })
@@ -377,6 +380,7 @@ async fn status_reports_build_ids() -> R {
             "epoch": 1,
             "open": null,
             "recording": null,
+            "stopped": null,
             "autosave": { "state": { "type": "off" }, "saved_at": null },
         })
     );

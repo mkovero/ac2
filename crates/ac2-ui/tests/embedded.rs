@@ -3614,3 +3614,87 @@ fn spatial_average_from_an_empty_daemon() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// The banners every pane shows now.
+fn banner_texts(s: &AppState) -> Vec<String> {
+    let wall = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(wall),
+    };
+    ac2_scene::banner::banners(&ac2_ui::scenes::status(s, &[], None, now))
+        .into_iter()
+        .map(|b| b.text)
+        .collect()
+}
+
+/// From an empty daemon on the simulated rig: a session opened from the app; the device
+/// vanishes and AUDIO STOPPED comes up with the attempts to reopen it, and once the device
+/// is back the banner goes and the session is open again — nobody touched the app.
+#[test]
+fn audio_stopped_comes_and_goes_by_itself() -> R {
+    let rig = ac2d::fake_rig()?;
+    let listen = ac2d::Listen::Local {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+    };
+    let handle = ac2d::Daemon::start(ac2d::DaemonConfig::new(
+        Arc::new(rig.clone()),
+        listen,
+        -10.0,
+    ))?;
+    let ep = Endpoints {
+        ctrl: handle.ctrl_endpoint().to_owned(),
+        data: handle.data_endpoint().to_owned(),
+    };
+    let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
+    d.synced()?;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until(
+        "the device list",
+        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
+    )?;
+    d.key("Enter");
+    d.until("the session", |s| s.open_session().is_some())?;
+    let epoch = d.st.daemon().ok_or("state")?.session.epoch;
+    let calm = banner_texts(&d.st);
+    assert!(
+        !calm.iter().any(|t| t.starts_with("AUDIO STOPPED")),
+        "{calm:?}"
+    );
+
+    rig.vanish(None);
+    d.until("AUDIO STOPPED", |s| {
+        banner_texts(s)
+            .iter()
+            .any(|t| t.starts_with("AUDIO STOPPED · audio host ended the stream at "))
+    })?;
+    d.until("a failed attempt in the top bar", |s| {
+        ac2_ui::scenes::audio_stopped(s, ac2_proto::units::WallNs(0))
+            .is_some_and(|t| t.detail.contains("the simulated device is gone"))
+    })?;
+    let bar = ac2_ui::scenes::audio_stopped(&d.st, ac2_proto::units::WallNs(0))
+        .ok_or("stopped")?
+        .bar;
+    assert!(
+        bar[0].starts_with("audio stopped · reopening (attempt "),
+        "{bar:?}"
+    );
+    assert!(d.st.open_session().is_some(), "the session stays open");
+
+    rig.restore();
+    d.until("the banner gone and the session back", |s| {
+        s.daemon()
+            .is_some_and(|st| st.session.stopped.is_none() && st.session.epoch.0 > epoch.0)
+            && !banner_texts(s)
+                .iter()
+                .any(|t| t.starts_with("AUDIO STOPPED"))
+    })?;
+    assert!(d.st.open_session().is_some());
+    drop(d);
+    handle.shutdown();
+    Ok(())
+}

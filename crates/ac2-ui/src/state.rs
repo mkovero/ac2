@@ -2649,6 +2649,10 @@ impl AppState {
             self.error("not armed: no audio session to play into");
             return;
         }
+        if self.daemon().is_some_and(|s| s.session.stopped.is_some()) {
+            self.error("not armed: the audio stopped; the daemon is reopening the session");
+            return;
+        }
         if let Some(settings) = self.stimulus.settings() {
             self.stimulus.phase = StimPhase::Arming;
             self.armed_with = Some(settings.clone());
@@ -4470,6 +4474,14 @@ impl AppState {
             }
             ConnEvent::Mirror(v) => {
                 self.mirror = Some(v);
+                // The daemon disarmed the generator when the audio stopped; an arm queued
+                // behind a stop must not follow it into a session that is reopening.
+                if self.stimulus.arm_after_stop
+                    && self.daemon().is_some_and(|s| s.session.stopped.is_some())
+                {
+                    self.stimulus.arm_after_stop = false;
+                    self.error("not armed: the audio stopped; the daemon is reopening the session");
+                }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
                 if let Some(p) = self.pending_select
                     && ids.contains(&p)
