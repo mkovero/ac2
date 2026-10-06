@@ -269,3 +269,22 @@ meter and a 65536-point spectrum. Sampled every 5 min for 65 min (noise ran 92 m
   coherence down to 0.94 (0.98 at 50 Hz: mains hum in the mixer path).
 - Afterwards JACK went back to 96 kHz / 256 and the session reopened; the FF400 kept its
   settings over both JACK restarts (mic alive, tone levels unchanged at 48 kHz).
+
+## Deploy of 645f5ec and audio recovery on the rig (2026-10-06)
+
+Deployed 645f5ec (protocol 21, session format 9). The format-8 autosave was set aside as
+`autosave.v8` as expected; before the deploy `state dump`, `spl leq export` (48 h, 15 MB) and a
+CSV export of each of the 10 traces were saved (`/work/ac2-scratch/deploy-645f5ec/` on the dev
+host). Afterwards FOH SPL (with its five C windows, limits 70 dB, warn 3 dB, horizon 1 min),
+Spectrum 1/2 and TF 1 were recreated with `meas new` / `spl leq set`, and the 10 traces imported
+(the four test transfer measurements of the phase 1 run were not recreated). Calibration survived
+(the store's format did not change). A CLI `gen pink` from the phase 1 run on ketunkolo had never
+exited; the new daemon refused it at protocol 14 and it was killed.
+
+**Recovery, real hardware:** `pkill -TERM jackd` at 19:03:13 UTC → within the same second the
+daemon logged the host ending the stream; every pane showed `AUDIO STOPPED · audio host ended
+the stream at 22:03`, the top bar `audio stopped · reopening (attempt 3, next in 3 s)`, `ac2
+status` the backend's reason ("No JACK server: start JACK"). jackd started again at 19:03:32 →
+the session reopened by itself on attempt 6 at 19:03:44 (the next backoff step), epoch 2, the
+same measurements running, SPL fresh, the Leq caption counting "offline 31 s"; the FF400 kept
+its settings. Not tried: a hung (not stopped) jackd, as after the FF400 reset.
