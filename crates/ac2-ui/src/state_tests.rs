@@ -261,6 +261,71 @@ fn arm_fire_level_stop() {
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
 }
 
+/// Space right after Esc, while the stop is still on its way: nothing goes out then (the
+/// lease is being released), and the stimulus arms once the stop has landed. A failed
+/// stop, a lost lease, another stop, a closed window or a lost connection drop the request:
+/// nothing arms behind them.
+#[test]
+fn space_during_a_stop_arms_once_the_stop_lands() {
+    let stopping = |t: &mut T| {
+        t.st.stimulus.level = Some(Dbfs(-20.0));
+        t.st.stimulus.phase = StimPhase::Firing;
+        let r = t.key("Esc");
+        assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+        assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+        assert!(
+            t.key("Space").is_empty(),
+            "nothing while the stop is in flight"
+        );
+        assert!(t.last_toast().contains("arms once the stop is done"));
+        assert!(t.key("Space").is_empty());
+    };
+    let is_arm = |r: &[Request]| matches!(r, [Request::StimArm { force: false, .. }]);
+
+    let mut t = T::new();
+    stopping(&mut t);
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert!(is_arm(&r), "{r:?}");
+    assert_eq!(t.st.stimulus.phase, StimPhase::Arming);
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+
+    // The stop failed: the lease is in doubt, nothing arms.
+    let mut t = T::new();
+    stopping(&mut t);
+    let r = t.conn(ConnEvent::Stimulus(StimEvent::Failed("timeout".into())));
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
+
+    // The lease is gone.
+    let mut t = T::new();
+    stopping(&mut t);
+    t.conn(ConnEvent::Stimulus(StimEvent::Lost("expired".into())));
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
+
+    // Esc, or the stop chord, again: the operator wants it stopped after all.
+    for chord in ["Esc", "Shift+Esc"] {
+        let mut t = T::new();
+        stopping(&mut t);
+        t.key(chord);
+        let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+        assert!(r.is_empty(), "{chord}: {r:?}");
+        assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    }
+
+    // The connection dropped: a new one holds no lease and arms nothing.
+    let mut t = T::new();
+    stopping(&mut t);
+    t.conn(ConnEvent::Failed {
+        target: "local daemon".into(),
+        error: "not responding".into(),
+        retry_in: std::time::Duration::from_secs(2),
+    });
+    assert!(!t.st.stimulus.arm_after_stop);
+    assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
+}
+
 #[test]
 fn level_never_exceeds_the_ceiling() {
     let mut t = T::new();

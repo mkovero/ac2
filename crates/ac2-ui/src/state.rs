@@ -323,6 +323,10 @@ pub struct Stimulus {
     /// Zero-based output channels.
     pub outputs: Vec<u16>,
     pub phase: StimPhase,
+    /// Space came while a stop was still on its way: the stimulus arms once that stop has
+    /// landed (not into the lease the stop is releasing). Any stop, a lost or failed lease,
+    /// a closed window and a new connection drop it.
+    pub arm_after_stop: bool,
 }
 
 impl Default for Stimulus {
@@ -332,6 +336,7 @@ impl Default for Stimulus {
             signal: Signal::Pink,
             outputs: vec![0],
             phase: StimPhase::Idle,
+            arm_after_stop: false,
         }
     }
 }
@@ -2265,6 +2270,7 @@ impl AppState {
     /// Disarms a stimulus armed (or arming) that is not playing: nothing is left armed
     /// behind a window that was closed. One that plays is left playing.
     fn disarm_unfired(&mut self, out: &mut Vec<Request>) {
+        self.stimulus.arm_after_stop = false;
         let firing = self.daemon().is_some_and(|s| s.generator.firing);
         if matches!(self.stimulus.phase, StimPhase::Armed | StimPhase::Arming) && !firing {
             self.stimulus.phase = StimPhase::Stopping;
@@ -2598,6 +2604,13 @@ impl AppState {
             ));
             return;
         }
+        if self.stimulus.phase == StimPhase::Stopping && !force {
+            if !self.stimulus.arm_after_stop {
+                self.stimulus.arm_after_stop = true;
+                self.toast("stopping… arms once the stop is done (Esc cancels)");
+            }
+            return;
+        }
         if !matches!(self.stimulus.phase, StimPhase::Idle) && !force {
             return;
         }
@@ -2605,6 +2618,26 @@ impl AppState {
             self.stimulus.phase = StimPhase::Arming;
             self.armed_with = Some(settings.clone());
             out.push(Request::StimArm { settings, force });
+        }
+    }
+
+    /// The arm Space asked for while a stop was in flight, now that the stop has landed:
+    /// the same checks as a fresh Space, against the state the stop left.
+    fn arm_after_stopped(&mut self, out: &mut Vec<Request>) {
+        if !self.connected() || self.stimulus.phase != StimPhase::Idle {
+            return;
+        }
+        if self.daemon().is_some_and(|s| s.session.open.is_none()) {
+            self.error("not armed: no audio session to play into");
+            return;
+        }
+        if let Some(settings) = self.stimulus.settings() {
+            self.stimulus.phase = StimPhase::Arming;
+            self.armed_with = Some(settings.clone());
+            out.push(Request::StimArm {
+                settings,
+                force: false,
+            });
         }
     }
 
@@ -3286,6 +3319,7 @@ impl AppState {
                 _ => {}
             },
             C::StimulusStop | C::StopAnywhere => {
+                self.stimulus.arm_after_stop = false;
                 if self.stimulus_live() {
                     self.stimulus.phase = StimPhase::Stopping;
                     out.push(Request::StimStop);
@@ -4377,6 +4411,7 @@ impl AppState {
                 };
                 // A new connection holds no lease.
                 self.stimulus.phase = StimPhase::Idle;
+                self.stimulus.arm_after_stop = false;
                 // Nor has it rebuilt any history: the log may have moved on meanwhile.
                 self.leq_logs.clear();
             }
@@ -4386,6 +4421,7 @@ impl AppState {
                 self.mirror = None;
                 self.data = None;
                 self.stimulus.phase = StimPhase::Idle;
+                self.stimulus.arm_after_stop = false;
             }
             ConnEvent::Mirror(v) => {
                 self.mirror = Some(v);
@@ -4982,6 +5018,9 @@ impl AppState {
             }
             StimEvent::Stopped => {
                 self.stimulus.phase = StimPhase::Idle;
+                if std::mem::take(&mut self.stimulus.arm_after_stop) && !self.sweep.arm_after_stop {
+                    self.arm_after_stopped(out);
+                }
                 let releasing = std::mem::take(&mut self.sweep.releasing);
                 let pending = std::mem::take(&mut self.sweep.arm_after_stop);
                 match self.sweep.plan.take() {
@@ -4997,6 +5036,7 @@ impl AppState {
             }
             StimEvent::Lost(msg) => {
                 self.stimulus.phase = StimPhase::Idle;
+                self.stimulus.arm_after_stop = false;
                 self.sweep.releasing = false;
                 self.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
@@ -5004,6 +5044,7 @@ impl AppState {
             }
             StimEvent::Failed(msg) => {
                 self.sweep.releasing = false;
+                self.stimulus.arm_after_stop = false;
                 if std::mem::take(&mut self.sweep.arm_after_stop) {
                     self.end_sweep_mode();
                 }

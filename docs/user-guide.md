@@ -136,7 +136,9 @@ make it play by accident:
 - **arm** (`Space`) and **fire** (`Enter`) are separate steps; **Esc** stops (with a window
   open, Esc first closes the window), **Shift+Esc** stops from anywhere, windows included —
   either from any client, without needing anything else. While anything is armed or
-  playing the top bar shows **■ Stop: Shift+Esc**;
+  playing the top bar shows **■ Stop: Shift+Esc**. Space pressed while a stop is still
+  finishing arms once it is done (Esc again cancels that; a failed stop or a lost lease
+  arms nothing);
 - one client holds the stimulus at a time (a lease it keeps refreshing). If that client
   disappears, the daemon fades the output out within 1.5 s;
 - the daemon has a global maximum level (`ac2d --max-level`, default −10 dBFS RMS);
