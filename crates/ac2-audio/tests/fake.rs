@@ -496,6 +496,19 @@ fn delivered(s: &mut DuplexStream, wait: Duration) -> usize {
     n
 }
 
+/// Whether `s` delivers a block within `within`: a realtime fake thread can take a while to
+/// get its first period on a loaded host, so a live stream is waited for, not sampled.
+fn delivers(s: &mut DuplexStream, within: Duration) -> bool {
+    let deadline = Instant::now() + within;
+    while Instant::now() < deadline {
+        if !drain(s).is_empty() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    false
+}
+
 #[test]
 fn a_stall_silences_running_streams_without_an_error_and_blocks_opens_until_it_ends() {
     let backend = FakeBackend::new(FakeConfig {
@@ -507,7 +520,7 @@ fn a_stall_silences_running_streams_without_an_error_and_blocks_opens_until_it_e
     let req = || DuplexRequest::new(vec![0], 2, max_level());
     let mut s = backend.open(req()).expect("open");
     assert_eq!(s.negotiated().delivery, ac2_audio::Delivery::Device);
-    assert!(delivered(&mut s, Duration::from_millis(100)) > 0);
+    assert!(delivers(&mut s, Duration::from_secs(2)));
     backend.stall(None);
     std::thread::sleep(Duration::from_millis(20));
     drain(&mut s);
@@ -520,7 +533,7 @@ fn a_stall_silences_running_streams_without_an_error_and_blocks_opens_until_it_e
     assert!(!opener.is_finished(), "the open waits out the stall");
     backend.restore();
     let mut fresh = opener.join().expect("join").expect("open after the stall");
-    assert!(delivered(&mut fresh, Duration::from_millis(100)) > 0);
+    assert!(delivers(&mut fresh, Duration::from_secs(2)));
     assert_eq!(
         delivered(&mut s, Duration::from_millis(50)),
         0,
@@ -552,7 +565,7 @@ fn a_vanished_device_ends_its_streams_refuses_opens_and_comes_back_after_its_tim
     std::thread::sleep(Duration::from_millis(350));
     assert_eq!(backend.outage(), None);
     let mut back = backend.open(req()).expect("back after its time");
-    assert!(delivered(&mut back, Duration::from_millis(100)) > 0);
+    assert!(delivers(&mut back, Duration::from_secs(2)));
 }
 
 #[test]
