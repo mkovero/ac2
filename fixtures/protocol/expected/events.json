@@ -177,6 +177,20 @@
   ]
  },
  {
+  "kind": "outputs",
+  "rev": 64,
+  "payload": [
+   {
+    "channel": 0,
+    "label": "Main L"
+   },
+   {
+    "channel": 3,
+    "label": "Sub"
+   }
+  ]
+ },
+ {
   "kind": "mic",
   "rev": 58,
   "payload": {

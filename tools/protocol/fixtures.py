@@ -682,6 +682,14 @@ def requests():
             "session.replay",
             {"recording": {"type": "name", "name": "soundcheck"}, "pace": "fast"},
         ),
+        req(56, "gen.ceiling", {"ceiling": -40.0, "confirm_raise": True}),
+        req(
+            57,
+            "session.outputs",
+            {"outputs": [{"channel": 0, "label": "Main L"}, {"channel": 1, "label": None}]},
+        ),
+        req(58, "server.info", mutation=False),
+        req(60, "server.revoke", {"name": "laptop"}),
     ]
 
 
@@ -700,6 +708,11 @@ def events():
             },
         },
         {"kind": "inputs", "rev": 50, "payload": INPUTS},
+        {
+            "kind": "outputs",
+            "rev": 64,
+            "payload": [{"channel": 0, "label": "Main L"}, {"channel": 3, "label": "Sub"}],
+        },
         {"kind": "mic", "rev": 58, "payload": {"type": "deleted", "value": "ECM"}},
         {
             "kind": "measurement",

@@ -15,9 +15,9 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MeasConfig,
-    Measurement, Mic, MicCurveId, Preview, RecordRequest, RecordingFile, RecordingRef,
-    RecordingRun, ReplayPace, Session, SessionConfig, SessionFile, SessionRef, SplHistory,
-    SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
+    Measurement, Mic, MicCurveId, OutputSetup, Preview, RecordRequest, RecordingFile, RecordingRef,
+    RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig, SessionFile, SessionRef,
+    SplHistory, SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
@@ -118,6 +118,13 @@ pub enum Command {
         /// Rows to upsert, one per channel.
         inputs: Vec<InputSetup>,
     },
+    /// Set or clear the labels of the listed outputs (others unchanged). Kept by the daemon
+    /// with the rig's settings.
+    #[serde(rename = "session.outputs")]
+    SessionOutputs {
+        /// Rows to upsert, one per channel; a `None` label clears it.
+        outputs: Vec<OutputSetup>,
+    },
 
     // -- gen (Q6 lease) -----------------------------------------------------------------
     /// Acquire the stimulus lease.
@@ -149,6 +156,17 @@ pub enum Command {
     /// Universal stop: fade out and disarm; no lease needed.
     #[serde(rename = "gen.stop")]
     GenStop,
+    /// Set the system maximum level (`generator.ceiling`). Any client may lower it: a
+    /// stimulus armed or playing above the new maximum is stopped and disarmed. Raising it
+    /// needs `confirm_raise` and is refused while anything is armed or playing. Never above
+    /// `generator.ceiling_bound`. Audited, and kept by the daemon across restarts.
+    #[serde(rename = "gen.ceiling")]
+    GenCeiling {
+        /// New maximum, dBFS RMS.
+        ceiling: Dbfs,
+        /// The operator confirmed a raise (ignored for a lowering).
+        confirm_raise: bool,
+    },
 
     // -- meas ---------------------------------------------------------------------------
     /// Create a measurement.
@@ -499,6 +517,26 @@ pub enum Command {
     /// Recordings in the daemon's recording directory.
     #[serde(rename = "rec.list")]
     RecList,
+    /// How the daemon serves clients: transport, server key, mDNS name, the authorized
+    /// client keys and the keys refused lately.
+    #[serde(rename = "server.info")]
+    ServerInfo,
+    /// Authorize a client key under `name` (network mode). Applies to connections from now
+    /// on; written to the authorized-clients file.
+    #[serde(rename = "server.authorize")]
+    ServerAuthorize {
+        /// Name the client's requests will carry (1 … 64 characters, no spaces).
+        name: String,
+        /// The client's public key (Z85, 40 characters).
+        key: String,
+    },
+    /// Revoke the client key named `name` (network mode): its requests are refused at once,
+    /// and it cannot connect again. A client cannot revoke its own key.
+    #[serde(rename = "server.revoke")]
+    ServerRevoke {
+        /// The authorized name.
+        name: String,
+    },
     /// Open a session that plays a recording instead of a device (new epoch): its inputs
     /// are the recorded ones under their device numbers, it has no outputs, and the running
     /// measurements analyse it as they would the device. A replay never reopens itself: it
@@ -525,11 +563,13 @@ impl Command {
             Self::SessionClose => "session.close",
             Self::SessionStatus => "session.status",
             Self::SessionInputs { .. } => "session.inputs",
+            Self::SessionOutputs { .. } => "session.outputs",
             Self::GenAcquire { .. } => "gen.acquire",
             Self::GenSet { .. } => "gen.set",
             Self::GenRefresh { .. } => "gen.refresh",
             Self::GenRelease { .. } => "gen.release",
             Self::GenStop => "gen.stop",
+            Self::GenCeiling { .. } => "gen.ceiling",
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasDelete { .. } => "meas.delete",
@@ -572,6 +612,9 @@ impl Command {
             Self::RecStop => "rec.stop",
             Self::RecList => "rec.list",
             Self::SessionReplay { .. } => "session.replay",
+            Self::ServerInfo => "server.info",
+            Self::ServerAuthorize { .. } => "server.authorize",
+            Self::ServerRevoke { .. } => "server.revoke",
         }
     }
 
@@ -598,6 +641,7 @@ impl Command {
                 | Self::SplHistoryGet { .. }
                 | Self::FileList
                 | Self::RecList
+                | Self::ServerInfo
         )
     }
 
@@ -690,6 +734,10 @@ pub enum ReplyBody {
     },
     /// `session.inputs`: the whole input setup.
     Inputs(Vec<InputSetup>),
+    /// `session.outputs`: every output label.
+    Outputs(Vec<OutputSetup>),
+    /// `server.info`, `server.authorize`, `server.revoke`.
+    Server(ServerInfo),
     /// `spl.log_get`.
     SplLogPage(SplLogPage),
     /// `spl.history_get`.

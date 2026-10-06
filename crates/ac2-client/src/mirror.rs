@@ -452,6 +452,7 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::Calibration(p) => upsert(&mut s.calibrations, p, |c| c.key.clone()),
         Change::Mic(p) => upsert(&mut s.mics, p, |m| m.name.clone()),
         Change::Inputs(i) => s.inputs = i.clone(),
+        Change::Outputs(o) => s.outputs = o.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = t,
         Change::Sweep(r) => s.sweep = Some(r),

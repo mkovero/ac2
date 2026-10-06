@@ -154,11 +154,13 @@ pub fn empty_state() -> State {
             firing: false,
             settings: None,
             ceiling: Dbfs(-6.0),
+            ceiling_bound: Dbfs(-6.0),
             last_action: None,
         },
         calibrations: vec![],
         mics: vec![],
         inputs: vec![],
+        outputs: vec![],
         spl_logs: vec![],
         timing: TimingStatus {
             epoch: 0,
@@ -767,6 +769,64 @@ impl Shared {
                 self.state.generator.firing = false;
                 self.generator_changed(GenAction::Stop, Some(client.clone()));
                 ReplyBody::Ack { rev: self.rev }
+            }
+            C::GenCeiling {
+                ceiling,
+                confirm_raise,
+            } => {
+                let g = &self.state.generator;
+                if !ceiling.0.is_finite() || ceiling.0 > g.ceiling_bound.0 {
+                    return Err(err(ErrorCode::Invalid, "above the bound"));
+                }
+                let action = if ceiling.0 > g.ceiling.0 {
+                    if !confirm_raise {
+                        return Err(err(ErrorCode::Refused, "raising needs a confirmation"));
+                    }
+                    if g.armed || g.firing {
+                        return Err(err(ErrorCode::Refused, "armed: stop first"));
+                    }
+                    GenAction::CeilingRaised
+                } else {
+                    let above = g.settings.as_ref().is_some_and(|s| s.level.0 > ceiling.0);
+                    if above && (g.armed || g.firing) {
+                        self.state.generator.armed = false;
+                        self.state.generator.firing = false;
+                    }
+                    GenAction::CeilingLowered
+                };
+                self.state.generator.ceiling = ceiling;
+                self.generator_changed(action, Some(client.clone()));
+                ReplyBody::Generator(self.state.generator.clone())
+            }
+            C::SessionOutputs { outputs } => {
+                for o in &outputs {
+                    if let Some(l) = &o.label {
+                        check_output_label(l).map_err(|e| err(ErrorCode::Invalid, e))?;
+                    }
+                }
+                let mut all: Vec<OutputSetup> = self
+                    .state
+                    .outputs
+                    .iter()
+                    .filter(|c| outputs.iter().all(|r| r.channel != c.channel))
+                    .cloned()
+                    .collect();
+                all.extend(outputs.into_iter().filter(|o| o.label.is_some()));
+                all.sort_by_key(|o| o.channel);
+                if all != self.state.outputs {
+                    self.commit(Change::Outputs(all));
+                }
+                ReplyBody::Outputs(self.state.outputs.clone())
+            }
+            C::ServerInfo => ReplyBody::Server(ServerInfo {
+                mode: ServerMode::Embedded,
+                recording_dir: None,
+            }),
+            C::ServerAuthorize { .. } | C::ServerRevoke { .. } => {
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake daemon is not in network mode",
+                ));
             }
             C::MeasCreate { config } => {
                 let id = MeasId(self.next_id);

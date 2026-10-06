@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Mic, RecordingRun, Session,
-    SplLog, State, SweepRun, TimingStatus, TraceMeta,
+    Autosave, CalEntry, CalKey, Generator, InputSetup, Measurement, Mic, OutputSetup, RecordingRun,
+    Session, SplLog, State, SweepRun, TimingStatus, TraceMeta,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
 
@@ -48,6 +48,8 @@ pub enum Change {
     Mic(Patch<Mic, String>),
     /// The whole input setup (mic names, active curves), sorted by channel.
     Inputs(Vec<InputSetup>),
+    /// Every output label of the rig, sorted by channel.
+    Outputs(Vec<OutputSetup>),
     /// An SPL log.
     SplLog(Patch<SplLog, MeasId>),
     /// Timing monitor state.
@@ -123,6 +125,13 @@ pub enum WireEvent {
         /// Payload.
         payload: Vec<InputSetup>,
     },
+    /// [`Change::Outputs`].
+    Outputs {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Vec<OutputSetup>,
+    },
     /// [`Change::SplLog`].
     SplLog {
         /// Rev.
@@ -171,6 +180,7 @@ impl From<Event> for WireEvent {
             Change::Calibration(payload) => Self::Calibration { rev, payload },
             Change::Mic(payload) => Self::Mic { rev, payload },
             Change::Inputs(payload) => Self::Inputs { rev, payload },
+            Change::Outputs(payload) => Self::Outputs { rev, payload },
             Change::SplLog(payload) => Self::SplLog { rev, payload },
             Change::Timing(payload) => Self::Timing { rev, payload },
             Change::Sweep(payload) => Self::Sweep { rev, payload },
@@ -190,6 +200,7 @@ impl From<WireEvent> for Event {
             WireEvent::Calibration { rev, payload } => (rev, Change::Calibration(payload)),
             WireEvent::Mic { rev, payload } => (rev, Change::Mic(payload)),
             WireEvent::Inputs { rev, payload } => (rev, Change::Inputs(payload)),
+            WireEvent::Outputs { rev, payload } => (rev, Change::Outputs(payload)),
             WireEvent::SplLog { rev, payload } => (rev, Change::SplLog(payload)),
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
             WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
@@ -211,6 +222,7 @@ impl Change {
             Self::Calibration(_) => "calibration",
             Self::Mic(_) => "mic",
             Self::Inputs(_) => "inputs",
+            Self::Outputs(_) => "outputs",
             Self::SplLog(_) => "spl_log",
             Self::Timing(_) => "timing",
             Self::Sweep(_) => "sweep",

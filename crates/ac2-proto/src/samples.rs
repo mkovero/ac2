@@ -362,6 +362,30 @@ pub fn commands() -> Vec<Command> {
             },
             pace: ReplayPace::Fast,
         },
+        Command::GenCeiling {
+            ceiling: Dbfs(-40.0),
+            confirm_raise: true,
+        },
+        Command::SessionOutputs {
+            outputs: vec![
+                OutputSetup {
+                    channel: 0,
+                    label: Some("Main L".into()),
+                },
+                OutputSetup {
+                    channel: 1,
+                    label: None,
+                },
+            ],
+        },
+        Command::ServerInfo,
+        Command::ServerAuthorize {
+            name: "laptop".into(),
+            key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
+        },
+        Command::ServerRevoke {
+            name: "laptop".into(),
+        },
     ]
 }
 
@@ -712,6 +736,7 @@ fn generator() -> Generator {
         firing: true,
         settings: Some(settings()),
         ceiling: Dbfs(-6.0),
+        ceiling_bound: Dbfs(-3.0),
         last_action: Some(GenAudit {
             action: GenAction::Fire,
             client: Some(ClientId("alice".into())),
@@ -803,6 +828,54 @@ fn mic_curve_ref() -> MicCurveRef {
         f_hi: Hz(20_000.0),
         imported_at: WallNs(1_788_000_000_000_000_000),
         stated_sensitivity: None,
+    }
+}
+
+fn outputs() -> Vec<OutputSetup> {
+    vec![
+        OutputSetup {
+            channel: 0,
+            label: Some("Main L".into()),
+        },
+        OutputSetup {
+            channel: 3,
+            label: Some("Sub".into()),
+        },
+    ]
+}
+
+/// A network-mode daemon's `server.info`.
+pub fn server_info() -> ServerInfo {
+    ServerInfo {
+        mode: ServerMode::Network {
+            ctrl: "tcp://0.0.0.0:47820".into(),
+            data: "tcp://0.0.0.0:47821".into(),
+            server_key: "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into(),
+            fingerprint: "SHA256:3f1c 9a2e 77b0 51d4".into(),
+            advertised_as: Some("foh-rig".into()),
+            authorized: vec![AuthorizedClient {
+                name: "laptop".into(),
+                key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
+                fingerprint: "SHA256:b2aa 0c3d 9e41 7f60".into(),
+            }],
+            refused: vec![
+                RefusedKey {
+                    key: Some("D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs".into()),
+                    fingerprint: Some("SHA256:51e0 c2b9 aa13 0d77".into()),
+                    address: "192.168.1.40".into(),
+                    count: 12,
+                    last_at: WallNs(1_790_000_000_000_000_000),
+                },
+                RefusedKey {
+                    key: None,
+                    fingerprint: None,
+                    address: "192.168.1.41".into(),
+                    count: 1,
+                    last_at: WallNs(1_790_000_000_000_000_000),
+                },
+            ],
+        },
+        recording_dir: Some("/home/fohtech/.local/share/ac2/recordings".into()),
     }
 }
 
@@ -1104,6 +1177,7 @@ pub fn state() -> State {
         calibrations: vec![cal_entry(), electrical_cal_entry()],
         mics: vec![mic()],
         inputs: inputs(),
+        outputs: outputs(),
         spl_logs: vec![spl_log()],
         timing: timing(),
         sweep: Some(sweep_run()),
@@ -1155,6 +1229,22 @@ pub fn events() -> Vec<Event> {
         ev(61, Change::Session(replay_session())),
         ev(62, Change::Measurement(Patch::Set(math_measurement()))),
         ev(63, Change::Trace(Patch::Set(math_trace_meta()))),
+        ev(64, Change::Outputs(outputs())),
+        ev(
+            65,
+            Change::Generator(Generator {
+                owner: None,
+                armed: false,
+                firing: false,
+                ceiling: Dbfs(-40.0),
+                last_action: Some(GenAudit {
+                    action: GenAction::CeilingRaised,
+                    client: Some(ClientId("laptop".into())),
+                    at: WallNs(1_790_000_000_000_000_000),
+                }),
+                ..generator()
+            }),
+        ),
     ]
 }
 
@@ -1292,6 +1382,18 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Sessions(vec![session_file()])),
         Ok(ReplyBody::Recording(recording_run())),
         Ok(ReplyBody::Recordings(vec![recording_file()])),
+        Ok(ReplyBody::Outputs(outputs())),
+        Ok(ReplyBody::Server(server_info())),
+        Ok(ReplyBody::Server(ServerInfo {
+            mode: ServerMode::Local {
+                ctrl: "ipc:///run/user/1000/ac2/ctrl.sock".into(),
+            },
+            recording_dir: None,
+        })),
+        Ok(ReplyBody::Server(ServerInfo {
+            mode: ServerMode::Embedded,
+            recording_dir: None,
+        })),
         Err(ProtoError {
             code: ErrorCode::Conflict,
             msg: "state moved".into(),

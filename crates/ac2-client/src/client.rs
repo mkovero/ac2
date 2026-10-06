@@ -228,6 +228,8 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Mic(_) => "mic",
         ReplyBody::Calibrations { .. } => "calibrations",
         ReplyBody::Inputs(_) => "inputs",
+        ReplyBody::Outputs(_) => "outputs",
+        ReplyBody::Server(_) => "server",
         ReplyBody::SplLogPage(_) => "spl_log_page",
         ReplyBody::SplHistory(_) => "spl_history",
         ReplyBody::Snapshot(_) => "snapshot",

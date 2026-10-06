@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 22`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 23`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -77,11 +77,13 @@ Lease column: **L** = `lease_token` required (Q6).
 | `session.close` | — | `ack` | |
 | `session.status` | — | `session` | |
 | `session.inputs` | `inputs: [InputSetup]` (upserted by channel) | `inputs` (the whole setup) | |
+| `session.outputs` | `outputs: [OutputSetup]` (upserted by channel; `label: nil` clears) | `outputs` (every label) | |
 | `gen.acquire` | `force: bool` | `lease` (`lease_token`, `expires_in_ms`) | |
 | `gen.set` | `lease_token`, `desired: {settings, armed, firing}` | `generator` | L |
 | `gen.refresh` | `lease_token` | `lease` | L |
 | `gen.release` | `lease_token` | `ack` | L |
 | `gen.stop` | — | `ack` | universal |
+| `gen.ceiling` | `ceiling: Dbfs`, `confirm_raise: bool` | `generator` | any client |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `config` | `measurement` | |
 | `meas.delete` | `meas` | `ack` | |
@@ -124,6 +126,9 @@ Lease column: **L** = `lease_token` required (Q6).
 | `rec.stop` | — | `recording` (the run, finished) | |
 | `rec.list` | — | `recordings` | |
 | `session.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `session` | |
+| `server.info` | — | `server` | |
+| `server.authorize` | `name`, `key` (Z85) | `server` | |
+| `server.revoke` | `name` | `server` | |
 
 Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries the full
 desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 s after
@@ -133,6 +138,48 @@ and expiry is a `generator` event naming the client (`last_action.client`; for `
 owner whose lease expired). The output path enforces the deadline itself; if it mutes on an
 expired deadline before the control side noticed, the daemon disarms with the same `expiry`
 event, so the state never says firing while the output is silent.
+
+**System max level (`gen.ceiling`).** `generator.ceiling` (dBFS RMS) is the system
+maximum: `gen.set`, `ir.capture` and `session.detect_loopback` above it are `refused`, and
+the output path limits every sample to the matching peak (6 × the RMS, at most full scale)
+on the running stream at once. `generator.ceiling_bound` is the hard upper bound fixed at
+daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not finite is
+`invalid`. Any client may change it (no lease):
+
+- **Lowering** applies at once. A stimulus armed or playing at a level above the new
+  maximum, and a sweep running at one, is stopped and disarmed (faded out, 20 ms): stopping
+  is unambiguous where a quietly lowered level would leave the owner's level and the
+  measurement's level disagreeing. One at or below the new maximum carries on untouched.
+- **Raising** needs `confirm_raise: true` (`refused` without), and is `refused` while the
+  generator is armed or firing, a sweep runs or a loopback detection plays.
+- Each change is a `generator` event whose `last_action` is `ceiling_lowered` or
+  `ceiling_raised` naming the client, and a line in the daemon's audit log. The daemon keeps
+  the value in its rig settings file (atomic write) and starts with it; a value above a
+  later, lower `--max-level` comes up at that bound. A change that cannot be written is
+  `internal` and leaves the maximum as it was.
+
+**Output labels (`session.outputs`).** `OutputSetup` = {`channel`: u16, `label`: string |
+nil}. Labels name the rig's outputs (`Main L`, `Sub`) for every client; they are kept with
+the rig settings (not in sessions) by channel number, whatever the device. A label is 1–32
+characters, no control characters, no surrounding space (`invalid` otherwise); `nil` clears
+it. `state.outputs` lists the labelled outputs, sorted by channel.
+
+**Server (`server.*`).** `server.info` → `ServerInfo`: `mode` (tagged by `type`):
+`embedded` (in an app's process) \| `local` {`ctrl`} (this machine only; the OS user is the
+trust boundary, there are no client keys) \| `network` {`ctrl`, `data`, `server_key` (Z85),
+`fingerprint`, `advertised_as`: string | nil (the mDNS name), `authorized`:
+[`AuthorizedClient` {`name`, `key`, `fingerprint`}], `refused`: [`RefusedKey` {`key`:
+string | nil (nil: not CURVE), `fingerprint`: string | nil, `address`, `count`, `last_at`:
+WallNs}], newest first, at most 32}; `recording_dir`: string | nil (where `rec.start`
+records on the daemon host). `server.authorize` adds `key` under `name` to the
+authorized-clients file (atomic write) and to the running handshake check; `server.revoke`
+removes `name`: its requests are `refused` at once and it cannot connect again (a
+connection already up keeps receiving data frames until it drops). Both answer the new
+`server` info; outside network mode they are `unsupported`. A name is 1–64 characters
+without whitespace; `invalid` for a duplicate name or key, a malformed key, revoking an
+unknown name (`not_found`) or the requesting client's own name (`refused`: that would lock
+the operator out). Any authorized client may use them: every authorized client is equally
+trusted.
 
 The stream carries every output of the session: arming routes the generator to
 `settings.outputs` without reopening the stream (same session epoch; running measurements,
@@ -773,7 +820,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `mic`, `inputs`, `spl_log_page`, `spl_history`,
+`export`, `calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`,
+`spl_log_page`, `spl_history`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `sweep`, `recording`, `recordings`.
 
@@ -800,9 +848,12 @@ polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported |
 average | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
-`armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
+`armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
+\| force \| arm \| fire \| set \| stop \| release \| expiry \| ceiling_lowered \|
+ceiling_raised, `client`, `at`}), `calibrations` (`CalEntry`:
 `key` {device, channel, mic}, `spl`: SplCal), `mics` (`Mic`: `name`, `curves`
-[MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `spl_logs` (`SplLog` per SPL
+[MicCurveRef]), `inputs` ([InputSetup], sorted by channel), `outputs` ([OutputSetup], the
+labelled outputs, sorted by channel), `spl_logs` (`SplLog` per SPL
 meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`TimingStatus`: `epoch`,
 `state` {no_stimulus | acquiring | locked{offset} | jumped{from, to} | lost}, `last_lock`,
 `drift` (`Drift` | nil: `ppm` output-vs-input clock drift from the loopback offset's slope,
@@ -839,8 +890,8 @@ gap time), and the generator is disarmed (it was disarmed when the audio stopped
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `mic`, `inputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`. `payload` is the entity's
-full new value (`inputs`: the whole list); for keyed entities (`measurement`, `trace`,
+`generator`, `calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`. `payload` is the entity's
+full new value (`inputs`, `outputs`: the whole list); for keyed entities (`measurement`, `trace`,
 `calibration`, `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB.

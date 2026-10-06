@@ -1860,6 +1860,10 @@ pub enum GenAction {
     Release,
     /// Lease expired.
     Expiry,
+    /// The system maximum level (`ceiling`) was lowered.
+    CeilingLowered,
+    /// The system maximum level (`ceiling`) was raised (an explicit confirmation).
+    CeilingRaised,
 }
 
 /// Last audited action.
@@ -1886,8 +1890,14 @@ pub struct Generator {
     pub firing: bool,
     /// Current settings, if ever set.
     pub settings: Option<GeneratorSettings>,
-    /// Global maximum level; requests above it are refused.
+    /// System maximum level, dBFS RMS: every emission above it is refused, and the output
+    /// path limits samples to the matching peak. Any client may lower it; raising it needs
+    /// an explicit confirmation and nothing armed or playing (`gen.ceiling`). Kept by the
+    /// daemon across restarts.
     pub ceiling: Dbfs,
+    /// The hard upper bound of `ceiling`, fixed when the daemon started (`ac2d
+    /// --max-level`): `ceiling` never exceeds it.
+    pub ceiling_bound: Dbfs,
     /// Last audited action.
     pub last_action: Option<GenAudit>,
 }
@@ -2798,6 +2808,40 @@ pub enum CurveChoice {
     },
 }
 
+/// An operator's name for one output channel of the rig (`Main L`, `Sub`), kept by the
+/// daemon with the rig's settings (not in sessions: the wiring outlives a session).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutputSetup {
+    /// Zero-based device output channel.
+    pub channel: u16,
+    /// The name; `None` clears it (the device's own channel name shows again).
+    pub label: Option<String>,
+}
+
+/// Longest output label the daemon accepts, characters.
+pub const MAX_OUTPUT_LABEL: usize = 32;
+
+/// Checks an output label: 1 … [`MAX_OUTPUT_LABEL`] characters, no control characters, no
+/// surrounding space.
+pub fn check_output_label(l: &str) -> Result<(), String> {
+    if l.is_empty() {
+        return Err("an output label must not be empty (clear it instead)".into());
+    }
+    if l.chars().count() > MAX_OUTPUT_LABEL {
+        return Err(format!(
+            "an output label is at most {MAX_OUTPUT_LABEL} characters"
+        ));
+    }
+    if l.chars().any(char::is_control) {
+        return Err("an output label must not contain control characters".into());
+    }
+    if l.trim() != l {
+        return Err("an output label must not start or end with a space".into());
+    }
+    Ok(())
+}
+
 /// Input setup of one input channel (decision K8): which mic is on it and which of the
 /// mic's curves it applies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -3145,6 +3189,8 @@ pub struct State {
     pub mics: Vec<Mic>,
     /// Input setup (mic names, active curves), sorted by channel.
     pub inputs: Vec<InputSetup>,
+    /// Output labels of the rig, sorted by channel; only labelled outputs are listed.
+    pub outputs: Vec<OutputSetup>,
     /// SPL logs.
     pub spl_logs: Vec<SplLog>,
     /// Timing.
@@ -3380,4 +3426,77 @@ pub struct ReplayInfo {
     pub recorded_start_sample: SampleIndex,
     /// When the recording started.
     pub recorded_at: WallNs,
+}
+
+// ---------------------------------------------------------------------------------------
+// The daemon's server features (`server.*`)
+
+/// How the daemon serves clients, and who may connect (`server.info`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerInfo {
+    /// Transport and its security.
+    pub mode: ServerMode,
+    /// Where raw capture files are recorded on the daemon host; `None`: this daemon does
+    /// not record.
+    pub recording_dir: Option<String>,
+}
+
+/// How the daemon listens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ServerMode {
+    /// In this process only (a daemon embedded in an app).
+    Embedded,
+    /// This machine only (`ipc://` or loopback TCP): the operating system's user boundary
+    /// is the trust boundary; there are no client keys.
+    Local {
+        /// Ctrl endpoint.
+        ctrl: String,
+    },
+    /// The network, CURVE on both sockets: only clients whose key is authorized connect.
+    Network {
+        /// Ctrl endpoint as bound.
+        ctrl: String,
+        /// Data endpoint as bound.
+        data: String,
+        /// The server's public key (Z85), which clients pin when pairing.
+        server_key: String,
+        /// Its fingerprint, as `ac2 discover` and the connect dialog show it.
+        fingerprint: String,
+        /// The name the rig is advertised under over mDNS; `None`: not advertised.
+        advertised_as: Option<String>,
+        /// The authorized clients, by name.
+        authorized: Vec<AuthorizedClient>,
+        /// Keys refused lately, newest first (bounded).
+        refused: Vec<RefusedKey>,
+    },
+}
+
+/// One authorized client key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizedClient {
+    /// Its name (the identity its requests carry: lease owner, audit).
+    pub name: String,
+    /// Public key (Z85).
+    pub key: String,
+    /// Fingerprint of the key.
+    pub fingerprint: String,
+}
+
+/// A client key the daemon refused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefusedKey {
+    /// Public key (Z85); `None` when the peer did not use CURVE.
+    pub key: Option<String>,
+    /// Fingerprint of the key; `None` with `key`.
+    pub fingerprint: Option<String>,
+    /// Peer address.
+    pub address: String,
+    /// Refusals of this key from this address since the daemon started.
+    pub count: u64,
+    /// The latest refusal.
+    pub last_at: WallNs,
 }
