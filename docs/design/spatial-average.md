@@ -104,7 +104,7 @@ answers, so the wait is the slowest member's. The members never wait on the aver
   transfer measurement). Validity bit `FEW_MEMBERS` 512.
 - `TraceSource::spatial_average` {`meas`, `meas_name`, `epoch`, `at_sample`, `method`,
   `members`: [{`meas`, `name`}]}: shares its epoch's time base like a capture.
-- `PROTO_VERSION` 15, session format 9 (sessions hold averages; a load checks their
+- `PROTO_VERSION` 19, session format 9 (sessions hold averages; a load checks their
   members against the loaded measurements).
 
 ## Tests
