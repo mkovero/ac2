@@ -345,3 +345,76 @@ fn stale_dims_offset_shifts_and_empty_says_so() {
     let s = input(&h, 0.0, Some(Freshness::Stopped { age_s: 2.0 }));
     assert!(s.caption.ends_with(" · stopped"), "{}", s.caption);
 }
+
+/// Split with the spectrograph, the spectrum part keeps its own legend (above its plot,
+/// never in the spectrograph), its per-bin axis unit and the selected trace's mark.
+#[test]
+fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
+    let g = log_bins();
+    let cols = crate::grid::columns(&g);
+    let level = vec![-60.0f32; cols.freqs.len()];
+    let trace = |id: u32, name: &str, selected: bool| SpectrumTrace {
+        key: crate::trace::TraceKey::Stored(ac2_proto::units::TraceId(id)),
+        name: name.into(),
+        color: crate::primitives::Color::WHITE,
+        freqs: &cols.freqs,
+        edges: &cols.edges,
+        level: &level,
+        validity: None,
+        peak: None,
+        scale: LevelScale::Dbfs,
+        quantity: crate::spectrum::Quantity::Tone,
+        bin_hz: cols.bin_hz,
+        caption: "stored".into(),
+        freshness: None,
+        offset_db: 0.0,
+        selected,
+    };
+    let traces = [trace(1, "Main L S1", false), trace(2, "Main L S2", true)];
+    let h = SpectrographHistory::new(30);
+    let input = SpectrographInput {
+        history: &h,
+        name: "Main".into(),
+        range: Range::new(-100.0, 0.0),
+        offset_db: 0.0,
+        freshness: None,
+    };
+    let theme = Theme::dark();
+    let s = spectrograph_scene(
+        &traces,
+        &Status::default(),
+        Some(&input),
+        &ViewState::default(),
+        &theme,
+        Viewport {
+            width: 800.0,
+            height: 500.0,
+        },
+    );
+    let sp = &s.spectrum;
+    assert_eq!(sp.unit, "dBFS per 2.93 Hz bin (tone)");
+    assert_eq!(sp.legend_shown, ["Main L S1", "Main L S2"]);
+    let selected: Vec<bool> = sp.legend.iter().map(|e| e.selected).collect();
+    assert_eq!(selected, [false, true]);
+    assert!(sp.legend_rect.bottom() <= sp.plot.y);
+    assert!(
+        sp.plot.bottom() < s.plot.y,
+        "the spectrum part is above the spectrograph"
+    );
+    // The selected curve is drawn twice as wide in the spectrum part.
+    let widths: Vec<f32> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| &l.polylines)
+        .filter(|p| p.clip == Some(sp.plot))
+        .map(|p| p.stroke.width)
+        .collect();
+    assert_eq!(
+        widths,
+        [
+            theme.trace_width,
+            theme.trace_width * crate::tf::SELECTED_WIDTH
+        ]
+    );
+}
