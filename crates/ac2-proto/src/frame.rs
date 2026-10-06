@@ -909,6 +909,10 @@ impl Frame {
 }
 
 /// Anything received on the data socket.
+// A message is decoded and at once moved on (an event into the mirror, a frame into the
+// latest-frame map), never stored as this enum, so the size of its larger variant costs
+// one move; boxing either variant would cost an allocation per message instead.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataMessage {
     /// A frame (including `ka`).

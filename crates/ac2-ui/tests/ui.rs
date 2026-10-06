@@ -1982,6 +1982,10 @@ fn leq_tiles_from_an_empty_daemon() {
     leq.set_spl(meter);
     let peaked = move |a: &ac2_ui::App| {
         held(a)
+            && a.state
+                .spl_hold
+                .get(&meas)
+                .is_some_and(|x| x.frame.meta.position.is_some())
             && a.state.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
