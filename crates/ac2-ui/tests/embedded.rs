@@ -2314,9 +2314,9 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
         return Err("the export prompt".into());
     };
     assert_eq!(p.kind, PromptKind::TraceExport(a));
-    // It starts in the app's working directory, where a relative path goes.
-    let cwd = std::env::current_dir()?.display().to_string();
-    assert_eq!(p.text, format!("{cwd}{}", std::path::MAIN_SEPARATOR));
+    // It starts in the home directory.
+    let home = std::env::home_dir().ok_or("home")?.display().to_string();
+    assert_eq!(p.text, format!("{home}{}", std::path::MAIN_SEPARATOR));
     retype(&mut d, &dir.path().display().to_string());
     d.key("Enter");
     let file = dir.path().join(format!("{name}.csv"));
@@ -2346,6 +2346,15 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
             .any(|t| t.text.contains("front fill.csv") && t.text.contains("bytes"))
     })?;
     assert_eq!(std::fs::read_to_string(&named)?, csv);
+
+    // A relative path is relative to the last export's folder.
+    export(&mut d);
+    retype(&mut d, "rel.csv");
+    d.key("Enter");
+    d.until("the relative export written", |s| {
+        s.toasts.iter().any(|t| t.text.contains("rel.csv"))
+    })?;
+    assert_eq!(std::fs::read_to_string(dir.path().join("rel.csv"))?, csv);
 
     // A folder that is not there: the error names the path.
     export(&mut d);

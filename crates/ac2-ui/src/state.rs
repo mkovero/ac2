@@ -908,8 +908,9 @@ pub struct AppState {
     pub prefs: UiPrefs,
     /// `prefs` changed since the app last saved them.
     pub prefs_dirty: bool,
-    /// The folder an export prompt starts in: the last export's, else the app's working
-    /// directory (a relative path is relative to it).
+    /// The folder an export prompt starts in, and a relative path is relative to: the last
+    /// export's, else the home directory. Never the working directory: started from a
+    /// desktop icon, that is wherever the launcher left it.
     pub export_dir: Option<std::path::PathBuf>,
     /// Local time of day for wall times.
     pub local_zone: crate::scenes::LocalZone,
@@ -1008,7 +1009,7 @@ impl AppState {
             sweep: SweepUi::default(),
             prefs: UiPrefs::default(),
             prefs_dirty: false,
-            export_dir: std::env::current_dir().ok(),
+            export_dir: std::env::home_dir(),
             local_zone: crate::scenes::LocalZone::System,
             stim_device: None,
             finder: FinderChoice::default(),
@@ -2399,6 +2400,10 @@ impl AppState {
                 } else {
                     self.trace_meta(id).map(|t| {
                         let path = std::path::PathBuf::from(path);
+                        let path = match &self.export_dir {
+                            Some(d) if path.is_relative() => d.join(path),
+                            _ => path,
+                        };
                         // The next export starts in the same folder.
                         self.export_dir = if path.is_dir() {
                             Some(path.clone())
@@ -3351,8 +3356,8 @@ impl AppState {
             },
             C::TraceExport => match self.selected_trace_meta().map(|t| t.id) {
                 Some(id) => {
-                    // The folder of the last export (else the app's working directory, where
-                    // a relative path goes), ready for a file name.
+                    // The folder of the last export (else the home directory), ready for a
+                    // file name.
                     let text = self
                         .export_dir
                         .as_ref()

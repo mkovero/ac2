@@ -409,7 +409,7 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **Export the selected trace (ac2 CSV) to a file…** in the palette writes the selected
   stored trace as `ac2 trace export --csv` does: type a file path, or a folder to write it
   under the trace's own name (`Main L S1.csv`). The prompt starts in the folder of the last
-  export (at first, the folder the app was started in, where a relative path goes); the
+  export (at first, the home directory), and a relative path is relative to it; the
   toast says where the file went. The file is written on this computer, also with a remote
   daemon.
 - **Delete** asks before the selected stored trace goes (naming it); **Delete** again or
