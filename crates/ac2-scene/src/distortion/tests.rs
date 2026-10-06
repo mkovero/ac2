@@ -119,7 +119,7 @@ fn status() -> Status {
         clock_drift_ppm: None,
         audio_stopped: None,
         no_delay_estimate: None,
-        average: None,
+        math: None,
     }
 }
 

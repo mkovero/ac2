@@ -8,11 +8,11 @@ use std::collections::BTreeMap;
 
 use ac2_core::mic_curve::Correction;
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::frame::{Frame, MemberStatus, TfFrame};
+use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
-    AverageMember, AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole,
-    MathOp, MeasKind, Measurement, MicCurveId, MicState, Smoothing, SmoothingMode,
-    SpatialAverageConfig, SweepData, TraceEdit, TraceKind, TraceMeta, TraceMicCurve, TraceSource,
+    AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathConfig,
+    MathExpr, MeasKind, Measurement, MicCurveId, MicState, NamedOperand, Operand, Smoothing,
+    SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -230,10 +230,8 @@ impl Control {
             .grid_id
             .and_then(|g| self.grids.get(&g).cloned())
             .ok_or_else(|| perr(ErrorCode::Internal, "the frame's grid is not registered"))?;
-        if let (FrameData::Tf(f), MeasKind::SpatialAverage { config }) =
-            (&frame.data, &m.config.kind)
-        {
-            return self.capture_average(&m, config.method, f, &frame, grid, columns, name, slot);
+        if let MeasKind::Math { config } = &m.config.kind {
+            return self.capture_math(&m, config, &frame, kind, grid, columns, name, slot);
         }
         let (delay, smoothing, depth, input): (Seconds, Option<Smoothing>, _, u16) =
             match (&frame.data, &m.config.kind) {
@@ -293,68 +291,104 @@ impl Control {
         Ok(self.add_trace(t, grid, columns, None))
     }
 
-    /// `trace.capture` of a spatial average: the trace names the members averaged into it
-    /// and the method; members left out at that moment are not named. A ratio of several
-    /// inputs, it is uncalibrated and names no single mic.
+    /// The name of math operand `o` as the state names it now.
+    pub(super) fn operand_name(&self, o: Operand) -> String {
+        match o {
+            Operand::Meas { meas } => self
+                .lookup(meas)
+                .map_or_else(|| format!("measurement {meas}"), |(n, _)| n.to_owned()),
+            Operand::Trace { trace } => self
+                .store
+                .state()
+                .traces
+                .iter()
+                .find(|t| t.id == trace)
+                .map_or_else(|| format!("trace {trace}"), |t| t.edit.name.clone()),
+        }
+    }
+
+    /// `trace.capture` of a math channel: the trace names the expression and the operands
+    /// that went into it (an average's operands left out at that moment are not named). A
+    /// combination of several inputs, it names no single mic or calibration.
     #[allow(clippy::too_many_arguments)]
-    fn capture_average(
+    fn capture_math(
         &mut self,
         m: &Measurement,
-        method: AverageMethod,
-        f: &TfFrame,
+        config: &MathConfig,
         frame: &Frame,
+        kind: TraceKind,
         grid: GridDef,
         columns: Columns,
         name: String,
         slot: Option<u8>,
     ) -> Result<ReplyBody, ProtoError> {
-        let included: Vec<AverageMember> = f
-            .meta
-            .average
+        let (state, delay, smoothing): (Option<&MathState>, Seconds, Option<Smoothing>) =
+            match &frame.data {
+                FrameData::Tf(f) => (f.meta.math.as_deref(), f.meta.delay, f.meta.smoothing),
+                FrameData::Spec(f) => (
+                    f.meta.math.as_deref(),
+                    Seconds(0.0),
+                    f.meta.smoothing.map(|fraction| Smoothing {
+                        fraction,
+                        mode: SmoothingMode::Magnitude,
+                    }),
+                ),
+                FrameData::Rta(f) => (f.meta.math.as_deref(), Seconds(0.0), None),
+                _ => (None, Seconds(0.0), None),
+            };
+        let state = state.ok_or_else(|| {
+            perr(
+                ErrorCode::Internal,
+                "the math channel's frame does not say what it combined",
+            )
+        })?;
+        let included: Vec<NamedOperand> = state
+            .operands
             .iter()
-            .flat_map(|a| &a.members)
-            .filter(|s| s.status == MemberStatus::Included)
-            .map(|s| AverageMember {
-                meas: s.meas,
-                name: self
-                    .lookup(s.meas)
-                    .map_or_else(|| format!("measurement {}", s.meas), |(n, _)| n.to_owned()),
+            .filter(|s| s.status == OperandStatus::Included)
+            .map(|s| NamedOperand {
+                operand: s.operand,
+                name: self.operand_name(s.operand),
             })
             .collect();
-        if included.len() < SpatialAverageConfig::MIN_MEMBERS {
+        let enough = match &config.expr {
+            MathExpr::Binary { .. } => included.len() == 2,
+            MathExpr::Average { .. } => included.len() >= MathConfig::MIN_AVERAGE,
+        };
+        if !enough || columns.mag_db.iter().all(|v| v.is_nan()) {
             return Err(perr(
                 ErrorCode::Refused,
                 format!(
-                    "{}: fewer than {} members have a usable result; nothing to capture",
-                    m.config.name,
-                    SpatialAverageConfig::MIN_MEMBERS
+                    "{}: its operands have no usable result together; nothing to capture",
+                    m.config.name
                 ),
             ));
         }
         let id = self.traces.alloc();
         let mut edit = meta::new_edit(id, name, slot);
-        edit.smoothing = f.meta.smoothing;
+        edit.smoothing = smoothing;
         let t = TraceMeta {
             id,
             edit,
-            kind: TraceKind::Transfer,
-            source: TraceSource::SpatialAverage {
+            kind,
+            source: TraceSource::Math {
                 meas: m.id,
                 meas_name: m.config.name.clone(),
                 epoch: frame.stamp.session_epoch,
                 at_sample: frame.stamp.audio_sample,
-                method,
-                members: included,
+                expr: config.expr.clone(),
+                operands: included,
+                phase: state.phase,
             },
             grid_id: grid.id(),
-            delay: f.meta.delay,
+            delay,
             depth: None,
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
-        tracing::info!("trace {id} captured from spatial average {}", m.id);
+        tracing::info!("trace {id} captured from math channel {}", m.id);
         Ok(self.add_trace(t, grid, columns, None))
     }
 
@@ -397,6 +431,7 @@ impl Control {
                 format!("trace {id} is locked; unlock it first"),
             ));
         }
+        self.check_trace_operand_delete(id)?;
         self.traces.remove(id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
         Ok(ReplyBody::Ack { rev })
@@ -462,19 +497,6 @@ impl Control {
         };
         let smoothing = common_smoothing(&refs, d.kind);
         self.derived(name, source, d, &refs, smoothing)
-    }
-
-    pub(super) fn trace_math(
-        &mut self,
-        a: TraceId,
-        b: TraceId,
-        op: MathOp,
-        name: String,
-    ) -> Result<ReplyBody, ProtoError> {
-        let (ta, tb) = (self.stored(a)?, self.stored(b)?);
-        let d = ops::math(&ta, &tb, op).map_err(|e| op_err(&e))?;
-        let smoothing = common_smoothing(&[&ta, &tb], d.kind);
-        self.derived(name, TraceSource::Math { a, b, op }, d, &[], smoothing)
     }
 
     pub(super) fn trace_import(
@@ -543,6 +565,7 @@ impl Control {
             t.mic_curve = None;
             self.traces.set_mic_curve(id, None);
             self.commit(Change::Trace(Patch::Set(t.clone())));
+            self.restart_maths_naming(Operand::Trace { trace: id });
             tracing::info!("trace {id}: mic curve removed");
             return Ok(ReplyBody::Trace(t));
         };
@@ -596,6 +619,8 @@ impl Control {
         self.traces
             .set_mic_curve(id, Some(points.normalised(f_norm)));
         self.commit(Change::Trace(Patch::Set(t.clone())));
+        // The curve corrects the trace's columns as a math channel combines them.
+        self.restart_maths_naming(Operand::Trace { trace: id });
         tracing::info!("trace {id}: mic curve of {m:?} applied (0 dB at {f_norm} Hz)");
         Ok(ReplyBody::Trace(t))
     }

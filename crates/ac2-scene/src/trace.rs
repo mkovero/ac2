@@ -140,12 +140,16 @@ impl<'a> TfTrace<'a> {
             None => TimeBase::Independent,
         };
         let note = match &m.source {
-            TraceSource::SpatialAverage {
-                method, members, ..
-            } => Some(format!(
-                "{} positions · {} avg",
-                members.len(),
-                crate::average::method_name(*method)
+            TraceSource::Math {
+                expr,
+                operands,
+                phase,
+                ..
+            } => Some(crate::math::capture_note(
+                expr,
+                operands,
+                *phase,
+                m.kind == ac2_proto::model::TraceKind::Transfer,
             )),
             _ => None,
         };

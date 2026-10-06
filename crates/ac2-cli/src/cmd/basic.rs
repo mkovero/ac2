@@ -181,7 +181,7 @@ fn time_weighting(t: TimeWeightArg) -> TimeWeighting {
     }
 }
 
-fn smoothing(f: FractionArg) -> Result<SmoothingFraction, CliError> {
+pub(crate) fn smoothing(f: FractionArg) -> Result<SmoothingFraction, CliError> {
     Ok(match f {
         FractionArg::F3 => SmoothingFraction::Third,
         FractionArg::F6 => SmoothingFraction::Sixth,
@@ -212,66 +212,8 @@ fn window(w: WindowArg) -> Window {
     }
 }
 
-/// The spatial average of `meas new avg`, its members resolved against `s`.
-fn average_config(n: &MeasNew, s: Option<&State>) -> Result<MeasKind, CliError> {
-    if n.reference.is_some() || n.measurement.is_some() || n.input.is_some() {
-        return Err(CliError::Usage(
-            "avg takes its inputs from its members (--of), not --ref / --meas / --input".into(),
-        ));
-    }
-    if n.of.len() < SpatialAverageConfig::MIN_MEMBERS {
-        return Err(CliError::Usage(format!(
-            "avg needs at least {} members: --of A,B",
-            SpatialAverageConfig::MIN_MEMBERS
-        )));
-    }
-    let s = s.ok_or_else(|| CliError::Usage("avg needs the daemon's measurements".into()))?;
-    let members =
-        n.of.iter()
-            .map(|r| find_meas(s, r).map(|m| m.id))
-            .collect::<Result<Vec<_>, _>>()?;
-    let reference = match (&n.phase_ref, n.ref_delay) {
-        (_, Some(d)) => AverageReference::Fixed { delay: d.0 },
-        (Some(r), None) => AverageReference::Member {
-            meas: find_meas(s, r)?.id,
-        },
-        (None, None) => AverageReference::Member { meas: members[0] },
-    };
-    Ok(MeasKind::SpatialAverage {
-        config: SpatialAverageConfig {
-            members,
-            method: super::traces::method(n.method.unwrap_or(AverageArg::Power)),
-            reference,
-            smoothing: n
-                .smooth
-                .map(|f| {
-                    smoothing(f).map(|fraction| Smoothing {
-                        fraction,
-                        mode: if n.smooth_magnitude_only {
-                            SmoothingMode::Magnitude
-                        } else {
-                            SmoothingMode::MagnitudePhase
-                        },
-                    })
-                })
-                .transpose()?,
-        },
-    })
-}
-
 /// Builds the measurement configuration of `meas new`, checking the kind's required inputs.
-/// `s` resolves the members of a spatial average.
-pub fn meas_config(n: &MeasNew, s: Option<&State>) -> Result<MeasConfig, CliError> {
-    if n.kind != MeasKindArg::Avg
-        && (!n.of.is_empty()
-            || n.method.is_some()
-            || n.phase_ref.is_some()
-            || n.ref_delay.is_some())
-    {
-        return Err(CliError::Usage(
-            "--of, --method, --phase-ref and --ref-delay apply to avg only".into(),
-        ));
-    }
+pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
     let need = |c: Option<crate::units::Channel>, flag: &str| {
         c.map(|c| c.0)
             .ok_or_else(|| CliError::Usage(format!("{:?} needs --{flag}", n.kind)))
@@ -284,7 +226,6 @@ pub fn meas_config(n: &MeasNew, s: Option<&State>) -> Result<MeasConfig, CliErro
         None => Ok(()),
     };
     let kind = match n.kind {
-        MeasKindArg::Avg => average_config(n, s)?,
         MeasKindArg::Tf => {
             refuse(n.input, "input")?;
             if n.ppo == 0 || n.ppo > 96 {
@@ -392,7 +333,7 @@ pub fn meas_config(n: &MeasNew, s: Option<&State>) -> Result<MeasConfig, CliErro
     })
 }
 
-async fn meas_call(c: &Client, cmd: Command) -> Result<Measurement, CliError> {
+pub(crate) async fn meas_call(c: &Client, cmd: Command) -> Result<Measurement, CliError> {
     let op = cmd.name();
     let r = c.call(cmd).await?;
     Ok(expect_body!(op, r, ReplyBody::Measurement(m) => m)?)
@@ -406,11 +347,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
     let c = connect(cli, false).await?;
     match cmd {
         MeasCmd::New(n) => {
-            let s = match n.kind {
-                MeasKindArg::Avg => Some(state(&c).await?),
-                _ => None,
-            };
-            let config = meas_config(n, s.as_ref())?;
+            let config = meas_config(n)?;
             let mut m = meas_call(&c, Command::MeasCreate { config }).await?;
             if n.start {
                 m = meas_call(&c, Command::MeasStart { meas: m.id }).await?;
@@ -764,7 +701,7 @@ mod tests {
         else {
             unreachable!()
         };
-        meas_config(&n, None)
+        meas_config(&n)
     }
 
     /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.

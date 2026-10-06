@@ -15,9 +15,9 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, EventError, decode_event, encode_event};
 use crate::grid::GridId;
 use crate::model::{
-    AverageMethod, BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale,
-    PeakWeighting, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting, TimingState,
-    TimingStatus, Weighting, Window,
+    BackendKind, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand,
+    PeakWeighting, PhaseBasis, PositionCorrection, Smoothing, SmoothingFraction, TimeWeighting,
+    TimingState, TimingStatus, Weighting, Window,
 };
 use crate::topic::{Stream, Topic};
 use crate::units::{
@@ -87,8 +87,8 @@ bitmask!(
         INSUFFICIENT_RESOLUTION = 1 << 7;
         /// Band above Nyquist.
         ABOVE_NYQUIST = 1 << 8;
-        /// A spatial average with fewer usable members than it needs: no value.
-        FEW_MEMBERS = 1 << 9;
+        /// A math channel without the usable operands it needs: no value.
+        FEW_OPERANDS = 1 << 9;
     }
 );
 
@@ -287,56 +287,55 @@ pub struct ArrayDesc {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TfMeta {
-    /// Delay applied to the reference; for a spatial average, the delay its phase is
-    /// referred to.
+    /// Delay applied to the reference; for a math channel, the delay its phase is referred
+    /// to.
     pub delay: Seconds,
     /// Display frozen.
     pub frozen: bool,
     /// Live smoothing applied.
     pub smoothing: Option<Smoothing>,
-    /// A mic curve was subtracted from `mag` (for a spatial average: from every member
-    /// averaged).
+    /// A mic curve was subtracted from `mag` (for a math channel: from every operand).
     pub mic_curve: bool,
-    /// What a spatial average combined; `None` for a transfer measurement.
-    pub average: Option<Box<TfAverage>>,
+    /// What a math channel combined; `None` for a transfer measurement.
+    pub math: Option<Box<MathState>>,
 }
 
-/// What a spatial average's frame combined.
+/// What a math channel's frame combined.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TfAverage {
-    /// Method.
-    pub method: AverageMethod,
-    /// Every configured member, in configuration order, with whether it was averaged.
-    pub members: Vec<AverageMemberState>,
+pub struct MathState {
+    /// Every operand of the expression, in expression order, with whether it went in.
+    pub operands: Vec<OperandState>,
+    /// What the result's phase is relative to.
+    pub phase: PhaseBasis,
 }
 
-impl TfAverage {
-    /// Members averaged into the frame.
+impl MathState {
+    /// Operands that went into the frame.
     pub fn included(&self) -> usize {
-        self.members
+        self.operands
             .iter()
-            .filter(|m| m.status == MemberStatus::Included)
+            .filter(|m| m.status == OperandStatus::Included)
             .count()
     }
 }
 
-/// One member of a spatial average in a frame.
+/// One operand of a math channel in a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AverageMemberState {
-    /// The member measurement.
-    pub meas: MeasId,
-    /// Whether it was averaged, and why not.
-    pub status: MemberStatus,
+pub struct OperandState {
+    /// The operand.
+    pub operand: Operand,
+    /// Whether it went in, and why not.
+    pub status: OperandStatus,
 }
 
-/// Whether a member went into a spatial average's frame. A member is left out rather than
-/// let it mislead the average (PLAN principle 8).
+/// Whether an operand went into a math channel's frame. An operand is left out rather than
+/// let it mislead the result (PLAN principle 8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MemberStatus {
-    /// Averaged.
+pub enum OperandStatus {
+    /// Went in.
     Included,
     /// Not running (or deleted).
     Stopped,
@@ -344,15 +343,18 @@ pub enum MemberStatus {
     Settling,
     /// Its own frame shows a fault banner (clip, no reference, check routing, no signal).
     Refused {
-        /// The member's protection flags.
+        /// The operand's protection flags.
         protection: ProtectionFlags,
     },
+    /// Its result cannot be combined with the others: another level scale, bin grid or band
+    /// layout.
+    Mismatch,
 }
 
-impl MemberStatus {
-    /// Protection flags that leave a member out of an average: the ones that raise a fault
-    /// banner on its own frame. A weak reference or a recent discontinuity only hold or
-    /// restart the member's averaging, which its validity mask already reports per column.
+impl OperandStatus {
+    /// Protection flags that leave an operand out: the ones that raise a fault banner on
+    /// its own frame. A weak reference or a recent discontinuity only hold or restart the
+    /// operand's averaging, which its validity mask already reports per column.
     pub const REFUSING: ProtectionFlags = ProtectionFlags(
         ProtectionFlags::CLIP.0
             | ProtectionFlags::NO_REFERENCE.0
@@ -376,7 +378,7 @@ pub struct IrMeta {
 }
 
 /// RTA metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RtaMeta {
     /// Band fraction.
@@ -389,10 +391,12 @@ pub struct RtaMeta {
     pub cal: CalStatus,
     /// A mic curve was subtracted from `level`.
     pub mic_curve: bool,
+    /// What a math channel combined; `None` for an RTA measurement.
+    pub math: Option<Box<MathState>>,
 }
 
 /// Spectrum metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpecMeta {
     /// Window.
@@ -406,6 +410,8 @@ pub struct SpecMeta {
     /// Display smoothing applied to `level`: a smoothed bin is a fractional-octave power
     /// average of tone levels, not the tone level of the bin.
     pub smoothing: Option<SmoothingFraction>,
+    /// What a math channel combined; `None` for a spectrum measurement.
+    pub math: Option<Box<MathState>>,
 }
 
 /// SPL meter readings; values in `scale`.
@@ -1115,14 +1121,14 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                 desc(ArrayName::Validity, Unit::Bitmask),
                 Col::U(mask_slice(&f.validity)),
             ));
-            FrameMeta::Rta(f.meta)
+            FrameMeta::Rta(f.meta.clone())
         }
         FrameData::Spec(f) => {
             cols.push((
                 desc(ArrayName::Level, level_unit(f.meta.scale)),
                 Col::F(&f.level),
             ));
-            FrameMeta::Spec(f.meta)
+            FrameMeta::Spec(f.meta.clone())
         }
         FrameData::Spl(f) => FrameMeta::Spl(f.meta),
         FrameData::Leq(f) => {
@@ -1447,14 +1453,14 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         }),
         FrameMeta::Rta(meta) => FrameData::Rta(RtaFrame {
             meas,
-            meta,
             level: a.f32(ArrayName::Level, level_unit(meta.scale))?,
             validity: a.mask(ArrayName::Validity)?,
+            meta,
         }),
         FrameMeta::Spec(meta) => FrameData::Spec(SpecFrame {
             meas,
-            meta,
             level: a.f32(ArrayName::Level, level_unit(meta.scale))?,
+            meta,
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
         FrameMeta::Leq(meta) => {

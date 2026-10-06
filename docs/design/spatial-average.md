@@ -1,8 +1,11 @@
 # Live spatial average of transfer functions
 
-Status: implemented (`MeasKind::SpatialAverage`, the daemon's average job
-`crates/ac2d/src/jobs/average.rs`, `ac2 meas new avg`, the app's "New spatial average"
-dialog). Answers PLAN.md §3.3 "Live spatial average of N transfer functions".
+Status: superseded as an entity by math channels (`math-channels.md`): the live spatial
+average is a math channel's average (`MeasKind::Math`, `expr: average`), with the operands
+named by id among live measurements *and* stored traces, created with Shift+M or `ac2 math new
+--op avg`. The mathematics, the dropout rules and the banners below are unchanged and are the
+math channel's *Average*; the wire, daemon and test sections describe the former
+`spatial_average` kind (PROTO 19 … 21, session format 9).
 
 ## What the operator gets
 

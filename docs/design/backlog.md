@@ -96,6 +96,21 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Math channels (operator, 2026-10-06: "instead of 'some A and B' it would be nice to be able
+choose trace from dropdown, then choose operator and then choose another trace … isn't it
+[spatial average] just math channel with averaging?"; `docs/design/math-channels.md`):
+- **A − B / A / B behind Ctrl+K were hard to use, and spectrum A − B landed on the magnitude
+  pane** → one concept, the math channel: A, operator, B by name from dropdowns (live
+  measurements and stored traces of one kind), or the operands of an average ticked; ÷ × + −
+  of transfer functions as complex values on a stated delay reference (+ is the summation
+  prediction), − and + of spectra / RTA as level difference / power sum, the average of 2 …
+  16 (power / complex / coherence-weighted). Computed live in the daemon, drawn in its kind's
+  pane, editable, captured with Ctrl+1 … 9 naming the expression and operands. The spatial
+  average is its average (same maths, dropout rules and banners). Shift+M, palette *New
+  math channel…* / *Edit the selected math channel…*; `ac2 math new / set` replaces
+  `ac2 meas new avg` and `ac2 trace math`; `trace.math` and the A − B / A / B palette entries
+  are gone. PROTO 22, session format 10.
+
 From the 645f5ec deploy on pupu and the operator (2026-10-06):
 - **"arm+fire to re-sweep with same parameters on sweep view; drive the gen for live
   transfer on transfer view and on spectrum/spectrograph"; "New sweep measurement" in the

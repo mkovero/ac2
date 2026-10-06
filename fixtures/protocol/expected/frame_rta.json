@@ -1,7 +1,7 @@
 {
  "topic": "d/3/rta",
  "header": {
-  "v": 21,
+  "v": 22,
   "kind": "rta",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -38,7 +38,8 @@
       "calibrator_level": 94.0
      }
     },
-    "mic_curve": true
+    "mic_curve": true,
+    "math": null
    }
   }
  },

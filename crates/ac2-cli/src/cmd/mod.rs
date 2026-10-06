@@ -8,6 +8,7 @@ mod discover;
 mod gen_;
 mod ir;
 mod leq;
+mod math;
 mod rec;
 mod traces;
 
@@ -31,6 +32,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Session { cmd } => basic::session(cli, cmd, out).await,
         Cmd::Gen { cmd } => gen_::run(cli, cmd, out).await,
         Cmd::Meas { cmd } => basic::meas(cli, cmd, out).await,
+        Cmd::Math { cmd } => math::run(cli, cmd, out).await,
         Cmd::Delay { cmd } => basic::delay(cli, cmd, out).await,
         Cmd::Spl { cmd } => basic::spl(cli, cmd, out).await,
         Cmd::Cal { cmd } => cal::run(cli, cmd, out).await,

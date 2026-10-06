@@ -394,18 +394,6 @@ impl Shared {
         )
     }
 
-    pub(super) fn trace_math(
-        &mut self,
-        a: TraceId,
-        b: TraceId,
-        op: MathOp,
-        name: String,
-    ) -> Result<ReplyBody, ProtoError> {
-        let d = ops::math(&self.trace(a)?, &self.trace(b)?, op)
-            .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
-        self.derived(name, TraceSource::Math { a, b, op }, d)
-    }
-
     pub(super) fn trace_import(
         &mut self,
         file_name: String,

@@ -311,12 +311,12 @@ fn recording_indicator() {
 }
 
 #[test]
-fn spatial_average_legend_and_banner() {
-    if !have_gpu("spatial_average_legend_and_banner") {
+fn math_average_legend_and_banner() {
+    if !have_gpu("math_average_legend_and_banner") {
         return;
     }
     let rig = common::Rig::start();
-    rig.add_spatial_average();
+    rig.add_math_average();
     let mut h = harness(options(Some(&rig)));
     let has_average = |app: &App| {
         app.state.measurements().len() == 6
@@ -372,7 +372,85 @@ fn spatial_average_legend_and_banner() {
             )]
         );
     }
-    snapshot(&mut h, "transfer_spatial_average");
+    snapshot(&mut h, "transfer_math_average");
+}
+
+/// Shift+M: the math channel dialog over the rig's measurements, A ÷ B by name.
+#[test]
+fn math_dialog() {
+    if !have_gpu("math_dialog") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::M);
+    h.event(Event::Text("M".into()));
+    step_until(
+        &mut h,
+        "the math dialog",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Math),
+    );
+    {
+        let Overlay::Form(f) = &h.state().state.overlay else {
+            panic!("no dialog");
+        };
+        assert_eq!(f.text(ac2_ui::forms::FieldId::Name), "Main L ÷ Delay tower");
+    }
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "math_dialog");
+}
+
+/// Spectrum math on the spectrum pane: its legend names the expression and what it means.
+#[test]
+fn spectrum_math() {
+    if !have_gpu("spectrum_math") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.add_spectrum_math();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "the spectrum math's frames", |a| {
+        live_with(a, 6)
+            && a.state.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Data {
+                        meas: MeasId(7),
+                        stream: Stream::Spec,
+                    })
+                    .is_some()
+            })
+    });
+    h.key_press_modifiers(Modifiers::ALT, Key::Num2);
+    h.key_press(Key::W);
+    // The pane shows the math channel: its caption is the expression and what it means.
+    h.state_mut()
+        .state
+        .pane_meas
+        .insert(PaneKind::Spectrum, MeasId(7));
+    {
+        let st = &h.state().state;
+        let s = ac2_ui::scenes::spectrum(
+            st,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let legend: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
+        assert!(
+            legend.iter().any(|l| l.contains("Mic 1 − Mic 2")),
+            "{legend:?}"
+        );
+        assert_eq!(s.caption, "Mic 1 FFT − Mic 2 FFT · level difference");
+    }
+    snapshot(&mut h, "spectrum_math");
 }
 
 #[test]

@@ -676,7 +676,7 @@ async fn grids_are_fetched_once_for_unknown_ids() -> R {
     Ok(())
 }
 
-/// Trace and session commands against the fake: capture, data, average, math, import,
+/// Trace and session commands against the fake: capture, data, average, import,
 /// export, save and load (disarmed, newer epoch), mirrored through events.
 #[tokio::test(flavor = "multi_thread")]
 async fn traces_and_sessions_against_the_fake() -> R {
@@ -767,21 +767,8 @@ async fn traces_and_sessions_against_the_fake() -> R {
         ReplyBody::Trace(t) => t,
         other => return Err(format!("{other:?}").into()),
     };
-    let ReplyBody::Trace(diff) = c
-        .call(Command::TraceMath {
-            a: a.id,
-            b: imp.id,
-            op: MathOp::MagnitudeDifference,
-            name: "a-a".into(),
-        })
-        .await?
-    else {
-        return Err("math".into());
-    };
-    match c.call(Command::TraceGet { trace: diff.id }).await? {
-        ReplyBody::TraceData(d) => assert!(d.mag_db.iter().all(|v| *v == 0.0)),
-        other => return Err(format!("{other:?}").into()),
-    }
+    // The export re-imports on the capture's own grid.
+    assert_eq!(imp.grid_id, a.grid_id);
     let bad = c
         .call(Command::TraceImport {
             file_name: "x.txt".into(),

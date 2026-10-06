@@ -198,6 +198,7 @@ impl Spectrum {
             cal: self.cal.status,
             mic_curve: self.cal.correction.is_some(),
             smoothing: self.cfg.smoothing,
+            math: None,
         }
     }
 

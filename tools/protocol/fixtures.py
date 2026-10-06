@@ -109,14 +109,17 @@ def tf_frame():
             "frozen": False,
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
-            "average": {
-                "method": "power",
-                "members": [
-                    {"meas": 2, "status": {"type": "included"}},
-                    {"meas": 3, "status": {"type": "included"}},
-                    {"meas": 4, "status": {"type": "refused", "protection": 2}},
-                    {"meas": 5, "status": {"type": "stopped"}},
+            "math": {
+                "operands": [
+                    {"operand": {"type": "meas", "meas": 2}, "status": {"type": "included"}},
+                    {"operand": {"type": "trace", "trace": 7}, "status": {"type": "included"}},
+                    {
+                        "operand": {"type": "meas", "meas": 4},
+                        "status": {"type": "refused", "protection": 2},
+                    },
+                    {"operand": {"type": "meas", "meas": 5}, "status": {"type": "stopped"}},
                 ],
+                "phase": "shared_time_base",
             },
         },
         [
@@ -170,6 +173,7 @@ def frames():
                     "basis": {"type": "acoustic", "calibrator_level": 94.0},
                 },
                 "mic_curve": True,
+                "math": None,
             },
             [
                 (arr("level", "db_spl"), [NAN, 74.5, 61.25]),
@@ -186,6 +190,13 @@ def frames():
                 "cal": {"type": "uncalibrated"},
                 "mic_curve": False,
                 "smoothing": "sixth",
+                "math": {
+                    "operands": [
+                        {"operand": {"type": "meas", "meas": 3}, "status": {"type": "included"}},
+                        {"operand": {"type": "trace", "trace": 8}, "status": {"type": "mismatch"}},
+                    ],
+                    "phase": "no_phase",
+                },
             },
             [
                 (arr("level", "dbfs"), [-120.0, -20.0, INF, NAN]),
@@ -491,16 +502,24 @@ def measurement():
     }
 
 
-AVERAGE_MEASUREMENT = {
+MATH_MEASUREMENT = {
     "id": 6,
     "config": {
         "name": "FOH average",
         "kind": {
-            "type": "spatial_average",
+            "type": "math",
             "config": {
-                "members": [1, 2, 5],
-                "method": "coherence_weighted",
-                "reference": {"type": "member", "meas": 2},
+                "domain": "transfer",
+                "expr": {
+                    "type": "average",
+                    "of": [
+                        {"type": "meas", "meas": 1},
+                        {"type": "meas", "meas": 2},
+                        {"type": "trace", "trace": 7},
+                    ],
+                    "method": "coherence_weighted",
+                },
+                "reference": {"type": "operand", "operand": {"type": "meas", "meas": 2}},
                 "smoothing": {"fraction": "third", "mode": "magnitude_phase"},
             },
         },
@@ -563,7 +582,7 @@ def requests():
         ),
         req(18, "delay.insert", {"meas": 1, "pick": {"type": "ranked", "index": 1}}),
         req(
-            28,
+            27,
             "trace.import",
             {
                 "file_name": "sub.txt",
@@ -573,7 +592,7 @@ def requests():
             },
         ),
         req(
-            31,
+            30,
             "cal.curve_import",
             {
                 "mic": "M30 #1234",
@@ -584,13 +603,13 @@ def requests():
             },
         ),
         req(
-            33,
+            32,
             "spl.log_get",
             {"meas": 4, "log": "previous", "from": 120, "max": 3600},
             mutation=False,
         ),
         req(
-            34,
+            33,
             "ir.capture",
             {
                 "lease_token": TOKEN,
@@ -606,16 +625,16 @@ def requests():
                 "name": "1083 sweep",
             },
         ),
-        req(41, "session.inputs", {"inputs": INPUTS}),
+        req(40, "session.inputs", {"inputs": INPUTS}),
         req(
-            42,
+            41,
             "cal.delete",
             {"key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"}},
         ),
-        req(43, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
-        req(44, "session.preview_stop", mutation=False),
+        req(42, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
+        req(43, "session.preview_stop", mutation=False),
         req(
-            45,
+            44,
             "session.detect_loopback",
             {
                 "lease_token": TOKEN,
@@ -626,11 +645,11 @@ def requests():
             },
             mutation=False,
         ),
-        req(46, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
-        req(48, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
-        req(49, "spl.log_new", {"meas": 4}),
+        req(45, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(47, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(48, "spl.log_new", {"meas": 4}),
         req(
-            50,
+            49,
             "cal.spl_electrical",
             {
                 "input": 1,
@@ -643,10 +662,10 @@ def requests():
                 "replace_acoustic": False,
             },
         ),
-        req(51, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
-        req(52, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
+        req(50, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
+        req(51, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
         req(
-            53,
+            52,
             "rec.start",
             {
                 "request": {
@@ -657,9 +676,9 @@ def requests():
                 }
             },
         ),
-        req(55, "rec.list", mutation=False),
+        req(54, "rec.list", mutation=False),
         req(
-            56,
+            55,
             "session.replay",
             {"recording": {"type": "name", "name": "soundcheck"}, "pace": "fast"},
         ),
@@ -690,7 +709,7 @@ def events():
         {
             "kind": "measurement",
             "rev": 62,
-            "payload": {"type": "set", "value": AVERAGE_MEASUREMENT},
+            "payload": {"type": "set", "value": MATH_MEASUREMENT},
         },
         {"kind": "spl_log", "rev": 52, "payload": {"type": "set", "value": SPL_LOG}},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},

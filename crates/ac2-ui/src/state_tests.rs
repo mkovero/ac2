@@ -1596,99 +1596,109 @@ fn m_averages_the_shown_stored_traces() {
     ));
 }
 
+/// Shift+M opens the math channel dialog: A is what the pane shows, B the next of its kind
+/// (live or stored), the operator ÷, the name the expression; Enter creates it.
 #[test]
-fn a_minus_b_from_the_palette() {
+fn math_channel_dialog_by_name() {
+    use crate::forms::{FieldId, FormKind};
+    use ac2_proto::model::{MathDomain, MathExpr, MathOp, Operand};
     let mut t = T::new();
     t.conn(with_traces(vec![
         stored(4, Some(2), 2),
         stored(5, Some(7), 2),
     ]));
-    // Nothing selected: the two lowest shown slots.
-    t.key("Ctrl+K");
-    t.text("A − B the selected");
+    t.key("Shift+M");
+    assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math));
+    assert_eq!(form(&t).fields[0].display(), "Main L (live)");
+    assert_eq!(form(&t).text(FieldId::Name), "Main L ÷ t4");
+    // B steps on to the other stored trace; the name follows.
+    t.key("Down");
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(form(&t).text(FieldId::Name), "Main L ÷ t5");
     let r = t.key("Enter");
-    assert!(
-        matches!(
-            r.as_slice(),
-            [Request::Call {
-                cmd: Command::TraceMath {
-                    a: TraceId(4),
-                    b: TraceId(5),
-                    op: MathOp::MagnitudeDifference,
-                    ..
-                },
-                ..
-            }]
-        ),
-        "{r:?}"
+    let c = created(&r).unwrap_or_else(|| panic!("{r:?}"));
+    assert_eq!(c.name, "Main L ÷ t5");
+    let MeasKind::Math { config } = &c.kind else {
+        panic!("{c:?}");
+    };
+    assert_eq!(config.domain, MathDomain::Transfer);
+    assert_eq!(
+        config.expr,
+        MathExpr::Binary {
+            a: Operand::Meas { meas: MeasId(1) },
+            op: MathOp::Divide,
+            b: Operand::Trace { trace: TraceId(5) },
+        }
     );
+    // From the palette too; with nothing of a kind to pair, it says what is missing.
+    t.conn(with_traces(vec![]));
     t.key("Ctrl+K");
-    t.text("A / B divided");
-    let r = t.key("Enter");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Call {
-            cmd: Command::TraceMath {
-                op: MathOp::ComplexDivision,
-                ..
-            },
-            ..
-        }]
-    ));
+    t.text("new math channel");
+    t.key("Enter");
+    assert!(matches!(t.st.overlay, Overlay::None));
+    assert!(
+        t.last_toast()
+            .contains("two transfer functions, spectra or RTAs"),
+        "{}",
+        t.last_toast()
+    );
 }
 
-/// With a trace selected, A − B is it minus the next shown trace of its kind in the list's
-/// order (slotted or not, wrapping round, hidden ones skipped); spectra pair with spectra.
+/// The selected math channel edits in the same dialog: Enter sends `meas.update` with its
+/// name kept.
 #[test]
-fn a_minus_b_takes_the_selected_trace_and_the_next_shown_one() {
-    let math = |r: &[Request]| match r {
-        [
-            Request::Call {
-                cmd: Command::TraceMath { a, b, name, .. },
-                ..
-            },
-        ] => Some((a.0, b.0, name.clone())),
-        _ => None,
-    };
+fn math_channel_edit() {
+    use crate::forms::FormKind;
+    use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
     let mut t = T::new();
-    let spec = |id: u32| TraceMeta {
-        kind: TraceKind::Spectrum {
-            scale: LevelScale::Dbfs,
+    let mut s = daemon_state();
+    s.traces = vec![stored(4, Some(2), 2)];
+    s.measurements.push(meas(
+        3,
+        "Prediction",
+        MeasKind::Math {
+            config: MathConfig::of(
+                MathDomain::Transfer,
+                MathExpr::Binary {
+                    a: Operand::Meas { meas: MeasId(1) },
+                    op: MathOp::Add,
+                    b: Operand::Trace { trace: TraceId(4) },
+                },
+            ),
         },
-        ..stored(id, None, 2)
+    ));
+    t.conn(mirror(s));
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.key("Ctrl+K");
+    t.text("edit the selected math");
+    t.key("Enter");
+    assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::MathEdit));
+    // Operator: + → − (complex difference).
+    t.key("Down");
+    t.key("Right");
+    let r = t.key("Enter");
+    let [
+        Request::Call {
+            cmd: Command::MeasUpdate { meas, config },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
     };
-    let mut hidden = stored(6, None, 2);
-    hidden.edit.visible = false;
-    // List order: slot 2 (t4), then unslotted oldest first: t5, t6 (hidden), t7, spectra.
-    t.conn(with_traces(vec![
-        stored(4, Some(2), 2),
-        stored(5, None, 2),
-        hidden,
-        stored(7, None, 2),
-        spec(8),
-        spec(9),
-    ]));
-    let run = |t: &mut T| {
-        t.st.update(Msg::Command(CommandId::MathDifference), &t.keys)
+    assert_eq!(*meas, MeasId(3));
+    assert_eq!(config.name, "Prediction");
+    let MeasKind::Math { config } = &config.kind else {
+        panic!()
     };
-    // An unslotted trace needs no slot: t5 − t7 (t6 is hidden).
-    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
-    assert_eq!(math(&run(&mut t)), Some((5, 7, "t5 − t7".into())));
-    // The last one wraps round to the first: t7 − slot 2.
-    t.st.update(Msg::SelectTrace(TraceId(7)), &t.keys);
-    assert_eq!(math(&run(&mut t)), Some((7, 4, "t7 − S2".into())));
-    // A spectrum pairs with the next spectrum, past the transfer traces.
-    t.st.update(Msg::SelectTrace(TraceId(9)), &t.keys);
-    assert_eq!(math(&run(&mut t)), Some((9, 8, "t9 − t8".into())));
-    // A divided by B follows the same pair.
-    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
-    let r = t.st.update(Msg::Command(CommandId::MathDivide), &t.keys);
-    assert_eq!(math(&r), Some((4, 5, "S2 / t5".into())));
-    // Alone of its kind: it says what B would be.
-    t.conn(with_traces(vec![stored(4, Some(2), 2), spec(8)]));
-    t.st.update(Msg::SelectTrace(TraceId(8)), &t.keys);
-    assert!(run(&mut t).is_empty());
-    assert!(t.last_toast().contains("t8 is A"), "{}", t.last_toast());
+    assert!(matches!(
+        config.expr,
+        MathExpr::Binary {
+            op: MathOp::Subtract,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -3546,7 +3556,7 @@ fn new_measurements_start_and_become_selected() {
             MeasKind::Spectrum { config } => ("spectrum", config.input),
             MeasKind::Rta { config } => ("rta", config.input),
             MeasKind::Spl { config } => ("spl", config.input),
-            MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. } => ("tf", 99),
+            MeasKind::Transfer { .. } | MeasKind::Math { .. } => ("tf", 99),
         };
         assert_eq!(kind, (want, 1));
     }

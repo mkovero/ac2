@@ -1,5 +1,5 @@
 //! Trace store and sessions on the fake rig: capture keeps the shown result with its
-//! metadata, averaging and A−B math use the shared time base, export re-imports exactly,
+//! metadata, averaging and math channels of stored traces use the shared time base, export re-imports exactly,
 //! imports refuse bad files with typed errors, and a session reload comes up disarmed in a
 //! new epoch with every measurement and trace as saved.
 #![allow(clippy::unwrap_used)]
@@ -85,6 +85,42 @@ fn settle(
             && f.stamp.config_rev.0 >= rev
     })
     .expect("settled tf frame")
+}
+
+/// A math channel `a op b` of stored traces, started, run for a moment (it publishes on
+/// the audio clock) and captured.
+fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> TraceMeta {
+    let c = &mut r.c;
+    let m = match c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: name.into(),
+            kind: MeasKind::Math {
+                config: MathConfig::of(
+                    MathDomain::Transfer,
+                    MathExpr::Binary {
+                        a: Operand::Trace { trace: a },
+                        op,
+                        b: Operand::Trace { trace: b },
+                    },
+                ),
+            },
+        },
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::MeasStart { meas: m.id });
+    for _ in 0..2 {
+        run(&mut r.d, 0.5);
+        c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let t = trace(c.ok(Command::TraceCapture {
+        meas: m.id,
+        name: name.into(),
+        slot: None,
+    }));
+    c.ok(Command::MeasDelete { meas: m.id });
+    t
 }
 
 struct Rig {
@@ -226,25 +262,21 @@ fn capture_average_math_export_import() {
         assert!(ap[i].abs() < 5.0, "{} Hz: {}", grid_freq(i), ap[i]);
     }
 
-    // A / B on the shared time base: same path, so 0 dB and 0°.
-    let q = trace(c.ok(Command::TraceMath {
-        a: aligned.id,
-        b: raw.id,
-        op: MathOp::ComplexDivision,
-        name: "q".into(),
-    }));
+    // A ÷ B on the shared time base: same path, so 0 dB and 0°.
+    let q = math_capture(&mut r, aligned.id, MathOp::Divide, raw.id, "q");
+    let c = &mut r.c;
+    assert!(matches!(
+        &q.source,
+        TraceSource::Math {
+            phase: PhaseBasis::SharedTimeBase,
+            ..
+        }
+    ));
     let qd = data(c, q.id);
     for i in band() {
         assert!(qd.mag_db[i].abs() < 0.5, "{}", qd.mag_db[i]);
         assert!(qd.phase_deg.as_ref().unwrap()[i].abs() < 5.0);
     }
-    let diff = trace(c.ok(Command::TraceMath {
-        a: aligned.id,
-        b: raw.id,
-        op: MathOp::MagnitudeDifference,
-        name: "diff".into(),
-    }));
-    assert!(data(c, diff.id).phase_deg.is_none());
 
     // A capture into slot 1 takes the slot from "raw".
     let again = trace(c.ok(Command::TraceCapture {
@@ -333,7 +365,7 @@ fn capture_average_math_export_import() {
     assert_eq!(tgt.edit.name, "house_curve");
     let td = data(c, tgt.id);
     assert!(td.phase_deg.is_none() && td.coherence.is_none());
-    // Phase methods refuse a mix of time bases; complex division needs phase.
+    // Phase methods refuse a mix of time bases; a sum needs phase.
     let e = c
         .call(Command::TraceAverage {
             traces: vec![aligned.id, imp.id],
@@ -343,15 +375,26 @@ fn capture_average_math_export_import() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid);
-    let e = c
-        .call(Command::TraceMath {
-            a: aligned.id,
-            b: tgt.id,
-            op: MathOp::ComplexDivision,
-            name: "x".into(),
-        })
-        .unwrap_err();
-    assert_eq!(e.code, ErrorCode::Invalid);
+    for (b, op) in [(tgt.id, MathOp::Add), (imp.id, MathOp::Subtract)] {
+        let e = c
+            .call(Command::MeasCreate {
+                config: MeasConfig {
+                    name: "x".into(),
+                    kind: MeasKind::Math {
+                        config: MathConfig::of(
+                            MathDomain::Transfer,
+                            MathExpr::Binary {
+                                a: Operand::Trace { trace: aligned.id },
+                                op,
+                                b: Operand::Trace { trace: b },
+                            },
+                        ),
+                    },
+                },
+            })
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{op:?}: {e:?}");
+    }
 
     // Typed refusal of a bad file.
     let e = c
@@ -462,7 +505,7 @@ fn set_smoothing(c: &mut Client, t: &TraceMeta, s: Option<Smoothing>) -> TraceMe
 
 /// Smoothing changes on a running transfer measurement without restarting its averages;
 /// captures keep the unsmoothed curve, are served smoothed as the live curve was, and can be
-/// re-smoothed at any time; averages and A − B combine the unsmoothed columns.
+/// re-smoothed at any time; averages combine the unsmoothed columns.
 #[test]
 fn live_smoothing_and_resmoothed_captures() {
     let mut r = rig("smoothing");
@@ -570,8 +613,8 @@ fn live_smoothing_and_resmoothed_captures() {
     let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
     assert_eq!(bits(&data(c, a.id).mag_db), bits(&smoothed.mag_db));
 
-    // A second capture of the same result; average and A − B of the two use the unsmoothed
-    // columns and start with the smoothing the inputs share.
+    // A second capture of the same result; their average uses the unsmoothed columns and
+    // starts with the smoothing the inputs share.
     let b = trace(c.ok(Command::TraceCapture {
         meas: MeasId(1),
         name: "b".into(),
@@ -593,14 +636,6 @@ fn live_smoothing_and_resmoothed_captures() {
             ad.mag_db[i]
         );
     }
-    let b = set_smoothing(c, &b, None);
-    let diff = trace(c.ok(Command::TraceMath {
-        a: a.id,
-        b: b.id,
-        op: MathOp::MagnitudeDifference,
-        name: "a-b".into(),
-    }));
-    assert_eq!(diff.edit.smoothing, None, "inputs differ in smoothing");
 
     // Smoothing is a protected edit and applies to transfer curves only.
     let mut locked = a.edit.clone();
@@ -972,7 +1007,11 @@ fn session_save_load_round_trip() {
     let dir = r._dir.path().join("sessions").join("friday show");
     let manifest = dir.join("session.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"version\": 9", "\"version\": 10")).unwrap();
+    std::fs::write(
+        &manifest,
+        text.replace("\"version\": 10", "\"version\": 11"),
+    )
+    .unwrap();
     let e = c
         .call(Command::FileLoad {
             session: SessionRef::Name {
@@ -984,8 +1023,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 10,
-            supported: 9
+            found: 11,
+            supported: 10
         })
     );
     assert_eq!(traces(c).len(), n);

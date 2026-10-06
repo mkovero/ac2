@@ -1,5 +1,5 @@
-//! Import of realistic analyzer exports, ac2 CSV round trips, averaging and A−B math with
-//! analytic expectations, and session directory round trips.
+//! Import of realistic analyzer exports, ac2 CSV round trips, averaging and math on stored
+//! traces with analytic expectations, and session directory round trips.
 #![allow(clippy::unwrap_used)]
 
 use std::path::Path;
@@ -8,7 +8,8 @@ use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{GridDef, ImportProblem};
 use ac2_traces::columns::{Columns, StoredTrace, frequencies};
-use ac2_traces::ops::{OpError, average, math};
+use ac2_traces::math::{self, Combine, Input, MathResult, trace_on_grid};
+use ac2_traces::ops::{OpError, average};
 use ac2_traces::session::{self, SavedDelay, SavedMeasurement, SavedSplLog, Session, SessionError};
 use ac2_traces::spl_log::SplLogInfo;
 use ac2_traces::text::{export_csv, import};
@@ -395,17 +396,34 @@ fn coherence_weighting_favours_the_coherent_trace() {
     );
 }
 
+/// `a op b` of two stored traces on `a`'s grid, as a math channel of them computes it.
+fn binary(a: &StoredTrace, b: &StoredTrace, op: MathOp) -> Result<MathResult, math::MathError> {
+    let f = frequencies(&a.grid);
+    let (ca, cb) = (trace_on_grid(a, &a.grid, &f), trace_on_grid(b, &a.grid, &f));
+    let input = |t: &StoredTrace, c| Input {
+        columns: c,
+        delay: t.meta.delay.0,
+        time_base: t.meta.source.shared_epoch(),
+    };
+    math::transfer(
+        Combine::Binary(op),
+        &[input(a, &ca), input(b, &cb)],
+        &a.grid,
+        &f,
+        ac2_core::average::DelayReference::Trace(0),
+    )
+}
+
 #[test]
-fn a_minus_b() {
+fn a_over_b_of_stored_traces() {
     let mut a = delayed(1, 2, 0.0110, 0.0110, 0.9);
     let b = delayed(2, 2, 0.0100, 0.0100, 0.9);
     a.columns.mag_db.iter_mut().for_each(|v| *v = -6.0);
-    let d = math(&a, &b, MathOp::MagnitudeDifference).unwrap();
-    assert!(d.columns.phase_deg.is_none());
-    assert_eq!(d.columns.mag_db[50], -6.0);
-    // Complex division on the shared time base shows A's 1 ms later arrival.
-    let q = math(&a, &b, MathOp::ComplexDivision).unwrap();
-    let i = col(&q.grid, 250.0);
+    // On the shared time base the ratio shows A's 1 ms later arrival.
+    let q = binary(&a, &b, MathOp::Divide).unwrap();
+    assert_eq!(q.phase, PhaseBasis::SharedTimeBase);
+    let i = col(&a.grid, 250.0);
+    assert!((q.columns.mag_db[i] + 6.0).abs() < 1e-4);
     let expect = ac2_traces::columns::wrap_deg(-360.0 * 250.0 * 0.001);
     let got = f64::from(q.columns.phase_deg.as_ref().unwrap()[i]);
     assert!((got - expect).abs() < 0.01, "{got} vs {expect}");
@@ -434,12 +452,15 @@ fn a_minus_b() {
         sweep: None,
         mic_curve: None,
     };
-    let d = math(&a, &tt, MathOp::MagnitudeDifference).unwrap();
-    let i = col(&d.grid, 1000.0);
+    let d = binary(&a, &tt, MathOp::Divide).unwrap();
+    let i = col(&a.grid, 1000.0);
     assert!((d.columns.mag_db[i] + 6.0).abs() < 1e-4);
+    assert!(d.columns.phase_deg.is_none());
+    assert_eq!(d.phase, PhaseBasis::NoPhase);
+    // A sum adds complex values: a target has none to add.
     assert_eq!(
-        math(&a, &tt, MathOp::ComplexDivision),
-        Err(OpError::NoPhase(TraceId(3)))
+        binary(&a, &tt, MathOp::Add),
+        Err(math::MathError::NoPhase(1))
     );
 }
 
@@ -468,11 +489,10 @@ fn third_octaves(lo: i32, hi: i32) -> GridDef {
     }
 }
 
-/// Band powers and FFT bins are not resampled: averaging or subtracting spectra / RTA on
-/// different grids is refused with a typed error, while the same operations
-/// on one grid work. Transfer traces on different grids are resampled instead (above).
+/// Band powers and FFT bins are not resampled: averaging spectra / RTA on different grids is
+/// refused with a typed error, while the same operation on one grid works. Transfer traces on different grids are resampled instead (above).
 #[test]
-fn spectrum_and_rta_math_across_grids_is_refused() {
+fn spectrum_and_rta_averages_across_grids_are_refused() {
     let refd = DelayReference::Trace { trace: TraceId(1) };
     let cases = [
         (
@@ -527,11 +547,6 @@ fn spectrum_and_rta_math_across_grids_is_refused() {
             Err(OpError::GridMismatch),
             "{kind:?}"
         );
-        assert_eq!(
-            math(&a, &b, MathOp::MagnitudeDifference),
-            Err(OpError::GridMismatch),
-            "{kind:?}"
-        );
         assert!(
             OpError::GridMismatch
                 .to_string()
@@ -542,8 +557,6 @@ fn spectrum_and_rta_math_across_grids_is_refused() {
         let same = level_trace(3, kind, ga);
         let r = average(&[&a, &same], AverageMethod::Power, refd).unwrap();
         assert!((r.columns.mag_db[0] + 20.0).abs() < 1e-9);
-        let d = math(&a, &same, MathOp::MagnitudeDifference).unwrap();
-        assert_eq!(d.columns.mag_db[0], 0.0);
     }
 }
 
@@ -649,7 +662,7 @@ fn smoothing_is_applied_when_served_and_never_stored() {
 }
 
 #[test]
-fn average_and_a_minus_b_combine_unsmoothed_columns() {
+fn average_and_math_combine_unsmoothed_columns() {
     let a = spiky(1);
     let b = delayed(2, 2, 0.010, 0.010, 0.9);
     let (mut sa, mut sb) = (a.clone(), b.clone());
@@ -659,8 +672,8 @@ fn average_and_a_minus_b_combine_unsmoothed_columns() {
     let plain = average(&[&a, &b], AverageMethod::Power, reference).unwrap();
     let smoothed = average(&[&sa, &sb], AverageMethod::Power, reference).unwrap();
     assert_eq!(plain.columns, smoothed.columns);
-    let d = math(&sa, &sb, MathOp::MagnitudeDifference).unwrap();
-    let i = col(&d.grid, 1000.0);
+    let d = binary(&sa, &sb, MathOp::Divide).unwrap();
+    let i = col(&sa.grid, 1000.0);
     assert!(
         (d.columns.mag_db[i] - 12.0).abs() < 1e-4,
         "{}",
@@ -885,16 +898,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 9", "\"version\": 8")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 10", "\"version\": 9")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 8
+            found: 9
         }
     );
-    assert!(e.to_string().contains("reads version 9 only"), "{e}");
+    assert!(e.to_string().contains("reads version 10 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -1308,7 +1321,7 @@ fn sweep_traces_combine_as_transfer_functions() {
     .unwrap();
     assert_eq!(d.kind, TraceKind::Transfer);
     assert!(d.columns.phase_deg.is_some());
-    let q = math(&a, &b, MathOp::ComplexDivision).unwrap();
+    let q = binary(&a, &b, MathOp::Divide).unwrap();
     assert!(
         q.columns
             .mag_db

@@ -1,7 +1,7 @@
 {
  "topic": "d/1/tf",
  "header": {
-  "v": 21,
+  "v": 22,
   "kind": "tf",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -44,35 +44,47 @@
      "mode": "magnitude"
     },
     "mic_curve": true,
-    "average": {
-     "method": "power",
-     "members": [
+    "math": {
+     "operands": [
       {
-       "meas": 2,
+       "operand": {
+        "type": "meas",
+        "meas": 2
+       },
        "status": {
         "type": "included"
        }
       },
       {
-       "meas": 3,
+       "operand": {
+        "type": "trace",
+        "trace": 7
+       },
        "status": {
         "type": "included"
        }
       },
       {
-       "meas": 4,
+       "operand": {
+        "type": "meas",
+        "meas": 4
+       },
        "status": {
         "type": "refused",
         "protection": 2
        }
       },
       {
-       "meas": 5,
+       "operand": {
+        "type": "meas",
+        "meas": 5
+       },
        "status": {
         "type": "stopped"
        }
       }
-     ]
+     ],
+     "phase": "shared_time_base"
     }
    }
   }

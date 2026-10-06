@@ -1055,6 +1055,7 @@ mod tests {
                 scale: LevelScale::DbSpl,
                 cal,
                 mic_curve: true,
+                math: None,
             },
             level: vec![],
             validity: vec![],
@@ -1082,6 +1083,7 @@ mod tests {
                 cal,
                 mic_curve: false,
                 smoothing: None,
+                math: None,
             },
             level: vec![],
         };

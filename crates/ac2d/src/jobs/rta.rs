@@ -201,6 +201,7 @@ impl Rta {
                 },
                 cal: self.cal.status,
                 mic_curve: self.corr.is_some(),
+                math: None,
             },
             level,
             validity,

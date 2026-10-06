@@ -2526,7 +2526,8 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
             .any(|t| t.error && t.text.contains("cannot write") && t.text.contains("gone"))
     })?;
 
-    // A − B of an unslotted trace: it, minus the next shown one (slot 1), without a slot.
+    // A math channel of an unslotted stored trace: Shift+M starts with the selected trace
+    // as A, by name.
     d.key("Ctrl+2");
     d.until("slot 2", |s| s.slots()[1].is_some())?;
     let b = d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?;
@@ -2544,16 +2545,18 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
         d.st.selected_trace_meta()
             .map(|t| t.edit.name.clone())
             .ok_or("b")?;
-    d.key("Ctrl+K");
-    d.send(Msg::Text("A − B the selected".into()));
+    d.key("Shift+M");
+    let Overlay::Form(f) = &d.st.overlay else {
+        return Err(format!("{:?}", d.st.overlay).into());
+    };
+    let name = f.text(ac2_ui::forms::FieldId::Name).to_owned();
+    assert!(name.starts_with(&format!("{b_name} ÷ ")), "{name}");
     d.key("Enter");
-    let want = format!("{b_name} − S1");
-    d.until("the difference trace", |s| {
-        s.daemon().is_some_and(|x| {
-            x.traces.iter().any(|t| {
-                t.edit.name == want
-                    && matches!(t.source, ac2_proto::model::TraceSource::Math { a: x, b: y, .. } if x == b && y == a)
-            })
+    let operand = ac2_proto::model::Operand::Trace { trace: b };
+    d.until("the math channel of the trace", |s| {
+        s.measurements().iter().any(|m| {
+            m.config.name == name
+                && matches!(&m.config.kind, MeasKind::Math { config } if config.expr.names(operand))
         })
     })?;
     drop(d);
@@ -3501,28 +3504,55 @@ fn record_and_replay_from_the_app() -> R {
     Ok(())
 }
 
-/// From an empty daemon: two transfer measurements (two positions of the room mic), a
-/// spatial average of them made in its dialog by name, the average drawn as a transfer
-/// curve whose legend counts its positions; a position stopped is named in a banner and,
-/// with one left, the average says it has none.
+/// The legend text of live measurement `id` on the transfer pane.
+fn tf_legend(s: &AppState, id: MeasId) -> String {
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 600.0,
+    };
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    ac2_ui::scenes::transfer(s, &Theme::dark(), size, now)
+        .legend
+        .iter()
+        .find(|e| e.key == ac2_scene::trace::TraceKey::Live(id))
+        .map(|e| e.text.clone())
+        .unwrap_or_default()
+}
+
+/// The math channel of the mirrored state, if there is one running.
+fn running_math(s: &AppState) -> Option<(MeasId, String)> {
+    s.measurements()
+        .iter()
+        .find(|m| matches!(m.config.kind, MeasKind::Math { .. }) && m.running)
+        .map(|m| (m.id, m.config.name.clone()))
+}
+
+/// From an empty daemon: two transfer measurements (two positions of the room mic); the
+/// math channel dialog by name (Shift+M) makes their average, drawn as a transfer curve whose
+/// legend counts its positions; Ctrl+1 freezes it into a stored trace naming the
+/// expression; edited into A ÷ B it reads 0 dB (one path over itself); a position stopped
+/// is named in a banner and the ratio says it has no result.
 #[test]
-fn spatial_average_from_an_empty_daemon() -> R {
+fn math_channels_from_an_empty_daemon() -> R {
     use ac2_proto::Command;
-    use ac2_proto::frame::MemberStatus;
-    use ac2_scene::trace::TraceKey;
+    use ac2_proto::frame::OperandStatus;
+    use ac2_proto::model::{MathExpr, MathOp, TraceSource};
     use ac2_ui::conn::Request;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
-    // No average of one position: the palette says what is missing.
-    d.send(Msg::Command(CommandId::NewAverage));
+    // One transfer function: nothing to combine it with yet, and the dialog says so.
+    d.key("Shift+M");
     assert!(!matches!(d.st.overlay, Overlay::Form(_)));
     assert!(
         d.st.toasts
             .iter()
-            .any(|t| t.text.contains("needs at least 2 transfer measurements")),
+            .any(|t| t.text.contains("two transfer functions, spectra or RTAs")),
         "{:?}",
         d.st.toasts
     );
@@ -3544,87 +3574,132 @@ fn spatial_average_from_an_empty_daemon() -> R {
             .find(|id| *id != first)
             .ok_or("second")?;
 
-    // The average's dialog lists both by name, in; Enter makes and starts it.
-    d.key("Ctrl+K");
-    d.send(Msg::Text("new spatial average".into()));
-    d.key("Enter");
+    // A, the operator and B by name; the operator steps on to the average, which takes both
+    // positions; Enter makes and starts it.
+    d.key("Shift+M");
     let Overlay::Form(f) = &d.st.overlay else {
         return Err(format!("{:?}", d.st.overlay).into());
     };
-    assert_eq!(f.kind, FormKind::Average);
+    assert_eq!(f.kind, FormKind::Math);
     let rows: Vec<(String, String)> = f
         .fields
         .iter()
         .map(|x| (x.label.clone(), x.display()))
         .collect();
-    assert_eq!(
-        rows[0],
-        (
-            "Reference \u{2192} Room mic".into(),
-            "in the average".into()
-        )
-    );
+    assert_eq!(rows[0].0, "A");
+    assert!(rows[0].1.ends_with("(live)"), "{rows:?}");
+    assert_eq!(rows[1], ("Operator".into(), "÷  A relative to B".into()));
+    assert_eq!(rows[2].0, "B");
+    d.key("Down");
+    for _ in 0..4 {
+        d.key("Right");
+    }
+    let Overlay::Form(f) = &d.st.overlay else {
+        return Err(format!("{:?}", d.st.overlay).into());
+    };
+    let rows: Vec<(String, String)> = f
+        .fields
+        .iter()
+        .map(|x| (x.label.clone(), x.display()))
+        .collect();
+    assert_eq!(rows[0], ("Operator".into(), "average of several".into()));
     assert_eq!(rows[1].1, "in the average");
+    assert_eq!(rows[2].1, "in the average");
+    assert!(
+        rows.iter()
+            .any(|r| r == &("Name".into(), "Average of 2".into())),
+        "{rows:?}"
+    );
     d.key("Enter");
-    d.until("the average, running", |s| {
-        s.measurements()
-            .iter()
-            .any(|m| matches!(m.config.kind, MeasKind::SpatialAverage { .. }) && m.running)
-    })?;
-    let avg =
-        d.st.measurements()
-            .iter()
-            .find(|m| matches!(m.config.kind, MeasKind::SpatialAverage { .. }))
-            .map(|m| (m.id, m.config.name.clone()))
-            .ok_or("average")?;
-    assert_eq!(avg.1, "Average 1");
+    d.until("the math channel, running", |s| running_math(s).is_some())?;
+    let (avg, name) = running_math(&d.st).ok_or("math channel")?;
+    assert_eq!(name, "Average of 2");
 
     // Two positions of the same −6 dB path average to −6 dB (the level is still typed).
     d.key("Space");
     d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
-    d.tf_frames(avg.0, 240)?;
-    let theme = Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 600.0,
-    };
-    let now = || ac2_ui::scenes::Now {
-        instant: Instant::now(),
-        wall: ac2_proto::units::WallNs(0),
-    };
-    let legend = |s: &AppState| {
-        ac2_ui::scenes::transfer(s, &theme, size, now())
-            .legend
-            .iter()
-            .find(|e| e.key == TraceKey::Live(avg.0))
-            .map(|e| e.text.clone())
-            .unwrap_or_default()
-    };
+    d.tf_frames(avg, 240)?;
     assert!(
-        legend(&d.st).starts_with("Average 1 · 2 positions · power avg"),
+        tf_legend(&d.st, avg).starts_with("Average of 2 · 2 positions · power avg"),
         "{}",
-        legend(&d.st)
+        tf_legend(&d.st, avg)
     );
 
-    // One position stopped: no average, and the banner says which and why.
+    // Ctrl+1 freezes it: a stored trace in slot 1 naming the expression and its operands.
+    d.send(Msg::SelectMeas(avg));
+    d.key("Ctrl+1");
+    d.until("the capture in slot 1", |s| {
+        s.daemon().is_some_and(|x| {
+            x.traces.iter().any(|t| {
+                t.edit.slot == Some(1)
+                    && matches!(
+                        &t.source,
+                        TraceSource::Math { expr: MathExpr::Average { .. }, operands, .. }
+                            if operands.len() == 2
+                    )
+            })
+        })
+    })?;
+
+    // Edited in the same dialog into A ÷ B: one path over itself is 0 dB.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("edit the selected math".into()));
+    d.key("Enter");
+    assert!(
+        matches!(&d.st.overlay, Overlay::Form(f) if f.kind == FormKind::MathEdit),
+        "{:?}",
+        d.st.overlay
+    );
+    for _ in 0..4 {
+        d.key("Left");
+    }
+    d.key("Enter");
+    let topic = Topic::Data {
+        meas: avg,
+        stream: Stream::Tf,
+    };
+    d.until("the ratio at 0 dB", |s| {
+        let ratio = s.meas(avg).is_some_and(|m| {
+            matches!(
+                &m.config.kind,
+                MeasKind::Math { config } if matches!(
+                    config.expr,
+                    MathExpr::Binary { op: MathOp::Divide, .. }
+                )
+            )
+        });
+        ratio
+            && s.data.as_ref().is_some_and(|x| {
+                x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                    FrameData::Tf(tf) => tf
+                        .mag
+                        .get(240)
+                        .is_some_and(|m| m.is_finite() && m.abs() < 0.5),
+                    _ => false,
+                })
+            })
+    })?;
+    assert!(
+        tf_legend(&d.st, avg).contains(" ÷ "),
+        "{}",
+        tf_legend(&d.st, avg)
+    );
+
+    // One operand stopped: no ratio, and the banner says which and why.
     d.conn.send(Request::Call {
         cmd: Command::MeasStop { meas: second },
         what: "stopped".into(),
     });
-    let topic = Topic::Data {
-        meas: avg.0,
-        stream: Stream::Tf,
-    };
-    d.until("the average without its second position", |s| {
+    d.until("the ratio without its second operand", |s| {
         s.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
-                FrameData::Tf(tf) => {
-                    tf.meta.average.as_ref().is_some_and(|a| {
-                        a.members.iter().any(|m| m.status == MemberStatus::Stopped)
-                    })
-                }
+                FrameData::Tf(tf) => tf.meta.math.as_ref().is_some_and(|a| {
+                    a.operands
+                        .iter()
+                        .any(|m| m.status == OperandStatus::Stopped)
+                }),
                 _ => false,
             })
         })
@@ -3635,11 +3710,17 @@ fn spatial_average_from_an_empty_daemon() -> R {
             .find(|m| m.id == second)
             .map(|m| m.config.name.clone())
             .unwrap_or_default();
-    // The transfer pane's banners follow its measurement: the average, once selected.
-    d.st.selected = Some(avg.0);
     d.st.pane_meas
-        .insert(ac2_ui::state::PaneKind::Transfer, avg.0);
-    let scene = ac2_ui::scenes::transfer(&d.st, &theme, size, now());
+        .insert(ac2_ui::state::PaneKind::Transfer, avg);
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 600.0,
+    };
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let scene = ac2_ui::scenes::transfer(&d.st, &Theme::dark(), size, now);
     let banners: Vec<(String, Option<String>)> = scene
         .banners
         .iter()
@@ -3647,15 +3728,106 @@ fn spatial_average_from_an_empty_daemon() -> R {
         .collect();
     assert!(
         banners.contains(&(
-            "NO AVERAGE · 1 OF 2 POSITIONS".into(),
-            Some(format!("Average 1: left out {second_name}: stopped"))
+            "NO RESULT · 1 OF 2 OPERANDS".into(),
+            Some(format!("Average of 2: left out {second_name}: stopped"))
         )),
         "{banners:?}"
     );
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// Spectrum math lands on the spectrum pane, never the transfer pane: two spectra of the
+/// room mic, A − B by the dialog with the spectrum pane focused, 0 dB everywhere (one input
+/// minus itself).
+#[test]
+fn spectrum_math_lands_on_the_spectrum_pane() -> R {
+    use ac2_proto::model::MathDomain;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    for n in 1..=2 {
+        d.send(Msg::Command(CommandId::NewSpectrum));
+        d.key("Enter");
+        d.until("the spectrum, running", |s| {
+            s.measurements()
+                .iter()
+                .filter(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }) && m.running)
+                .count()
+                == n
+        })?;
+    }
+    d.key("Alt+2");
+    d.key("Shift+M");
+    let Overlay::Form(f) = &d.st.overlay else {
+        return Err(format!("{:?}", d.st.overlay).into());
+    };
+    let op = f
+        .fields
+        .iter()
+        .find(|x| x.label == "Operator")
+        .map(|x| x.display())
+        .unwrap_or_default();
+    assert_eq!(op, "−  level difference (dB)");
+    d.key("Enter");
+    d.until("the spectrum math, running", |s| running_math(s).is_some())?;
+    let (id, name) = running_math(&d.st).ok_or("math channel")?;
+    assert_eq!(name, "Spectrum 2 − Spectrum 1");
+    assert!(d.st.meas(id).is_some_and(|m| matches!(
+        &m.config.kind,
+        MeasKind::Math { config } if config.domain == MathDomain::Spectrum
+    )));
+    // The level is still typed: Space arms, Enter fires.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    let topic = Topic::Data {
+        meas: id,
+        stream: Stream::Spec,
+    };
+    // Two spectra of one input, each on its own FFT frames: about 0 dB apart.
+    d.until("the difference, about 0 dB over the band", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Spec(sp) => {
+                    let mut v: Vec<f32> =
+                        sp.level.iter().copied().filter(|v| v.is_finite()).collect();
+                    v.sort_by(f32::total_cmp);
+                    v.len() > 100 && v[v.len() / 2].abs() < 1.0
+                }
+                _ => false,
+            })
+        })
+    })?;
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 600.0,
+    };
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let live = ac2_scene::trace::TraceKey::Live(id);
+    d.st.pane_meas.insert(ac2_ui::state::PaneKind::Spectrum, id);
+    let spec = ac2_ui::scenes::spectrum(&d.st, &Theme::dark(), size, now());
     assert!(
-        legend(&d.st).starts_with("Average 1 · 1 of 2 positions"),
+        spec.legend.iter().any(|e| e.key == live),
+        "not on the spectrum pane"
+    );
+    // Shown by the pane, its caption is the expression and what it means.
+    assert!(
+        spec.caption
+            .contains("Spectrum 2 − Spectrum 1 · level difference"),
         "{}",
-        legend(&d.st)
+        spec.caption
+    );
+    let tf = ac2_ui::scenes::transfer(&d.st, &Theme::dark(), size, now());
+    assert!(
+        tf.legend.iter().all(|e| e.key != live),
+        "spectrum math on the transfer pane"
     );
     d.stop()?;
     drop(d);

@@ -869,26 +869,18 @@ async fn trace_commands_json() -> R {
         fixed["source"]["reference"],
         json!({ "type": "fixed", "delay": 0.0125 })
     );
-    let m = ok_json(&f, &["trace", "math", "a", "b", "--name", "a-b", "--json"]).await?;
+    // A math channel of the two stored traces, by name.
+    let m = ok_json(&f, &["math", "new", "a / b", "--json"]).await?;
+    assert_eq!(m["config"]["name"], "a ÷ b");
     assert_eq!(
-        m["source"],
-        json!({ "type": "math", "a": 2, "b": 3, "op": "magnitude_difference" })
+        m["config"]["kind"]["config"]["expr"],
+        json!({
+            "type": "binary",
+            "a": { "type": "trace", "trace": 2 },
+            "op": "divide",
+            "b": { "type": "trace", "trace": 3 }
+        })
     );
-    let m = ok_json(
-        &f,
-        &[
-            "trace",
-            "math",
-            "a",
-            "b",
-            "--name",
-            "a/b",
-            "--complex",
-            "--json",
-        ],
-    )
-    .await?;
-    assert_eq!(m["source"]["op"], "complex_division");
 
     // Display smoothing from the command line: 1/N or N, the mode kept unless asked.
     let sm = ok_json(&f, &["trace", "smooth", "a", "1/12", "--json"]).await?;
@@ -1014,8 +1006,7 @@ async fn trace_commands_json() -> R {
     );
     assert_eq!(r.json()?["error"]["code"], "invalid");
 
-    let rm = ok_json(&f, &["trace", "rm", "a-b", "a/b", "--json"]).await?;
-    assert_eq!(rm, json!({ "deleted": [6, 7] }));
+    ok_json(&f, &["meas", "rm", "a ÷ b", "--json"]).await?;
 
     // Sessions.
     let saved = ok_json(&f, &["session", "save", "show", "--json"]).await?;

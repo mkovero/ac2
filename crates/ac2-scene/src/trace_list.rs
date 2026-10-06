@@ -1,14 +1,14 @@
 //! The list of stored traces beside the panes: every trace by name, what it is, its slot,
 //! whether it is shown, and its colour, in the order the selection keys step through.
 
-use ac2_proto::model::{MathOp, TraceKind, TraceMeta, TraceSource};
+use ac2_proto::model::{MathExpr, MathOp, TraceKind, TraceMeta, TraceSource};
 use ac2_proto::units::TraceId;
 
 use crate::format;
 use crate::primitives::Color;
 
 /// What a trace is, as the list names it: `sweep`, `capture`, `imported`, `average`,
-/// `A − B`, `target` …
+/// `A ÷ B`, `target` …
 pub fn kind_name(t: &TraceMeta) -> &'static str {
     match (t.kind, &t.source) {
         (TraceKind::Target, _) => "target",
@@ -16,21 +16,15 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
         (TraceKind::Sweep, TraceSource::Imported { .. }) => "imported sweep",
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",
-        (_, TraceSource::SpatialAverage { .. }) => "spatial average",
-        (
-            _,
-            TraceSource::Math {
-                op: MathOp::MagnitudeDifference,
-                ..
+        (_, TraceSource::Math { expr, .. }) => match expr {
+            MathExpr::Average { .. } => "math average",
+            MathExpr::Binary { op, .. } => match op {
+                MathOp::Divide => "A ÷ B",
+                MathOp::Multiply => "A × B",
+                MathOp::Add => "A + B",
+                MathOp::Subtract => "A − B",
             },
-        ) => "A − B",
-        (
-            _,
-            TraceSource::Math {
-                op: MathOp::ComplexDivision,
-                ..
-            },
-        ) => "A / B",
+        },
         (TraceKind::Spectrum { .. }, TraceSource::Captured { .. }) => "spectrum capture",
         (TraceKind::Rta { .. }, TraceSource::Captured { .. }) => "RTA capture",
         (TraceKind::Sweep, TraceSource::Captured { .. }) => "sweep",
@@ -168,6 +162,18 @@ mod tests {
     use ac2_proto::model::*;
     use ac2_proto::units::*;
 
+    fn math(expr: MathExpr) -> TraceSource {
+        TraceSource::Math {
+            meas: MeasId(4),
+            meas_name: "m".into(),
+            epoch: SessionEpoch(1),
+            at_sample: SampleIndex(0),
+            expr,
+            operands: vec![],
+            phase: PhaseBasis::SharedTimeBase,
+        }
+    }
+
     fn meta(
         id: u32,
         name: &str,
@@ -274,22 +280,32 @@ mod tests {
                 "average",
             ),
             (
-                TraceKind::Transfer,
-                TraceSource::Math {
-                    a: TraceId(1),
-                    b: TraceId(2),
-                    op: MathOp::MagnitudeDifference,
+                TraceKind::Spectrum {
+                    scale: LevelScale::Dbfs,
                 },
+                math(MathExpr::Binary {
+                    a: Operand::Meas { meas: MeasId(1) },
+                    op: MathOp::Subtract,
+                    b: Operand::Trace { trace: TraceId(2) },
+                }),
                 "A − B",
             ),
             (
                 TraceKind::Transfer,
-                TraceSource::Math {
-                    a: TraceId(1),
-                    b: TraceId(2),
-                    op: MathOp::ComplexDivision,
-                },
-                "A / B",
+                math(MathExpr::Binary {
+                    a: Operand::Meas { meas: MeasId(1) },
+                    op: MathOp::Divide,
+                    b: Operand::Meas { meas: MeasId(2) },
+                }),
+                "A ÷ B",
+            ),
+            (
+                TraceKind::Transfer,
+                math(MathExpr::Average {
+                    of: vec![],
+                    method: AverageMethod::Power,
+                }),
+                "math average",
             ),
         ];
         for (kind, source, want) in cases {

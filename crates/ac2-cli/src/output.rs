@@ -148,16 +148,23 @@ pub fn meas_kind(k: &MeasKind) -> String {
             weighting(config.weighting),
             time_weighting(config.time_weighting)
         ),
-        MeasKind::SpatialAverage { config } => format!(
-            "{} average of {}",
-            average_method(config.method),
-            config
-                .members
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
+        MeasKind::Math { config } => {
+            let what = match config.domain {
+                ac2_proto::model::MathDomain::Transfer => "tf",
+                ac2_proto::model::MathDomain::Spectrum => "spectrum",
+                ac2_proto::model::MathDomain::Rta => "rta",
+            };
+            let e = ac2_scene::math::expression(&config.expr, |o| match o {
+                ac2_proto::model::Operand::Meas { meas } => format!("#{meas}"),
+                ac2_proto::model::Operand::Trace { trace } => format!("trace {trace}"),
+            });
+            match &config.expr {
+                ac2_proto::model::MathExpr::Average { method, .. } => {
+                    format!("{what} math: {} {e}", average_method(*method))
+                }
+                ac2_proto::model::MathExpr::Binary { .. } => format!("{what} math: {e}"),
+            }
+        }
     }
 }
 
@@ -359,19 +366,17 @@ fn source_text(s: &TraceSource) -> String {
             meas, meas_name, ..
         } => format!("captured from {meas_name} ({meas})"),
         TraceSource::Imported { file_name, .. } => format!("imported {file_name}"),
-        TraceSource::SpatialAverage {
+        TraceSource::Math {
             meas_name,
-            method,
-            members,
+            expr,
+            operands,
             ..
         } => format!(
-            "{} average {meas_name} of {}",
-            average_method(*method),
-            members
+            "math {meas_name}: {}",
+            ac2_scene::math::expression(expr, |o| operands
                 .iter()
-                .map(|m| m.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+                .find(|n| n.operand == o)
+                .map_or_else(|| "?".to_owned(), |n| n.name.clone()))
         ),
         TraceSource::Average { traces, method, .. } => {
             let m = average_method(*method);
@@ -384,10 +389,6 @@ fn source_text(s: &TraceSource) -> String {
                     .join(", ")
             )
         }
-        TraceSource::Math { a, b, op } => match op {
-            ac2_proto::model::MathOp::MagnitudeDifference => format!("{a} − {b} (dB)"),
-            ac2_proto::model::MathOp::ComplexDivision => format!("{a} / {b} (complex)"),
-        },
         TraceSource::IrCapture { run, .. } => format!("sweep {run}"),
     }
 }
@@ -498,7 +499,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         TraceSource::Captured {
             epoch, at_sample, ..
         }
-        | TraceSource::SpatialAverage {
+        | TraceSource::Math {
             epoch, at_sample, ..
         } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
         TraceSource::IrCapture { epoch, .. } => format!("\n  epoch       {}", epoch.0),

@@ -913,16 +913,17 @@ fn source_text(s: &TraceSource) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        TraceSource::SpatialAverage {
+        TraceSource::Math {
             meas,
             meas_name,
             epoch,
             at_sample,
-            method,
-            members,
+            expr: _,
+            operands,
+            phase,
         } => format!(
-            "captured from spatial average {meas_name:?} (measurement {meas}), {method:?} of {}, session epoch {}, sample {}",
-            members
+            "captured from math channel {meas_name:?} (measurement {meas}) of {}, phase {phase:?}, session epoch {}, sample {}",
+            operands
                 .iter()
                 .map(|m| format!("{:?}", m.name))
                 .collect::<Vec<_>>()
@@ -930,7 +931,6 @@ fn source_text(s: &TraceSource) -> String {
             epoch.0,
             at_sample.0
         ),
-        TraceSource::Math { a, b, op } => format!("{op:?} of trace {a} and trace {b}"),
         TraceSource::IrCapture {
             run,
             epoch,

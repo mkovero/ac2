@@ -1,4 +1,4 @@
-//! Capture, averaging and A−B math on stored traces.
+//! Capture and averaging of stored traces (math channels: [`crate::math`]).
 //!
 //! # Time base
 //!
@@ -19,11 +19,11 @@ use ac2_core::average as core;
 use ac2_proto::FrameData;
 use ac2_proto::GridDef;
 use ac2_proto::frame::ValidityMask;
-use ac2_proto::model::{AverageMethod, DelayReference, MathOp, TraceKind};
+use ac2_proto::model::{AverageMethod, DelayReference, TraceKind};
 use ac2_proto::units::{Seconds, SessionEpoch, TraceId};
 use num_complex::Complex64;
 
-use crate::columns::{Columns, StoredTrace, frequencies, resample, wrap_deg};
+use crate::columns::{Columns, StoredTrace, frequencies, resample};
 
 /// Why an operation was refused.
 #[derive(Debug, Clone, PartialEq)]
@@ -425,76 +425,5 @@ pub fn average_on_time_base(
             coherence: with_coherence.then(|| f32s(a.mean_coherence.iter().copied())),
         },
         delay: Seconds(a.reference_delay_s),
-    })
-}
-
-/// A − B on A's grid (B resampled when needed).
-///
-/// `magnitude_difference`: dB subtraction; the result has no phase. `complex_division`:
-/// A / B as complex values; with a shared time base B's phase is first re-referred to A's
-/// delay, so the result shows A's arrival relative to B; otherwise each keeps its own
-/// alignment. Transfer and target traces combine with each other; spectra and RTA only
-/// with their own kind on the same grid, and only by magnitude.
-pub fn math(a: &StoredTrace, b: &StoredTrace, op: MathOp) -> Result<Derived, OpError> {
-    // Applied mic curves are part of what each side measured.
-    let (a, b) = (&crate::mic::bake(a), &crate::mic::bake(b));
-    let relative = |k: TraceKind| transfer_like(k) || k == TraceKind::Target;
-    let (ka, kb) = (a.meta.kind, b.meta.kind);
-    if !(relative(ka) && relative(kb)) && ka != kb {
-        return Err(OpError::MixedKinds);
-    }
-    if !relative(ka) {
-        if op == MathOp::ComplexDivision {
-            return Err(OpError::KindNotSupported(ka));
-        }
-        if a.grid.id() != b.grid.id() {
-            return Err(OpError::GridMismatch);
-        }
-    }
-    let freqs = frequencies(&a.grid);
-    let bc = on_grid(b, &a.grid, &freqs);
-    let n = freqs.len();
-    let mag: Vec<f32> = (0..n).map(|i| a.columns.mag_db[i] - bc.mag_db[i]).collect();
-    if mag.iter().all(|v| v.is_nan()) {
-        return Err(OpError::NoOverlap);
-    }
-    let phase = match op {
-        MathOp::MagnitudeDifference => None,
-        MathOp::ComplexDivision => {
-            let pa = a
-                .columns
-                .phase_deg
-                .as_ref()
-                .ok_or(OpError::NoPhase(a.meta.id))?;
-            let pb = bc.phase_deg.as_ref().ok_or(OpError::NoPhase(b.meta.id))?;
-            let shift = if all_shared(&[a, b]) {
-                a.meta.delay.0 - b.meta.delay.0
-            } else {
-                0.0
-            };
-            Some(
-                (0..n)
-                    .map(|i| {
-                        let d = f64::from(pa[i]) - f64::from(pb[i]) - 360.0 * freqs[i] * shift;
-                        if d.is_finite() {
-                            wrap_deg(d) as f32
-                        } else {
-                            f32::NAN
-                        }
-                    })
-                    .collect(),
-            )
-        }
-    };
-    Ok(Derived {
-        // A difference of levels is a relative dB curve, whatever it was made from.
-        kind: TraceKind::Transfer,
-        grid: a.grid.clone(),
-        columns: Columns {
-            mag_db: mag,
-            phase_deg: phase,
-            coherence: None,
-        },
-        delay: Seconds(0.0),
     })
 }

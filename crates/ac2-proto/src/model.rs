@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
+use crate::topic::Stream;
 use crate::units::{
     ClientId, Db, DbSpl, Dbfs, Degrees, Hz, MeasId, MvPerPa, Rev, SampleIndex, Samples, Seconds,
     SessionEpoch, SweepId, TraceId, Volts, WallNs,
@@ -853,76 +854,212 @@ pub enum MeasKind {
         /// Configuration.
         config: SplConfig,
     },
-    /// Live spatial average of transfer measurements (publishes `tf` only;
-    /// `docs/design/spatial-average.md`).
-    SpatialAverage {
+    /// Math channel: a result the daemon computes from named live measurements and stored
+    /// traces, published as `tf`, `spec` or `rta` by its domain
+    /// (`docs/design/math-channels.md`).
+    Math {
         /// Configuration.
-        config: SpatialAverageConfig,
+        config: MathConfig,
     },
 }
 
 impl MeasKind {
-    /// Whether the measurement publishes a `tf` stream (a transfer function or a spatial
-    /// average of them), so it is drawn, captured and compared as a transfer function.
+    /// The stream that carries the measurement's curve or reading.
+    pub fn stream(&self) -> Stream {
+        match self {
+            MeasKind::Transfer { .. } => Stream::Tf,
+            MeasKind::Spectrum { .. } => Stream::Spec,
+            MeasKind::Rta { .. } => Stream::Rta,
+            MeasKind::Spl { .. } => Stream::Spl,
+            MeasKind::Math { config } => config.domain.stream(),
+        }
+    }
+
+    /// Whether the measurement publishes a `tf` stream (a transfer function or transfer
+    /// math), so it is drawn, captured and compared as a transfer function.
     pub fn publishes_tf(&self) -> bool {
-        matches!(
-            self,
-            MeasKind::Transfer { .. } | MeasKind::SpatialAverage { .. }
+        self.stream() == Stream::Tf
+    }
+
+    /// Whether the measurement is drawn on the spectrum pane: a spectrum, an RTA, or math
+    /// on either.
+    pub fn publishes_levels(&self) -> bool {
+        matches!(self.stream(), Stream::Spec | Stream::Rta)
+    }
+}
+
+/// A math channel: an expression over operands of one domain, evaluated by the daemon
+/// whenever it publishes, so every client shows the same result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MathConfig {
+    /// What the operands are, and so what the result is and where it is drawn.
+    pub domain: MathDomain,
+    /// The expression.
+    pub expr: MathExpr,
+    /// Delay the phase of a transfer sum, difference or average is referred to.
+    pub reference: MathReference,
+    /// Display smoothing of the result (transfer and spectrum domains); the operands are
+    /// combined unsmoothed.
+    pub smoothing: Option<Smoothing>,
+}
+
+impl MathConfig {
+    /// Fewest operands of an average, and fewest usable ones for it to show a value.
+    pub const MIN_AVERAGE: usize = 2;
+    /// Most operands of an average.
+    pub const MAX_AVERAGE: usize = 16;
+
+    /// `expr` in `domain`, phase referred to the first operand, unsmoothed.
+    pub fn of(domain: MathDomain, expr: MathExpr) -> Self {
+        let first = expr
+            .operands()
+            .first()
+            .copied()
+            .unwrap_or(Operand::Meas { meas: MeasId(0) });
+        Self {
+            domain,
+            expr,
+            reference: MathReference::Operand { operand: first },
+            smoothing: None,
+        }
+    }
+
+    /// The power average of `of`: a spatial average of mic positions.
+    pub fn power_average(domain: MathDomain, of: Vec<Operand>) -> Self {
+        Self::of(
+            domain,
+            MathExpr::Average {
+                of,
+                method: AverageMethod::Power,
+            },
         )
     }
 }
 
-/// Live spatial average of transfer measurements: the daemon combines the members' current
-/// results whenever it publishes, with the same mathematics as `trace.average`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SpatialAverageConfig {
-    /// Member transfer measurements, in display order: at least
-    /// [`SpatialAverageConfig::MIN_MEMBERS`], at most [`SpatialAverageConfig::MAX_MEMBERS`],
-    /// distinct, all on one grid.
-    pub members: Vec<MeasId>,
-    /// How the members are combined.
-    pub method: AverageMethod,
-    /// Delay the averaged phase is referred to.
-    pub reference: AverageReference,
-    /// Live smoothing of the average, if any (members are averaged unsmoothed).
-    pub smoothing: Option<Smoothing>,
+/// What a math channel's operands are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MathDomain {
+    /// Transfer functions (and sweep traces, their fundamental): magnitude and phase
+    /// combine as complex values. Publishes `tf`.
+    Transfer,
+    /// Narrowband spectra on one bin grid: tone levels. Publishes `spec`.
+    Spectrum,
+    /// RTA bands on one band layout: band power. Publishes `rta`.
+    Rta,
 }
 
-impl SpatialAverageConfig {
-    /// Fewest members of an average, and fewest usable members for it to show a value.
-    pub const MIN_MEMBERS: usize = 2;
-    /// Most members of an average.
-    pub const MAX_MEMBERS: usize = 16;
-
-    /// `members` averaged by power, phase referred to the first member's delay, unsmoothed.
-    pub fn power_of(members: Vec<MeasId>) -> Self {
-        let reference = AverageReference::Member {
-            meas: members.first().copied().unwrap_or(MeasId(0)),
-        };
-        Self {
-            members,
-            method: AverageMethod::Power,
-            reference,
-            smoothing: None,
+impl MathDomain {
+    /// The stream a math channel of this domain publishes.
+    pub fn stream(self) -> Stream {
+        match self {
+            MathDomain::Transfer => Stream::Tf,
+            MathDomain::Spectrum => Stream::Spec,
+            MathDomain::Rta => Stream::Rta,
         }
     }
 }
 
-/// Delay a live spatial average's phase is referred to.
+/// A math channel's expression.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MathExpr {
+    /// `a op b`.
+    Binary {
+        /// Left operand.
+        a: Operand,
+        /// Operator.
+        op: MathOp,
+        /// Right operand.
+        b: Operand,
+    },
+    /// Average of [`MathConfig::MIN_AVERAGE`] … [`MathConfig::MAX_AVERAGE`] distinct
+    /// operands.
+    Average {
+        /// Operands, in display order.
+        of: Vec<Operand>,
+        /// How they are combined (spectrum and RTA: power only).
+        method: AverageMethod,
+    },
+}
+
+impl MathExpr {
+    /// Every operand, in expression order.
+    pub fn operands(&self) -> Vec<Operand> {
+        match self {
+            MathExpr::Binary { a, b, .. } => vec![*a, *b],
+            MathExpr::Average { of, .. } => of.clone(),
+        }
+    }
+
+    /// Whether `o` is one of the operands.
+    pub fn names(&self, o: Operand) -> bool {
+        self.operands().contains(&o)
+    }
+}
+
+/// A math operator. Transfer functions combine as complex values (magnitude and phase
+/// together); spectra and RTA bands as levels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MathOp {
+    /// `A ÷ B`: A relative to B (transfer only).
+    Divide,
+    /// `A × B`: A cascaded with B (transfer only).
+    Multiply,
+    /// `A + B`: transfer: the complex sum (what A and B sum to acoustically); levels: the
+    /// power sum.
+    Add,
+    /// `A − B`: transfer: the complex difference; levels: the level difference in dB.
+    Subtract,
+}
+
+/// A math channel's operand: a live measurement or a stored trace, named by id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Operand {
+    /// A live measurement's current result.
+    Meas {
+        /// The measurement.
+        meas: MeasId,
+    },
+    /// A stored trace.
+    Trace {
+        /// The trace.
+        trace: TraceId,
+    },
+}
+
+/// Delay the phase of a transfer sum, difference or average is referred to.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum AverageReference {
-    /// The inserted delay of one member (the delay its newest result was measured with).
-    Member {
-        /// That member.
-        meas: MeasId,
+pub enum MathReference {
+    /// The delay one operand was measured with (a live operand's newest).
+    Operand {
+        /// That operand.
+        operand: Operand,
     },
     /// An explicit delay.
     Fixed {
         /// Delay.
         delay: Seconds,
     },
+}
+
+/// What a math result's phase is relative to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseBasis {
+    /// Every operand shares one time base (one session epoch): the phase keeps their
+    /// relative arrival, referred to the delay the result states.
+    SharedTimeBase,
+    /// The operands share no time base (an import, another epoch): the phase combines each
+    /// operand as aligned by its own delay; their relative arrival is unknown.
+    OwnAlignments,
+    /// The result has no phase (levels, an operand without phase, a power average across
+    /// time bases).
+    NoPhase,
 }
 
 /// Arguments of `meas.create` / `meas.update`.
@@ -1778,16 +1915,6 @@ pub enum Polarity {
     Inverted,
 }
 
-/// Trace math operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MathOp {
-    /// dB subtraction of magnitudes (A − B); phase dropped.
-    MagnitudeDifference,
-    /// Complex division A / B.
-    ComplexDivision,
-}
-
 /// Imported file format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1867,10 +1994,9 @@ pub enum TraceSource {
         /// What the file held that the trace does not keep.
         notes: Vec<ImportNote>,
     },
-    /// Captured from a live spatial average (shared time reference within `epoch`, like a
-    /// capture).
-    SpatialAverage {
-        /// The average measurement.
+    /// Captured from a math channel: the expression and the operands that went into it.
+    Math {
+        /// The math channel.
         meas: MeasId,
         /// Its name at capture.
         meas_name: String,
@@ -1878,11 +2004,13 @@ pub enum TraceSource {
         epoch: SessionEpoch,
         /// Capture sample index.
         at_sample: SampleIndex,
-        /// Method.
-        method: AverageMethod,
-        /// The members averaged into the capture (members excluded at that moment are not
-        /// listed).
-        members: Vec<AverageMember>,
+        /// The expression.
+        expr: MathExpr,
+        /// The operands that went into the capture, named as at capture, in expression
+        /// order (an average's operands left out at that moment are not listed).
+        operands: Vec<NamedOperand>,
+        /// What the phase is relative to.
+        phase: PhaseBasis,
     },
     /// Average of other traces.
     Average {
@@ -1892,15 +2020,6 @@ pub enum TraceSource {
         method: AverageMethod,
         /// Phase reference.
         reference: DelayReference,
-    },
-    /// A − B.
-    Math {
-        /// A.
-        a: TraceId,
-        /// B.
-        b: TraceId,
-        /// Operation.
-        op: MathOp,
     },
     /// Sweep measurement (`ir.capture`).
     IrCapture {
@@ -1922,27 +2041,38 @@ pub enum TraceSource {
 }
 
 impl TraceSource {
-    /// The session epoch whose time base the trace's phase is in: captures (live, spatial
-    /// average or sweep) share their epoch's; every other source is independent
-    /// (decision 8a).
+    /// The session epoch whose time base the trace's phase is in: captures (live or sweep)
+    /// share their epoch's, and so does a math capture whose phase is a sum, difference or
+    /// average of operands in that time base (a ratio or a cascade is relative, in no time
+    /// base); every other source is independent (decision 8a).
     pub fn shared_epoch(&self) -> Option<SessionEpoch> {
         match self {
-            TraceSource::Captured { epoch, .. }
-            | TraceSource::SpatialAverage { epoch, .. }
-            | TraceSource::IrCapture { epoch, .. } => Some(*epoch),
-            TraceSource::Imported { .. }
-            | TraceSource::Average { .. }
-            | TraceSource::Math { .. } => None,
+            TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
+                Some(*epoch)
+            }
+            TraceSource::Math {
+                epoch, expr, phase, ..
+            } => {
+                let relative = matches!(
+                    expr,
+                    MathExpr::Binary {
+                        op: MathOp::Divide | MathOp::Multiply,
+                        ..
+                    }
+                );
+                (*phase == PhaseBasis::SharedTimeBase && !relative).then_some(*epoch)
+            }
+            TraceSource::Imported { .. } | TraceSource::Average { .. } => None,
         }
     }
 }
 
-/// A member of a captured spatial average.
+/// A math capture's operand and its name at capture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AverageMember {
-    /// The member measurement.
-    pub meas: MeasId,
+pub struct NamedOperand {
+    /// The operand.
+    pub operand: Operand,
     /// Its name at capture.
     pub name: String,
 }

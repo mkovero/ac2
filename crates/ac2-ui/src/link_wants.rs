@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use ac2_proto::model::MeasKind;
+use ac2_proto::model::{MathDomain, MeasKind};
 use ac2_proto::topic::{Stream, Topic};
 
 use crate::conn::{DISPLAY_PERIOD, Request};
@@ -47,7 +47,7 @@ impl AppState {
             || self.view.spectrum.mode.spectrograph();
         let mut out = HashSet::new();
         for m in self.measurements() {
-            let streams: &[Stream] = match m.config.kind {
+            let streams: &[Stream] = match &m.config.kind {
                 MeasKind::Transfer { .. } => match (shows(PaneKind::Transfer), ir_of == Some(m.id))
                 {
                     (true, true) => &[Stream::Tf, Stream::Ir],
@@ -61,8 +61,12 @@ impl AppState {
                 MeasKind::Rta { .. } if spectrum => &[Stream::Rta],
                 MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => &[],
                 MeasKind::Spl { .. } => &[Stream::Spl, Stream::Leq],
-                MeasKind::SpatialAverage { .. } if shows(PaneKind::Transfer) => &[Stream::Tf],
-                MeasKind::SpatialAverage { .. } => &[],
+                MeasKind::Math { config } => match config.domain {
+                    MathDomain::Transfer if shows(PaneKind::Transfer) => &[Stream::Tf],
+                    MathDomain::Spectrum if spectrum => &[Stream::Spec],
+                    MathDomain::Rta if spectrum => &[Stream::Rta],
+                    _ => &[],
+                },
             };
             out.extend(
                 streams

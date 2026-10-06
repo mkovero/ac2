@@ -14,8 +14,8 @@ use crate::grid::{GridDef, GridId};
 use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
-    GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MathOp,
-    MeasConfig, Measurement, Mic, MicCurveId, Preview, RecordRequest, RecordingFile, RecordingRef,
+    GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MeasConfig,
+    Measurement, Mic, MicCurveId, Preview, RecordRequest, RecordingFile, RecordingRef,
     RecordingRun, ReplayPace, Session, SessionConfig, SessionFile, SessionRef, SplHistory,
     SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
@@ -290,18 +290,6 @@ pub enum Command {
         /// Name of the result.
         name: String,
     },
-    /// A − B into a new trace.
-    #[serde(rename = "trace.math")]
-    TraceMath {
-        /// A.
-        a: TraceId,
-        /// B.
-        b: TraceId,
-        /// Operation.
-        op: MathOp,
-        /// Name of the result.
-        name: String,
-    },
     /// Import a file sent by the client.
     #[serde(rename = "trace.import")]
     TraceImport {
@@ -560,7 +548,6 @@ impl Command {
             Self::TraceUpdate { .. } => "trace.update",
             Self::TraceDelete { .. } => "trace.delete",
             Self::TraceAverage { .. } => "trace.average",
-            Self::TraceMath { .. } => "trace.math",
             Self::TraceImport { .. } => "trace.import",
             Self::TraceMicCurve { .. } => "trace.mic_curve",
             Self::TraceExport { .. } => "trace.export",
@@ -675,7 +662,7 @@ pub enum ReplyBody {
     Measurement(Measurement),
     /// `delay.find`.
     DelayFinding(DelayFinding),
-    /// `trace.capture/update/average/math/import`.
+    /// `trace.capture/update/average/import`.
     Trace(TraceMeta),
     /// `ir.capture`: the run, as started.
     Sweep(SweepRun),

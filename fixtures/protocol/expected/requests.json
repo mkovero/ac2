@@ -1,6 +1,6 @@
 [
  {
-  "v": 21,
+  "v": 22,
   "id": 0,
   "cmd": {
    "op": "hello",
@@ -11,7 +11,7 @@
   "expect_rev": null
  },
  {
-  "v": 21,
+  "v": 22,
   "id": 2,
   "cmd": {
    "op": "session.open",
@@ -43,7 +43,7 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
+  "v": 22,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -76,7 +76,7 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
+  "v": 22,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
@@ -84,7 +84,7 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
+  "v": 22,
   "id": 10,
   "cmd": {
    "op": "meas.create",
@@ -121,7 +121,7 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
+  "v": 22,
   "id": 17,
   "cmd": {
    "op": "delay.find",
@@ -136,7 +136,7 @@
   "expect_rev": null
  },
  {
-  "v": 21,
+  "v": 22,
   "id": 18,
   "cmd": {
    "op": "delay.insert",
@@ -151,8 +151,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 28,
+  "v": 22,
+  "id": 27,
   "cmd": {
    "op": "trace.import",
    "args": {
@@ -167,8 +167,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 31,
+  "v": 22,
+  "id": 30,
   "cmd": {
    "op": "cal.curve_import",
    "args": {
@@ -184,8 +184,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 33,
+  "v": 22,
+  "id": 32,
   "cmd": {
    "op": "spl.log_get",
    "args": {
@@ -198,8 +198,8 @@
   "expect_rev": null
  },
  {
-  "v": 21,
-  "id": 34,
+  "v": 22,
+  "id": 33,
   "cmd": {
    "op": "ir.capture",
    "args": {
@@ -234,8 +234,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 41,
+  "v": 22,
+  "id": 40,
   "cmd": {
    "op": "session.inputs",
    "args": {
@@ -268,8 +268,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 42,
+  "v": 22,
+  "id": 41,
   "cmd": {
    "op": "cal.delete",
    "args": {
@@ -283,8 +283,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 43,
+  "v": 22,
+  "id": 42,
   "cmd": {
    "op": "session.preview",
    "args": {
@@ -295,16 +295,16 @@
   "expect_rev": null
  },
  {
-  "v": 21,
-  "id": 44,
+  "v": 22,
+  "id": 43,
   "cmd": {
    "op": "session.preview_stop"
   },
   "expect_rev": null
  },
  {
-  "v": 21,
-  "id": 45,
+  "v": 22,
+  "id": 44,
   "cmd": {
    "op": "session.detect_loopback",
    "args": {
@@ -320,8 +320,8 @@
   "expect_rev": null
  },
  {
-  "v": 21,
-  "id": 46,
+  "v": 22,
+  "id": 45,
   "cmd": {
    "op": "trace.mic_curve",
    "args": {
@@ -335,8 +335,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 48,
+  "v": 22,
+  "id": 47,
   "cmd": {
    "op": "cal.curve_delete",
    "args": {
@@ -349,8 +349,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 49,
+  "v": 22,
+  "id": 48,
   "cmd": {
    "op": "spl.log_new",
    "args": {
@@ -360,8 +360,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 50,
+  "v": 22,
+  "id": 49,
   "cmd": {
    "op": "cal.spl_electrical",
    "args": {
@@ -378,8 +378,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 51,
+  "v": 22,
+  "id": 50,
   "cmd": {
    "op": "spl.history_get",
    "args": {
@@ -390,8 +390,8 @@
   "expect_rev": null
  },
  {
-  "v": 21,
-  "id": 52,
+  "v": 22,
+  "id": 51,
   "cmd": {
    "op": "delay.nudge",
    "args": {
@@ -402,8 +402,8 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 53,
+  "v": 22,
+  "id": 52,
   "cmd": {
    "op": "rec.start",
    "args": {
@@ -421,16 +421,16 @@
   "expect_rev": 41
  },
  {
-  "v": 21,
-  "id": 55,
+  "v": 22,
+  "id": 54,
   "cmd": {
    "op": "rec.list"
   },
   "expect_rev": null
  },
  {
-  "v": 21,
-  "id": 56,
+  "v": 22,
+  "id": 55,
   "cmd": {
    "op": "session.replay",
    "args": {

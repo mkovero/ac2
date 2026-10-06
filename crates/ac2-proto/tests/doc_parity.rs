@@ -216,14 +216,44 @@ fn protocol_doc_names_everything() {
         &mut missing,
     );
     check(
-        "average member status",
-        &names_of::<frame::MemberStatus, _>(&Tagged { t: "no_such" }),
+        "math operand status",
+        &names_of::<frame::OperandStatus, _>(&Tagged { t: "no_such" }),
         &doc,
         &mut missing,
     );
     check(
-        "average reference",
-        &names_of::<model::AverageReference, _>(&Tagged { t: "no_such" }),
+        "math reference",
+        &names_of::<model::MathReference, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "math expression",
+        &names_of::<model::MathExpr, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "math operand",
+        &names_of::<model::Operand, _>(&Tagged { t: "no_such" }),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "math operator",
+        &names_of::<model::MathOp, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "math domain",
+        &names_of::<model::MathDomain, _>(&"no_such"),
+        &doc,
+        &mut missing,
+    );
+    check(
+        "phase basis",
+        &names_of::<model::PhaseBasis, _>(&"no_such"),
         &doc,
         &mut missing,
     );

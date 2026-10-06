@@ -19,7 +19,6 @@
 
 pub mod audio;
 pub mod autosave;
-pub mod average;
 pub mod axis;
 pub mod banner;
 pub mod cal;
@@ -31,6 +30,7 @@ pub mod grid;
 pub mod ir;
 pub mod leq;
 pub mod leq_preset;
+pub mod math;
 pub mod meter;
 pub mod meter_leq;
 pub mod primitives;

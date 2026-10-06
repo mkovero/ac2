@@ -496,7 +496,7 @@ pub(super) fn kind_tag(k: &MeasKind) -> &'static str {
         MeasKind::Spectrum { .. } => "FFT",
         MeasKind::Rta { .. } => "RTA",
         MeasKind::Spl { .. } => "SPL",
-        MeasKind::SpatialAverage { .. } => "AVG",
+        MeasKind::Math { .. } => "MATH",
     }
 }
 
@@ -600,6 +600,12 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 MeasKind::Spectrum { config } => {
                     if let Some(f) = config.smoothing {
                         text.push_str(&format!(" · smoothed {}", format::octave_fraction(f)));
+                    }
+                }
+                MeasKind::Math { config } => {
+                    let e = ac2_scene::math::expression(&config.expr, |o| st.operand_name(o));
+                    if e != m.config.name {
+                        text.push_str(&format!(" · {e}"));
                     }
                 }
                 _ => {}

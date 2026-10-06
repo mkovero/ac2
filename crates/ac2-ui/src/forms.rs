@@ -8,11 +8,11 @@
 //! shares live here.
 
 use ac2_proto::model::{
-    AverageMethod, BandFraction, DepthPolicy, EssSpec, MeasConfig, MeasKind, Measurement,
-    OpenSession, RtaConfig, Smoothing, SmoothingFraction, SpatialAverageConfig, SpectrumConfig,
-    SplConfig, SweepInputs, SweepRequest, TimeWeighting, TransferConfig, Weighting,
+    BandFraction, DepthPolicy, EssSpec, MeasConfig, MeasKind, Measurement, OpenSession, Operand,
+    RtaConfig, Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, SweepInputs, SweepRequest,
+    TimeWeighting, TransferConfig, Weighting,
 };
-use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
+use ac2_proto::units::{Dbfs, Hz, Seconds};
 
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,8 +23,10 @@ pub enum FormKind {
     Spl,
     /// Sweep measurement (harmonic distortion).
     Sweep,
-    /// Live spatial average of transfer measurements.
-    Average,
+    /// A new math channel ([`crate::math_dialog`]).
+    Math,
+    /// A math channel edited.
+    MathEdit,
 }
 
 impl FormKind {
@@ -34,7 +36,8 @@ impl FormKind {
             FormKind::Spectrum => "New spectrum",
             FormKind::Rta => "New RTA",
             FormKind::Spl => "New SPL meter",
-            FormKind::Average => "New spatial average (several mic positions as one curve)",
+            FormKind::Math => "New math channel (A ÷ × + − B, or the average of several)",
+            FormKind::MathEdit => "Edit math channel",
             FormKind::Sweep => "Sweep measurement (response and harmonic distortion)",
         }
     }
@@ -43,6 +46,7 @@ impl FormKind {
     pub fn submit(self) -> &'static str {
         match self {
             FormKind::Sweep => "Enter arms the sweep (then Enter plays it, Esc stops)",
+            FormKind::MathEdit => "Enter applies",
             _ => "Enter creates and starts",
         }
     }
@@ -63,6 +67,7 @@ impl FormKind {
     pub fn verb(self) -> &'static str {
         match self {
             FormKind::Sweep => "Arm",
+            FormKind::MathEdit => "Apply",
             _ => "Create and start",
         }
     }
@@ -89,10 +94,18 @@ pub enum FieldId {
     Repeats,
     /// Silence recorded after each sweep: the room's decay and its noise.
     Tail,
-    /// Whether this transfer measurement is in a spatial average.
-    Member(MeasId),
-    /// How a spatial average combines its members.
+    /// Whether this operand is in a math channel's average.
+    Member(Operand),
+    /// How a math channel's average combines its operands.
     Method,
+    /// A math channel's first operand.
+    OperandA,
+    /// A math channel's operator.
+    Operator,
+    /// A math channel's second operand.
+    OperandB,
+    /// The operand whose delay a math channel's sum or average is referred to.
+    PhaseRef,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
@@ -124,7 +137,12 @@ pub struct Field {
 }
 
 impl Field {
-    fn text(id: FieldId, label: &'static str, text: impl Into<String>, hint: &str) -> Self {
+    pub(crate) fn text(
+        id: FieldId,
+        label: &'static str,
+        text: impl Into<String>,
+        hint: &str,
+    ) -> Self {
         Self {
             id,
             label: label.into(),
@@ -133,7 +151,12 @@ impl Field {
         }
     }
 
-    fn choice(id: FieldId, label: impl Into<String>, options: &[&str], index: usize) -> Self {
+    pub(crate) fn choice(
+        id: FieldId,
+        label: impl Into<String>,
+        options: &[&str],
+        index: usize,
+    ) -> Self {
         Self {
             id,
             label: label.into(),
@@ -251,6 +274,8 @@ pub struct Form {
     /// The focused text field's whole text is selected: typing replaces it, Backspace
     /// clears it. A text field is selected when it gets the focus, and by Ctrl+A.
     pub selected: bool,
+    /// The math channel dialog's own state ([`crate::math_dialog`]).
+    pub math: Option<Box<crate::math_dialog::MathForm>>,
 }
 
 /// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
@@ -262,23 +287,6 @@ const SMOOTHING: [(&str, Option<SmoothingFraction>); 6] = [
     ("1/12 octave", Some(SmoothingFraction::Twelfth)),
     ("1/24 octave", Some(SmoothingFraction::TwentyFourth)),
     ("1/48 octave", Some(SmoothingFraction::FortyEighth)),
-];
-/// A spatial-average member row (index 0: in the average).
-const MEMBER: [&str; 2] = ["in the average", "left out"];
-/// Spatial-average methods, as `ac2 meas new avg --method` (index 0: power, its default).
-const METHODS: [(&str, AverageMethod); 3] = [
-    (
-        "power (level over the positions, no cancellation)",
-        AverageMethod::Power,
-    ),
-    (
-        "complex (as summed at one point: arrivals cancel)",
-        AverageMethod::Complex,
-    ),
-    (
-        "coherence-weighted (cleaner positions count more)",
-        AverageMethod::CoherenceWeighted,
-    ),
 ];
 const DEPTH: [&str; 2] = [
     "equal confidence (every frequency alike)",
@@ -343,13 +351,14 @@ pub fn parse_buffer(text: &str) -> Result<Option<u32>, String> {
 }
 
 impl Form {
-    fn new(kind: FormKind, fields: Vec<Field>) -> Self {
+    pub(crate) fn new(kind: FormKind, fields: Vec<Field>) -> Self {
         Self {
             kind,
             fields,
             focus: 0,
             error: None,
             selected: false,
+            math: None,
         }
     }
 
@@ -383,8 +392,8 @@ impl Form {
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
-            // Built by [`Form::sweep`] and [`Form::average`].
-            FormKind::Sweep | FormKind::Average => Vec::new(),
+            // Built by [`Form::sweep`] and [`Form::math`].
+            FormKind::Sweep | FormKind::Math | FormKind::MathEdit => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -429,44 +438,6 @@ impl Form {
             ],
         };
         Self::new(kind, fields)
-    }
-
-    /// The spatial-average dialog: one row per transfer measurement (`transfers`, by name,
-    /// at most [`SpatialAverageConfig::MAX_MEMBERS`]), each in the average or left out
-    /// (all in at first: the usual case is every mic position), then the name, the method
-    /// and the smoothing. `existing` names the average.
-    pub fn average(transfers: &[&Measurement], existing: &[&Measurement]) -> Self {
-        let n = existing
-            .iter()
-            .filter(|m| form_kind(&m.config.kind) == FormKind::Average)
-            .count()
-            + 1;
-        let mut fields: Vec<Field> = transfers
-            .iter()
-            .take(SpatialAverageConfig::MAX_MEMBERS)
-            .map(|m| Field::choice(FieldId::Member(m.id), m.config.name.clone(), &MEMBER, 0))
-            .collect();
-        fields.push(Field::text(
-            FieldId::Name,
-            "Name",
-            format!("Average {n}"),
-            "",
-        ));
-        fields.push(Field::choice(
-            FieldId::Method,
-            "Method",
-            &METHODS.map(|m| m.0),
-            0,
-        ));
-        fields.push(Field::choice(
-            FieldId::Smoothing,
-            "Smoothing",
-            &SMOOTHING.map(|s| s.0),
-            0,
-        ));
-        let mut f = Self::new(FormKind::Average, fields);
-        f.focus = 0;
-        f
     }
 
     /// The sweep dialog over the session's captured `inputs` and its `outputs` (channel,
@@ -741,6 +712,9 @@ impl Form {
             }
         }
         self.error = None;
+        if self.math.is_some() {
+            self.math_changed();
+        }
     }
 
     /// Typed text into the focused text field; replaces a selected text.
@@ -795,29 +769,7 @@ impl Form {
         let smoothing = SMOOTHING[pick(FieldId::Smoothing).min(SMOOTHING.len() - 1)].1;
         let kind = match self.kind {
             FormKind::Sweep => return Err("a sweep makes no measurement".into()),
-            FormKind::Average => {
-                let members: Vec<MeasId> = self
-                    .fields
-                    .iter()
-                    .filter_map(|f| match (f.id, &f.value) {
-                        (FieldId::Member(m), Value::Choice { index: 0, .. }) => Some(m),
-                        _ => None,
-                    })
-                    .collect();
-                if members.len() < SpatialAverageConfig::MIN_MEMBERS {
-                    return Err(format!(
-                        "an average needs at least {} positions: put them in with ←/→",
-                        SpatialAverageConfig::MIN_MEMBERS
-                    ));
-                }
-                MeasKind::SpatialAverage {
-                    config: SpatialAverageConfig {
-                        method: METHODS[pick(FieldId::Method).min(METHODS.len() - 1)].1,
-                        smoothing: smoothing.map(Smoothing::of),
-                        ..SpatialAverageConfig::power_of(members)
-                    },
-                }
-            }
+            FormKind::Math | FormKind::MathEdit => return self.math_config(),
             FormKind::Transfer => {
                 let r = input(FieldId::Reference, "reference input")?;
                 let m = input(FieldId::Measurement, "measurement input")?;
@@ -875,7 +827,7 @@ fn form_kind(k: &MeasKind) -> FormKind {
         MeasKind::Spectrum { .. } => FormKind::Spectrum,
         MeasKind::Rta { .. } => FormKind::Rta,
         MeasKind::Spl { .. } => FormKind::Spl,
-        MeasKind::SpatialAverage { .. } => FormKind::Average,
+        MeasKind::Math { .. } => FormKind::Math,
     }
 }
 

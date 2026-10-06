@@ -27,8 +27,8 @@ use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
 use crate::outbox::Outbox;
 
-pub(crate) mod average;
 pub(crate) mod finder;
+pub(crate) mod math;
 pub(crate) mod meters;
 #[cfg(test)]
 mod pace_tests;
@@ -395,7 +395,7 @@ impl Drop for JobHandle {
 }
 
 /// Asks a running job for its current result, as `trace.capture` does, from another thread
-/// (a spatial average asking its members). A probe of a stopped job answers nothing.
+/// (a math channel asking its live operands). A probe of a stopped job answers nothing.
 #[derive(Clone, Debug)]
 pub(crate) struct Probe {
     tx: Sender<JobMsg>,
@@ -413,8 +413,8 @@ impl Probe {
     }
 }
 
-/// The probes of running transfer jobs by measurement, kept by control as jobs start and
-/// stop, read by spatial averages when they publish.
+/// The probes of running transfer, spectrum and RTA jobs by measurement, kept by control as
+/// jobs start and stop, read by math channels when they publish.
 #[derive(Debug, Default)]
 pub(crate) struct Probes(Mutex<HashMap<MeasId, Probe>>);
 

@@ -8,16 +8,16 @@ use std::time::Instant;
 use ac2_client::TopicFrame;
 use ac2_proto::FrameData;
 use ac2_proto::frame::ProtectionFlags;
-use ac2_proto::model::{LevelScale, MeasKind, Measurement, Polarity, TraceKind};
+use ac2_proto::model::{LevelScale, MeasKind, Measurement, PhaseBasis, Polarity, TraceKind};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, Seconds, WallNs};
-use ac2_scene::average::AverageStatus;
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::format;
 use ac2_scene::grid::{GridColumns, column_frequencies, columns};
 use ac2_scene::ir::{IrScene, ir_scene};
 use ac2_scene::leq::{LeqScene, LeqView, leq_scene, leq_tiles};
+use ac2_scene::math::MathStatus;
 use ac2_scene::meter_leq::{MeterLeqScene, meter_leq_scene};
 use ac2_scene::primitives::{Scene, Viewport};
 use ac2_scene::spectrograph::{
@@ -116,7 +116,7 @@ pub fn status(
             .map(|d| d.ppm),
         audio_stopped: audio_stopped(st, now.wall),
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
-        average: None,
+        math: None,
     }
 }
 
@@ -156,19 +156,33 @@ fn is_tf(m: &Measurement) -> bool {
     m.config.kind.publishes_tf()
 }
 
-/// What a spatial average's frame averaged, members named as the measurement list names
-/// them; `None` for any other frame.
-fn average_status(st: &AppState, frame: &FrameData) -> Option<AverageStatus> {
-    let FrameData::Tf(f) = frame else {
+/// What a math channel's frame combined, operands named as the lists name them; `None`
+/// for any other frame.
+fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<MathStatus> {
+    let MeasKind::Math { config } = &m.config.kind else {
         return None;
     };
-    let a = f.meta.average.as_ref()?;
-    let ms = st.measurements();
-    Some(AverageStatus::new(a, |id| {
-        ms.iter()
-            .find(|m| m.id == id)
-            .map_or_else(|| format!("measurement {id}"), |m| m.config.name.clone())
-    }))
+    let state = match frame {
+        FrameData::Tf(f) => f.meta.math.as_deref(),
+        FrameData::Spec(f) => f.meta.math.as_deref(),
+        FrameData::Rta(f) => f.meta.math.as_deref(),
+        _ => None,
+    }?;
+    Some(MathStatus::new(config, state, |o| st.operand_name(o)))
+}
+
+/// The banner status of the math channel `focus` shows, unless it is stopped (its last
+/// frame is history).
+fn shown_math(
+    st: &AppState,
+    focus: Option<&Measurement>,
+    frames: &[(MeasId, &TopicFrame)],
+) -> Option<(String, MathStatus)> {
+    let m = focus?;
+    let (_, f) = frames
+        .iter()
+        .find(|(id, f)| *id == m.id && !stopped(st, f))?;
+    Some((m.config.name.clone(), math_status(st, m, &f.frame.data)?))
 }
 
 /// The TF measurement the IR pane and the delay banner follow: the one the transfer pane
@@ -248,7 +262,16 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             Polarity::Normal
         };
         t.nudge = Seconds(e.nudge_s);
-        t.note = average_status(st, &l.tf.frame.data).map(|a| a.tag());
+        t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
+        // A ratio or cascade of operands without a shared time base has each operand's
+        // own alignment in its phase, not a time base of this session.
+        if f.meta
+            .math
+            .as_ref()
+            .is_some_and(|m| m.phase == PhaseBasis::OwnAlignments)
+        {
+            t.time_base = TimeBase::Independent;
+        }
         traces.push(t);
     }
     for (data, cols) in &stored {
@@ -267,13 +290,9 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
     let focus = focus_tf(st);
     let mut status = status(st, &shown, focus, now);
-    // The shown average's positions, unless it is stopped (its last frame is history).
-    status.average = focus.and_then(|m| {
-        let l = live
-            .iter()
-            .find(|l| l.meas.id == m.id && !stopped(st, l.tf))?;
-        Some((m.config.name.clone(), average_status(st, &l.tf.frame.data)?))
-    });
+    // The shown math channel's operands.
+    let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
+    status.math = shown_math(st, focus, &frames);
     transfer_scene(&traces, &st.tf_display, &status, &st.view, theme, size)
 }
 
@@ -283,10 +302,8 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
 pub fn spectrum_scale(st: &AppState) -> LevelScale {
     let mut scales = Vec::new();
     for (_, m) in pane_order(st, PaneKind::Spectrum) {
-        let stream = match m.config.kind {
-            MeasKind::Spectrum { .. } => Stream::Spec,
-            MeasKind::Rta { .. } => Stream::Rta,
-            _ => continue,
+        let Some(stream) = crate::state::spectrum_stream(m) else {
+            continue;
         };
         match frame(st, m.id, stream).map(|tf| &tf.frame.data) {
             Some(FrameData::Spec(f)) => scales.push(f.meta.scale),
@@ -356,10 +373,8 @@ fn with_spectrum<R>(
     }
     let mut cols = Vec::new();
     for (i, m) in pane_order(st, PaneKind::Spectrum) {
-        let stream = match m.config.kind {
-            MeasKind::Spectrum { .. } => Stream::Spec,
-            MeasKind::Rta { .. } => Stream::Rta,
-            _ => continue,
+        let Some(stream) = crate::state::spectrum_stream(m) else {
+            continue;
         };
         let Some(tf) = frame(st, m.id, stream) else {
             continue;
@@ -421,6 +436,10 @@ fn with_spectrum<R>(
             t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
         t.offset_db = st.edit(c.meas.id).offset_db;
+        // A math channel's caption is its expression and what it means.
+        if let Some(m) = math_status(st, c.meas, &c.tf.frame.data) {
+            t.caption = m.tag();
+        }
         if matches!(t.quantity, Quantity::Tone | Quantity::SmoothedTone(_)) {
             t.bin_hz = c.cols.bin_hz;
         }
@@ -491,7 +510,9 @@ fn with_spectrum<R>(
         });
     }
     let shown: Vec<&TopicFrame> = cols.iter().map(|c| c.tf).collect();
-    let status = status(st, &shown, None, now);
+    let mut status = status(st, &shown, None, now);
+    let frames: Vec<(MeasId, &TopicFrame)> = cols.iter().map(|c| (c.meas.id, c.tf)).collect();
+    status.math = shown_math(st, st.pane_meas(PaneKind::Spectrum), &frames);
     // The pane draws on the level range of the scale its curves are in.
     let mut view = st.view;
     view.spectrum.level = st.view.spectrum.range(spectrum_scale(st));

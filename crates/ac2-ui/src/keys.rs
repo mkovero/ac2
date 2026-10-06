@@ -428,7 +428,8 @@ commands! {
     NewSpectrum => "meas_new_spectrum", "New spectrum…", [Global];
     NewRta => "meas_new_rta", "New RTA…", [Global];
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
-    NewAverage => "meas_new_average", "New spatial average of transfer measurements (several mic positions)…", [Global];
+    NewMath => "meas_new_math", "New math channel: A ÷ × + − B, or the average of several (mic positions)…", [Global];
+    EditMath => "math_edit", "Edit the selected math channel: operands, operator, method…", [Global];
     DeleteMeasurement => "meas_delete", "Delete selected measurement", [Global];
     InputSetup => "input_setup", "Input setup: mic, mic curve and calibration of each input…", [Global];
     Calibrations => "calibrations", "Calibrations: mics, curves and sensitivity calibrations…", [Global];
@@ -476,8 +477,6 @@ commands! {
     Average => "average", "Average shown stored traces (power)", [Transfer];
     AverageComplex => "average_complex", "Average shown stored traces (complex)", [Transfer];
     AverageCoherence => "average_coherence", "Average shown stored traces (coherence-weighted)", [Transfer];
-    MathDifference => "math_difference", "A − B: the selected trace minus the next shown one (dB)", [Transfer, Spectrum];
-    MathDivide => "math_divide", "A / B: the selected trace divided by the next shown one (complex)", [Transfer];
     PhaseUnwrap => "phase_unwrap", "Phase wrapped / unwrapped", [Transfer];
     SmoothCoarser => "smooth_coarser", "Smoothing coarser (selected trace or pane's measurement)", [Transfer, Spectrum];
     SmoothFiner => "smooth_finer", "Smoothing finer (selected trace or pane's measurement)", [Transfer, Spectrum];
@@ -570,6 +569,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::FocusSpl, S::Global, alt(K::Num4)),
         (C::FocusDistortion, S::Global, alt(K::Num5)),
         (C::SweepNew, S::Global, sh(K::S)),
+        // Shift+M, a step on from M (average the shown traces): a math channel by name.
+        (C::NewMath, S::Global, sh(K::M)),
         (C::NextPane, S::Global, k(K::Tab)),
         (C::PrevPane, S::Global, sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
@@ -1087,12 +1088,10 @@ mod tests {
             CommandId::NewSpectrum,
             CommandId::NewRta,
             CommandId::NewSpl,
-            CommandId::NewAverage,
+            CommandId::EditMath,
             CommandId::DeleteMeasurement,
             CommandId::AverageComplex,
             CommandId::AverageCoherence,
-            CommandId::MathDifference,
-            CommandId::MathDivide,
             CommandId::ImportTrace,
             CommandId::SessionSave,
             CommandId::SessionLoad,

@@ -69,6 +69,13 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: MeasCmd,
     },
+    /// Math channels: live results computed from measurements and stored traces by name
+    /// (`A ÷ B`, `A × B`, `A + B`, `A − B`, the average of several).
+    Math {
+        /// Action.
+        #[command(subcommand)]
+        cmd: MathCmd,
+    },
     /// Delay finder and compensation of a transfer measurement.
     Delay {
         /// Action.
@@ -375,8 +382,6 @@ pub enum MeasKindArg {
     Rta,
     /// SPL meter.
     Spl,
-    /// Live spatial average of transfer measurements (`--of`).
-    Avg,
 }
 
 /// Frequency weighting.
@@ -545,21 +550,98 @@ pub struct MeasNew {
     /// Time weighting (spl).
     #[arg(long, value_enum, default_value = "fast")]
     pub time: TimeWeightArg,
-    /// avg: member transfer measurements by id or name, e.g. `--of "Seat 1,Seat 2,Seat 3"`.
-    #[arg(long, value_delimiter = ',', value_name = "MEAS,…")]
-    pub of: Vec<MeasRef>,
-    /// avg: power (RMS magnitude), complex, or coherence (inverse-variance weighted).
-    #[arg(long, value_enum)]
-    pub method: Option<AverageArg>,
-    /// avg phase reference: this member's inserted delay (default: the first member).
-    #[arg(long, value_name = "MEAS", conflicts_with = "ref_delay")]
-    pub phase_ref: Option<MeasRef>,
-    /// avg phase reference: an explicit delay, e.g. `12.5ms`.
-    #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
-    pub ref_delay: Option<Time>,
     /// Start right away.
     #[arg(long)]
     pub start: bool,
+}
+
+/// `math …`.
+#[derive(Debug, Subcommand)]
+pub enum MathCmd {
+    /// Create a math channel: `ac2 math new "Main L / Sub"`, `--op div --a "Main L" --b
+    /// Sub`, or `--op avg --of "Seat 1,Seat 2,Seat 3"`. It is listed in `meas list` and
+    /// captured like any measurement (`trace capture`).
+    New {
+        /// The channel.
+        #[command(flatten)]
+        math: MathArgs,
+        /// Start right away.
+        #[arg(long)]
+        start: bool,
+    },
+    /// Change a math channel: its operands and operator (as for `new`), its average method,
+    /// phase reference, smoothing or name. What is not given stays as it is.
+    Set {
+        /// The math channel, by id or name.
+        channel: MeasRef,
+        /// What changes.
+        #[command(flatten)]
+        math: MathArgs,
+    },
+}
+
+/// A math channel as typed.
+#[derive(Debug, Args)]
+pub struct MathArgs {
+    /// `"A op B"` with the operator spaced: `/` or `÷` (A relative to B), `*` or `×`
+    /// (cascade), `+` (sum), `-` or `−` (difference). Operands by name or id; `trace:NAME`
+    /// or `meas:NAME` when a measurement and a trace share a name.
+    pub expr: Option<String>,
+    /// The operator, with `--a`/`--b` (or `--of` for `avg`).
+    #[arg(long, value_enum, conflicts_with = "expr")]
+    pub op: Option<MathOpArg>,
+    /// Operand A.
+    #[arg(long, value_name = "OPERAND", conflicts_with = "expr")]
+    pub a: Option<MeasRef>,
+    /// Operand B.
+    #[arg(long, value_name = "OPERAND", conflicts_with = "expr")]
+    pub b: Option<MeasRef>,
+    /// avg: the operands averaged, e.g. `--of "Seat 1,Seat 2,Seat 3"`.
+    #[arg(
+        long,
+        value_delimiter = ',',
+        value_name = "OPERAND,…",
+        conflicts_with = "expr"
+    )]
+    pub of: Vec<MeasRef>,
+    /// avg: power (RMS magnitude), complex, or coherence (inverse-variance weighted);
+    /// spectra and RTA: power only.
+    #[arg(long, value_enum)]
+    pub method: Option<AverageArg>,
+    /// Phase reference of a sum, difference or average: this operand's delay (default: the
+    /// first operand).
+    #[arg(long, value_name = "OPERAND", conflicts_with = "ref_delay")]
+    pub phase_ref: Option<MeasRef>,
+    /// Phase reference: an explicit delay, e.g. `12.5ms`.
+    #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
+    pub ref_delay: Option<Time>,
+    /// Display smoothing of the result, 1/N octave (transfer and spectrum math).
+    #[arg(long, value_enum, conflicts_with = "no_smooth")]
+    pub smooth: Option<FractionArg>,
+    /// Transfer math: smooth the magnitude only and keep the phase.
+    #[arg(long, requires = "smooth")]
+    pub smooth_magnitude_only: bool,
+    /// `set`: take the smoothing off.
+    #[arg(long)]
+    pub no_smooth: bool,
+    /// Name (default for `new`: the expression, e.g. `Main L ÷ Sub`).
+    #[arg(long)]
+    pub name: Option<String>,
+}
+
+/// A math operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum MathOpArg {
+    /// A ÷ B: A relative to B (transfer).
+    Div,
+    /// A × B: cascade (transfer).
+    Mul,
+    /// A + B: transfer: complex sum; levels: power sum.
+    Add,
+    /// A − B: transfer: complex difference; levels: level difference.
+    Sub,
+    /// The average of `--of`.
+    Avg,
 }
 
 /// Which finder result to insert.
@@ -1104,19 +1186,6 @@ pub enum TraceCmd {
         /// Phase reference: an explicit delay, e.g. `12.5ms`.
         #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
         ref_delay: Option<Time>,
-    },
-    /// A − B into a new trace: dB difference, or with `--complex` complex division A / B.
-    Math {
-        /// A.
-        a: MeasRef,
-        /// B.
-        b: MeasRef,
-        /// Name of the result.
-        #[arg(long)]
-        name: String,
-        /// Complex division (keeps phase) instead of magnitude difference.
-        #[arg(long)]
-        complex: bool,
     },
     /// Import a CSV / analyzer text export (freq, mag[, phase][, coherence]).
     Import {

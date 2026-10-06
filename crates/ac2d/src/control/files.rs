@@ -20,7 +20,7 @@ use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
-use super::{Control, averages, delay_samples, static_grid, validate_meas};
+use super::{Control, delay_samples, maths, static_grid, validate_meas};
 use crate::util::{perr, perr_detail, wall_ns};
 
 fn session_err(e: SessionError) -> ProtoError {
@@ -165,8 +165,8 @@ impl Control {
     ) -> Result<SessionEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state
         // as it was.
-        // The grid of each measurement that has one before a session runs; a spatial
-        // average's is its members' (checked against the loaded measurements).
+        // The grid of each measurement that has one before a session runs; a transfer math
+        // channel's is its operands' (checked against the loaded measurements and traces).
         let mut grids: HashMap<MeasId, GridDef> = HashMap::new();
         for sm in &data.measurements {
             validate_meas(&sm.config)?;
@@ -177,13 +177,28 @@ impl Control {
                 ));
             }
             let grid = match &sm.config.kind {
-                MeasKind::SpatialAverage { config } => {
-                    Some(averages::members_grid(Some(sm.id), config, |id| {
+                MeasKind::Math { config } => {
+                    let meas = |id| {
                         data.measurements
                             .iter()
-                            .find(|o| o.id == id)
+                            .find(|o: &&SavedMeasurement| o.id == id)
                             .map(|o| (o.config.name.as_str(), &o.config.kind))
-                    })?)
+                    };
+                    let trace = |id| {
+                        data.traces
+                            .iter()
+                            .find(|t: &&ac2_traces::StoredTrace| t.meta.id == id)
+                            .map(|t| (&t.meta, t.grid.clone()))
+                    };
+                    maths::check_operands(
+                        Some(sm.id),
+                        config,
+                        &maths::Lookup {
+                            meas: &meas,
+                            trace: &trace,
+                            epoch: None,
+                        },
+                    )?
                 }
                 k => static_grid(k),
             };
@@ -269,7 +284,15 @@ impl Control {
         for l in data.spl_logs {
             self.set_spl_log(l.info.meas, crate::leq_log::LeqLog::from_rows(l.rows));
         }
+        // Traces first: a math channel's stored operands must be there when it starts.
+        for t in data.traces {
+            self.register_grid(t.grid.clone());
+            self.traces
+                .insert(t.meta.id, t.grid, t.columns, t.sweep, t.mic_curve);
+            self.commit(Change::Trace(Patch::Set(t.meta)));
+        }
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
+        let mut loaded = Vec::with_capacity(data.measurements.len());
         for sm in data.measurements {
             self.next_meas = self.next_meas.max(sm.id.0.saturating_add(1));
             let delay = matches!(sm.config.kind, MeasKind::Transfer { .. }).then(|| {
@@ -298,20 +321,25 @@ impl Control {
             };
             self.ensure_spl_log(&meas, None);
             meas.config_rev = Rev(self.store.rev().0 + 1);
-            if meas.running && self.session.is_some() {
+            self.commit(Change::Measurement(Patch::Set(meas.clone())));
+            loaded.push(meas);
+        }
+        // Then the jobs, once every measurement is there: a math channel looks its live
+        // operands up whatever their order.
+        if self.session.is_some() {
+            for mut meas in loaded.into_iter().filter(|m| m.running) {
                 match self.start_job(&meas) {
-                    Ok(Some(g)) => meas.grid_id = Some(self.register_grid(g)),
+                    Ok(Some(g)) => {
+                        let id = Some(self.register_grid(g));
+                        if id != meas.grid_id {
+                            meas.grid_id = id;
+                            self.commit(Change::Measurement(Patch::Set(meas)));
+                        }
+                    }
                     Ok(None) => {}
                     Err(e) => tracing::warn!("measurement {} not started: {}", meas.id, e.msg),
                 }
             }
-            self.commit(Change::Measurement(Patch::Set(meas)));
-        }
-        for t in data.traces {
-            self.register_grid(t.grid.clone());
-            self.traces
-                .insert(t.meta.id, t.grid, t.columns, t.sweep, t.mic_curve);
-            self.commit(Change::Trace(Patch::Set(t.meta)));
         }
         Ok(epoch)
     }

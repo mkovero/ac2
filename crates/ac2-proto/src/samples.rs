@@ -9,11 +9,11 @@ use crate::ctrl::{
 };
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
-    AverageMemberState, ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta,
-    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MemberStatus,
-    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
-    SpecFrame, SpecMeta, SplFrame, SplMeta, TfAverage, TfFrame, TfMeta, TimingMeta, TimingWindow,
-    ValidityMask,
+    ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags,
+    LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MathState, OperandState,
+    OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta,
+    SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
+    TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -242,12 +242,6 @@ pub fn commands() -> Vec<Command> {
             reference: DelayReference::Trace { trace: TraceId(7) },
             name: "avg".into(),
         },
-        Command::TraceMath {
-            a: TraceId(7),
-            b: TraceId(8),
-            op: MathOp::ComplexDivision,
-            name: "L/R".into(),
-        },
         Command::TraceImport {
             file_name: "sub.txt".into(),
             format: ImportFormat::AnalyzerText,
@@ -371,17 +365,27 @@ pub fn commands() -> Vec<Command> {
     ]
 }
 
-/// A spatial average of three transfer measurements.
-pub fn average_measurement() -> Measurement {
+/// A math channel: the coherence-weighted average of two live transfer measurements and a
+/// stored trace.
+pub fn math_measurement() -> Measurement {
     Measurement {
         id: MeasId(6),
         config: MeasConfig {
             name: "FOH average".into(),
-            kind: MeasKind::SpatialAverage {
-                config: SpatialAverageConfig {
-                    members: vec![MeasId(1), MeasId(2), MeasId(5)],
-                    method: AverageMethod::CoherenceWeighted,
-                    reference: AverageReference::Member { meas: MeasId(2) },
+            kind: MeasKind::Math {
+                config: MathConfig {
+                    domain: MathDomain::Transfer,
+                    expr: MathExpr::Average {
+                        of: vec![
+                            Operand::Meas { meas: MeasId(1) },
+                            Operand::Meas { meas: MeasId(2) },
+                            Operand::Trace { trace: TraceId(7) },
+                        ],
+                        method: AverageMethod::CoherenceWeighted,
+                    },
+                    reference: MathReference::Operand {
+                        operand: Operand::Meas { meas: MeasId(2) },
+                    },
                     smoothing: Some(Smoothing {
                         fraction: SmoothingFraction::Third,
                         mode: SmoothingMode::MagnitudePhase,
@@ -394,6 +398,40 @@ pub fn average_measurement() -> Measurement {
         frozen: false,
         delay: None,
         grid_id: Some(log_grid().id()),
+    }
+}
+
+/// A capture of the math channel `Main L ÷ Sub` (a live measurement over a stored trace).
+fn math_trace_meta() -> TraceMeta {
+    TraceMeta {
+        id: TraceId(10),
+        source: TraceSource::Math {
+            meas: MeasId(6),
+            meas_name: "Main L ÷ Sub".into(),
+            epoch: SessionEpoch(2),
+            at_sample: SampleIndex(4_800_000),
+            expr: MathExpr::Binary {
+                a: Operand::Meas { meas: MeasId(1) },
+                op: MathOp::Divide,
+                b: Operand::Trace { trace: TraceId(8) },
+            },
+            operands: vec![
+                NamedOperand {
+                    operand: Operand::Meas { meas: MeasId(1) },
+                    name: "Main L".into(),
+                },
+                NamedOperand {
+                    operand: Operand::Trace { trace: TraceId(8) },
+                    name: "Sub".into(),
+                },
+            ],
+            phase: PhaseBasis::OwnAlignments,
+        },
+        delay: Seconds(0.0),
+        depth: None,
+        cal: CalState::Uncalibrated,
+        mic: None,
+        ..trace_meta()
     }
 }
 
@@ -1115,7 +1153,8 @@ pub fn events() -> Vec<Event> {
         ev(59, Change::Measurement(Patch::Set(spl_measurement()))),
         ev(60, Change::Recording(recording_run())),
         ev(61, Change::Session(replay_session())),
-        ev(62, Change::Measurement(Patch::Set(average_measurement()))),
+        ev(62, Change::Measurement(Patch::Set(math_measurement()))),
+        ev(63, Change::Trace(Patch::Set(math_trace_meta()))),
     ]
 }
 
@@ -1325,7 +1364,7 @@ pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
     }
 }
 
-/// A 480-column TF frame of a spatial average of four members, two of them averaged.
+/// A 480-column TF frame of a math channel averaging four operands, two of them included.
 /// Columns 0..4 are thinned and 470.. out of band (NaN). Values are exactly representable
 /// so other languages can rebuild them bit for bit.
 pub fn tf_frame() -> Frame {
@@ -1344,28 +1383,28 @@ pub fn tf_frame() -> Frame {
                     mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
-                average: Some(Box::new(TfAverage {
-                    method: AverageMethod::Power,
-                    members: vec![
-                        AverageMemberState {
-                            meas: MeasId(2),
-                            status: MemberStatus::Included,
+                math: Some(Box::new(MathState {
+                    operands: vec![
+                        OperandState {
+                            operand: Operand::Meas { meas: MeasId(2) },
+                            status: OperandStatus::Included,
                         },
-                        AverageMemberState {
-                            meas: MeasId(3),
-                            status: MemberStatus::Included,
+                        OperandState {
+                            operand: Operand::Trace { trace: TraceId(7) },
+                            status: OperandStatus::Included,
                         },
-                        AverageMemberState {
-                            meas: MeasId(4),
-                            status: MemberStatus::Refused {
+                        OperandState {
+                            operand: Operand::Meas { meas: MeasId(4) },
+                            status: OperandStatus::Refused {
                                 protection: ProtectionFlags::NO_SIGNAL,
                             },
                         },
-                        AverageMemberState {
-                            meas: MeasId(5),
-                            status: MemberStatus::Stopped,
+                        OperandState {
+                            operand: Operand::Meas { meas: MeasId(5) },
+                            status: OperandStatus::Stopped,
                         },
                     ],
+                    phase: PhaseBasis::SharedTimeBase,
                 })),
             },
             mag: (0..n).map(|i| val(i, -6.0 + i as f32 * 0.031_25)).collect(),
@@ -1424,6 +1463,7 @@ pub fn frames() -> Vec<Frame> {
                         },
                     },
                     mic_curve: true,
+                    math: None,
                 },
                 level: vec![f32::NAN, 74.5, 61.25],
                 validity: vec![
@@ -1443,6 +1483,19 @@ pub fn frames() -> Vec<Frame> {
                     cal: CalStatus::Uncalibrated,
                     mic_curve: false,
                     smoothing: Some(SmoothingFraction::Sixth),
+                    math: Some(Box::new(MathState {
+                        operands: vec![
+                            OperandState {
+                                operand: Operand::Meas { meas: MeasId(3) },
+                                status: OperandStatus::Included,
+                            },
+                            OperandState {
+                                operand: Operand::Trace { trace: TraceId(8) },
+                                status: OperandStatus::Mismatch,
+                            },
+                        ],
+                        phase: PhaseBasis::NoPhase,
+                    })),
                 },
                 level: vec![-120.0, -20.0, f32::INFINITY, f32::NAN],
             }),

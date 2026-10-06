@@ -81,7 +81,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
                 mode: SmoothingMode::MagnitudePhase,
             }),
             mic_curve: false,
-            average: None,
+            math: None,
         },
         mag,
         phase,
@@ -216,6 +216,7 @@ fn spec_frame(meas: u32) -> SpecFrame {
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
             smoothing: None,
+            math: None,
         },
         level,
     }
@@ -455,50 +456,115 @@ impl Rig {
         }
     }
 
-    /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a power
-    /// spatial average of Main L, Delay tower and Seat 3, whose frames say Seat 3 was left
-    /// out (stopped): two of three positions averaged.
-    pub fn add_spatial_average(&self) {
-        use ac2_proto::frame::{AverageMemberState, MemberStatus, TfAverage};
+    /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a math
+    /// channel: the power average of Main L, Delay tower and Seat 3, whose frames say Seat 3
+    /// was left out (stopped): two of three positions averaged.
+    pub fn add_math_average(&self) {
+        use ac2_proto::frame::{MathState, OperandState, OperandStatus};
+        use ac2_proto::model::{MathConfig, MathDomain, Operand, PhaseBasis};
+        let of: Vec<Operand> = [1, 2, 5]
+            .map(|m| Operand::Meas { meas: MeasId(m) })
+            .to_vec();
         {
             let mut s = self.fake.lock();
             let mut seat = measurement(5, "Seat 3", transfer(3), None, Some(&TF_GRID));
             seat.running = false;
             s.commit(Change::Measurement(Patch::Set(seat)));
+            let mut config = MathConfig::power_average(MathDomain::Transfer, of.clone());
+            config.smoothing = Some(Smoothing {
+                fraction: SmoothingFraction::Sixth,
+                mode: SmoothingMode::MagnitudePhase,
+            });
             let avg = measurement(
                 6,
                 "Audience",
-                MeasKind::SpatialAverage {
-                    config: SpatialAverageConfig {
-                        smoothing: Some(Smoothing {
-                            fraction: SmoothingFraction::Sixth,
-                            mode: SmoothingMode::MagnitudePhase,
-                        }),
-                        ..SpatialAverageConfig::power_of(vec![MeasId(1), MeasId(2), MeasId(5)])
-                    },
-                },
+                MeasKind::Math { config },
                 None,
                 Some(&TF_GRID),
             );
             s.commit(Change::Measurement(Patch::Set(avg)));
         }
         let mut f = tf_frame(6, -1.5, 0.0, 1300.0);
-        f.meta.average = Some(Box::new(TfAverage {
-            method: AverageMethod::Power,
-            members: [
-                (1, MemberStatus::Included),
-                (2, MemberStatus::Included),
-                (5, MemberStatus::Stopped),
-            ]
-            .map(|(m, status)| AverageMemberState {
-                meas: MeasId(m),
-                status,
-            })
-            .to_vec(),
+        f.meta.math = Some(Box::new(MathState {
+            operands: of
+                .into_iter()
+                .zip([
+                    OperandStatus::Included,
+                    OperandStatus::Included,
+                    OperandStatus::Stopped,
+                ])
+                .map(|(operand, status)| OperandState { operand, status })
+                .collect(),
+            phase: PhaseBasis::SharedTimeBase,
         }));
         self.extra
             .lock()
             .unwrap()
             .push((FrameData::Tf(f), Some(TF_GRID.id())));
+    }
+
+    /// Adds "Mic 1 − Mic 2" (7), spectrum math: the level difference of Mic 1 FFT and a
+    /// second spectrum "Mic 2 FFT" (8), a gently rising difference of a few dB.
+    pub fn add_spectrum_math(&self) {
+        use ac2_proto::frame::{MathState, OperandState, OperandStatus};
+        use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand, PhaseBasis};
+        let (a, b) = (
+            Operand::Meas { meas: MeasId(3) },
+            Operand::Meas { meas: MeasId(8) },
+        );
+        {
+            let mut s = self.fake.lock();
+            let mic2 = measurement(
+                8,
+                "Mic 2 FFT",
+                MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        input: 2,
+                        fft_len: 4096,
+                        window: Window::Hann,
+                        averaging: SpecAveraging::Off,
+                        smoothing: None,
+                    },
+                },
+                None,
+                Some(&SPEC_GRID),
+            );
+            s.commit(Change::Measurement(Patch::Set(mic2)));
+            let config = MathConfig::of(
+                MathDomain::Spectrum,
+                MathExpr::Binary {
+                    a,
+                    op: MathOp::Subtract,
+                    b,
+                },
+            );
+            let m = measurement(
+                7,
+                "Mic 1 − Mic 2",
+                MeasKind::Math { config },
+                None,
+                Some(&SPEC_GRID),
+            );
+            s.commit(Change::Measurement(Patch::Set(m)));
+        }
+        let mut f = spec_frame(7);
+        let freqs = ac2_scene::grid::column_frequencies(&SPEC_GRID);
+        f.level = freqs
+            .iter()
+            .map(|x| (2.0 * (x.max(20.0) / 1000.0).log2()).clamp(-6.0, 6.0) as f32)
+            .collect();
+        f.meta.math = Some(Box::new(MathState {
+            operands: [a, b]
+                .map(|operand| OperandState {
+                    operand,
+                    status: OperandStatus::Included,
+                })
+                .to_vec(),
+            phase: PhaseBasis::NoPhase,
+        }));
+        self.extra
+            .lock()
+            .unwrap()
+            .push((FrameData::Spec(f), Some(SPEC_GRID.id())));
     }
 }

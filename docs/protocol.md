@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 21`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 22`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -100,7 +100,6 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
-| `trace.math` | `a`, `b`, `op: magnitude_difference \| complex_division`, `name` | `trace` | |
 | `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| auto`, `role: trace \| target`, `content: bin` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv` | `export` (`file_name`, `content: bin`) | |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
@@ -177,24 +176,58 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   weighting settled, and its `lmax`, `lmin`, `leq`, `lpeak` and `duration` cover the same
   interval as before the change (since the meter started or `meas.reset`). A new `input`
   restarts the meter.
-- **Spatial average** (`spatial_average`, `SpatialAverageConfig`: `members` [MeasId],
-  `method` `power` \| `complex` \| `coherence_weighted`, `reference`: `AverageReference`
-  (tagged by `type`: `member` {`meas`} = that member's inserted delay, or `fixed`
-  {`delay`}), `smoothing`: `Smoothing` \| nil). Design: `docs/design/spatial-average.md`.
-  2 … 16 distinct transfer measurements on one grid (`invalid` / `not_found` otherwise; the
-  reference member must be one of them); its `grid_id` is theirs. It publishes `tf` only:
-  whenever a frame is due the daemon asks every member for its current unsmoothed result
-  and combines them as `trace.average` does — every member's phase re-referred from its own
-  inserted delay to the reference, a column valid only where every included member's is
-  (otherwise its validity is the union of theirs), then the average's own `smoothing`.
-  `TfMeta.delay` is the reference delay used, `TfMeta.average` says which members went in
-  (§5.4); `coh` is the plain mean of the included members' γ² (a display mask, not a
-  coherence of the average). A member stopped, without a usable result, or whose frame
-  carries `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING` or `NO_SIGNAL` is left out of that frame;
-  with fewer than two left every column is NaN with `FEW_MEMBERS`. While an average names a
-  measurement, `meas.delete` of it, and a `meas.update` that makes it another kind or moves
-  it to another grid, are `refused`. `meas.reset` of an average is `invalid` (reset its
-  members); `meas.freeze` holds its last average. Only `smoothing` changes in place.
+- **Math channel** (`math`, `MathConfig`: `domain`, `expr`, `reference`, `smoothing`).
+  Design: `docs/design/math-channels.md`. A result the daemon computes from operands named
+  by id — live measurements and stored traces — and publishes like a measurement of its
+  `domain`'s kind: `transfer` (`tf`, combined as complex values), `spectrum` (`spec`, tone
+  levels on one bin grid) or `rta` (`rta`, band powers on one band layout). Its `grid_id`
+  is the published grid (a transfer result's is known before it runs; a spectrum's is the
+  display grid of its operands' FFT, its capture every bin).
+  - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`} or `average` {`of`:
+    2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`}. An
+    operand (`Operand`, tagged by `type`) is `meas` {`meas`} or `trace` {`trace`}.
+  - `op` (`MathOp`): `divide` (A ÷ B: A relative to B), `multiply` (A × B: the cascade),
+    `add` (transfer: the complex sum, what A and B sum to acoustically; levels: the power
+    sum `10·lg(10^{a/10} + 10^{b/10})`), `subtract` (transfer: the complex difference;
+    levels: the level difference in dB). Levels take `add` and `subtract` only, and average
+    on `power` only.
+  - `reference` (`MathReference`, tagged by `type`): `operand` {`operand`} = the delay that
+    operand was measured with (a live one's newest; kept while it is left out), or `fixed`
+    {`delay`}: what the phase of a transfer sum, difference or average is referred to.
+  - `smoothing` (`Smoothing` \| nil): transfer and spectrum domains (`invalid` for RTA),
+    applied to the result; the operands are combined unsmoothed. Only `smoothing` changes
+    in place; any other change restarts the channel.
+  - Transfer phase and time base (decision 8a): every operand is converted from its own
+    inserted delay, so operands of one session epoch (live ones, and captures of that
+    epoch) combine with their relative arrival. A ratio states `delay` 0 (its phase keeps
+    A's arrival relative to B), a cascade `τa + τb`; neither needs a shared time base, and
+    without one its phase is of each operand's own alignment (`PhaseBasis`
+    `own_alignments`). A sum, difference, `complex` or `coherence_weighted` average needs
+    phase in every operand and one time base: `invalid` at create, and at run time an
+    operand of another time base is left out as `mismatch`. A `power` average across time
+    bases keeps the magnitude only (`no_phase`), as does a ratio or cascade with an
+    operand without phase (a target: allowed in `divide` and `multiply` only).
+  - Coherence: `divide` and `multiply` carry the lower γ² of the two operands per column; a
+    sum or difference none (NaN); an average the plain mean of its operands' — display
+    masks, never estimates.
+  - Whenever a frame is due the daemon asks every live operand for its current unsmoothed
+    result (as `trace.capture` does) and combines it with the stored operands' columns
+    (their mic curve baked in, resampled onto a transfer result's grid; spectra and RTA
+    bands must share one grid). A live operand stopped, without a usable result, whose
+    frame carries `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING` or `NO_SIGNAL`, or that does not
+    combine (another scale, grid or time base) is left out of that frame; without both
+    operands of a `binary` expression, or two of an `average`, every column is NaN with
+    `FEW_OPERANDS`. A column has a value only where every included operand has one
+    (otherwise its validity is the union of theirs). The frame's `math` meta says which
+    operands went in and what the phase is relative to (§5.4).
+  - Refused at create / update: an operand that does not exist (`not_found`), of another
+    kind than the domain, a math channel as an operand, live transfer operands on
+    different grids, `a` = `b`, a duplicate in an average (`invalid`). While a math channel
+    names a measurement, `meas.delete` of it and a `meas.update` that changes its kind,
+    grid, FFT length or band layout are `refused`; `trace.delete` of a named trace is
+    `refused`; `trace.mic_curve` on it restarts the channel with the corrected columns.
+    `meas.reset` of a math channel is `invalid` (reset its operands); `meas.freeze` holds
+    its last result.
 
 #### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 
@@ -436,9 +469,9 @@ display edits and are never applied to the stored data.
   with the live job's kernel (a spectrum has no phase: its power is smoothed in either
   `mode`; a spectrum capture starts with `magnitude`); coherence is never smoothed.
   `trace.export` and `file.save` write the unsmoothed columns (the setting is listed in the
-  CSV header), and `trace.average` / `trace.math` combine unsmoothed columns. A capture
-  starts with the smoothing its measurement had; an average or A − B starts with the
-  smoothing its inputs share (nil when they differ).
+  CSV header), and `trace.average` and math channels combine unsmoothed columns. A capture
+  starts with the smoothing its measurement had; an average starts with the smoothing its
+  inputs share (nil when they differ).
 - **Mic curve after capture.** `trace.mic_curve {trace, curve}` puts the named curve of the
   mic library (`MicCurveId` {`mic`, `label`}) on a stored trace, or removes the applied one
   (`curve: nil`; `not_found` when there is none). It is recorded as `TraceMeta.mic_curve` (`TraceMicCurve`: `mic`, `curve:
@@ -450,8 +483,8 @@ display edits and are never applied to the stored data.
   normalisation frequency of the trace's sensitivity calibration (the calibrator's; 1 kHz
   for an electrical one), else of the newest sensitivity calibration of the mic, else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
   calibration store does not change it. `trace.export` writes the uncorrected columns and
-  names the curve in its `# mic:` line; `trace.average` / `trace.math` combine corrected
-  columns, and the result's `mic.curve` names the curve its columns now carry. Refused:
+  names the curve in its `# mic:` line; `trace.average` and math channels combine corrected
+  columns, and an average's `mic.curve` names the curve its columns now carry. Refused:
   a trace whose `mic.curve` is set (captured with the curve in its columns: a second
   correction would count it twice) and a locked trace (`refused`), a target (`invalid`),
   a curve not in the mic library (`not_found`).
@@ -472,20 +505,23 @@ display edits and are never applied to the stored data.
   name and the mic curve applied to the captured columns as its full `MicCurveRef` — label,
   file, content hash —, nil without a mic name; a sweep
   names no curve, its analysis works on the raw recordings), `mic_curve` (nil: see
-  *Mic curve after capture*), `created_at`. A spatial average captures as `kind: transfer`
-  with `source.spatial_average` {`meas`, `meas_name`, `epoch`, `at_sample`, `method`,
-  `members`: [`AverageMember` {`meas`, `name`}] — the members averaged into the captured
-  result}, `delay` its reference delay, `depth`, `mic` nil, `uncalibrated`; `refused` when
-  fewer than two members are in.
+  *Mic curve after capture*), `created_at`. A math channel captures as its domain's kind
+  (`transfer`, `spectrum` {`scale`}, `rta` {`scale`}) with `source.math` {`meas`,
+  `meas_name`, `epoch`, `at_sample`, `expr`, `operands`: [`NamedOperand` {`operand`,
+  `name`}] — the operands that went into the captured result, named as at capture —,
+  `phase`: `PhaseBasis`}, `delay` its stated delay, `depth` and `mic` nil,
+  `uncalibrated`; `refused` when the expression lacks its operands at that moment.
 - **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
   `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
   `refused`.
-- **Time base (decisions 8a / 8b).** Captured traces (`captured`, `spatial_average`,
-  `ir_capture`) share the time base of their session epoch; every other source
-  (`imported`, `average`, `math`) is independent.
+- **Time base (decisions 8a / 8b).** Captured traces (`captured`, `ir_capture`) share the
+  time base of their session epoch, and so does a `math` capture whose `phase` is
+  `shared_time_base` and whose expression is a sum, difference or average (a ratio or a
+  cascade is relative, in no time base); every other source (`imported`, `average`, other
+  `math`) is independent.
 - `trace.average`: ≥ 2 distinct traces of one kind (no targets). Transfer: `power` (RMS
   magnitude, phase of the complex mean), `complex`, `coherence_weighted` (weight
   γ²/(1 − γ²), γ² capped at 0.999); every input's phase is re-referred to `reference`
@@ -495,11 +531,6 @@ display edits and are never applied to the stored data.
   time base, or with an input without phase, keeps the magnitude only. Spectrum / RTA:
   `power` only, all on one grid. A column is valid only where every input is. The result is
   on the first trace's grid (others resampled).
-- `trace.math`: `magnitude_difference` = A − B in dB (no phase); `complex_division` = A / B
-  with B's phase re-referred to A's delay when both are captured in one epoch (otherwise
-  each keeps its own alignment). Transfer and target traces combine with each other (B is
-  resampled onto A's grid); spectra / RTA only with their own kind on one grid, magnitude
-  only. Result kind `transfer`, source `math`, independent.
 - `trace.import`: the file text is parsed by `format` (§7.1) and, unless it is an ac2 CSV
   on a known grid, resampled onto a log grid (48 points per octave, 96 when the file is
   denser) — magnitude and coherence linear over log frequency, phase unwrapped first.
@@ -572,7 +603,7 @@ shorter = the analysis minimum, ≥ 1 s).
   `insufficient_range` {`range`, `needed`} (`Db`; EDT, C50, C80, D50 need 20 dB, T20 35 dB,
   T30 45 dB), `filter_limited` {`bandwidth_decay`} (bandwidth × decay time below 8). A refused
   value is never sent as a number.
-- Smoothing, average and A − B treat a sweep trace as a transfer function (magnitude and
+- Smoothing, averages and math channels treat a sweep trace as a transfer function (magnitude and
   phase; the distortion stays with the sweep trace).
 
 #### Sessions (`file.*`)
@@ -765,8 +796,8 @@ The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stop
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
-polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | spatial_average | imported | average |
-math | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
+polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported | math |
+average | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `last_action`), `calibrations` (`CalEntry`:
@@ -909,10 +940,10 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve`, `average` (`TfAverage` \| nil: a spatial average's `method` and `members` [{`meas`, `status`: `MemberStatus`}], below) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
-| `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve` |
-| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing` |
+| `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
+| `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
@@ -926,11 +957,18 @@ subtracted from `mag` (tf, measurement input only; phase untouched) or `level` (
 bin, rta per band as a log-frequency power average), or, for `spl`, run as a minimum-phase
 filter before frequency weighting — never on `lpeak`, which stays uncorrected.
 
-`MemberStatus` (tagged by `type`), one per configured member in configuration order:
-`included` (averaged into this frame), `stopped` (not running), `settling` (running without
-a usable result: no valid column yet, or no answer in time), `refused` {`protection`: the
-member's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`, `NO_SIGNAL`}. A spatial
-average's own `protection` is always 0: its members' faults are in their statuses.
+`MathState`: `operands` [{`operand`: `Operand`, `status`: `OperandStatus`}], one per operand
+of the expression in its order, and `phase`: `PhaseBasis` (`shared_time_base`: the phase
+keeps the operands' relative arrival, referred to `delay`; `own_alignments`: of each operand
+as aligned by its own delay, no shared time base; `no_phase`). `OperandStatus` (tagged by
+`type`): `included` (went into this frame), `stopped` (not running), `settling` (running
+without a usable result: no valid column yet, or no answer in time), `refused`
+{`protection`: the operand's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`,
+`NO_SIGNAL`}, `mismatch` (does not combine with the others: another level scale, grid or
+time base). A math channel's own `protection` is always 0: its operands' faults are in their
+statuses. A spectrum math result's live frame gathers its bins into display columns like a
+spectrum's, each the highest value among its bins (a level difference: the largest in the
+column); its capture keeps every bin.
 
 The unit of `level` must match `meta.scale`. A required array missing, an array listed
 twice or one that does not belong to the kind refuses the frame.
@@ -941,7 +979,8 @@ Undefined bits refuse the frame.
 
 `validity` (0 = valid): `THINNED` 1, `OUT_OF_BAND` 2, `SETTLING` 4, `NO_REFERENCE` 8,
 `NO_MEASUREMENT` 16, `PROTECTED` 32, `BELOW_FLOOR` 64, `INSUFFICIENT_RESOLUTION` 128,
-`ABOVE_NYQUIST` 256, `FEW_MEMBERS` 512 (a spatial average with fewer than two usable members).
+`ABOVE_NYQUIST` 256, `FEW_OPERANDS` 512 (a math channel without the usable operands its
+expression needs).
 
 `protection`: `NO_REFERENCE` 1, `NO_SIGNAL` 2, `CLIP` 4, `WEAK_REFERENCE` 8,
 `DISCONTINUITY` 16 (averages restarted after a stream gap), `CHECK_ROUTING` 32 (reference
@@ -1042,7 +1081,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.csv         one SPL log per SPL meter (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 9, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 10, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], spl_logs:
 [{meas, file}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
@@ -1061,7 +1100,8 @@ in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a c
 curve by name only, without its label, file and content hash, version 6 had no Leq windows
 and no SPL logs, version 7 named files by save generation and its autosave kept the
 previous one as a separate directory, version 8 had no spatial averages and no room
-parameters on sweeps — are refused). A directory that holds other files is never written
+parameters on sweeps, version 9 held spatial averages where version 10 holds math channels
+— are refused). A directory that holds other files is never written
 into.
 
 ### 7.3 Autosave

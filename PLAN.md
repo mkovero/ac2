@@ -125,7 +125,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Multiple measurement pairs live at once | P0 | ac | 3 |
 | Fault banners: NO REFERENCE / NO SIGNAL / CHECK ROUTING / CLIP / STALE (frame age) / NO DELAY ESTIMATE | P0 | ac + new | 4 |
 | Delay change without full ladder resettle; sub-sample delay | P1 | new | 7 |
-| Live spatial average of N transfer functions (done: `docs/design/spatial-average.md`) | P1 | new | 7 |
+| Live spatial average of N transfer functions (done, as a math channel's average: `docs/design/math-channels.md`) | P1 | new | 7 |
 
 ### 3.4 Spectrum / RTA
 | Feature | Pri | Src | Phase |
@@ -145,7 +145,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Phase comparison: overlays drawn relative to the selected trace's measured delay (pick key to change), so relative arrival stays visible; imported traces marked independent; per-trace delay nudge | P0 | new | 4 |
 | Delay distance readout: delay × c(temperature) next to ms, no correction layers | P1 | new | 4 |
 | Trace averaging: power, complex, coherence-weighted; common delay/phase reference stated per average | P0 | ac | 5 |
-| Trace math A−B: dB subtraction for magnitude, complex division where phase is wanted | P1 | new | 5 |
+| Math channels: A ÷ × + − B and the average of N, operands by name (live measurements and stored traces), complex for transfer functions (magnitude and phase on a stated delay reference), levels for spectra / RTA, drawn in their kind's pane, live, editable, captured (done: `docs/design/math-channels.md`) | P1 | new | 5 |
 | Target curves (file or drawn) | P1 | ac (file) | 5 |
 | CSV export; import common analyzer text exports | P0 | ac (export) | 5 |
 | Sessions: whole state save/load (always loads disarmed) | P0 | new | 5 |
@@ -213,7 +213,8 @@ crates/
   ac2d/        Daemon: audio session, jobs, state store, sessions, autosave, SPL log and
                Leq history, calibration store, ZMQ server, CURVE/ZAP, mDNS.
   ac2-cli/     `ac2` binary.
-  ac2-traces/  Stored traces, trace math, text import/export, SPL log files, session files.
+  ac2-traces/  Stored traces, math channels' combinations, text import/export, SPL log files,
+               session files.
   ac2-paths/   Platform config / data directories, atomic writes.
   ac2-scene/   Pure display layer: traces → geometry, axes, ticks, readout strings,
                banners. No GPU, no windowing, no sockets.
@@ -420,7 +421,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
   for a retry window, so a retried command never executes twice.
 - Command groups: `session` (devices, open, close, status), `gen` (acquire, release, arm,
   fire, set, stop), `meas` (create, update, delete, start, stop, freeze, reset), `delay`
-  (find, insert, set, track), `trace` (capture, list, get, update, delete, average, math,
+  (find, insert, set, track), `trace` (capture, list, get, update, delete, average,
   import, export, mic curve), `cal` (spl, spl electrical, curve import / rename / delete,
   use, list, delete), `spl` (log get, log new, history get), `ir` (capture), `state` (snapshot, since), `grid` (get), `file` (save,
   load, list). `docs/protocol.md` is the normative list.

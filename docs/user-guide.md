@@ -336,22 +336,59 @@ curve.
 
 Smoothing never changes stored data. A capture keeps the unsmoothed curve and starts with
 the smoothing its measurement had, so a trace can be re-smoothed at any time; averages and
-A − B combine the unsmoothed curves and start with the smoothing their inputs share.
+math channels combine the unsmoothed curves (an average starts with the smoothing its inputs
+share, a math channel has its own).
 
 The banners say what is wrong rather than showing a misleading curve: **NO REFERENCE**, **NO
 SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (no fresh frame; the age is shown), **NO
-DELAY ESTIMATE**, and for a spatial average **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE**
-(below).
+DELAY ESTIMATE**, and for a math channel **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** /
+**NO RESULT** (below).
 
-### Spatial average
+### Math channels
 
-A speaker sounds different from seat to seat, so tune to the average of several mic
-positions rather than to one spot. Make one transfer measurement per mic (same reference,
-each its own mic input), then the palette's *New spatial average…*: it lists every transfer
-measurement by name, all in the average to start with (**←/→** leaves one out), with a name,
-a method and smoothing; **Enter** creates and starts it. It is drawn in the transfer pane
-like any transfer function, updating with its positions, and its legend counts them:
-`Average 1 · 4 positions · power avg`.
+A **math channel** is a live result made from other curves by name: **A ÷ B**, **A × B**,
+**A + B**, **A − B**, or the **average** of several. Its operands are live measurements or
+stored traces (captures, sweeps, imports) of one kind, and it is drawn where its kind is
+drawn: transfer math on the magnitude, phase and coherence panes, spectrum and RTA math on
+the spectrum pane. The daemon computes it, so it updates with every live operand and every
+client (and `ac2 meas list`) sees the same result.
+
+**Shift+M** (or *New math channel…* in the palette) opens its dialog: **A** (←/→ steps
+through every live measurement and stored trace by name, `(live)` or `(stored, S2)`), the
+**operator**, and **B** (the curves of A's kind). The name follows the expression (`Main L ÷
+Sub`) until you type another. **Enter** creates and starts it. *Edit the selected math
+channel…* in the palette opens the same dialog on an existing one: change its operands,
+operator, method or smoothing, **Enter** applies.
+
+Transfer functions combine as complex values — magnitude **and** phase together:
+
+- **A ÷ B** — A relative to B: e.g. a speaker against its previous measurement, or against a
+  target curve (magnitude only). Its phase keeps A's arrival relative to B.
+- **A × B** — the cascade: a response through a filter.
+- **A + B** — the summation prediction: what A and B add up to at the mic, e.g. main + sub
+  before both play. Their relative arrival matters, so both must be in one time base: live
+  measurements and captures of the same audio session (a capture of the sub alone plus the
+  main live works). The phase is referred to A's delay (or the one you pick).
+- **A − B** — the complex difference.
+
+Spectra and RTA bands are levels: **A − B** is the level difference in dB, **A + B** the power
+sum; their average is the power mean. A spectrum combines with a spectrum on the same FFT
+length, an RTA with an RTA on the same bands; the dialog only offers B of A's kind, and the
+daemon says why it refuses anything else.
+
+What the legend says: `Main L ÷ Sub`; `Main L + Sub · no coherence` (a sum has no coherence
+of its own); `phase: own alignments` when an operand shares no time base with the other (an
+import, a capture from an earlier session: each keeps its own alignment, their relative
+arrival is unknown); `magnitude only` against a target. **A ÷ B** and **A × B** take the
+lower coherence of the two per frequency, so the coherence mask blanks where either is
+unreliable.
+
+**The average (spatial average).** A speaker sounds different from seat to seat, so tune to
+the average of several mic positions rather than to one spot. Make one transfer measurement
+per mic (same reference, each its own mic input), **Shift+M**, step the operator to *average
+of several*: every curve of A's kind is listed, all in the average to start with (**←/→**
+leaves one out), with a method and smoothing. Its legend counts the positions: `Average of 4
+· 4 positions · power avg`.
 
 - **power** (default): the level over the positions, without cancellation between them;
   the right one to EQ against.
@@ -360,19 +397,32 @@ like any transfer function, updating with its positions, and its legend counts t
 - **coherence-weighted**: the complex mean with cleaner positions (higher coherence)
   counting more.
 
-The phase is referred to the first position's delay: each position keeps its arrival
-relative to it. A position that is stopped, still settling, or showing CLIP, NO REFERENCE,
-CHECK ROUTING or NO SIGNAL is left out and named: the banner **AVERAGE · 3 OF 4 POSITIONS**
-says which and why, and the legend says `3 of 4 positions`. With fewer than two positions in
-there is no average (**NO AVERAGE**, no curve) rather than one position passed off as an
-average. A position cannot be deleted, or moved to another grid, while an average names it.
-**F** freezes the average; **R** on it resets its positions' averaging. **Ctrl+1 … 9**
-captures it as a stored trace that names the positions it averaged.
+One mic moved from seat to seat: capture each position (**Ctrl+1 … 9**) and average the
+stored captures the same way — or with **M** (*Traces and slots*), the same mathematics.
 
-One mic moved from seat to seat: capture each position to a slot and average the captures
-(**M**, *Traces and slots*) — the same mathematics. From a script: `ac2 meas new avg --name
-Audience --of "Seat 1,Seat 2,Seat 3" [--method power|complex|coherence] [--phase-ref
-"Seat 2" | --ref-delay 12ms] [--smooth 6] --start`.
+An operand that is stopped, still settling, showing CLIP, NO REFERENCE, CHECK ROUTING or NO
+SIGNAL, or that does not combine with the others is left out and named: **AVERAGE · 3 OF 4
+POSITIONS** says which and why, and the legend says `3 of 4 positions`. With fewer than two
+positions there is no average (**NO AVERAGE**, no curve), and without both operands no ratio
+or sum (**NO RESULT · 1 OF 2 OPERANDS**) — never one curve passed off as the result. An
+operand cannot be deleted, or moved to another grid, while a math channel names it. **F**
+freezes a math channel; **R** on it resets its live operands' averaging. **Ctrl+1 … 9**
+captures it as a stored trace that names the expression and the operands that went in.
+
+From a script:
+
+```
+ac2 math new "Main L / Sub"                       # ÷; also * + - (spaced), or ÷ × −
+ac2 math new --name Prediction --op add --a "trace:Sub alone" --b "Main L"
+ac2 math new --name Audience --op avg --of "Seat 1,Seat 2,Seat 3" \
+    [--method power|complex|coherence] [--phase-ref "Seat 2" | --ref-delay 12ms] [--smooth 6]
+ac2 math set Audience --method complex            # what is not given stays
+```
+
+Operands are measurements or stored traces by name or id; `trace:NAME` / `meas:NAME` when a
+measurement and a trace share a name. Math channels are listed in `ac2 meas list` and
+captured with `ac2 trace capture`. (`ac2 math` replaces the former `ac2 meas new avg` and
+`ac2 trace math`.)
 
 ## Delay finder
 
@@ -424,7 +474,7 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
   there); **1 … 9** show and hide a slot.
 - The **Traces** list beside the panes holds every stored trace, slotted or not: its name,
-  what it is (*capture*, *sweep*, *imported*, *average*, *A − B*, *target* …), its slot,
+  what it is (*capture*, *sweep*, *imported*, *average*, *A ÷ B*, *target* …), its slot,
   *hidden* when it is, and a dot in its curve's colour (a ring when hidden). Slotted traces
   come first by slot, then the rest oldest first. A click on a row selects the trace (again:
   deselects); a click on its dot shows or hides it.
@@ -477,12 +527,9 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 - **C** turns on the comparison cursor, synchronised across panes and traces; **Shift+←/→**
   moves it.
 - **M** averages the shown stored traces (power; complex and coherence-weighted averages are
-  in the command palette); A − B is a dB difference, A / B a complex division. A is the
-  selected trace and B the next shown trace after it in the list (slotted or not, wrapping
-  round, hidden ones skipped) that it combines with — transfer, sweep and target curves with
-  each other, a spectrum or RTA capture only with its own kind — so an unslotted trace needs
-  no slot first; with no trace selected they take the two lowest shown slots (the lower is
-  A). The new trace is named after both (`S1 − S2`, `Main L − S3`).
+  in the command palette). A ÷ B, A × B, A + B and A − B of stored traces (and live
+  measurements) are math channels: **Shift+M** with the trace selected starts with it as A
+  (*Math channels* above).
 - **Z** loads a target curve; the command palette imports CSV and other analyzers' text
   exports. `ac2 trace export <name> --csv out.csv` exports.
 - From the command line: `ac2 trace display <trace> on|off` shows or hides a trace, `ac2
@@ -516,7 +563,7 @@ MM1 34804 (curve 90° applied after capture, 0 dB at 1000 Hz, file …)`. The cu
 replacing the curve in the store later does not change the trace. A sweep's distortion is
 corrected too (each harmonic is picked up at its own frequency). A trace captured **with**
 the curve already applied (`mic … (curve … in the columns)`) refuses a second one — it would
-correct twice. Averages and A − B combine the corrected curves.
+correct twice. Averages and math channels combine the corrected curves.
 
 ## Sweep measurement: response and harmonic distortion
 
@@ -1100,6 +1147,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
 | `Shift+O` | Open audio session… | `session_open` |
+| `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
 | `Shift+L` | Leq windows and limits of the SPL meter… | `leq_windows` |
 
@@ -1200,7 +1248,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
-| New spatial average of transfer measurements (several mic positions)… | `meas_new_average` |
+| Edit the selected math channel: operands, operator, method… | `math_edit` |
 | Delete selected measurement | `meas_delete` |
 | Input setup: mic, mic curve and calibration of each input… | `input_setup` |
 | Calibrations: mics, curves and sensitivity calibrations… | `calibrations` |
@@ -1223,8 +1271,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Delay finder: observation length (s)… | `finder_observation` |
 | Average shown stored traces (complex) | `average_complex` |
 | Average shown stored traces (coherence-weighted) | `average_coherence` |
-| A − B: the selected trace minus the next shown one (dB) | `math_difference` |
-| A / B: the selected trace divided by the next shown one (complex) | `math_divide` |
 | Smoothing: off | `smooth_off` |
 | Smoothing: 1/48 oct | `smooth_48` |
 | Smoothing: 1/24 oct | `smooth_24` |
@@ -1260,11 +1306,12 @@ documents each command; `ac2 discover` lists daemons on the local network.
 |---|---|
 | `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
 | `ac2 session open / close / status / inputs / save / load / list` | the audio session, each input's mic and active curve, saved sessions |
-| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements, and spatial averages of transfer measurements (`avg --of A,B,C`) |
+| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements (math channels are listed too) |
+| `ac2 math new / set` | math channels: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
-| `ac2 trace capture / list / show / rename / display / slot / rm / average / math / import / export / smooth / mic` | stored traces |
+| `ac2 trace capture / list / show / rename / display / slot / rm / average / import / export / smooth / mic` | stored traces |
 | `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
 | `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |

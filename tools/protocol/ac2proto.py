@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 21
+PROTO_VERSION = 22
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -136,21 +136,26 @@ _TIMING_STATUS = [
     ("internal_reference", None),
 ]
 _LEVELS = [("channels", None)]
-_MEMBER_STATUS = ("tagged", {
+_OPERAND = ("tagged", {"meas": [("meas", None)], "trace": [("trace", None)]})
+_OPERAND_STATUS = ("tagged", {
     "included": [],
     "stopped": [],
     "settling": [],
     "refused": [("protection", None)],
+    "mismatch": [],
 })
+_MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERAND_STATUS)])),
+                 ("phase", None)])
 _POSITION = [("level", None), ("peak", None)]
 _PEAK = [("level", None), ("judgement", None)]
 META = {
     "tf": [("delay", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
-           ("average", ("opt", [("method", None),
-                                ("members", ("list", [("meas", None), ("status", _MEMBER_STATUS)]))]))],
+           ("math", _MATH)],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
-    "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None)],
-    "spec": [("window", None), ("scale", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None)],
+    "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),
+            ("math", _MATH)],
+    "spec": [("window", None), ("scale", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None),
+             ("math", _MATH)],
     "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
             ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None), ("cal", _CAL), ("mic_curve", None), ("position", ("opt", _POSITION))],

@@ -110,30 +110,6 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             let t = expect_body!("trace.average", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
         }
-        TraceCmd::Math {
-            a,
-            b,
-            name,
-            complex,
-        } => {
-            let s = state(&c).await?;
-            let (a, b) = (find_trace(&s, a)?.id, find_trace(&s, b)?.id);
-            let op = if *complex {
-                MathOp::ComplexDivision
-            } else {
-                MathOp::MagnitudeDifference
-            };
-            let r = c
-                .call(Command::TraceMath {
-                    a,
-                    b,
-                    op,
-                    name: name.clone(),
-                })
-                .await?;
-            let t = expect_body!("trace.math", r, ReplyBody::Trace(t) => t)?;
-            out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
-        }
         TraceCmd::Import {
             file,
             target,

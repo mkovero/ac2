@@ -27,6 +27,7 @@ pub mod hints;
 pub mod keys;
 pub mod leq_dialog;
 pub mod link_wants;
+pub mod math_dialog;
 pub mod palette;
 pub mod plot;
 pub mod prefs;

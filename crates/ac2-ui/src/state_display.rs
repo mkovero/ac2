@@ -4,7 +4,7 @@
 //! applied to the stored columns.
 
 use ac2_proto::Command;
-use ac2_proto::model::{LevelScale, MeasKind, Measurement, TraceKind, TraceMeta};
+use ac2_proto::model::{LevelScale, Measurement, TraceKind, TraceMeta};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Db, MeasId, TraceId};
 use ac2_scene::axis::Range;
@@ -300,11 +300,10 @@ impl AppState {
             }
             PaneKind::Spectrum => {
                 for m in self.measurements() {
-                    let stream = match m.config.kind {
-                        MeasKind::Spectrum { .. } => Stream::Spec,
-                        MeasKind::Rta { .. } => Stream::Rta,
-                        _ => continue,
-                    };
+                    if !m.config.kind.publishes_levels() {
+                        continue;
+                    }
+                    let stream = m.config.kind.stream();
                     if let Some((f, freqs)) = live(stream, m) {
                         let level = match &f.data {
                             ac2_proto::FrameData::Spec(s) => &s.level,

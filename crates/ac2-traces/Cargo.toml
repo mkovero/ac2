@@ -1,6 +1,6 @@
 [package]
 name = "ac2-traces"
-description = "Stored traces: column data, averaging and A−B math, text import/export, session files."
+description = "Stored traces: column data, averaging and math channels, text import/export, session files."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -920,7 +920,6 @@ impl Shared {
                 reference,
                 name,
             } => self.trace_average(traces, method, reference, name)?,
-            C::TraceMath { a, b, op, name } => self.trace_math(a, b, op, name)?,
             C::TraceImport {
                 file_name,
                 format,

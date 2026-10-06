@@ -40,8 +40,8 @@
 use ac2_proto::frame::ProtectionFlags;
 use ac2_proto::model::{MeasKind, Measurement, NoEstimateReason, TimingState};
 
-use crate::average::AverageStatus;
 use crate::format;
+use crate::math::MathStatus;
 use crate::primitives::{Anchor, FillRect, HAlign, Layer, Rect, VAlign, Viewport};
 use crate::theme::Theme;
 use crate::time::{DAEMON_SILENT_AFTER_S, STALE_AFTER_S};
@@ -72,9 +72,9 @@ pub enum BannerKind {
     NoReference,
     CheckRouting,
     NoSignal,
-    NoAverage,
+    NoMathResult,
     Stale,
-    AverageIncomplete,
+    MathIncomplete,
     OutputTimingJump,
     ClockDrift,
     NoDelayEstimate,
@@ -89,8 +89,8 @@ impl BannerKind {
             | Self::NoReference
             | Self::CheckRouting
             | Self::NoSignal
-            | Self::NoAverage => Severity::Fault,
-            Self::Stale | Self::AverageIncomplete | Self::OutputTimingJump | Self::ClockDrift => {
+            | Self::NoMathResult => Severity::Fault,
+            Self::Stale | Self::MathIncomplete | Self::OutputTimingJump | Self::ClockDrift => {
                 Severity::Warning
             }
             Self::NoDelayEstimate => Severity::Info,
@@ -123,8 +123,8 @@ pub struct Status {
     /// The open session's audio stopped ([`crate::audio::audio_stopped_text`]).
     pub audio_stopped: Option<crate::audio::AudioStoppedText>,
     pub no_delay_estimate: Option<NoDelayEstimate>,
-    /// The shown spatial average (its name and what its newest frame averaged).
-    pub average: Option<(String, AverageStatus)>,
+    /// The shown math channel (its name and what its newest frame combined).
+    pub math: Option<(String, MathStatus)>,
 }
 
 /// Why a TF measurement has no delay the operator can rely on.
@@ -220,13 +220,13 @@ pub fn banners(s: &Status) -> Vec<Banner> {
             Some("measurement input below its floor; check mic and input".into()),
         ));
     }
-    if let Some((name, a)) = &s.average
+    if let Some((name, a)) = &s.math
         && let Some((fault, text, detail)) = a.banner(name)
     {
         let kind = if fault {
-            BannerKind::NoAverage
+            BannerKind::NoMathResult
         } else {
-            BannerKind::AverageIncomplete
+            BannerKind::MathIncomplete
         };
         out.push(banner(kind, text, Some(detail)));
     }
@@ -466,7 +466,7 @@ pub(crate) mod tests {
             clock_drift_ppm: Some(-52.4),
             audio_stopped: None,
             no_delay_estimate: Some(NoDelayEstimate::NotFound),
-            average: None,
+            math: None,
         }
     }
 
@@ -876,29 +876,36 @@ pub(crate) mod tests {
         assert!(rows[0].detail.is_some());
     }
 
-    /// A spatial average without enough positions is a fault right under the signal
-    /// faults; one missing positions is a warning after STALE; a full one says nothing.
+    /// A math average without enough positions is a fault right under the signal faults;
+    /// one missing positions is a warning after STALE; a full one says nothing.
     #[test]
-    fn spatial_average_banners() {
-        use crate::average::AverageStatus;
-        use ac2_proto::frame::{AverageMemberState, MemberStatus, TfAverage};
-        use ac2_proto::model::AverageMethod;
+    fn math_average_banners() {
+        use crate::math::MathStatus;
+        use ac2_proto::frame::{MathState, OperandState, OperandStatus as MemberStatus};
+        use ac2_proto::model::{MathConfig, MathDomain, Operand, PhaseBasis};
         use ac2_proto::units::MeasId;
         let avg = |s: &[MemberStatus]| {
-            let a = TfAverage {
-                method: AverageMethod::Power,
-                members: s
-                    .iter()
-                    .enumerate()
-                    .map(|(i, s)| AverageMemberState {
-                        meas: MeasId(i as u32 + 1),
-                        status: *s,
+            let of: Vec<Operand> = (1..=s.len() as u32)
+                .map(|m| Operand::Meas { meas: MeasId(m) })
+                .collect();
+            let c = MathConfig::power_average(MathDomain::Transfer, of.clone());
+            let a = MathState {
+                operands: of
+                    .into_iter()
+                    .zip(s)
+                    .map(|(operand, status)| OperandState {
+                        operand,
+                        status: *status,
                     })
                     .collect(),
+                phase: PhaseBasis::SharedTimeBase,
             };
             Some((
                 "Audience".to_string(),
-                AverageStatus::new(&a, |m| format!("Seat {}", m.0)),
+                MathStatus::new(&c, &a, |o| match o {
+                    Operand::Meas { meas } => format!("Seat {}", meas.0),
+                    Operand::Trace { trace } => format!("trace {trace}"),
+                }),
             ))
         };
         let base = Status {
@@ -907,7 +914,7 @@ pub(crate) mod tests {
             ..Status::default()
         };
         let none = Status {
-            average: avg(&[MemberStatus::Included, MemberStatus::Stopped]),
+            math: avg(&[MemberStatus::Included, MemberStatus::Stopped]),
             ..base.clone()
         };
         let b = banners(&none);
@@ -925,7 +932,7 @@ pub(crate) mod tests {
             Some("Audience: left out Seat 2: stopped")
         );
         let short = Status {
-            average: avg(&[
+            math: avg(&[
                 MemberStatus::Included,
                 MemberStatus::Included,
                 MemberStatus::Settling,
@@ -939,7 +946,7 @@ pub(crate) mod tests {
         );
         assert_eq!(b[2].severity, Severity::Warning);
         let full = Status {
-            average: avg(&[MemberStatus::Included; 3]),
+            math: avg(&[MemberStatus::Included; 3]),
             ..base
         };
         assert_eq!(texts(&banners(&full)), ["NO SIGNAL", "STALE · 2.0 s"]);

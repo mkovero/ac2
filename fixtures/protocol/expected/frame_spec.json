@@ -1,7 +1,7 @@
 {
  "topic": "d/5/spec",
  "header": {
-  "v": 21,
+  "v": 22,
   "kind": "spec",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -28,7 +28,30 @@
      "type": "uncalibrated"
     },
     "mic_curve": false,
-    "smoothing": "sixth"
+    "smoothing": "sixth",
+    "math": {
+     "operands": [
+      {
+       "operand": {
+        "type": "meas",
+        "meas": 3
+       },
+       "status": {
+        "type": "included"
+       }
+      },
+      {
+       "operand": {
+        "type": "trace",
+        "trace": 8
+       },
+       "status": {
+        "type": "mismatch"
+       }
+      }
+     ],
+     "phase": "no_phase"
+    }
    }
   }
  },

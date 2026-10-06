@@ -249,17 +249,33 @@
     "config": {
      "name": "FOH average",
      "kind": {
-      "type": "spatial_average",
+      "type": "math",
       "config": {
-       "members": [
-        1,
-        2,
-        5
-       ],
-       "method": "coherence_weighted",
+       "domain": "transfer",
+       "expr": {
+        "type": "average",
+        "of": [
+         {
+          "type": "meas",
+          "meas": 1
+         },
+         {
+          "type": "meas",
+          "meas": 2
+         },
+         {
+          "type": "trace",
+          "trace": 7
+         }
+        ],
+        "method": "coherence_weighted"
+       },
        "reference": {
-        "type": "member",
-        "meas": 2
+        "type": "operand",
+        "operand": {
+         "type": "meas",
+         "meas": 2
+        }
        },
        "smoothing": {
         "fraction": "third",

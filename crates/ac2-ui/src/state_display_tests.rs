@@ -218,6 +218,7 @@ fn spec_frame(t: &mut T, meas: u32, level: Vec<f32>) {
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
             smoothing: None,
+            math: None,
         },
         level,
     });
