@@ -3845,10 +3845,23 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         assert!(r.is_empty(), "display only: {r:?}");
         assert_eq!(t.st.view.distortion.unit, unit);
     }
-    t.key("Shift+I");
-    assert!(t.st.view.distortion.show_ir);
+    // G steps the views: the impulse response, the room parameters, back; Shift+I goes
+    // to the IR and back; Shift+G steps the IR's scale.
+    use ac2_scene::view::SweepMode;
+    assert_eq!(t.st.view.distortion.mode, SweepMode::Response);
     t.key("G");
+    assert_eq!(t.st.view.distortion.mode, SweepMode::Ir);
+    t.key("G");
+    assert_eq!(t.st.view.distortion.mode, SweepMode::Room);
+    assert_eq!(t.st.layout_prefs().sweep_view, SweepMode::Room);
+    t.key("G");
+    assert_eq!(t.st.view.distortion.mode, SweepMode::Response);
+    t.key("Shift+I");
+    assert_eq!(t.st.view.distortion.mode, SweepMode::Ir);
+    t.key("Shift+G");
     assert_eq!(t.st.view.ir.mode, IrMode::Log);
+    t.key("Shift+I");
+    assert_eq!(t.st.view.distortion.mode, SweepMode::Response);
 
     // Shift+W hides the pane again.
     t.key("Shift+W");
@@ -4982,15 +4995,17 @@ fn key_hints_follow_the_focused_pane() {
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
     assert_eq!(spl[..3], ["G meter/Leq/both", "F F/S/I", "Z A/C/Z"]);
-    // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR.
+    // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR,
+    // and G its views in each.
     t.key("Alt+5");
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
     assert!(d.contains(&"U dB/%".to_owned()), "{d:?}");
-    assert!(!d.contains(&"G linear/log/ETC".to_owned()), "{d:?}");
+    assert!(d.contains(&"G response/IR/room".to_owned()), "{d:?}");
+    assert!(!d.contains(&"Shift+G linear/log/ETC".to_owned()), "{d:?}");
     t.key("Shift+I");
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
     assert!(!d.contains(&"U dB/%".to_owned()), "{d:?}");
-    assert!(d.contains(&"G linear/log/ETC".to_owned()), "{d:?}");
+    assert!(d.contains(&"Shift+G linear/log/ETC".to_owned()), "{d:?}");
     // Mac labels.
     let mac: Vec<String> =
         t.st.key_hint_line(&t.keys, PaneKind::Distortion, crate::keys::LabelStyle::Mac)

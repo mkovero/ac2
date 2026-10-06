@@ -507,7 +507,8 @@ commands! {
     SplWeighting => "spl_weighting", "SPL meter: frequency weighting A → C → Z", [Spl];
 
     DistortionUnit => "distortion_unit", "Distortion in dB re fundamental / percent", [Distortion];
-    SweepIr => "sweep_ir", "Sweep: distortion / impulse response", [Distortion];
+    SweepView => "sweep_view", "Sweep pane: response & distortion → impulse response → room parameters", [Distortion];
+    SweepIr => "sweep_ir", "Sweep pane: impulse response (again: response & distortion)", [Distortion];
     HideDistortion => "hide_distortion", "Hide the sweep / distortion pane", [Distortion];
 }
 
@@ -698,7 +699,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::SplWeighting, S::Spl, k(K::Z)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
-        (C::IrMode, S::Distortion, k(K::G)),
+        // G steps the pane's views, as in the spectrum and SPL panes; the IR's own steps
+        // take Shift.
+        (C::SweepView, S::Distortion, k(K::G)),
+        (C::IrMode, S::Distortion, sh(K::G)),
         (C::DistortionUnit, S::Distortion, k(K::U)),
         (C::SweepIr, S::Distortion, sh(K::I)),
         // W is the layout key: maximise, and with Shift this pane away.
@@ -800,8 +804,8 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SweepNew, "new sweep", 90),
                     hint(C::NextMeasurement, "next sweep", 80),
                     hint(C::DistortionUnit, "dB/%", 70),
+                    hint(C::SweepView, "response/IR/room", 75),
                     hint(C::IrMode, "linear/log/ETC", 70),
-                    hint(C::SweepIr, "IR/distortion", 60),
                     hint(C::MaximizePane, "maximise", 50),
                     hint(C::HideDistortion, "hide pane", 40),
                 ]

@@ -31,6 +31,7 @@
 //! fullscreen = true
 //! spl_view = "meter_leq"
 //! spectrum_view = "spectrograph"
+//! sweep_view = "room"
 //! ir_mode = "etc"
 //! distortion_unit = "percent"
 //!
@@ -61,7 +62,7 @@ use std::path::Path;
 
 use ac2_scene::axis::Range;
 use ac2_scene::view::{
-    DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SplMode, ViewState, level,
+    DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SplMode, SweepMode, ViewState, level,
 };
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +98,8 @@ pub struct LayoutPrefs {
     pub spl_view: SplMode,
     /// What the spectrum pane shows: the spectrum, the spectrograph or both.
     pub spectrum_view: SpectrumMode,
+    /// What the sweep pane shows: the response and distortion, the IR or the room table.
+    pub sweep_view: SweepMode,
     pub ir_mode: IrMode,
     pub distortion_unit: DistortionUnit,
     /// The measurement each pane shows, by name (transfer, spectrum, SPL).
@@ -111,6 +114,7 @@ impl Default for LayoutPrefs {
             fullscreen: false,
             spl_view: SplMode::MeterLeq,
             spectrum_view: SpectrumMode::Spectrum,
+            sweep_view: SweepMode::Response,
             ir_mode: IrMode::Linear,
             distortion_unit: DistortionUnit::Db,
             measurements: BTreeMap::new(),
@@ -328,6 +332,15 @@ enum SpectrumViewFile {
     Spectrograph,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SweepViewFile {
+    #[default]
+    Response,
+    Ir,
+    Room,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum IrModeFile {
@@ -370,6 +383,8 @@ struct LayoutFile {
     spl_view: SplViewFile,
     #[serde(default)]
     spectrum_view: SpectrumViewFile,
+    #[serde(default)]
+    sweep_view: SweepViewFile,
     #[serde(default = "ir_linear")]
     ir_mode: IrModeFile,
     #[serde(default = "unit_db")]
@@ -417,6 +432,11 @@ impl LayoutFile {
                 SpectrumViewFile::SpectrumSpectrograph => SpectrumMode::Split,
                 SpectrumViewFile::Spectrograph => SpectrumMode::Spectrograph,
             },
+            sweep_view: match self.sweep_view {
+                SweepViewFile::Response => SweepMode::Response,
+                SweepViewFile::Ir => SweepMode::Ir,
+                SweepViewFile::Room => SweepMode::Room,
+            },
             ir_mode: match self.ir_mode {
                 IrModeFile::Linear => IrMode::Linear,
                 IrModeFile::Log => IrMode::Log,
@@ -445,6 +465,11 @@ impl LayoutFile {
                 SpectrumMode::Spectrum => SpectrumViewFile::Spectrum,
                 SpectrumMode::Split => SpectrumViewFile::SpectrumSpectrograph,
                 SpectrumMode::Spectrograph => SpectrumViewFile::Spectrograph,
+            },
+            sweep_view: match l.sweep_view {
+                SweepMode::Response => SweepViewFile::Response,
+                SweepMode::Ir => SweepViewFile::Ir,
+                SweepMode::Room => SweepViewFile::Room,
             },
             ir_mode: match l.ir_mode {
                 IrMode::Linear => IrModeFile::Linear,
@@ -801,6 +826,7 @@ mod tests {
             fullscreen: true,
             spl_view: SplMode::Leq,
             spectrum_view: SpectrumMode::Spectrograph,
+            sweep_view: SweepMode::Room,
             ir_mode: IrMode::Etc,
             distortion_unit: DistortionUnit::Percent,
             measurements: [
@@ -822,6 +848,7 @@ mod tests {
             "fullscreen = true",
             "spl_view = \"leq\"",
             "spectrum_view = \"spectrograph\"",
+            "sweep_view = \"room\"",
             "ir_mode = \"etc\"",
             "distortion_unit = \"percent\"",
             "[layout.measurements]",

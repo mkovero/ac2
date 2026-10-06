@@ -164,8 +164,10 @@ impl AppState {
     /// The pane the level keys act on (the focused one), or why not.
     fn level_target(&mut self) -> Option<PaneKind> {
         let p = self.layout.focus;
-        let p =
-            level_pane(p).filter(|p| !(*p == PaneKind::Distortion && self.view.distortion.show_ir));
+        let p = level_pane(p).filter(|p| {
+            *p != PaneKind::Distortion
+                || self.view.distortion.mode == ac2_scene::view::SweepMode::Response
+        });
         if p.is_none() {
             self.error(format!(
                 "{} has no level axis to zoom",

@@ -179,3 +179,73 @@ fn the_sweep_ir_view_carries_the_table_when_tall_enough() {
         crate::distortion::sweep_ir_scene(&d, color, &status, &view, &theme, short).expect("scene");
     assert!(sc.room.is_none());
 }
+
+/// The room view: the table alone, as large as the pane allows with every band shown (read
+/// across a room); in a small pane the narrow-pane rules still hold; without parameters it
+/// says why.
+#[test]
+fn the_room_view_takes_the_pane_and_grows_to_fit() {
+    use crate::banner::Status;
+    let theme = Theme::dark();
+    let r = room();
+    let full = Viewport {
+        width: 1100.0,
+        height: 600.0,
+    };
+    let s = room_scene(Some(&r), Some("Sweep 1"), &Status::default(), &theme, full);
+    let t = s.table.as_ref().expect("table");
+    assert!(
+        t.caption
+            .starts_with("Sweep 1 · Room (ISO 3382-1) · octave bands")
+    );
+    assert!(s.font_size > theme.font_size, "{}", s.font_size);
+    assert!(table_height_at(t, s.font_size) <= s.rect.h);
+    assert!(table_width_at(t, s.font_size) <= s.rect.w);
+    let all: Vec<&str> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|x| x.text.as_str()))
+        .collect();
+    assert!(all.contains(&"63") && all.contains(&"All") && all.contains(&"T30 (s)"));
+    assert!(!all.iter().any(|x| x.contains("hidden")), "{all:?}");
+    // Every label stays inside the pane.
+    for l in s.scene.layers.iter().flat_map(|l| &l.labels) {
+        let right = l.pos[0] + text_width(&l.text, l.size);
+        assert!(right <= full.width + 0.5, "{} at {right}", l.text);
+    }
+    // Small: the small font, outer bands dropped and said.
+    let small = room_scene(
+        Some(&r),
+        Some("Sweep 1"),
+        &Status::default(),
+        &theme,
+        Viewport {
+            width: 260.0,
+            height: 300.0,
+        },
+    );
+    assert_eq!(small.font_size, theme.small_font_size);
+    let some: Vec<&str> = small
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|x| x.text.as_str()))
+        .collect();
+    assert!(
+        some.iter()
+            .any(|x| x.ends_with("bands hidden (narrow pane)")),
+        "{some:?}"
+    );
+    // No parameters, no sweep: the note says why.
+    let none = room_scene(None, Some("Sweep 2"), &Status::default(), &theme, full);
+    assert_eq!(
+        none.note.as_deref(),
+        Some("Sweep 2: no room parameters (a sweep with silence after it measures them)")
+    );
+    let nothing = room_scene(None, None, &Status::default(), &theme, full);
+    assert_eq!(
+        nothing.note.as_deref(),
+        Some("no sweep results yet: Shift+S sets one up")
+    );
+}

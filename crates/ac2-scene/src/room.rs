@@ -322,33 +322,53 @@ impl RoomTable {
 
 /// Height the drawn table needs, logical pixels.
 pub fn table_height(t: &RoomTable, theme: &Theme) -> f32 {
-    let line = theme.small_font_size * 1.45;
-    line * (2 + t.rows.len()) as f32 + theme.small_font_size * 1.3 * t.legend.len() as f32 + 6.0
+    table_height_at(t, theme.small_font_size)
+}
+
+/// [`table_height`] at font `size`.
+pub fn table_height_at(t: &RoomTable, size: f32) -> f32 {
+    let line = size * 1.45;
+    line * (2 + t.rows.len()) as f32 + size * 1.3 * t.legend.len() as f32 + 6.0
+}
+
+/// Width the table needs with every band shown, at font `size`.
+pub fn table_width_at(t: &RoomTable, size: f32) -> f32 {
+    name_width(size) + column_width(t, size) * t.bands.len() as f32
+}
+
+fn name_width(size: f32) -> f32 {
+    Param::ALL
+        .iter()
+        .map(|p| text_width(p.name(), size))
+        .fold(0.0f32, f32::max)
+        + 8.0
+}
+
+fn column_width(t: &RoomTable, size: f32) -> f32 {
+    t.bands
+        .iter()
+        .map(|b| text_width(b, size))
+        .chain(
+            t.rows
+                .iter()
+                .flat_map(|r| r.cells.iter().map(|c| text_width(&c.text, size))),
+        )
+        .fold(0.0f32, f32::max)
+        + 10.0
 }
 
 /// The table drawn into `rect`: caption, band header, one row per parameter, legend.
 /// Columns that do not fit are dropped from the outer bands inwards (broadband stays),
 /// and the caption says how many are hidden. Refused cells are dimmed.
 pub fn table_layer(t: &RoomTable, rect: Rect, theme: &Theme) -> Layer {
-    let size = theme.small_font_size;
+    table_layer_at(t, rect, theme, theme.small_font_size)
+}
+
+/// [`table_layer`] at font `size`.
+pub fn table_layer_at(t: &RoomTable, rect: Rect, theme: &Theme, size: f32) -> Layer {
     let line = size * 1.45;
-    let name_w = Param::ALL
-        .iter()
-        .map(|p| text_width(p.name(), size))
-        .fold(0.0f32, f32::max)
-        + 8.0;
-    let col_w = |t: &RoomTable| {
-        t.bands
-            .iter()
-            .map(|b| text_width(b, size))
-            .chain(
-                t.rows
-                    .iter()
-                    .flat_map(|r| r.cells.iter().map(|c| text_width(&c.text, size))),
-            )
-            .fold(0.0f32, f32::max)
-            + 10.0
-    };
+    let name_w = name_width(size);
+    let col_w = |t: &RoomTable| column_width(t, size);
     // Keep the middle bands: drop the lowest, then the highest, and so on.
     let n = t.bands.len().saturating_sub(1);
     let mut keep: Vec<usize> = (0..=n).collect();
@@ -429,6 +449,106 @@ pub fn table_layer(t: &RoomTable, rect: Rect, theme: &Theme) -> Layer {
         l.clip = Some(rect);
     }
     layer
+}
+
+/// The sweep pane's room view: the table alone under the banners, its font as large as the
+/// pane allows (up to [`ROOM_FONT_MAX`] × the theme's font) with every band shown, so it
+/// reads across a room; a pane too small for even the small font keeps the narrow-pane
+/// rules ([`table_layer`]: outer bands dropped, said in the caption).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoomScene {
+    pub scene: crate::primitives::Scene,
+    pub table: Option<RoomTable>,
+    /// The table's font size.
+    pub font_size: f32,
+    /// Where the table is drawn.
+    pub rect: Rect,
+    /// Why there is no table (no sweep, or one without room parameters).
+    pub note: Option<String>,
+    pub strip: Rect,
+    pub banners: Vec<crate::banner::BannerRow>,
+}
+
+/// Largest table font of the room view, times the theme's font size.
+pub const ROOM_FONT_MAX: f32 = 2.0;
+
+/// The room view of `room` (a sweep `name`'s parameters; `None`: says why there are none).
+pub fn room_scene(
+    room: Option<&RoomAcoustics>,
+    name: Option<&str>,
+    status: &crate::banner::Status,
+    theme: &Theme,
+    size: crate::primitives::Viewport,
+) -> RoomScene {
+    use crate::canvas::{Canvas, MARGINS};
+    let mut c = Canvas::new(size, theme);
+    let w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
+    let strip = crate::canvas::banner_strip(&mut c, status, MARGINS.left, w, size, theme);
+    let top = strip.rect.bottom() + MARGINS.top;
+    let rect = Rect::new(
+        MARGINS.left,
+        top,
+        w,
+        (size.height - top - MARGINS.top).max(1.0),
+    );
+    let table = room.map(|r| {
+        let mut t = room_table(r, BandSet::Octave);
+        if let Some(n) = name {
+            t.caption = format!("{n} · {}", t.caption);
+        }
+        t
+    });
+    let small = theme.small_font_size;
+    let font_size = table.as_ref().map_or(small, |t| {
+        let mut f = (theme.font_size * ROOM_FONT_MAX).floor();
+        while f > small
+            && (table_height_at(t, f) > rect.h
+                || table_width_at(t, f) > rect.w
+                || t.legend.iter().any(|l| text_width(l, f * 0.8) > rect.w))
+        {
+            f -= 0.5;
+        }
+        f.max(small)
+    });
+    let note = match (&table, name) {
+        (Some(_), _) => None,
+        (None, Some(n)) => Some(format!(
+            "{n}: no room parameters (a sweep with silence after it measures them)"
+        )),
+        (None, None) => Some("no sweep results yet: Shift+S sets one up".to_string()),
+    };
+    if let Some(t) = &table {
+        // The legend lines are long sentences: a smaller size than the numbers keeps them on
+        // one line each at the sizes the numbers take.
+        let mut layer = table_layer_at(t, rect, theme, font_size);
+        if font_size > small {
+            let legend_size = (font_size * 0.8).max(small);
+            for l in &mut layer.labels {
+                if t.legend.contains(&l.text) {
+                    l.size = legend_size;
+                }
+            }
+        }
+        c.data = layer;
+    }
+    if let Some(n) = &note {
+        c.overlay.labels.push(label(
+            n.clone(),
+            [rect.x + rect.w / 2.0, rect.y + rect.h / 2.0],
+            anchor(HAlign::Center, VAlign::Center),
+            small,
+            theme.text_dim,
+        ));
+    }
+    RoomScene {
+        scene: c.into_scene(size),
+        table,
+        font_size,
+        rect,
+        note,
+        strip: strip.rect,
+        banners: strip.rows,
+    }
 }
 
 #[cfg(test)]

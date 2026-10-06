@@ -391,8 +391,8 @@ pub struct DistortionView {
     pub unit: DistortionUnit,
     /// y range of the dB view.
     pub range_db: Range,
-    /// The sweep's impulse response instead of its distortion.
-    pub show_ir: bool,
+    /// Which of the sweep's views the pane shows.
+    pub mode: SweepMode,
 }
 
 impl Default for DistortionView {
@@ -400,7 +400,31 @@ impl Default for DistortionView {
         Self {
             unit: DistortionUnit::Db,
             range_db: Range::new(-100.0, 0.0),
-            show_ir: false,
+            mode: SweepMode::Response,
+        }
+    }
+}
+
+/// The views of a sweep result, one at a time in the sweep pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SweepMode {
+    /// The fundamental's response above, the harmonic distortion below.
+    #[default]
+    Response,
+    /// The sweep's impulse response.
+    Ir,
+    /// The ISO 3382-1 room parameters, the whole pane: read at a distance.
+    Room,
+}
+
+impl SweepMode {
+    /// G: response & distortion → impulse response → room parameters → response: the order
+    /// a sweep is read in, from what the speaker does to what the room does.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Response => Self::Ir,
+            Self::Ir => Self::Room,
+            Self::Room => Self::Response,
         }
     }
 }

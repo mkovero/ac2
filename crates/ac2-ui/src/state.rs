@@ -28,7 +28,7 @@ use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
     CoherencePlacement, DistortionUnit, FreqRange, IrMode, LeqStyle, PhaseView, SpectrumStyle,
-    SplMode, ViewState,
+    SplMode, SweepMode, ViewState,
 };
 use ac2_scene::{axis::Range, format};
 
@@ -1476,6 +1476,7 @@ impl AppState {
             fullscreen: self.fullscreen,
             spl_view: self.view.spl.mode,
             spectrum_view: self.view.spectrum.mode,
+            sweep_view: self.view.distortion.mode,
             ir_mode: self.view.ir.mode,
             distortion_unit: self.view.distortion.unit,
             measurements,
@@ -1563,6 +1564,7 @@ impl AppState {
         self.fullscreen = l.fullscreen;
         self.view.spl.mode = l.spl_view;
         self.view.spectrum.mode = l.spectrum_view;
+        self.view.distortion.mode = l.sweep_view;
         self.view.ir.mode = l.ir_mode;
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
@@ -1625,12 +1627,12 @@ impl AppState {
         pane: PaneKind,
         style: crate::keys::LabelStyle,
     ) -> Vec<crate::hints::KeyHint> {
-        let ir = self.view.distortion.show_ir;
+        let mode = self.view.distortion.mode;
         crate::hints::line(keymap, pane.scope(), style, |c| {
             pane == PaneKind::Distortion
                 && match c {
-                    CommandId::DistortionUnit => ir,
-                    CommandId::IrMode => !ir,
+                    CommandId::DistortionUnit => mode != SweepMode::Response,
+                    CommandId::IrMode => mode != SweepMode::Ir,
                     _ => false,
                 }
         })
@@ -3545,7 +3547,16 @@ impl AppState {
                     DistortionUnit::Percent => DistortionUnit::Db,
                 };
             }
-            C::SweepIr => self.view.distortion.show_ir = !self.view.distortion.show_ir,
+            C::SweepView => {
+                self.view.distortion.mode = self.view.distortion.mode.next();
+                self.focus(PaneKind::Distortion);
+            }
+            C::SweepIr => {
+                self.view.distortion.mode = match self.view.distortion.mode {
+                    SweepMode::Ir => SweepMode::Response,
+                    _ => SweepMode::Ir,
+                };
+            }
             C::HideDistortion => {
                 self.layout.shown[PaneKind::Distortion.index()] = false;
                 if self.layout.focus == PaneKind::Distortion {

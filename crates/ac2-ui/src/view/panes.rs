@@ -349,7 +349,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         }
         let mut right = title.right() - 8.0;
         if pane == PaneKind::Distortion
-            && !app.state.view.distortion.show_ir
+            && app.state.view.distortion.mode == ac2_scene::view::SweepMode::Response
             && let Some(left) = unit_toggle(app, ui, title, x, ch)
         {
             right = left - 10.0;
@@ -861,7 +861,8 @@ fn navigate(
             crate::scenes::spectrum_scale(&app.state),
         )
         .is_some()
-        && !(pane == PaneKind::Distortion && app.state.view.distortion.show_ir)
+        && (pane != PaneKind::Distortion
+            || app.state.view.distortion.mode == ac2_scene::view::SweepMode::Response)
     {
         // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
         let (zoom, shift, dx, pos) = ui.input(|i| {

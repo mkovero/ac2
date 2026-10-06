@@ -163,8 +163,8 @@ mod tests {
                 "Shift+S new sweep",
                 "N next sweep",
                 "U dB/%",
-                "G linear/log/ETC",
-                "Shift+I IR/distortion",
+                "G response/IR/room",
+                "Shift+G linear/log/ETC",
                 "W maximise",
                 "Shift+W hide pane",
                 "H all keys"
@@ -178,7 +178,7 @@ mod tests {
         let k = Keymap::default();
         let mac = texts(&line(&k, Scope::Distortion, LabelStyle::Mac, |_| false));
         assert!(mac.contains(&"⇧S new sweep".to_owned()), "{mac:?}");
-        assert!(mac.contains(&"⇧I IR/distortion".to_owned()), "{mac:?}");
+        assert!(mac.contains(&"⇧G linear/log/ETC".to_owned()), "{mac:?}");
         let mac = texts(&line(&k, Scope::Transfer, LabelStyle::Mac, |_| false));
         assert!(mac.contains(&"⌘1 capture".to_owned()), "{mac:?}");
         // Remapped: the line shows the new chord; unbound: the hint goes.
@@ -191,9 +191,9 @@ mod tests {
         assert!(!t.iter().any(|s| s.contains("find delay")), "{t:?}");
         assert_eq!(t.last().map(String::as_str), Some("F1 all keys"));
         // A pane's own binding wins over the global one.
-        let k = Keymap::from_toml("[distortion]\nsweep_ir = \"Q\"\n").expect("valid");
+        let k = Keymap::from_toml("[distortion]\nsweep_view = \"Q\"\n").expect("valid");
         let t = texts(&line(&k, Scope::Distortion, LabelStyle::Pc, |_| false));
-        assert!(t.contains(&"Q IR/distortion".to_owned()), "{t:?}");
+        assert!(t.contains(&"Q response/IR/room".to_owned()), "{t:?}");
     }
 
     #[test]

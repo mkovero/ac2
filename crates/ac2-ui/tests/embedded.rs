@@ -717,7 +717,7 @@ fn room_parameters_of_a_sweep_from_the_app() -> R {
         s.sweep.run.is_none() && s.layout.focus == PaneKind::Distortion && s.shown_sweep().is_some()
     })?;
     d.key("Shift+I");
-    assert!(d.st.view.distortion.show_ir);
+    assert_eq!(d.st.view.distortion.mode, ac2_scene::view::SweepMode::Ir);
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {
         width: 1100.0,
@@ -753,6 +753,26 @@ fn room_parameters_of_a_sweep_from_the_app() -> R {
         .flat_map(|l| l.labels.iter().map(|x| x.text.as_str()))
         .collect();
     assert!(labels.contains(&"T30 (s)") && labels.contains(&t.caption.as_str()));
+
+    // G: the room parameters alone, the whole pane, every band at a larger size.
+    d.key("G");
+    assert_eq!(d.st.view.distortion.mode, ac2_scene::view::SweepMode::Room);
+    let ac2_ui::scenes::SweepPane::Room(room) = ac2_ui::scenes::sweep(&d.st, &theme, size, now)
+    else {
+        return Err("the sweep pane does not show the room parameters".into());
+    };
+    let rt = room.table.as_ref().ok_or("no room table")?;
+    assert_eq!(rt.bands, t.bands);
+    assert_eq!(rt.rows, t.rows);
+    assert!(room.font_size > theme.font_size, "{}", room.font_size);
+    let labels: Vec<&str> = room
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|x| x.text.as_str()))
+        .collect();
+    assert!(labels.contains(&"T30 (s)") && labels.contains(&"250"));
+    assert!(!labels.iter().any(|x| x.contains("hidden")), "{labels:?}");
     drop(d);
     drop(daemon);
     Ok(())
@@ -2055,7 +2075,7 @@ fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     };
     let caption = |s: &AppState| match ac2_ui::scenes::sweep(s, &theme, size, now) {
         ac2_ui::scenes::SweepPane::Distortion(x) => x.caption.clone(),
-        ac2_ui::scenes::SweepPane::Ir(_) => String::new(),
+        ac2_ui::scenes::SweepPane::Ir(_) | ac2_ui::scenes::SweepPane::Room(_) => String::new(),
     };
     assert!(caption(&d.st).starts_with(&n1), "{}", caption(&d.st));
     d.key("V");

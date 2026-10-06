@@ -106,7 +106,10 @@ last), rows `EDT (s)`, `T20 (s)`, `T30 (s)`, `C50 (dB)`, `C80 (dB)`, `D50 (%)`, 
 refused cells as words (dimmed), the legend for the words and marks that occur, and the caption
 `Room (ISO 3382-1) · octave bands · decay to 1980 ms`. In the app the sweep pane's IR view
 (Shift+I) draws the octave table under the IR when the pane is at least 140 px taller than the
-table; a pane too narrow drops outer bands (broadband stays) and says how many are hidden. The
+table; a pane too narrow drops outer bands (broadband stays) and says how many are hidden.
+The pane's third view (G: response → IR → room) is the table alone under the banners, its
+font the largest (up to twice the theme's) at which every band and the legend fit; a pane
+too small even for the small font keeps the narrow-pane rule (`room::room_scene`). The
 CLI prints the octave table after the distortion summary of `ac2 ir capture` and on
 `ac2 ir metrics <trace> [--third]`; `--json` gives the full `RoomAcoustics`.
 

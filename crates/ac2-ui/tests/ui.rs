@@ -1267,15 +1267,25 @@ fn session_dialog() {
     h.step();
     snapshot(&mut h, "sweep_distortion_percent");
     h.key_press_modifiers(Modifiers::SHIFT, Key::I);
-    step_until(&mut h, "sweep IR", |a| a.state.view.distortion.show_ir);
-    // G: the log view, where the harmonics' impulses read at their level.
-    h.key_press(Key::G);
+    step_until(&mut h, "sweep IR", |a| {
+        a.state.view.distortion.mode == ac2_scene::view::SweepMode::Ir
+    });
+    // Shift+G: the log view, where the harmonics' impulses read at their level.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::G);
     step_until(&mut h, "log IR", |a| {
         a.state.view.ir.mode == ac2_scene::view::IrMode::Log
     });
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_ir");
+    // G: the room parameters alone, the whole (maximised) pane.
+    h.key_press(Key::G);
+    step_until(&mut h, "room parameters", |a| {
+        a.state.view.distortion.mode == ac2_scene::view::SweepMode::Room
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "sweep_room");
 }
 
 /// A set of sweeps running while the transfer pane is maximised: the progress strip shows

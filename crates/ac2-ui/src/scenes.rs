@@ -527,6 +527,7 @@ pub fn ir(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<IrSc
 pub enum SweepPane {
     Distortion(Box<DistortionScene>),
     Ir(Box<IrScene>),
+    Room(Box<ac2_scene::room::RoomScene>),
 }
 
 impl SweepPane {
@@ -534,6 +535,7 @@ impl SweepPane {
         match self {
             SweepPane::Distortion(s) => s.scene,
             SweepPane::Ir(s) => s.scene,
+            SweepPane::Room(s) => s.scene,
         }
     }
 
@@ -541,7 +543,7 @@ impl SweepPane {
     pub fn x_axis(&self) -> Option<ac2_scene::axis::Mapping> {
         match self {
             SweepPane::Distortion(s) => Some(s.x_axis.mapping),
-            SweepPane::Ir(_) => None,
+            SweepPane::Ir(_) | SweepPane::Room(_) => None,
         }
     }
 
@@ -560,11 +562,19 @@ impl SweepPane {
     }
 }
 
-/// The sweep pane: the shown sweep trace's distortion, or its impulse response.
+/// The sweep pane: the shown sweep trace's distortion, its impulse response or its room
+/// parameters.
 pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPane {
     let status = status(st, &[], None, now);
     let shown = st.shown_sweep();
-    if st.view.distortion.show_ir
+    if st.view.distortion.mode == ac2_scene::view::SweepMode::Room {
+        let room = shown.and_then(|(d, _)| d.sweep.as_ref()?.room.as_ref());
+        let name = shown.map(|(d, _)| d.meta.edit.name.as_str());
+        return SweepPane::Room(Box::new(ac2_scene::room::room_scene(
+            room, name, &status, theme, size,
+        )));
+    }
+    if st.view.distortion.mode == ac2_scene::view::SweepMode::Ir
         && let Some((d, _)) = shown
     {
         let c = d.meta.edit.color;

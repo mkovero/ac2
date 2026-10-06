@@ -541,9 +541,12 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   below. Where an order is within the noise it is drawn dashed at its own floor; the shading
   is the noise under every order's floor. The **dB | %** toggle in the pane's title (or
   **U**) switches the distortion between dB re fundamental and percent (a log axis: 0.01 %,
-  0.1 %, 1 %, …), readouts included. **Shift+I** shows the
-  sweep's impulse response with the harmonics' impulses marked (**G**: linear / log / ETC),
-  **N** steps through stored sweeps (selecting each), **Shift+W** hides the pane. The sweep is also a stored
+  0.1 %, 1 %, …), readouts included. **G** steps the pane's views, one at a time, as in the
+  spectrum and SPL panes: response & distortion → the sweep's **impulse response** with the
+  harmonics' impulses marked (**Shift+G**: linear / log / ETC) → the **room parameters**
+  table alone, the whole pane, as large as it fits (read across a room; maximised with
+  **W**) → back; the view is remembered. **Shift+I** goes straight to the impulse response
+  and back. **N** steps through stored sweeps (selecting each), **Shift+W** hides the pane. The sweep is also a stored
   trace, drawn in the transfer pane like any capture and listed under Traces (see *Traces and slots*).
 - **Progress strip:** while a sweep runs (from this app, another client or the CLI), a strip
   under the top bar — visible whichever pane is maximised — shows its name and level,
@@ -564,7 +567,8 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
 - **Room parameters (ISO 3382-1):** every sweep also computes EDT, T20, T30, C50, C80 and
   D50 of its impulse response per octave band (and one-third octave) and broadband
   (`docs/design/room-metrics.md`). In the app, the sweep pane's impulse response
-  (**Shift+I**) shows the octave table under the plot when the pane is tall enough. A value
+  (**Shift+I**) shows the octave table under the plot when the pane is tall enough, and the
+  room view (**G** from the IR) shows it alone in large type. A value
   the measurement cannot support is a word, never a number: `noise` (the decay meets the
   noise too soon: T30 needs 45 dB of decay range, T20 35 dB, EDT and C/D 20 dB), `short`
   (the decay is too short for that band's filter), `—` (no decay, e.g. an anechoic
@@ -1164,9 +1168,10 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `G` | IR: linear → log → ETC | `ir_mode` |
+| `Shift+G` | IR: linear → log → ETC | `ir_mode` |
 | `U` | Distortion in dB re fundamental / percent | `distortion_unit` |
-| `Shift+I` | Sweep: distortion / impulse response | `sweep_ir` |
+| `G` | Sweep pane: response & distortion → impulse response → room parameters | `sweep_view` |
+| `Shift+I` | Sweep pane: impulse response (again: response & distortion) | `sweep_ir` |
 | `Shift+W` | Hide the sweep / distortion pane | `hide_distortion` |
 
 #### Command palette only (`Ctrl+K`)
@@ -1235,7 +1240,7 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq/both · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` linear/log/ETC · `Shift+I` IR/distortion · `W` maximise · `Shift+W` hide pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->
 
