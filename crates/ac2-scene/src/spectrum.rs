@@ -419,6 +419,7 @@ pub struct SpectrumScene {
     /// spectrum, for a tooltip over it.
     pub unit_rect: Rect,
     pub unit_help: Option<String>,
+    /// The caption as drawn ([`caption_forms`]: the longest that leaves the unit room).
     pub caption: String,
     pub cursor: Option<SpectrumCursor>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
@@ -431,6 +432,41 @@ pub struct SpectrumScene {
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
     pub banners: Vec<BannerRow>,
+}
+
+/// A caption from its longest form to its shortest, for a pane too narrow for the full
+/// one: without the parenthesised details (`(data sheet 15.0 mV/Pa)`), then without its
+/// first part (the window or band, which the pane's title and the unit also say), then its
+/// parts from the end off, last nothing. The calibration stays longest: it says whether
+/// the levels are dB SPL to be trusted.
+pub fn caption_forms(caption: &str) -> Vec<String> {
+    let mut v = vec![caption.to_string()];
+    if caption.is_empty() {
+        return v;
+    }
+    let mut bare = String::new();
+    let mut depth = 0usize;
+    for ch in caption.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => bare.push(ch),
+            _ => {}
+        }
+    }
+    let parts: Vec<String> = bare
+        .split('·')
+        .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|p| !p.is_empty())
+        .collect();
+    v.push(parts.join(" · "));
+    let rest = parts.get(1..).unwrap_or_default();
+    for n in (1..=rest.len()).rev() {
+        v.push(rest[..n].join(" · "));
+    }
+    v.push(String::new());
+    v.dedup();
+    v
 }
 
 /// The axis unit's forms ([`level_unit_forms`]) for the curves shown, and its help for a
@@ -646,17 +682,36 @@ pub(crate) fn spectrum_scene_in(
         ));
         legend_shown.push(text);
     }
-    let caption = traces.first().map_or(String::new(), |t| t.caption.clone());
-    // The unit shares the plot's top line with the caption (right): it takes its longest
-    // form that leaves the caption room.
-    let room = plot.w
-        - 12.0
-        - if caption.is_empty() {
-            0.0
-        } else {
-            text_width(&caption, font) + 12.0
-        };
+    let full_caption = traces.first().map_or(String::new(), |t| t.caption.clone());
+    // The unit (left) and the caption (right) share the plot's top line. The caption takes
+    // its longest form that leaves the unit its compact form room (`dB SPL/bin`: a bin level
+    // is no band level, which the bare scale would no longer say), then the unit its longest
+    // form beside it: the two never overlap, and what the axis means goes last.
     let (forms, unit_help) = unit_forms(traces);
+    let compact = forms
+        .len()
+        .checked_sub(2)
+        .and_then(|i| forms.get(i))
+        .or(forms.last())
+        .map_or(0.0, |f| text_width(f, font));
+    let shortest = forms.last().map_or(0.0, |f| text_width(f, font));
+    let room_beside = |caption: &str| {
+        plot.w
+            - 12.0
+            - if caption.is_empty() {
+                0.0
+            } else {
+                text_width(caption, font) + 12.0
+            }
+    };
+    let caption_forms = caption_forms(&full_caption);
+    let caption = caption_forms
+        .iter()
+        .find(|c| room_beside(c) >= compact)
+        .or_else(|| caption_forms.iter().find(|c| room_beside(c) >= shortest))
+        .cloned()
+        .unwrap_or_default();
+    let room = room_beside(&caption);
     let unit = forms
         .iter()
         .find(|f| text_width(f, font) <= room)
@@ -1303,29 +1358,24 @@ mod tests {
         let mut seen = Vec::new();
         for w in [900.0, 480.0, 440.0, 400.0, 330.0, 260.0, 200.0, 120.0] {
             let s = scene(std::slice::from_ref(&t), w);
-            let caption = s
-                .scene
-                .layers
-                .iter()
-                .flat_map(|l| &l.labels)
-                .find(|l| l.text == "Hann window")
-                .expect("caption");
-            let cap = crate::canvas::tests::label_box(caption);
-            // The unit fits left of the caption whenever any form does.
-            if s.unit != "dB SPL" {
-                assert!(s.unit_rect.right() < cap.x, "{w}: {:?} vs {cap:?}", s.unit);
-            }
-            seen.push(s.unit);
+            assert_unit_clear_of_caption(&s, w);
+            seen.push((s.unit, s.caption));
         }
         seen.dedup();
+        let u = |a: &str, c: &str| (a.to_string(), c.to_string());
         assert_eq!(
             seen,
             [
-                "dB SPL per 1.46 Hz bin (tone, 1/3 oct smoothed)",
-                "dB SPL per 1.46 Hz bin (1/3 oct smoothed)",
-                "dB SPL per 1.46 Hz bin",
-                "dB SPL/bin",
-                "dB SPL",
+                u(
+                    "dB SPL per 1.46 Hz bin (tone, 1/3 oct smoothed)",
+                    "Hann window"
+                ),
+                u("dB SPL per 1.46 Hz bin (1/3 oct smoothed)", "Hann window"),
+                u("dB SPL per 1.46 Hz bin", "Hann window"),
+                u("dB SPL/bin", "Hann window"),
+                // The window goes before the unit shrinks to the bare scale.
+                u("dB SPL/bin", ""),
+                u("dB SPL", ""),
             ]
         );
         // Spectra on two FFT lengths share the axis as per bin, mixed widths.
@@ -1345,6 +1395,98 @@ mod tests {
         u.quantity = Quantity::Tone;
         let s = scene(&[t, u], 900.0);
         assert_eq!(s.unit, "dB SPL per bin, mixed widths (tone)");
+    }
+
+    /// The unit's label and the drawn caption never overlap.
+    fn assert_unit_clear_of_caption(s: &SpectrumScene, w: f32) {
+        if s.caption.is_empty() {
+            return;
+        }
+        let caption = s
+            .scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .find(|l| l.text == s.caption)
+            .expect("caption");
+        let cap = crate::canvas::tests::label_box(caption);
+        assert!(
+            s.unit_rect.right() < cap.x,
+            "{w}: {:?} vs {:?} at {cap:?}",
+            s.unit,
+            s.caption
+        );
+    }
+
+    /// The rig's calibration caption (an electrical calibration with its data sheet and a
+    /// mic curve) beside the per-bin unit: from 300 to 1300 px the two never overlap; the
+    /// caption gives up the data sheet, then the window, then its tail, and the unit keeps
+    /// at least `dB SPL/bin`.
+    #[test]
+    fn a_long_calibration_caption_leaves_the_unit_room() {
+        let g = GridDef::LogBins {
+            fs: Hz(48_000.0),
+            n: 32_768,
+            ppo: 96,
+        };
+        let cols = crate::grid::columns(&g);
+        let level = vec![-60.0f32; cols.freqs.len()];
+        let rig = "Hann window · electrical cal 1 kHz (data sheet 15.0 mV/Pa) ±1 dB · 2 d ago \
+                   · mic curve: MM1 34804 90°";
+        let t = SpectrumTrace {
+            key: TraceKey::Stored(ac2_proto::units::TraceId(1)),
+            name: "Mic".into(),
+            color: Color::WHITE,
+            freqs: &cols.freqs,
+            edges: &cols.edges,
+            level: &level,
+            validity: None,
+            peak: None,
+            scale: LevelScale::DbSpl,
+            quantity: Quantity::Tone,
+            bin_hz: cols.bin_hz,
+            caption: rig.into(),
+            freshness: None,
+            offset_db: 0.0,
+            selected: false,
+        };
+        let theme = Theme::dark();
+        let mut captions = Vec::new();
+        for w in (300..=1300).step_by(50) {
+            let w = w as f32;
+            let size = Viewport {
+                width: w,
+                height: 300.0,
+            };
+            let s = spectrum_scene(
+                std::slice::from_ref(&t),
+                &Status::default(),
+                &ViewState::default(),
+                &theme,
+                size,
+            );
+            assert_unit_clear_of_caption(&s, w);
+            assert_ne!(s.unit, "dB SPL", "{w}");
+            captions.push(s.caption);
+        }
+        captions.dedup();
+        assert_eq!(captions.first().map(String::as_str), Some(""));
+        assert!(
+            captions.contains(&"electrical cal 1 kHz ±1 dB".to_string()),
+            "{captions:?}"
+        );
+        assert_eq!(captions.last().map(String::as_str), Some(rig));
+        assert_eq!(
+            caption_forms(rig),
+            [
+                rig,
+                "Hann window · electrical cal 1 kHz ±1 dB · 2 d ago · mic curve: MM1 34804 90°",
+                "electrical cal 1 kHz ±1 dB · 2 d ago · mic curve: MM1 34804 90°",
+                "electrical cal 1 kHz ±1 dB · 2 d ago",
+                "electrical cal 1 kHz ±1 dB",
+                "",
+            ]
+        );
     }
 
     #[test]
