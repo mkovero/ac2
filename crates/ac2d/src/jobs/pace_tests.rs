@@ -365,18 +365,21 @@ fn spl_peaks_survive_the_frame_rate() {
     s.emit(&r.em);
     let first = spl_frames(&r);
     assert_eq!(first.len(), 1);
-    // Within the frame period: a burst 30 dB up, emitted at once; nothing goes out yet, and
-    // the emit asks to be called again.
+    // A burst 30 dB up, emitted at once. Within the frame period nothing goes out yet and the
+    // emit asks to be called again; a slow host may already be past the period, and then the
+    // frame goes out now (the cap itself is `spl_frame_rate_is_capped`).
     feed(&mut s, &mut at, 1, 0.316, &mut seed);
-    assert!(matches!(s.emit(&r.em), Flush::Pending(_)));
-    assert!(spl_frames(&r).is_empty());
-    // Quiet again for half a second, then the next frame.
+    match s.emit(&r.em) {
+        Flush::Pending(_) => assert!(spl_frames(&r).is_empty()),
+        Flush::Done => {}
+    }
+    // Quiet again for half a second, then the next frame: it still holds the burst.
     feed(&mut s, &mut at, 100, 0.01, &mut seed);
     std::thread::sleep(Duration::from_secs_f64(1.0 / f64::from(SPL_FPS)));
     assert_eq!(s.emit(&r.em), Flush::Done);
     let next = spl_frames(&r);
-    assert_eq!(next.len(), 1);
-    let (a, b) = (&first[0], &next[0]);
+    assert!(!next.is_empty());
+    let (a, b) = (&first[0], next.last().expect("a frame after the quiet"));
     assert!(b.lpeak > a.lpeak + 25.0, "Lpeak {} → {}", a.lpeak, b.lpeak);
     assert!(b.lmax > a.lmax + 10.0, "Lmax {} → {}", a.lmax, b.lmax);
     // The running level has fallen back by then: only the interval figures held the burst.
