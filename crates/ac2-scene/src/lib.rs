@@ -37,6 +37,7 @@ pub mod primitives;
 pub mod progress;
 pub mod readout;
 pub mod recording;
+pub mod rig;
 pub mod room;
 pub mod spectrograph;
 pub mod spectrum;

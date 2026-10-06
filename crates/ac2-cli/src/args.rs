@@ -335,6 +335,17 @@ pub enum GenCmd {
     },
     /// Fade out and disarm whatever is playing (any client, no lease needed).
     Stop,
+    /// Show the system max level, or set it (any client). Lowering applies at once: a
+    /// stimulus armed or playing above it is stopped. Raising needs `--yes` and nothing
+    /// armed or playing; it never goes above the daemon's `--max-level` bound.
+    Ceiling {
+        /// New system max level, e.g. `-40dbfs`; without it the level in force is shown.
+        #[arg(allow_hyphen_values = true, value_name = "DBFS")]
+        level: Option<LevelDbfs>,
+        /// Confirms a raise.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 /// Butterworth slope of the noise band limits.

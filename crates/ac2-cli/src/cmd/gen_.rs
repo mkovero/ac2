@@ -1,4 +1,5 @@
-//! `gen <signal>` (foreground, holds the lease) and `gen stop` (universal).
+//! `gen <signal>` (foreground, holds the lease), `gen stop` (universal) and `gen ceiling`
+//! (the system max level).
 //!
 //! Safety: the level is a required typed dBFS value, checked against the daemon's ceiling
 //! before the lease is even acquired. The command acquires and *arms* (arming does not
@@ -19,13 +20,15 @@ use super::connect;
 use crate::CliError;
 use crate::args::{Cli, GenCmd, GenOpts, SlopeArg};
 use crate::output::{self, Out};
+use crate::units::LevelDbfs;
 use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
+use ac2_scene::rig;
 
 /// The settings `gen` would send, validated without a daemon.
 pub fn settings(cmd: &GenCmd) -> Result<Option<(GeneratorSettings, bool)>, CliError> {
     let (signal, opts): (Signal, &GenOpts) = match cmd {
-        GenCmd::Stop => return Ok(None),
+        GenCmd::Stop | GenCmd::Ceiling { .. } => return Ok(None),
         GenCmd::Pink(o) => (Signal::Pink, o),
         GenCmd::White(o) => (Signal::White, o),
         GenCmd::Sine { freq, opts } => (Signal::Sine { freq: freq.0 }, opts),
@@ -159,7 +162,69 @@ pub(crate) fn say(
     }
 }
 
+/// `gen ceiling [LEVEL] [--yes]`.
+async fn ceiling(
+    cli: &Cli,
+    level: Option<LevelDbfs>,
+    yes: bool,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    let g = c.snapshot().await?.state.generator;
+    let Some(LevelDbfs(to)) = level else {
+        let change = rig::ceiling_change(&g);
+        out.emit(
+            &json!({
+                "ceiling": g.ceiling.0,
+                "bound": g.ceiling_bound.0,
+                "changed": change,
+            }),
+            || {
+                let mut s = format!("system max level {}", rig::ceiling_line(&g));
+                if let Some(ch) = &change {
+                    s.push_str(&format!(" ({ch})"));
+                }
+                s
+            },
+        )?;
+        return Ok(());
+    };
+    if to.0 > g.ceiling.0 && !yes {
+        return Err(CliError::Refused(format!(
+            "raising the system max level from {} to {} needs --yes",
+            rig::dbfs(g.ceiling.0),
+            rig::dbfs(to.0)
+        )));
+    }
+    let r = c
+        .call(Command::GenCeiling {
+            ceiling: to,
+            confirm_raise: yes,
+        })
+        .await?;
+    let now = expect_body!("gen.ceiling", r, ReplyBody::Generator(g) => g)?;
+    out.emit(
+        &json!({
+            "ceiling": now.ceiling.0,
+            "bound": now.ceiling_bound.0,
+            "previous": g.ceiling.0,
+            "stopped": (g.armed || g.firing) && !(now.armed || now.firing),
+        }),
+        || {
+            let mut s = rig::ceiling_changed(g.ceiling, now.ceiling);
+            if (g.armed || g.firing) && !(now.armed || now.firing) {
+                s.push_str("; the stimulus above it was stopped");
+            }
+            s
+        },
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    if let GenCmd::Ceiling { level, yes } = cmd {
+        return ceiling(cli, *level, *yes, out).await;
+    }
     let Some((settings, force)) = settings(cmd)? else {
         let c = connect(cli, false).await?;
         let r = c.call(Command::GenStop).await?;
