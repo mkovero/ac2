@@ -3,6 +3,11 @@
 //! ones; the samples of a recording made from the replay are the recorded samples, bit for
 //! bit. The sidecar holds the discontinuity and the configuration change at their samples;
 //! bounds, shutdown and a daemon that died while recording all leave a finished file.
+//!
+//! The RTA averages one value per publish interval, and publish intervals follow wall time:
+//! live and replayed, it averages the same samples over other spans. Its comparison
+//! therefore uses a steady tone, whose band levels do not depend on the span, rather than
+//! noise, whose do.
 #![allow(clippy::unwrap_used)]
 
 mod common;
@@ -31,8 +36,6 @@ const SECONDS: f64 = 3.0;
 /// The rig loses this many frames before block 200.
 const LOST: u32 = 1000;
 const XRUN_BLOCK: u64 = 200;
-/// Index of the 1 kHz band of a third-octave RTA from 25 Hz.
-const RTA_1K: usize = 16;
 
 /// The common rig with an xrun that loses frames.
 fn xrun_rig() -> FakeBackend {
@@ -279,7 +282,6 @@ fn replayed_recording_reproduces_the_live_analyses() {
     let live_end = session_end(&d);
     let live_tf = capture(&mut c, 1, "live tf");
     let live_spec = capture(&mut c, 2, "live spec");
-    let live_rta = capture(&mut c, 3, "live rta");
 
     let done_run = run_of(c.ok(Command::RecStop));
     assert_eq!(
@@ -379,10 +381,9 @@ fn replayed_recording_reproduces_the_live_analyses() {
     let replay_spl = spl_level(&sub, live_end);
     let rep_tf = capture(&mut c, 1, "replay tf");
     let rep_spec = capture(&mut c, 2, "replay spec");
-    let rep_rta = capture(&mut c, 3, "replay rta");
 
     // Same samples, same blocks, same resets: the transfer function, the spectrum and the
-    // SPL meter agree to within rounding.
+    // SPL meter agree to within rounding (the RTA: `replayed_rta_reads_a_steady_tone_alike`).
     assert_close("tf mag", &live_tf.mag_db, &rep_tf.mag_db, 0.01);
     assert_close(
         "tf phase",
@@ -397,15 +398,7 @@ fn replayed_recording_reproduces_the_live_analyses() {
         1e-4,
     );
     assert_close("spectrum", &live_spec.mag_db, &rep_spec.mag_db, 0.01);
-    // The RTA averages per publish interval, and a fast replay's intervals hold more audio
-    // than live ones: the same samples, averaged over other spans. Pink noise agrees
-    // within its statistical spread where bands are wide enough (from 1 kHz).
-    assert_close(
-        "rta from 1 kHz",
-        &live_rta.mag_db[RTA_1K..],
-        &rep_rta.mag_db[RTA_1K..],
-        1.5,
-    );
+
     assert!(
         (live_spl - replay_spl).abs() <= 0.01,
         "spl live {live_spl}, replay {replay_spl}"
@@ -452,6 +445,105 @@ fn replayed_recording_reproduces_the_live_analyses() {
 
     // A replayed session never had an input the recording lacks.
     c.ok(Command::SessionClose);
+    h.shutdown();
+}
+
+/// The third-octave RTA of a recorded 1 kHz tone reads the same live and replayed. A steady
+/// tone's band levels do not depend on which span of it an interval averages (to within
+/// the part of a period an interval cuts off: < 0.05 dB at 1 kHz over the shortest live
+/// interval), so the comparison checks the replayed samples, not how either run's
+/// publish intervals fell.
+#[test]
+fn replayed_rta_reads_a_steady_tone_alike() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let backend = manual_rig();
+    let mut cfg = config(backend.clone(), inproc("rec-rta"));
+    cfg.lease_expiry = Duration::from_secs(120);
+    cfg.recording_dir = Some(dir.path().to_owned());
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, _sub) = connect(&h, &[]);
+    let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
+    let live_epoch = match c.ok(Command::SessionOpen {
+        config: session(false),
+    }) {
+        ReplyBody::Session(s) => s.epoch,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "rta".into(),
+            kind: MeasKind::Rta {
+                config: RtaConfig::on_input(1, BandFraction::Third),
+            },
+        },
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let tok = match c.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::GenSet {
+        lease_token: tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Sine {
+                    freq: ac2_proto::units::Hz(1000.0),
+                },
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
+    let mut d = driver(&backend);
+    // The tone settles (fade-in, the filter bank's transients) before the recording starts.
+    run(&mut d, 0.5);
+    wait_handed_on(&ka, live_epoch, end_sample(&d));
+    c.ok(record(vec![1], "tone", 60.0));
+    let mut done = 0.0;
+    while done < 3.0 {
+        run(&mut d, 0.25);
+        done += 0.25;
+        wait_handed_on(&ka, live_epoch, end_sample(&d));
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+    let live = capture(&mut c, 1, "live rta");
+    c.ok(Command::RecStop);
+
+    let epoch = match c.ok(Command::SessionReplay {
+        recording: RecordingRef::Name {
+            name: "tone".into(),
+        },
+        pace: ReplayPace::Fast,
+    }) {
+        ReplyBody::Session(s) => s.epoch,
+        other => panic!("{other:?}"),
+    };
+    let s = raw::read_sidecar(dir.path(), "tone").unwrap();
+    let end = s.end.as_ref().map(|e| e.frames).unwrap();
+    wait_handed_on(&ka, epoch, end);
+    let replayed = capture(&mut c, 1, "replay rta");
+
+    // Every band within 30 dB of the tone's: the tone itself and its filters' skirts. The
+    // bands below hold only the path's noise floor, a random signal again.
+    let peak = live
+        .mag_db
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!((peak + 26.0).abs() < 1.0, "the tone reads {peak} dB");
+    let near: Vec<usize> = (0..live.mag_db.len())
+        .filter(|&i| live.mag_db[i] > peak - 30.0)
+        .collect();
+    assert!(near.len() >= 3, "{near:?}");
+    for i in near {
+        let (a, b) = (live.mag_db[i], replayed.mag_db[i]);
+        assert!((a - b).abs() <= 0.05, "band {i}: live {a}, replay {b}");
+    }
     h.shutdown();
 }
 

@@ -132,11 +132,15 @@ impl Driver {
         })
     }
 
+    /// Esc, until the daemon says stopped and the app has taken the stop's reply: the
+    /// mirror's generator event and the link's reply arrive separately, and Space is not
+    /// taken while the app still waits for the stop to finish.
     fn stop(&mut self) -> R {
         self.key("Escape");
         self.until("stopped", |s| {
-            s.daemon()
-                .is_some_and(|d| !d.generator.firing && !d.generator.armed)
+            s.stimulus.phase == StimPhase::Idle
+                && s.daemon()
+                    .is_some_and(|d| !d.generator.firing && !d.generator.armed)
         })
     }
 }

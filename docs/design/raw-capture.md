@@ -118,16 +118,18 @@ function, a spectrum, an RTA and an SPL meter running, and replaying it `fast`:
 | TF magnitude / phase / coherence (480 columns) | ≤ 0.01 dB / ≤ 0.1° / ≤ 1e-4 |
 | spectrum (every bin) | ≤ 0.01 dB |
 | SPL meter level | ≤ 0.01 dB |
-| third-octave RTA, bands ≥ 1 kHz | ≤ 1.5 dB |
+| third-octave RTA of a steady 1 kHz tone, bands within 30 dB of it | ≤ 0.05 dB |
 
 The TF, spectrum and SPL meter average over blocks, so identical blocks give results equal
 to rounding (in practice identical). The RTA averages one value per *publish interval*, and
 publish intervals follow wall time: a fast replay packs more audio into an interval than a
-live run did, so its average is over other spans of the same audio. With pink noise that is
-a statistical difference — larger in narrow low bands — and the stated bound covers it; a
-`realtime` replay is the one to use when RTA readings must match closely. The same holds for
-anything paced by wall time (frame rates, the SPL meter's per-second log, which follows the
-replay's own clock).
+live run did, so its average is over other spans of the same audio. With noise that is a
+statistical difference that depends on scheduling (on a loaded CI runner more than 1.5 dB
+in a third-octave band), so the RTA is compared on a steady tone, whose band levels do not
+depend on the span (`replayed_rta_reads_a_steady_tone_alike`). A `realtime` replay is the
+one to use when RTA readings of noise must match closely. The same holds for anything
+paced by wall time (frame rates, the SPL meter's per-second log, which follows the replay's
+own clock).
 
 ## Limits and open questions
 
