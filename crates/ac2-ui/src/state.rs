@@ -40,11 +40,15 @@ use crate::keys::{Chord, CommandId, Keymap, RESERVED, STOP_ANYWHERE, Scope};
 use crate::leq_dialog::LeqDialog;
 use crate::palette::Palette;
 use crate::prefs::UiPrefs;
-use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
+use crate::session_dialog::{RoleKey, Row, SessionDialog};
+use crate::settings::{Page, Settings};
 
 #[path = "state_display.rs"]
 mod display;
 pub use display::{DeleteTracePrompt, LEVEL_ZOOM_FACTOR, level_range};
+#[path = "state_settings.rs"]
+mod settings_impl;
+pub use settings_impl::SettingsMsg;
 
 /// The panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -558,7 +562,6 @@ pub const RECORD_MAX_S: f64 = 3600.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptKind {
     StimulusLevel,
-    StimulusOutputs,
     Offset(MeasId),
     Delay(MeasId),
     /// A file to import as a trace or target curve.
@@ -592,7 +595,6 @@ impl PromptKind {
     pub fn label(self) -> &'static str {
         match self {
             PromptKind::StimulusLevel => "Stimulus level (dBFS)",
-            PromptKind::StimulusOutputs => "Stimulus outputs (1-based, e.g. 1, 2)",
             PromptKind::Offset(_) => "Display offset (dB)",
             PromptKind::TraceOffset(_) => "Display offset of the selected trace (dB)",
             PromptKind::TraceSlot(_) => {
@@ -663,21 +665,67 @@ pub enum Overlay {
     DelayPick(Box<DelayChoice>),
     /// A new-measurement dialog.
     Form(Box<Form>),
-    /// The audio session dialog.
-    Session(Box<SessionDialog>),
+    /// The Settings view: every setting, a page per area ([`crate::settings`]).
+    Settings(Box<Settings>),
     /// A pane's measurement list, opened from its title chip.
     PaneMenu(PaneMenu),
     /// After a session opened with a reference and mics on a daemon without measurements:
     /// one key creates a transfer measurement per mic.
     Offer(Box<Offer>),
-    /// The calibrations and input setup view.
-    Calibrations(Box<CalView>),
-    /// The Leq windows and limits of an SPL meter.
-    Leq(Box<LeqDialog>),
     /// The confirmation before a new SPL log.
     NewLog(Box<NewLogPrompt>),
     /// The confirmation before a stored trace is deleted.
     DeleteTrace(Box<DeleteTracePrompt>),
+}
+
+impl Overlay {
+    /// The Settings view, when open.
+    pub fn settings(&self) -> Option<&Settings> {
+        match self {
+            Overlay::Settings(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The session model while Settings shows the Inputs & outputs or Audio page.
+    pub fn session(&self) -> Option<&SessionDialog> {
+        match self {
+            Overlay::Settings(s) if matches!(s.page, Page::Io | Page::Audio) => Some(&s.session),
+            _ => None,
+        }
+    }
+
+    pub fn session_mut(&mut self) -> Option<&mut SessionDialog> {
+        match self {
+            Overlay::Settings(s) if matches!(s.page, Page::Io | Page::Audio) => {
+                Some(&mut s.session)
+            }
+            _ => None,
+        }
+    }
+
+    /// The calibrations while Settings shows the Calibration page.
+    pub fn cal(&self) -> Option<&CalView> {
+        match self {
+            Overlay::Settings(s) if s.page == Page::Calibration => Some(&s.cal),
+            _ => None,
+        }
+    }
+
+    /// The Leq windows while Settings shows the SPL / Leq page.
+    pub fn leq(&self) -> Option<&LeqDialog> {
+        match self {
+            Overlay::Settings(s) if s.page == Page::Leq => s.leq.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn leq_mut(&mut self) -> Option<&mut LeqDialog> {
+        match self {
+            Overlay::Settings(s) if s.page == Page::Leq => s.leq.as_mut(),
+            _ => None,
+        }
+    }
 }
 
 /// What an SPL meter's history was rebuilt from its log for.
@@ -817,6 +865,8 @@ pub enum Msg {
     },
     /// Mouse on the Leq windows dialog.
     Leq(LeqMsg),
+    /// Mouse on the Settings view.
+    Settings(SettingsMsg),
 }
 
 /// What the mouse does on the Leq windows dialog.
@@ -982,6 +1032,12 @@ pub struct AppState {
     pub(crate) link_wants: crate::link_wants::Sent,
     /// Spectrum / RTA measurements seen running, so a start is told from a run going on.
     spectrum_running: BTreeSet<MeasId>,
+    /// This client's key, for the Settings view (`None`: it has none).
+    pub client_key: Option<crate::settings::ClientKey>,
+    /// The operator asked for the connect dialog (the app opens it).
+    pub want_connect_dialog: bool,
+    /// The Settings page last shown: the Settings key opens it again.
+    settings_page_last: Page,
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
     /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
     spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
@@ -1056,6 +1112,9 @@ impl AppState {
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
             spectrum_fit: BTreeMap::new(),
+            client_key: None,
+            want_connect_dialog: false,
+            settings_page_last: Page::Io,
         }
     }
 
@@ -1423,6 +1482,9 @@ impl AppState {
         let before = self.meter_wants();
         let tick = matches!(msg, Msg::Tick { .. });
         self.update_inner(msg, keymap, &mut out);
+        if tick {
+            self.poll_settings(&mut out);
+        }
         self.sync_meters(before, tick, &mut out);
         self.sync_session_watch(&mut out);
         if !tick {
@@ -1508,7 +1570,10 @@ impl AppState {
     ) {
         let session = self.open_session().is_some();
         match &self.overlay {
-            Overlay::Session(d) => (true, d.preview_target()),
+            _ if self.overlay.session().is_some() => (
+                true,
+                self.overlay.session().and_then(|d| d.preview_target()),
+            ),
             Overlay::Form(_) => (true, None),
             _ => (session, None),
         }
@@ -1528,7 +1593,7 @@ impl AppState {
             && self.connected()
         {
             self.devices_for = Some(e);
-            if !matches!(self.overlay, Overlay::Session(_) | Overlay::Form(_)) {
+            if !matches!(self.overlay, Overlay::Settings(_) | Overlay::Form(_)) {
                 out.push(Request::Devices);
             }
         }
@@ -1569,6 +1634,9 @@ impl AppState {
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.levels.apply(&mut self.view);
+        if let Some(s) = prefs.spectrograph_span_s {
+            self.view.spectrum.spectrograph.span_s = s;
+        }
         self.pending_pane_meas = l.measurements.clone();
         self.prefs = prefs;
     }
@@ -1658,7 +1726,7 @@ impl AppState {
         let Some(o) = self.open_session() else {
             return Vec::new();
         };
-        let meters = if matches!(self.overlay, Overlay::Session(_)) {
+        let meters = if self.overlay.session().is_some() {
             // The dialog's meters may be another device's preview.
             BTreeMap::new()
         } else {
@@ -1788,10 +1856,7 @@ impl AppState {
         let Some(d) = &self.data else {
             return out;
         };
-        let from_preview = match &self.overlay {
-            Overlay::Session(s) => s.preview_target(),
-            _ => None,
-        };
+        let from_preview = self.overlay.session().and_then(|s| s.preview_target());
         let topic = if from_preview.is_some() {
             Topic::PreviewLevels
         } else {
@@ -1898,13 +1963,8 @@ impl AppState {
             Msg::Backspace => match &mut self.overlay {
                 Overlay::Palette(p) => p.backspace(),
                 Overlay::Form(f) => f.backspace(),
-                Overlay::Session(d) => d.backspace(),
-                Overlay::Calibrations(v) if v.typing() => v.backspace(),
-                // Not typing: Backspace deletes, as Delete does.
-                Overlay::Calibrations(_) => {
-                    self.cal_view_key(Chord::key(eframe::egui::Key::Delete), None, out);
-                }
-                Overlay::Leq(d) => d.backspace(),
+                // Not typing: Backspace deletes where Delete deletes.
+                Overlay::Settings(_) => self.settings_backspace(out),
                 Overlay::DeleteTrace(_) => self.delete_trace(false, out),
                 Overlay::Prompt(p) => {
                     p.text.pop();
@@ -1927,6 +1987,7 @@ impl AppState {
             } => self.level_zoom(pane, about_db, factor),
             Msg::LevelPan { pane, db } => self.level_pan(pane, db),
             Msg::Leq(m) => self.leq_msg(m, out),
+            Msg::Settings(m) => self.settings_msg(m, out),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
@@ -2101,12 +2162,8 @@ impl AppState {
                 }
                 return;
             }
-            Overlay::Session(_) => {
-                self.session_key(chord, swallow, out);
-                return;
-            }
-            Overlay::Calibrations(_) => {
-                self.cal_view_key(chord, swallow, out);
+            Overlay::Settings(_) => {
+                self.settings_key(chord, swallow, keymap, out);
                 return;
             }
             Overlay::Offer(_) => {
@@ -2131,22 +2188,6 @@ impl AppState {
                     self.delete_trace(true, out);
                 } else if matches!(chord.key, Key::Backspace | Key::N) {
                     self.delete_trace(false, out);
-                }
-                return;
-            }
-            Overlay::Leq(d) => {
-                match chord.key {
-                    Key::Enter => self.submit_leq(out),
-                    Key::ArrowUp => d.move_row(-1),
-                    Key::ArrowDown => d.move_row(1),
-                    Key::Tab if chord.shift => d.move_cell(-1),
-                    Key::Tab => d.move_cell(1),
-                    Key::ArrowLeft => d.cycle(-1),
-                    Key::ArrowRight => d.cycle(1),
-                    Key::Insert => d.add_window(),
-                    Key::Delete => d.remove_window(),
-                    Key::A if chord.command => d.select_all(),
-                    _ => self.swallow_text = swallow,
                 }
                 return;
             }
@@ -2270,11 +2311,7 @@ impl AppState {
         self.command(c, keymap, out);
         let opened_text = matches!(
             self.overlay,
-            Overlay::Palette(_)
-                | Overlay::Prompt(_)
-                | Overlay::Form(_)
-                | Overlay::Session(_)
-                | Overlay::Leq(_)
+            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Settings(_)
         );
         if opened_text && std::mem::discriminant(&self.overlay) != before {
             self.swallow_text = typed_char(&chord);
@@ -2287,8 +2324,8 @@ impl AppState {
     /// strip's Stop stops it.
     fn close_overlay(&mut self, out: &mut Vec<Request>) {
         match &mut self.overlay {
-            Overlay::Calibrations(v) if v.electrical.is_some() || v.acoustic.is_some() => {
-                v.close_dialog();
+            Overlay::Settings(s) if s.inner_open() => {
+                s.close_inner();
             }
             Overlay::Form(f) if f.kind == FormKind::Sweep => {
                 self.overlay = Overlay::None;
@@ -2323,9 +2360,7 @@ impl AppState {
         match &mut self.overlay {
             Overlay::Palette(p) => p.type_text(&t),
             Overlay::Form(f) => f.type_text(&t),
-            Overlay::Session(d) => d.type_text(&t),
-            Overlay::Calibrations(v) => v.type_text(&t),
-            Overlay::Leq(d) => d.type_text(&t),
+            Overlay::Settings(_) => self.settings_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;
@@ -2350,14 +2385,6 @@ impl AppState {
         let text = p.text.clone();
         let r = match kind {
             PromptKind::StimulusLevel => self.set_level_text(&text, out),
-            PromptKind::StimulusOutputs => parse_outputs(&text).map(|o| {
-                if let Some(dev) = &self.stim_device {
-                    self.prefs.outputs.insert(dev.clone(), o.clone());
-                    self.prefs_dirty = true;
-                }
-                self.stimulus.outputs = o;
-                self.resend_stimulus(out);
-            }),
             PromptKind::CalDelete => self.cal_delete(&text, out),
             PromptKind::TraceMicCurve(id) => {
                 let mics = self.daemon().map(|s| s.mics.clone()).unwrap_or_default();
@@ -3535,8 +3562,15 @@ impl AppState {
                 self.prompt(PromptKind::StimulusLevel, text);
             }
             C::StimulusOutputs => {
-                let text = outputs_text(&self.stimulus.outputs);
-                self.prompt(PromptKind::StimulusOutputs, text);
+                self.open_settings(Page::Io, out);
+                // On the stimulus output: the first ticked one, else the first output.
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.focus_outputs = !s.focus_stimulus_outputs();
+                }
+            }
+            C::Settings => {
+                let page = self.settings_page_last;
+                self.open_settings(page, out);
             }
 
             C::FocusTransfer => self.focus(PaneKind::Transfer),
@@ -3633,6 +3667,8 @@ impl AppState {
                     ThemeName::Light => ThemeName::HighContrast,
                     ThemeName::HighContrast => ThemeName::Dark,
                 };
+                self.prefs.theme = Some(self.theme);
+                self.prefs_dirty = true;
             }
             C::ZoomIn | C::ZoomOut => {
                 let t = self.nav.target;
@@ -3739,11 +3775,7 @@ impl AppState {
                 if !self.connected() {
                     self.error("not connected");
                 } else {
-                    let open = self.open_session().cloned();
-                    let setup = self.daemon().map(|s| s.inputs.clone()).unwrap_or_default();
-                    self.overlay =
-                        Overlay::Session(Box::new(SessionDialog::new(open.as_ref(), &setup)));
-                    out.push(Request::Devices);
+                    self.open_settings(Page::Audio, out);
                 }
             }
             C::Record => {
@@ -3765,7 +3797,11 @@ impl AppState {
                             request: ac2_proto::model::RecordRequest {
                                 inputs: o.config.input_channels.clone(),
                                 name: None,
-                                max_duration: Seconds(RECORD_MAX_S),
+                                max_duration: Seconds(
+                                    self.prefs
+                                        .record_limit_min
+                                        .map_or(RECORD_MAX_S, |m| f64::from(m) * 60.0),
+                                ),
                                 max_bytes: None,
                             },
                         },
@@ -3896,16 +3932,13 @@ impl AppState {
                 self.prompt(PromptKind::CalDelete, text);
             }
             C::InputSetup | C::Calibrations => match self.daemon() {
-                Some(s) => {
-                    // Input setup starts on the input the selected measurement listens on.
-                    let on = (c == C::InputSetup)
-                        .then(|| {
-                            self.selected_meas()
-                                .and_then(|m| meas_input(&m.config.kind))
-                        })
-                        .flatten();
-                    let v = CalView::new(s, on);
-                    self.overlay = Overlay::Calibrations(Box::new(v));
+                Some(_) => {
+                    let page = if c == C::InputSetup {
+                        Page::Io
+                    } else {
+                        Page::Calibration
+                    };
+                    self.open_settings(page, out);
                 }
                 None => self.error("not connected to a daemon"),
             },
@@ -4295,13 +4328,8 @@ impl AppState {
             | C::SplA
             | C::SplC
             | C::SplZ => self.spl_weightings(c, out),
-            C::LeqWindows => match self.pane_meas(PaneKind::Spl).cloned() {
-                Some(m) => {
-                    let calibrated = self.leq_calibrated(m.id);
-                    if let Some(d) = LeqDialog::new(&m, calibrated) {
-                        self.overlay = Overlay::Leq(Box::new(d));
-                    }
-                }
+            C::LeqWindows => match self.pane_meas(PaneKind::Spl) {
+                Some(_) => self.open_settings(Page::Leq, out),
                 None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
             },
         }
@@ -4431,7 +4459,7 @@ impl AppState {
             self.submit_leq(out);
             return;
         }
-        let Overlay::Leq(d) = &mut self.overlay else {
+        let Some(d) = self.overlay.leq_mut() else {
             return;
         };
         match m {
@@ -4453,7 +4481,7 @@ impl AppState {
     /// Enter on the Leq dialog: the meter's windows go out (applied in place: its log and
     /// windows carry on) and the SPL pane shows them; or the dialog says what is wrong.
     fn submit_leq(&mut self, out: &mut Vec<Request>) {
-        let Overlay::Leq(d) = &mut self.overlay else {
+        let Some(d) = self.overlay.leq_mut() else {
             return;
         };
         match d.meas_config() {
@@ -4717,6 +4745,7 @@ impl AppState {
                 }
                 self.follow_spectrum_starts();
                 self.follow_output_device();
+                self.follow_settings();
                 self.follow_sweep(out);
                 self.follow_leq_alarms();
                 let data = self.data.clone();
@@ -4734,9 +4763,14 @@ impl AppState {
                 }
                 let names = self.session_input_names();
                 match (&mut self.overlay, r) {
-                    (Overlay::Session(s), Ok(d)) => s.set_backends(d, &self.prefs),
-                    (Overlay::Session(s), Err(e)) => {
-                        s.error = Some(format!("cannot list devices: {e}"));
+                    (Overlay::Settings(s), Ok(d)) => {
+                        s.session.set_backends(d, &self.prefs);
+                        if s.focus_outputs {
+                            s.focus_outputs = !s.focus_stimulus_outputs();
+                        }
+                    }
+                    (Overlay::Settings(s), Err(e)) => {
+                        s.session.error = Some(format!("cannot list devices: {e}"));
                     }
                     (Overlay::Form(f), Ok(_)) => {
                         // Channel names arrived: relabel the inputs.
@@ -4753,15 +4787,15 @@ impl AppState {
             } => {
                 // The answer for a device the dialog has since left says nothing about the
                 // one it shows now.
-                if let Overlay::Session(s) = &mut self.overlay
+                if let Some(s) = self.overlay.session_mut()
                     && s.preview_target() == Some((backend, device))
                 {
                     s.preview_error = result.err().map(|e| format!("meters unavailable: {e}"));
                 }
             }
             ConnEvent::LoopbackDetected(r) => {
-                if let Overlay::Session(s) = &mut self.overlay {
-                    s.detect_result(r);
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.session.detect_result(r);
                     // The detection closed the preview on the daemon: reopen it now.
                     self.preview_sent_s = f64::NEG_INFINITY;
                 } else if let Err(e) = r {
@@ -4806,8 +4840,8 @@ impl AppState {
                 self.traces.insert(t.meta.id, (t, g));
             }
             ConnEvent::Reply { what, result } => {
-                if let Overlay::Calibrations(v) = &mut self.overlay {
-                    v.reply(&what, &result);
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.cal.reply(&what, &result);
                 }
                 match result {
                     Ok(()) => self.toast(what),
@@ -4823,6 +4857,20 @@ impl AppState {
                 self.toast(format!("slot {slot}: {} captured", trace.edit.name));
             }
             ConnEvent::Stimulus(s) => self.stim_event(s, out),
+            ConnEvent::Server { what, result } => {
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    match (&result, &what) {
+                        // A failed change leaves the info shown as it was.
+                        (Err(_), Some(_)) => {}
+                        _ => s.connection.server = Some(result.clone()),
+                    }
+                }
+                match (what, result) {
+                    (Some(w), Ok(_)) => self.toast(w),
+                    (Some(w), Err(e)) => self.error(format!("{w}: {e}")),
+                    (None, _) => {}
+                }
+            }
         }
     }
 
@@ -4887,78 +4935,6 @@ impl AppState {
         }
     }
 
-    /// Keys on the session dialog. Esc never gets here: it closes the dialog, as it closes
-    /// every window.
-    fn session_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
-        use eframe::egui::Key;
-        let Overlay::Session(d) = &mut self.overlay else {
-            return;
-        };
-        let plain = !(chord.command || chord.alt);
-        match chord.key {
-            Key::Enter => {
-                if d.edit == Some(Edit::DetectLevel) {
-                    self.session_msg(SessionMsg::DetectConfirm, out);
-                } else if matches!(d.edit, Some(Edit::Mic(_))) {
-                    d.finish_edit();
-                } else {
-                    self.submit_session(out);
-                }
-            }
-            Key::ArrowUp => {
-                d.detect_cancel();
-                d.move_focus(-1);
-            }
-            Key::Tab if chord.shift => {
-                d.detect_cancel();
-                d.move_focus(-1);
-            }
-            Key::ArrowDown | Key::Tab => {
-                d.detect_cancel();
-                d.move_focus(1);
-            }
-            Key::ArrowLeft | Key::ArrowRight if d.edit.is_none() => {
-                let forward = chord.key == Key::ArrowRight;
-                if matches!(d.focus, Row::Input(_)) {
-                    let st = self.mirror.as_ref().and_then(|m| m.state.clone());
-                    let mics = st.as_ref().map(|s| s.mics.as_slice()).unwrap_or_default();
-                    let live = st.as_ref().map(|s| s.inputs.as_slice()).unwrap_or_default();
-                    if let Some(row) = d.step_curve(forward, mics, live) {
-                        // The session already captures this mic: the choice applies now.
-                        let what = curve_what(&row);
-                        out.push(Request::Call {
-                            what,
-                            cmd: Command::SessionInputs { inputs: vec![row] },
-                        });
-                    }
-                } else {
-                    d.cycle(if forward { 1 } else { -1 }, &self.prefs);
-                }
-            }
-            // Everything below types text while a text row or edit has the keyboard.
-            _ if d.text_focus() => self.swallow_text = swallow,
-            Key::Space if plain => d.toggle(),
-            Key::R if plain => d.assign(RoleKey::Reference),
-            Key::M if plain => d.assign(RoleKey::Mic),
-            Key::S if plain => d.assign(RoleKey::Stimulus),
-            Key::N | Key::F2 if plain => {
-                if d.start_mic_edit() {
-                    // The N that started the edit also arrives as text.
-                    self.swallow_text = typed_char(&chord);
-                }
-            }
-            Key::D if plain => {
-                self.session_msg(SessionMsg::Detect, out);
-                if let Overlay::Session(d) = &self.overlay
-                    && d.edit == Some(Edit::DetectLevel)
-                {
-                    self.swallow_text = typed_char(&chord);
-                }
-            }
-            _ => self.swallow_text = swallow,
-        }
-    }
-
     /// Keys of the calibrations view.
     fn cal_view_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
         use eframe::egui::Key;
@@ -4966,9 +4942,10 @@ impl AppState {
             self.overlay = Overlay::None;
             return;
         };
-        let Overlay::Calibrations(v) = &mut self.overlay else {
+        let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
+        let v = &mut s.cal;
         if let Some(d) = &mut v.acoustic {
             if let Some(a) = crate::acoustic_dialog::key(d, &chord) {
                 self.cal_action(a, out);
@@ -4988,10 +4965,7 @@ impl AppState {
         let plain = !(chord.command || chord.alt);
         let action = match chord.key {
             Key::Enter if v.edit.is_some() => v.finish(&st),
-            Key::Enter => {
-                self.overlay = Overlay::None;
-                None
-            }
+            Key::Enter => None,
             Key::ArrowUp => {
                 v.move_focus(&st, -1);
                 None
@@ -5101,11 +5075,22 @@ impl AppState {
     fn session_msg(&mut self, m: SessionMsg, out: &mut Vec<Request>) {
         let level = self.stimulus.level;
         let ceiling = self.ceiling();
-        let Overlay::Session(d) = &mut self.overlay else {
+        let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
+        // The mouse reaches a row on the page it is drawn on.
+        if let SessionMsg::Focus(r)
+        | SessionMsg::Cycle(r, _)
+        | SessionMsg::Toggle(r)
+        | SessionMsg::Role(r, _)
+        | SessionMsg::EditMic(r) = m
+        {
+            s.show_row(r);
+        }
+        let d = &mut s.session;
         match m {
             SessionMsg::Focus(r) => {
+                s.on_ceiling = false;
                 d.detect_cancel();
                 d.focus_row(r);
             }
@@ -5115,16 +5100,26 @@ impl AppState {
                 d.cycle(step, &self.prefs);
             }
             SessionMsg::Toggle(r) => {
+                s.on_ceiling = false;
                 d.focus_row(r);
                 d.toggle();
             }
             SessionMsg::Role(r, k) => {
+                s.on_ceiling = false;
                 d.focus_row(r);
                 d.assign(k);
+                if k == crate::session_dialog::RoleKey::Stimulus {
+                    self.stimulus_ticks_now(out);
+                }
             }
             SessionMsg::EditMic(r) => {
+                s.on_ceiling = false;
                 d.focus_row(r);
-                d.start_mic_edit();
+                if matches!(r, Row::Output(_)) {
+                    d.start_label_edit();
+                } else {
+                    d.start_mic_edit();
+                }
             }
             SessionMsg::Detect => {
                 if let Err(e) = d.detect_start(level) {
@@ -5146,9 +5141,10 @@ impl AppState {
     /// for the device, and points the stimulus at the chosen outputs (K4).
     fn submit_session(&mut self, out: &mut Vec<Request>) {
         let no_measurements = self.daemon().is_some_and(|s| s.measurements.is_empty());
-        let Overlay::Session(d) = &mut self.overlay else {
+        let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
+        let d = &mut s.session;
         d.finish_edit();
         let plan = match d.plan() {
             Ok(p) => p,

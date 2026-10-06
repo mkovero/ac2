@@ -58,8 +58,9 @@ struct Args {
     /// Linux).
     #[arg(long, value_name = "FILE")]
     keys: Option<std::path::PathBuf>,
-    #[arg(long, value_enum, default_value = "dark")]
-    theme: ThemeArg,
+    /// Theme for this run (default: the one last chosen in Settings › Display, else dark).
+    #[arg(long, value_enum)]
+    theme: Option<ThemeArg>,
     /// Open the connect dialog (local daemon, embedded, or a rig found on the network). Also
     /// opens on its own when no target is given and no local daemon is running.
     #[arg(long, conflicts_with_all = ["remote", "ctrl", "embedded"])]
@@ -173,14 +174,27 @@ fn main() -> ExitCode {
     let keymap_path = Some(args.keys.clone().unwrap_or_else(config_path));
     let (keymap, err) = Keymap::load(keymap_path.as_deref());
     notices.extend(err);
-    let theme = match args.theme {
-        ThemeArg::Dark => ThemeName::Dark,
-        ThemeArg::Light => ThemeName::Light,
-        ThemeArg::HighContrast => ThemeName::HighContrast,
-    };
     let prefs_path = ac2_paths::ui_prefs();
     let (prefs, err) = UiPrefs::load(Some(&prefs_path));
     notices.extend(err);
+    let theme = match args.theme {
+        Some(ThemeArg::Dark) => ThemeName::Dark,
+        Some(ThemeArg::Light) => ThemeName::Light,
+        Some(ThemeArg::HighContrast) => ThemeName::HighContrast,
+        None => prefs.theme.unwrap_or(ThemeName::Dark),
+    };
+    let key_dir = args
+        .key_dir
+        .clone()
+        .unwrap_or_else(ac2_client::keys::default_key_dir);
+    // Shown, never made here: a key is made when the operator pairs with a rig.
+    let client_key = KeyDir::new(key_dir.clone())
+        .client_keypair()
+        .ok()
+        .map(|kp| ac2_ui::settings::ClientKey {
+            fingerprint: kp.public.fingerprint(),
+            key: kp.public.to_z85(),
+        });
     let opts = AppOptions {
         target,
         theme,
@@ -194,6 +208,13 @@ fn main() -> ExitCode {
         // An embedded daemon on real audio starts without a session; the simulated rig
         // starts measuring.
         open_session_dialog: embedded.is_some() && !matches!(args.backend, Some(BackendArg::Fake)),
+        client_key,
+        connect: Some(ac2_ui::app::ConnectSetup {
+            key_dir,
+            client_name: NAME.into(),
+            backends: embedded_backends(),
+            discovery: !args.no_discovery,
+        }),
     };
     // The window as last left; the app makes it fit the screen if that changed.
     let mut viewport = egui::ViewportBuilder::default()

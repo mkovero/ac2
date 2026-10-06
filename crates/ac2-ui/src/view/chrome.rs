@@ -310,9 +310,11 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             (it.prio, v, it.droppable)
         })
         .collect();
-    // A little slack: egui rounds widget sizes to whole pixels.
-    let pick = fit_bar(&widths, ui.available_width() - 4.0);
+    // A little slack: egui rounds widget sizes to whole pixels; the gear keeps its place.
+    let pick = fit_bar(&widths, ui.available_width() - 4.0 - GEAR_W);
     let (lp, rp) = pick.split_at(left.len());
+    let settings_tip = format!("Settings ({})", key_hint(app, CommandId::Settings));
+    let mut open_settings = false;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BAR_GAP;
         for (it, p) in left.iter().zip(lp) {
@@ -321,6 +323,14 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             }
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let gear = ui
+                .add(
+                    egui::Button::new(RichText::new("⚙").size(16.0).color(ch.text))
+                        .frame(false)
+                        .min_size(egui::vec2(GEAR_W - BAR_GAP, 18.0)),
+                )
+                .on_hover_text(settings_tip);
+            open_settings = gear.clicked();
             for (it, p) in right.iter().zip(rp) {
                 if let Some(k) = p {
                     draw_item(ui, it, *k, true);
@@ -328,7 +338,13 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             }
         });
     });
+    if open_settings {
+        app.dispatch(crate::state::Msg::Command(CommandId::Settings));
+    }
 }
+
+/// Room the Settings gear takes at the bar's right edge.
+const GEAR_W: f32 = 28.0;
 
 /// The stimulus items, from the bar's right edge inwards: what the keys do next, who holds
 /// the generator, the level and outputs, the state badge.
@@ -394,6 +410,15 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         Item::new(
             90,
             vec![
+                RichText::new(format!(
+                    "{prefix}{level} → {}",
+                    ac2_scene::rig::stimulus_outputs(
+                        &st.stimulus.outputs,
+                        st.daemon()
+                            .map(|s| s.outputs.as_slice())
+                            .unwrap_or_default()
+                    )
+                )),
                 RichText::new(format!(
                     "{prefix}{level} → out {}",
                     outputs_text(&st.stimulus.outputs)

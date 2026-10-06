@@ -13,7 +13,7 @@ use crate::session_dialog::{
 use crate::state::{Msg, Overlay, SessionMsg};
 use crate::theme::Chrome;
 
-use super::overlays::{backdrop, card};
+use super::overlays::card;
 
 const METER_W: f32 = 150.0;
 const METER_H: f32 = 10.0;
@@ -111,12 +111,14 @@ fn label_col(ui: &mut egui::Ui, text: &str, focused: bool, ch: &Chrome) -> egui:
     )
 }
 
-/// The session dialog.
-pub(super) fn session(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
-    let Overlay::Session(d) = &app.state.overlay else {
-        return;
-    };
-    let d: SessionDialog = (**d).clone();
+/// The input meters and each mic row's curve and calibration text, for the channel rows.
+fn channel_data(
+    app: &App,
+    d: &SessionDialog,
+) -> (
+    std::collections::BTreeMap<u16, MeterReading>,
+    Vec<Option<(String, bool)>>,
+) {
     let meters = app.state.input_meters();
     let now = super::now();
     let offset = ac2_scene::time::ClockOffset(
@@ -128,71 +130,91 @@ pub(super) fn session(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
             }),
     );
-    let cal: Vec<Option<(String, bool)>> = (0..d.inputs.len())
+    let cal = (0..d.inputs.len())
         .map(|i| {
             app.state
                 .daemon()
                 .and_then(|st| d.row_cal_text(i, st, now.wall, offset))
         })
         .collect();
-    backdrop(ctx);
-    let mut msg = None;
-    let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("ac2-session"))
-        .order(egui::Order::Foreground)
-        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 40.0))
-        .show(ctx, |ui| {
-            card(ch).show(ui, |ui| {
-                ui.set_width(780.0);
-                ui.label(RichText::new("Open audio session").strong().size(16.0));
-                ui.add_space(6.0);
-                backend_rows(ui, &d, ch, &mut msg);
-                ui.add_space(4.0);
-                ui.separator();
-                let grid_h = (screen.height() - 430.0).max(160.0);
-                egui::ScrollArea::vertical()
-                    .max_height(grid_h)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| channel_grid(ui, &d, &meters, &cal, ch, &mut msg));
-                ui.separator();
-                rate_rows(ui, &d, ch, &mut msg);
-                detect_panel(ui, &d, ch, &mut msg);
-                for (text, color) in [
-                    (d.notice.as_deref(), ch.armed),
-                    (d.preview_error.as_deref(), ch.dim),
-                    (d.error.as_deref(), ch.fault),
-                ] {
-                    if let Some(t) = text {
-                        ui.add_space(2.0);
-                        ui.label(RichText::new(t).color(color));
-                    }
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.button(RichText::new("Open").strong()).clicked() {
-                        msg = Some(SessionMsg::Submit);
-                    }
-                    if ui.button("Detect loopback…").clicked() {
-                        msg = Some(SessionMsg::Detect);
-                    }
-                    if ui.button("Cancel").clicked() {
-                        msg = Some(SessionMsg::Cancel);
-                    }
-                });
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(
-                        "↑↓ move · ←→ backend / device, a mic's curve (off / 0° / 90° …) · \
-                         Space in session · R reference · M mic · S stimulus · N names the \
-                         mic · D detects the loopback · Enter opens · Esc closes",
-                    )
-                    .small()
-                    .color(ch.dim),
-                );
-            });
-        });
-    if let Some(m) = msg {
-        app.dispatch(Msg::Session(m));
+    (meters, cal)
+}
+
+/// What the session model says: a notice, why meters are missing, why Enter was refused.
+pub(super) fn notices(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome) {
+    for (text, color) in [
+        (d.notice.as_deref(), ch.armed),
+        (d.preview_error.as_deref(), ch.dim),
+        (d.error.as_deref(), ch.fault),
+    ] {
+        if let Some(t) = text {
+            ui.add_space(2.0);
+            ui.label(RichText::new(t).color(color));
+        }
+    }
+}
+
+/// The Inputs & outputs page's channels: inputs with meters, names and roles, outputs with
+/// their labels and stimulus ticks, the reference pair and the loopback detection.
+pub(super) fn channels_page(
+    app: &App,
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    if d.backends.is_none() {
+        ui.label(RichText::new("listing backends and devices…").color(ch.dim));
+        return;
+    }
+    if let Some(dev) = d.device_info() {
+        ui.label(
+            RichText::new(format!(
+                "{} · {} (the device is chosen on the Audio page)",
+                dev.name,
+                device_summary(dev)
+            ))
+            .color(ch.dim),
+        );
+        ui.add_space(4.0);
+    }
+    let (meters, cal) = channel_data(app, d);
+    channel_grid(ui, d, &meters, &cal, ch, msg);
+    ui.add_space(6.0);
+    ui.label(RichText::new(d.reference_text()).color(ch.text));
+    detect_panel(ui, d, ch, msg);
+    notices(ui, d, ch);
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if ui
+            .button(RichText::new("Open the session with these channels").strong())
+            .clicked()
+        {
+            *msg = Some(SessionMsg::Submit);
+        }
+        if ui.button("Detect loopback…").clicked() {
+            *msg = Some(SessionMsg::Detect);
+        }
+    });
+}
+
+/// The Audio page: backend, device, rate and buffer.
+pub(super) fn audio_page(
+    ui: &mut egui::Ui,
+    d: &SessionDialog,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    backend_rows(ui, d, ch, msg);
+    ui.add_space(6.0);
+    rate_rows(ui, d, ch, msg);
+    notices(ui, d, ch);
+    ui.add_space(6.0);
+    if ui
+        .button(RichText::new("Open the session").strong())
+        .clicked()
+    {
+        *msg = Some(SessionMsg::Submit);
     }
 }
 
@@ -400,10 +422,21 @@ fn channel_grid(
                             .color(ch.dim),
                     );
                 });
-                let t = RichText::new(r.label()).color(if in_session { ch.text } else { ch.dim });
+                let name = if d.edit == Some(Edit::OutputLabel(o)) {
+                    format!("{}▏", d.label_text)
+                } else {
+                    match (&r.rig_label, &r.device_name) {
+                        (Some(l), Some(dev)) => format!("{l} · {dev}"),
+                        _ => r.label(),
+                    }
+                };
+                let t = RichText::new(name).color(if in_session { ch.text } else { ch.dim });
                 let resp = ui.add(egui::Button::selectable(focused, t));
                 if resp.clicked() {
                     *msg = Some(SessionMsg::Focus(row));
+                }
+                if resp.double_clicked() {
+                    *msg = Some(SessionMsg::EditMic(row));
                 }
                 if focused {
                     resp.scroll_to_me(None);

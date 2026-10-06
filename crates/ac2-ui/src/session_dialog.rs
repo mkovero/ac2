@@ -1,6 +1,7 @@
-//! The audio session dialog (Shift+O): a backend, a device, and one row per input and output
-//! with its name, a live meter and its role. Pure data; the reducer routes keys here and the
-//! view draws it.
+//! The audio session model behind two pages of Settings ([`crate::settings`]): **Audio**
+//! (a backend, a device, rate and buffer; Shift+O) and **Inputs & outputs** (one row per
+//! input and output with its name, a live meter and its role). Pure data; the reducer
+//! routes keys here and the view draws it.
 //!
 //! Roles say what a channel is for, so nobody types channel numbers:
 //! - **R — Reference**: the input the stimulus returns on through a loopback cable (one).
@@ -10,13 +11,15 @@
 //!
 //! The session's inputs, outputs and loopback follow from the roles (and the rows put in
 //! the session with Space). Choices are remembered per device ([`UiPrefs::sessions`]).
+//! Outputs carry the rig's labels (`Main L`), kept by the daemon for every client; N on an
+//! output row names it.
 
 use std::collections::BTreeMap;
 
 use ac2_proto::model::{
     Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
-    DeviceSelector, InputSetup, LoopbackDetection, LoopbackRoute, MeasConfig, MeasKind, Mic,
-    OpenSession, SessionConfig, TransferConfig,
+    DeviceSelector, InputSetup, LoopbackDetection, LoopbackRoute, MAX_OUTPUT_LABEL, MeasConfig,
+    MeasKind, Mic, OpenSession, OutputSetup, SessionConfig, TransferConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
@@ -73,13 +76,28 @@ impl InputRow {
 pub struct OutputRow {
     pub channel: u16,
     pub device_name: Option<String>,
+    /// The rig's label of this output (`Main L`), kept by the daemon.
+    pub rig_label: Option<String>,
     pub stimulus: bool,
 }
 
 impl OutputRow {
+    /// The rig's label, else the backend's name, else `Output N`.
     pub fn label(&self) -> String {
-        output_name(self.channel, self.device_name.as_deref())
+        match &self.rig_label {
+            Some(l) => l.clone(),
+            None => output_name(self.channel, self.device_name.as_deref()),
+        }
     }
+}
+
+/// Which rows a page of Settings shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    /// Audio: backend, device, rate, buffer.
+    Device,
+    /// Inputs & outputs: one row per channel.
+    Channels,
 }
 
 /// A focusable row.
@@ -98,6 +116,8 @@ pub enum Row {
 pub enum Edit {
     /// The mic name of input row `.0`.
     Mic(usize),
+    /// The rig's label of output row `.0`; applied on Enter, dropped on ↑/↓.
+    OutputLabel(usize),
     /// The level of the loopback detection burst.
     DetectLevel,
 }
@@ -166,6 +186,8 @@ pub struct SessionDialog {
     pub edit: Option<Edit>,
     /// Why the last Enter was refused (plain words).
     pub error: Option<String>,
+    /// The output label being typed ([`Edit::OutputLabel`]).
+    pub label_text: String,
     /// What just happened (a role moved, a detection answered).
     pub notice: Option<String>,
     pub detect: Option<DetectPanel>,
@@ -175,6 +197,10 @@ pub struct SessionDialog {
     open: Option<OpenSession>,
     /// The daemon's input setup (mic names) when the dialog opened.
     setup: Vec<InputSetup>,
+    /// The rows of which page are focusable.
+    pub part: Part,
+    /// The rig's output labels as last mirrored.
+    labels: Vec<OutputSetup>,
 }
 
 /// Operator-facing backend name.
@@ -224,11 +250,34 @@ impl SessionDialog {
             focus: Row::Backend,
             edit: None,
             error: None,
+            label_text: String::new(),
             notice: None,
             detect: None,
             preview_error: None,
             open: open.cloned(),
             setup: setup.to_vec(),
+            part: Part::Device,
+            labels: Vec::new(),
+        }
+    }
+
+    /// Shows the rows of `part`; the focus moves to its first row unless it is on one.
+    pub fn show_part(&mut self, part: Part) {
+        self.part = part;
+        if !self.rows().contains(&self.focus) {
+            self.edit = None;
+            if let Some(r) = self.rows().first() {
+                self.focus = *r;
+            }
+        }
+    }
+
+    /// The rig's output labels changed (or arrived): the rows follow, an edit in progress
+    /// keeps its text.
+    pub fn set_labels(&mut self, labels: &[OutputSetup]) {
+        self.labels = labels.to_vec();
+        for o in &mut self.outputs {
+            o.rig_label = rig_label(labels, o.channel);
         }
     }
 
@@ -263,6 +312,9 @@ impl SessionDialog {
             })
             .unwrap_or(0);
         self.load_device(prefs);
+        // The rows are new: the focus belongs on one the shown page has.
+        let part = self.part;
+        self.show_part(part);
     }
 
     pub fn backend_info(&self) -> Option<&BackendInfo> {
@@ -369,6 +421,7 @@ impl SessionDialog {
             .map(|channel| OutputRow {
                 channel,
                 device_name: names(d.output.as_ref(), channel),
+                rig_label: rig_label(&self.labels, channel),
                 stimulus: false,
             })
             .collect();
@@ -468,19 +521,25 @@ impl SessionDialog {
 
     // ----- focus -------------------------------------------------------------------------
 
-    /// Focus order.
+    /// Focus order of the rows [`Self::part`] shows.
     pub fn rows(&self) -> Vec<Row> {
-        let mut v = vec![Row::Backend, Row::Device];
-        v.extend((0..self.inputs.len()).map(Row::Input));
-        v.extend((0..self.outputs.len()).map(Row::Output));
-        v.extend([Row::Rate, Row::Buffer]);
-        v
+        match self.part {
+            Part::Device => vec![Row::Backend, Row::Device, Row::Rate, Row::Buffer],
+            Part::Channels => {
+                let mut v: Vec<Row> = (0..self.inputs.len()).map(Row::Input).collect();
+                v.extend((0..self.outputs.len()).map(Row::Output));
+                v
+            }
+        }
     }
 
-    /// ↑/↓ (Tab / Shift+Tab), wrapping. Ends a mic-name edit.
+    /// ↑/↓ (Tab / Shift+Tab), wrapping. Ends a mic-name edit; drops an output label edit.
     pub fn move_focus(&mut self, d: i32) {
         self.finish_edit();
         let rows = self.rows();
+        if rows.is_empty() {
+            return;
+        }
         let i = rows.iter().position(|r| *r == self.focus).unwrap_or(0) as i32;
         let n = rows.len() as i32;
         self.focus = rows[(i + d).rem_euclid(n) as usize];
@@ -607,9 +666,51 @@ impl SessionDialog {
         true
     }
 
+    /// N on an output row: types its label (the rig's name for it, for every client).
+    pub fn start_label_edit(&mut self) -> bool {
+        let Row::Output(i) = self.focus else {
+            return false;
+        };
+        let Some(r) = self.outputs.get(i) else {
+            return false;
+        };
+        self.label_text = r.rig_label.clone().unwrap_or_default();
+        self.edit = Some(Edit::OutputLabel(i));
+        self.notice = None;
+        self.error = None;
+        true
+    }
+
+    /// Enter on an output label edit: the row to send (`None` label clears it), or why not.
+    pub fn commit_label(&mut self) -> Result<Option<OutputSetup>, String> {
+        let Some(Edit::OutputLabel(i)) = self.edit else {
+            return Ok(None);
+        };
+        let Some(r) = self.outputs.get(i) else {
+            self.edit = None;
+            return Ok(None);
+        };
+        let text = self.label_text.trim().to_owned();
+        let label = (!text.is_empty()).then_some(text);
+        if let Some(l) = &label {
+            ac2_proto::model::check_output_label(l)?;
+        }
+        let row = OutputSetup {
+            channel: r.channel,
+            label,
+        };
+        self.edit = None;
+        Ok((self.outputs[i].rig_label != row.label).then_some(row))
+    }
+
     /// Ends a mic-name edit (Enter, ↑/↓, Tab). Another mic name starts with no curve
-    /// chosen: the choice belonged to the other capsule.
+    /// chosen: the choice belonged to the other capsule. An output label edit is dropped:
+    /// a rig-wide name is only sent on Enter.
     pub fn finish_edit(&mut self) {
+        if let Some(Edit::OutputLabel(_)) = self.edit {
+            self.edit = None;
+            return;
+        }
         if let Some(Edit::Mic(i)) = self.edit
             && let Some(r) = self.inputs.get(i)
         {
@@ -738,6 +839,13 @@ impl SessionDialog {
                     d.error = None;
                 }
             }
+            Some(Edit::OutputLabel(_)) => {
+                for c in s.chars().filter(|c| !c.is_control()) {
+                    if self.label_text.chars().count() < MAX_OUTPUT_LABEL {
+                        self.label_text.push(c);
+                    }
+                }
+            }
             None => match self.focus {
                 Row::Rate => self.rate.push_str(s),
                 Row::Buffer => self.buffer.push_str(s),
@@ -757,6 +865,9 @@ impl SessionDialog {
                 if let Some(d) = &mut self.detect {
                     d.level.pop();
                 }
+            }
+            Some(Edit::OutputLabel(_)) => {
+                self.label_text.pop();
             }
             None => match self.focus {
                 Row::Rate => {
@@ -956,6 +1067,45 @@ impl SessionDialog {
         })
     }
 
+    /// The default reference as its loopback pair, in words: which input the stimulus output
+    /// returns on, and whether that is the open session's already.
+    pub fn reference_text(&self) -> String {
+        let input = self.inputs.iter().find(|r| r.role == InputRole::Reference);
+        let output = self
+            .stimulus_output()
+            .and_then(|o| self.outputs.iter().find(|r| r.channel == o));
+        match (input, output) {
+            (Some(i), Some(o)) => {
+                let now = self.is_open_device()
+                    && self.open.as_ref().and_then(|s| s.config.loopback)
+                        == Some(LoopbackRoute {
+                            output: o.channel,
+                            input: i.channel,
+                        });
+                format!(
+                    "Reference (loopback): input {} · {} ← output {} · {}{}",
+                    i.channel + 1,
+                    i.label(),
+                    o.channel + 1,
+                    o.label(),
+                    if now {
+                        ""
+                    } else {
+                        " — applies when the session opens (Enter)"
+                    }
+                )
+            }
+            (Some(i), None) => format!(
+                "Reference: input {} · {} — tick the output that feeds its loopback (S)",
+                i.channel + 1,
+                i.label()
+            ),
+            (None, _) => "No reference: R on the input the stimulus's loopback cable returns on \
+                          (or D detects it)"
+                .to_owned(),
+        }
+    }
+
     // ----- the session -------------------------------------------------------------------
 
     /// A detection burst is playing.
@@ -1107,6 +1257,14 @@ impl SessionDialog {
             transfers,
         })
     }
+}
+
+/// The rig's label of output `channel`, if it has one.
+fn rig_label(labels: &[OutputSetup], channel: u16) -> Option<String> {
+    labels
+        .iter()
+        .find(|o| o.channel == channel)
+        .and_then(|o| o.label.clone())
 }
 
 /// Roles of a device never used before: the simulated rig's own wiring (out 1 → in 1

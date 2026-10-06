@@ -341,6 +341,7 @@ macro_rules! commands {
 commands! {
     Help => "help", "Show / hide key bindings", [Global];
     Palette => "palette", "Command palette", [Global];
+    Settings => "settings", "Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection…", [Global];
     Quit => "quit", "Quit", [Global];
     Fullscreen => "fullscreen", "Window full screen on / off", [Global];
     KeyHints => "key_hints", "Key hints on / off", [Global];
@@ -354,7 +355,7 @@ commands! {
     LevelUpCoarse => "level_up_coarse", "Stimulus level +3 dB", [Global];
     LevelDownCoarse => "level_down_coarse", "Stimulus level −3 dB", [Global];
     StimulusLevel => "stimulus_level", "Stimulus: type level (dBFS)…", [Global];
-    StimulusOutputs => "stimulus_outputs", "Stimulus: type output channels…", [Global];
+    StimulusOutputs => "stimulus_outputs", "Stimulus outputs: tick them in Settings › Inputs & outputs…", [Global];
     StimulusTakeOver => "stimulus_take_over", "Stimulus: take over the lease from another client and arm", [Global];
 
     FocusTransfer => "focus_transfer", "Focus transfer-function pane", [Global];
@@ -420,7 +421,7 @@ commands! {
     SessionSave => "session_save", "Session: save (name or path)…", [Global];
     SessionLoad => "session_load", "Session: load, disarmed (name or path)…", [Global];
     Reconnect => "reconnect", "Reconnect to the daemon now", [Global];
-    OpenSession => "session_open", "Open audio session…", [Global];
+    OpenSession => "session_open", "Open audio session: Settings › Audio…", [Global];
     CloseSession => "session_close", "Close audio session", [Global];
     Record => "record", "Record: raw audio of every input on / off (stops by itself after 1 h)", [Global];
     ReplayRecording => "replay_recording", "Replay a recording as the session (name or path)…", [Global];
@@ -431,15 +432,15 @@ commands! {
     NewMath => "meas_new_math", "New math channel: A ÷ × + − B, or the average of several (mic positions)…", [Global];
     EditMath => "math_edit", "Edit the selected math channel: operands, operator, method…", [Global];
     DeleteMeasurement => "meas_delete", "Delete selected measurement", [Global];
-    InputSetup => "input_setup", "Input setup: mic, mic curve and calibration of each input…", [Global];
-    Calibrations => "calibrations", "Calibrations: mics, curves and sensitivity calibrations…", [Global];
+    InputSetup => "input_setup", "Input setup: Settings › Inputs & outputs (names, roles, mics, max level)…", [Global];
+    Calibrations => "calibrations", "Calibrations: Settings › Calibration (mics, curves, sensitivities)…", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
     MicCurve => "mic_curve", "Mic curve: next curve on the selected measurement's input (off → 0° → 90° …)", [Global];
     MicCurveInput => "mic_curve_input", "Mic curve on input N… (e.g. 2=90°, 2=off)", [Global];
     CalDelete => "cal_delete", "Calibration: delete a sensitivity calibration (input=mic)…", [Global];
     TraceMicCurve => "trace_mic_curve", "Mic curve on the selected trace (e.g. MM1 34804 90°; none removes)…", [Global];
     SweepNew => "sweep_new", "New sweep measurement: response and harmonic distortion…", [Global];
-    LeqWindows => "leq_windows", "Leq windows and limits of the SPL meter…", [Global];
+    LeqWindows => "leq_windows", "Leq windows and limits of the SPL meter: Settings › SPL / Leq…", [Global];
     SplFast => "spl_fast", "SPL meter: Fast time weighting (125 ms)", [Global];
     SplSlow => "spl_slow", "SPL meter: Slow time weighting (1 s)", [Global];
     SplImpulse => "spl_impulse", "SPL meter: Impulse time weighting (35 ms / 1.5 s)", [Global];
@@ -559,6 +560,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::Help, S::Global, k(K::F1)),
         (C::KeyHints, S::Global, sh(K::H)),
         (C::Palette, S::Global, cmd(K::K)),
+        // Ctrl+P(references): the desktop's Ctrl+, is the transfer pane's whole-sample delay
+        // step here, and a letter is on every layout.
+        (C::Settings, S::Global, cmd(K::P)),
         (C::Quit, S::Global, cmd(K::Q)),
         (C::Fullscreen, S::Global, k(K::F11)),
         (C::StimulusLevel, S::Global, k(K::L)),

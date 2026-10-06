@@ -2239,17 +2239,38 @@ fn stimulus_outputs_are_remembered_per_device() {
     assert!(t.st.stimulus.describe().ends_with("→ out 1"));
     assert!(t.st.prefs.outputs.is_empty());
     t.st.prefs_dirty = false;
-    // Choosing outputs remembers them for the session's output device.
-    prompt_text(&mut t, CommandId::StimulusOutputs, "2, 3");
-    assert_eq!(t.st.stimulus.outputs, vec![1, 2]);
+    // Choosing outputs (S on an output in Settings › Inputs & outputs, opened on the
+    // stimulus output) remembers them for the session's output device and applies them
+    // now: the open session (on the simulated rig the dialog lists) has them.
+    let mut s = daemon_state();
+    if let Some(o) = &mut s.session.open {
+        o.backend = BackendKind::Fake;
+    }
+    t.conn(mirror(s));
+    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    // No output ticked yet: the first one is focused; output 2 takes the stimulus.
+    assert_eq!(dialog(&t).focus, Row::Output(0));
+    t.key("Down");
+    t.key("S");
+    assert_eq!(t.st.stimulus.outputs, vec![1]);
     assert!(t.st.prefs_dirty);
-    assert_eq!(t.st.prefs.outputs_for("fake:loop"), Some(&[1u16, 2][..]));
+    assert_eq!(t.st.prefs.outputs_for("fake:loop"), Some(&[1u16][..]));
+    assert!(
+        dialog(&t)
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.starts_with("the stimulus plays on 2 · ")),
+        "{:?}",
+        dialog(&t).notice
+    );
+    t.key("Escape");
 
     // Another device: never used, so output 1; back on the first, its outputs return.
     t.conn(mirror(with_output_device("hw:UMC1820")));
     assert_eq!(t.st.stimulus.outputs, vec![0]);
     t.conn(mirror(with_output_device("fake:loop")));
-    assert_eq!(t.st.stimulus.outputs, vec![1, 2]);
+    assert_eq!(t.st.stimulus.outputs, vec![1]);
 
     // A later run starts from the saved preferences.
     let mut t2 = T::disconnected();
@@ -2260,7 +2281,7 @@ fn stimulus_outputs_are_remembered_per_device() {
         client_id: ClientId("c1".into()),
     });
     t2.conn(mirror(daemon_state()));
-    assert_eq!(t2.st.stimulus.outputs, vec![1, 2]);
+    assert_eq!(t2.st.stimulus.outputs, vec![1]);
 }
 
 #[test]
@@ -2481,10 +2502,11 @@ fn real_backends() -> Vec<BackendInfo> {
     b
 }
 
+/// The session model of Settings (its Inputs & outputs and Audio pages).
 fn dialog(t: &T) -> &SessionDialog {
-    match &t.st.overlay {
-        Overlay::Session(d) => d,
-        other => panic!("no session dialog: {other:?}"),
+    match t.st.overlay.settings() {
+        Some(s) => &s.session,
+        None => panic!("no Settings: {:?}", t.st.overlay),
     }
 }
 
@@ -2522,9 +2544,20 @@ fn previewed(r: &[Request]) -> Option<&DeviceId> {
 }
 
 /// Focuses the session dialog row `row` with ↓ from the top.
+/// Moves to `row` by keys: Ctrl+PageUp / PageDown to its page of Settings, then ↓.
 fn focus(t: &mut T, row: Row) {
+    let page = match row {
+        Row::Input(_) | Row::Output(_) => crate::settings::Page::Io,
+        _ => crate::settings::Page::Audio,
+    };
+    for _ in 0..8 {
+        if t.st.overlay.settings().is_some_and(|s| s.page == page) {
+            break;
+        }
+        t.key("Ctrl+PageDown");
+    }
     for _ in 0..64 {
-        if dialog(t).focus == row {
+        if dialog(t).focus == row && t.st.overlay.settings().is_some_and(|s| !s.on_ceiling) {
             return;
         }
         t.key("Down");
@@ -4033,9 +4066,9 @@ fn mm1_state(curve: CurveChoice) -> State {
 }
 
 fn cal_view(t: &T) -> &crate::cal_view::CalView {
-    match &t.st.overlay {
-        Overlay::Calibrations(v) => v,
-        other => panic!("no calibrations view: {other:?}"),
+    match t.st.overlay.cal() {
+        Some(v) => v,
+        None => panic!("no calibrations page: {:?}", t.st.overlay),
     }
 }
 
@@ -4055,7 +4088,7 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     let mut t = T::new();
     t.conn(mirror(mm1_state(label("0°"))));
     // Main L (transfer, measuring input 2) is selected: Input setup opens on its input.
-    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
     let st = t.st.daemon().cloned().expect("state");
     assert_eq!(
         cal_view(&t).focused(&st),
@@ -4188,7 +4221,7 @@ fn electrical_calibration_from_the_input_setup_view() {
         c.stated_sensitivity = Some(15.0);
     }
     t.conn(mirror(s));
-    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
     let r = t.type_key("E", "e");
     assert!(r.is_empty());
     let d = cal_view(&t).electrical.clone().expect("the dialog");
@@ -4501,7 +4534,7 @@ fn leq_windows_from_the_keyboard() {
     t.conn(mirror(with_spl()));
     t.conn(leq_data(1, 100, 80.0, ac2_proto::frame::LeqFlags::NONE));
     t.type_key("Shift+L", "L");
-    let Overlay::Leq(d) = &t.st.overlay else {
+    let Some(d) = t.st.overlay.leq() else {
         panic!("{:?}", t.st.overlay)
     };
     assert_eq!(d.name, "FOH SPL");
@@ -4516,7 +4549,7 @@ fn leq_windows_from_the_keyboard() {
     t.key("Tab");
     t.key("Tab");
     t.text("100");
-    let Overlay::Leq(d) = &t.st.overlay else {
+    let Some(d) = t.st.overlay.leq() else {
         panic!()
     };
     assert_eq!(d.rows.len(), 2);
@@ -4567,7 +4600,7 @@ fn leq_windows_from_the_keyboard() {
     t.key("Tab");
     t.text("loud");
     t.key("Enter");
-    let Overlay::Leq(d) = &t.st.overlay else {
+    let Some(d) = t.st.overlay.leq() else {
         panic!()
     };
     assert!(d.error.as_deref().is_some_and(|e| e.contains("LAeq 1 min")));
@@ -5150,6 +5183,9 @@ mod display;
 
 #[path = "state_overlay_tests.rs"]
 mod overlay;
+
+#[path = "state_settings_tests.rs"]
+mod settings;
 
 /// An `spl` frame of meter 4 at `at_ms` (daemon clock) under `rev`.
 fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> ConnEvent {

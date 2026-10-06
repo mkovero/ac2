@@ -10,7 +10,9 @@ use crate::theme::Chrome;
 
 use crate::palette::PALETTE_ROWS;
 
-pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+/// Draws the open window; a full-window view (Settings) starts at `top`, under the bars
+/// that say what drives the speakers.
+pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
     match app.state.overlay.clone() {
         Overlay::None => {}
         Overlay::Help => help(app, ctx, ch),
@@ -18,10 +20,8 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         Overlay::Prompt(_) => prompt(app, ctx, ch),
         Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
         Overlay::Form(_) => form(app, ctx, ch),
-        Overlay::Session(_) => super::session::session(app, ctx, ch),
+        Overlay::Settings(_) => super::settings::settings(app, ctx, ch, top),
         Overlay::Offer(_) => super::session::offer(app, ctx, ch),
-        Overlay::Calibrations(_) => super::cal::calibrations(app, ctx, ch),
-        Overlay::Leq(_) => super::leq::leq(app, ctx, ch),
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
         Overlay::DeleteTrace(_) => delete_trace(app, ctx, ch),
         // Drawn by its pane, under the title chip.

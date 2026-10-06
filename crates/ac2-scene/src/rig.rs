@@ -104,6 +104,33 @@ pub fn outputs_text(
         .join(", ")
 }
 
+/// The stimulus outputs as the top bar says them: by the rig's labels where there are
+/// some (`Main L, out 3`), else by number (`out 1, 2`).
+pub fn stimulus_outputs(channels: &[u16], labels: &[OutputSetup]) -> String {
+    let label = |c: u16| {
+        labels
+            .iter()
+            .find(|o| o.channel == c)
+            .and_then(|o| o.label.clone())
+    };
+    if channels.iter().any(|c| label(*c).is_some()) {
+        channels
+            .iter()
+            .map(|&c| label(c).unwrap_or_else(|| format!("out {}", u32::from(c) + 1)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        format!(
+            "out {}",
+            channels
+                .iter()
+                .map(|c| (u32::from(*c) + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 /// How the daemon serves clients, in lines.
 pub fn server_lines(s: &ServerInfo) -> Vec<String> {
     let mut v = match &s.mode {
@@ -232,6 +259,8 @@ mod tests {
             outputs_text(&[0, 2], &labels, |_| None),
             "1 · Main L, 3 · Output 3"
         );
+        assert_eq!(stimulus_outputs(&[0, 2], &labels), "Main L, out 3");
+        assert_eq!(stimulus_outputs(&[1, 2], &labels), "out 2, 3");
     }
 
     #[test]

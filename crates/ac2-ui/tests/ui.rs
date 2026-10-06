@@ -62,6 +62,8 @@ fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
         started: Instant::now(),
         bench_startup: false,
         open_session_dialog: false,
+        client_key: None,
+        connect: None,
     }
 }
 
@@ -510,7 +512,7 @@ fn keyboard_focus_stays_in_the_open_dialog() {
         (
             "Leq windows",
             |h| h.key_press_modifiers(Modifiers::SHIFT, Key::L),
-            |o| matches!(o, Overlay::Leq(_)),
+            |o| o.leq().is_some(),
         ),
         (
             "palette",
@@ -631,20 +633,20 @@ fn calibrations_view() {
     h.event(Event::Text("calibrations".into()));
     h.key_press(Key::Enter);
     step_until(&mut h, "calibrations view", |a| {
-        matches!(a.state.overlay, Overlay::Calibrations(_))
+        a.state.overlay.cal().is_some()
     });
     h.state_mut().state.toasts.clear();
     snapshot(&mut h, "calibrations_view");
     // C on the mic's input: the acoustic calibration dialog, the mic prefilled.
     for _ in 0..8 {
-        let on_input = match &h.state().state.overlay {
-            Overlay::Calibrations(v) => h
+        let on_input = match h.state().state.overlay.cal() {
+            Some(v) => h
                 .state()
                 .state
                 .daemon()
                 .and_then(|s| v.focused(s))
                 .is_some_and(|l| l == ac2_ui::cal_view::CalLine::Input(1)),
-            _ => false,
+            None => false,
         };
         if on_input {
             break;
@@ -653,11 +655,9 @@ fn calibrations_view() {
     }
     h.key_press(Key::C);
     h.event(Event::Text("c".into()));
-    step_until(
-        &mut h,
-        "the acoustic dialog",
-        |a| matches!(&a.state.overlay, Overlay::Calibrations(v) if v.acoustic.is_some()),
-    );
+    step_until(&mut h, "the acoustic dialog", |a| {
+        a.state.overlay.cal().is_some_and(|v| v.acoustic.is_some())
+    });
     h.state_mut().state.toasts.clear();
     snapshot(&mut h, "acoustic_calibration_dialog");
 }
@@ -1210,10 +1210,7 @@ impl Drop for Meters {
 }
 
 fn session_dialog_of(a: &App) -> Option<&ac2_ui::session_dialog::SessionDialog> {
-    match &a.state.overlay {
-        Overlay::Session(d) => Some(d),
-        _ => None,
-    }
+    a.state.overlay.settings().map(|s| &s.session)
 }
 
 /// Shift+O: the session dialog lists the backends and the rig's channels by name with their
@@ -1243,10 +1240,12 @@ fn session_dialog() {
                 && fake.lock().preview.is_some()
         },
     );
-    // ↓↓↓ to input 2, N names its mic.
-    for _ in 0..3 {
-        h.key_press(Key::ArrowDown);
-    }
+    // The Audio page first; Ctrl+PgUp to Inputs & outputs, ↓ to input 2, N names its mic.
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "settings_audio");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::PageUp);
+    h.key_press(Key::ArrowDown);
     h.key_press(Key::N);
     h.event(Event::Text("n".into()));
     h.event(Event::Text("M30 FOH".into()));
@@ -1775,14 +1774,15 @@ fn leq_tiles_from_an_empty_daemon() {
     // 1 min window, Tab Tab its limit, 102; ↓↓↓ the 30 min one's, 99.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog", |a| {
-        matches!(a.state.overlay, Overlay::Leq(_))
+        a.state.overlay.leq().is_some()
     });
     h.key_press(Key::ArrowRight);
-    step_until(
-        &mut h,
-        "the DIN preset alone",
-        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(0) && d.rows.len() == 1),
-    );
+    step_until(&mut h, "the DIN preset alone", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| d.preset == Some(0) && d.rows.len() == 1)
+    });
     h.key_press(Key::ArrowLeft);
     h.key_press(Key::ArrowDown);
     h.key_press(Key::ArrowDown);
@@ -1794,9 +1794,12 @@ fn leq_tiles_from_an_empty_daemon() {
     }
     h.event(Event::Text("99".into()));
     step_until(&mut h, "the limits typed", |a| {
-        matches!(&a.state.overlay, Overlay::Leq(d)
-            if d.preset.is_none() && d.rows.len() == 5
-                && d.rows[0].limit == "102" && d.rows[3].limit == "99")
+        a.state.overlay.leq().is_some_and(|d| {
+            d.preset.is_none()
+                && d.rows.len() == 5
+                && d.rows[0].limit == "102"
+                && d.rows[3].limit == "99"
+        })
     });
     h.event(Event::PointerGone);
     h.state_mut().state.toasts.clear();
@@ -1804,10 +1807,14 @@ fn leq_tiles_from_an_empty_daemon() {
     snapshot(&mut h, "leq_dialog");
     // ↑ ×5 to the preset row, → to the French preset for children (its two windows, the
     // longest name and source), then ← back to "none": the windows as typed.
-    let typed = match &h.state().state.overlay {
-        Overlay::Leq(d) => d.rows.clone(),
-        _ => panic!("the Leq dialog"),
-    };
+    let typed = h
+        .state()
+        .state
+        .overlay
+        .leq()
+        .expect("the Leq dialog")
+        .rows
+        .clone();
     let to = ac2_proto::model::LeqPreset::ALL
         .iter()
         .position(|p| *p == ac2_proto::model::LeqPreset::FranceChildren)
@@ -1818,20 +1825,22 @@ fn leq_tiles_from_an_empty_daemon() {
     for _ in 0..=to {
         h.key_press(Key::ArrowRight);
     }
-    step_until(
-        &mut h,
-        "two windows from one preset",
-        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset == Some(to) && d.rows.len() == 2),
-    );
+    step_until(&mut h, "two windows from one preset", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| d.preset == Some(to) && d.rows.len() == 2)
+    });
     snapshot(&mut h, "leq_dialog_two_window_preset");
     for _ in 0..=to {
         h.key_press(Key::ArrowLeft);
     }
-    step_until(
-        &mut h,
-        "back to the windows as typed",
-        |a| matches!(&a.state.overlay, Overlay::Leq(d) if d.preset.is_none() && d.rows == typed),
-    );
+    step_until(&mut h, "back to the windows as typed", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| d.preset.is_none() && d.rows == typed)
+    });
     // egui walks its own widget focus on arrow keys too; the app's keys never need it.
     h.ctx.memory_mut(|m| {
         if let Some(id) = m.focused() {
@@ -2062,7 +2071,7 @@ fn leq_tiles_from_an_empty_daemon() {
     // to the LCpeak limit, 135; the dialog with its settings under the windows.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog again", |a| {
-        matches!(a.state.overlay, Overlay::Leq(_))
+        a.state.overlay.leq().is_some()
     });
     h.key_press(Key::ArrowUp);
     h.key_press(Key::ArrowUp);
@@ -2071,9 +2080,10 @@ fn leq_tiles_from_an_empty_daemon() {
     h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
     h.event(Event::Text("135".into()));
     step_until(&mut h, "the peak limit and the correction typed", |a| {
-        matches!(&a.state.overlay, Overlay::Leq(d)
-            if d.extra_text(ac2_ui::leq_dialog::Extra::LcPeak) == "135"
-                && d.extra_text(ac2_ui::leq_dialog::Extra::Position) == "4")
+        a.state.overlay.leq().is_some_and(|d| {
+            d.extra_text(ac2_ui::leq_dialog::Extra::LcPeak) == "135"
+                && d.extra_text(ac2_ui::leq_dialog::Extra::Position) == "4"
+        })
     });
     h.event(Event::PointerGone);
     snapshot_when(&mut h, "leq_dialog_peaks_position", pin, |_| true);

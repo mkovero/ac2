@@ -114,14 +114,14 @@ fn with_window(w: Window) -> T {
                 transfers: Vec::new(),
             }));
         }
-        Window::Calibrations => cmd(&mut t, CommandId::InputSetup),
+        Window::Calibrations => cmd(&mut t, CommandId::Calibrations),
         Window::Electrical => {
-            cmd(&mut t, CommandId::InputSetup);
+            cmd(&mut t, CommandId::Calibrations);
             t.type_key("E", "e");
             assert!(cal_view(&t).electrical.is_some());
         }
         Window::Acoustic => {
-            cmd(&mut t, CommandId::InputSetup);
+            cmd(&mut t, CommandId::Calibrations);
             t.type_key("C", "c");
             assert!(cal_view(&t).acoustic.is_some());
         }
@@ -144,14 +144,16 @@ fn with_window(w: Window) -> T {
             | (Window::Prompt, Overlay::Prompt(_))
             | (Window::DelayPick, Overlay::DelayPick(_))
             | (Window::Form | Window::Sweep, Overlay::Form(_))
-            | (Window::Session, Overlay::Session(_))
             | (Window::PaneMenu, Overlay::PaneMenu(_))
             | (Window::Offer, Overlay::Offer(_))
             | (
-                Window::Calibrations | Window::Electrical | Window::Acoustic,
-                Overlay::Calibrations(_)
+                Window::Session
+                    | Window::Calibrations
+                    | Window::Electrical
+                    | Window::Acoustic
+                    | Window::Leq,
+                Overlay::Settings(_)
             )
-            | (Window::Leq, Overlay::Leq(_))
             | (Window::NewLog, Overlay::NewLog(_))
             | (Window::DeleteTrace, Overlay::DeleteTrace(_))
     );

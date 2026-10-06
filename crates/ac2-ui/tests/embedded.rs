@@ -162,10 +162,11 @@ fn measure_from_empty(d: &mut Driver) -> R {
 
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until(
-        "the device list",
-        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
-    )?;
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
     // The rig's own wiring as roles: in 1 the reference (loopback of out 1), in 2 the mic;
     // every input of the device metered before the session opens.
     d.until("the meters of the device", |s| s.input_meters().len() == 4)?;
@@ -248,7 +249,9 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
     d.send(Msg::Text("input setup".into()));
     d.key("Enter");
     assert!(
-        matches!(&d.st.overlay, Overlay::Calibrations(_)),
+        d.st.overlay
+            .settings()
+            .is_some_and(|s| s.page == ac2_ui::settings::Page::Io),
         "{:?}",
         d.st.overlay
     );
@@ -673,12 +676,14 @@ fn room_parameters_of_a_sweep_from_the_app() -> R {
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
     d.until("the meters of the device", |s| {
-        matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some())
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
             && s.input_meters().len() == 4
     })?;
-    if let Overlay::Session(x) = &mut d.st.overlay {
-        x.focus_row(Row::Input(2));
-    }
+    d.send(Msg::Session(ac2_ui::state::SessionMsg::Focus(Row::Input(
+        2,
+    ))));
     d.key("M");
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
@@ -919,14 +924,14 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until(
-        "the device list",
-        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
-    )?;
-    // The rig's mic is on input 2 (the dialog's fourth row): N names it.
-    for _ in 0..3 {
-        d.key("ArrowDown");
-    }
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
+    // The rig's mic is on input 2, on the Inputs & outputs page: N names it.
+    d.key("Ctrl+PageUp");
+    d.key("ArrowDown");
     d.key("N");
     d.send(Msg::Text("n".into()));
     d.send(Msg::Text("MM1 34804".into()));
@@ -953,15 +958,11 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
             .is_some_and(|c| c.contains("no mic curve stored for MM1 34804"))
     })?;
 
-    // The input setup view opens on the selected measurement's input.
+    // The calibrations open on the selected measurement's input.
     d.key("Ctrl+K");
-    d.send(Msg::Text("input setup".into()));
+    d.send(Msg::Text("calibrations".into()));
     d.key("Enter");
-    assert!(
-        matches!(&d.st.overlay, Overlay::Calibrations(_)),
-        "{:?}",
-        d.st.overlay
-    );
+    assert!(d.st.overlay.cal().is_some(), "{:?}", d.st.overlay);
     let import = |d: &mut Driver, file: &str| {
         d.key("I");
         d.send(Msg::Text("i".into()));
@@ -1163,7 +1164,7 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     // 85; ↓ to the second window's limit, 85, Shift+Tab ×2 to its length, ←← to 10 s.
     d.key("Shift+L");
     d.send(Msg::Text("L".into()));
-    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    d.until("the Leq dialog", |s| s.overlay.leq().is_some())?;
     for k in [
         "ArrowDown",
         "ArrowDown",
@@ -1187,7 +1188,7 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
     ] {
         d.key(k);
     }
-    if let Overlay::Leq(x) = &d.st.overlay {
+    if let Some(x) = d.st.overlay.leq() {
         let names: Vec<String> = x
             .rows
             .iter()
@@ -1337,10 +1338,10 @@ fn a_peak_limit_and_the_position_correction_from_the_app() -> R {
 
     d.key("Shift+L");
     d.send(Msg::Text("L".into()));
-    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    d.until("the Leq dialog", |s| s.overlay.leq().is_some())?;
     d.key("ArrowUp");
     d.key("ArrowUp");
-    let Overlay::Leq(x) = &d.st.overlay else {
+    let Some(x) = d.st.overlay.leq() else {
         return Err("the Leq dialog".into());
     };
     assert_eq!(x.focus, Focus::Extra(Extra::Position));
@@ -1493,7 +1494,7 @@ fn filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     // Shift+L: ↓↓ to the first window, Tab Tab to its limit, 80; ↓ and 80 for each other.
     d.key("Shift+L");
     d.send(Msg::Text("L".into()));
-    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    d.until("the Leq dialog", |s| s.overlay.leq().is_some())?;
     for k in ["ArrowDown", "ArrowDown", "Tab", "Tab"] {
         d.key(k);
     }
@@ -1933,9 +1934,9 @@ fn a_preset_replaces_the_windows_from_the_app() -> R {
     // Shift+L; → on the preset row: DIN 15905-5, its one window in the dialog; Enter.
     d.key("Shift+L");
     d.send(Msg::Text("L".into()));
-    d.until("the Leq dialog", |s| matches!(s.overlay, Overlay::Leq(_)))?;
+    d.until("the Leq dialog", |s| s.overlay.leq().is_some())?;
     d.key("ArrowRight");
-    let Overlay::Leq(x) = &d.st.overlay else {
+    let Some(x) = d.st.overlay.leq() else {
         return Err("the Leq dialog".into());
     };
     assert_eq!(
@@ -2164,10 +2165,11 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     // A session and its transfer measurement, from the app.
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until(
-        "the device list",
-        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
-    )?;
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
     d.key("Enter");
     d.until("the measurement offer", |s| {
         matches!(s.overlay, Overlay::Offer(_))
@@ -2656,9 +2658,9 @@ fn electrical_calibration_from_the_app() -> R {
     d.key("Ctrl+K");
     d.send(Msg::Text("calibrations".into()));
     d.key("Enter");
-    let focused = |s: &AppState| match &s.overlay {
-        Overlay::Calibrations(v) => s.daemon().and_then(|st| v.focused(st)),
-        _ => None,
+    let focused = |s: &AppState| match s.overlay.cal() {
+        Some(v) => s.daemon().and_then(|st| v.focused(st)),
+        None => None,
     };
     for _ in 0..8 {
         if focused(&d.st) == Some(CalLine::Input(1)) {
@@ -2699,9 +2701,9 @@ fn electrical_calibration_from_the_app() -> R {
     let tone = Tone::start(&ep)?;
     d.key("E");
     d.send(Msg::Text("e".into()));
-    let dialog = |s: &AppState| match &s.overlay {
-        Overlay::Calibrations(v) => v.electrical.clone(),
-        _ => None,
+    let dialog = |s: &AppState| match s.overlay.cal() {
+        Some(v) => v.electrical.clone(),
+        None => None,
     };
     let dl = dialog(&d.st).ok_or("the electrical dialog")?;
     assert_eq!(dl.sensitivity, "15.0 mV/Pa");
@@ -2731,9 +2733,9 @@ fn electrical_calibration_from_the_app() -> R {
         }
         std::thread::sleep(Duration::from_millis(300));
     }
-    let notice = match &d.st.overlay {
-        Overlay::Calibrations(v) => v.notice.clone().unwrap_or_default(),
-        _ => String::new(),
+    let notice = match d.st.overlay.cal() {
+        Some(v) => v.notice.clone().unwrap_or_default(),
+        None => String::new(),
     };
     assert!(notice.contains("stored"), "{notice}");
     d.key("Escape");
@@ -2829,9 +2831,9 @@ fn acoustic_calibration_from_the_app() -> R {
     d.key("Ctrl+K");
     d.send(Msg::Text("calibrations".into()));
     d.key("Enter");
-    let focused = |s: &AppState| match &s.overlay {
-        Overlay::Calibrations(v) => s.daemon().and_then(|st| v.focused(st)),
-        _ => None,
+    let focused = |s: &AppState| match s.overlay.cal() {
+        Some(v) => s.daemon().and_then(|st| v.focused(st)),
+        None => None,
     };
     for _ in 0..8 {
         if focused(&d.st) == Some(CalLine::Input(1)) {
@@ -2848,9 +2850,9 @@ fn acoustic_calibration_from_the_app() -> R {
     let tone = Tone::start(&ep)?;
     d.key("C");
     d.send(Msg::Text("c".into()));
-    let dialog = |s: &AppState| match &s.overlay {
-        Overlay::Calibrations(v) => v.acoustic.clone(),
-        _ => None,
+    let dialog = |s: &AppState| match s.overlay.cal() {
+        Some(v) => v.acoustic.clone(),
+        None => None,
     };
     let dl = dialog(&d.st).ok_or("the acoustic dialog")?;
     assert_eq!(dl.title(), "Acoustic calibration · in 2");
@@ -2882,9 +2884,9 @@ fn acoustic_calibration_from_the_app() -> R {
         }
         std::thread::sleep(Duration::from_millis(300));
     }
-    let notice = match &d.st.overlay {
-        Overlay::Calibrations(v) => v.notice.clone().unwrap_or_default(),
-        _ => String::new(),
+    let notice = match d.st.overlay.cal() {
+        Some(v) => v.notice.clone().unwrap_or_default(),
+        None => String::new(),
     };
     assert!(
         notice.contains("acoustic calibration of input 2 (MM1 34804): stored")
@@ -3891,10 +3893,11 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
-    d.until(
-        "the device list",
-        |s| matches!(&s.overlay, Overlay::Session(x) if x.device_info().is_some()),
-    )?;
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
     // The offered transfer measurement, so a curve is up when the audio stops.

@@ -121,6 +121,12 @@ pub enum ConnEvent {
     },
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
+    /// `server.info` (`what: None`), or a `server.*` change named `what`, answered with the
+    /// daemon's server info or why not.
+    Server {
+        what: Option<String>,
+        result: Result<ac2_proto::model::ServerInfo, String>,
+    },
     /// The Leq history of SPL meter `meas` as the daemon rebuilt it from the meter's log
     /// ([`Request::LeqBackfill`] number `ask`).
     LeqBackfill {
@@ -234,6 +240,11 @@ pub enum Request {
     DisplayPeriod(Duration),
     /// Drop the connection and connect again now.
     Reconnect,
+    /// `server.info` ([`ConnEvent::Server`]).
+    ServerInfo,
+    /// `server.authorize` / `server.revoke`; answered with the new info
+    /// ([`ConnEvent::Server`] carrying `what`).
+    ServerCall { cmd: Command, what: String },
 }
 
 enum Ctl {
@@ -606,6 +617,14 @@ async fn wait_retry(
                 Some(Ctl::Req(Request::DetectLoopback(_))) => {
                     out.send(ConnEvent::LoopbackDetected(Err("not connected".into())));
                 }
+                Some(Ctl::Req(Request::ServerInfo)) => out.send(ConnEvent::Server {
+                    what: None,
+                    result: Err("not connected".into()),
+                }),
+                Some(Ctl::Req(Request::ServerCall { what, .. })) => out.send(ConnEvent::Server {
+                    what: Some(what),
+                    result: Err("not connected".into()),
+                }),
                 // Applied on the next connection.
                 Some(Ctl::Req(Request::Meters(on))) => wants.meters = on,
                 Some(Ctl::Req(Request::Topics(t))) => wants.topics = t,
@@ -653,6 +672,8 @@ fn request_name(r: &Request) -> String {
         Request::Topics(_) => "subscribe".into(),
         Request::DisplayPeriod(_) => "display rate".into(),
         Request::Reconnect => "reconnect".into(),
+        Request::ServerInfo => "server info".into(),
+        Request::ServerCall { what, .. } => what.clone(),
     }
 }
 
@@ -1060,6 +1081,32 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                         Err(_) => format!("export {name}"),
                     },
                     result: result.map(|_| ()),
+                });
+            });
+        }
+        Request::ServerInfo => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call(Command::ServerInfo)
+                    .await
+                    .and_then(|r| expect_body!("server.info", r, ReplyBody::Server(s) => s))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::Server { what: None, result });
+            });
+        }
+        Request::ServerCall { cmd, what } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let op = cmd.name();
+                let result = c
+                    .call(cmd)
+                    .await
+                    .and_then(|r| expect_body!(op, r, ReplyBody::Server(s) => s))
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::Server {
+                    what: Some(what),
+                    result,
                 });
             });
         }

@@ -2,13 +2,17 @@
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
 //! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
-//! meter's number holds a reading, the layout and window as last left: the focused
+//! meter's number holds a reading, the theme, the record toggle's time limit, the
+//! spectrograph's history span, the layout and window as last left: the focused
 //! pane, maximised or full screen, what each pane shows, the window's size and position,
 //! and each pane's level axis range (a fit made for one show is a fair start for the next).
 //!
 //! ```toml
 //! key_hints = false
 //! spl_hold_ms = 250
+//! theme = "light"
+//! record_limit_min = 90
+//! spectrograph_span_s = 30
 //!
 //! [stimulus_outputs]
 //! "hw:UMC1820" = [1, 2]
@@ -194,7 +198,19 @@ pub struct UiPrefs {
     pub levels: LevelPrefs,
     /// The window as last left (`None`: never saved).
     pub window: Option<WindowPrefs>,
+    /// The theme last chosen (`None`: never chosen; `ac2-ui --theme` overrides it for a run).
+    pub theme: Option<ac2_scene::theme::ThemeName>,
+    /// How long the record toggle records before it stops by itself, minutes (`None`: an
+    /// hour, [`crate::state::RECORD_MAX_S`]).
+    pub record_limit_min: Option<u32>,
+    /// The spectrograph's history span, s (one of
+    /// [`ac2_scene::view::SPECTROGRAPH_SPANS_S`]; `None`: its default).
+    pub spectrograph_span_s: Option<u32>,
 }
+
+/// Bounds of the record toggle's limit, minutes: a whole day of every input of a large
+/// interface would fill a disk unattended.
+pub const RECORD_LIMIT_MIN: std::ops::RangeInclusive<u32> = 1..=480;
 
 impl Default for UiPrefs {
     fn default() -> Self {
@@ -207,6 +223,9 @@ impl Default for UiPrefs {
             layout: LayoutPrefs::default(),
             levels: LevelPrefs::default(),
             window: None,
+            theme: None,
+            record_limit_min: None,
+            spectrograph_span_s: None,
         }
     }
 }
@@ -219,6 +238,12 @@ struct File {
     key_hints: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme: Option<ThemeFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    record_limit_min: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spectrograph_span_s: Option<u32>,
     /// One-based channels per device id.
     #[serde(default)]
     stimulus_outputs: BTreeMap<String, Vec<u32>>,
@@ -233,6 +258,34 @@ struct File {
     levels: Option<LevelsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ThemeFile {
+    Dark,
+    Light,
+    HighContrast,
+}
+
+impl ThemeFile {
+    fn name(self) -> ac2_scene::theme::ThemeName {
+        use ac2_scene::theme::ThemeName as T;
+        match self {
+            Self::Dark => T::Dark,
+            Self::Light => T::Light,
+            Self::HighContrast => T::HighContrast,
+        }
+    }
+
+    fn of(t: ac2_scene::theme::ThemeName) -> Self {
+        use ac2_scene::theme::ThemeName as T;
+        match t {
+            T::Dark => Self::Dark,
+            T::Light => Self::Light,
+            T::HighContrast => Self::HighContrast,
+        }
+    }
 }
 
 /// `[low, high]` dB per axis; one left out is the default.
@@ -638,6 +691,23 @@ impl UiPrefs {
                 SPL_HOLD_MS.end()
             ));
         }
+        if let Some(m) = f.record_limit_min
+            && !RECORD_LIMIT_MIN.contains(&m)
+        {
+            return Err(format!(
+                "ui.toml: record_limit_min must be {} … {}",
+                RECORD_LIMIT_MIN.start(),
+                RECORD_LIMIT_MIN.end()
+            ));
+        }
+        if let Some(s) = f.spectrograph_span_s
+            && !ac2_scene::view::SPECTROGRAPH_SPANS_S.contains(&s)
+        {
+            return Err(format!(
+                "ui.toml: spectrograph_span_s must be one of {:?}",
+                ac2_scene::view::SPECTROGRAPH_SPANS_S
+            ));
+        }
         let window = match f.window {
             Some(w) if w.width >= WindowPrefs::MIN.0 && w.height >= WindowPrefs::MIN.1 => {
                 Some(WindowPrefs {
@@ -669,6 +739,9 @@ impl UiPrefs {
                 .transpose()?
                 .unwrap_or_default(),
             window,
+            theme: f.theme.map(ThemeFile::name),
+            record_limit_min: f.record_limit_min,
+            spectrograph_span_s: f.spectrograph_span_s,
         })
     }
 
@@ -677,6 +750,9 @@ impl UiPrefs {
         let f = File {
             key_hints: (!self.key_hints).then_some(false),
             spl_hold_ms: self.spl_hold_ms,
+            theme: self.theme.map(ThemeFile::of),
+            record_limit_min: self.record_limit_min,
+            spectrograph_span_s: self.spectrograph_span_s,
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
             levels: LevelsFile::from_prefs(&self.levels),

@@ -40,6 +40,34 @@ pub struct AppOptions {
     /// Open the session dialog once connected if the daemon has no audio session (an
     /// embedded daemon on real audio starts without one).
     pub open_session_dialog: bool,
+    /// This client's key, shown on the Connection page of Settings.
+    pub client_key: Option<crate::settings::ClientKey>,
+    /// What the connect dialog needs, so Settings can open it again; `None`: it cannot.
+    pub connect: Option<ConnectSetup>,
+}
+
+/// What the connect dialog is made from (Settings › Connection opens it while running).
+#[derive(Clone, Debug)]
+pub struct ConnectSetup {
+    pub key_dir: std::path::PathBuf,
+    pub client_name: String,
+    pub backends: Vec<EmbeddedBackend>,
+    /// Browse the network for rigs.
+    pub discovery: bool,
+}
+
+impl ConnectSetup {
+    /// A dialog as the app starts with one.
+    pub fn dialog(&self) -> ConnectDialog {
+        let mdns = ac2_discovery::Options::default();
+        ConnectDialog::new(
+            ac2_client::KeyDir::new(self.key_dir.clone()),
+            self.client_name.clone(),
+            self.backends.clone(),
+            crate::connect::local_daemon_running(),
+            self.discovery.then_some(&mdns),
+        )
+    }
 }
 
 impl std::fmt::Debug for AppOptions {
@@ -110,6 +138,8 @@ pub struct App {
     window: Option<crate::prefs::WindowPrefs>,
     /// Whether the restored window size was checked against the screen.
     window_checked: bool,
+    /// What the connect dialog is made from.
+    connect_setup: Option<ConnectSetup>,
 }
 
 impl std::fmt::Debug for App {
@@ -141,6 +171,7 @@ impl App {
         let mut state = AppState::new(opts.theme, describe);
         state.set_prefs(opts.prefs);
         state.open_session_when_empty = opts.open_session_dialog;
+        state.client_key = opts.client_key;
         for n in opts.notices {
             state.update(
                 Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
@@ -173,6 +204,7 @@ impl App {
             embedded: None,
             window: None,
             window_checked: false,
+            connect_setup: opts.connect,
         }
     }
 
@@ -367,12 +399,7 @@ impl App {
     fn input(&mut self, ctx: &egui::Context) {
         let text_overlay = matches!(
             self.state.overlay,
-            Overlay::Palette(_)
-                | Overlay::Prompt(_)
-                | Overlay::Form(_)
-                | Overlay::Session(_)
-                | Overlay::Calibrations(_)
-                | Overlay::Leq(_)
+            Overlay::Palette(_) | Overlay::Prompt(_) | Overlay::Form(_) | Overlay::Settings(_)
         );
         let events = ctx.input_mut(|i| {
             let (mine, rest): (Vec<Event>, Vec<Event>) =
@@ -687,6 +714,15 @@ impl eframe::App for App {
         if self.state.quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        if std::mem::take(&mut self.state.want_connect_dialog) {
+            match &self.connect_setup {
+                Some(c) => self.connect = Some(c.dialog()),
+                None => self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
+                    what: "connect dialog".into(),
+                    result: Err("not available in this window".into()),
+                }))),
+            }
+        }
         self.follow_window(&ctx);
         if self.applied_fullscreen != self.state.fullscreen {
             self.applied_fullscreen = self.state.fullscreen;
@@ -718,9 +754,15 @@ impl eframe::App for App {
         }
         if self.state.animating() || self.startup.first_frame.is_none() {
             ctx.request_repaint();
-        } else if matches!(self.state.overlay, Overlay::Session(_)) {
-            // The dialog renews its device preview from the frame tick, also when no meter
-            // frame arrives to wake the UI.
+        } else if self.state.overlay.session().is_some()
+            || self
+                .state
+                .overlay
+                .settings()
+                .is_some_and(|s| s.page == crate::settings::Page::Connection)
+        {
+            // The device preview is renewed, and the server info asked again, from the frame
+            // tick, also when no frame arrives to wake the UI.
             ctx.request_repaint_after(Duration::from_millis(500));
         } else if self.state.operation().is_some() {
             // The progress bar and time left move between the daemon's step reports.

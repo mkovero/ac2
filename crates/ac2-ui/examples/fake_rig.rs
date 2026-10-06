@@ -50,6 +50,8 @@ fn main() -> Result<(), eframe::Error> {
         started,
         bench_startup: has("--bench-startup"),
         open_session_dialog: false,
+        client_key: None,
+        connect: None,
     };
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
