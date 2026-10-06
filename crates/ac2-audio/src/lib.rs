@@ -52,7 +52,7 @@ mod jack_host;
 mod rng;
 
 pub use backend::{
-    Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
+    Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, HistoryRequest, IndexExactness, Negotiated,
     RateRange, SHORT_BUFFER_AT_48K, SampleFormat, StaticLatency, short_buffer_frames,
 };
@@ -61,7 +61,7 @@ pub use block::{BlockConsumer, BlockFlags, BlockHeader, TransportStats};
 pub use cpal_host::CpalBackend;
 pub use error::{AudioError, Operation, RequestError, Unavailability, Unsupported};
 pub use events::EventSnapshot;
-pub use fake::{FakeBackend, FakeConfig, FakeDriver, FakeReverb};
+pub use fake::{FakeBackend, FakeConfig, FakeDriver, FakeReverb, OutageKind};
 pub use generator::{
     GeneratorHandle, GeneratorPort, MAX_ROUTED_CHANNELS, RouteError, SignalSource, generator,
 };

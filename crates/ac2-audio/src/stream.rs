@@ -164,6 +164,12 @@ impl DuplexStream {
         self.drain = drain;
     }
 
+    /// Records what paces the blocks (a backend that starts its driver after building the
+    /// stream).
+    pub(crate) fn set_delivery(&mut self, delivery: crate::backend::Delivery) {
+        self.negotiated.delivery = delivery;
+    }
+
     /// What was opened.
     pub fn negotiated(&self) -> &Negotiated {
         &self.negotiated

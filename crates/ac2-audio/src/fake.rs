@@ -26,21 +26,21 @@
 //! `n` hear DAC position `n · (1 + ppm·1e-6) − D` (positive = DAC clock fast), so the
 //! offset changes by `−ppm·1e-6` samples per sample.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
 use crate::backend::{
-    Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
+    Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
     StaticLatency,
 };
 use crate::block::{BlockProducer, BlockStamp};
 use crate::clock::FrameCounterClock;
-use crate::error::{AudioError, Operation, Unsupported};
+use crate::error::{AudioError, Operation, Unavailability, Unsupported};
 use crate::events::{BackendEvents, EventLatch};
 use crate::output::{OutputRenderer, OutputStamp};
 use crate::rng::Rng;
@@ -418,11 +418,124 @@ fn output_faults(faults: &[FakeFault]) -> Vec<OutputFault> {
     v
 }
 
-/// The simulated device. Cloning shares the parked manual driver slot.
+/// How the simulated device fails in an outage ([`FakeBackend::stall`],
+/// [`FakeBackend::vanish`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutageKind {
+    /// The device stops delivering without an error, as behind a hung audio server: running
+    /// streams get no callbacks and no notification, and opening a stream blocks until the
+    /// outage ends.
+    Stall,
+    /// The device goes away with an error, as when its server shuts down: running streams
+    /// are ended by the host, and opening one fails as unavailable until the outage ends.
+    Vanish,
+}
+
+/// The simulated device's availability, shared by every clone of a [`FakeBackend`] and
+/// every stream opened on it. A stream that was running when an outage began never
+/// delivers again, even after it ends: the device was reset under it, and only a stream
+/// opened afterwards hears it (which is what a recovering daemon must do).
+#[derive(Debug)]
+struct Outage {
+    base: Instant,
+    /// The latest outage's kind: 0 none yet, 1 stall, 2 vanish.
+    kind: AtomicU8,
+    /// When the latest outage ends, ns after `base`; `u64::MAX` until restored.
+    until_ns: AtomicU64,
+    /// Outages begun so far.
+    begun: AtomicU64,
+    /// Opens blocked by a stall wait here for its end.
+    lock: Mutex<()>,
+    ended: Condvar,
+}
+
+impl Outage {
+    fn new() -> Self {
+        Self {
+            base: Instant::now(),
+            kind: AtomicU8::new(0),
+            until_ns: AtomicU64::new(0),
+            begun: AtomicU64::new(0),
+            lock: Mutex::new(()),
+            ended: Condvar::new(),
+        }
+    }
+
+    fn now_ns(&self) -> u64 {
+        u64::try_from(self.base.elapsed().as_nanos()).unwrap_or(u64::MAX - 1)
+    }
+
+    fn begin(&self, kind: OutageKind, lasts: Option<Duration>) {
+        let _g = self.lock.lock();
+        let until = lasts.map_or(u64::MAX, |d| {
+            self.now_ns()
+                .saturating_add(u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
+                .min(u64::MAX - 1)
+        });
+        self.kind.store(
+            match kind {
+                OutageKind::Stall => 1,
+                OutageKind::Vanish => 2,
+            },
+            Ordering::Release,
+        );
+        self.until_ns.store(until, Ordering::Release);
+        self.begun.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn end(&self) {
+        let _g = self.lock.lock();
+        self.until_ns.store(0, Ordering::Release);
+        self.ended.notify_all();
+    }
+
+    /// The outage in force now, if any.
+    fn active(&self) -> Option<OutageKind> {
+        if self.now_ns() >= self.until_ns.load(Ordering::Acquire) {
+            return None;
+        }
+        match self.kind.load(Ordering::Acquire) {
+            1 => Some(OutageKind::Stall),
+            2 => Some(OutageKind::Vanish),
+            _ => None,
+        }
+    }
+
+    /// Waits out a stall (an open behind a hung server), then refuses while vanished.
+    fn admit(&self) -> Result<(), AudioError> {
+        let mut g = self
+            .lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            match self.active() {
+                None => return Ok(()),
+                Some(OutageKind::Vanish) => {
+                    return Err(AudioError::Unavailable {
+                        backend: BackendKind::Fake,
+                        reason: Unavailability::Host("the simulated device is gone".into()),
+                    });
+                }
+                Some(OutageKind::Stall) => {
+                    // Woken by `end`; a timed outage ends by itself, so look again soon.
+                    g = self
+                        .ended
+                        .wait_timeout(g, Duration::from_millis(20))
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0;
+                }
+            }
+        }
+    }
+}
+
+/// The simulated device. Cloning shares the parked manual driver slot and the device's
+/// availability.
 #[derive(Debug, Clone)]
 pub struct FakeBackend {
     config: FakeConfig,
     parked: Arc<Mutex<Option<FakeDriver>>>,
+    outage: Arc<Outage>,
 }
 
 impl FakeBackend {
@@ -432,7 +545,31 @@ impl FakeBackend {
         Ok(Self {
             config,
             parked: Arc::new(Mutex::new(None)),
+            outage: Arc::new(Outage::new()),
         })
+    }
+
+    /// The device stops delivering without an error ([`OutageKind::Stall`]) for `lasts`, or
+    /// until [`Self::restore`] when `None`. Acts on [`FakeDrive::Thread`] streams; a manual
+    /// stream simply is not stepped.
+    pub fn stall(&self, lasts: Option<Duration>) {
+        self.outage.begin(OutageKind::Stall, lasts);
+    }
+
+    /// The device goes away with an error ([`OutageKind::Vanish`]) for `lasts`, or until
+    /// [`Self::restore`] when `None`.
+    pub fn vanish(&self, lasts: Option<Duration>) {
+        self.outage.begin(OutageKind::Vanish, lasts);
+    }
+
+    /// Ends the outage: streams opened from now on deliver again.
+    pub fn restore(&self) {
+        self.outage.end();
+    }
+
+    /// The outage in force, if any.
+    pub fn outage(&self) -> Option<OutageKind> {
+        self.outage.active()
     }
 
     /// The device settings.
@@ -451,6 +588,7 @@ impl FakeBackend {
         mut request: DuplexRequest,
     ) -> Result<(DuplexStream, FakeDriver), AudioError> {
         request.validate()?;
+        self.outage.admit()?;
         let c = &self.config;
         for (selector, direction) in [
             (&request.input_device, Direction::Input),
@@ -510,6 +648,7 @@ impl FakeBackend {
             clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
+            delivery: Delivery::Stepped,
         };
         let sim = Sim::new(
             c.clone(),
@@ -580,12 +719,15 @@ impl Backend for FakeBackend {
                 *slot = Some(driver);
             }
             FakeDrive::Thread(pace) => {
-                let guard =
-                    spawn_driver(driver, pace, &self.config).map_err(|e| AudioError::Backend {
+                stream.set_delivery(Delivery::Device);
+                let outage = Arc::clone(&self.outage);
+                let guard = spawn_driver(driver, pace, &self.config, outage).map_err(|e| {
+                    AudioError::Backend {
                         backend: BackendKind::Fake,
                         operation: Operation::Start,
                         detail: e.to_string(),
-                    })?;
+                    }
+                })?;
                 let drain =
                     Duration::from_nanos(self.config.ns(2 * u64::from(self.config.block_frames)));
                 stream.set_guard(Box::new(guard), drain);
@@ -614,18 +756,32 @@ fn spawn_driver(
     mut driver: FakeDriver,
     pace: Pace,
     c: &FakeConfig,
+    outage: Arc<Outage>,
 ) -> std::io::Result<ThreadGuard> {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_t = Arc::clone(&stop);
     let limit = c.stop_after_blocks;
     let block = Duration::from_nanos(c.ns(u64::from(c.block_frames)));
     let (sleeper, _) = crate::timer::sleeper()?;
+    // Read before the thread starts: an outage begun after the open hits this stream.
+    let born = outage.begun.load(Ordering::Acquire);
     let thread = std::thread::Builder::new()
         .name("ac2-fake-audio".into())
         .spawn(move || {
             let t0 = Instant::now();
             let mut due = Duration::ZERO;
+            let mut ended = false;
             while !stop_t.load(Ordering::Acquire) {
+                if outage.begun.load(Ordering::Acquire) != born {
+                    // The device was reset under this stream: it never delivers again; a
+                    // vanished one is reported ended by the host, a stalled one says nothing.
+                    if !ended && outage.kind.load(Ordering::Acquire) == 2 {
+                        ended = true;
+                        driver.sim.events.end();
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
                 if limit.is_some_and(|l| driver.blocks() >= l) {
                     std::thread::sleep(Duration::from_millis(1));
                     continue;

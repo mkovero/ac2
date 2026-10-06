@@ -23,7 +23,7 @@ use jack::{
 };
 
 use crate::backend::{
-    Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
+    Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
     StaticLatency,
 };
@@ -450,6 +450,7 @@ impl Backend for JackBackend {
                 capture: cap_lat,
                 playback: play_lat,
             },
+            delivery: Delivery::Device,
         };
         // Output written in cycle n leaves at the next cycle boundary, then passes the
         // playback latency.

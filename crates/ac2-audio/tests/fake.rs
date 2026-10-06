@@ -484,3 +484,82 @@ fn thread_drive_delivers_blocks_and_stops_cleanly() {
         StopOutcome::NeverEmitted
     );
 }
+
+/// Blocks delivered by `s` within `wait`.
+fn delivered(s: &mut DuplexStream, wait: Duration) -> usize {
+    let deadline = Instant::now() + wait;
+    let mut n = 0;
+    while Instant::now() < deadline {
+        n += drain(s).len();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    n
+}
+
+#[test]
+fn a_stall_silences_running_streams_without_an_error_and_blocks_opens_until_it_ends() {
+    let backend = FakeBackend::new(FakeConfig {
+        drive: FakeDrive::Thread(Pace::Realtime),
+        block_frames: 480,
+        ..FakeConfig::default()
+    })
+    .expect("config");
+    let req = || DuplexRequest::new(vec![0], 2, max_level());
+    let mut s = backend.open(req()).expect("open");
+    assert_eq!(s.negotiated().delivery, ac2_audio::Delivery::Device);
+    assert!(delivered(&mut s, Duration::from_millis(100)) > 0);
+    backend.stall(None);
+    std::thread::sleep(Duration::from_millis(20));
+    drain(&mut s);
+    assert_eq!(delivered(&mut s, Duration::from_millis(150)), 0);
+    assert!(!s.events().ended, "a stall reports nothing");
+    // An open waits for the device, as behind a hung server.
+    let b = backend.clone();
+    let opener = std::thread::spawn(move || b.open(DuplexRequest::new(vec![0], 2, max_level())));
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(!opener.is_finished(), "the open waits out the stall");
+    backend.restore();
+    let mut fresh = opener.join().expect("join").expect("open after the stall");
+    assert!(delivered(&mut fresh, Duration::from_millis(100)) > 0);
+    assert_eq!(
+        delivered(&mut s, Duration::from_millis(50)),
+        0,
+        "the stream that hung stays silent"
+    );
+}
+
+#[test]
+fn a_vanished_device_ends_its_streams_refuses_opens_and_comes_back_after_its_time() {
+    let backend = FakeBackend::new(FakeConfig {
+        drive: FakeDrive::Thread(Pace::Realtime),
+        block_frames: 480,
+        ..FakeConfig::default()
+    })
+    .expect("config");
+    let req = || DuplexRequest::new(vec![0], 2, max_level());
+    let s = backend.open(req()).expect("open");
+    backend.vanish(Some(Duration::from_millis(300)));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !s.events().ended && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(s.events().ended, "the host ends the stream");
+    match backend.open(req()) {
+        Err(ac2_audio::AudioError::Unavailable { .. }) => {}
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(backend.outage(), Some(ac2_audio::OutageKind::Vanish));
+    std::thread::sleep(Duration::from_millis(350));
+    assert_eq!(backend.outage(), None);
+    let mut back = backend.open(req()).expect("back after its time");
+    assert!(delivered(&mut back, Duration::from_millis(100)) > 0);
+}
+
+#[test]
+fn a_manual_stream_is_stepped() {
+    let backend = FakeBackend::new(FakeConfig::default()).expect("config");
+    let s = backend
+        .open(DuplexRequest::new(vec![0], 2, max_level()))
+        .expect("open");
+    assert_eq!(s.negotiated().delivery, ac2_audio::Delivery::Stepped);
+}

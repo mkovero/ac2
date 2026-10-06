@@ -20,7 +20,7 @@ use cpal::{
 };
 
 use crate::backend::{
-    Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
+    Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
     StaticLatency, short_buffer_frames,
 };
@@ -455,6 +455,7 @@ impl Backend for CpalBackend {
             },
             index: IndexExactness::Estimated,
             latency: StaticLatency::PerCallbackTimestamps,
+            delivery: Delivery::Device,
         };
         // Device buffers hold about two periods; allow three plus scheduling slack.
         let period = buffer_frames.unwrap_or(frames);

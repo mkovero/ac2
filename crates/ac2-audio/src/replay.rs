@@ -17,7 +17,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::backend::{
-    Backend, BackendKind, ClockRelation, DeviceCaps, DeviceId, DeviceSelector, Direction,
+    Backend, BackendKind, ClockRelation, Delivery, DeviceCaps, DeviceId, DeviceSelector, Direction,
     DirectionCaps, DuplexRequest, FrameRange, IndexExactness, Negotiated, RateRange, SampleFormat,
     StaticLatency,
 };
@@ -227,6 +227,7 @@ impl Backend for ReplayBackend {
             clock: ClockRelation::SingleCallback,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
+            delivery: Delivery::Stepped,
         };
         let source = (c.open)().map_err(|e| AudioError::Backend {
             backend: BackendKind::Replay,

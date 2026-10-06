@@ -372,6 +372,21 @@ pub struct Negotiated {
     pub index: IndexExactness,
     /// Stated latency.
     pub latency: StaticLatency,
+    /// What paces the blocks.
+    pub delivery: Delivery,
+}
+
+/// What paces a stream's blocks, which decides whether a pause in them is a fault.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Delivery {
+    /// The device's clock: blocks arrive in real time, one per period, so a stream that
+    /// delivers nothing for many periods has a device or server that stopped.
+    Device,
+    /// No device clock paces it: a test steps it by hand (the fake's
+    /// [`crate::fake::FakeDrive::Manual`]), or a replay waits for its consumers. A pause is
+    /// theirs, never a device's.
+    Stepped,
 }
 
 /// An audio backend.
