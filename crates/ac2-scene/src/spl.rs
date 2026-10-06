@@ -276,6 +276,8 @@ pub fn spl_readout(
             Some(Freshness::Stale { age_s }) => Some(format!("STALE {}", format::age(age_s))),
             // A stopped meter's number is no current level: it says so, dimmed like STALE.
             Some(Freshness::Stopped { .. }) => Some("STOPPED".into()),
+            // The banner says why and since when; the number only says it is not current.
+            Some(Freshness::AudioStopped { .. }) => Some("AUDIO STOPPED".into()),
             _ => None,
         },
         bar: bar(m.scale, live_level),
@@ -755,6 +757,10 @@ mod tests {
         let stopped = Some(Freshness::Stopped { age_s: 23.0 });
         let r2 = spl_readout(&f, -23.4, String::new(), stopped, SINCE.into());
         assert_eq!(r2.stale.as_deref(), Some("STOPPED"));
+        // While the audio is stopped the banner says why; the number only says so, no age.
+        let out = Some(Freshness::AudioStopped { age_s: 4.8 });
+        let r3 = spl_readout(&f, -23.4, String::new(), out, SINCE.into());
+        assert_eq!(r3.stale.as_deref(), Some("AUDIO STOPPED"));
         // The bar follows the live level, not the held one: −23.4 dBFS on −100 … 0.
         assert!((r.bar.fill - 0.766).abs() < 1e-4, "{}", r.bar.fill);
         let r = spl_readout(&f, f64::NEG_INFINITY, String::new(), None, SINCE.into());

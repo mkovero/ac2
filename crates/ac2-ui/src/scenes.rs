@@ -56,6 +56,12 @@ pub fn freshness(st: &AppState, tf: &TopicFrame) -> Freshness {
             age_s: age.max(since),
         };
     }
+    // Late because the audio stopped: the AUDIO STOPPED banner explains it.
+    if tf.stale && st.daemon().is_some_and(|s| s.session.stopped.is_some()) {
+        return Freshness::AudioStopped {
+            age_s: age.max(since),
+        };
+    }
     // The client's flag already applies each stream's own threshold (a once-a-second Leq frame
     // is 3 s, the rest 1 s); judging the age again here with the general 1 s would dim a Leq
     // view for a moment whenever a frame arrived a little after its second.
@@ -673,6 +679,7 @@ fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqVie
         stale: match fresh {
             Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),
             Freshness::Stopped { .. } => Some("STOPPED".into()),
+            Freshness::AudioStopped { .. } => Some("AUDIO STOPPED".into()),
             Freshness::Fresh { .. } => None,
         },
         scale: f.meta.scale,

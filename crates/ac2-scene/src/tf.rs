@@ -129,11 +129,8 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64, selected: bool) -> LegendEntry {
     if t.smoothing.is_some() {
         tags.push(format::smoothing(t.smoothing));
     }
-    let stale = t.is_stale();
-    match t.freshness {
-        Some(f) if stale => tags.push(format!("STALE {}", format::age(f.age_s()))),
-        Some(f) if f.is_stopped() => tags.push("stopped".to_string()),
-        _ => {}
+    if let Some(tag) = t.freshness.and_then(|f| f.tag()) {
+        tags.push(tag);
     }
     let mut text = t.name.clone();
     for tag in &tags {
@@ -145,7 +142,7 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64, selected: bool) -> LegendEntry {
         name: t.name.clone(),
         tags,
         text,
-        stale,
+        stale: t.is_stale(),
         selected,
     }
 }

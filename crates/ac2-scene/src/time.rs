@@ -78,6 +78,11 @@ pub enum Freshness {
     Stopped {
         age_s: f64,
     },
+    /// The session's audio stopped: no frame can come until the daemon reopens it. The
+    /// AUDIO STOPPED banner says why; a per-curve age would only repeat it less clearly.
+    AudioStopped {
+        age_s: f64,
+    },
 }
 
 impl Freshness {
@@ -89,8 +94,20 @@ impl Freshness {
         }
     }
 
+    /// The data is not current (a fault, or the audio stopped): drawn dimmed.
     pub fn is_stale(&self) -> bool {
-        matches!(self, Self::Stale { .. })
+        matches!(self, Self::Stale { .. } | Self::AudioStopped { .. })
+    }
+
+    /// The tag a curve's legend entry or a readout carries: `STALE 3.2 s`, `stopped`,
+    /// `audio stopped`; none while fresh.
+    pub fn tag(&self) -> Option<String> {
+        match *self {
+            Self::Fresh { .. } => None,
+            Self::Stale { age_s } => Some(format!("STALE {}", crate::format::age(age_s))),
+            Self::Stopped { .. } => Some("stopped".into()),
+            Self::AudioStopped { .. } => Some("audio stopped".into()),
+        }
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -99,7 +116,10 @@ impl Freshness {
 
     pub fn age_s(&self) -> f64 {
         match *self {
-            Self::Fresh { age_s } | Self::Stale { age_s } | Self::Stopped { age_s } => age_s,
+            Self::Fresh { age_s }
+            | Self::Stale { age_s }
+            | Self::Stopped { age_s }
+            | Self::AudioStopped { age_s } => age_s,
         }
     }
 }
@@ -129,6 +149,24 @@ mod tests {
             local_clock(at, WallNs(at.0 + 20 * 3600 * S), plus3),
             "3 Oct 7:01"
         );
+    }
+
+    /// A curve's tag: the age only when frames are late for no known reason; the audio
+    /// stopped says so (its banner has the time), and the curve is dimmed either way.
+    #[test]
+    fn tags_name_why_data_is_old() {
+        assert_eq!(Freshness::Fresh { age_s: 0.2 }.tag(), None);
+        assert_eq!(
+            Freshness::Stale { age_s: 4.8 }.tag().as_deref(),
+            Some("STALE 4.8 s")
+        );
+        assert_eq!(
+            Freshness::Stopped { age_s: 4.8 }.tag().as_deref(),
+            Some("stopped")
+        );
+        let out = Freshness::AudioStopped { age_s: 4.8 };
+        assert_eq!(out.tag().as_deref(), Some("audio stopped"));
+        assert!(out.is_stale() && !out.is_stopped());
     }
 
     #[test]

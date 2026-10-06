@@ -3615,6 +3615,26 @@ fn spatial_average_from_an_empty_daemon() -> R {
     Ok(())
 }
 
+/// The transfer pane's legend entries now.
+fn legend_texts(s: &AppState) -> Vec<String> {
+    let wall = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(wall),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 900.0,
+        height: 500.0,
+    };
+    ac2_ui::scenes::transfer(s, &Theme::dark(), size, now)
+        .legend
+        .into_iter()
+        .map(|e| e.text)
+        .collect()
+}
+
 /// The banners every pane shows now.
 fn banner_texts(s: &AppState) -> Vec<String> {
     let wall = std::time::SystemTime::now()
@@ -3659,6 +3679,18 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     )?;
     d.key("Enter");
     d.until("the session", |s| s.open_session().is_some())?;
+    // The offered transfer measurement, so a curve is up when the audio stops.
+    d.until("the measurement offer", |s| {
+        matches!(s.overlay, Overlay::Offer(_))
+    })?;
+    d.key("Enter");
+    d.until("the measurement, running and selected", |s| {
+        s.selected_meas().is_some_and(|m| m.running)
+    })?;
+    let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+    d.until("a transfer frame", |s| {
+        ac2_ui::scenes::frame(s, meas, Stream::Tf).is_some()
+    })?;
     let epoch = d.st.daemon().ok_or("state")?.session.epoch;
     let calm = banner_texts(&d.st);
     assert!(
@@ -3684,6 +3716,14 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
         "{bar:?}"
     );
     assert!(d.st.open_session().is_some(), "the session stays open");
+    // Under the banner the curve says the audio stopped, not a STALE age of its own.
+    d.until("the legend says the audio stopped", |s| {
+        legend_texts(s)
+            .iter()
+            .any(|t| t.ends_with(" · audio stopped"))
+    })?;
+    let legend = legend_texts(&d.st);
+    assert!(!legend.iter().any(|t| t.contains("STALE")), "{legend:?}");
 
     rig.restore();
     d.until("the banner gone and the session back", |s| {

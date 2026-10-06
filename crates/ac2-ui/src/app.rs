@@ -530,7 +530,10 @@ impl ClockTexts {
         if let Some(d) = &st.data {
             for f in d.latest.frames.values() {
                 let fresh = crate::scenes::freshness(st, f);
-                if fresh.is_stale() && matches!(f.topic, Topic::Data { .. }) {
+                // Only a STALE tag counts its age; an audio-stopped curve says so without one.
+                if matches!(fresh, ac2_scene::time::Freshness::Stale { .. })
+                    && matches!(f.topic, Topic::Data { .. })
+                {
                     count(fresh.age_s(), &mut texts);
                 }
             }

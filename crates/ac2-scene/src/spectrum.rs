@@ -509,11 +509,8 @@ fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
     if t.offset_db != 0.0 {
         tags.push(format!("offset {}", format::db_readout(t.offset_db)));
     }
-    let stale = t.is_stale();
-    match t.freshness {
-        Some(f) if stale => tags.push(format!("STALE {}", format::age(f.age_s()))),
-        Some(f) if f.is_stopped() => tags.push("stopped".to_string()),
-        _ => {}
+    if let Some(tag) = t.freshness.and_then(|f| f.tag()) {
+        tags.push(tag);
     }
     let mut text = t.name.clone();
     for tag in &tags {
@@ -525,7 +522,7 @@ fn legend_entry(t: &SpectrumTrace<'_>) -> LegendEntry {
         name: t.name.clone(),
         tags,
         text,
-        stale,
+        stale: t.is_stale(),
         selected: t.selected,
     }
 }
