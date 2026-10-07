@@ -121,7 +121,7 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64, stepped_s: f64, selected: bool) 
         }
     }
     if nudge_s + stepped_s != 0.0 {
-        tags.push(format!("nudge {}", signed_ms(nudge_s + stepped_s)));
+        tags.push(format!("nudge {}", format::nudge(nudge_s + stepped_s)));
     }
     if t.inverted {
         tags.push("inv".to_string());

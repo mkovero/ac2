@@ -545,12 +545,21 @@ impl AppState {
                 if !(0.0..=10_000.0).contains(&v) {
                     return Err("delay must be 0 … 10000 ms".to_string());
                 }
+                let delay = v / 1000.0;
+                // A typed delay keeps the arrival: the daemon moves `nudged` with it.
+                let (name, nudged) = self.meas(id).map_or((String::new(), 0.0), |m| {
+                    let moved = m
+                        .delay
+                        .as_ref()
+                        .map_or(0.0, |d| d.nudged.0 + delay - d.applied.0);
+                    (m.config.name.clone(), moved + self.edit(id).nudge_s)
+                });
                 out.push(Request::Call {
                     cmd: Command::DelaySet {
                         meas: id,
-                        delay: Seconds(v / 1000.0),
+                        delay: Seconds(delay),
                     },
-                    what: format!("delay {}", format::delay(v / 1000.0)),
+                    what: format::typed_delay_toast(&name, delay, nudged),
                 });
                 Ok(())
             }),

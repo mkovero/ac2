@@ -348,15 +348,23 @@ fn transfer_commands() {
     t.key("Enter");
     assert_eq!(t.st.edit(MeasId(1)).offset_db, 3.5);
     t.key(".");
+    assert!(
+        t.last_toast().ends_with(": nudged +0.1 ms → +0.10 ms"),
+        "{}",
+        t.last_toast()
+    );
     t.key(".");
+    assert!(t.last_toast().ends_with(": nudged +0.1 ms → +0.20 ms"));
     t.key(",");
+    assert!(t.last_toast().ends_with(": nudged −0.1 ms → +0.10 ms"));
     assert!((t.st.edit(MeasId(1)).nudge_s - 0.000_1).abs() < 1e-15);
     // Ctrl / Alt on the same keys move the measurement's own delay: a whole sample, a tenth.
+    // The toast's total is the step on top of the display nudge (+0.1 ms), as the row says.
     for (key, samples, what) in [
-        ("Ctrl+.", 1.0, "+1 sample"),
-        ("Ctrl+,", -1.0, "−1 sample"),
-        ("Alt+.", 0.1, "+0.1 sample"),
-        ("Alt+,", -0.1, "−0.1 sample"),
+        ("Ctrl+.", 1.0, "+1 sample → +0.12 ms"),
+        ("Ctrl+,", -1.0, "−1 sample → +0.08 ms"),
+        ("Alt+.", 0.1, "+0.1 sample → +0.10 ms"),
+        ("Alt+,", -0.1, "−0.1 sample → +0.10 ms"),
     ] {
         let r = t.key(key);
         match r.as_slice() {
@@ -368,7 +376,7 @@ fn transfer_commands() {
             ] => {
                 assert_eq!(*meas, MeasId(1));
                 assert!((by.0 - samples / 48_000.0).abs() < 1e-15, "{key}");
-                assert!(w.ends_with(&format!("delay {what}")), "{w}");
+                assert!(w.ends_with(&format!(": nudged {what}")), "{w}");
             }
             r => panic!("{key}: {r:?}"),
         }
@@ -381,10 +389,14 @@ fn transfer_commands() {
         o => panic!("{o:?}"),
     }
     let r = t.key("Enter");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Call { cmd: Command::DelaySet { delay: Seconds(d), .. }, .. }] if (*d - 0.0125).abs() < 1e-12
-    ));
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Call { cmd: Command::DelaySet { delay: Seconds(d), .. }, what }]
+                if (*d - 0.0125).abs() < 1e-12 && what.ends_with(": delay 12.50 ms → nudged +0.10 ms")
+        ),
+        "{r:?}"
+    );
     // View toggles.
     t.key("B");
     assert_eq!(t.st.view.tf.coherence.blank_below, Some(0.3));
@@ -413,6 +425,51 @@ fn transfer_commands() {
     t.key("Esc");
     assert!(t.key("M").is_empty());
     assert!(t.last_toast().contains("at least two"));
+}
+
+/// The text of the one call in `r`.
+fn call_text(r: &[Request]) -> &str {
+    match r {
+        [Request::Call { what, .. }] => what,
+        r => panic!("{r:?}"),
+    }
+}
+
+#[test]
+fn delay_toasts_name_the_step_and_the_whole_nudge() {
+    let mut t = T::new();
+    // Not nudged: a typed delay is just the delay.
+    t.type_key("D", "d");
+    assert_eq!(call_text(&t.key("Enter")), "Main L: delay 12.50 ms");
+    // Two samples of delay steps on the arrival.
+    let mut s = daemon_state();
+    for m in &mut s.measurements {
+        if let Some(d) = &mut m.delay {
+            d.applied = Seconds(602.0 / 48_000.0);
+            d.applied_samples = 602.0;
+            d.nudged = Seconds(2.0 / 48_000.0);
+            d.nudged_samples = 2.0;
+        }
+    }
+    t.conn(mirror(s));
+    assert_eq!(
+        call_text(&t.key("Ctrl+.")),
+        "Main L: nudged +1 sample → +0.06 ms"
+    );
+    assert_eq!(
+        call_text(&t.key("Alt+,")),
+        "Main L: nudged −0.1 sample → +0.04 ms"
+    );
+    // A typed delay keeps the arrival (12.50 ms): the nudge is the rest.
+    t.type_key("D", "d");
+    for _ in 0..10 {
+        t.key("Backspace");
+    }
+    t.text("12");
+    assert_eq!(
+        call_text(&t.key("Enter")),
+        "Main L: delay 12.00 ms → nudged −0.50 ms"
+    );
 }
 
 #[test]

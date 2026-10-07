@@ -161,6 +161,51 @@ pub fn sample_step(samples: f64) -> String {
     format!("{} {unit}", signed(samples, needed_decimals(samples, 3)))
 }
 
+/// A delay nudge: how far a curve was moved from its arrival, signed, in ms to 10 µs (half
+/// a sample at 48 kHz, so a one-sample nudge never reads as none): `+0.30 ms`, `−0.02 ms`.
+/// The list rows, the legend's nudge tag and the nudge toasts all say it this way.
+pub fn nudge(seconds: f64) -> String {
+    with_unit(signed(seconds * 1000.0, 2), " ms")
+}
+
+/// `nudged +0.30 ms` after a measurement's or a trace's state in its list row; `None` when
+/// it is not nudged.
+pub fn nudged_tag(seconds: f64) -> Option<String> {
+    (seconds != 0.0).then(|| format!("nudged {}", nudge(seconds)))
+}
+
+/// One step of a delay nudge, in the unit its keys step by.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NudgeStep {
+    /// A measurement's delay: whole or fractional samples of the session rate.
+    Samples(f64),
+    /// A display nudge (a trace's, or a live curve's): seconds.
+    Seconds(f64),
+}
+
+/// The toast after a nudge: the step taken, then the curve's whole nudge as its row and
+/// legend show it: `TF 2: nudged +1 sample → +0.02 ms`, `1083 94cm: nudged −0.1 ms → +0.20 ms`.
+pub fn nudge_toast(name: &str, step: NudgeStep, total_s: f64) -> String {
+    let step = match step {
+        NudgeStep::Samples(n) => sample_step(n),
+        NudgeStep::Seconds(s) => {
+            let ms = s * 1000.0;
+            with_unit(signed(ms, needed_decimals(ms, 3)), " ms")
+        }
+    };
+    format!("{name}: nudged {step} \u{2192} {}", nudge(total_s))
+}
+
+/// The toast after a typed delay: the delay set, and the nudge from the arrival it keeps
+/// when there is one: `TF 2: delay 0.94 ms → nudged +0.02 ms`, `TF 2: delay 0.94 ms`.
+pub fn typed_delay_toast(name: &str, applied_s: f64, nudged_s: f64) -> String {
+    let set = format!("{name}: delay {}", delay(applied_s));
+    if is_zero_text(&fixed(nudged_s * 1000.0, 2)) {
+        return set;
+    }
+    format!("{set} \u{2192} nudged {}", nudge(nudged_s))
+}
+
 /// An applied delay: milliseconds to 10 µs as everywhere else, with a third decimal when
 /// the delay has a finer part, so that a step of a tenth of a sample (2 µs at 48 kHz)
 /// shows: `12.50 ms`, `12.502 ms`.
@@ -358,6 +403,47 @@ mod tests {
         assert_eq!(signed(-3.0, 1), "−3.0");
         assert_eq!(fixed(f64::NAN, 1), "—");
         assert_eq!(signed(f64::INFINITY, 1), "—");
+    }
+
+    #[test]
+    fn nudges_and_their_toasts() {
+        assert_eq!(nudge(0.000_3), "+0.30 ms");
+        assert_eq!(nudge(-0.000_3), "−0.30 ms");
+        // One sample at 48 kHz.
+        assert_eq!(nudge(1.0 / 48_000.0), "+0.02 ms");
+        assert_eq!(nudge(0.0), "0.00 ms");
+        assert_eq!(nudge(f64::NAN), "—");
+        assert_eq!(nudged_tag(0.0), None);
+        assert_eq!(nudged_tag(-0.000_126).as_deref(), Some("nudged −0.13 ms"));
+        assert_eq!(
+            nudge_toast("TF 2", NudgeStep::Samples(1.0), 1.0 / 48_000.0),
+            "TF 2: nudged +1 sample → +0.02 ms"
+        );
+        assert_eq!(
+            nudge_toast("TF 2", NudgeStep::Samples(-0.1), -0.000_25),
+            "TF 2: nudged −0.1 sample → −0.25 ms"
+        );
+        assert_eq!(
+            nudge_toast("1083 94cm", NudgeStep::Seconds(0.000_1), 0.000_3),
+            "1083 94cm: nudged +0.1 ms → +0.30 ms"
+        );
+        assert_eq!(
+            nudge_toast("1083 94cm", NudgeStep::Seconds(-0.000_1), 0.0),
+            "1083 94cm: nudged −0.1 ms → 0.00 ms"
+        );
+        assert_eq!(
+            typed_delay_toast("TF 2", 0.000_94, 1.0 / 48_000.0),
+            "TF 2: delay 0.94 ms → nudged +0.02 ms"
+        );
+        assert_eq!(
+            typed_delay_toast("TF 2", 0.012_5, -0.001),
+            "TF 2: delay 12.50 ms → nudged −1.00 ms"
+        );
+        // A float residue of the arithmetic is no nudge.
+        assert_eq!(
+            typed_delay_toast("TF 2", 0.000_94, 1e-12),
+            "TF 2: delay 0.94 ms"
+        );
     }
 
     #[test]

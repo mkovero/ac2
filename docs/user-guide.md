@@ -571,14 +571,15 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   **Alt+.** by a tenth of a sample. Its live curve moves at once, and only it: the same way
   **,** / **.** move a stored trace (Ctrl+. like **.**, Ctrl+, like **,**), whichever curve
   is the phase reference — the stored traces stay where they are, also when the live curve
-  is the reference. The legend tags the live curve `nudge +0.21 ms` and the measurement list
-  says `nudged +0.21 ms` after its delay; the reference line and the distance keep the
+  is the reference. The legend tags the live curve `nudge +0.21 ms`, the measurement list
+  says `nudged +0.21 ms` after its delay (both count its **,** / **.** nudge in), and the
+  toast names the step and that total: `Main L: nudged +1 sample → +0.21 ms`; the reference line and the distance keep the
   measured arrival. A capture taken then is drawn exactly where the live curve was (its
   trace carries the step as its own nudge, which **,** / **.** adjust). The transfer function
   keeps its averages and turns them to the new delay instead of starting over, so you can
   walk the phase into place by eye. **D** (a typed delay) is the same move in one go: the
   arrival stays, the live curve alone moves to the typed delay and the nudge is its distance
-  from the arrival. **1** (the finder's) sets a new arrival: nothing moves and the nudge is
+  from the arrival (`Main L: delay 12.00 ms → nudged −0.50 ms`). **1** (the finder's) sets a new arrival: nothing moves and the nudge is
   gone; tracking (**Y**) follows the arrival and keeps your steps on top of it. A stopped or hidden measurement has no live curve to move:
   the keys only say so (**S** starts it) and leave the delay alone. Delays are kept to
   fractions of a sample (the finder's estimate is inserted exactly, `600.25samples` can be
@@ -670,7 +671,8 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
   gives it up; `none` frees its slot), so the digit keys reach it.
 - The trace keys act on the selected trace when its curve is on the transfer pane (else on
-  the live measurement): **U** inverts it, **,** / **.** nudge it, **E** makes it the phase
+  the live measurement): **U** inverts it, **,** / **.** nudge it (`Sweep 2: nudged +0.1 ms →
+  +0.30 ms`, and its row says `nudged +0.30 ms`), **E** makes it the phase
   reference, **K** / **Shift+K** smooth it, and **Mic curve on the selected trace…** corrects
   it. The offset keys (**J**, **Alt+↑/↓**, below) act on a selected trace of any kind. A
   target curve takes an offset only (it has no phase); a

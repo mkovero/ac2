@@ -339,7 +339,8 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     assert!(
         d.st.toasts
             .iter()
-            .any(|t| t.text.ends_with("delay −0.1 sample")),
+            // The total depends on whether the mirror caught up between the keys.
+            .any(|t| t.text.contains(": nudged −0.1 sample → ")),
         "{:?}",
         d.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
     );

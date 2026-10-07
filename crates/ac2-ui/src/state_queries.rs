@@ -305,6 +305,7 @@ impl AppState {
                     expression,
                     offset_db: e.offset_db,
                     inverted: e.inverted,
+                    nudge_s: e.nudge_s,
                     hidden: self.meas_hidden(m),
                     color: colours.meas(m.id),
                 }

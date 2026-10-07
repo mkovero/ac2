@@ -171,13 +171,18 @@ impl AppState {
             ));
             return;
         };
+        // The whole nudge after the step, as the row and the legend will show it: the
+        // daemon moves `nudged` by the same samples it moves the applied delay.
+        let stepped = m.delay.as_ref().map_or(0.0, |d| d.nudged_samples) + samples;
+        let total = stepped / rate + self.edit(m.id).nudge_s;
+        let what = format::nudge_toast(&m.config.name, format::NudgeStep::Samples(samples), total);
         self.call(
             out,
             Command::DelayNudge {
                 meas: m.id,
                 by: Seconds(samples / rate),
             },
-            format!("{}: delay {}", m.config.name, format::sample_step(samples)),
+            what,
         );
     }
 
@@ -1176,10 +1181,10 @@ impl AppState {
                     Ok(Some(t)) => {
                         let mut edit = t.edit.clone();
                         edit.delay_nudge = Seconds(step(edit.delay_nudge.0));
-                        let what = format!(
-                            "{}: nudged {}",
-                            trace_label(&t),
-                            format::ms(edit.delay_nudge.0, 1)
+                        let what = format::nudge_toast(
+                            &trace_label(&t),
+                            format::NudgeStep::Seconds(d),
+                            edit.delay_nudge.0,
                         );
                         self.call(out, Command::TraceUpdate { trace: t.id, edit }, what);
                     }
@@ -1187,6 +1192,14 @@ impl AppState {
                         if let Some(m) = self.need_tf() {
                             let e = self.edits.entry(m.id).or_default();
                             e.nudge_s = step(e.nudge_s);
+                            // The whole nudge, delay steps included, as the row says it.
+                            let stepped = m.delay.as_ref().map_or(0.0, |d| d.nudged.0);
+                            let total = stepped + e.nudge_s;
+                            self.toast(format::nudge_toast(
+                                &m.config.name,
+                                format::NudgeStep::Seconds(d),
+                                total,
+                            ));
                         }
                     }
                 }

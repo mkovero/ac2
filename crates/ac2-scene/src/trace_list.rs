@@ -112,6 +112,7 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             let hidden = (!t.edit.visible).then(|| "hidden".to_owned());
             let locked = t.edit.locked.then(|| "locked".to_owned());
             let no_data = (!i.has_data).then(|| "no data yet".to_owned());
+            let nudged = format::nudged_tag(t.edit.delay_nudge.0);
             let smooth = smoothing_text(t);
             let run = run_settings(t);
             // Dropped from the end first: what the eye and the colour already say last.
@@ -123,6 +124,8 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
                 if extra {
                     v.extend(no_data.clone());
                     v.extend(locked.clone());
+                    // As on a measurement's row: the nudge before the smoothing.
+                    v.extend(nudged.clone());
                     v.extend(smooth.clone());
                 }
                 v.join(" · ")
@@ -434,5 +437,50 @@ mod tests {
         for w in d.windows(2) {
             assert!(w[0].chars().count() > w[1].chars().count(), "{d:?}");
         }
+    }
+
+    /// The details line of one trace with `delay_nudge` (seconds), hidden or shown.
+    fn nudged_details(nudge_s: f64, visible: bool) -> Vec<String> {
+        let mut t = meta(4, "FOH", Some(1), TraceKind::Transfer, captured());
+        t.edit.delay_nudge = Seconds(nudge_s);
+        t.edit.visible = visible;
+        t.edit.smoothing = Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::MagnitudePhase,
+        });
+        let rows = trace_rows(
+            &[TraceItem {
+                meta: &t,
+                has_data: true,
+                color: Color::from_rgba8([1, 2, 3, 255]),
+            }],
+            None,
+        );
+        rows[0].details.clone()
+    }
+
+    #[test]
+    fn rows_say_a_nudge_as_a_measurement_row_does() {
+        assert_eq!(
+            nudged_details(0.000_3, true)[0],
+            "capture · slot 1 · nudged +0.30 ms · 1/6 oct"
+        );
+        assert_eq!(
+            nudged_details(-0.000_1, true)[0],
+            "capture · slot 1 · nudged −0.10 ms · 1/6 oct"
+        );
+        // A one-sample step at 48 kHz still reads as a nudge.
+        assert_eq!(
+            nudged_details(1.0 / 48_000.0, true)[0],
+            "capture · slot 1 · nudged +0.02 ms · 1/6 oct"
+        );
+        assert_eq!(nudged_details(0.0, true)[0], "capture · slot 1 · 1/6 oct");
+        // Hidden stays next to the kind and slot; the nudge drops before it when narrow.
+        let d = nudged_details(-0.000_25, false);
+        assert_eq!(
+            d[0],
+            "capture · slot 1 · hidden · nudged −0.25 ms · 1/6 oct"
+        );
+        assert_eq!(d[1], "capture · slot 1 · hidden");
     }
 }
