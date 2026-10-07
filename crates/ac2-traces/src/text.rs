@@ -931,8 +931,11 @@ fn source_text(s: &TraceSource) -> String {
             epoch.0,
             at_sample.0
         ),
-        TraceSource::IrCapture {
+        TraceSource::Sweep {
+            meas,
+            meas_name,
             run,
+            number,
             epoch,
             sweep,
             level,
@@ -940,7 +943,7 @@ fn source_text(s: &TraceSource) -> String {
             reference_input,
             measurement_input,
         } => format!(
-            "sweep {} ({} Hz – {} Hz, {} s, {} dBFS, {repeats}×), input {} re {}, session epoch {}",
+            "run {number} of sweep measurement {meas_name:?} (measurement {meas}, sweep {}; {} Hz – {} Hz, {} s, {} dBFS, {repeats}×), input {} re {}, session epoch {}",
             run.0,
             sweep.start.0,
             sweep.end.0,

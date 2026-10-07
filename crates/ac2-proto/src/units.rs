@@ -108,7 +108,7 @@ id_type!(
     TraceId(u32)
 );
 id_type!(
-    /// One `ir.capture` run, per incarnation.
+    /// One `sweep.run` run, per incarnation.
     SweepId(u32)
 );
 id_type!(

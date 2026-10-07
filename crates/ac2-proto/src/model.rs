@@ -861,31 +861,80 @@ pub enum MeasKind {
         /// Configuration.
         config: MathConfig,
     },
+    /// Sweep measurement: settings only. Nothing plays until `sweep.run` fires it (under the
+    /// stimulus lease, armed, like firing); each run is stored as a sweep trace it owns
+    /// (`docs/design/measurement-tree.md`).
+    Sweep {
+        /// Configuration.
+        config: SweepConfig,
+    },
 }
 
 impl MeasKind {
-    /// The stream that carries the measurement's curve or reading.
-    pub fn stream(&self) -> Stream {
+    /// The stream that carries the measurement's curve or reading; `None` for a sweep
+    /// measurement, whose results are stored traces, never a stream.
+    pub fn stream(&self) -> Option<Stream> {
         match self {
-            MeasKind::Transfer { .. } => Stream::Tf,
-            MeasKind::Spectrum { .. } => Stream::Spec,
-            MeasKind::Rta { .. } => Stream::Rta,
-            MeasKind::Spl { .. } => Stream::Spl,
-            MeasKind::Math { config } => config.domain.stream(),
+            MeasKind::Transfer { .. } => Some(Stream::Tf),
+            MeasKind::Spectrum { .. } => Some(Stream::Spec),
+            MeasKind::Rta { .. } => Some(Stream::Rta),
+            MeasKind::Spl { .. } => Some(Stream::Spl),
+            MeasKind::Math { config } => Some(config.domain.stream()),
+            MeasKind::Sweep { .. } => None,
         }
     }
 
     /// Whether the measurement publishes a `tf` stream (a transfer function or transfer
     /// math), so it is drawn, captured and compared as a transfer function.
     pub fn publishes_tf(&self) -> bool {
-        self.stream() == Stream::Tf
+        self.stream() == Some(Stream::Tf)
     }
 
     /// Whether the measurement is drawn on the spectrum pane: a spectrum, an RTA, or math
     /// on either.
     pub fn publishes_levels(&self) -> bool {
-        matches!(self.stream(), Stream::Spec | Stream::Rta)
+        matches!(self.stream(), Some(Stream::Spec | Stream::Rta))
     }
+
+    /// Whether it runs as a job (`meas.start`): every kind but a sweep measurement, which
+    /// plays only when `sweep.run` fires it.
+    pub fn is_job(&self) -> bool {
+        !matches!(self, MeasKind::Sweep { .. })
+    }
+}
+
+/// Who a stored trace or a math channel belongs to: the measurement it is listed under, or
+/// the imported group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TraceOwner {
+    /// A measurement (never a math channel: math lives under a measurement).
+    Meas {
+        /// The measurement.
+        meas: MeasId,
+    },
+    /// No measurement: imports, and the traces of a measurement deleted with them kept.
+    Imported,
+}
+
+impl TraceOwner {
+    /// The owning measurement, if any.
+    pub fn meas(self) -> Option<MeasId> {
+        match self {
+            TraceOwner::Meas { meas } => Some(meas),
+            TraceOwner::Imported => None,
+        }
+    }
+}
+
+/// What `meas.delete` does with the stored traces and math channels the measurement owns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OwnedTraces {
+    /// They stay, moved to [`TraceOwner::Imported`].
+    Keep,
+    /// They are deleted with it.
+    Delete,
 }
 
 /// A math channel: an expression over operands of one domain, evaluated by the daemon
@@ -893,6 +942,9 @@ impl MeasKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MathConfig {
+    /// The measurement it is listed under (the one selected when it was made); its
+    /// captures are filed there too.
+    pub owner: TraceOwner,
     /// What the operands are, and so what the result is and where it is drawn.
     pub domain: MathDomain,
     /// The expression.
@@ -910,14 +962,15 @@ impl MathConfig {
     /// Most operands of an average.
     pub const MAX_AVERAGE: usize = 16;
 
-    /// `expr` in `domain`, phase referred to the first operand, unsmoothed.
-    pub fn of(domain: MathDomain, expr: MathExpr) -> Self {
+    /// `expr` in `domain` under `owner`, phase referred to the first operand, unsmoothed.
+    pub fn of(owner: TraceOwner, domain: MathDomain, expr: MathExpr) -> Self {
         let first = expr
             .operands()
             .first()
             .copied()
             .unwrap_or(Operand::Meas { meas: MeasId(0) });
         Self {
+            owner,
             domain,
             expr,
             reference: MathReference::Operand { operand: first },
@@ -925,9 +978,10 @@ impl MathConfig {
         }
     }
 
-    /// The power average of `of`: a spatial average of mic positions.
-    pub fn power_average(domain: MathDomain, of: Vec<Operand>) -> Self {
+    /// The power average of `of` under `owner`: a spatial average of mic positions.
+    pub fn power_average(owner: TraceOwner, domain: MathDomain, of: Vec<Operand>) -> Self {
         Self::of(
+            owner,
             domain,
             MathExpr::Average {
                 of,
@@ -2031,10 +2085,17 @@ pub enum TraceSource {
         /// Phase reference.
         reference: DelayReference,
     },
-    /// Sweep measurement (`ir.capture`).
-    IrCapture {
+    /// A run of a sweep measurement (`sweep.run`).
+    Sweep {
+        /// The sweep measurement.
+        meas: MeasId,
+        /// Its name at the run.
+        meas_name: String,
         /// The run that made it.
         run: SweepId,
+        /// Run number within the measurement (1, 2 …): one more than the highest of its
+        /// runs stored when it ran.
+        number: u32,
         /// Epoch (shared time reference within it, like a capture).
         epoch: SessionEpoch,
         /// Sweep played.
@@ -2057,9 +2118,7 @@ impl TraceSource {
     /// base); every other source is independent (decision 8a).
     pub fn shared_epoch(&self) -> Option<SessionEpoch> {
         match self {
-            TraceSource::Captured { epoch, .. } | TraceSource::IrCapture { epoch, .. } => {
-                Some(*epoch)
-            }
+            TraceSource::Captured { epoch, .. } | TraceSource::Sweep { epoch, .. } => Some(*epoch),
             TraceSource::Math {
                 epoch, expr, phase, ..
             } => {
@@ -2185,6 +2244,9 @@ pub struct TraceEdit {
     /// capture starts with the smoothing its measurement had. A spectrum has no phase: its
     /// power is smoothed in either mode.
     pub smoothing: Option<Smoothing>,
+    /// The measurement it is listed under (a capture: the one it came from; a sweep run: its
+    /// sweep measurement), or the imported group. Moving it changes nothing else.
+    pub owner: TraceOwner,
 }
 
 /// Trace metadata entity (mandatory metadata of PLAN §3.5).
@@ -2270,51 +2332,35 @@ pub struct TraceData {
 }
 
 // ---------------------------------------------------------------------------------------
-// Sweep measurement (`ir.capture`, docs/design/sweep-distortion.md)
+// Sweep measurement (`MeasKind::Sweep`, `sweep.run`, docs/design/sweep-distortion.md)
 
-/// Which inputs a sweep records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SweepInputs {
-    /// The reference and measurement inputs of a transfer measurement.
-    Measurement {
-        /// The measurement.
-        meas: MeasId,
-    },
-    /// Inputs by number (zero-based device inputs).
-    Channels {
-        /// Reference (loopback).
-        reference: u16,
-        /// Measurement (mic).
-        measurement: u16,
-    },
-}
-
-/// Arguments of `ir.capture`.
+/// A sweep measurement's settings: what each `sweep.run` of it plays and records.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SweepRequest {
-    /// Inputs recorded.
-    pub inputs: SweepInputs,
+pub struct SweepConfig {
+    /// Reference input (the loopback), zero-based.
+    pub reference_input: u16,
+    /// Measurement input (the mic), zero-based.
+    pub measurement_input: u16,
     /// Output channels carrying the sweep (zero-based): the speaker's and the loopback's.
     pub outputs: Vec<u16>,
-    /// RMS level of the sweep's constant-envelope part; refused when absent (there is no
-    /// default level).
-    pub level: Option<Dbfs>,
+    /// RMS level of the sweep's constant-envelope part, typed by the operator (there is no
+    /// default level); checked against the global maximum at every run.
+    pub level: Dbfs,
     /// The sweep.
     pub sweep: EssSpec,
-    /// Sweeps played and averaged, 1 … [`SweepRequest::MAX_REPEATS`].
+    /// Sweeps played and averaged, 1 … [`SweepConfig::MAX_REPEATS`].
     pub repeats: u8,
     /// Linear-response gate after the arrival; `None` = the whole response up to the noise
     /// window.
     pub gate: Option<Seconds>,
     /// Silence recorded after each sweep (the room's decay and its noise; room parameters
-    /// are computed up to its end), at most [`SweepRequest::MAX_TAIL`]; `None` or anything
+    /// are computed up to its end), at most [`SweepConfig::MAX_TAIL`]; `None` or anything
     /// shorter = the shortest the analysis needs (1 s or more).
     pub tail: Option<Seconds>,
 }
 
-impl SweepRequest {
+impl SweepConfig {
     /// Longest silence after each sweep.
     pub const MAX_TAIL: Seconds = Seconds(20.0);
 
@@ -2365,12 +2411,14 @@ pub enum SweepStatus {
     },
 }
 
-/// The latest sweep run (`ir.capture`), mirrored.
+/// The latest sweep run (`sweep.run`), mirrored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SweepRun {
     /// Id.
     pub id: SweepId,
+    /// The sweep measurement it runs.
+    pub meas: MeasId,
     /// Client that started it.
     pub owner: ClientId,
     /// Name of the trace it makes.

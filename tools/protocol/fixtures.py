@@ -509,6 +509,7 @@ MATH_MEASUREMENT = {
         "kind": {
             "type": "math",
             "config": {
+                "owner": {"type": "meas", "meas": 1},
                 "domain": "transfer",
                 "expr": {
                     "type": "average",
@@ -533,6 +534,31 @@ MATH_MEASUREMENT = {
 
 
 SWEEP = {"start": 20.0, "end": 20000.0, "duration": 5.0, "fade_in": 0.01, "fade_out": 0.01}
+
+SWEEP_MEASUREMENT = {
+    "id": 7,
+    "config": {
+        "name": "Genelec 1 m",
+        "kind": {
+            "type": "sweep",
+            "config": {
+                "reference_input": 1,
+                "measurement_input": 0,
+                "outputs": [0, 1],
+                "level": -50.0,
+                "sweep": SWEEP,
+                "repeats": 2,
+                "gate": 0.005,
+                "tail": 3.0,
+            },
+        },
+    },
+    "config_rev": 66,
+    "running": False,
+    "frozen": False,
+    "delay": None,
+    "grid_id": None,
+}
 
 
 def requests():
@@ -610,20 +636,8 @@ def requests():
         ),
         req(
             33,
-            "ir.capture",
-            {
-                "lease_token": TOKEN,
-                "request": {
-                    "inputs": {"type": "channels", "reference": 1, "measurement": 0},
-                    "outputs": [0, 1],
-                    "level": -50.0,
-                    "sweep": SWEEP,
-                    "repeats": 2,
-                    "gate": 0.005,
-                    "tail": 3.0,
-                },
-                "name": "1083 sweep",
-            },
+            "sweep.run",
+            {"lease_token": TOKEN, "meas": 7, "name": "1083 sweep"},
         ),
         req(40, "session.inputs", {"inputs": INPUTS}),
         req(
@@ -731,6 +745,7 @@ def events():
             "rev": 55,
             "payload": {
                 "id": 3,
+                "meas": 7,
                 "owner": "alice",
                 "name": "1083 sweep",
                 "reference_input": 1,
@@ -745,6 +760,11 @@ def events():
                 "status": {"type": "done", "trace": 9},
                 "started_at": 1790000000000000000,
             },
+        },
+        {
+            "kind": "measurement",
+            "rev": 66,
+            "payload": {"type": "set", "value": SWEEP_MEASUREMENT},
         },
         {
             "kind": "recording",

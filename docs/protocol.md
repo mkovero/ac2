@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 23`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 24`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -86,7 +86,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `gen.ceiling` | `ceiling: Dbfs`, `confirm_raise: bool` | `generator` | any client |
 | `meas.create` | `config: MeasConfig` | `measurement` | |
 | `meas.update` | `meas`, `config` | `measurement` | |
-| `meas.delete` | `meas` | `ack` | |
+| `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
 | `meas.freeze` | `meas`, `frozen` | `measurement` | |
@@ -115,7 +115,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `seconds: u32` | `spl_history` | |
-| `ir.capture` | `lease_token`, `request: SweepRequest`, `name` | `sweep` (the run as started) | L (held for the capture), armed |
+| `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
@@ -140,7 +140,7 @@ expired deadline before the control side noticed, the daemon disarms with the sa
 event, so the state never says firing while the output is silent.
 
 **System max level (`gen.ceiling`).** `generator.ceiling` (dBFS RMS) is the system
-maximum: `gen.set`, `ir.capture` and `session.detect_loopback` above it are `refused`, and
+maximum: `gen.set`, `sweep.run` and `session.detect_loopback` above it are `refused`, and
 the output path limits every sample to the matching peak (6 × the RMS, at most full scale)
 on the running stream at once. `generator.ceiling_bound` is the hard upper bound fixed at
 daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not finite is
@@ -223,8 +223,11 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   weighting settled, and its `lmax`, `lmin`, `leq`, `lpeak` and `duration` cover the same
   interval as before the change (since the meter started or `meas.reset`). A new `input`
   restarts the meter.
-- **Math channel** (`math`, `MathConfig`: `domain`, `expr`, `reference`, `smoothing`).
-  Design: `docs/design/math-channels.md`. A result the daemon computes from operands named
+- **Math channel** (`math`, `MathConfig`: `owner`, `domain`, `expr`, `reference`,
+  `smoothing`). Design: `docs/design/math-channels.md`. `owner` (`TraceOwner`, below): the
+  measurement it is listed under — front ends give it the one selected when it was made —
+  or `imported`; its captures are filed under the same owner. A math channel or a
+  measurement that does not exist as owner is `invalid` / `not_found`. A result the daemon computes from operands named
   by id — live measurements and stored traces — and publishes like a measurement of its
   `domain`'s kind: `transfer` (`tf`, combined as complex values), `spectrum` (`spec`, tone
   levels on one bin grid) or `rta` (`rta`, band powers on one band layout). Its `grid_id`
@@ -270,11 +273,41 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   - Refused at create / update: an operand that does not exist (`not_found`), of another
     kind than the domain, a math channel as an operand, live transfer operands on
     different grids, `a` = `b`, a duplicate in an average (`invalid`). While a math channel
-    names a measurement, `meas.delete` of it and a `meas.update` that changes its kind,
+    names a measurement, `meas.delete` of it (unless the channel goes with it: owned by it,
+    `traces: delete`) and a `meas.update` that changes its kind,
     grid, FFT length or band layout are `refused`; `trace.delete` of a named trace is
     `refused`; `trace.mic_curve` on it restarts the channel with the corrected columns.
     `meas.reset` of a math channel is `invalid` (reset its operands); `meas.freeze` holds
     its last result.
+
+- **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_input`,
+  `outputs` ([u16], the speaker's and the loopback's), `level: Dbfs` (typed, no default),
+  `sweep: EssSpec`, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`). Settings
+  only: it publishes no stream, `running` stays false, and `meas.start` / `meas.stop` /
+  `meas.freeze` / `meas.reset` of it are `invalid`. `sweep.run` plays it (below); each run is
+  a stored `sweep` trace it owns. `meas.update` changes the settings for the next run.
+  `invalid` at create / update: equal inputs, outputs empty or repeated, repeats outside
+  1…8, a non-finite or positive level, a gate ≤ 0, a tail above 20 s, sweep parameters the
+  generator refuses at the session's rate (checked again at every run, as are the
+  session's inputs and outputs and the ceiling).
+
+#### Ownership (`TraceOwner`) and `meas.delete`
+
+Design: `docs/design/measurement-tree.md`. Every stored trace has an owner,
+`TraceEdit.owner` (`TraceOwner`, tagged by `type`: `meas` {`meas`} or `imported`), and so
+does every math channel (`MathConfig.owner`). A capture is owned by the measurement it came
+from, a math capture by the math channel's owner, a sweep run by its sweep measurement, an
+average by the owner its inputs share (else `imported`), an import by `imported`. Moving a
+trace is a `trace.update` with another `owner` (allowed on a locked trace); moving a math
+channel a `meas.update` with another `MathConfig.owner`. An owner must be an existing
+measurement other than a math channel (`not_found` / `invalid`).
+
+`meas.delete {meas, traces}` deletes the measurement and, by `traces` (`OwnedTraces`):
+`keep` — its traces and math channels stay, their owner becomes `imported` (one `trace` /
+`measurement` event each); `delete` — they are deleted with it (locked traces included:
+the operator chose to). Refused (`refused`) while a math channel that stays names the
+measurement or a trace deleted with it as an operand, and while a run of the measurement
+plays or analyses.
 
 #### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 
@@ -545,7 +578,8 @@ display edits and are never applied to the stored data.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
-  `epoch`, `at_sample`}, `delay` (the delay the DSP used), `depth` (transfer),
+  `epoch`, `at_sample`}, `edit.owner` the measurement, `delay` (the delay the DSP used),
+  `depth` (transfer),
   `cal` (spectrum / RTA: the calibration the measurement used, picked by the calibration
   matching rules below — its `key` names another mic or input when it was not this mic's;
   transfer functions are ratios and always `uncalibrated`), `mic` (the input setup's mic
@@ -564,7 +598,7 @@ display edits and are never applied to the stored data.
 - **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
   `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
   `refused`.
-- **Time base (decisions 8a / 8b).** Captured traces (`captured`, `ir_capture`) share the
+- **Time base (decisions 8a / 8b).** Captured traces (`captured`, `sweep`) share the
   time base of their session epoch, and so does a `math` capture whose `phase` is
   `shared_time_base` and whose expression is a sum, difference or average (a ratio or a
   cascade is relative, in no time base); every other source (`imported`, `average`, other
@@ -595,30 +629,30 @@ display edits and are never applied to the stored data.
   `not_ascending`, `out_of_range`, `too_many_rows` (> 65536), `bad_header`,
   `bad_coherence`.
 
-#### Sweep measurement (`ir.capture`)
+#### Sweep runs (`sweep.run`)
 
-Design: `docs/design/sweep-distortion.md`. `SweepRequest`: `inputs` (`SweepInputs`, tagged by
-`type`: `measurement` {`meas`} — a transfer measurement's reference and measurement inputs —
-or `channels` {`reference`, `measurement`}), `outputs` ([u16], the speaker's and the
-loopback's), `level: Dbfs | nil`, `sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`,
-`fade_in`, `fade_out`}, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`
+Design: `docs/design/sweep-distortion.md`. `sweep.run {lease_token, meas, name}` runs the
+sweep measurement `meas` (`MeasKind::Sweep`, `SweepConfig` above) with its settings:
+`sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`, `fade_in`, `fade_out`}, `tail`
 (silence recorded after each sweep: the room's decay and its noise, at most 20 s; nil or
-shorter = the analysis minimum, ≥ 1 s).
+shorter = the analysis minimum, ≥ 1 s). `name` nil names the trace `Run <number>`.
 
-- Refused (`refused`) without a level, above the ceiling, or while the generator is not
-  armed by the caller (arm with `gen.set` first: like firing, the capture needs it), while it
-  fires, while a loopback detection or another sweep runs, or without an open session.
-  `invalid`: inputs not captured or equal, outputs empty / repeated / not in the session,
-  repeats outside 1…8, sweep parameters the generator refuses, a gate ≤ 0, a tail above
-  20 s.
+- Refused (`refused`) above the ceiling, or while the generator is not armed by the caller
+  (arm with `gen.set` first: like firing, the run needs it), while it fires, while a
+  loopback detection or another sweep runs, or without an open session. `invalid`: not a
+  sweep measurement, inputs not captured, outputs not in the session, sweep parameters the
+  generator refuses at the session's rate.
 - The daemon routes the generator to `outputs`, plays `repeats` synchronised sweeps each
   followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records both inputs, analyses on a job thread
-  and stores a trace of `kind: sweep` (source `ir_capture` {`run`, `epoch`, `sweep`, `level`,
-  `repeats`, `reference_input`, `measurement_input`}, `delay` = the arrival). While it plays
+  and stores a trace of `kind: sweep` owned by the measurement (source `sweep` {`meas`,
+  `meas_name`, `run`, `number` — one more than the highest run number of the measurement's
+  stored runs —, `epoch`, `sweep`, `level`, `repeats`, `reference_input`,
+  `measurement_input`}, `delay` = the arrival). While it plays
   the generator is `firing` with the sweep as its settings; once the recording is in it is
   disarmed (`last_action` `stop` by the daemon; the lease stays with its holder), so the next
   sweep or stimulus needs an explicit arm.
-- Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `owner`, `name`,
+- Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `meas`, `owner`,
+  `name`,
   `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
   (actual), `post_roll`, `repeats`, `gate`, `started_at`, `status` (`SweepStatus`, tagged by
   `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`trace`} or `failed`
@@ -844,8 +878,8 @@ The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stop
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
-polarity, delay_nudge, slot, smoothing}, `kind`, `source` {captured | imported | math |
-average | ir_capture}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
+polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
+math | average | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
@@ -859,7 +893,7 @@ meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`Ti
 `drift` (`Drift` | nil: `ppm` output-vs-input clock drift from the loopback offset's slope,
 `span` s regressed, `warning` true when output and input are on different clocks, `at`
 WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
-committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `ir.capture` run),
+committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2).
 

@@ -147,6 +147,21 @@ fn edit() -> TraceEdit {
             fraction: SmoothingFraction::Twelfth,
             mode: SmoothingMode::MagnitudePhase,
         }),
+        owner: TraceOwner::Meas { meas: MeasId(1) },
+    }
+}
+
+/// A sweep measurement's settings.
+fn sweep_config() -> SweepConfig {
+    SweepConfig {
+        reference_input: 1,
+        measurement_input: 0,
+        outputs: vec![0, 1],
+        level: Dbfs(-50.0),
+        sweep: sweep(),
+        repeats: 2,
+        gate: Some(Seconds(0.005)),
+        tail: Some(Seconds(3.0)),
     }
 }
 
@@ -199,7 +214,10 @@ pub fn commands() -> Vec<Command> {
                 },
             },
         },
-        Command::MeasDelete { meas: MeasId(3) },
+        Command::MeasDelete {
+            meas: MeasId(3),
+            traces: OwnedTraces::Keep,
+        },
         Command::MeasStart { meas: MeasId(1) },
         Command::MeasStop { meas: MeasId(1) },
         Command::MeasFreeze {
@@ -272,21 +290,10 @@ pub fn commands() -> Vec<Command> {
             from: 120,
             max: 3600,
         },
-        Command::IrCapture {
+        Command::SweepRun {
             lease_token: token(),
-            request: Box::new(SweepRequest {
-                inputs: SweepInputs::Channels {
-                    reference: 1,
-                    measurement: 0,
-                },
-                outputs: vec![0, 1],
-                level: Some(Dbfs(-50.0)),
-                sweep: sweep(),
-                repeats: 2,
-                gate: Some(Seconds(0.005)),
-                tail: Some(Seconds(3.0)),
-            }),
-            name: "1083 sweep".into(),
+            meas: MeasId(7),
+            name: Some("1083 sweep".into()),
         },
         Command::StateSnapshot,
         Command::StateSince { rev: Rev(41) },
@@ -389,6 +396,24 @@ pub fn commands() -> Vec<Command> {
     ]
 }
 
+/// A sweep measurement: settings only, never running.
+pub fn sweep_measurement() -> Measurement {
+    Measurement {
+        id: MeasId(7),
+        config: MeasConfig {
+            name: "Genelec 1 m".into(),
+            kind: MeasKind::Sweep {
+                config: sweep_config(),
+            },
+        },
+        config_rev: Rev(66),
+        running: false,
+        frozen: false,
+        delay: None,
+        grid_id: None,
+    }
+}
+
 /// A math channel: the coherence-weighted average of two live transfer measurements and a
 /// stored trace.
 pub fn math_measurement() -> Measurement {
@@ -398,6 +423,7 @@ pub fn math_measurement() -> Measurement {
             name: "FOH average".into(),
             kind: MeasKind::Math {
                 config: MathConfig {
+                    owner: TraceOwner::Meas { meas: MeasId(1) },
                     domain: MathDomain::Transfer,
                     expr: MathExpr::Average {
                         of: vec![
@@ -595,6 +621,10 @@ fn trace_meta() -> TraceMeta {
 fn imported_trace_meta() -> TraceMeta {
     TraceMeta {
         id: TraceId(8),
+        edit: TraceEdit {
+            owner: TraceOwner::Imported,
+            ..edit()
+        },
         kind: TraceKind::Transfer,
         source: TraceSource::Imported {
             file_name: "sweep1.csv".into(),
@@ -617,6 +647,7 @@ fn imported_trace_meta() -> TraceMeta {
 fn sweep_run() -> SweepRun {
     SweepRun {
         id: SweepId(3),
+        meas: MeasId(7),
         owner: ClientId("alice".into()),
         name: "1083 sweep".into(),
         reference_input: 1,
@@ -636,9 +667,16 @@ fn sweep_run() -> SweepRun {
 fn sweep_meta() -> TraceMeta {
     TraceMeta {
         id: TraceId(9),
+        edit: TraceEdit {
+            owner: TraceOwner::Meas { meas: MeasId(7) },
+            ..edit()
+        },
         kind: TraceKind::Sweep,
-        source: TraceSource::IrCapture {
+        source: TraceSource::Sweep {
+            meas: MeasId(7),
+            meas_name: "Genelec 1 m".into(),
             run: SweepId(3),
+            number: 2,
             epoch: SessionEpoch(2),
             sweep: sweep(),
             level: Dbfs(-50.0),
@@ -1245,6 +1283,7 @@ pub fn events() -> Vec<Event> {
                 ..generator()
             }),
         ),
+        ev(66, Change::Measurement(Patch::Set(sweep_measurement()))),
     ]
 }
 

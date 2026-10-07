@@ -1,7 +1,7 @@
 //! Trace metadata rules shared by the daemon and the fake daemon: fresh edits, colours,
 //! slots and what a lock protects.
 
-use ac2_proto::model::{Polarity, Rgb, TraceEdit, TraceMeta};
+use ac2_proto::model::{Polarity, Rgb, TraceEdit, TraceMeta, TraceOwner};
 use ac2_proto::units::{Db, Seconds, TraceId};
 
 /// Okabe–Ito colours (distinguishable with the common colour-vision deficiencies), without
@@ -48,7 +48,7 @@ pub const PALETTE: [Rgb; 7] = [
 pub const MAX_NAME: usize = 128;
 
 /// Edits of a new trace: visible, unlocked, as measured.
-pub fn new_edit(id: TraceId, name: String, slot: Option<u8>) -> TraceEdit {
+pub fn new_edit(id: TraceId, name: String, slot: Option<u8>, owner: TraceOwner) -> TraceEdit {
     TraceEdit {
         name,
         color: PALETTE[(id.0 as usize).wrapping_sub(1) % PALETTE.len()],
@@ -60,6 +60,7 @@ pub fn new_edit(id: TraceId, name: String, slot: Option<u8>) -> TraceEdit {
         delay_nudge: Seconds(0.0),
         slot,
         smoothing: None,
+        owner,
     }
 }
 

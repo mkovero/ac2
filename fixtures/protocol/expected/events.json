@@ -265,6 +265,10 @@
      "kind": {
       "type": "math",
       "config": {
+       "owner": {
+        "type": "meas",
+        "meas": 1
+       },
        "domain": "transfer",
        "expr": {
         "type": "average",
@@ -395,6 +399,7 @@
   "rev": 55,
   "payload": {
    "id": 3,
+   "meas": 7,
    "owner": "alice",
    "name": "1083 sweep",
    "reference_input": 1,
@@ -420,6 +425,46 @@
     "trace": 9
    },
    "started_at": 1790000000000000000
+  }
+ },
+ {
+  "kind": "measurement",
+  "rev": 66,
+  "payload": {
+   "type": "set",
+   "value": {
+    "id": 7,
+    "config": {
+     "name": "Genelec 1 m",
+     "kind": {
+      "type": "sweep",
+      "config": {
+       "reference_input": 1,
+       "measurement_input": 0,
+       "outputs": [
+        0,
+        1
+       ],
+       "level": -50.0,
+       "sweep": {
+        "start": 20.0,
+        "end": 20000.0,
+        "duration": 5.0,
+        "fade_in": 0.01,
+        "fade_out": 0.01
+       },
+       "repeats": 2,
+       "gate": 0.005,
+       "tail": 3.0
+      }
+     }
+    },
+    "config_rev": 66,
+    "running": false,
+    "frozen": false,
+    "delay": null,
+    "grid_id": null
+   }
   }
  },
  {

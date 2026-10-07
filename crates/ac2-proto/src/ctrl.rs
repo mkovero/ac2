@@ -15,9 +15,9 @@ use crate::model::{
     AverageMethod, BackendInfo, BackendKind, CalEntry, CalKey, DelayFinding, DelayPick,
     DelayReference, DeviceId, ElectricalConnection, ExportFormat, FinderBand, Generator,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, Lease, LoopbackDetection, MeasConfig,
-    Measurement, Mic, MicCurveId, OutputSetup, Preview, RecordRequest, RecordingFile, RecordingRef,
-    RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig, SessionFile, SessionRef,
-    SplHistory, SplLogPage, SplLogWhich, SweepRequest, SweepRun, TraceData, TraceEdit, TraceMeta,
+    Measurement, Mic, MicCurveId, OutputSetup, OwnedTraces, Preview, RecordRequest, RecordingFile,
+    RecordingRef, RecordingRun, ReplayPace, ServerInfo, Session, SessionConfig, SessionFile,
+    SessionRef, SplHistory, SplLogPage, SplLogWhich, SweepRun, TraceData, TraceEdit, TraceMeta,
 };
 use crate::units::{
     Blob, ClientId, DaemonIncarnation, Db, DbSpl, Dbfs, Hz, LeaseToken, MeasId, MvPerPa, RequestId,
@@ -183,13 +183,17 @@ pub enum Command {
         /// New configuration.
         config: MeasConfig,
     },
-    /// Delete a measurement.
+    /// Delete a measurement, and say what becomes of the stored traces and math channels
+    /// it owns. Refused while a math channel that stays computes from it or from a trace
+    /// deleted with it, and while a run of it (a sweep measurement) plays.
     #[serde(rename = "meas.delete")]
     MeasDelete {
         /// Measurement.
         meas: MeasId,
+        /// Its traces and math channels: kept (moved to the imported group) or deleted.
+        traces: OwnedTraces,
     },
-    /// Start the job.
+    /// Start the job (refused for a sweep measurement: `sweep.run` plays it).
     #[serde(rename = "meas.start")]
     MeasStart {
         /// Measurement.
@@ -454,19 +458,20 @@ pub enum Command {
         meas: MeasId,
     },
 
-    // -- ir -----------------------------------------------------------------------------
-    /// Sweep measurement: plays `request.repeats` synchronised sweeps, records the reference
-    /// and measurement inputs and stores a `sweep` trace (response, harmonic distortion, IR).
-    /// Like firing, it needs the stimulus lease and the generator armed; the reply is the
-    /// started run, whose progress and outcome follow as `sweep` events.
-    #[serde(rename = "ir.capture")]
-    IrCapture {
+    // -- sweep --------------------------------------------------------------------------
+    /// Run a sweep measurement with its settings: plays its `repeats` synchronised sweeps,
+    /// records the reference and measurement inputs and stores a `sweep` trace it owns
+    /// (response, harmonic distortion, IR, room parameters). Like firing, it needs the
+    /// stimulus lease and the generator armed; the reply is the started run, whose progress
+    /// and outcome follow as `sweep` events.
+    #[serde(rename = "sweep.run")]
+    SweepRun {
         /// Lease.
         lease_token: LeaseToken,
-        /// What to play and record (boxed: it is the largest command).
-        request: Box<SweepRequest>,
-        /// Name of the resulting trace.
-        name: String,
+        /// The sweep measurement.
+        meas: MeasId,
+        /// Name of the resulting trace; `None` = `Run <number>`.
+        name: Option<String>,
     },
 
     // -- state, grid, file --------------------------------------------------------------
@@ -601,7 +606,7 @@ impl Command {
             Self::SplLogGet { .. } => "spl.log_get",
             Self::SplLogNew { .. } => "spl.log_new",
             Self::SplHistoryGet { .. } => "spl.history_get",
-            Self::IrCapture { .. } => "ir.capture",
+            Self::SweepRun { .. } => "sweep.run",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
             Self::GridGet { .. } => "grid.get",
@@ -652,7 +657,7 @@ impl Command {
             | Self::GenRefresh { lease_token }
             | Self::GenRelease { lease_token }
             | Self::SessionDetectLoopback { lease_token, .. }
-            | Self::IrCapture { lease_token, .. } => Some(*lease_token),
+            | Self::SweepRun { lease_token, .. } => Some(*lease_token),
             _ => None,
         }
     }
@@ -708,7 +713,7 @@ pub enum ReplyBody {
     DelayFinding(DelayFinding),
     /// `trace.capture/update/average/import`.
     Trace(TraceMeta),
-    /// `ir.capture`: the run, as started.
+    /// `sweep.run`: the run, as started.
     Sweep(SweepRun),
     /// `trace.list`.
     Traces(Vec<TraceMeta>),

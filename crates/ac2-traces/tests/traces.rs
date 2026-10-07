@@ -31,6 +31,7 @@ fn grid() -> GridDef {
 
 fn edit(name: &str) -> TraceEdit {
     TraceEdit {
+        owner: ac2_proto::model::TraceOwner::Imported,
         name: name.into(),
         color: Rgb { r: 1, g: 2, b: 3 },
         visible: true,
@@ -898,16 +899,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 10", "\"version\": 9")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 11", "\"version\": 10")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 9
+            found: 10
         }
     );
-    assert!(e.to_string().contains("reads version 10 only"), "{e}");
+    assert!(e.to_string().contains("reads version 11 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -929,7 +930,10 @@ fn session_refusals() {
 fn sweep_trace(id: u32) -> StoredTrace {
     let g = grid();
     let n = frequencies(&g).len();
-    let source = TraceSource::IrCapture {
+    let source = TraceSource::Sweep {
+        meas: ac2_proto::units::MeasId(1),
+        meas_name: "Sweep".into(),
+        number: 1,
         run: SweepId(1),
         epoch: SessionEpoch(2),
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
