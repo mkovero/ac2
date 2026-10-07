@@ -470,7 +470,7 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
         "DONE   trace {} {:?}: arrival {} · reference {} · {} × {} s{}\n",
         data.meta.id,
         data.meta.edit.name,
-        ac2_scene::format::ms(s.info.arrival.0, 2),
+        ac2_scene::format::delay(s.info.arrival.0),
         ac2_scene::format::db_readout(s.info.reference_level.0),
         s.info.repeats,
         ac2_scene::format::fixed(s.info.duration.0, 2),

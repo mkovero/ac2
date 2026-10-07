@@ -856,7 +856,7 @@ fn stream_results(cfg: FinderConfig, r: &[f32], m: &[f32]) -> Vec<FinderResult> 
     out
 }
 
-fn track(results: &[FinderResult], agreement: Agreement) -> Vec<Option<i64>> {
+fn track(results: &[FinderResult], agreement: Agreement) -> Vec<Option<f64>> {
     let mut t = Tracker::new(agreement);
     results.iter().map(|r| t.observe(r)).collect()
 }
@@ -887,13 +887,21 @@ fn tracking_full_locks_in_two_windows_and_relocks_after_a_step() {
     let moves = track(&results, Agreement::for_band(Band::FullRange, FS));
     println!("full tracking moves: {moves:?}");
     assert_eq!(moves[0], None);
-    assert_eq!(moves[1], Some(412), "lock after two windows");
+    assert_eq!(
+        moves[1].map(f64::round),
+        Some(412.0),
+        "lock after two windows"
+    );
     assert_eq!(moves[2], None);
     assert_eq!(
         moves[3], None,
         "first window after the step is only pending"
     );
-    assert_eq!(moves[4], Some(1188), "relock two windows after the step");
+    assert_eq!(
+        moves[4].map(f64::round),
+        Some(1188.0),
+        "relock two windows after the step"
+    );
 }
 
 #[test]
@@ -983,7 +991,7 @@ fn tracker_rules() {
         )),
         None
     );
-    assert_eq!(t.observe(&accepted(1000.9, 3)), Some(1001));
+    assert_eq!(t.observe(&accepted(1000.9, 3)), Some(1001.0));
     assert_eq!(t.held(), Some(1001));
     // a refusal clears pending too
     assert_eq!(t.observe(&accepted(1000.9, 4)), None);
@@ -1003,7 +1011,7 @@ fn tracker_rules() {
     assert_eq!(t.observe(&accepted(2000.0, 8)), None);
     t.reset();
     assert_eq!(t.observe(&accepted(2000.0, 9)), None);
-    assert_eq!(t.observe(&accepted(2000.4, 10)), Some(2000));
+    assert_eq!(t.observe(&accepted(2000.4, 10)), Some(2000.0));
 }
 
 #[test]
@@ -1012,7 +1020,7 @@ fn tracker_sub_agreement_is_a_tenth_of_a_millisecond() {
     assert!((sub.samples - 4.8).abs() < 1e-12);
     let mut t = Tracker::new(sub);
     assert_eq!(t.observe(&accepted(1000.0, 0)), None);
-    assert_eq!(t.observe(&accepted(1004.7, 1)), Some(1005));
+    assert_eq!(t.observe(&accepted(1004.7, 1)), Some(1005.0));
     assert_eq!(t.observe(&accepted(1000.0, 2)), None);
     assert_eq!(
         t.observe(&accepted(1004.9, 3)),
@@ -1046,7 +1054,7 @@ fn tracking_sub_locks_in_two_windows() {
     let moves = track(&results, Agreement::for_band(Band::Sub, FS));
     assert_eq!(moves[0], None);
     assert!(
-        matches!(moves[1], Some(d) if (d + 600).abs() <= 5),
+        matches!(moves[1], Some(d) if (d + 600.0).abs() <= 5.0),
         "{moves:?}"
     );
 }
@@ -1169,4 +1177,33 @@ fn timing_print() {
             lm as f64 / fs * 1e3,
         );
     }
+}
+
+#[test]
+fn tracker_inserts_the_fraction_once_it_repeats() {
+    let mut t = Tracker::new(Agreement::for_band(Band::FullRange, FS));
+    // 0.3 samples apart: agreeing, but only to the whole sample
+    assert_eq!(t.observe(&accepted(1000.2, 0)), None);
+    assert_eq!(t.observe(&accepted(1000.45, 1)), Some(1000.0));
+    // within a tenth of a sample: the pair's fractional mean
+    assert_eq!(t.observe(&accepted(1000.36, 2)), None);
+    let fine = t.observe(&accepted(1000.40, 3)).expect("fractional insert");
+    assert!((fine - 1000.38).abs() < 1e-9, "{fine}");
+    assert_eq!(t.held(), Some(1000));
+    // a fraction that stays within the agreement of the insert does not move it
+    assert_eq!(t.observe(&accepted(1000.44, 4)), None);
+    assert_eq!(t.observe(&accepted(1000.47, 5)), None);
+    // nor does a looser pair on the same whole sample
+    assert_eq!(t.observe(&accepted(1000.1, 6)), None);
+    assert_eq!(t.observe(&accepted(1000.4, 7)), None);
+    // a fraction across the half-sample, near the insert, stays put although it rounds up
+    assert_eq!(t.observe(&accepted(1000.43, 8)), None);
+    assert_eq!(t.observe(&accepted(1000.50, 9)), None);
+    assert_eq!(t.held(), Some(1001));
+    // the arrival moves on: the new fraction is inserted
+    assert_eq!(t.observe(&accepted(1003.71, 10)), None);
+    let fine = t
+        .observe(&accepted(1003.75, 11))
+        .expect("fractional insert");
+    assert!((fine - 1003.73).abs() < 1e-9, "{fine}");
 }

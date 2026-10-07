@@ -61,8 +61,8 @@ impl Finder {
         }
     }
 
-    /// Appends a block; returns a new tracked delay when tracking moves it.
-    pub(crate) fn push(&mut self, start: u64, r: &[f32], m: &[f32]) -> Option<i64> {
+    /// Appends a block; returns a new tracked delay, samples, when tracking moves it.
+    pub(crate) fn push(&mut self, start: u64, r: &[f32], m: &[f32]) -> Option<f64> {
         if self.reference.is_empty() || start != self.start + self.reference.len() as u64 {
             self.reference.clear();
             self.measurement.clear();
@@ -356,7 +356,7 @@ mod tests {
             moved = moved.or(f.push(start, &r, &m));
             start += r.len() as u64;
         }
-        assert_eq!(moved, Some(500));
+        assert_eq!(moved.map(f64::round), Some(500.0));
     }
 
     #[test]
@@ -393,7 +393,7 @@ mod tests {
                 moves.push((i * 1024, d));
             }
         }
-        let ds: Vec<i64> = moves.iter().map(|&(_, d)| d).collect();
+        let ds: Vec<i64> = moves.iter().map(|&(_, d)| d.round() as i64).collect();
         assert_eq!(ds, vec![412, 30_000], "{moves:?}");
         assert!(moves[1].0 >= change);
     }

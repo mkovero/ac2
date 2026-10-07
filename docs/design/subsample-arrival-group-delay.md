@@ -1,7 +1,16 @@
 # Sub-sample arrival on the sweep; group delay that holds below 100 Hz
 
-Status: proposed (operator, 2026-10-07: "sub sample precision sounds worthwhile, write design
-doc about it, below 100 [Hz] difference worries me"). Inputs: the REW cross-check on pupu
+Status: §1–4 implemented, the daemon's half of §2 open (2026-10-07). The sweep's arrival is
+the band-limited peak (±32 samples zero-padded ×16, then a parabola: ±16 left ≈ 0.002 sample of
+bias from the cut tails, ±32 ≈ 0.0004) with the phase, the IR's `t0` and the room times
+referred to it (`ac2-core::sweep`); the delay tracker (`ac2-core::delay::Tracker`) returns
+the fractional mean of two results agreeing within 0.1 sample, but the daemon's
+`ControlMsg::DelayTracked` still carries whole samples, so tracking still inserts whole
+samples; readouts show the arrival to the µs and `ac2 trace delay-diff` the A − B
+difference to 0.1 µs (the app has no A − B arrival readout yet); group delay is the
+coherence-weighted slope fit, span in the pane title. §5 not started. Originally proposed by
+the operator, 2026-10-07: "sub sample precision sounds worthwhile, write design doc about it,
+below 100 [Hz] difference worries me". Inputs: the REW cross-check on pupu
 (`docs/rigs/pupu.md`, "REW cross-check, electrical"), `delay-no-resettle.md` (fractional
 delays on the live transfer function), `sweep-distortion.md`.
 
@@ -77,7 +86,8 @@ strongest sample …") and `arrival_s = d / fs`.
 
 - Keep `d` as the whole-sample anchor for every window (linear, harmonic, room): windows
   stay in whole samples, as on the live path (`delay-no-resettle.md`, "The two halves").
-- Refine the peak: take `h[d−16 … d+16]`, interpolate band-limited by zero-padding its DFT
+- Refine the peak: take `h[d−32 … d+32]` (±16 leaves ≈ 0.002 sample of bias from the
+  tails it cuts), interpolate band-limited by zero-padding its DFT
   ×16 (the sweep is band-limited to `f2`, so the samples define the peak exactly), then a
   parabolic vertex on |h| at the fine grid. A parabola on the raw samples alone is biased
   by up to ≈ 0.05 sample for a sinc-shaped peak, and more when `f2` is well below Nyquist;
@@ -151,4 +161,8 @@ pane but is what the unsmoothed group delay shows.
   matches REW and is unambiguous for one path; the phase slope is what crossover summation
   cares about. Report the peak; the difference readout could offer both.
 - Default span for an unsmoothed trace: ±1/24 oct is a guess between resolution and noise;
-  the field run will say.
+  the field run will say. The scene's analytic test (high-pass at 3 Hz, 0.03° ripple of
+  period 1.1 Hz) reads within 4.6 % from 16 to 25 Hz at ±1/24 (the neighbour difference: 18 %)
+  but up to ≈ 10 % at 45–50 Hz, where the ripple's slope is a larger part of a smaller group
+  delay and five columns no longer span its period; ±1/12 stays within 2.6 % from 16 to 50 Hz.
+  Finding the ripple (§5) matters more than the span.

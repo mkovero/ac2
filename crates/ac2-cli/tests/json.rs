@@ -871,6 +871,16 @@ async fn trace_commands_json() -> R {
     assert_eq!(d["meta"], a);
     assert_eq!(d["mag_db"].as_array().map(Vec::len), Some(480));
     assert!(d["coherence"].is_array());
+    // Both captured at the same applied delay: no difference.
+    let dd = ok_json(&f, &["trace", "delay-diff", "a", "b", "--json"]).await?;
+    assert_eq!(dd["difference_s"], 0.0);
+    assert_eq!(dd["a_delay_s"], 0.01);
+    assert!(
+        dd["text"]
+            .as_str()
+            .is_some_and(|t| t.ends_with("mm @ 20 °C")),
+        "{dd}"
+    );
 
     let avg = ok_json(
         &f,

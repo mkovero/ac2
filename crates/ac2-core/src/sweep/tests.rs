@@ -641,3 +641,75 @@ fn a_room_keeps_its_parameters_through_the_sweep() {
         Err(SweepError::BadTail)
     ));
 }
+
+/// `x` delayed by `delay` samples, a fraction included, exactly: a linear phase on the DFT
+/// of the zero-padded record (the padding keeps the circular shift from wrapping).
+fn fractionally_delayed(x: &[f64], delay: f64, gain: f64) -> Vec<f64> {
+    let n = 2 * x.len().next_power_of_two();
+    let mut spec = fft_forward(x, n);
+    let last = spec.len() - 1;
+    for (k, z) in spec.iter_mut().enumerate() {
+        // A fractional delay at Nyquist is not real; the sweep has nothing there.
+        *z *= if k == last {
+            Complex64::new(0.0, 0.0)
+        } else {
+            gain * Complex64::from_polar(1.0, -TAU * k as f64 * delay / n as f64)
+        };
+    }
+    let mut y = fft_inverse(spec, n);
+    y.truncate(x.len());
+    y
+}
+
+/// Arrival error, samples, of a sweep through an exact `REF_DELAY`-relative fractional delay.
+fn fractional_arrival_error(fs: f64, f2: f64, phi: f64, snr_db: Option<f64>) -> (f64, f64) {
+    let s = SweepSpec {
+        sample_rate: fs,
+        ..spec(ess(50.0, f2, 1.0))
+    };
+    let t = SweepTiming::new(&s).expect("timing");
+    let amp = dbfs_to_rms(s.level_dbfs) * std::f64::consts::SQRT_2;
+    let mut x = vec![0.0; (0.37 * fs) as usize];
+    x.extend((0..t.sweep_samples()).map(|n| amp * t.plan.sample(n)));
+    x.extend(std::iter::repeat_n(
+        0.0,
+        t.post_roll_samples(fs) + (0.05 * fs) as usize,
+    ));
+    let reference = delayed(&x, REF_DELAY, REF_GAIN);
+    let mut mic = fractionally_delayed(&x, MIC_DELAY as f64 + phi, MIC_GAIN);
+    if let Some(snr) = snr_db {
+        let rms = dbfs_to_rms(s.level_dbfs) * MIC_GAIN * 10f64.powf(-snr / 20.0);
+        Noise(phi.to_bits() ^ fs.to_bits()).add(&mut mic, rms);
+    }
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let expected = (MIC_DELAY - REF_DELAY) as f64 + phi;
+    let err = r.arrival_s * fs - expected;
+    // A pure delay referred to its own arrival has no phase left.
+    let at = |f: f64| {
+        let i = r.frequencies.iter().position(|&c| c >= f).expect("column");
+        r.phase_deg[i]
+    };
+    let phase = at(1000.0).abs().max(at(10_000.0).abs());
+    (err, phase)
+}
+
+#[test]
+fn a_fractional_delay_reads_as_a_fractional_arrival() {
+    for (fs, f2) in [
+        (48_000.0, 20_000.0),
+        (96_000.0, 20_000.0),
+        (96_000.0, 40_000.0),
+    ] {
+        for phi in [0.0, 0.1, 0.25, 0.5, 0.73] {
+            let (clean, phase) = fractional_arrival_error(fs, f2, phi, None);
+            let (noisy, _) = fractional_arrival_error(fs, f2, phi, Some(40.0));
+            eprintln!(
+                "fs {fs} f2 {f2} phi {phi}: clean {clean:+.5}, 40 dB {noisy:+.5} sample, \
+                 phase {phase:.4}°"
+            );
+            assert!(clean.abs() < 0.005, "fs {fs} f2 {f2} phi {phi}: {clean}");
+            assert!(noisy.abs() < 0.05, "fs {fs} f2 {f2} phi {phi}: {noisy}");
+            assert!(phase < 0.5, "fs {fs} f2 {f2} phi {phi}: phase {phase}°");
+        }
+    }
+}

@@ -47,7 +47,7 @@ use estimator::{
 };
 
 pub use stream::DelayStream;
-pub use track::{Agreement, Tracker};
+pub use track::{Agreement, FINE_AGREEMENT_SAMPLES, Tracker};
 
 /// A run of samples at an absolute stream index (from the block headers).
 #[derive(Debug, Clone, Copy)]

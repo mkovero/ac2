@@ -252,6 +252,28 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
             let t = expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?;
             out.emit(&t, || output::traces(std::slice::from_ref(&t)))?;
         }
+        TraceCmd::DelayDiff { a, b, temp } => {
+            let s = state(&c).await?;
+            let (ta, tb) = (find_trace(&s, a)?, find_trace(&s, b)?);
+            let text = ac2_scene::readout::arrival_difference(ta.delay.0, tb.delay.0, temp.0);
+            let j = json!({
+                "a": ta.id,
+                "b": tb.id,
+                "a_delay_s": ta.delay.0,
+                "b_delay_s": tb.delay.0,
+                "difference_s": ta.delay.0 - tb.delay.0,
+                "text": text,
+            });
+            out.emit(&j, || {
+                format!(
+                    "{} − {}: {text}  ({} − {})\n",
+                    ta.edit.name,
+                    tb.edit.name,
+                    ac2_scene::format::delay(ta.delay.0),
+                    ac2_scene::format::delay(tb.delay.0)
+                )
+            })?;
+        }
         TraceCmd::Rename { trace, name } => {
             let name = name.trim();
             if name.is_empty() {

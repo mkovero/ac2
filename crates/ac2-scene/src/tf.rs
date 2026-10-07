@@ -14,6 +14,7 @@ use crate::readout::{self, CursorReadout};
 use crate::theme::Theme;
 use crate::trace::{
     DisplayCache, DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
+    group_delay_span,
 };
 use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
 
@@ -153,6 +154,19 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64, stepped_s: f64, selected: bool) 
 /// `smoothing 1/6 oct`, `smoothing off`.
 pub fn smoothing_caption(s: Option<ac2_proto::model::Smoothing>) -> String {
     format!("smoothing {}", format::smoothing(s))
+}
+
+/// The span the shown traces' group delay is fitted over: `1/12 oct`, or `1/12–1/6 oct`
+/// when their smoothing gives them different spans.
+fn group_delay_span_text(shown: &[DisplayTrace]) -> String {
+    let spans = shown.iter().map(|t| group_delay_span(t.smoothing));
+    let narrowest = spans.clone().max().unwrap_or(group_delay_span(None));
+    let widest = spans.min().unwrap_or(narrowest);
+    if narrowest == widest {
+        format!("1/{widest} oct")
+    } else {
+        format!("1/{narrowest}–1/{widest} oct")
+    }
 }
 
 fn signed_ms(s: f64) -> String {
@@ -341,7 +355,7 @@ pub fn transfer_scene(
                 ),
                 PhaseView::GroupDelay { range_ms } => (
                     y(range_ms, "ms", Steps::Decimal),
-                    "Group delay ms".to_string(),
+                    format!("Group delay ms · {}", group_delay_span_text(&shown)),
                 ),
             },
             TfPaneKind::Coherence => (
@@ -942,7 +956,7 @@ mod tests {
             SIZE,
         );
         assert_eq!(s.panes.len(), 2);
-        assert_eq!(s.panes[1].title, "Group delay ms");
+        assert_eq!(s.panes[1].title, "Group delay ms · 1/12 oct");
         assert_eq!(s.cursor.as_ref().expect("cursor").rows[0].phase, "0.20 ms");
         // Every phase-pane point sits at the 0.2 ms line.
         let y = s.panes[1].y_axis.mapping.to_px(0.2);

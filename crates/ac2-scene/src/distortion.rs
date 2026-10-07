@@ -235,7 +235,7 @@ fn y_value(db: f64, unit: DistortionUnit) -> f64 {
 /// arrival alone. CLIPPED stays on every one (and alone last): it says the result is wrong.
 fn info_lines(d: &TraceData, s: &SweepData) -> Vec<String> {
     let i = &s.info;
-    let arrival = format!("arrival {}", format::ms(i.arrival.0, 2));
+    let arrival = format!("arrival {}", format::delay(i.arrival.0));
     let runs = format!("{} × {} s", i.repeats, format::fixed(i.duration.0, 2));
     let window = format!(
         "window {} + {}",

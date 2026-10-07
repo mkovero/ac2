@@ -478,13 +478,14 @@ impl Analysis for Transfer {
         }
         if let Some(d) = self.finder.push(b.start_sample, &self.rbuf, &self.mbuf) {
             tracing::info!(
-                "measurement {}: tracking moves the delay to {d} samples",
+                "measurement {}: tracking moves the delay to {d:.3} samples",
                 self.meas.0
             );
+            // `DelayTracked` carries whole samples, so the tracker's fraction is rounded here.
             let _ = self.to_control.send(ControlMsg::DelayTracked {
                 meas: self.meas,
                 epoch: self.epoch,
-                samples: d,
+                samples: d.round() as i64,
             });
         }
         self.routing.push(&self.rbuf, &self.mbuf);

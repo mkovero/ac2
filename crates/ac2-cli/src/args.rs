@@ -1297,6 +1297,17 @@ pub enum TraceCmd {
         /// `on` or `off`.
         state: Shown,
     },
+    /// The difference of two traces' delays, A − B, to 0.1 µs: for sweeps, the difference
+    /// of their arrivals (what aligning a pair trims); for captures, of the applied delays.
+    DelayDiff {
+        /// Trace A (id or name).
+        a: MeasRef,
+        /// Trace B (id or name).
+        b: MeasRef,
+        /// Air temperature for the path-length difference.
+        #[arg(long, default_value = "20c", allow_hyphen_values = true)]
+        temp: Celsius,
+    },
     /// Rename a stored trace.
     Rename {
         /// Trace id or name.

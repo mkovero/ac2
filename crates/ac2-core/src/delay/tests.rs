@@ -250,7 +250,7 @@ fn switched(x: &[f64], before: &[(i64, f64)], after: &[(i64, f64)], change: usiz
         .collect()
 }
 
-type Tracked = Vec<(FinderResult, Option<i64>)>;
+type Tracked = Vec<(FinderResult, Option<f64>)>;
 
 /// Every window through a full-search stream and a tracking stream side by side, each
 /// feeding its own tracker that starts holding `held`; returns both results and moves.
@@ -319,8 +319,8 @@ fn tracking_local_search_reacquires_after_a_jump() {
     assert_eq!(b.len(), n_win);
     let moves_a: Vec<_> = a.iter().map(|(_, mv)| *mv).collect();
     let moves_b: Vec<_> = b.iter().map(|(_, mv)| *mv).collect();
-    assert_eq!(moves_a[1], Some(d1));
-    assert_eq!(moves_a[7], Some(d2), "{moves_a:?}");
+    assert_eq!(moves_a[1].map(f64::round), Some(d1 as f64));
+    assert_eq!(moves_a[7].map(f64::round), Some(d2 as f64), "{moves_a:?}");
     assert_eq!(moves_b, moves_a);
     for ((ra, _), (rb, _)) in a.iter().zip(&b) {
         assert_eq!(kind(&ra.outcome), kind(&rb.outcome));
@@ -365,7 +365,10 @@ fn tracking_local_search_finds_a_new_far_arrival_at_the_next_full_search() {
     let m = switched(&x, &[(412, 1.0)], &[(-15_000, 1.0), (412, 1.0)], change);
     let r: Vec<f32> = x.iter().map(|&v| v as f32).collect();
     let (a, b, _) = track_both(cfg, &r, &m, 412);
-    let at = |v: &Tracked| v.iter().position(|(_, mv)| *mv == Some(-15_000));
+    let at = |v: &Tracked| {
+        v.iter()
+            .position(|(_, mv)| mv.map(f64::round) == Some(-15_000.0))
+    };
     let (ia, ib) = (at(&a), at(&b));
     println!("new far arrival: full search moves at window {ia:?}, tracking at {ib:?}");
     assert_eq!(

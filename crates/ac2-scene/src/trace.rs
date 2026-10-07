@@ -9,7 +9,13 @@
 //! - **Coherence.** Optional blanking (γ² below a threshold → gap) and an opacity curve
 //!   (low coherence fades). Coherence itself is never blanked or faded.
 //! - **Phase comparison time reference (decision 8b).** See below.
-//! - **Unwrapped phase and group delay** for the alternative phase views.
+//! - **Unwrapped phase and group delay** for the alternative phase views. Group delay is
+//!   the slope of a line fitted to the unwrapped phase over a stated span, not a
+//!   neighbour difference: on a 48-per-octave grid neighbours are 2.9 % of f apart, so a
+//!   phase error of 0.03° at 50 Hz is already 58 µs of a 187 µs group delay. The fit
+//!   weights each column by `γ²/(1−γ²)`, the inverse of an averaged phase estimate's
+//!   variance (columns without coherence weigh 1), and the span is
+//!   [`group_delay_span`]; the slope's error falls as `n^{−3/2}` with the columns fitted.
 //!
 //! # Phase relative to the shared reference delay
 //!
@@ -47,7 +53,7 @@
 
 use ac2_proto::frame::{FrameStamp, TfFrame, ValidityMask};
 use ac2_proto::model::{
-    ImportNote, MicState, Polarity, Smoothing, TraceData, TraceMicCurve, TraceSource,
+    ImportNote, MicState, Polarity, Smoothing, SmoothingMode, TraceData, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 use std::sync::{Arc, Mutex};
@@ -289,7 +295,7 @@ pub struct DisplayTrace {
     pub phase_wrapped_deg: Vec<f64>,
     /// Rotated phase, unwrapped along frequency.
     pub phase_unwrapped_deg: Vec<f64>,
-    /// Group delay of the rotated phase, seconds.
+    /// Group delay of the rotated phase over [`group_delay_span`], seconds.
     pub group_delay_s: Vec<f64>,
     /// γ² (not blanked by the coherence threshold).
     pub coherence: Vec<f64>,
@@ -305,6 +311,70 @@ impl DisplayTrace {
     pub fn is_stale(&self) -> bool {
         self.freshness.is_some_and(|f| f.is_stale())
     }
+}
+
+/// Unsmoothed phase gets its group delay over 1/12 octave (±1/24): about five columns of a
+/// 48-per-octave grid, 2× less noise than the neighbour difference, while a resonance a
+/// twelfth of an octave wide still shows.
+pub const GROUP_DELAY_SPAN_B: u32 = 12;
+
+/// The span group delay is fitted over, as `b` of 1/b octave (centred on the column): the
+/// trace's phase smoothing when that is wider than [`GROUP_DELAY_SPAN_B`], since a slope
+/// finer than the smoothing would only show its averaging. Magnitude-only smoothing leaves
+/// the phase as measured.
+pub fn group_delay_span(smoothing: Option<Smoothing>) -> u32 {
+    match smoothing {
+        Some(s) if s.mode == SmoothingMode::MagnitudePhase => {
+            s.fraction.b().min(GROUP_DELAY_SPAN_B)
+        }
+        _ => GROUP_DELAY_SPAN_B,
+    }
+}
+
+/// `−dφ/df / 360` of `unwrapped` (degrees) at each column: the slope of a weighted
+/// least-squares line over the columns within ±1/(2b) octave, and at least the two
+/// neighbours on a grid too coarse for that. NaN with fewer than three columns to fit.
+fn fitted_group_delay(freqs: &[f64], unwrapped: &[f64], coherence: &[f64], b: u32) -> Vec<f64> {
+    // γ² of 1 would weigh infinitely; 1 − 10⁻⁶ already outweighs any noisy column.
+    let weight = |g: f64| {
+        if g.is_finite() {
+            let g = g.clamp(0.0, 1.0 - 1e-6);
+            g / (1.0 - g)
+        } else {
+            1.0
+        }
+    };
+    let half_oct = 0.5 / f64::from(b) * (1.0 + 1e-9);
+    let n = freqs.len();
+    let mut out = vec![f64::NAN; n];
+    for i in 0..n {
+        let fi = freqs[i];
+        if !unwrapped[i].is_finite() || fi.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+            continue;
+        }
+        let near = |j: usize| j.abs_diff(i) <= 1 || (freqs[j] / fi).log2().abs() <= half_oct;
+        let lo = (0..i).rev().take_while(|&j| near(j)).last().unwrap_or(i);
+        let hi = (i + 1..n).take_while(|&j| near(j)).last().unwrap_or(i);
+        let (mut sw, mut sx, mut sy, mut sxx, mut sxy, mut used) = (0.0, 0.0, 0.0, 0.0, 0.0, 0);
+        for j in lo..=hi {
+            let w = weight(coherence[j]);
+            if !unwrapped[j].is_finite() || w <= 0.0 {
+                continue;
+            }
+            let (x, y) = (freqs[j] - fi, unwrapped[j] - unwrapped[i]);
+            sw += w;
+            sx += w * x;
+            sy += w * y;
+            sxx += w * x * x;
+            sxy += w * x * y;
+            used += 1;
+        }
+        let den = sw * sxx - sx * sx;
+        if used >= 3 && den > 0.0 {
+            out[i] = -(sw * sxy - sx * sy) / den / 360.0;
+        }
+    }
+    out
 }
 
 fn get(v: Option<&[f32]>, i: usize) -> f64 {
@@ -385,26 +455,15 @@ pub fn display_trace(
     }
     let rot = |i: usize| -360.0 * t.freqs[i] * shift_s;
 
-    // Group delay of the measured phase by central differences (one-sided at the ends of a
-    // run), then shifted by Δ: −dφ/df / 360 of the rotation term is exactly Δ.
-    let mut group_delay_s = vec![f64::NAN; n];
-    for i in 0..n {
-        if !unwrapped[i].is_finite() {
-            continue;
-        }
-        let lo = (i > 0 && unwrapped[i - 1].is_finite()).then(|| i - 1);
-        let hi = (i + 1 < n && unwrapped[i + 1].is_finite()).then_some(i + 1);
-        let (a, b) = match (lo, hi) {
-            (Some(a), Some(b)) => (a, b),
-            (Some(a), None) => (a, i),
-            (None, Some(b)) => (i, b),
-            (None, None) => continue,
-        };
-        let df = t.freqs[b] - t.freqs[a];
-        if df > 0.0 {
-            group_delay_s[i] = -(unwrapped[b] - unwrapped[a]) / (360.0 * df) + shift_s;
-        }
-    }
+    // Group delay of the measured phase, then shifted by Δ: −dφ/df / 360 of the rotation
+    // term is exactly Δ, so it is added rather than fitted.
+    let mut group_delay_s = fitted_group_delay(
+        &t.freqs[..n],
+        &unwrapped,
+        &coherence,
+        group_delay_span(t.smoothing),
+    );
+    group_delay_s.iter_mut().for_each(|g| *g += shift_s);
 
     let phase_unwrapped_deg: Vec<f64> = (0..n)
         .map(|i| {
@@ -785,7 +844,12 @@ mod tests {
             let got = d[1].phase_wrapped_deg[i];
             assert!(wrap_deg(got - want).abs() < 1e-3, "{f} Hz: {got} vs {want}");
             assert!(d[0].phase_wrapped_deg[i].abs() < 1e-3);
-            // Group delay reads the 1.5 ms arrival difference.
+            // Group delay reads the 1.5 ms arrival difference; an end column of this
+            // coarse grid has one neighbour, too few to fit.
+            if i == 0 || i + 1 == d[1].freqs.len() {
+                assert!(d[1].group_delay_s[i].is_nan());
+                continue;
+            }
             assert!((d[1].group_delay_s[i] - 0.0015).abs() < 1e-6, "{f}");
             assert!(d[0].group_delay_s[i].abs() < 1e-6);
         }
@@ -955,9 +1019,12 @@ mod tests {
             assert!(d.coherence[i].is_nan());
         }
         assert!(d.magnitude_db[6].is_finite());
-        // Group delay next to a gap is one-sided; an isolated column has none.
-        assert!(d.group_delay_s[4].is_finite() && d.group_delay_s[8].is_finite());
-        assert!(d.group_delay_s[6].is_nan());
+        // Group delay needs three columns in its span: on this coarse grid the span is the
+        // two neighbours, so a column next to a gap has none.
+        assert!(d.group_delay_s[3].is_finite() && d.group_delay_s[9].is_finite());
+        for i in [4, 6, 8] {
+            assert!(d.group_delay_s[i].is_nan(), "{i}");
+        }
     }
 
     #[test]
@@ -1115,5 +1182,88 @@ mod tests {
                 assert_eq!(after[0].shift_s.to_bits(), before[0].shift_s.to_bits());
             }
         }
+    }
+
+    /// A path whose group delay is known exactly: a second-order Butterworth high-pass at
+    /// 3 Hz and 3.7 µs of delay, measured with a phase ripple of 0.03° and period 1.1 Hz
+    /// (an echo 0.9 s out, the size the sweep's LF phase shows). The neighbour difference
+    /// reads the ripple's own slope, up to 476 µs, next to the high-pass's 2.7 ms at 16 Hz;
+    /// a fit over most of a period averages it out.
+    #[test]
+    fn group_delay_fit_holds_at_low_frequencies() {
+        use std::f64::consts::{PI, SQRT_2};
+        let (f0, delay) = (3.0, 3.7e-6);
+        let ripple = |f: f64| 0.03 * (2.0 * PI * f / 1.1).sin();
+        // Phase lead of the high-pass, degrees, continuous above f0.
+        let hp = |f: f64| {
+            let (w, w0) = (2.0 * PI * f, 2.0 * PI * f0);
+            (PI - (w * w0 * SQRT_2).atan2(w0 * w0 - w * w)).to_degrees()
+        };
+        let path = |f: f64| hp(f) - 360.0 * f * delay;
+        let exact = |f: f64| {
+            let h = 1e-4;
+            -(path(f + h) - path(f - h)) / (2.0 * h) / 360.0
+        };
+        let freqs: Vec<f64> = (0..=240)
+            .map(|k| 10.0 * 2f64.powf(f64::from(k) / 48.0))
+            .collect();
+        let n = freqs.len();
+        let data = Data {
+            phase: freqs
+                .iter()
+                .map(|&f| wrap_deg(path(f) + ripple(f)) as f32)
+                .collect(),
+            mag: vec![0.0; n],
+            coh: vec![f32::NAN; n],
+            validity: vec![ValidityMask::NONE; n],
+            freqs,
+        };
+        // Worst relative error of the fit and of the neighbour difference in `lo..=hi` Hz.
+        let worst = |smoothing: Option<Smoothing>, lo: f64, hi: f64| {
+            let mut t = data.trace(1, TimeBase::Independent);
+            t.coherence = None;
+            t.smoothing = smoothing;
+            let d = display_trace(&t, None, &CoherenceStyle::default());
+            let u = &d.phase_unwrapped_deg;
+            let (mut fit, mut central) = (0.0f64, 0.0f64);
+            for i in (1..n - 1).filter(|&i| (lo..=hi).contains(&d.freqs[i])) {
+                let want = exact(d.freqs[i]);
+                let cd = -(u[i + 1] - u[i - 1]) / (360.0 * (d.freqs[i + 1] - d.freqs[i - 1]));
+                fit = fit.max((d.group_delay_s[i] / want - 1.0).abs());
+                central = central.max((cd / want - 1.0).abs());
+            }
+            (fit, central)
+        };
+        let (fit, central) = worst(None, 16.0, 25.0);
+        eprintln!(
+            "16–25 Hz, 1/12 oct: fit within {:.1} %, neighbour difference {:.1} %",
+            fit * 100.0,
+            central * 100.0
+        );
+        assert!(fit < 0.05, "fit {fit}");
+        assert!(central > 0.10, "neighbour difference {central}");
+
+        // A 1/6-octave phase-smoothed trace gets its group delay over 1/6 octave, which
+        // spans the ripple's period further up too.
+        let sixth = Smoothing {
+            fraction: ac2_proto::model::SmoothingFraction::Sixth,
+            mode: SmoothingMode::MagnitudePhase,
+        };
+        assert_eq!(group_delay_span(Some(sixth)), 6);
+        let (fit, central) = worst(Some(sixth), 16.0, 50.0);
+        eprintln!(
+            "16–50 Hz, 1/6 oct: fit within {:.1} %, neighbour difference {:.1} %",
+            fit * 100.0,
+            central * 100.0
+        );
+        assert!(fit < 0.035, "fit {fit}");
+        assert!(central > 0.20, "neighbour difference {central}");
+        // Magnitude-only smoothing leaves the phase, and its span, as measured.
+        let mag_only = Smoothing {
+            mode: SmoothingMode::Magnitude,
+            ..sixth
+        };
+        assert_eq!(group_delay_span(Some(mag_only)), GROUP_DELAY_SPAN_B);
+        assert_eq!(group_delay_span(None), 12);
     }
 }

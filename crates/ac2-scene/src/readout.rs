@@ -15,15 +15,31 @@ pub fn delay_distance_m(delay_s: f64, temp_c: f64) -> f64 {
     delay_s * speed_of_sound(temp_c)
 }
 
-/// `12.34 ms · 4.24 m @ 20 °C`.
+/// `12.34 ms · 4.24 m @ 20 °C`; the delay to the µs when it has a finer part (`12.502 ms`).
 pub fn delay_readout(delay_s: f64, temp_c: f64) -> String {
     if !delay_s.is_finite() {
         return format::NO_VALUE.to_string();
     }
     format!(
         "{} · {} m @ {}",
-        format::ms(delay_s, 2),
+        format::delay(delay_s),
         format::fixed(delay_distance_m(delay_s, temp_c), 2),
+        format::celsius(temp_c)
+    )
+}
+
+/// Difference of two arrivals (A − B), to 0.1 µs (a hundredth of a sample at 96 kHz: what
+/// aligning a pair needs), with the path-length difference it stands for:
+/// `+3.7 µs · +1.3 mm @ 20 °C`.
+pub fn arrival_difference(a_s: f64, b_s: f64, temp_c: f64) -> String {
+    let d = a_s - b_s;
+    if !d.is_finite() {
+        return format::NO_VALUE.to_string();
+    }
+    format!(
+        "{} µs · {} mm @ {}",
+        format::signed(d * 1e6, 1),
+        format::signed(delay_distance_m(d, temp_c) * 1000.0, 1),
         format::celsius(temp_c)
     )
 }
@@ -105,7 +121,21 @@ mod tests {
         // 30 °C: c = 349.0 m/s; 1 ms → 0.349 m.
         assert_eq!(delay_readout(0.001, 30.0), "1.00 ms · 0.35 m @ 30 °C");
         assert_eq!(delay_readout(-0.0015, 22.5), "−1.50 ms · −0.52 m @ 22.5 °C");
+        assert_eq!(
+            delay_readout(0.000_003_7, 20.0),
+            "0.004 ms · 0.00 m @ 20 °C"
+        );
         assert_eq!(delay_readout(f64::NAN, 20.0), "—");
+        // 3.69 µs × 343.2146 m/s = 1.27 mm.
+        assert_eq!(
+            arrival_difference(0.012_503_69, 0.0125, 20.0),
+            "+3.7 µs · +1.3 mm @ 20 °C"
+        );
+        assert_eq!(
+            arrival_difference(0.0, 0.000_020_8, 20.0),
+            "−20.8 µs · −7.1 mm @ 20 °C"
+        );
+        assert_eq!(arrival_difference(f64::NAN, 0.0, 20.0), "—");
     }
 
     fn dt(key: u32, freqs: Vec<f64>, mag: Vec<f64>) -> DisplayTrace {

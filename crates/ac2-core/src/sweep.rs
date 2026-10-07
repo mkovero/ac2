@@ -105,6 +105,14 @@ const NOISE_MARGIN_S: f64 = 0.01;
 const ROOM_PRE_S: f64 = 0.1;
 /// Samples at or above this magnitude count as clipped.
 const CLIP: f64 = 0.999;
+/// Samples either side of the whole-sample peak that the fine arrival is interpolated from.
+/// The span cuts off the band-limited peak's tails, which decay only as 1/t; the cut biases
+/// the vertex by ≈ 0.002 sample at ±16 and ≈ 0.0004 at ±32.
+const FINE_HALF: usize = 32;
+/// Interpolation factor before the parabolic vertex: a parabola through raw samples of a
+/// sinc-shaped peak is biased by up to ≈ 0.05 sample; on a ×16 band-limited grid the peak is
+/// that much closer to a parabola that its own bias falls below 0.001 sample.
+const FINE_UPSAMPLE: usize = 16;
 
 /// What was played and how to analyse it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -334,7 +342,8 @@ pub struct SweepAnalysis {
     pub duration_s: f64,
     /// Repeats averaged.
     pub repeats: usize,
-    /// Arrival of the linear response re the reference, s.
+    /// Arrival of the linear response re the reference, s: the peak of the impulse
+    /// response, to a fraction of a sample.
     pub arrival_s: f64,
     /// The reference's sweep re the emitted level (loopback gain), dB.
     pub reference_db: f64,
@@ -609,6 +618,9 @@ pub fn analyse_recording(
     if peak.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return Err(SweepError::NoSignal);
     }
+    // The arrival `D = d + phi`: windows stay anchored on the whole sample `d`, times and the
+    // phase are referred to `D`.
+    let phi = fine_peak(at, d);
 
     let l = timing.plan.rate_s;
     let k_max = spec.max_order;
@@ -697,10 +709,11 @@ pub fn analyse_recording(
     let nl = 2 * lin_len.next_power_of_two();
     let s1 = fft_forward(&segment(&h, d - lin_pre as i64, &lw), nl);
     let bin_l = fs / nl as f64;
-    // Refer the phase to the arrival: the segment starts `lin_pre` samples before it.
+    // Refer the phase to the arrival: the segment starts `lin_pre + phi` samples before it.
+    let lead = lin_pre as f64 + phi;
     let rot = |k: usize| {
         let z = s1[k];
-        z * Complex64::from_polar(1.0, TAU * k as f64 * lin_pre as f64 / nl as f64)
+        z * Complex64::from_polar(1.0, TAU * k as f64 * lead / nl as f64)
     };
     let mut magnitude_db = vec![f64::NAN; freqs.len()];
     let mut phase_deg = vec![f64::NAN; freqs.len()];
@@ -769,19 +782,20 @@ pub fn analyse_recording(
         timing.full_level_hz(),
         f2 * (-spec.ess.fade_out_s / l).exp(),
     );
-    let room = crate::room::analyse(&room_ir, fs, (room_start - d) as f64 / fs, excited);
+    let re_arrival = |i: i64| ((i - d) as f64 - phi) / fs;
+    let room = crate::room::analyse(&room_ir, fs, re_arrival(room_start), excited);
 
     Ok(SweepAnalysis {
         sample_rate: fs,
         rate_s: l,
         duration_s: timing.plan.duration_s(),
         repeats: cuts.len(),
-        arrival_s: d as f64 / fs,
+        arrival_s: (d as f64 + phi) / fs,
         reference_db,
         first_onset_s: onsets[0] as f64 / fs,
         harmonic_window_s: (pre_n as f64 / fs, post_n as f64 / fs),
         linear_window_s: (lin_pre as f64 / fs, lin_post as f64 / fs),
-        noise_window_s: (noise_end - (noise_windows * w_len) as i64 - d) as f64 / fs,
+        noise_window_s: re_arrival(noise_end - (noise_windows * w_len) as i64),
         frequencies: freqs,
         magnitude_db,
         phase_deg,
@@ -790,12 +804,44 @@ pub fn analyse_recording(
         thd_floor_db,
         ir,
         ir_etc_db,
-        ir_t0_s: (ir_start - d) as f64 / fs,
+        ir_t0_s: re_arrival(ir_start),
         ir_dt_s: bucket as f64 / fs,
         clipped,
         room,
-        room_end_s: (room_end - d) as f64 / fs,
+        room_end_s: re_arrival(room_end),
     })
+}
+
+/// Fractional offset of the peak of |h| from the whole sample `d`: `h[d−FINE_HALF …
+/// d+FINE_HALF]` interpolated band-limited (zero-padded DFT; the sweep stops below Nyquist, so the samples
+/// define the peak), then a parabolic vertex on the fine grid.
+fn fine_peak(h: impl Fn(i64) -> f64, d: i64) -> f64 {
+    let n = 2 * FINE_HALF + 1;
+    let mut x: Vec<Complex64> = (0..n)
+        .map(|i| Complex64::new(h(d - FINE_HALF as i64 + i as i64), 0.0))
+        .collect();
+    let mut planner = rustfft::FftPlanner::<f64>::new();
+    planner.plan_fft_forward(n).process(&mut x);
+    // `n` is odd: bins 0..=n/2 are the positive frequencies, the rest the negative ones, and
+    // there is no Nyquist bin to split.
+    let big = n * FINE_UPSAMPLE;
+    let half = n / 2;
+    let mut y = vec![Complex64::new(0.0, 0.0); big];
+    y[..=half].copy_from_slice(&x[..=half]);
+    y[big - (n - half - 1)..].copy_from_slice(&x[half + 1..]);
+    planner.plan_fft_inverse(big).process(&mut y);
+    let mag = |j: usize| y[j].re.abs();
+    let c = FINE_HALF * FINE_UPSAMPLE;
+    let j =
+        (c - FINE_UPSAMPLE..=c + FINE_UPSAMPLE).fold(c, |b, j| if mag(j) > mag(b) { j } else { b });
+    let (y0, y1, y2) = (mag(j - 1), mag(j), mag(j + 1));
+    let den = y0 - 2.0 * y1 + y2;
+    let vertex = if den < 0.0 {
+        0.5 * (y0 - y2) / den
+    } else {
+        0.0
+    };
+    (j as f64 + vertex - c as f64) / FINE_UPSAMPLE as f64
 }
 
 fn wrap_deg(d: f64) -> f64 {

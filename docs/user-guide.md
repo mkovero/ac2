@@ -424,6 +424,13 @@ curve.
   the delay (**X**, **D**) before reading smoothed phase at high frequencies. A curve set to
   smooth the magnitude only (`ac2 meas new tf … --smooth 6 --smooth-magnitude-only`) says
   `mag only` and keeps the measured phase.
+- **Group delay** (**Shift+P**) is the slope of a line fitted to the unwrapped phase over a
+  span around each column, each column weighted by its coherence, not the difference of two
+  neighbours: on a 48-per-octave grid neighbours are 3 % of f apart, so a few hundredths of
+  a degree of phase error would swing the low-frequency group delay by tens of percent. The
+  span is 1/12 octave, or the curve's phase smoothing when that is wider (1/6, 1/3); the
+  pane's title says it (`Group delay ms · 1/12 oct`). A feature narrower than the span is
+  smeared over it.
 - **Spectra** (narrowband FFT) are smoothed as power over a fractional-octave window on the
   FFT bins. A smoothed spectrum no longer reads as the tone level of a bin — a sine is spread
   over the window and reads lower — so the level axis says so: `dBFS per 1.46 Hz bin (tone,
@@ -806,6 +813,14 @@ very low start: the extension plays lower still, though below full level.
   floor, THD), the analysis facts and the impulse response; `ac2 trace import` of that file
   restores the sweep. The sweep's columns are uncorrected even when its mic has a curve:
   `ac2 trace mic <sweep> <mic>` applies it.
+- **Arrival:** the sweep's arrival is the peak of its impulse response re the reference, to
+  a fraction of a sample (the peak interpolated band-limited: about a thousandth of a sample
+  on a clean path), shown to the µs where it has a finer part (`arrival 0.004 ms`). The
+  phase, the IR's t = 0 and an export's `delay_ms` and `sweep_info` `arrival` are referred to
+  that arrival, so a path's sub-sample delay leaves the phase rather than showing as a phase
+  lag rising with frequency. `ac2 trace delay-diff A B` prints the difference of two traces'
+  delays — for two sweeps, of their arrivals — to 0.1 µs with the path length it stands for
+  (`+3.7 µs · +1.3 mm @ 20 °C`; `--temp` sets the air temperature).
 - **Room parameters (ISO 3382-1):** every sweep also computes EDT, T20, T30, C50, C80 and
   D50 of its impulse response per octave band (and one-third octave) and broadband
   (`docs/design/room-metrics.md`). In the app, the sweep pane's impulse response
