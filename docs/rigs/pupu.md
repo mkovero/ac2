@@ -540,3 +540,17 @@ noise windows read the response high-passed below the lowest analysed fundamenta
 Xone −10 on 8c3a658: 198 PASS, 0 WARN, 0 FAIL; dist H2 at 22 Hz +1.1 dB vs sine (was +22.4),
 10 Hz requests now read a value (−0.2 dB) instead of a bound. Baselines `xone-10dbfs`
 (8c3a658) and `xone-20dbfs` (2638893) in `tools/crosscheck/baselines/pupu/`.
+
+### Xone tones re-picked off the mains bands (2026-10-07, ac2d 8c3a658, −10 dBFS)
+
+The 134 INCONCLUSIVE of the first −10 run were 90 harmonics a sweep could not judge because a
+mains line (pupu shows one at every 50 Hz multiple to 2 kHz) sat inside the ±17 Hz band a sweep
+reads as the harmonic, 39 harmonics below floor + margin, 3 displayed group delays with a mains
+column and 2 LF H2 bounds. Below 300 Hz no tone keeps more than three of H2..H5 clear, so the
+Xone tones are now 15, 26.25, 35, 40.5, 56.2, 60.5, 93.9, 1040 and 10000 Hz: each keeps at least
+two harmonics clear and together they cover H2..H5 below 100 Hz (`tests/test_rig_tones.py`).
+Run `20261007T193836Z`: 243 PASS, 1 WARN (10Hz-11s H3 at 26 Hz −3.0 dB vs sine, 11 dB over its
+floor), 0 FAIL; judged harmonic comparisons 3 → 19. Of the 164 INCONCLUSIVE, 60 are the mains
+bands no tone can avoid and 102 harmonics below floor (the Xone's H3..H5 sit under −115 dBr):
+those need a lower floor, not a different tone. The 1040 Hz displayed group delay still has a
+mains column beside it. Baseline `xone-10dbfs.json` re-taken from this run.

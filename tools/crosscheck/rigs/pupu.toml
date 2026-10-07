@@ -95,7 +95,11 @@ seconds = 60
 
 [stages.sine]
 # Steady sines on each path. Frequencies are nudged so H2..H5 stay off 50 Hz multiples.
-xone_hz = [16, 20, 31.5, 50, 100, 1000, 10000]
+# Xone: mains lines stand at every 50 Hz multiple to 2 kHz, and a sweep reads a harmonic over
+# ±17 Hz below ~1 kHz, so below 300 Hz no tone keeps more than three of H2..H5 clear. Each tone
+# keeps at least two (tests/test_rig_tones.py); together they cover every harmonic below
+# 100 Hz, and 1040 Hz clears the mains columns of the displayed group delay.
+xone_hz = [15, 26.25, 35, 40.5, 56.2, 60.5, 93.9, 1040, 10000]
 genelec_hz = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
 gd_pairs = true            # phase at f·2^(±1/48) for group delay (xone only)
 probe_seconds = 2.0

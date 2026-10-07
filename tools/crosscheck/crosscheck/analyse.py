@@ -892,7 +892,7 @@ class Analysis:
         # A sweep reads harmonic k as the energy of a band around k·f at least ~30 Hz wide; a
         # mains line inside it is read as harmonic, while the steady sine resolves k·f alone.
         fk = k * fc
-        half = max(fk * (2 ** (1 / 48) - 1), 15.0) + MAINS_GUARD_HZ
+        half = dsp.sweep_harmonic_half_band(fk, MAINS_GUARD_HZ)
         line = next((h for h in getattr(self, "mains_hz", []) if abs(h - fk) <= half), None)
         if line is not None and ca["kind"] != "none":
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,

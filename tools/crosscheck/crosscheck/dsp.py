@@ -338,6 +338,13 @@ def avoid_mains(f: float, seconds: float, mains: float = 50.0, kmax: int = 5, gu
     return f
 
 
+def sweep_harmonic_half_band(fk: float, guard_hz: float) -> float:
+    """Half-width of the band around harmonic frequency fk that a sweep reads as the harmonic:
+    its 1/48-octave column, but never narrower than ~30 Hz, because the harmonic impulse window
+    is short. A mains line inside it is read as distortion."""
+    return max(fk * (2 ** (1 / 48) - 1), 15.0) + guard_hz
+
+
 def mains_lines(x: np.ndarray, fs: float, mains: float = 50.0, n_max: int = 40, thr_db: float = 10.0) -> list[dict]:
     """Mains-family lines in a noise recording: multiples of `mains` whose bin stands
     `thr_db` above the median of ±5 % around it."""
