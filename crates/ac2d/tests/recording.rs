@@ -22,7 +22,7 @@ use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
     BackendKind, BandFraction, DiscontinuityCause, GeneratorDesired, GeneratorSettings, MeasConfig,
     MeasKind, RecordRequest, RecordingEnd, RecordingRef, RecordingRun, RecordingStatus, ReplayPace,
-    RtaConfig, Signal, SpectrumConfig, State, TraceData,
+    RtaConfig, Signal, SpecAveraging, SpectrumConfig, State, TraceData,
 };
 use ac2_proto::units::{Dbfs, MeasId, Seconds, SessionEpoch, TraceId};
 use ac2_proto::{Command, ErrorCode, ReplyBody};
@@ -474,7 +474,16 @@ fn replayed_rta_reads_a_steady_tone_alike() {
         config: MeasConfig {
             name: "rta".into(),
             kind: MeasKind::Rta {
-                config: RtaConfig::on_input(1, BandFraction::Third),
+                // A steady tone's band power over one publish interval ripples at 2f by about
+                // 1/(2πfT) of its level, and the interval follows the host's timers (shorter on
+                // macOS); a 1 s exponential mean over many intervals averages that ripple out,
+                // so live and replay compare the samples, not the scheduling.
+                config: RtaConfig {
+                    averaging: SpecAveraging::Exponential {
+                        time_constant: Seconds(1.0),
+                    },
+                    ..RtaConfig::on_input(1, BandFraction::Third)
+                },
             },
         },
     });
