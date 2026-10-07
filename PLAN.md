@@ -141,6 +141,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 |---|---|---|---|
 | Capture live → named, colored trace; slots; mandatory metadata: delay, polarity, offset, smoothing, cal state, mic, time | P0 | ac | 4 |
 | Show/hide/lock/reorder, offset, invert | P0 | ac | 4 |
+| A measurement owns its traces: one tree of measurements with their captures, math channels and sweep runs (Imported for the rest); move, fold, delete keeping or deleting them; sweep as a measurement kind (done: `docs/design/measurement-tree.md`) | P0 | new | 7 |
 | Synchronized comparison cursor across traces and panes | P0 | new | 4 |
 | Phase comparison: overlays drawn relative to the selected trace's measured delay (pick key to change), so relative arrival stays visible; imported traces marked independent; per-trace delay nudge | P0 | new | 4 |
 | Delay distance readout: delay × c(temperature) next to ms, no correction layers | P1 | new | 4 |
@@ -519,15 +520,17 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
   window open. An open window (help, palette, prompt, dialog, view) owns the keyboard:
   `↑/↓` move or scroll it, `←/→` change a choice, `Enter` confirms, `Esc` closes the topmost
   window only; none of them reaches the stimulus. `Shift+Esc` stops the stimulus from
-  anywhere, windows included (fixed, not remappable). Closing a dialog that arms (the sweep)
-  disarms what is armed and not playing; a playing stimulus keeps playing until stopped.
-  The focused view decides what `Space` arms: the sweep view a re-sweep with the last
-  sweep's parameters (the dialog when there is none), every other view the generator for
-  live measuring; `Enter` fires what is armed, named in the top bar (`Enter fires: re-sweep
-  3 s −50 dBFS`).
+  anywhere, windows included (fixed, not remappable). No dialog arms anything (the sweep
+  dialog makes a sweep measurement that waits); a playing stimulus keeps playing until
+  stopped. The focused view decides what `Space` arms: the sweep view a run of the selected
+  sweep measurement with its settings (the dialog that makes one when there is none), every
+  other view the generator for live measuring; `Enter` fires what is armed, named in the top
+  bar (`Enter fires: sweep Genelec 1 m · 3 s −50 dBFS`).
 - The keys that act on "the selected curve" (`A` show / hide, `Delete` / `Backspace`
   delete after a confirmation, the offsets) act on the item selected last: a measurement
-  (list, `N`, a pane's chip) or a stored trace (list, `V`); selecting a measurement
+  (its row in the measurement tree, its live curve's or a math channel's row, `N`, a pane's
+  chip) or a stored trace (the tree, `V`); `Shift+A` the item's whole group (the
+  measurement and everything under it); selecting a measurement
   deselects the trace, `Esc` hands the keys back to the measurement. Hiding a measurement
   is this app's display only; it keeps measuring. In an open window `Backspace` edits text
   and never deletes what is behind the window.

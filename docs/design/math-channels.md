@@ -27,6 +27,9 @@ daemon evaluates, with operands chosen by name.
 
 `MeasKind::Math { config: MathConfig }`:
 
+- `owner`: the measurement it is listed under (`measurement-tree.md`) — the one selected
+  when it was made (Shift+M), or `imported`; its captures are filed there too. Moving it is
+  a `meas.update` of the owner alone, applied without restarting the channel.
 - `domain`: `transfer` | `spectrum` | `rta` — what the operands are, so what the result is and
   which stream it publishes (`tf`, `spec`, `rta`). The daemon checks every operand against
   it; clients read the pane and stream from it without looking the operands up.

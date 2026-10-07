@@ -1,7 +1,8 @@
 # Sweep (Farina) measurement with harmonic distortion
 
-Status: implemented (`ac2_core::sweep`, `ir.capture`, `ac2 ir capture`, the app's sweep dialog
-and Distortion pane). Answers PLAN.md §3.7 "IR capture by ESS, deconvolution, harmonic split,
+Status: implemented (`ac2_core::sweep`, the sweep measurement kind and `sweep.run`
+(`measurement-tree.md`), `ac2 meas new sweep` / `ac2 sweep run` / `ac2 ir capture`, the app's
+sweep dialog and Distortion pane). Answers PLAN.md §3.7 "IR capture by ESS, deconvolution, harmonic split,
 gating" and §5.5; the ISO 3382-1 room parameters of the same IR are in
 `docs/design/room-metrics.md`.
 
@@ -161,9 +162,12 @@ recorder → analysis, f32 audio):
 
 ## Protocol and storage
 
-`ir.capture` (lease, generator armed, typed level) runs the repeats as one generator source,
+`sweep.run` of a sweep measurement (lease, generator armed, the measurement's typed level
+checked against the ceiling at every run; `measurement-tree.md`) runs the repeats as one
+generator source,
 records reference and mic on a job thread, analyses there and stores a `sweep` trace
-(fundamental magnitude/phase on the log grid + per-order distortion and floors + IR). Progress
+(fundamental magnitude/phase on the log grid + per-order distortion and floors + IR) under the
+measurement, named `Run <n>`. Progress
 and outcome are the mirrored `sweep` entity. Once the recording is in, the generator is
 disarmed (the lease stays with its holder): a sweep is one shot, and nothing is left armed for
 a stray Enter. Lease expiry, `gen.stop`/`gen.release`, a forced takeover or a closed session

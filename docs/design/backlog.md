@@ -93,6 +93,26 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+A measurement owns its traces (operator, 2026-10-07: "this becomes little bit confusing to
+see 'measurements' and 'traces' at the transfer screen, I would imagine transfer measurement
+includes set of traces and mathing should be within the measurement, as a trace"; "I would
+expect new sweep to become new measurement as transfer/spl etc is, and have its traces under
+its measurement"):
+- **One tree** replaces the Measurements and Traces lists: each measurement with its live
+  curve, captures, math channels and sweep runs, then Imported; folding, Shift+A for a whole
+  group, Move to measurement… (Shift+F2), legends grouped the same way
+  (`docs/design/measurement-tree.md`).
+- **Ownership on the wire** (protocol 24, session format 11): `TraceEdit.owner`,
+  `MathConfig.owner`; `meas.delete {traces: keep | delete}`, asked every time in the app
+  ("I'd ask every time"), Keep the default.
+- **Sweep is a measurement kind** (`MeasKind::Sweep`, `sweep.run` replaces `ir.capture`):
+  created without playing ("it should wait yes similarly as it works with transfer now"),
+  Space/Enter run the selected sweep measurement, each run a trace under it; `ac2 meas new
+  sweep`, `ac2 sweep run`, `ac2 ir capture` runs the measurement with its flags' settings.
+- **Math lives under the measurement it was made on** ("the math should live on selected
+  measurement it was created on"), its captures too; the dialog offers that measurement's
+  curves first.
+
 What the keys act on (operator, 2026-10-07: "if I press backspace or A on selected
 measurement it says something I dont know what in red box, I would expect it to remove
 selected measurement with backspace and hide its measurement traces if A"):

@@ -91,7 +91,7 @@ The generator ceiling was only `ac2d --max-level`; changing it meant restarting 
   min(kept, bound): a later, lower `--max-level` wins. A file that cannot be read is never
   written (the daemon starts at the bound and refuses changes with the reason); one of
   another format version is set aside.
-- Every emitting path keeps enforcing it: `gen.set`, `ir.capture`, `session.detect_loopback`
+- Every emitting path keeps enforcing it: `gen.set`, `sweep.run`, `session.detect_loopback`
   refuse levels above it; the peak limit of the running stream and of the detection burst's
   stream follow it.
 - CLI: `ac2 gen ceiling` shows it (with the bound and who changed it last),

@@ -195,11 +195,13 @@ make it play by accident:
 RTA (spectrograph included), IR and SPL views they drive the generator for live measuring:
 Space arms pink noise (or the chosen signal) at the operator's level on the stimulus outputs,
 Enter plays it. On the sweep view (the **Sweep / distortion** pane focused, maximised or
-not) Space arms a **re-sweep** with the last sweep's parameters — outputs, level, length,
-range, repeats, silence after, reference — without opening the dialog, and Enter plays it
-(with no sweep yet, Space opens the sweep dialog). Enter fires what is armed; armed and
-still silent, Space on a view of the other kind re-sets the armed stimulus to that view's.
-The top bar says what the keys will do: `Space arms: re-sweep 3 s −50 dBFS`,
+not) Space arms a **run of the selected sweep measurement** with its settings — outputs,
+level, length, range, repeats, silence after, reference — and Enter plays it (with no sweep
+measurement yet, Space opens the dialog that makes one). A level or outputs changed while
+armed become the measurement's settings for this run and the next. Enter fires what is
+armed; armed and still silent, Space on a view of the other kind re-sets the armed stimulus
+to that view's. The top bar says what the keys will do: `Space arms: sweep Genelec 1 m · 3 s
+−50 dBFS`,
 `Enter fires: pink −50 dBFS → out 1`. Esc and Shift+Esc stop as always.
 
 ## Transfer measurement
@@ -236,10 +238,14 @@ which kind they need when it is another.
 **What A and Delete act on: the item selected last.** One measurement and at most one stored
 trace are selected at a time, and the one selected last has the keys that act on "the
 selected curve": a click (or **N**, a pane's chip, a click in its pane) on a measurement
-gives them to it; a click on a trace in the Traces list (or **V**, **Alt+V**) gives them to
-that trace; **Esc** with no window open hands them back to the measurement. The list
-shows which: the measurement row is filled while it has the keys and only outlined while a
-trace selected after it does; the trace's row is filled while it is selected.
+gives them to it (its row in the measurement tree, its live curve's row, or a math channel's
+row); a click on a trace in the tree (or **V**, **Alt+V**) gives them to that trace; **Esc**
+with no window open hands them back to the measurement. The tree shows which: the
+measurement row is filled while it has the keys and only outlined while a trace selected
+after it does; the trace's row is filled while it is selected.
+- **Shift+A** hides a measurement **and everything under it** — its live curve, its stored
+  traces, the math channels made on it — and shows them all again when all are hidden
+  (with a trace selected: that trace's group).
 
 - **A** on a measurement hides its live curve in every pane (its legend row goes; the IR
   pane says `TF 2 hidden — A shows it`); **A** again shows it. This is this app's display
@@ -488,7 +494,12 @@ ac2 math new --name Prediction --op add --a "trace:Sub alone" --b "Main L"
 ac2 math new --name Audience --op avg --of "Seat 1,Seat 2,Seat 3" \
     [--method power|complex|coherence] [--phase-ref "Seat 2" | --ref-delay 12ms] [--smooth 6]
 ac2 math set Audience --method complex            # what is not given stays
+ac2 math set Audience --under "FOH"               # listed under another measurement
 ```
+
+A math channel is listed under a measurement: `--under MEAS` (or `--imported`); without it
+`math new` files it under its first operand when that is a measurement, else where that
+trace is filed (the app files it under the measurement selected when Shift+M was pressed).
 
 Operands are measurements or stored traces by name or id; `trace:NAME` / `meas:NAME` when a
 measurement and a trace share a name. Math channels are listed in `ac2 meas list` and
@@ -535,6 +546,49 @@ its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it sa
 L stopped — S starts it` (**S** starts and stops it from the IR pane too), `no reference:
 nothing is driving the loopback`, `no signal: …`.
 
+## The measurement tree
+
+Beside the panes, one tree lists every measurement with what it owns under it
+([measurement-tree.md](design/measurement-tree.md)):
+
+```
+TF  Main L            running
+  ├ Main L (live)
+  ├ pre-EQ            capture
+  ├ post-EQ           capture
+  └ pre ÷ post        math (live)
+SWEEP  Genelec 1 m    2 runs
+  ├ Run 1             sweep run · 3 s −50.0 dBFS
+  └ Run 2             sweep run · 3 s −50.0 dBFS
+SPL  FOH SPL          running
+Imported              1 trace
+  └ 1083 94cm         imported
+```
+
+- A **capture** (Ctrl+1 … 9) is filed under the measurement it came from, a **math
+  channel** under the measurement selected when it was made (Shift+M), its captures under
+  the same measurement, a **sweep run** under its sweep measurement, an **average** (M) with
+  its inputs when they share one, and **imports** (and session traces of no measurement)
+  under **Imported**, listed last when it holds something.
+- The arrow before a measurement **folds** it (its rows are not listed; the header says how
+  many are folded); **Fold / unfold the selected measurement** in the palette does the same.
+- A row's dot is its curve's colour (a ring when hidden): a click shows or hides that curve
+  (a live curve: this app's display; a stored trace: the daemon's). A click on the row
+  selects it; a double click on a trace renames it.
+- **Move to measurement…** (**Shift+F2**, beside F2 rename, or the palette) files the
+  selected stored trace — or the selected math channel — under another measurement or
+  under Imported: **↑/↓** choose, **Enter** moves it, **Esc** cancels. Only where it is
+  listed changes; its curve, name and settings stay (a locked trace moves too).
+- The panes' legends follow the tree: a measurement's live curve, its traces and its math
+  channels together, group by group.
+- **Deleting a measurement that owns traces asks every time**: *Keep them (move to Imported)*,
+  *Delete them too*, or *Cancel* — **←/→** choose, **Enter** takes it (Keep is the default),
+  **Esc** cancels. An answer that would leave a math channel without an operand says so and
+  cannot be taken (Keep with a math channel under it that computes from the measurement;
+  Delete when a math channel elsewhere uses one of its traces); a math channel elsewhere that
+  computes from the measurement itself refuses the delete as before. A measurement that
+  owns nothing gets the plain confirmation.
+
 ## Traces and slots
 
 A **trace** is a stored snapshot of a measurement's live result, with the metadata needed to
@@ -544,12 +598,12 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
   there); **1 … 9** show and hide a slot.
-- The **Traces** list beside the panes holds every stored trace, slotted or not: its name,
-  what it is (*capture*, *sweep*, *imported*, *average*, *A ÷ B*, *target* …), its slot,
-  *hidden* when it is, and a dot in its curve's colour (a ring when hidden). Slotted traces
-  come first by slot, then the rest oldest first. A click on a row selects the trace (again:
-  deselects); a click on its dot shows or hides it.
-- **V** / **Shift+V** select the next / previous **shown** trace in that order — sweep
+- The tree lists every stored trace under its owner, slotted or not: its name, what it is
+  (*capture*, *sweep run*, *imported*, *average*, *A ÷ B*, *target* …), its slot, *hidden*
+  when it is, and a dot in its curve's colour (a ring when hidden). Within a measurement
+  slotted traces come first by slot, then the rest oldest first. A click on a row selects
+  the trace (again: deselects); a click on its dot shows or hides it.
+- **V** / **Shift+V** select the next / previous **shown** trace in the tree's order — sweep
   results and imports included — with the live measurement as the stop between the last and
   the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. **Esc** (with no window
   open) goes back to the live measurement — it also stops the stimulus, as always — and
@@ -644,21 +698,24 @@ speaker's output and on the loopback output; ac2 records the loopback (reference
 divides one by the other, and separates the harmonics, which arrive before the linear impulse
 response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md).
 
-- **App:** **Shift+S** (or **New sweep measurement** in the palette) opens the dialog: reference,
-  mic and the speaker's output by name (the session's loopback output always plays too), the
-  **level** (typed, no default), 20 Hz – 20 kHz, duration (1 s quick look, 3 s default; 6 s
-  and 12 s lower the noise floor), repeats (each doubling lowers the floor by 3 dB), name.
-  The reference is the session's loopback input; a session without a loopback mapping leaves
-  it as "choose the reference", and the sweep does not arm until one is picked. **←/→** step
-  a choice (→ longer / more) and stop at the ends; a text field's text is selected when it
-  gets the focus (**Ctrl+A** selects it again), so typing replaces it. **Enter** arms the
-  sweep (the dialog closes), **Enter** again plays it, **Esc** stops (and discards it).
-  **Esc** in the dialog closes it; anything armed and not yet playing is disarmed with it,
-  so nothing stays armed behind a closed window, while a stimulus already playing keeps
-  playing (**Shift+Esc** or the strip's **Stop** stops it). Once the sweep has played
-  the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed. On the
-  sweep view **Space** then arms the same sweep again (named `Sweep 2`, …) and **Enter**
-  plays it; **Shift+S** sets up a different one. The result opens the
+- **App:** a sweep is a **measurement** like a transfer function: **Shift+S** (or **New sweep
+  measurement** in the palette) opens the dialog that makes one: reference, mic and the
+  speaker's output by name (the session's loopback output always plays too), the **level**
+  (typed, no default), 20 Hz – 20 kHz, duration (1 s quick look, 3 s default; 6 s and 12 s
+  lower the noise floor), repeats (each doubling lowers the floor by 3 dB), silence after,
+  name. The reference is the session's loopback input; a session without a loopback mapping
+  leaves it as "choose the reference", and the measurement is not made until one is picked.
+  **←/→** step a choice (→ longer / more) and stop at the ends; a text field's text is
+  selected when it gets the focus (**Ctrl+A** selects it again), so typing replaces it.
+  **Enter** makes the sweep measurement and **plays nothing**: it waits in the tree, and the
+  sweep pane comes up focused. **Space** on the sweep pane arms a run of the selected sweep
+  measurement with its settings (the safety of any stimulus: typed level, the rig's
+  maximum, the lease), **Enter** plays it, **Esc** stops (and discards it). Once the run has
+  played the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed.
+  **Space** and **Enter** again run it again; each run is stored **under the measurement**
+  as *Run 1*, *Run 2* … (renamed with F2 like any trace). **Edit the selected measurement…**
+  (palette) changes a sweep measurement's settings for its next run. The newest run of the
+  selected sweep measurement is what the pane shows (or the run selected). The result opens the
   **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
   below. Where an order is within the noise it is drawn dashed at its own floor; the shading
   is the noise under every order's floor. The **dB | %** toggle in the pane's title (or
@@ -668,8 +725,8 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   harmonics' impulses marked (**Shift+G**: linear / log / ETC) → the **room parameters**
   table alone, the whole pane, as large as it fits (read across a room; maximised with
   **W**) → back; the view is remembered. **Shift+I** goes straight to the impulse response
-  and back. **N** steps through stored sweeps (selecting each), **Shift+W** hides the pane. The sweep is also a stored
-  trace, drawn in the transfer pane like any capture and listed under Traces (see *Traces and slots*).
+  and back. **N** steps through stored sweeps (selecting each), **Shift+W** hides the pane. A run is also a stored
+  trace, drawn in the transfer pane like any capture and listed under its sweep measurement (see *The measurement tree*).
 - **Progress strip:** while a sweep runs (from this app, another client or the CLI), a strip
   under the top bar — visible whichever pane is maximised — shows its name and level,
   *sweep 1 of 2*, a bar and the time left (about the remaining repeats × (sweep + the
@@ -677,8 +734,12 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   **Stop (Shift+Esc)** button, like **Shift+Esc** (from anywhere) or **Esc** (with no window
   open), fades the output out, disarms the generator and discards the run; nothing is
   stored.
-- **CLI:** `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs` (`--from 20hz --to
-  20khz --duration 3s --repeats 1 --gate 5ms --name …`). Like `gen`, it arms and waits:
+- **CLI:** `ac2 meas new sweep --ref 2 --meas 1 --out 1,2 --level -50dbfs --name "Genelec 1
+  m"` (`--from 20hz --to 20khz --duration 3s --repeats 1 --gate 5ms --tail 2s`) makes a sweep
+  measurement; `ac2 sweep run "Genelec 1 m"` runs it. `ac2 ir capture --ref 2 --mic 1 --out
+  1,2 --level -50dbfs` (same flags, `--name` names the run) runs the sweep measurement with
+  exactly those settings, making one (`Sweep 1`, …) when there is none: the same command
+  again is the next run of the same measurement. Like `gen`, both arm and wait:
   **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. The daemon disarms the generator as soon
   as the sweep has played (or failed); any client arms again for the next one. It then prints THD at 100 Hz, 1 kHz and
   10 kHz and each order's highest point; `--json` gives the same as JSON lines.
@@ -1156,7 +1217,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+Q` | Quit | `quit` |
 | `F11` | Window full screen on / off | `fullscreen` |
 | `Shift+H` | Key hints on / off | `key_hints` |
-| `Space` | Stimulus: arm what the view plays (sweep view: re-sweep; others: the generator) | `stimulus_arm` |
+| `Space` | Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator) | `stimulus_arm` |
 | `Enter` | Stimulus: fire what is armed (named in the top bar) | `stimulus_fire` |
 | `Esc` | Stimulus: stop and disarm (no window open) | `stimulus_stop` |
 | `Shift+Esc` | Stimulus: stop and disarm, also with a window open | `stimulus_stop_anywhere` |
@@ -1222,6 +1283,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
 | `Shift+O` | Open audio session: Settings › Audio… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
+| `Shift+A` | Show / hide the selected measurement with every trace under it | `hide_group` |
+| `Shift+F2` | Move the selected trace or math channel to another measurement (or Imported)… | `move_trace` |
 | `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
 | `Shift+L` | Leq windows and limits of the SPL meter: Settings › SPL / Leq… | `leq_windows` |
 
@@ -1322,7 +1385,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
-| Edit the selected math channel: operands, operator, method… | `math_edit` |
+| Edit the selected math channel (operands, operator, method) or sweep measurement (its next run)… | `meas_edit` |
+| Fold / unfold the selected measurement in the list | `toggle_group` |
 | Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
 | Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
@@ -1379,13 +1443,14 @@ documents each command; `ac2 discover` lists daemons on the local network.
 |---|---|
 | `ac2 devices`, `ac2 status`, `ac2 daemon start / stop / status` | the daemon and its audio devices; `status` includes the autosave state |
 | `ac2 session open / close / status / inputs / save / load / list` | the audio session, each input's mic and active curve, saved sessions |
-| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements (math channels are listed too) |
+| `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math channels are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces` |
 | `ac2 math new / set` | math channels: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
 | `ac2 gen ceiling [LEVEL] [--yes]` | the system max level: shown with its bound and who changed it; a lower level applies at once, a higher one needs `--yes` and nothing armed |
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
-| `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
-| `ac2 trace capture / list / show / rename / display / slot / rm / average / import / export / smooth / mic` | stored traces |
+| `ac2 sweep run <meas>` | a run of a sweep measurement with its settings, stored under it |
+| `ac2 ir capture` | a sweep with its settings as flags: runs the sweep measurement with exactly those settings (made when there is none), the run stored under it |
+| `ac2 trace capture / list / show / rename / display / slot / move / rm / average / import / export / smooth / mic` | stored traces; `list` says what each is filed under; `move <traces> --to MEAS` (or `--imported`) files them elsewhere |
 | `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
 | `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |
