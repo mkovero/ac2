@@ -106,6 +106,12 @@ running transfer measurement, somehow I would expect it"):
   show beside the banner text in every theme; the IR pane's reason has room for the whole
   sentence (`nothing is playing — Space arms, Enter starts the stimulus`). Playing, the
   loopback-patch text as before.
+- **Full screen stays the pane alone** ("'arm' and probably driving too interfere
+  fullscreen ... if you want things to be fullscreen then let them be fullscreen"; "I dont
+  expect even the badge on full screen"): arming, firing, stopping, an arm queued behind a
+  stop and a running sweep no longer bring the top bar back in the stage view, so no pane
+  resizes; no badge either. Esc / Shift+Esc stop as before; every other layout shows the
+  stimulus in the top bar (PLAN §8.2).
 
 A measurement owns its traces (operator, 2026-10-07: "this becomes little bit confusing to
 see 'measurements' and 'traces' at the transfer screen, I would imagine transfer measurement

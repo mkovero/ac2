@@ -424,8 +424,9 @@ figures does not. All decisions are `ac2_scene::leq` (headless, tested); the app
   either. Defaults: columns, no strip.
 - **Stage view**: full screen with the SPL pane maximised on its windows draws only the
   scene — columns and the caption (meter, unit, run, calibration) — without the app's top bar,
-  measurement list or pane title. While a stimulus is armed or playing, or a sweep runs, the
-  top bar is shown anyway: what drives the speakers is never hidden.
+  measurement list or pane title, also while a stimulus is armed or playing or a sweep runs
+  (the operator's decision, PLAN §8.2: full screen is the explicit choice to see only the
+  pane).
 
 ## Presets (informational, not legal advice)
 

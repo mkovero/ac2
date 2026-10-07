@@ -810,6 +810,49 @@ fn stimulus_flow_against_the_fake_daemon() {
     assert!(rig.fake.executions("gen.stop") >= 1);
 }
 
+/// Full screen is the pane alone: with the stimulus armed and then playing, the stage view
+/// draws exactly what it drew with the stimulus off (one snapshot, taken three times); Esc
+/// still stops it from there.
+#[test]
+fn the_stage_view_stays_the_pane_while_firing() {
+    if !have_gpu("the_stage_view_stays_the_pane_while_firing") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.state_mut().state.stimulus.level = Some(ac2_proto::units::Dbfs(-24.0));
+    h.key_press(Key::W);
+    h.key_press(Key::W);
+    step_until(&mut h, "the stage view", |a| {
+        a.state.stage_view() && a.state.layout.focus == PaneKind::Transfer
+    });
+    let quiet = |h: &mut Harness<'_, App>| {
+        h.state_mut().state.toasts.clear();
+        h.step();
+    };
+    quiet(&mut h);
+    snapshot(&mut h, "transfer_stage");
+    h.key_press(Key::Space);
+    step_until(&mut h, "armed", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.armed)
+    });
+    quiet(&mut h);
+    snapshot(&mut h, "transfer_stage");
+    h.key_press(Key::Enter);
+    step_until(&mut h, "firing", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.firing) && a.state.stage_view()
+    });
+    quiet(&mut h);
+    snapshot(&mut h, "transfer_stage");
+    h.key_press(Key::Escape);
+    step_until(&mut h, "stopped", |a| {
+        a.state.daemon().is_some_and(|s| {
+            !s.generator.firing && !s.generator.armed && s.generator.owner.is_none()
+        }) && a.state.stage_view()
+    });
+}
+
 #[test]
 fn startup_first_frame() {
     if !have_gpu("startup_first_frame") {

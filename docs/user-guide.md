@@ -279,8 +279,10 @@ the focused pane alone in the window → that pane **full screen** → the split
 Full screen is the **stage view**: the window fills the screen and holds the pane's picture
 alone — no top bar, measurement list or pane title; a plot keeps a one-line caption naming
 the pane and its measurement, the SPL meter and its Leq windows name themselves. Key hints
-are off there. Whenever a stimulus is armed or playing, or a sweep or another operation
-runs, the top bar comes back: what drives the speakers is never hidden. **F11** on its own
+are off there. Full screen is your explicit choice to see only the pane: arming, playing
+or stopping the stimulus and a running sweep change nothing on it — no top bar, strip or
+badge comes back and no pane resizes; Esc and Shift+Esc stop as always. Outside full
+screen the top bar shows the stimulus as usual. **F11** on its own
 puts the whole window full screen (or back) in whatever layout it is in — with one pane up,
 that is the same stage view. Esc stops the stimulus as anywhere else (Shift+Esc too, also
 with a window open).
@@ -1013,8 +1015,8 @@ meter reads **A-weighted, Fast** (`LAF`) unless you choose otherwise, in the app
   caption for both: the meter's name, the run and the calibration. G goes meter → Leq
   windows → meter + Leq → meter; the palette has each by name ("SPL pane: meter + Leq
   windows"), and the app remembers the choice. W twice (or W, then F11) makes it the stage
-  view: the number and the windows, nothing else (the top bar comes back while a stimulus is
-  armed or playing). On a short pane the number and its name share one line above the
+  view: the number and the windows, nothing else, also while a stimulus is armed or
+  playing. On a short pane the number and its name share one line above the
   windows; on a very short one (under about 170 px) the number gives way: the windows judge the
   limits, the meter view still has it.
 - **The number** is the current time-weighted level, centred and as large as the pane
@@ -1094,8 +1096,8 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   both. **W** gives the pane the whole
   window, once more (or **F11**) the whole screen: the **stage view**, nothing but the
   columns (in meter + Leq, the number above them) and the caption with the meter's name,
-  the run and its calibration (the top bar comes
-  back while a stimulus is armed or playing). W again goes back to the split layout.
+  the run and its calibration (arming or playing the stimulus changes nothing there; Esc
+  and Shift+Esc still stop it). W again goes back to the split layout.
 - Each column (and tile) says, large, its **state** (OK, NEAR, OVER, or "over in 47 s" when a
   filling window is on course to go over) and the **headroom**: the highest steady level for
   the next minute that keeps the window at or below its limit (**"stay ≤ 101.5 dB"**; while

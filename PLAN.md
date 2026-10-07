@@ -526,6 +526,11 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
   sweep measurement with its settings (the dialog that makes one when there is none), every
   other view the generator for live measuring; `Enter` fires what is armed, named in the top
   bar (`Enter fires: sweep Genelec 1 m · 3 s −50 dBFS`).
+- Full screen (the stage view) shows only the focused pane, also while a stimulus is armed
+  or playing or a sweep runs: no top bar, strip or badge comes back and no pane resizes.
+  Operator's decision beside principle 9: full screen is the explicit choice to see only
+  the pane; the stimulus stays safe by its keys (`Esc`, `Shift+Esc` stop from full screen
+  as everywhere) and is shown in the top bar of every other layout.
 - The keys that act on "the selected curve" (`A` show / hide, `Delete` / `Backspace`
   delete after a confirmation, the offsets) act on the item selected last: a measurement
   (its row in the measurement tree, its live curve's or a math channel's row, `N`, a pane's

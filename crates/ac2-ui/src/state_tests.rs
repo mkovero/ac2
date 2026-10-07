@@ -4847,9 +4847,9 @@ fn leq_layout_keys_and_prefs() {
     assert!(!t.st.stage_view());
     t.key("F11");
     assert!(t.st.stage_view());
-    // Not with the stimulus armed: what drives the speakers stays in view.
+    // Armed too: full screen stays the pane alone.
     t.st.stimulus.phase = StimPhase::Armed;
-    assert!(!t.st.stage_view());
+    assert!(t.st.stage_view());
     t.st.stimulus.phase = StimPhase::Idle;
     // The meter is full screen as well; W goes back to the split layout.
     t.key("G");
@@ -5490,7 +5490,7 @@ fn spl_number_holds_for_the_display_period() {
 
 /// W: split → the focused pane alone → full screen (the stage view, on any pane) → split.
 /// F11 alone is the window full screen in whatever layout; with one pane, the stage view.
-/// The top bar comes back whenever a stimulus is armed.
+/// Full screen stays the pane alone with a stimulus armed.
 #[test]
 fn w_cycles_split_maximised_full_screen() {
     let mut t = T::new();
@@ -5503,7 +5503,7 @@ fn w_cycles_split_maximised_full_screen() {
     assert!(t.st.stage_view(), "the transfer pane full screen");
     assert!(!t.st.key_hints_shown());
     t.st.stimulus.phase = StimPhase::Armed;
-    assert!(!t.st.stage_view());
+    assert!(t.st.stage_view());
     t.st.stimulus.phase = StimPhase::Idle;
     t.key("W");
     assert!(!t.st.layout.maximized && !t.st.fullscreen);
@@ -6380,4 +6380,58 @@ fn a_sweep_is_never_stopped_by_a_transfer_stop() {
     t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
     assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+}
+
+/// Arming, firing, stopping and an arm queued behind a stop never change the layout, the
+/// full-screen state or what the view draws around the panes (the pane rects follow from
+/// those alone), in every layout: split, one pane, F11 over the split, and the stage view
+/// (where a running sweep changes nothing either).
+#[test]
+fn the_stimulus_never_changes_the_layout() {
+    for keys in [&[][..], &["W"], &["F11"], &["W", "W"]] {
+        let mut t = T::new();
+        t.st.layout.focus = PaneKind::Transfer;
+        for k in keys {
+            t.key(k);
+        }
+        let seen = |t: &T| {
+            (
+                t.st.layout,
+                t.st.fullscreen,
+                t.st.stage_view(),
+                t.st.key_hints_shown(),
+            )
+        };
+        let before = seen(&t);
+        let check = |t: &mut T, what: &str| assert_eq!(seen(t), before, "{keys:?}: {what}");
+        t.st.stimulus.level = Some(Dbfs(-20.0));
+        t.key("Space");
+        check(&mut t, "arming");
+        t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+        check(&mut t, "armed");
+        t.key("Enter");
+        check(&mut t, "fire requested");
+        t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
+        let mut s = daemon_state();
+        s.generator.owner = Some(ClientId("c1".into()));
+        s.generator.armed = true;
+        s.generator.firing = true;
+        t.conn(mirror(s.clone()));
+        check(&mut t, "firing");
+        t.key("Escape");
+        check(&mut t, "stopping");
+        t.key("Space");
+        assert!(t.st.stimulus.arm_after_stop);
+        check(&mut t, "an arm queued behind the stop");
+        t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+        check(&mut t, "stopped, arming again");
+        t.key("Escape");
+        t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+        // A sweep running on the daemon: the progress strip is an operation outside full
+        // screen; in it, nothing.
+        s.sweep = Some(sweep_run(SweepStatus::Playing { repeat: 1 }));
+        t.conn(mirror(s));
+        assert!(t.st.operation().is_some());
+        check(&mut t, "a sweep running");
+    }
 }

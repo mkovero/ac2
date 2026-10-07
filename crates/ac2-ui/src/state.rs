@@ -1824,14 +1824,12 @@ impl AppState {
 
     /// The stage view: the focused pane alone with the window full screen, so the screen
     /// holds only the pane's picture (no top bar, list or pane title; the SPL meter and its
-    /// Leq windows read across a room). Whenever a stimulus may be sounding or an operation
-    /// runs, the top bar comes back: what is driving the speakers is never hidden.
+    /// Leq windows read across a room). Full screen is the operator's explicit choice to see
+    /// only the pane: the stimulus arming, playing or stopping and a sweep running change
+    /// nothing on it (no top bar, strip or badge comes back, no pane resizes), and Esc and
+    /// Shift+Esc stop as everywhere. Outside full screen the top bar shows the stimulus.
     pub fn stage_view(&self) -> bool {
-        self.fullscreen
-            && self.layout.maximized
-            && self.stimulus.phase == StimPhase::Idle
-            && !self.daemon().is_some_and(|d| d.generator.firing)
-            && self.operation().is_none()
+        self.fullscreen && self.layout.maximized
     }
 
     /// Whether the panes show key hints now: on in the preferences, and never in the stage
