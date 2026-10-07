@@ -111,14 +111,15 @@ fn label_col(ui: &mut egui::Ui, text: &str, focused: bool, ch: &Chrome) -> egui:
     )
 }
 
-/// The input meters and each mic row's curve and calibration text, for the channel rows.
-fn channel_data(
-    app: &App,
-    d: &SessionDialog,
-) -> (
+/// Each input's meter, and each mic row's curve and calibration text (with whether it needs
+/// a look).
+type ChannelData = (
     std::collections::BTreeMap<u16, MeterReading>,
     Vec<Option<(String, bool)>>,
-) {
+);
+
+/// The input meters and each mic row's curve and calibration text, for the channel rows.
+fn channel_data(app: &App, d: &SessionDialog) -> ChannelData {
     let meters = app.state.input_meters();
     let now = super::now();
     let offset = ac2_scene::time::ClockOffset(

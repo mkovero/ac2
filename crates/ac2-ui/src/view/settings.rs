@@ -104,6 +104,9 @@ fn page(
     body: egui::Rect,
     msg: &mut Option<Msg>,
 ) {
+    // Wide pages (the calibrations' grid) scroll sideways; the header and the keys wrap
+    // within the page.
+    ui.set_max_width(body.width());
     ui.label(
         RichText::new(s.page.title())
             .strong()
@@ -117,7 +120,7 @@ fn page(
     );
     ui.add_space(8.0);
     let footer_h = 44.0;
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .id_salt(("ac2-settings-page", s.page.index()))
         .max_height((body.height() - 70.0 - footer_h).max(120.0))
         .auto_shrink([false, false])
@@ -234,6 +237,22 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     }
 }
 
+/// A line's title in a fixed-width, left-aligned column.
+fn title_cell(ui: &mut egui::Ui, title: &str, focused: bool, ch: &Chrome) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(190.0, 20.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(190.0);
+            ui.label(
+                RichText::new(title)
+                    .strong()
+                    .color(if focused { ch.focus } else { ch.text }),
+            );
+        },
+    );
+}
+
 fn recording_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome) {
     let limit = app
         .state
@@ -250,14 +269,7 @@ fn recording_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome) {
         ui.horizontal(|ui| {
             let marker = if focused { "▸" } else { " " };
             ui.label(RichText::new(marker).color(ch.focus).monospace());
-            ui.add_sized(
-                [160.0, 20.0],
-                egui::Label::new(RichText::new(title).strong().color(if focused {
-                    ch.focus
-                } else {
-                    ch.text
-                })),
-            );
+            title_cell(ui, title, focused, ch);
             let shown = if focused && row == RecordingRow::Limit && !s.recording.text.is_empty() {
                 format!("{}▏ min", s.recording.text)
             } else {
@@ -285,14 +297,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
         ui.horizontal(|ui| {
             let marker = if focused { "▸" } else { " " };
             ui.label(RichText::new(marker).color(ch.focus).monospace());
-            ui.add_sized(
-                [190.0, 20.0],
-                egui::Label::new(RichText::new(row.title()).strong().color(if focused {
-                    ch.focus
-                } else {
-                    ch.text
-                })),
-            );
+            title_cell(ui, row.title(), focused, ch);
             if row == DisplayRow::LevelAxes {
                 ui.label(RichText::new(value).color(ch.text));
                 if ui.small_button("Reset").clicked() {

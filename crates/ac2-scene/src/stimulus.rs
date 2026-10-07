@@ -5,7 +5,7 @@
 //! generator for live measuring. Enter fires what is armed. The hint names it with its
 //! level, so the operator reads what will play before it plays.
 
-use ac2_proto::model::Signal;
+use ac2_proto::model::{OutputSetup, Signal};
 use ac2_proto::units::Dbfs;
 
 use crate::format;
@@ -13,11 +13,13 @@ use crate::format;
 /// What the stimulus keys would play.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stimulus {
-    /// The generator: a noise (or tone) at a level on outputs (zero-based).
+    /// The generator: a noise (or tone) at a level on outputs (zero-based), named by the
+    /// rig's `labels` where it has them.
     Generator {
         signal: Signal,
         level: Option<Dbfs>,
         outputs: Vec<u16>,
+        labels: Vec<OutputSetup>,
     },
     /// A sweep: the one the dialog set up, or a re-sweep with the last sweep's parameters.
     Sweep {
@@ -65,11 +67,12 @@ pub fn describe(what: &Stimulus) -> String {
             signal,
             level,
             outputs,
+            labels,
         } => format!(
-            "{} {} → out {}",
+            "{} {} → {}",
             signal_name(signal),
             level_text(*level),
-            outputs_text(outputs)
+            crate::rig::stimulus_outputs(outputs, labels)
         ),
         Stimulus::Sweep {
             again,
@@ -111,14 +114,6 @@ fn short_number(v: f64) -> String {
     }
 }
 
-/// One-based: `1, 2`.
-fn outputs_text(o: &[u16]) -> String {
-    o.iter()
-        .map(|c| (u32::from(*c) + 1).to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +124,7 @@ mod tests {
             signal: Signal::Pink,
             level: level.map(Dbfs),
             outputs: vec![0],
+            labels: Vec::new(),
         }
     }
 
@@ -177,10 +173,25 @@ mod tests {
             signal: Signal::Sine { freq: Hz(1000.0) },
             level: Some(Dbfs(-12.0)),
             outputs: vec![0, 1],
+            labels: Vec::new(),
         };
         assert_eq!(
             hint(Next::Space, &two, "L").0,
             "Space arms: sine 1.00 kHz −12 dBFS → out 1, 2"
+        );
+        // Outputs the rig has named are named.
+        let named = Stimulus::Generator {
+            signal: Signal::Pink,
+            level: Some(Dbfs(-50.0)),
+            outputs: vec![0, 1],
+            labels: vec![OutputSetup {
+                channel: 0,
+                label: Some("Main L".into()),
+            }],
+        };
+        assert_eq!(
+            hint(Next::Enter, &named, "L").0,
+            "Enter fires: pink −50 dBFS → Main L, out 2"
         );
         assert_eq!(
             hint(Next::Space, &pink(None), "L"),

@@ -572,7 +572,7 @@ fn calibrations_view() {
     };
     use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, WallNs};
     use ac2_proto::{Change, Patch};
-    if !have_gpu("calibrations_view") {
+    if !have_gpu("settings_calibration") {
         return;
     }
     let rig = common::Rig::start();
@@ -636,7 +636,7 @@ fn calibrations_view() {
         a.state.overlay.cal().is_some()
     });
     h.state_mut().state.toasts.clear();
-    snapshot(&mut h, "calibrations_view");
+    snapshot(&mut h, "settings_calibration");
     // C on the mic's input: the acoustic calibration dialog, the mic prefilled.
     for _ in 0..8 {
         let on_input = match h.state().state.overlay.cal() {
@@ -1218,7 +1218,7 @@ fn session_dialog_of(a: &App) -> Option<&ac2_ui::session_dialog::SessionDialog> 
 /// level, Enter opens and one more key creates the transfer measurement.
 #[test]
 fn session_dialog() {
-    if !have_gpu("session_dialog") {
+    if !have_gpu("settings_inputs_outputs") {
         return;
     }
     let fake =
@@ -1255,7 +1255,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    snapshot(&mut h, "session_dialog");
+    snapshot(&mut h, "settings_inputs_outputs");
 
     // D, a typed level, Enter: the fake answers in 1, which becomes the Reference.
     h.key_press(Key::D);
@@ -1268,7 +1268,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    snapshot(&mut h, "session_dialog_detect_confirm");
+    snapshot(&mut h, "settings_detect_confirm");
     h.key_press(Key::Enter);
     step_until(&mut h, "detected", |a| {
         session_dialog_of(a).is_some_and(|d| {
@@ -1286,7 +1286,7 @@ fn session_dialog() {
     });
     h.state_mut().state.toasts.clear();
     h.step();
-    snapshot(&mut h, "session_dialog_detected");
+    snapshot(&mut h, "settings_detected");
 
     h.key_press(Key::Enter);
     step_until(&mut h, "session open, offer shown", |a| {
@@ -1804,7 +1804,7 @@ fn leq_tiles_from_an_empty_daemon() {
     h.event(Event::PointerGone);
     h.state_mut().state.toasts.clear();
     h.step();
-    snapshot(&mut h, "leq_dialog");
+    snapshot(&mut h, "settings_leq");
     // ↑ ×5 to the preset row, → to the French preset for children (its two windows, the
     // longest name and source), then ← back to "none": the windows as typed.
     let typed = h
@@ -2492,4 +2492,95 @@ fn spectrograph() {
         );
     }
     snapshot_when(&mut h, "spectrograph_alone", pin, same);
+}
+
+/// The Settings view's own pages on a live rig whose outputs are named and whose max level
+/// is below its bound: Inputs & outputs with the max level row and a raise waiting for its
+/// word, Recording, Display and Connection (an embedded-style daemon: no client keys).
+#[test]
+fn settings_pages() {
+    use ac2_proto::Change;
+    use ac2_proto::model::OutputSetup;
+    use ac2_proto::units::Dbfs;
+    if !have_gpu("settings_pages") {
+        return;
+    }
+    let rig = common::Rig::start();
+    {
+        let mut f = rig.fake.lock();
+        let mut g = f.state.generator.clone();
+        g.ceiling = Dbfs(-40.0);
+        g.ceiling_bound = Dbfs(-10.0);
+        f.commit(Change::Generator(g));
+        f.commit(Change::Outputs(vec![
+            OutputSetup {
+                channel: 0,
+                label: Some("Main L".into()),
+            },
+            OutputSetup {
+                channel: 1,
+                label: Some("Main R".into()),
+            },
+        ]));
+    }
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::P);
+    step_until(&mut h, "Inputs & outputs with the device", |a| {
+        a.state.overlay.settings().is_some_and(|s| {
+            s.page == ac2_ui::settings::Page::Io && s.session.device_info().is_some()
+        })
+    });
+    // ↑ from the first channel: the max level row; -20, Enter: the raise asks for its word.
+    h.key_press(Key::ArrowUp);
+    h.event(Event::Text("-20".into()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the raise confirmation", |a| {
+        a.state
+            .overlay
+            .settings()
+            .is_some_and(|s| s.ceiling.confirm.is_some())
+    });
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "settings_max_level_raise");
+    h.key_press(Key::Escape);
+    for (key, page, name) in [
+        (
+            Key::Num5,
+            ac2_ui::settings::Page::Recording,
+            "settings_recording",
+        ),
+        (
+            Key::Num6,
+            ac2_ui::settings::Page::Display,
+            "settings_display",
+        ),
+        (
+            Key::Num7,
+            ac2_ui::settings::Page::Connection,
+            "settings_connection",
+        ),
+    ] {
+        h.key_press_modifiers(Modifiers::ALT, key);
+        step_until(&mut h, name, |a| {
+            a.state.overlay.settings().is_some_and(|s| {
+                s.page == page
+                    && (page == ac2_ui::settings::Page::Display || s.connection.server.is_some())
+            })
+        });
+        h.state_mut().state.toasts.clear();
+        // The connection's id is the daemon's per-connection one: pinned for the picture.
+        let pin = |a: &mut App| {
+            if let Some(m) = &a.state.mirror {
+                let mut m = (**m).clone();
+                m.client_id = Some(ac2_proto::units::ClientId("ac2-ui test".into()));
+                a.state.mirror = Some(std::sync::Arc::new(m));
+            }
+        };
+        snapshot_when(&mut h, name, pin, |a| {
+            a.state.my_client_id().map(|c| c.0.as_str()) == Some("ac2-ui test")
+        });
+    }
 }

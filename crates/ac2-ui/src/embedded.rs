@@ -192,6 +192,7 @@ pub fn start_embedded_with(
     // Calibrations of real devices persist in the same store a stand-alone `ac2d` uses; a
     // simulated rig's stay in memory.
     config.cal_store = (backend != EmbeddedBackend::Fake).then(ac2_paths::cal_store);
+    config.rig_settings = (backend != EmbeddedBackend::Fake).then(ac2_paths::rig_settings);
     let handle = Daemon::start(config).map_err(|e| EmbeddedError::Start(e.to_string()))?;
     let endpoints = Endpoints {
         ctrl: handle.ctrl_endpoint().to_owned(),

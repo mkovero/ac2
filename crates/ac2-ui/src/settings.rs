@@ -304,21 +304,21 @@ pub fn display_rows(
         .iter()
         .map(|r| {
             let v = match r {
-                DisplayRow::Theme => format!("‹ {} ›", theme_name(theme)),
+                DisplayRow::Theme => theme_name(theme).to_owned(),
                 DisplayRow::KeyHints => {
                     if key_hints {
-                        "‹ shown under the focused pane ›".into()
+                        "shown under the focused pane".into()
                     } else {
-                        "‹ hidden ›".into()
+                        "hidden".into()
                     }
                 }
                 DisplayRow::SplHold => match spl_hold_ms {
-                    None => "‹ by the time weighting ›".into(),
+                    None => "by the time weighting".into(),
                     Some(ms) => {
-                        format!("‹ {} s ›", ac2_scene::format::fixed(f64::from(ms) / 1e3, 2))
+                        format!("{} s", ac2_scene::format::fixed(f64::from(ms) / 1e3, 2))
                     }
                 },
-                DisplayRow::Spectrograph => format!("‹ last {span_s} s ›"),
+                DisplayRow::Spectrograph => format!("last {span_s} s"),
                 DisplayRow::LevelAxes => {
                     "each pane's as last left · Enter resets them to the defaults".into()
                 }
@@ -899,26 +899,31 @@ mod tests {
         // Above the bound: refused here, saying where the bound comes from.
         e.type_text("-6");
         assert_eq!(e.enter(Some(&g), false), None);
-        assert!(e.error.as_deref().unwrap().contains("ac2d --max-level"));
+        assert!(
+            e.error
+                .as_deref()
+                .expect("set")
+                .contains("ac2d --max-level")
+        );
 
         // A raise: refused while live, else a confirmation that needs the word.
         e.text = "-20 dBFS".into();
         assert_eq!(e.enter(Some(&g), true), None);
         assert_eq!(e.error.as_deref(), Some(RAISE_WHILE_LIVE));
         assert_eq!(e.enter(Some(&g), false), None);
-        let c = e.confirm.clone().unwrap();
+        let c = e.confirm.clone().expect("set");
         assert_eq!((c.from, c.to), (Dbfs(-40.0), Dbfs(-20.0)));
         e.type_text("yes");
         assert_eq!(e.enter(Some(&g), false), None);
-        assert!(e.error.as_deref().unwrap().starts_with("type raise"));
-        e.confirm.as_mut().unwrap().typed.clear();
+        assert!(e.error.as_deref().expect("set").starts_with("type raise"));
+        e.confirm.as_mut().expect("set").typed.clear();
         e.type_text("Raise");
         assert_eq!(e.enter(Some(&g), false), Some((Dbfs(-20.0), true)));
         assert!(e.confirm.is_none());
 
         e.type_text("loud");
         assert_eq!(e.enter(Some(&g), false), None);
-        assert!(e.error.as_deref().unwrap().starts_with("not a number"));
+        assert!(e.error.as_deref().expect("set").starts_with("not a number"));
     }
 
     #[test]
@@ -934,10 +939,10 @@ mod tests {
         assert_eq!(
             texts,
             vec![
-                "‹ light ›",
-                "‹ hidden ›",
-                "‹ 0.50 s ›",
-                "‹ last 30 s ›",
+                "light",
+                "hidden",
+                "0.50 s",
+                "last 30 s",
                 "each pane's as last left · Enter resets them to the defaults",
             ]
         );
@@ -981,7 +986,7 @@ mod tests {
         assert!(
             p.notice
                 .as_deref()
-                .unwrap()
+                .expect("set")
                 .starts_with("Delete again revokes laptop")
         );
         assert_eq!(p.delete(), Some(ConnAction::Revoke("laptop".into())));

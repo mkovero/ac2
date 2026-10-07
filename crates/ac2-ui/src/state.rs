@@ -2692,6 +2692,7 @@ impl AppState {
             },
             level: self.stimulus.level,
             outputs: self.stimulus.outputs.clone(),
+            labels: self.daemon().map(|s| s.outputs.clone()).unwrap_or_default(),
         }
     }
 
