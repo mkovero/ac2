@@ -885,3 +885,29 @@ fn a_dc_blocked_loopback_leaves_the_lowest_harmonics_clean() {
     eprintln!("dc-blocked loopback, 20–40 Hz: H2 max error {e2:.2} dB");
     assert!(e2 <= 1.0, "{e2}");
 }
+
+#[test]
+fn a_linear_path_with_its_own_low_frequency_roll_off_reads_no_h2_at_the_lowest_columns() {
+    // The path rolls off a few hertz up (coupling capacitors) behind the DC-blocked loopback:
+    // its response in the octaves below the analysed band is large and rings, so a filter that
+    // takes those octaves out of the harmonic windows must not spread them back before the
+    // arrival, where every harmonic window lies. A linear path has no H2 at all.
+    let s = SweepSpec {
+        grid: LogGrid::covering(48, 20.0, 20_000.0),
+        ..spec(ess(20.0, 20_000.0, 5.5))
+    };
+    let x = emitted(&s, 1, 0.37);
+    let reference = delayed(&dc_blocked(&dc_blocked(&x, 2.0), 2.0), REF_DELAY, REF_GAIN);
+    let mut mic = delayed(&dc_blocked(&dc_blocked(&x, 4.0), 4.0), MIC_DELAY, MIC_GAIN);
+    Noise(17).add(&mut mic, 1e-8);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let worst = r
+        .frequencies
+        .iter()
+        .zip(&r.harmonics[0].level_db)
+        .filter(|(f, l)| (20.0..=40.0).contains(*f) && l.is_finite())
+        .map(|(_, &l)| l)
+        .fold(f64::NEG_INFINITY, f64::max);
+    eprintln!("linear path, 20–40 Hz: H2 at most {worst:.1} dBr");
+    assert!(worst <= -115.0, "{worst}");
+}

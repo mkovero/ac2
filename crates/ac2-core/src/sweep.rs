@@ -95,6 +95,10 @@ pub const HARMONIC_FS_FRACTION: f64 = 0.45;
 pub const MIN_REFERENCE_DB: f64 = -40.0;
 /// Most points of the stored IR; longer spans are decimated peak-preserving.
 pub const IR_POINTS: usize = 16_384;
+/// Corner of the harmonic windows' high-pass re the lowest analysed fundamental: H2's band
+/// at twice that fundamental is then 0.002 dB down (see `high_passed`).
+const HARMONIC_HIGH_PASS: f64 = 0.75;
+
 /// Regularisation of the spectral division, relative to the reference's peak bin power.
 const REGULARISATION: f64 = 1e-6;
 /// Earliest arrival searched, seconds before the reference.
@@ -574,8 +578,8 @@ fn interp(s: &[f64], x: f64) -> f64 {
     s[i] * (1.0 - t) + s[i + 1] * t
 }
 
-/// `spec` (bins `bin_hz` apart) weighted by a zero-phase high-pass: 0 up to `from`, a
-/// raised cosine in log-frequency up to `to`, 1 above.
+/// `spec` (bins `bin_hz` apart) through a fourth-order Butterworth high-pass at `fc`, the
+/// analog prototype evaluated on each bin (minimum phase, so causal).
 ///
 /// Below the emitted start the reference carries no sweep, and a loopback's own DC-blocking
 /// high-pass takes the little the fade-in leaves there down to the regularisation, so the
@@ -585,22 +589,30 @@ fn interp(s: &[f64], x: f64) -> f64 {
 /// harmonic windows are 0.1 s at most with edges of a few tens of milliseconds, so their
 /// side lobes carry that swell some 25 dB down into the lowest harmonic bands, where it
 /// reads as H2 up to 20 dB above the path's own, or as a floor as high. No analysed
-/// harmonic needs content below `f_lo` (the k-th order's bands start above 1.25·f_lo), and
-/// a transition spanning the octaves of the fade-in rings for a small fraction of a harmonic
-/// window.
-fn high_passed(spec: &[Complex64], bin_hz: f64, from: f64, to: f64) -> Vec<Complex64> {
-    let span = (to / from).ln();
+/// harmonic needs content below the lowest analysed fundamental (H2's bands start at twice
+/// it), so the harmonic windows read the response without it.
+///
+/// The filter must be causal: below the analysed band the response is large (the path's own
+/// roll-off rings there), and a zero-phase filter spreads what its transition passes evenly
+/// before and after the arrival. Every harmonic window lies before the arrival, at −L·ln k,
+/// and on a 5.5 s sweep H2's is within the ringing of a transition a few hertz wide; a causal
+/// filter rings only after the arrival. Fourth order: a steeper one rings far enough into the
+/// post-roll to lift the noise windows.
+fn high_passed(spec: &[Complex64], bin_hz: f64, fc: f64) -> Vec<Complex64> {
+    const ORDER: usize = 4;
+    let wc = TAU * fc;
     spec.iter()
         .enumerate()
         .map(|(k, &z)| {
-            let f = k as f64 * bin_hz;
-            if f >= to {
-                z
-            } else if f <= from {
-                Complex64::new(0.0, 0.0)
-            } else {
-                z * (0.5 - 0.5 * (PI * (f / from).ln() / span).cos())
+            if k == 0 {
+                return Complex64::new(0.0, 0.0);
             }
+            let s = Complex64::new(0.0, TAU * k as f64 * bin_hz);
+            (0..ORDER / 2).fold(z, |acc, i| {
+                // pole pair at angle θ from the imaginary axis: s² + 2·sin θ·ωc·s + ωc²
+                let th = PI * (2 * i + 1) as f64 / (2 * ORDER) as f64;
+                acc * s * s / (s * s + s * (2.0 * th.sin() * wc) + wc * wc)
+            })
         })
         .collect()
 }
@@ -696,12 +708,7 @@ pub fn analyse_recording(
     // Lowest fundamental analysed for distortion.
     let f_lo = timing.full_level_hz().max(2.0 / timing.window_s());
     let h_harm = fft_inverse(
-        high_passed(
-            &acc,
-            fs / n as f64,
-            timing.emitted.start_hz.min(0.5 * f_lo),
-            f_lo,
-        ),
+        high_passed(&acc, fs / n as f64, HARMONIC_HIGH_PASS * f_lo),
         n,
     );
     let h = fft_inverse(acc, n);
