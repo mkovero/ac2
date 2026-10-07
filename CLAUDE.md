@@ -1,8 +1,8 @@
 # ac2 — agent notes
 
 Open-source (MIT) live dual-channel analyzer for PA tuning. Clean-slate successor to `ac`
-(`~/src/ac`). Read `PLAN.md` for scope and architecture; `docs/design/open-questions.md`
-for settled decisions (top table) and open technical questions.
+(`~/src/ac`). Start from `STATUS.md` (where things stand, which file answers what);
+`docs/design/open-questions.md` for settled decisions (top table) and open technical questions.
 
 ## Build
 ```
@@ -48,6 +48,17 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
   local runs are Linux only, so macOS/Windows breakage shows only there.
 - Any change to what goes on the wire bumps `PROTO_VERSION` (pre-1.0: no compatibility);
   `fixtures/protocol/WIRE_LOCK` and its test enforce it.
+
+## Context budget
+Every turn re-sends the whole context, so what an agent reads stays paid for until it ends.
+- Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
+  through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
+  `grep -n '^#'` first, read one section.
+- Iterate with `cargo test -p <crate> <filter>`; the full workspace run once, before commit.
+  Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
+- UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
+- Delegation: one task per agent with the files and functions named in the brief; the agent
+  ends when the task is done. Unrelated follow-ups go to a fresh agent, not via SendMessage.
 
 ## Audio safety
 - Never emit sound on real hardware from automated runs. Tests and spikes output silence on

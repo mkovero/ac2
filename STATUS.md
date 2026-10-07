@@ -1,0 +1,23 @@
+# ac2 — status and where to look
+
+Short orientation; read this instead of the whole of `PLAN.md`. Versions live in the code
+(`PROTO_VERSION` in `crates/ac2-proto/src/lib.rs`), not here.
+
+## Where things stand
+- Phases 0–6 (1.0 scope) pass their CI criteria; phase 7 (post-1.0 extras) is in progress.
+  Per-phase table with CI and hardware results: `PLAN.md` §9.0.
+- Hardware verified on Linux only: the `pupu` rig (`docs/rigs/pupu.md`), a Pi 4 kiosk
+  client. macOS: a tester runs the disk image (`testing/macos/`); Windows: MSI in a VM.
+- Open hardware gates: duplex spike and 1 h run on macOS/Windows, keyboard-only speaker
+  tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
+
+## Where to look
+| need | file |
+|---|---|
+| what to work on next | `docs/design/backlog.md` (open items only), `docs/design/ui-backlog.md` |
+| what already landed | `docs/design/backlog-done.md`, `git log` |
+| why a decision was made | `docs/design/open-questions.md` (table at top), `docs/design/<topic>.md` |
+| scope / architecture | `PLAN.md` — `grep -n '^#' PLAN.md`, then read one section |
+| wire format | `docs/protocol.md` — by section, same way |
+| user-facing behaviour, keys | `docs/user-guide.md` — by section |
+| rig procedures | `docs/rigs/pupu.md` |
