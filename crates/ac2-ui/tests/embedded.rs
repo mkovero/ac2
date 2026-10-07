@@ -574,6 +574,46 @@ fn drawn_phase(s: &AppState, col: usize) -> Vec<(ac2_scene::trace::TraceKey, f64
         .collect()
 }
 
+/// The transfer pane's drawn curve `k`: its column frequencies and wrapped phases.
+fn drawn_curve(s: &AppState, k: ac2_scene::trace::TraceKey) -> (Vec<f64>, Vec<f64>) {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1100.0,
+        height: 600.0,
+    };
+    let sc = ac2_ui::scenes::transfer(s, &Theme::dark(), size, now);
+    sc.traces
+        .iter()
+        .find(|t| t.key == k)
+        .map(|t| (t.freqs.clone(), t.phase_wrapped_deg.clone()))
+        .unwrap_or_default()
+}
+
+/// How far a curve's phase moved between two drawings, less the rotation a step of `samples`
+/// should give (360°·f·samples/fs): the median over 500 Hz – 2 kHz. Two live estimates scatter
+/// by several degrees per column on the noisy rig, so one column alone cannot judge the step.
+fn rotation_residual(
+    before: &(Vec<f64>, Vec<f64>),
+    after: &(Vec<f64>, Vec<f64>),
+    samples: f64,
+    rate: f64,
+) -> f64 {
+    let wrap = |x: f64| (x + 180.0).rem_euclid(360.0) - 180.0;
+    let mut r: Vec<f64> = before
+        .0
+        .iter()
+        .zip(before.1.iter().zip(&after.1))
+        .filter(|(f, (a, b))| (500.0..=2000.0).contains(*f) && a.is_finite() && b.is_finite())
+        .map(|(f, (a, b))| wrap(b - a - 360.0 * f * samples / rate))
+        .collect();
+    assert!(r.len() > 20, "{} columns in 500 Hz – 2 kHz", r.len());
+    r.sort_by(f64::total_cmp);
+    r[r.len() / 2]
+}
+
 fn phase_of(v: &[(ac2_scene::trace::TraceKey, f64, String)], k: ac2_scene::trace::TraceKey) -> f64 {
     v.iter().find(|x| x.0 == k).map_or(f64::NAN, |x| x.1)
 }
@@ -630,6 +670,7 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.until("the run's data", |s| s.traces.contains_key(&run))?;
     let live = TraceKey::Live(m.id);
     let before = drawn_phase(&d.st, 240);
+    let live_before = drawn_curve(&d.st, live);
     let legend = |v: &[(TraceKey, f64, String)], k| {
         v.iter()
             .find(|x| x.0 == k)
@@ -661,14 +702,13 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
         })
     })?;
     let after = drawn_phase(&d.st, 240);
-    let f = 1000.0;
+    let live_after = drawn_curve(&d.st, live);
     let wrap = |x: f64| (x + 180.0).rem_euclid(360.0) - 180.0;
-    let moved = wrap(phase_of(&after, live) - phase_of(&before, live));
-    // Ten samples later: the curve leads by 360°·f·10/fs (75° at 1 kHz, 48 kHz).
-    let expect = 360.0 * f * 10.0 / rate;
+    // Ten samples later the curve leads by 360°·f·10/fs at every frequency (75° at 1 kHz).
+    let off = rotation_residual(&live_before, &live_after, 10.0, rate);
     assert!(
-        (moved - expect).abs() < 5.0,
-        "live moved {moved:.1}°, expected {expect:.1}° — before {before:?} after {after:?}"
+        off.abs() < 2.0,
+        "live moved {off:+.1}° off its expected rotation — before {before:?} after {after:?}"
     );
     for k in [TraceKey::Stored(cap), TraceKey::Stored(run)] {
         assert_eq!(
@@ -736,9 +776,10 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
     let post = drawn_phase(&d.st, 240);
     let nudged =
         wrap(phase_of(&post, TraceKey::Stored(cap)) - phase_of(&pre, TraceKey::Stored(cap)));
+    // Ctrl+. made the live curve lead (checked above); `.` must turn the capture the same way.
     assert!(
-        moved.signum() == nudged.signum() && (nudged - 36.0).abs() < 1.0,
-        "Ctrl+. moved the live curve {moved:.1}°, `.` the capture {nudged:.1}°"
+        nudged > 0.0 && (nudged - 36.0).abs() < 1.0,
+        "`.` turned the capture {nudged:.1}°, the way Ctrl+. turned the live curve (leading)"
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
@@ -751,6 +792,7 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
     assert_eq!(d.st.selected_trace, Some(run));
     d.send(Msg::Command(CommandId::PhaseReference));
     let pre = drawn_phase(&d.st, 240);
+    let live_pre = drawn_curve(&d.st, live);
     assert!(
         legend(&pre, TraceKey::Stored(run)).contains("· ref"),
         "{pre:?}"
@@ -767,11 +809,11 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
         })
     })?;
     let post = drawn_phase(&d.st, 240);
-    let back = wrap(phase_of(&post, live) - phase_of(&pre, live));
+    let live_post = drawn_curve(&d.st, live);
+    let off = rotation_residual(&live_pre, &live_post, -10.0, rate);
     assert!(
-        (back + expect).abs() < 5.0,
-        "live moved {back:.1}°, expected {:.1}° — before {pre:?} after {post:?}",
-        -expect
+        off.abs() < 2.0,
+        "live moved {off:+.1}° off its expected rotation back — before {pre:?} after {post:?}"
     );
     for (k, _, _) in &pre {
         if *k != live {
