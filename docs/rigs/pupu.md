@@ -343,7 +343,7 @@ CSV). The restore is now a script, `restore.sh` there, generated from the state 
 recreates the 13 measurements in id order so ids match, then imports the traces and moves each
 under its owner, slot and visibility, then sets TF 2's delay (44 samples). Run it from
 ketunkolo only after ketunkolo has the new CLI: the old one is refused at the protocol check.
-The PipeWire bridge REW uses (see below) stayed up across the `jack-ac` / `ac2d` restarts.
+The PipeWire bridge REW uses (see below) stayed up across the `ac2d` restart.
 The Pi's kiosk must be restarted after its nfsroot update; the old one is refused as
 protocol 24 until then.
 
