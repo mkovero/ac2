@@ -332,6 +332,14 @@ pub fn end_sample(d: &FakeDriver) -> u64 {
     d.blocks() * u64::from(BLOCK)
 }
 
+/// Waits until the daemon's keepalive reports audio up to `end` taken in (any epoch).
+pub fn handed_on(ka: &Sub, end: u64) {
+    ka.frame(Duration::from_secs(30), |f| {
+        matches!(f.data, ac2_proto::frame::FrameData::Ka(_)) && f.stamp.audio_sample.0 + 1 >= end
+    })
+    .unwrap_or_else(|| panic!("audio up to {end} never arrived"));
+}
+
 pub fn wall_now_ns() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

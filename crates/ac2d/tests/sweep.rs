@@ -78,6 +78,7 @@ fn run_until(
     d: &mut FakeDriver,
     c: &mut Client,
     sub: &Sub,
+    ka: &Sub,
     token: LeaseToken,
     mut pred: impl FnMut(&SweepRun) -> bool,
 ) -> SweepRun {
@@ -85,6 +86,10 @@ fn run_until(
     loop {
         assert!(Instant::now() < deadline, "no matching sweep event");
         run(d, 0.25);
+        // The fake device is stepped faster than real time; wait for the daemon to take the
+        // audio in before the next step, or a slow host overflows the capture queue and the
+        // sweep reports a dropout that the test, not the daemon, caused.
+        handed_on(ka, end_sample(d));
         let _ = c.call(Command::GenRefresh { lease_token: token });
         while let Some(ac2_proto::DataMessage::Event(e)) = sub.next(Duration::from_millis(5)) {
             if let Change::Sweep(r) = e.change
@@ -101,6 +106,7 @@ fn setup() -> (
     FakeBackend,
     Client,
     Sub,
+    Sub,
     FakeDriver,
     LeaseToken,
 ) {
@@ -108,6 +114,7 @@ fn setup() -> (
     let backend = distorting_rig();
     let h = Daemon::start(config(backend.clone(), inproc("sweep"))).unwrap();
     let (mut c, sub) = connect(&h, &[b"evt"]);
+    let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
     c.ok(Command::Hello {
         client: "sweep test".into(),
     });
@@ -119,12 +126,12 @@ fn setup() -> (
         ReplyBody::Lease(l) => l.lease_token,
         other => panic!("{other:?}"),
     };
-    (h, backend, c, sub, d, token)
+    (h, backend, c, sub, ka, d, token)
 }
 
 #[test]
 fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
-    let (_h, _b, mut c, sub, mut d, token) = setup();
+    let (_h, _b, mut c, sub, ka, mut d, token) = setup();
 
     // Refused before it is armed, without a level, above the ceiling.
     let capture = |c: &mut Client, level: Option<f64>| {
@@ -170,7 +177,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         ErrorCode::Refused
     );
 
-    let done = run_until(&mut d, &mut c, &sub, token, |r| {
+    let done = run_until(&mut d, &mut c, &sub, &ka, token, |r| {
         matches!(
             r.status,
             SweepStatus::Done { .. } | SweepStatus::Failed { .. }
@@ -277,7 +284,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
 
 #[test]
 fn stopping_or_losing_the_lease_discards_the_run() {
-    let (_h, _b, mut c, sub, mut d, token) = setup();
+    let (_h, _b, mut c, sub, ka, mut d, token) = setup();
     arm(&mut c, token);
     let start = |c: &mut Client| match c.ok(Command::IrCapture {
         lease_token: token,
@@ -290,7 +297,9 @@ fn stopping_or_losing_the_lease_discards_the_run() {
     let r = start(&mut c);
     run(&mut d, 0.5);
     c.ok(Command::GenStop);
-    let failed = run_until(&mut d, &mut c, &sub, token, |x| x.id == r.id && !x.active());
+    let failed = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
+        x.id == r.id && !x.active()
+    });
     assert!(matches!(
         failed.status,
         SweepStatus::Failed {
@@ -334,7 +343,7 @@ fn stopping_or_losing_the_lease_discards_the_run() {
 /// finished one: nothing is left armed for the next Enter.
 #[test]
 fn a_failed_sweep_leaves_the_generator_disarmed() {
-    let (_h, _b, mut c, sub, mut d, token) = setup();
+    let (_h, _b, mut c, sub, ka, mut d, token) = setup();
     arm(&mut c, token);
     let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
         lease_token: token,
@@ -346,7 +355,9 @@ fn a_failed_sweep_leaves_the_generator_disarmed() {
     }) else {
         panic!("not a sweep");
     };
-    let ended = run_until(&mut d, &mut c, &sub, token, |x| x.id == r.id && !x.active());
+    let ended = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
+        x.id == r.id && !x.active()
+    });
     assert!(
         matches!(ended.status, SweepStatus::Failed { .. }),
         "{:?}",
@@ -391,6 +402,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
     .unwrap();
     let h = Daemon::start(config(backend.clone(), inproc("sweep-hall"))).unwrap();
     let (mut c, sub) = connect(&h, &[b"evt"]);
+    let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
     c.ok(Command::Hello {
         client: "hall test".into(),
     });
@@ -423,7 +435,9 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         panic!("not a sweep");
     };
     assert!((r.post_roll.0 - 2.0).abs() < 1e-3, "{:?}", r.post_roll);
-    let done = run_until(&mut d, &mut c, &sub, token, |x| x.id == r.id && !x.active());
+    let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
+        x.id == r.id && !x.active()
+    });
     let SweepStatus::Done { trace } = done.status else {
         panic!("sweep failed: {:?}", done.status);
     };

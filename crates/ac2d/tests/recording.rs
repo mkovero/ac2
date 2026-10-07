@@ -512,6 +512,9 @@ fn replayed_rta_reads_a_steady_tone_alike() {
     run(&mut d, 0.5);
     wait_handed_on(&ka, live_epoch, end_sample(&d));
     c.ok(record(vec![1], "tone", 60.0));
+    // The live mean starts again with the recording (no audio moves until the driver steps
+    // again), so live and replay average exactly the same samples.
+    c.ok(Command::MeasReset { meas: MeasId(1) });
     let mut done = 0.0;
     while done < 3.0 {
         run(&mut d, 0.25);
