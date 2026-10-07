@@ -74,6 +74,11 @@ impl Recorder {
 }
 
 impl Analysis for Recorder {
+    fn result_generation(&self) -> Option<u64> {
+        // Not an operand of math channels.
+        None
+    }
+
     fn push(&mut self, b: &Block) {
         if self.done {
             return;

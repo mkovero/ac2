@@ -11,7 +11,10 @@ use ac2_proto::units::{
     DaemonIncarnation, MeasId, Rev, SampleIndex, Seconds, SessionEpoch, TraceId, WallNs,
 };
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use super::*;
+use crate::jobs::Probe;
 
 const EPOCH: SessionEpoch = SessionEpoch(3);
 
@@ -355,4 +358,100 @@ fn summation_of_a_capture_and_a_live_operand() {
         }
         assert!(f.coh[k].is_nan(), "a sum has no coherence");
     }
+}
+
+/// A math job over `operands` (`None` = live) with the probes `probes` holds.
+fn job(cfg: MathConfig, stored: Vec<Option<Arc<Held>>>, probes: Arc<Probes>) -> MathJob {
+    MathJob::new(
+        MeasId(9),
+        cfg,
+        Grids {
+            grid: grid(),
+            display: None,
+        },
+        stored,
+        EPOCH,
+        probes,
+        false,
+        Rev(1),
+    )
+}
+
+fn hand_off(j: &mut MathJob, start: u64) {
+    j.push(&Block::new(
+        start,
+        256,
+        1,
+        ac2_audio::BlockFlags::NONE,
+        1,
+        vec![0.0; 256],
+    ));
+}
+
+/// A probe whose result generation the test sets (its job thread is never asked).
+fn probe() -> (Probe, Arc<AtomicU64>) {
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let results = Arc::new(AtomicU64::new(0));
+    let p = Probe {
+        tx,
+        thread: std::thread::current(),
+        results: Arc::clone(&results),
+    };
+    (p, results)
+}
+
+fn held() -> Option<Arc<Held>> {
+    match stored(0.0, 0.0, None) {
+        Answer::Stored(h) => Some(h),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn stored_operands_alone_form_no_new_result_from_audio() {
+    let trace = |t| Operand::Trace { trace: TraceId(t) };
+    let mut j = job(
+        binary(trace(1), MathOp::Divide, trace(2)),
+        vec![held(), held()],
+        Arc::new(Probes::default()),
+    );
+    hand_off(&mut j, 0);
+    let first = j.generation;
+    for i in 1..100 {
+        hand_off(&mut j, i * 256);
+    }
+    // Unchanged: the pace refreshes the result for clients, it is not formed anew.
+    assert_eq!(j.generation, first);
+    // A command still changes it.
+    j.command(JobCmd::Freeze(false));
+    assert_eq!(j.generation, first + 1);
+}
+
+#[test]
+fn a_live_operand_paces_the_result_by_its_own_results() {
+    let probes = Arc::new(Probes::default());
+    let (p, results) = probe();
+    probes.set(MeasId(1), Some(p));
+    let mut j = job(
+        binary(meas(1), MathOp::Add, Operand::Trace { trace: TraceId(2) }),
+        vec![None, held()],
+        Arc::clone(&probes),
+    );
+    hand_off(&mut j, 0);
+    let first = j.generation;
+    // Hand-offs while the operand has nothing new: nothing new here either.
+    for i in 1..10 {
+        hand_off(&mut j, i * 256);
+    }
+    assert_eq!(j.generation, first);
+    // The operand forms a result: the next hand-off makes one here.
+    results.store(1, Ordering::Release);
+    hand_off(&mut j, 10 * 256);
+    assert_eq!(j.generation, first + 1);
+    hand_off(&mut j, 11 * 256);
+    assert_eq!(j.generation, first + 1);
+    // The operand stops: that changes the result too (it is left out).
+    probes.set(MeasId(1), None);
+    hand_off(&mut j, 12 * 256);
+    assert_eq!(j.generation, first + 2);
 }

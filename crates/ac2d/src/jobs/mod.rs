@@ -8,7 +8,7 @@
 //! publish rate; between frames it only accumulates.
 
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
@@ -333,6 +333,11 @@ pub(crate) trait Analysis: Send {
     fn frames_needed(&self) -> Option<u64> {
         None
     }
+    /// A count that advances whenever the result [`Analysis::capture`] returns may have
+    /// changed (the job's own `Pace` generation): math channels read it through a [`Probe`]
+    /// to form and publish a new result only when an operand has one. `None` for analyses
+    /// a math channel cannot use as an operand.
+    fn result_generation(&self) -> Option<u64>;
 }
 
 /// Longest `trace.capture` waits for a job to form its result. The request wakes the job like
@@ -344,6 +349,8 @@ const CAPTURE_WAIT: Duration = Duration::from_secs(1);
 pub(crate) struct JobHandle {
     tx: Sender<JobMsg>,
     thread: Option<JoinHandle<()>>,
+    /// The analysis's [`Analysis::result_generation`], as of its last drain.
+    results: Arc<AtomicU64>,
     /// Id of this job at the fan-out.
     pub(crate) fanout_id: u64,
 }
@@ -376,6 +383,7 @@ impl JobHandle {
         Some(Probe {
             tx: self.tx.clone(),
             thread: self.thread.as_ref()?.thread().clone(),
+            results: Arc::clone(&self.results),
         })
     }
 
@@ -400,6 +408,7 @@ impl Drop for JobHandle {
 pub(crate) struct Probe {
     tx: Sender<JobMsg>,
     thread: std::thread::Thread,
+    results: Arc<AtomicU64>,
 }
 
 impl Probe {
@@ -410,6 +419,12 @@ impl Probe {
         self.tx.send(JobMsg::Capture(tx)).ok()?;
         self.thread.unpark();
         Some(rx)
+    }
+
+    /// The job's result generation as of its last drain of audio and commands: unchanged,
+    /// it has nothing new to answer a request with.
+    pub(crate) fn results(&self) -> u64 {
+        self.results.load(Ordering::Acquire)
     }
 }
 
@@ -451,6 +466,8 @@ pub(crate) fn spawn(
     let (tx, rx) = std::sync::mpsc::channel::<JobMsg>();
     let queue = Arc::new(Queue::default());
     let q = Arc::clone(&queue);
+    let results = Arc::new(AtomicU64::new(0));
+    let r = Arc::clone(&results);
     let thread = std::thread::Builder::new()
         .name(name.clone())
         .spawn(move || {
@@ -462,7 +479,7 @@ pub(crate) fn spawn(
                 }
             };
             let em = Emitter { outbox, env };
-            run(&mut *analysis, &rx, &q, &em);
+            run(&mut *analysis, &rx, &q, &em, &r);
         })?;
     let feed = JobFeed {
         tx: tx.clone(),
@@ -473,6 +490,7 @@ pub(crate) fn spawn(
         JobHandle {
             tx,
             thread: Some(thread),
+            results,
             fanout_id,
         },
         feed,
@@ -482,7 +500,13 @@ pub(crate) fn spawn(
 /// Messages handled per wakeup before the job looks at its publish schedule again.
 const DRAIN_MAX: usize = 64;
 
-fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter) {
+fn run(
+    a: &mut dyn Analysis,
+    rx: &Receiver<JobMsg>,
+    queue: &Queue,
+    em: &Emitter,
+    results: &AtomicU64,
+) {
     let period = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
     // Audio arrives once per fan-out hand-off, a publish period apart or less, give or take
     // scheduling jitter. A frame may go a quarter period early, so a hand-off just before
@@ -544,6 +568,9 @@ fn run(a: &mut dyn Analysis, rx: &Receiver<JobMsg>, queue: &Queue, em: &Emitter)
                     Err(TryRecvError::Disconnected) => return,
                 };
             }
+        }
+        if let Some(g) = a.result_generation() {
+            results.store(g, Ordering::Release);
         }
         let now = Instant::now();
         if changed || retry.is_some_and(|t| now >= t) {

@@ -408,6 +408,10 @@ fn spl_frame_rate_is_capped() {
 struct Sleepy;
 
 impl Analysis for Sleepy {
+    fn result_generation(&self) -> Option<u64> {
+        None
+    }
+
     fn push(&mut self, _b: &Block) {}
     fn command(&mut self, _c: JobCmd) {}
     fn emit(&mut self, _e: &Emitter) -> Flush {

@@ -633,6 +633,11 @@ impl Spl {
 }
 
 impl Analysis for Spl {
+    fn result_generation(&self) -> Option<u64> {
+        // Not an operand of math channels.
+        None
+    }
+
     fn push(&mut self, b: &Block) {
         self.applied_at.get_or_insert(b.start_sample);
         channel_f64(b, self.idx, &mut self.buf);

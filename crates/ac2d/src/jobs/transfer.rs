@@ -435,6 +435,10 @@ impl Transfer {
 }
 
 impl Analysis for Transfer {
+    fn result_generation(&self) -> Option<u64> {
+        Some(self.generation)
+    }
+
     fn push(&mut self, b: &Block) {
         let contiguous = self.end == Some(b.start_sample);
         if self.end.is_some() && (!contiguous || b.flags.breaks_continuity()) {

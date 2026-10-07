@@ -4,7 +4,10 @@
 //!
 //! The job analyses no audio itself. The capture fan-out still feeds it every hand-off, so
 //! it publishes on the same clock as its live operands, its frames carry the session's
-//! sample index, and it goes STALE exactly when they do. Whenever a frame is due it asks
+//! sample index, and it goes STALE exactly when they do. A frame is due when a live operand
+//! has a new result (its job's result generation, read through its probe on each hand-off)
+//! or a command changed the channel; a channel of stored traces alone only refreshes, as any
+//! unchanged result does. Whenever a frame is due it asks
 //! every live operand for its current unsmoothed result (the same request `trace.capture`
 //! makes), so the result is formed once per published frame from the operands' newest
 //! state, never from frames they happened to publish. Stored operands are held as their
@@ -105,6 +108,9 @@ pub(crate) struct MathJob {
     end: Option<u64>,
     wall: u64,
     generation: u64,
+    /// The live operands' result generations (and which of them run) when the job last
+    /// looked: a new result forms only when this changes.
+    operands_seen: Option<u64>,
     pace: Pace,
     /// Newest inserted delay seen per operand: the reference while that operand is left out.
     seen_delay: Vec<Option<f64>>,
@@ -141,9 +147,28 @@ impl MathJob {
             end: None,
             wall: 0,
             generation: 0,
+            operands_seen: None,
             pace: Pace::new(Duration::ZERO),
             seen_delay,
         }
+    }
+
+    /// One value for the live operands' state: each running one's result generation, in
+    /// expression order, and which are not running. Stored operands never change it.
+    fn operands_state(&self) -> u64 {
+        self.cfg.expr.operands().iter().zip(&self.stored).fold(
+            0xcbf2_9ce4_8422_2325,
+            |h, (o, s)| {
+                let v = match (o, s) {
+                    (Operand::Meas { meas }, None) => self
+                        .probes
+                        .get(*meas)
+                        .map_or(0, |p| p.results().wrapping_add(1)),
+                    _ => 0,
+                };
+                (h ^ v).wrapping_mul(0x0100_0000_01b3)
+            },
+        )
     }
 
     /// Every operand's current result: all requests to live operands go out first, so they
@@ -584,14 +609,25 @@ fn level_scale(included: &[(usize, Value)]) -> LevelScale {
 }
 
 impl Analysis for MathJob {
+    fn result_generation(&self) -> Option<u64> {
+        Some(self.generation)
+    }
+
     fn push(&mut self, b: &Block) {
         if self.apply_pending {
             self.applied_at = b.start_sample;
             self.apply_pending = false;
         }
         if !self.frozen {
-            // The live operands have taken this audio too: their results may have changed.
-            self.generation += 1;
+            // The result changes only with a live operand's: a channel of stored traces is
+            // the same until a command changes it (the pace refreshes it for the client),
+            // and one of live operands forms a new result when one of them has, not on
+            // every hand-off.
+            let state = self.operands_state();
+            if self.operands_seen != Some(state) {
+                self.operands_seen = Some(state);
+                self.generation += 1;
+            }
         }
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;

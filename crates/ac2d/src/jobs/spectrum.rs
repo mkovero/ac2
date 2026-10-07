@@ -228,6 +228,10 @@ fn db(p: f64) -> f32 {
 }
 
 impl Analysis for Spectrum {
+    fn result_generation(&self) -> Option<u64> {
+        Some(self.generation)
+    }
+
     fn push(&mut self, b: &Block) {
         self.applied_at.get_or_insert(b.start_sample);
         if self.end.is_some_and(|e| e != b.start_sample)

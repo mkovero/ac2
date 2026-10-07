@@ -270,6 +270,11 @@ fn log_event(ev: &TimingEvent) {
 }
 
 impl Analysis for Timing {
+    fn result_generation(&self) -> Option<u64> {
+        // Not an operand of math channels.
+        None
+    }
+
     fn push(&mut self, b: &Block) {
         let contiguous = self.end == Some(b.start_sample);
         if self.end.is_none() || !contiguous || b.flags.breaks_continuity() {
