@@ -1047,8 +1047,16 @@ fn a_shows_and_hides_the_selected_trace_and_the_eye_any_trace() {
         stored(13, None, 2),
     ]));
     // Nothing selected: A says how to select.
+    t.conn(mirror(empty_state()));
     assert!(t.key("A").is_empty());
-    assert!(t.last_toast().contains("select a stored trace first"));
+    assert_eq!(
+        t.last_toast(),
+        "select a measurement or a stored trace first (click it in the list, N, V)"
+    );
+    t.conn(with_traces(vec![
+        stored(10, Some(1), 2),
+        stored(13, None, 2),
+    ]));
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
     let (id, edit, what) = trace_update(&t.key("A"));
     assert_eq!(id, TraceId(13));
@@ -3522,8 +3530,8 @@ fn close_session_and_delete_measurement() {
         ),
         "{r:?}"
     );
-    let r =
-        t.st.update(Msg::Command(CommandId::DeleteMeasurement), &t.keys);
+    t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys);
+    let r = t.key("Enter");
     assert!(
         matches!(r.as_slice(), [Request::Call { cmd: Command::MeasDelete { meas: MeasId(1) }, what }]
             if what == "Main L deleted"),
@@ -3536,9 +3544,10 @@ fn close_session_and_delete_measurement() {
     );
     assert!(t.last_toast().contains("no audio session"));
     assert!(
-        t.st.update(Msg::Command(CommandId::DeleteMeasurement), &t.keys)
+        t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys)
             .is_empty()
     );
+    assert_eq!(t.st.overlay, Overlay::None);
     assert!(t.last_toast().contains("select a measurement"));
 }
 

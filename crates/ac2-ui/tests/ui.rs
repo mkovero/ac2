@@ -2224,6 +2224,49 @@ fn traces_list() {
     snapshot(&mut h, "traces_list");
 }
 
+/// A on the selected measurement hides its curve (its list row says `hidden`, dimmed; the
+/// transfer pane's title says so and its legend loses it), and Backspace asks before it is
+/// deleted, naming it and what goes.
+#[test]
+fn measurement_hidden_and_delete_confirm() {
+    if !have_gpu("measurement_hidden_and_delete_confirm") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press(Key::N);
+    step_until(&mut h, "delay tower", |a| {
+        a.state.selected == Some(MeasId(2))
+    });
+    h.key_press(Key::A);
+    step_until(&mut h, "delay tower hidden", |a| {
+        a.state.hidden_meas.contains("Delay tower")
+    });
+    let caption = h.state().state.pane_caption(PaneKind::Transfer);
+    assert!(
+        caption
+            .as_deref()
+            .is_some_and(|c| c.starts_with("Delay tower hidden · ")),
+        "{caption:?}"
+    );
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "measurement_hidden");
+    h.key_press(Key::Backspace);
+    step_until(
+        &mut h,
+        "the confirmation",
+        |a| matches!(&a.state.overlay, Overlay::Delete(p) if p.target == ac2_ui::state::DeleteTarget::Meas(MeasId(2))),
+    );
+    h.step();
+    snapshot(&mut h, "measurement_delete_confirm");
+    h.key_press(Key::Escape);
+    step_until(&mut h, "kept", |a| {
+        a.state.overlay == Overlay::None && a.state.measurements().len() == 4
+    });
+}
+
 /// The key hints on a crowded grid: the sweep pane shown beside the others (four narrow
 /// panes under the transfer pane at 1280 px), the SPL meter focused with its hint line cut
 /// to what fits, its footer naming the mic and its curve without running into the readouts,

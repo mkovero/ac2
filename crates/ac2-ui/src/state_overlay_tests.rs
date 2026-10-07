@@ -47,9 +47,10 @@ enum Window {
     Leq,
     NewLog,
     DeleteTrace,
+    DeleteMeas,
 }
 
-const WINDOWS: [Window; 15] = [
+const WINDOWS: [Window; 16] = [
     Window::Help,
     Window::Palette,
     Window::Prompt,
@@ -65,6 +66,7 @@ const WINDOWS: [Window; 15] = [
     Window::Leq,
     Window::NewLog,
     Window::DeleteTrace,
+    Window::DeleteMeas,
 ];
 
 /// A connected daemon with a calibrated mic, an SPL meter with Leq data and a stored trace,
@@ -136,6 +138,9 @@ fn with_window(w: Window) -> T {
             t.key("V");
             t.key("Delete");
         }
+        Window::DeleteMeas => {
+            t.key("Backspace");
+        }
     }
     let open = matches!(
         (w, &t.st.overlay),
@@ -155,8 +160,15 @@ fn with_window(w: Window) -> T {
                 Overlay::Settings(_)
             )
             | (Window::NewLog, Overlay::NewLog(_))
-            | (Window::DeleteTrace, Overlay::DeleteTrace(_))
-    );
+    ) || match (w, &t.st.overlay) {
+        (Window::DeleteTrace, Overlay::Delete(p)) => {
+            matches!(p.target, crate::state::DeleteTarget::Trace(_))
+        }
+        (Window::DeleteMeas, Overlay::Delete(p)) => {
+            matches!(p.target, crate::state::DeleteTarget::Meas(_))
+        }
+        _ => false,
+    };
     assert!(open, "{w:?} did not open: {:?}", t.st.overlay);
     t
 }

@@ -25,7 +25,8 @@ RTA and SPL meters. In the app every setting lives in **Settings** (**Ctrl+P**, 
 the top bar; [below](#settings)); **Shift+O** opens its Audio page to open a session
 ([the session's channels](#inputs--outputs-and-audio)), and the command palette (**Ctrl+K**) has *New transfer
 measurement…*, *New spectrum…*, *New RTA…* and *New SPL meter…* (created, started and
-selected on **Enter**), *Delete selected measurement* and *Close audio session*. Until there
+selected on **Enter**) and *Close audio session*; **Delete** (or **Backspace**) deletes the
+selected measurement after asking. Until there
 is a session, or a measurement, the transfer pane says which of these comes next. This
 works the same against a daemon the app hosts, a per-user daemon and a remote one. The CLI
 does the same from a script, with the same defaults:
@@ -231,6 +232,28 @@ measurement). **S** (start / stop) and **R** (reset) act on the measurement the 
 shows — never on one of another kind selected elsewhere — and say what to create when the
 pane shows none. **F**, **X** and the delay keys act on the selected measurement and say
 which kind they need when it is another.
+
+**What A and Delete act on: the item selected last.** One measurement and at most one stored
+trace are selected at a time, and the one selected last has the keys that act on "the
+selected curve": a click (or **N**, a pane's chip, a click in its pane) on a measurement
+gives them to it; a click on a trace in the Traces list (or **V**, **Alt+V**) gives them to
+that trace; **Esc** with no window open hands them back to the measurement. The list
+shows which: the measurement row is filled while it has the keys and only outlined while a
+trace selected after it does; the trace's row is filled while it is selected.
+
+- **A** on a measurement hides its live curve in every pane (its legend row goes; the IR
+  pane says `TF 2 hidden — A shows it`); **A** again shows it. This is this app's display
+  only: the measurement keeps running and measuring, the other clients still see it. Its
+  list row says `hidden` (dimmed), as does its row in a pane's measurement list, and its
+  pane's title starts with `TF 2 hidden`. **N** / **Shift+N** and a click still reach it.
+  The app remembers hidden measurements by name in `ui.toml` (`hidden = ["TF 2"]` under
+  `[layout]`).
+- **Delete** or **Backspace** (keyboards without a Delete key) on a measurement asks first:
+  *Delete measurement TF 2? Its live curve and settings go; captured traces stay.* **Delete**,
+  **Backspace** or **Enter** deletes it, **Esc** or **N** keeps it. A measurement a math
+  channel computes from cannot be deleted (the daemon refuses it): the window says so in
+  the confirmation's place, naming the channel to edit or delete first, and only closes.
+- On a stored trace both act on the trace (below).
 
 **One pane only, full screen (W).** **W** steps through three layouts: the split layout →
 the focused pane alone in the window → that pane **full screen** → the split layout again.
@@ -561,12 +584,12 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   export (at first, the home directory), and a relative path is relative to it; the
   toast says where the file went. The file is written on this computer, also with a remote
   daemon.
-- **Delete** asks before the selected stored trace goes (naming it); **Delete** again or
-  **Enter** deletes it, **N** or **Esc** keeps it.
+- **Delete** (or **Backspace**) asks before the selected stored trace goes (naming it);
+  **Delete**, **Backspace** or **Enter** deletes it, **N** or **Esc** keeps it.
   The selection moves to the next shown trace in the list (else the one before it, else the
-  live measurement). A locked trace is not deleted, and Delete never deletes a live
-  measurement (that is **Delete selected measurement** in the palette). The palette has
-  **Delete selected trace…** too.
+  live measurement). A locked trace is not deleted. With a measurement selected after the
+  trace, the same keys are about the measurement ([above](#choosing-what-a-pane-shows)). The
+  palette has **Delete selected measurement or trace…** too.
 - **One selection for the sweeps:** a sweep selected in the list or with V is the one the
   **Sweep / distortion** pane shows, and **N** / **Shift+N** on that pane select the sweep they
   step to, for the transfer pane and the trace keys too. A finished sweep is selected.
@@ -1082,7 +1105,9 @@ Settings open, **↑/↓** move the selection or scroll (**PageUp / PageDown**,
 **Home / End** where a list is long: the help, the palette, the Calibration page, a pane's
 measurement list), **←/→** change a choice, **Enter** confirms and **Esc** closes the
 topmost window only — the electrical calibration dialog closes back to the Calibration
-page, the next Esc closes Settings. None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never
+page, the next Esc closes Settings. **Backspace** in a window erases typed text; it deletes
+nothing behind the window (where nothing is typed — Settings' lists, a delete confirmation —
+it is Delete). None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never
 stops while a window is open, and the mouse wheel scrolls the window rather than zooming the
 plot behind it. The help and the delay candidates leave the other keys working (try a key
 while reading), except the stimulus's. **Shift+Esc** stops the stimulus from anywhere,
@@ -1187,9 +1212,9 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+V` | Select previous shown stored trace (then live) | `prev_trace` |
 | `Alt+V` | Select next trace incl. hidden (then live) | `next_any_trace` |
 | `Alt+Shift+V` | Select previous trace incl. hidden (then live) | `prev_any_trace` |
-| `A` | Show / hide the selected stored trace | `toggle_trace` |
+| `A` | Show / hide the selected curve | `toggle_selected` |
 | `F2` | Rename the selected trace… | `trace_rename` |
-| `Delete` | Delete selected trace… (asks first) | `trace_delete` |
+| `Delete` or `Backspace` | Delete selected measurement or trace… | `delete_selected` |
 | `Alt+↑` | Display offset +1 dB of the selected curve | `offset_up` |
 | `Alt+↓` | Display offset −1 dB of the selected curve | `offset_down` |
 | `Alt+Shift+↑` | Display offset +3 dB of the selected curve | `offset_up_coarse` |
@@ -1298,7 +1323,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
 | Edit the selected math channel: operands, operator, method… | `math_edit` |
-| Delete selected measurement | `meas_delete` |
 | Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
 | Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |

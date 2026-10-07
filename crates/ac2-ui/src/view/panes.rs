@@ -742,21 +742,7 @@ fn pane_menu(
     if menu.pane != pane {
         return;
     }
-    let rows: Vec<(MeasId, String)> = app
-        .state
-        .pane_candidates(pane)
-        .iter()
-        .map(|m| {
-            (
-                m.id,
-                format!(
-                    "{}  {}",
-                    super::chrome::kind_tag(&m.config.kind),
-                    m.config.name
-                ),
-            )
-        })
-        .collect();
+    let rows: Vec<(MeasId, String)> = app.state.pane_menu_rows(pane);
     let mut picked = None;
     let area = egui::Area::new(ui.id().with(("pane-menu", pane as u32)))
         .order(egui::Order::Foreground)

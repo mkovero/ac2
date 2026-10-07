@@ -2374,7 +2374,9 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     d.key("V");
     assert_eq!(d.st.selected_trace, Some(a));
     d.key("Delete");
-    assert!(matches!(&d.st.overlay, Overlay::DeleteTrace(p) if p.trace == a));
+    assert!(
+        matches!(&d.st.overlay, Overlay::Delete(p) if p.target == ac2_ui::state::DeleteTarget::Trace(a))
+    );
     d.key("Delete");
     assert_eq!(d.st.selected_trace, Some(b));
     d.until("slot 1 deleted", |s| {
@@ -2400,6 +2402,116 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
 
 /// A level axis remembered from the last run is where the pane starts; a spectrum that
 /// starts still fits the axis on its first frame.
+/// The keys act on what was selected last: from an empty daemon, two transfer
+/// measurements; the first selected, A hides its curve from the transfer pane while it keeps
+/// running and measuring, A shows it again; Backspace asks before it goes and Enter deletes
+/// it, the other measuring on.
+#[test]
+fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
+    use ac2_ui::state::{DeleteTarget, PaneKind};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let first = d.st.selected_meas().cloned().ok_or("measurement")?;
+
+    // A second transfer measurement from the palette's dialog, as it comes.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new transfer".into()));
+    d.key("Enter");
+    assert!(matches!(&d.st.overlay, Overlay::Form(f) if f.kind == FormKind::Transfer));
+    d.key("Enter");
+    d.until("the second measurement, running and selected", |s| {
+        s.measurements().len() == 2
+            && s.selected_meas()
+                .is_some_and(|m| m.id != first.id && m.running)
+    })?;
+    let second = d.st.selected_meas().cloned().ok_or("second")?;
+    // The level typed for the first is kept: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.tf_frames(second.id, 240)?;
+
+    let theme = Theme::dark();
+    let size = ac2_scene::primitives::Viewport {
+        width: 1200.0,
+        height: 600.0,
+    };
+    let now = || ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let names = |s: &AppState| -> Vec<String> {
+        ac2_ui::scenes::transfer(s, &theme, size, now())
+            .legend
+            .iter()
+            .map(|e| e.name.clone())
+            .collect()
+    };
+    d.until("both curves", |s| names(s).len() == 2)?;
+
+    // Select the first in the list; A hides its curve.
+    d.send(Msg::SelectMeas(first.id));
+    d.key("A");
+    assert_eq!(names(&d.st), std::slice::from_ref(&second.config.name));
+    let row =
+        d.st.meas_rows()
+            .into_iter()
+            .find(|r| r.id == first.id)
+            .ok_or("row")?;
+    assert!(row.hidden && row.text.contains("hidden"), "{}", row.text);
+    assert!(
+        d.st.pane_caption(PaneKind::Transfer)
+            .is_some_and(|c| c.starts_with(&format!("{} hidden", first.config.name)))
+    );
+    // Hidden, it keeps running and its frames keep coming.
+    let seq = |s: &AppState| {
+        s.data.as_ref().and_then(|x| {
+            x.latest
+                .get(&Topic::Data {
+                    meas: first.id,
+                    stream: Stream::Tf,
+                })
+                .map(|f| f.frame.stamp.seq)
+        })
+    };
+    let before = seq(&d.st);
+    d.until("a newer frame of the hidden measurement", |s| {
+        seq(s) > before
+    })?;
+    assert!(
+        d.st.daemon()
+            .and_then(|x| x.measurements.iter().find(|m| m.id == first.id))
+            .is_some_and(|m| m.running)
+    );
+    d.key("A");
+    assert_eq!(names(&d.st).len(), 2);
+    d.key("A");
+
+    // Backspace asks first; Enter deletes it.
+    d.key("Backspace");
+    assert!(
+        matches!(&d.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Meas(first.id)),
+        "{:?}",
+        d.st.overlay
+    );
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    d.until("the first measurement gone", |s| {
+        s.measurements().len() == 1 && s.meas(first.id).is_none()
+    })?;
+    assert!(d.st.hidden_meas.is_empty());
+    assert!(d.st.meas(second.id).is_some_and(|m| m.running));
+    d.until("the other curve alone", |s| {
+        names(s) == [second.config.name.clone()]
+    })?;
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 #[test]
 fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;

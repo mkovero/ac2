@@ -1,5 +1,5 @@
-//! Reducer tests of the display edits: offset steps, the level axis, deleting a stored
-//! trace, and which pane a selection brings up.
+//! Reducer tests of the display edits: offset steps, the level axis, hiding and deleting
+//! the selected measurement or stored trace, and which pane a selection brings up.
 
 use super::*;
 use ac2_scene::primitives::Viewport;
@@ -379,24 +379,28 @@ fn delete_asks_then_deletes_the_selected_trace() {
         stored(14, None, 2),
         locked,
     ]));
-    // Nothing selected: never the live measurement.
+    // No trace selected: the measurement selected is what Delete is about.
     assert!(t.key("Delete").is_empty());
-    assert_eq!(t.st.overlay, Overlay::None);
     assert!(
-        t.last_toast().contains("stored trace"),
-        "{}",
-        t.last_toast()
+        matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Meas(MeasId(1))),
+        "{:?}",
+        t.st.overlay
     );
+    t.key("Esc");
     // Asks first, naming it.
     t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
     assert!(t.key("Delete").is_empty());
-    let Overlay::DeleteTrace(p) = &t.st.overlay else {
+    let Overlay::Delete(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
     };
-    assert_eq!(p.trace, TraceId(10));
+    assert_eq!(p.target, DeleteTarget::Trace(TraceId(10)));
     assert_eq!(p.confirm.title, "Delete t10?");
     assert_eq!(p.confirm.lines[0], "capture · slot 1 · no data yet");
-    // Esc keeps it (the stimulus untouched); so do N and Backspace.
+    assert_eq!(
+        p.confirm.hint,
+        "Delete, Backspace or Enter deletes it · Esc or N keeps it"
+    );
+    // Esc keeps it (the stimulus untouched); so does N.
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(
@@ -407,13 +411,10 @@ fn delete_asks_then_deletes_the_selected_trace() {
     t.key("Delete");
     assert!(t.key("N").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    t.key("Delete");
-    assert!(t.st.update(Msg::Backspace, &t.keys).is_empty());
-    assert_eq!(t.st.overlay, Overlay::None);
     // Other keys wait for the answer.
     t.key("Delete");
     assert!(t.key("A").is_empty());
-    assert!(matches!(t.st.overlay, Overlay::DeleteTrace(_)));
+    assert!(matches!(t.st.overlay, Overlay::Delete(_)));
     // Delete again deletes; the selection moves to the next shown trace.
     let (id, what) = deleted(&t.key("Delete")).expect("deleted");
     assert_eq!(id, TraceId(10));
@@ -431,19 +432,20 @@ fn delete_asks_then_deletes_the_selected_trace() {
     t.conn(with_traces(vec![stored(11, None, 2), stored(14, None, 2)]));
     assert_eq!(t.st.selected_trace, Some(TraceId(14)));
     t.key("Delete");
-    let (_, what) = deleted(&t.st.update(Msg::DeleteTrace(true), &t.keys)).expect("deleted");
+    let (_, what) = deleted(&t.st.update(Msg::Delete(true), &t.keys)).expect("deleted");
     assert_eq!(what, "t14 deleted · t11 selected");
-    // The only one: back to the live measurement.
+    // The only one, with Backspace twice (keyboards without Delete): back to the live
+    // measurement.
     t.conn(with_traces(vec![stored(11, None, 2)]));
-    t.key("Delete");
-    let (_, what) = deleted(&t.key("Delete")).expect("deleted");
+    t.key("Backspace");
+    let (_, what) = deleted(&t.st.update(Msg::Backspace, &t.keys)).expect("deleted");
     assert_eq!(what, "t11 deleted · keys act on the live measurement");
     assert_eq!(t.st.selected_trace, None);
     // The mouse's Keep.
     t.conn(with_traces(vec![stored(11, None, 2)]));
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("Delete");
-    assert!(t.st.update(Msg::DeleteTrace(false), &t.keys).is_empty());
+    assert!(t.st.update(Msg::Delete(false), &t.keys).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     // A locked trace refuses before asking.
     let mut locked = stored(15, None, 2);
@@ -457,9 +459,11 @@ fn delete_asks_then_deletes_the_selected_trace() {
     t.conn(with_traces(vec![stored(11, None, 2)]));
     t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("Ctrl+K");
-    t.text("delete selected trace");
+    t.text("delete selected measurement or trace");
     t.key("Enter");
-    assert!(matches!(&t.st.overlay, Overlay::DeleteTrace(p) if p.trace == TraceId(11)));
+    assert!(
+        matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Trace(TraceId(11)))
+    );
 }
 
 /// Picking a measurement brings up the pane that draws it: in the maximised layout the one
@@ -793,4 +797,313 @@ fn the_ir_pane_says_why_there_is_no_ir() {
             .any(|l| l.text == line),
         "{line}"
     );
+}
+
+fn meas_deleted(r: &[Request]) -> Option<(MeasId, String)> {
+    match r {
+        [
+            Request::Call {
+                cmd: Command::MeasDelete { meas },
+                what,
+            },
+        ] => Some((*meas, what.clone())),
+        _ => None,
+    }
+}
+
+/// Delete and Backspace act on what was selected last: a measurement asks first (naming
+/// it and what goes), Esc or N keeps it, Delete / Backspace / Enter deletes it; a stored
+/// trace selected after it is what they delete instead.
+#[test]
+fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![stored(10, Some(1), 2)]));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    for key in ["Delete", "Backspace"] {
+        assert!(t.key(key).is_empty(), "{key} only asks");
+        let Overlay::Delete(p) = &t.st.overlay else {
+            panic!("{key}: {:?}", t.st.overlay);
+        };
+        assert_eq!(p.target, DeleteTarget::Meas(MeasId(1)));
+        assert_eq!(p.confirm.title, "Delete measurement Main L?");
+        assert_eq!(
+            p.confirm.lines,
+            [
+                "transfer function · running",
+                "Its live curve and settings go; captured traces stay."
+            ]
+        );
+        assert!(!p.confirm.refused);
+        // Esc keeps it, the stimulus untouched.
+        assert!(t.key("Esc").is_empty());
+        assert_eq!(t.st.overlay, Overlay::None);
+    }
+    t.key("Backspace");
+    assert!(t.key("N").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    // Delete then Enter, Backspace twice, Delete twice: each deletes it.
+    for (first, second) in [
+        ("Delete", "Enter"),
+        ("Backspace", "Backspace"),
+        ("Delete", "Delete"),
+    ] {
+        t.key(first);
+        assert_eq!(
+            meas_deleted(&t.key(second)),
+            Some((MeasId(1), "Main L deleted".to_owned())),
+            "{first} {second}"
+        );
+        assert_eq!(t.st.overlay, Overlay::None);
+    }
+    // A stored trace selected after it: Backspace is about the trace.
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.key("Backspace");
+    assert!(
+        matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Trace(TraceId(10))),
+        "{:?}",
+        t.st.overlay
+    );
+    t.key("Esc");
+    // Selecting the measurement again gives it the keys back.
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("Delete");
+    assert!(
+        matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Meas(MeasId(1)))
+    );
+}
+
+/// A measurement a math channel computes from cannot go (the daemon refuses it): the
+/// window says so in the confirmation's place, naming the channel, and only closes.
+#[test]
+fn deleting_a_math_operand_says_which_channel_uses_it() {
+    use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.push(meas(
+        3,
+        "Sum",
+        MeasKind::Math {
+            config: MathConfig::of(
+                MathDomain::Transfer,
+                MathExpr::Binary {
+                    a: Operand::Meas { meas: MeasId(1) },
+                    op: MathOp::Add,
+                    b: Operand::Meas { meas: MeasId(1) },
+                },
+            ),
+        },
+    ));
+    t.conn(mirror(s));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert!(t.key("Backspace").is_empty());
+    let Overlay::Delete(p) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(p.target, DeleteTarget::Refused);
+    assert_eq!(p.confirm.title, "Main L cannot be deleted");
+    assert_eq!(
+        p.confirm.lines,
+        [
+            "transfer function · an operand of the math channel Sum",
+            "Edit or delete Sum first: it computes from Main L."
+        ]
+    );
+    assert_eq!(p.confirm.hint, "Enter or Esc closes");
+    // Nothing is deleted whatever the answer.
+    for key in ["Enter", "Delete", "Backspace"] {
+        assert!(t.key(key).is_empty(), "{key}");
+        assert_eq!(t.st.overlay, Overlay::None);
+        t.key("Delete");
+    }
+    assert!(t.st.update(Msg::Delete(true), &t.keys).is_empty());
+    // The math channel itself goes after a confirmation.
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.key("Delete");
+    assert_eq!(
+        meas_deleted(&t.key("Enter")),
+        Some((MeasId(3), "Sum deleted".to_owned()))
+    );
+}
+
+/// An open window owns Backspace: in a prompt it erases typed text and never deletes the
+/// selected measurement behind it.
+#[test]
+fn backspace_in_a_prompt_edits_its_text() {
+    let mut t = T::new();
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.type_key("D", "d");
+    t.text("12");
+    assert!(t.key("Backspace").is_empty());
+    assert!(t.st.update(Msg::Backspace, &t.keys).is_empty());
+    let Overlay::Prompt(p) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    // Prefilled with the delay in use (12.5 ms): the two typed digits are gone.
+    assert_eq!(p.text, "12.5");
+    assert!(t.key("Backspace").is_empty());
+    assert!(matches!(t.st.overlay, Overlay::Prompt(_)));
+}
+
+/// TF and spectrum frames of measurements 1 (Main L) and 2 (Sub).
+fn live_frames(t: &mut T) {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{SpecFrame, SpecMeta};
+    use ac2_proto::{Frame, FrameData};
+    let tf = ac2_proto::samples::tf_frame();
+    let spec_grid = GridDef::Linear {
+        fs: Hz(48_000.0),
+        n: 14,
+    };
+    let spec = Frame {
+        stamp: ac2_proto::samples::stamp(Some(spec_grid.clone())),
+        data: FrameData::Spec(SpecFrame {
+            meas: MeasId(2),
+            meta: SpecMeta {
+                window: Window::Hann,
+                scale: LevelScale::Dbfs,
+                cal: CalStatus::Uncalibrated,
+                mic_curve: false,
+                smoothing: None,
+                math: None,
+            },
+            level: vec![-60.0; 8],
+        }),
+    };
+    let mut latest = Latest::default();
+    for f in [tf, spec] {
+        let f = TopicFrame {
+            topic: f.data.topic(),
+            frame: Arc::new(f),
+            received: Instant::now(),
+            since_new: std::time::Duration::ZERO,
+            age: Some(0.0),
+            stale: false,
+        };
+        latest.frames.insert(f.topic.to_string().into(), f);
+    }
+    let mut grids = std::collections::BTreeMap::new();
+    for g in [ac2_proto::samples::log_grid(), spec_grid] {
+        grids.insert(g.id(), Arc::new(g));
+    }
+    t.conn(ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids,
+        drained: Instant::now(),
+    })));
+}
+
+/// A on a selected measurement hides its live curves in every pane (display only: nothing
+/// goes to the daemon, it keeps running); its list row, its pane's title and the IR pane
+/// say so; A again shows it. The app remembers it by name. On a stored trace selected
+/// after it, A shows / hides the trace as before.
+#[test]
+fn a_hides_and_shows_the_selected_measurement() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![stored(10, Some(1), 2)]));
+    live_frames(&mut t);
+    let theme = Theme::dark();
+    let tf_names = |t: &T| -> Vec<String> {
+        crate::scenes::transfer(&t.st, &theme, SIZE, now())
+            .legend
+            .iter()
+            .map(|e| e.name.clone())
+            .collect()
+    };
+    let spec_names = |t: &T| -> Vec<String> {
+        crate::scenes::spectrum(&t.st, &theme, SIZE, now())
+            .legend
+            .iter()
+            .map(|e| e.name.clone())
+            .collect()
+    };
+    let row = |t: &T, id: u32| {
+        t.st.meas_rows()
+            .into_iter()
+            .find(|r| r.id == MeasId(id))
+            .expect("row")
+    };
+    assert_eq!(tf_names(&t), ["Main L"]);
+    assert_eq!(spec_names(&t), ["Sub"]);
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert_eq!(row(&t, 1).mark, ac2_scene::meas_list::Mark::Active);
+    assert!(t.key("A").is_empty(), "display only");
+    assert_eq!(
+        t.last_toast(),
+        "Main L hidden: it keeps measuring · A shows it"
+    );
+    assert!(tf_names(&t).is_empty());
+    assert_eq!(spec_names(&t), ["Sub"]);
+    assert!(t.st.meas(MeasId(1)).expect("still there").running);
+    assert!(row(&t, 1).hidden);
+    assert!(
+        row(&t, 1).text.contains("running · hidden"),
+        "{}",
+        row(&t, 1).text
+    );
+    assert!(!row(&t, 2).hidden);
+    let caption = t.st.pane_caption(PaneKind::Transfer).unwrap_or_default();
+    assert!(caption.starts_with("Main L hidden"), "{caption}");
+    assert_eq!(
+        t.st.pane_caption_variants(PaneKind::Transfer)
+            .last()
+            .map(String::as_str),
+        Some("Main L hidden")
+    );
+    assert_eq!(
+        t.st.pane_menu_rows(PaneKind::Transfer),
+        [(MeasId(1), "TF  Main L · hidden".to_owned())]
+    );
+    let ir = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    assert_eq!(ir.note.as_deref(), Some("Main L hidden — A shows it"));
+    // Remembered by name.
+    assert_eq!(
+        t.st.layout_prefs().hidden,
+        ["Main L".to_owned()].into_iter().collect()
+    );
+    // The spectrum's measurement too.
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    assert!(t.key("A").is_empty());
+    assert!(spec_names(&t).is_empty());
+    assert!(
+        t.st.pane_caption(PaneKind::Spectrum)
+            .is_some_and(|c| c.starts_with("Sub hidden"))
+    );
+    // A stored trace selected after it: A is about the trace (the daemon keeps that).
+    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    assert_eq!(row(&t, 2).mark, ac2_scene::meas_list::Mark::Selected);
+    let r = t.key("A");
+    assert!(
+        matches!(r.as_slice(), [Request::Call { cmd: Command::TraceUpdate { trace: TraceId(10), edit }, .. }] if !edit.visible),
+        "{r:?}"
+    );
+    // Back on the measurements: A shows them again.
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    assert!(t.key("A").is_empty());
+    assert_eq!(t.last_toast(), "Sub shown");
+    assert_eq!(spec_names(&t), ["Sub"]);
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("A");
+    assert_eq!(tf_names(&t), ["Main L"]);
+    assert!(t.st.layout_prefs().hidden.is_empty());
+    assert!(!row(&t, 1).text.contains("hidden"));
+}
+
+/// The hidden measurements come back by name on the next start; a deleted one's name is
+/// forgotten.
+#[test]
+fn hidden_measurements_are_remembered_by_name() {
+    let mut t = T::new();
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.key("A");
+    let p = crate::prefs::UiPrefs {
+        layout: t.st.layout_prefs(),
+        ..Default::default()
+    };
+    let mut u = T::new();
+    u.st.set_prefs(p);
+    assert!(u.st.meas_hidden(u.st.meas(MeasId(2)).expect("Sub")));
+    u.st.update(Msg::SelectMeas(MeasId(2)), &u.keys);
+    u.key("Delete");
+    assert!(meas_deleted(&u.key("Enter")).is_some());
+    assert!(u.st.hidden_meas.is_empty());
 }

@@ -139,6 +139,8 @@ pub struct DeleteConfirm {
     /// What it is (`capture · slot 1`), then what deleting means.
     pub lines: Vec<String>,
     pub hint: String,
+    /// Nothing can be deleted: the window says why and only closes.
+    pub refused: bool,
 }
 
 /// What the confirmation says for `row`.
@@ -151,8 +153,8 @@ pub fn delete_confirm(row: &TraceRow) -> DeleteConfirm {
              it cannot be undone."
                 .to_owned(),
         ],
-        hint: "Delete or Enter deletes it · N or Esc keeps it (Esc also stops the stimulus)"
-            .to_owned(),
+        hint: "Delete, Backspace or Enter deletes it · Esc or N keeps it".to_owned(),
+        refused: false,
     }
 }
 

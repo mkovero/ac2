@@ -93,6 +93,22 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+What the keys act on (operator, 2026-10-07: "if I press backspace or A on selected
+measurement it says something I dont know what in red box, I would expect it to remove
+selected measurement with backspace and hide its measurement traces if A"):
+- **A and Delete acted on stored traces only** (a red "select a stored trace first" with a
+  measurement selected), **Backspace did nothing** and deleting a measurement was palette
+  only → they act on the item selected last, a measurement or a stored trace (selecting a
+  measurement deselects the trace; the list fills the row that has the keys and outlines
+  the selected measurement while a trace has them). A on a measurement hides its live
+  curves in every pane, display only (it keeps measuring; `hidden` in its list row, its
+  pane's title and chip list, the IR pane's note; remembered by name in `ui.toml`).
+  Delete / Backspace ask (*Delete measurement TF 2? …*) and send `meas.delete`; a math
+  channel's operand says which channel to change instead. Backspace in an open window
+  still edits text only; held, it never answers the confirmation it opened. Commands
+  `toggle_selected` / `delete_selected` replace `toggle_trace` / `trace_delete` /
+  `meas_delete`. No wire change.
+
 Sweep level axis (operator, 2026-10-07: "sweep distortion could shift+home as everything
 else by default after measurement"):
 - **A new sweep result showed on the last range** (or the one remembered in `ui.toml`), often

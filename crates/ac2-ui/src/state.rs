@@ -45,7 +45,7 @@ use crate::settings::{Page, Settings};
 
 #[path = "state_display.rs"]
 mod display;
-pub use display::{DeleteTracePrompt, LEVEL_ZOOM_FACTOR, level_range};
+pub use display::{DeletePrompt, DeleteTarget, LEVEL_ZOOM_FACTOR, level_range};
 #[path = "state_settings.rs"]
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
@@ -674,8 +674,9 @@ pub enum Overlay {
     Offer(Box<Offer>),
     /// The confirmation before a new SPL log.
     NewLog(Box<NewLogPrompt>),
-    /// The confirmation before a stored trace is deleted.
-    DeleteTrace(Box<DeleteTracePrompt>),
+    /// The confirmation before the selected measurement or stored trace is deleted (or,
+    /// for a measurement a math channel computes from, why it cannot be).
+    Delete(Box<DeletePrompt>),
 }
 
 impl Overlay {
@@ -850,8 +851,8 @@ pub enum Msg {
     Offer(bool),
     /// Mouse on the new SPL log confirmation: `true` starts it, `false` keeps the log.
     NewLog(bool),
-    /// Mouse on the delete confirmation: `true` deletes the trace, `false` keeps it.
-    DeleteTrace(bool),
+    /// Mouse on the delete confirmation: `true` deletes, `false` keeps it.
+    Delete(bool),
     /// Ctrl+wheel on a pane: its level axis zooms by `factor` (> 1 in) about `about_db`.
     LevelZoom {
         pane: PaneKind,
@@ -965,7 +966,12 @@ pub struct AppState {
     pub pane_meas: BTreeMap<PaneKind, MeasId>,
     /// The stored trace selected (list, V, the sweep pane's N): the trace keys change it
     /// instead of the pane's measurement, and a selected sweep is what the sweep pane shows.
+    /// Selecting a measurement clears it, so whichever of the two was selected last is what
+    /// the keys act on ([`AppState::keys_on_trace`]).
     pub selected_trace: Option<TraceId>,
+    /// Measurements whose live curves this app hides, by name (as `ui.toml` keeps them):
+    /// display only, they keep measuring.
+    pub hidden_meas: BTreeSet<String>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
     /// time.
@@ -1111,6 +1117,7 @@ impl AppState {
             leq_alarms_seen: BTreeMap::new(),
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
+            hidden_meas: BTreeSet::new(),
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
             spectrum_fit: BTreeMap::new(),
@@ -1142,6 +1149,17 @@ impl AppState {
 
     pub fn selected_meas(&self) -> Option<&Measurement> {
         self.meas(self.selected?)
+    }
+
+    /// Whether `m`'s live curves are hidden in this app.
+    pub fn meas_hidden(&self, m: &Measurement) -> bool {
+        self.hidden_meas.contains(&m.config.name)
+    }
+
+    /// The keys that act on "the selected curve" (Delete, A) act on the selected stored
+    /// trace: it was selected after the measurement. Else on the selected measurement.
+    pub fn keys_on_trace(&self) -> bool {
+        self.selected_trace_meta().is_some()
     }
 
     /// Measurements pane `p` can show, in list order.
@@ -1315,6 +1333,18 @@ impl AppState {
             );
         }
         v.extend(smoothing);
+        // The pane's own measurement hidden: said first and kept longest, or an empty plot
+        // would read as a fault.
+        let hidden = self
+            .pane_meas(pane)
+            .filter(|m| {
+                matches!(pane, PaneKind::Transfer | PaneKind::Spectrum) && self.meas_hidden(m)
+            })
+            .map(|m| format!("{} hidden", m.config.name));
+        if let Some(h) = hidden {
+            v = v.iter().map(|s| format!("{h} · {s}")).collect();
+            v.push(h);
+        }
         v.extend(trace);
         v.dedup();
         v
@@ -1353,6 +1383,57 @@ impl AppState {
             })
             .collect();
         ac2_scene::trace_list::trace_rows(&items, self.selected_trace)
+    }
+
+    /// The rows of pane `p`'s measurement list (its title chip): `TF  Main L`, `TF  TF 2 ·
+    /// hidden`.
+    pub fn pane_menu_rows(&self, p: PaneKind) -> Vec<(MeasId, String)> {
+        self.pane_candidates(p)
+            .iter()
+            .map(|m| {
+                let hidden = if self.meas_hidden(m) {
+                    " · hidden"
+                } else {
+                    ""
+                };
+                (
+                    m.id,
+                    format!(
+                        "{}  {}{hidden}",
+                        ac2_scene::meas_list::kind_tag(&m.config.kind),
+                        m.config.name
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    /// The measurement list's rows, in list order: the selected one marked, as the one the
+    /// keys act on unless a stored trace was selected after it.
+    pub fn meas_rows(&self) -> Vec<ac2_scene::meas_list::MeasRow> {
+        let active = !self.keys_on_trace();
+        self.measurements()
+            .into_iter()
+            .map(|m| {
+                let e = self.edit(m.id);
+                let expression = match &m.config.kind {
+                    MeasKind::Math { config } => {
+                        Some(ac2_scene::math::expression(&config.expr, |o| {
+                            self.operand_name(o)
+                        }))
+                    }
+                    _ => None,
+                };
+                let item = ac2_scene::meas_list::MeasItem {
+                    meas: m,
+                    expression,
+                    offset_db: e.offset_db,
+                    inverted: e.inverted,
+                    hidden: self.meas_hidden(m),
+                };
+                ac2_scene::meas_list::meas_row(&item, self.selected, active)
+            })
+            .collect()
     }
 
     /// The trace in each slot 1…9 (index 0 = slot 1).
@@ -1534,6 +1615,17 @@ impl AppState {
                 measurements.insert(p, n);
             }
         }
+        // Names of measurements that exist (all of them until the daemon's state is known):
+        // a deleted one's name must not hide a new one of that name in a later run.
+        let hidden = match self.daemon() {
+            None => self.hidden_meas.clone(),
+            Some(_) => self
+                .measurements()
+                .iter()
+                .map(|m| m.config.name.clone())
+                .filter(|n| self.hidden_meas.contains(n))
+                .collect(),
+        };
         crate::prefs::LayoutPrefs {
             focus: self.layout.focus,
             maximized: self.layout.maximized,
@@ -1544,6 +1636,7 @@ impl AppState {
             ir_mode: self.view.ir.mode,
             distortion_unit: self.view.distortion.unit,
             measurements,
+            hidden,
         }
     }
 
@@ -1640,6 +1733,7 @@ impl AppState {
             self.view.spectrum.spectrograph.span_s = s;
         }
         self.pending_pane_meas = l.measurements.clone();
+        self.hidden_meas = l.hidden.clone();
         self.prefs = prefs;
     }
 
@@ -1962,18 +2056,7 @@ impl AppState {
         match msg {
             Msg::Key(chord) => self.key(chord, keymap, out),
             Msg::Text(t) => self.text(&t),
-            Msg::Backspace => match &mut self.overlay {
-                Overlay::Palette(p) => p.backspace(),
-                Overlay::Form(f) => f.backspace(),
-                // Not typing: Backspace deletes where Delete deletes.
-                Overlay::Settings(_) => self.settings_backspace(out),
-                Overlay::DeleteTrace(_) => self.delete_trace(false, out),
-                Overlay::Prompt(p) => {
-                    p.text.pop();
-                    p.error = None;
-                }
-                _ => {}
-            },
+            Msg::Backspace => self.backspace(out),
             Msg::Wheel { rows } => self.wheel(rows, keymap),
             Msg::Command(c) => self.command(c, keymap, out),
             Msg::Conn(e) => self.conn_event(*e, keymap, out),
@@ -1981,7 +2064,7 @@ impl AppState {
             Msg::Session(m) => self.session_msg(m, out),
             Msg::Offer(create) => self.offer(create, out),
             Msg::NewLog(go) => self.new_log(go, out),
-            Msg::DeleteTrace(go) => self.delete_trace(go, out),
+            Msg::Delete(go) => self.delete(go, out),
             Msg::LevelZoom {
                 pane,
                 about_db,
@@ -2085,8 +2168,38 @@ impl AppState {
         });
     }
 
+    /// Backspace in an open window: edits typed text, never deletes a measurement or a
+    /// trace behind the window. Where nothing is typed it is Delete (Settings, the delete
+    /// confirmation), as on keyboards without a Delete key.
+    fn backspace(&mut self, out: &mut Vec<Request>) {
+        match &mut self.overlay {
+            Overlay::Palette(p) => p.backspace(),
+            Overlay::Form(f) => f.backspace(),
+            Overlay::Settings(_) => self.settings_backspace(out),
+            Overlay::Delete(_) => self.delete(true, out),
+            // The safe answer, as N.
+            Overlay::Offer(_) => self.offer(false, out),
+            Overlay::NewLog(_) => self.new_log(false, out),
+            Overlay::Prompt(p) => {
+                p.text.pop();
+                p.error = None;
+            }
+            _ => {}
+        }
+    }
+
     fn key(&mut self, chord: Chord, keymap: &Keymap, out: &mut Vec<Request>) {
         use eframe::egui::Key;
+        // An open window owns Backspace, as the app routes it (the help leaves the keys
+        // working, so it is no such window).
+        if chord.key == Key::Backspace
+            && !(chord.command || chord.alt)
+            && !matches!(self.overlay, Overlay::None | Overlay::Help)
+        {
+            self.swallow_text = None;
+            self.backspace(out);
+            return;
+        }
         let swallow = self.swallow_text.take();
         // The stop that works from anywhere, before any window sees the key.
         if chord == STOP_ANYWHERE {
@@ -2171,7 +2284,7 @@ impl AppState {
             Overlay::Offer(_) => {
                 if chord.key == Key::Enter {
                     self.offer(true, out);
-                } else if matches!(chord.key, Key::Backspace | Key::N) {
+                } else if chord.key == Key::N {
                     self.offer(false, out);
                 }
                 return;
@@ -2179,17 +2292,17 @@ impl AppState {
             Overlay::NewLog(_) => {
                 if chord.key == Key::Enter {
                     self.new_log(true, out);
-                } else if matches!(chord.key, Key::Backspace | Key::N) {
+                } else if chord.key == Key::N {
                     self.new_log(false, out);
                 }
                 return;
             }
-            // Delete twice deletes, as in the calibrations view.
-            Overlay::DeleteTrace(_) => {
+            // Delete twice deletes, as in the calibrations view (Backspace is Delete here).
+            Overlay::Delete(_) => {
                 if matches!(chord.key, Key::Enter | Key::Delete) {
-                    self.delete_trace(true, out);
-                } else if matches!(chord.key, Key::Backspace | Key::N) {
-                    self.delete_trace(false, out);
+                    self.delete(true, out);
+                } else if chord.key == Key::N {
+                    self.delete(false, out);
                 }
                 return;
             }
@@ -3622,10 +3735,7 @@ impl AppState {
             C::PrevTrace => self.cycle_trace(-1, false),
             C::NextAnyTrace => self.cycle_trace(1, true),
             C::PrevAnyTrace => self.cycle_trace(-1, true),
-            C::ToggleTrace => match self.selected_trace {
-                Some(id) => self.toggle_shown(id, out),
-                None => self.error(SELECT_TRACE_FIRST),
-            },
+            C::ToggleSelected => self.toggle_selected(keymap, out),
             C::TraceSlot => match self.selected_trace_meta().cloned() {
                 Some(t) => {
                     let text = t.edit.slot.map(|n| n.to_string()).unwrap_or_default();
@@ -3657,7 +3767,7 @@ impl AppState {
                 None => self.error(SELECT_TRACE_FIRST),
             },
             C::SelectLive => self.select_live(),
-            C::DeleteTrace => self.ask_delete_trace(),
+            C::DeleteSelected => self.ask_delete(),
             C::SmoothCoarser => self.smooth(1, None, out),
             C::SmoothFiner => self.smooth(-1, None, out),
             C::SmoothOff => self.smooth(0, Some(None), out),
@@ -3897,14 +4007,6 @@ impl AppState {
                     None => self.error("select a math channel first (N)"),
                 }
             }
-            C::DeleteMeasurement => match self.selected_meas().cloned() {
-                Some(m) => self.call(
-                    out,
-                    Command::MeasDelete { meas: m.id },
-                    format!("{} deleted", m.config.name),
-                ),
-                None => self.error("select a measurement first (N)"),
-            },
             C::InputMics => {
                 let rows: Vec<InputSetup> = self
                     .daemon()

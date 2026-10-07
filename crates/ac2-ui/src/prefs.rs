@@ -38,6 +38,7 @@
 //! sweep_view = "room"
 //! ir_mode = "etc"
 //! distortion_unit = "percent"
+//! hidden = ["TF 2"]
 //!
 //! [layout.measurements]
 //! transfer = "Main L"
@@ -61,7 +62,7 @@
 //! UI state, not configuration: one that cannot be read is reported once and replaced by
 //! the next save, and a write is atomic (`ac2_paths::write_private_atomic`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ac2_scene::axis::Range;
@@ -108,6 +109,8 @@ pub struct LayoutPrefs {
     pub distortion_unit: DistortionUnit,
     /// The measurement each pane shows, by name (transfer, spectrum, SPL).
     pub measurements: BTreeMap<PaneKind, String>,
+    /// Measurements whose live curves are hidden (A), by name.
+    pub hidden: BTreeSet<String>,
 }
 
 impl Default for LayoutPrefs {
@@ -122,6 +125,7 @@ impl Default for LayoutPrefs {
             ir_mode: IrMode::Linear,
             distortion_unit: DistortionUnit::Db,
             measurements: BTreeMap::new(),
+            hidden: BTreeSet::new(),
         }
     }
 }
@@ -442,6 +446,8 @@ struct LayoutFile {
     ir_mode: IrModeFile,
     #[serde(default = "unit_db")]
     distortion_unit: UnitFile,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hidden: Vec<String>,
     /// Last: a table.
     #[serde(default)]
     measurements: MeasurementsFile,
@@ -500,6 +506,7 @@ impl LayoutFile {
                 UnitFile::Percent => DistortionUnit::Percent,
             },
             measurements,
+            hidden: self.hidden.into_iter().collect(),
         }
     }
 
@@ -533,6 +540,7 @@ impl LayoutFile {
                 DistortionUnit::Db => UnitFile::Db,
                 DistortionUnit::Percent => UnitFile::Percent,
             },
+            hidden: l.hidden.iter().cloned().collect(),
             measurements: MeasurementsFile {
                 transfer: name(PaneKind::Transfer),
                 spectrum: name(PaneKind::Spectrum),
@@ -910,6 +918,7 @@ mod tests {
                 (PaneKind::Spl, "FOH SPL".to_owned()),
             ]
             .into(),
+            hidden: ["TF 2".to_owned()].into(),
         };
         p.window = Some(WindowPrefs {
             width: 1600,
@@ -927,6 +936,7 @@ mod tests {
             "sweep_view = \"room\"",
             "ir_mode = \"etc\"",
             "distortion_unit = \"percent\"",
+            "hidden = [\"TF 2\"]",
             "[layout.measurements]",
             "spl = \"FOH SPL\"",
             "[window]",

@@ -1,10 +1,10 @@
 //! Display edits the operator makes while comparing curves: display offsets in steps, the
-//! level (vertical) axis of each pane, deleting a stored trace after a confirmation, and
-//! which pane a selection brings up. No measured value changes: an offset is drawn, never
-//! applied to the stored columns.
+//! level (vertical) axis of each pane, showing / hiding and deleting (after a confirmation)
+//! the selected measurement or stored trace, and which pane a selection brings up. No
+//! measured value changes: an offset is drawn, never applied to the stored columns.
 
 use ac2_proto::Command;
-use ac2_proto::model::{LevelScale, Measurement, TraceKind, TraceMeta};
+use ac2_proto::model::{LevelScale, MeasKind, Measurement, Operand, TraceKind, TraceMeta};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Db, MeasId, TraceId};
 use ac2_scene::axis::Range;
@@ -15,11 +15,21 @@ use ac2_scene::view::{ViewState, level};
 use super::{AppState, Overlay, PaneKind, drawn_in, on_transfer_pane, trace_label};
 use crate::conn::Request;
 
-/// The confirmation before a stored trace is deleted.
+/// What a delete confirmation would delete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeleteTarget {
+    Trace(TraceId),
+    Meas(MeasId),
+    /// Nothing: the window says why the selection cannot go (a math channel computes from
+    /// it) and only closes.
+    Refused,
+}
+
+/// The confirmation before the selected measurement or stored trace is deleted.
 #[derive(Clone, Debug, PartialEq)]
-pub struct DeleteTracePrompt {
-    pub trace: TraceId,
-    /// How toasts name it: `slot 1 (Main L S1)`.
+pub struct DeletePrompt {
+    pub target: DeleteTarget,
+    /// How toasts name it: `slot 1 (Main L S1)`, `TF 2`.
     pub label: String,
     pub confirm: ac2_scene::trace_list::DeleteConfirm,
 }
@@ -306,7 +316,11 @@ impl AppState {
         };
         match p {
             PaneKind::Transfer => {
-                for m in self.measurements() {
+                for m in self
+                    .measurements()
+                    .into_iter()
+                    .filter(|m| !self.meas_hidden(m))
+                {
                     if let Some((f, freqs)) = live(Stream::Tf, m)
                         && let ac2_proto::FrameData::Tf(tf) = &f.data
                     {
@@ -320,7 +334,11 @@ impl AppState {
                 }
             }
             PaneKind::Spectrum => {
-                for m in self.measurements() {
+                for m in self
+                    .measurements()
+                    .into_iter()
+                    .filter(|m| !self.meas_hidden(m))
+                {
                     if !m.config.kind.publishes_levels() {
                         continue;
                     }
@@ -361,15 +379,74 @@ impl AppState {
         v
     }
 
-    // ----- deleting a stored trace -------------------------------------------------------
+    // ----- the selected curve: show / hide, delete ----------------------------------------
 
-    /// Delete: asks before the selected stored trace goes; a locked one refuses.
-    pub(super) fn ask_delete_trace(&mut self) {
-        let Some(t) = self.selected_trace_meta().cloned() else {
-            self.error(format!(
-                "Delete removes a stored trace: {SELECT_TRACE_FIRST_SHORT} (a live measurement \
-                 is deleted from the palette)"
+    /// A: shows or hides the selected stored trace (the daemon keeps that), else the selected
+    /// measurement's live curves in every pane (this app's display only: it keeps measuring).
+    pub(super) fn toggle_selected(&mut self, keymap: &crate::keys::Keymap, out: &mut Vec<Request>) {
+        if let Some(id) = self.selected_trace.filter(|_| self.keys_on_trace()) {
+            self.toggle_shown(id, out);
+            return;
+        }
+        let Some(name) = self.selected_meas().map(|m| m.config.name.clone()) else {
+            self.error(SELECT_FIRST);
+            return;
+        };
+        if self.hidden_meas.remove(&name) {
+            self.toast(format!("{name} shown"));
+        } else {
+            let key = keymap
+                .first_chord(
+                    crate::keys::CommandId::ToggleSelected,
+                    crate::keys::Scope::Global,
+                )
+                .map_or_else(|| "the palette".to_owned(), |c| c.label());
+            self.toast(format!(
+                "{name} hidden: it keeps measuring · {key} shows it"
             ));
+            self.hidden_meas.insert(name);
+        }
+    }
+
+    /// Delete / Backspace: asks before the selected stored trace or measurement goes (a
+    /// locked trace refuses; a measurement a math channel computes from says so in the
+    /// confirmation's place).
+    pub(super) fn ask_delete(&mut self) {
+        if self.keys_on_trace() {
+            self.ask_delete_trace();
+            return;
+        }
+        let Some(m) = self.selected_meas().cloned() else {
+            self.error(SELECT_FIRST);
+            return;
+        };
+        let operand = Operand::Meas { meas: m.id };
+        let users: Vec<String> = self
+            .measurements()
+            .iter()
+            .filter(|x| matches!(&x.config.kind, MeasKind::Math { config } if config.expr.names(operand)))
+            .map(|x| x.config.name.clone())
+            .collect();
+        let (target, confirm) = if users.is_empty() {
+            (
+                DeleteTarget::Meas(m.id),
+                ac2_scene::meas_list::delete_confirm(&m),
+            )
+        } else {
+            (
+                DeleteTarget::Refused,
+                ac2_scene::meas_list::delete_refused(&m, &users),
+            )
+        };
+        self.overlay = Overlay::Delete(Box::new(DeletePrompt {
+            target,
+            label: m.config.name.clone(),
+            confirm,
+        }));
+    }
+
+    fn ask_delete_trace(&mut self) {
+        let Some(t) = self.selected_trace_meta().cloned() else {
             return;
         };
         let label = trace_label(&t);
@@ -380,24 +457,41 @@ impl AppState {
         let Some(row) = self.trace_rows().into_iter().find(|r| r.id == t.id) else {
             return;
         };
-        self.overlay = Overlay::DeleteTrace(Box::new(DeleteTracePrompt {
-            trace: t.id,
+        self.overlay = Overlay::Delete(Box::new(DeletePrompt {
+            target: DeleteTarget::Trace(t.id),
             label,
             confirm: ac2_scene::trace_list::delete_confirm(&row),
         }));
     }
 
-    /// The delete confirmation: delete (the selection moves to the next shown trace in the
-    /// list, else the one before it, else the live measurement), or keep it.
-    pub(super) fn delete_trace(&mut self, go: bool, out: &mut Vec<Request>) {
-        let Overlay::DeleteTrace(p) = &self.overlay else {
+    /// The delete confirmation's answer: delete, or keep it.
+    pub(super) fn delete(&mut self, go: bool, out: &mut Vec<Request>) {
+        let Overlay::Delete(p) = &self.overlay else {
             return;
         };
-        let (id, label) = (p.trace, p.label.clone());
+        let (target, label) = (p.target, p.label.clone());
         self.overlay = Overlay::None;
         if !go {
             return;
         }
+        match target {
+            DeleteTarget::Trace(id) => self.delete_trace(id, label, out),
+            DeleteTarget::Meas(meas) => {
+                // A measurement of that name made later starts shown.
+                self.hidden_meas.remove(&label);
+                self.call(
+                    out,
+                    Command::MeasDelete { meas },
+                    format!("{label} deleted"),
+                );
+            }
+            DeleteTarget::Refused => {}
+        }
+    }
+
+    /// Deletes stored trace `id`; the selection moves to the next shown trace in the list,
+    /// else the one before it, else the live measurement.
+    fn delete_trace(&mut self, id: TraceId, label: String, out: &mut Vec<Request>) {
         let list: Vec<(TraceId, bool)> = self
             .trace_list()
             .iter()
@@ -460,3 +554,7 @@ impl AppState {
 
 /// How to select a trace, in a sentence that goes on.
 const SELECT_TRACE_FIRST_SHORT: &str = "select a stored trace with V or a click in the list";
+
+/// What Delete and A say with nothing selected.
+const SELECT_FIRST: &str =
+    "select a measurement or a stored trace first (click it in the list, N, V)";

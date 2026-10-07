@@ -421,7 +421,11 @@ impl App {
                     let open = self.state.overlay != Overlay::None;
                     let overlay = open && self.state.overlay != Overlay::Help;
                     if overlay && key == Key::Backspace {
-                        self.dispatch(Msg::Backspace);
+                        // Held, it keeps erasing typed text; where Backspace is Delete (the
+                        // delete confirmation), one held press must not open and answer it.
+                        if !repeat || text_overlay {
+                            self.dispatch(Msg::Backspace);
+                        }
                         continue;
                     }
                     // Auto-repeat only for navigation; never for stimulus or toggles, so a

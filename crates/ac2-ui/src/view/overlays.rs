@@ -23,22 +23,23 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::Settings(_) => super::settings::settings(app, ctx, ch, top),
         Overlay::Offer(_) => super::session::offer(app, ctx, ch),
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
-        Overlay::DeleteTrace(_) => delete_trace(app, ctx, ch),
+        Overlay::Delete(_) => delete(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }
     toasts(app, ctx, ch);
 }
 
-/// The confirmation before a stored trace is deleted: which one, and that it is final.
-fn delete_trace(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
-    let Overlay::DeleteTrace(p) = &app.state.overlay else {
+/// The confirmation before the selected measurement or stored trace is deleted: which
+/// one, and what deleting it means; or why it cannot be.
+fn delete(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    let Overlay::Delete(p) = &app.state.overlay else {
         return;
     };
     let k = p.confirm.clone();
     backdrop(ctx);
     let mut msg = None;
-    egui::Area::new(egui::Id::new("ac2-delete-trace"))
+    egui::Area::new(egui::Id::new("ac2-delete"))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
         .show(ctx, |ui| {
@@ -56,6 +57,12 @@ fn delete_trace(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
+                    if k.refused {
+                        if ui.button("Close").clicked() {
+                            msg = Some(false);
+                        }
+                        return;
+                    }
                     if ui.button(RichText::new("Delete").strong()).clicked() {
                         msg = Some(true);
                     }
@@ -67,7 +74,7 @@ fn delete_trace(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
             });
         });
     if let Some(m) = msg {
-        app.dispatch(Msg::DeleteTrace(m));
+        app.dispatch(Msg::Delete(m));
     }
 }
 
@@ -214,12 +221,16 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
                 }
                 continue;
             }
+            // Keys that do not fit the key column side by side go one per line.
+            let labels: Vec<String> = chords.iter().map(|k| k.label()).collect();
+            let one_line = labels.join(" ");
+            let keys = if one_line.chars().count() <= KEY_COLUMN_CHARS {
+                one_line
+            } else {
+                labels.join("\n")
+            };
             rows.push(HelpRow::Bind {
-                keys: chords
-                    .iter()
-                    .map(|k| k.label())
-                    .collect::<Vec<_>>()
-                    .join(" "),
+                keys,
                 title: c.title().into(),
                 live,
             });
@@ -405,7 +416,8 @@ fn help_row(ui: &mut egui::Ui, row: &HelpRow, ch: &Chrome) {
         HelpRow::Bind { keys, title, live } => {
             ui.horizontal(|ui| {
                 // Fixed key column so titles line up.
-                let h = ui.text_style_height(&egui::TextStyle::Body);
+                let lines = keys.lines().count().max(1) as f32;
+                let h = ui.text_style_height(&egui::TextStyle::Body) * lines;
                 let (r, _) = ui.allocate_exact_size(egui::vec2(88.0, h), egui::Sense::hover());
                 ui.painter().text(
                     r.left_center(),
@@ -845,6 +857,12 @@ mod tests {
         assert!(rows.contains(&HelpRow::Bind {
             keys: "1…9".into(),
             title: "Show / hide slot 1…9".into(),
+            live: true,
+        }));
+        // Too wide side by side: one key per line.
+        assert!(rows.contains(&HelpRow::Bind {
+            keys: "Delete\nBackspace".into(),
+            title: CommandId::DeleteSelected.title().into(),
             live: true,
         }));
         // Focused scope right after the global one.

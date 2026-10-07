@@ -406,12 +406,12 @@ commands! {
     PrevTrace => "prev_trace", "Select previous shown stored trace (then live)", [Global];
     NextAnyTrace => "next_any_trace", "Select next trace incl. hidden (then live)", [Global];
     PrevAnyTrace => "prev_any_trace", "Select previous trace incl. hidden (then live)", [Global];
-    ToggleTrace => "toggle_trace", "Show / hide the selected stored trace", [Global];
+    ToggleSelected => "toggle_selected", "Show / hide the selected curve", [Global];
     TraceSlot => "trace_slot", "Move the selected trace to slot… (1 … 9, none frees its slot)", [Global];
     TraceRename => "trace_rename", "Rename the selected trace…", [Global];
     TraceExport => "trace_export", "Export the selected trace (ac2 CSV) to a file…", [Global];
     SelectLive => "select_live", "Deselect the stored trace: keys act on the live measurement again", [Global];
-    DeleteTrace => "trace_delete", "Delete selected trace… (asks first)", [Global];
+    DeleteSelected => "delete_selected", "Delete selected measurement or trace…", [Global];
     OffsetUp => "offset_up", "Display offset +1 dB of the selected curve", [Global];
     OffsetDown => "offset_down", "Display offset −1 dB of the selected curve", [Global];
     OffsetUpCoarse => "offset_up_coarse", "Display offset +3 dB of the selected curve", [Global];
@@ -431,7 +431,6 @@ commands! {
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
     NewMath => "meas_new_math", "New math channel: A ÷ × + − B, or the average of several (mic positions)…", [Global];
     EditMath => "math_edit", "Edit the selected math channel: operands, operator, method…", [Global];
-    DeleteMeasurement => "meas_delete", "Delete selected measurement", [Global];
     InputSetup => "input_setup", "Input setup: Settings › Inputs & outputs (names, roles, mics, max level)…", [Global];
     Calibrations => "calibrations", "Calibrations: Settings › Calibration (mics, curves, sensitivities)…", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
@@ -605,8 +604,10 @@ pub fn defaults() -> Vec<Binding> {
         (C::OffsetUpCoarse, S::Global, alt_sh(K::ArrowUp)),
         (C::OffsetDownCoarse, S::Global, alt_sh(K::ArrowDown)),
         (C::OffsetClear, S::Global, alt(K::Home)),
-        // Delete asks first (Delete again or Enter deletes).
-        (C::DeleteTrace, S::Global, k(K::Delete)),
+        // Delete asks first (Delete again or Enter deletes). Backspace too: Mac keyboards
+        // and many laptops have no Delete key.
+        (C::DeleteSelected, S::Global, k(K::Delete)),
+        (C::DeleteSelected, S::Global, k(K::Backspace)),
         (C::TraceRename, S::Global, k(K::F2)),
         (C::ToggleCursor, S::Global, k(K::C)),
         (C::CursorLeft, S::Global, sh(K::ArrowLeft)),
@@ -642,8 +643,9 @@ pub fn defaults() -> Vec<Binding> {
                 ..alt(K::V)
             },
         ),
-        // A is free in every pane; the digits stay the slots' show / hide.
-        (C::ToggleTrace, S::Global, k(K::A)),
+        // A is free in every pane; the digits stay the slots' show / hide. It acts on what
+        // was selected last: a measurement or a stored trace.
+        (C::ToggleSelected, S::Global, k(K::A)),
         (C::InsertDelay, S::Transfer, k(K::X)),
         (C::InsertStrongest, S::Transfer, sh(K::X)),
         (C::TypeDelay, S::Transfer, k(K::D)),
@@ -755,7 +757,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::NextTrace, "select trace", 90),
-                    hint(C::ToggleTrace, "show/hide", 80),
+                    hint(C::ToggleSelected, "show/hide", 80),
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
                     hint(C::SmoothCoarser, "smoothing", 60),
@@ -1093,7 +1095,6 @@ mod tests {
             CommandId::NewRta,
             CommandId::NewSpl,
             CommandId::EditMath,
-            CommandId::DeleteMeasurement,
             CommandId::AverageComplex,
             CommandId::AverageCoherence,
             CommandId::ImportTrace,
@@ -1179,7 +1180,7 @@ mod tests {
             ("Shift+V", CommandId::PrevTrace),
             ("Alt+V", CommandId::NextAnyTrace),
             ("Alt+Shift+V", CommandId::PrevAnyTrace),
-            ("A", CommandId::ToggleTrace),
+            ("A", CommandId::ToggleSelected),
         ] {
             assert_eq!(m.lookup(t, c(chord)), Some(cmd), "{chord}");
         }
@@ -1232,7 +1233,14 @@ mod tests {
                 Some(CommandId::OffsetDownCoarse)
             );
             assert_eq!(m.lookup(scope, c("Alt+Home")), Some(CommandId::OffsetClear));
-            assert_eq!(m.lookup(scope, c("Delete")), Some(CommandId::DeleteTrace));
+            assert_eq!(
+                m.lookup(scope, c("Delete")),
+                Some(CommandId::DeleteSelected)
+            );
+            assert_eq!(
+                m.lookup(scope, c("Backspace")),
+                Some(CommandId::DeleteSelected)
+            );
             assert_eq!(m.lookup(scope, c("Home")), Some(CommandId::ResetView));
             for (k, cmd) in [
                 ("Ctrl+Up", CommandId::LevelPanUp),

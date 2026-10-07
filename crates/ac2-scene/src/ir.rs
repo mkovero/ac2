@@ -278,12 +278,16 @@ pub enum IrMissing {
     NoSignal,
     /// Running, nothing wrong known: the first frame is on its way.
     NotYet,
+    /// Its curves are hidden in this app (it keeps measuring).
+    Hidden,
 }
 
-/// The empty IR pane's text for measurement `name`; `start_key` starts it.
-pub fn missing_text(name: &str, why: IrMissing, start_key: &str) -> String {
+/// The empty IR pane's text for measurement `name`; `key` brings the IR back: the key that
+/// starts a stopped measurement, or shows a hidden one.
+pub fn missing_text(name: &str, why: IrMissing, key: &str) -> String {
     match why {
-        IrMissing::Stopped => format!("{name} stopped — {start_key} starts it"),
+        IrMissing::Stopped => format!("{name} stopped — {key} starts it"),
+        IrMissing::Hidden => format!("{name} hidden — {key} shows it"),
         IrMissing::AudioStopped => format!("{name}: the audio stopped — the IR returns with it"),
         IrMissing::NoReference => "no reference: nothing is driving the loopback".into(),
         IrMissing::NoSignal => "no signal: the measurement input is below its floor".into(),
@@ -575,6 +579,10 @@ mod tests {
             "no signal: the measurement input is below its floor"
         );
         assert_eq!(t(IrMissing::NotYet), "TF 1: no IR frame yet");
+        assert_eq!(
+            missing_text("TF 1", IrMissing::Hidden, "A"),
+            "TF 1 hidden — A shows it"
+        );
         let status = Status {
             protection: ac2_proto::frame::ProtectionFlags::NO_REFERENCE,
             ..Status::default()

@@ -1,8 +1,8 @@
 //! Top bar (link, session, stimulus) and the measurement list.
 
-use ac2_proto::model::MeasKind;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
+use ac2_scene::meas_list::Mark;
 use ac2_scene::recording::RecordingTone;
 use eframe::egui::{self, Color32, RichText};
 
@@ -514,17 +514,6 @@ pub(super) fn progress(
     }
 }
 
-/// Short kind tag of a measurement in lists.
-pub(super) fn kind_tag(k: &MeasKind) -> &'static str {
-    match k {
-        MeasKind::Transfer { .. } => "TF",
-        MeasKind::Spectrum { .. } => "FFT",
-        MeasKind::Rta { .. } => "RTA",
-        MeasKind::Spl { .. } => "SPL",
-        MeasKind::Math { .. } => "MATH",
-    }
-}
-
 /// Every input of the open session, metered all the time: the operator sees what reaches
 /// the mic and the reference before and during any measurement.
 fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
@@ -580,11 +569,14 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let mut toggled_trace = None;
     let tips = RowTips {
         meas: format!(
-            "Click selects it · {} / {} step through the focused pane's measurements",
+            "Click selects it · {} / {} step through the focused pane's measurements · {} \
+             shows / hides its curves · {} deletes it (asks first)",
             key_hint(app, CommandId::NextMeasurement),
-            key_hint(app, CommandId::PrevMeasurement)
+            key_hint(app, CommandId::PrevMeasurement),
+            key_hint(app, CommandId::ToggleSelected),
+            key_hint(app, CommandId::DeleteSelected)
         ),
-        eye: key_hint(app, CommandId::ToggleTrace),
+        eye: key_hint(app, CommandId::ToggleSelected),
         select: format!(
             "Click selects it (again: deselects) · double click renames · {} / {} step through the shown traces",
             key_hint(app, CommandId::NextTrace),
@@ -600,53 +592,25 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         if ms.is_empty() {
             ui.label(RichText::new("none").color(ch.dim));
         }
-        for m in ms {
-            let selected = st.selected == Some(m.id) && st.selected_trace.is_none();
-            let kind = kind_tag(&m.config.kind);
-            let state = match (m.running, m.frozen) {
-                (_, true) => "frozen",
-                (true, false) => "running",
-                (false, false) => "stopped",
+        for row in st.meas_rows() {
+            let mut text = RichText::new(&row.text);
+            if row.hidden {
+                text = text.color(ch.dim);
+            }
+            // Filled: the keys act on it. Outlined: still the selected measurement, while a
+            // stored trace selected after it has the keys.
+            let b = match row.mark {
+                Mark::Active => egui::Button::selectable(true, text),
+                Mark::Selected => egui::Button::new(text)
+                    .fill(Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::new(1.0, ch.focus)),
+                Mark::None => egui::Button::selectable(false, text),
             };
-            let mut text = format!("{kind}  {}\n     {state}", m.config.name);
-            if let Some(d) = &m.delay {
-                // Distance stays in the transfer legend's reference line.
-                text.push_str(&format!(" · {}", format::delay(d.applied.0)));
-                if d.tracking && d.awaiting_pick {
-                    text.push_str(" · tracking paused");
-                } else if d.tracking {
-                    text.push_str(" · tracking");
-                }
-            }
-            match &m.config.kind {
-                MeasKind::Transfer { config } if config.smoothing.is_some() => {
-                    text.push_str(&format!(" · {}", format::smoothing(config.smoothing)));
-                }
-                MeasKind::Spectrum { config } => {
-                    if let Some(f) = config.smoothing {
-                        text.push_str(&format!(" · smoothed {}", format::octave_fraction(f)));
-                    }
-                }
-                MeasKind::Math { config } => {
-                    let e = ac2_scene::math::expression(&config.expr, |o| st.operand_name(o));
-                    if e != m.config.name {
-                        text.push_str(&format!(" · {e}"));
-                    }
-                }
-                _ => {}
-            }
-            let e = st.edit(m.id);
-            if e.inverted {
-                text.push_str(" · inv");
-            }
-            if e.offset_db != 0.0 {
-                text.push_str(&format!(" · {}", format::db_readout(e.offset_db)));
-            }
             let r = ui
-                .add(egui::Button::selectable(selected, text).wrap_mode(egui::TextWrapMode::Wrap))
+                .add(b.wrap_mode(egui::TextWrapMode::Wrap))
                 .on_hover_text(&tips.meas);
             if r.clicked() {
-                clicked = Some(m.id);
+                clicked = Some(row.id);
             }
         }
         ui.add_space(12.0);
@@ -693,7 +657,7 @@ fn traces_header(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
             RichText::new(format!(
                 "{} selects · {} shows / hides",
                 key_hint(app, CommandId::NextTrace),
-                key_hint(app, CommandId::ToggleTrace)
+                key_hint(app, CommandId::ToggleSelected)
             ))
             .small()
             .color(ch.dim),

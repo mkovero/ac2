@@ -212,7 +212,8 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let grids = st.data.as_ref().map(|d| &d.grids);
     let mut live = Vec::new();
     for (i, m) in pane_order(st, PaneKind::Transfer) {
-        if !is_tf(m) {
+        // A hidden measurement keeps its colour: showing it again brings back the same curve.
+        if !is_tf(m) || st.meas_hidden(m) {
             continue;
         }
         let Some(tf) = frame(st, m.id, Stream::Tf) else {
@@ -336,6 +337,9 @@ pub fn spectrum(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Spect
 /// The spectrum pane with the spectrograph of the pane's measurement under it.
 pub fn spectrograph(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SpectrographScene {
     let shown = st.pane_meas(PaneKind::Spectrum).and_then(|m| {
+        if st.meas_hidden(m) {
+            return None;
+        }
         let stream = crate::state::spectrum_stream(m)?;
         Some((m, stream))
     });
@@ -373,6 +377,9 @@ fn with_spectrum<R>(
     }
     let mut cols = Vec::new();
     for (i, m) in pane_order(st, PaneKind::Spectrum) {
+        if st.meas_hidden(m) {
+            continue;
+        }
         let Some(stream) = crate::state::spectrum_stream(m) else {
             continue;
         };
@@ -536,7 +543,7 @@ pub fn ir(
     let ir = frame(st, m.id, Stream::Ir);
     let shown: Vec<&TopicFrame> = [tf, ir].into_iter().flatten().collect();
     let status = status(st, &shown, Some(m), now);
-    if let Some(ir) = ir
+    if let Some(ir) = ir.filter(|_| !st.meas_hidden(m))
         && let FrameData::Ir(f) = &ir.frame.data
     {
         let i = st
@@ -554,7 +561,10 @@ pub fn ir(
             size,
         ));
     }
-    let why = if !m.running {
+    let hidden = st.meas_hidden(m);
+    let why = if hidden {
+        IrMissing::Hidden
+    } else if !m.running {
         IrMissing::Stopped
     } else if status.audio_stopped.is_some() {
         IrMissing::AudioStopped
@@ -565,8 +575,16 @@ pub fn ir(
     } else {
         IrMissing::NotYet
     };
+    let (command, scope) = if hidden {
+        (
+            crate::keys::CommandId::ToggleSelected,
+            crate::keys::Scope::Global,
+        )
+    } else {
+        (crate::keys::CommandId::StartStop, crate::keys::Scope::Ir)
+    };
     let start = keymap
-        .first_chord(crate::keys::CommandId::StartStop, crate::keys::Scope::Ir)
+        .first_chord(command, scope)
         .map_or_else(|| "the palette".to_owned(), |c| c.label());
     Some(missing_scene(
         missing_text(&m.config.name, why, &start),

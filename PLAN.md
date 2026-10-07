@@ -525,6 +525,12 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
   sweep's parameters (the dialog when there is none), every other view the generator for
   live measuring; `Enter` fires what is armed, named in the top bar (`Enter fires: re-sweep
   3 s −50 dBFS`).
+- The keys that act on "the selected curve" (`A` show / hide, `Delete` / `Backspace`
+  delete after a confirmation, the offsets) act on the item selected last: a measurement
+  (list, `N`, a pane's chip) or a stored trace (list, `V`); selecting a measurement
+  deselects the trace, `Esc` hands the keys back to the measurement. Hiding a measurement
+  is this app's display only; it keeps measuring. In an open window `Backspace` edits text
+  and never deletes what is behind the window.
 - Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `B` coherence mask, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change (`H` IR became `Shift+I` when `H` became help).
 
 ### 8.3 Lightweight targets
