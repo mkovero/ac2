@@ -722,22 +722,12 @@ pub fn analyse_recording(
             continue;
         }
         let (e_lo, e_hi) = spec.grid.edges(i);
-        let lo = (e_lo / bin_l).ceil() as usize;
-        let hi = ((e_hi / bin_l).floor() as usize).min(s1.len() - 1);
-        let (p, z) = if lo <= hi {
-            let p = (lo..=hi).map(|k| s1[k].norm_sqr()).sum::<f64>() / (hi - lo + 1) as f64;
-            let z: Complex64 = (lo..=hi).map(rot).sum();
-            (p, z)
-        } else {
-            let x = f / bin_l;
-            let k = x.floor() as usize;
-            if k + 1 >= s1.len() {
-                continue;
-            }
-            let t = x - k as f64;
-            let z = rot(k) * (1.0 - t) + rot(k + 1) * t;
-            (z.norm_sqr(), z)
-        };
+        let (a, b) = (e_lo / bin_l, e_hi / bin_l);
+        if b + 1.0 >= s1.len() as f64 {
+            continue;
+        }
+        let p = column_mean(|k| s1[k].norm_sqr(), a, b);
+        let z = column_mean(rot, a, b);
         if p > 0.0 {
             magnitude_db[i] = db10(p);
             phase_deg[i] = wrap_deg(z.arg().to_degrees());
@@ -842,6 +832,40 @@ fn fine_peak(h: impl Fn(i64) -> f64, d: i64) -> f64 {
         0.0
     };
     (j as f64 + vertex - c as f64) / FINE_UPSAMPLE as f64
+}
+
+/// Mean over `[a, b]` (bin units, `b + 1` inside the spectrum) of the piecewise-linear
+/// interpolant through the bins `v(k)`; its value at the centre when the span is empty.
+///
+/// A column's phase is that of the spectrum averaged over its band, so the average has to be
+/// centred on the column. Summing only the whole bins inside the edges centres it on those
+/// bins instead, up to half a bin off, and a path with group delay τ then reads its phase
+/// wrong by 360°·τ·Δf: with the default gate (≈ 0.9 s, bins ≈ 0.37 Hz apart) and a 1 ms
+/// high-pass delay at 20 Hz that is up to ≈ 0.07°, and since the 48-per-octave columns beat
+/// against the bin grid it is a ripple about 1 Hz long that the neighbour difference turns
+/// into a group delay swinging ±60 %. The interpolant's integral over the exact edges is
+/// centred on the column whatever the bins, and a column narrower than a bin reads the
+/// interpolated value at its centre.
+fn column_mean<T>(v: impl Fn(usize) -> T, a: f64, b: f64) -> T
+where
+    T: Copy + std::ops::Add<Output = T> + std::ops::Mul<f64, Output = T>,
+{
+    let lerp = |k: usize, x: f64| v(k) * (1.0 - (x - k as f64)) + v(k + 1) * (x - k as f64);
+    if b - a <= 0.0 {
+        let x = 0.5 * (a + b);
+        return lerp(x.floor() as usize, x);
+    }
+    let mut x = a;
+    let k0 = a.floor() as usize;
+    let mut acc = lerp(k0, x) * 0.0;
+    while x < b {
+        let k = x.floor() as usize;
+        let x1 = (k as f64 + 1.0).min(b);
+        // The interpolant is linear on [k, k+1]: the trapezoid is its exact integral.
+        acc = acc + (lerp(k, x) + lerp(k, x1)) * (0.5 * (x1 - x));
+        x = x1;
+    }
+    acc * (1.0 / (b - a))
 }
 
 fn wrap_deg(d: f64) -> f64 {

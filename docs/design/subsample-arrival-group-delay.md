@@ -135,12 +135,47 @@ further); the table above shows ±1/12 within 7 % of the steady sine from 16 Hz.
 a resonance narrower than the span is smeared, which is what the stated bandwidth tells the
 operator.
 
-### 5. The 0.9 s ripple in the sweep's LF phase
+### 5. The LF phase ripple: columns read off-centre
 
-Find it before relying on the fit to hide it: compare the deconvolved `h` around the gate
-end with the noise window; try the gate's taper length; check whether the second repeat's
-pre-roll or the harmonic windows overlap. A phase ripple of 0.03° is invisible on the phase
-pane but is what the unsmoothed group delay shows.
+The ≈ 0.03° ripple, ≈ 1.1 Hz long near 20 Hz, was not a component 0.9 s from the arrival
+but the linear spectrum read at the wrong frequencies. With the default gate (0.89 s) the
+spectrum's bins are fs/n ≈ 0.37 Hz apart, wider than a 1/48-octave column below ≈ 25 Hz.
+A column took the mean of the whole bins between its edges (one bin, or the interpolated
+centre when it held none), so its phase belonged to a frequency up to half a bin off its
+own; through a path with group delay τ that misreads the phase by 360°·τ·Δf, ≈ 0.07° at
+20 Hz with τ ≈ 1 ms, and the column grid beating against the bin grid makes it periodic
+(period ≈ bin·column/(bin − column): 0.9 … 1.4 Hz at 18 … 20 Hz). The neighbour difference
+turned it into the 670 ↔ 1830 µs swing.
+
+Ruled out on the pupu captures (`e3/r10a.wav`, `r10b.wav`) with a numpy replica: the
+deconvolved `h` evaluated as an exact DTFT at each column centre over the same gate leaves
+0.007° rms (the noise in the gate, different between the two runs), against 0.020° for the
+bin-summed columns — so gate edge, noise window, regularisation and wrap contribute nothing
+measurable at this level.
+
+Fix (`ac2-core::sweep`): each column is the mean over its exact edges of the linear
+interpolant between bins (power for the magnitude, the arrival-referred complex value for
+the phase), centred on the column whatever the bins; a column narrower than a bin reads the
+interpolated value at its centre. Test: a 3 Hz second-order high-pass with 3.7 µs through
+a 10 Hz – 20 kHz, 5.5 s sweep: phase within 0.002° of analytic at 16–40 Hz after a line,
+neighbour-difference group delay within 0.4 % (before: 0.084°, 42 %).
+
+On the captures (ac2 analysis replaying the 10 Hz sweep as played; phase with the arrival
+added back, vs steady sines):
+
+| | 16 Hz | 20 | 25 | 31.5 | 40 | 50 | 80 | 100 |
+|---|---|---|---|---|---|---|---|---|
+| steady-sine phase, ° | 10.125 | 8.288 | | 5.399 | 4.277 | 3.432 | 2.156 | 1.720 |
+| r10a phase before / after | 10.219 / 10.209 | 8.374 / 8.369 | | 5.415 / 5.404 | 4.291 / 4.287 | 3.425 / 3.428 | 2.160 / 2.157 | 1.722 / 1.719 |
+| steady-sine group delay, µs | 1535 | 1054 | 706 | 459 | 290 | 187 | 75 | 49 |
+| r10a neighbour diff before / after | 1801 / 1532 | 730 / 1082 | 709 / 715 | 511 / 456 | 281 / 291 | 242 / 237 | 66 / 69 | 46 / 46 |
+| r10b neighbour diff before / after | 1909 / 1611 | 739 / 1100 | 700 / 710 | 508 / 453 | 278 / 289 | 191 / 187 | 63 / 65 | 44 / 45 |
+| r10a ±1/12 oct fit before / after | 1528 / 1521 | 1092 / 1061 | 728 / 722 | 455 / 459 | 292 / 291 | 194 / 192 | 72 / 72 | 45 / 45 |
+
+Phase ripple about a smooth fit (14–50 Hz): 0.020 / 0.022° rms before, 0.005 / 0.006° after;
+neighbour-difference group delay over 18–23 Hz 515…1695 µs before, 845…1248 µs after. What
+is left is the noise inside the 0.89 s gate (uncorrelated between r10a and r10b, and 50 Hz
+mains near 50 Hz); the ±1/12-octave fit averages it out.
 
 ## Validation
 

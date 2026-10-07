@@ -713,3 +713,107 @@ fn a_fractional_delay_reads_as_a_fractional_arrival() {
         }
     }
 }
+
+/// RBJ second-order high-pass, Q = 1/√2: the low-frequency corner of a converter path.
+struct HighPass {
+    b: [f64; 3],
+    a: [f64; 2],
+}
+
+impl HighPass {
+    fn new(fc: f64) -> Self {
+        let w = TAU * fc / FS;
+        let alpha = w.sin() / (2.0 * std::f64::consts::FRAC_1_SQRT_2);
+        let c = w.cos();
+        let a0 = 1.0 + alpha;
+        Self {
+            b: [(1.0 + c) / 2.0 / a0, -(1.0 + c) / a0, (1.0 + c) / 2.0 / a0],
+            a: [-2.0 * c / a0, (1.0 - alpha) / a0],
+        }
+    }
+
+    fn run(&self, x: &[f64]) -> Vec<f64> {
+        let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+        x.iter()
+            .map(|&v| {
+                let y = self.b[0] * v + self.b[1] * x1 + self.b[2] * x2
+                    - self.a[0] * y1
+                    - self.a[1] * y2;
+                (x2, x1, y2, y1) = (x1, v, y1, y);
+                y
+            })
+            .collect()
+    }
+
+    /// Phase, radians.
+    fn phase(&self, f: f64) -> f64 {
+        let z = Complex64::from_polar(1.0, -TAU * f / FS);
+        let num = self.b[0] + self.b[1] * z + self.b[2] * z * z;
+        let den = 1.0 + self.a[0] * z + self.a[1] * z * z;
+        (num / den).arg()
+    }
+
+    /// Group delay, s.
+    fn group_delay(&self, f: f64) -> f64 {
+        let df = 1e-3;
+        -(self.phase(f + df) - self.phase(f - df)) / (TAU * 2.0 * df)
+    }
+}
+
+#[test]
+fn low_frequency_phase_is_free_of_bin_ripple() {
+    // A 3 Hz high-pass leads by ≈ 8° at 20 Hz and delays by ≈ 1.7 ms; the default gate
+    // (≈ 0.9 s) makes the linear spectrum's bins wider than the 48-per-octave columns there,
+    // so the phase must be read at each column's centre for the group delay to hold.
+    let s = SweepSpec {
+        grid: LogGrid {
+            ppo: 48,
+            k_min: -288,
+            k_max: 239,
+        },
+        ..spec(ess(10.0, 20_000.0, 5.5))
+    };
+    let hp = HighPass::new(3.0);
+    let x = emitted(&s, 1, 0.37);
+    let reference = delayed(&x, REF_DELAY, REF_GAIN);
+    let mut mic = fractionally_delayed(&hp.run(&x), MIC_DELAY as f64 + 3.7e-6 * FS, MIC_GAIN);
+    Noise(11).add(&mut mic, 1e-5);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let cols: Vec<usize> = (0..r.frequencies.len())
+        .filter(|&i| (16.0..=40.0).contains(&r.frequencies[i]))
+        .collect();
+    assert!(cols.len() > 60);
+    // Residual against the analytic phase, less the line a misplaced arrival leaves.
+    let err: Vec<(f64, f64)> = cols
+        .iter()
+        .map(|&i| {
+            let f = r.frequencies[i];
+            let e = wrap_deg(r.phase_deg[i] - hp.phase(f).to_degrees());
+            (f, e)
+        })
+        .collect();
+    let slope =
+        err.iter().map(|(f, e)| f * e).sum::<f64>() / err.iter().map(|(f, _)| f * f).sum::<f64>();
+    let ripple = err
+        .iter()
+        .fold(0.0f64, |a, (f, e)| a.max((e - slope * f).abs()));
+    // Neighbour (central) difference of the unwrapped phase against the analytic delay.
+    let mut worst_gd = 0.0f64;
+    for w in cols.windows(3) {
+        let (a, c, b) = (w[0], w[1], w[2]);
+        let dphi = wrap_deg(r.phase_deg[b] - r.phase_deg[a]).to_radians();
+        let gd = -dphi / (TAU * (r.frequencies[b] - r.frequencies[a]));
+        let want = hp.group_delay(r.frequencies[c]);
+        worst_gd = worst_gd.max((gd / want - 1.0).abs());
+    }
+    eprintln!(
+        "phase ripple {ripple:.5}°, arrival slope {slope:.2e}°/Hz, group delay within {:.1} %",
+        100.0 * worst_gd
+    );
+    assert!(ripple < 0.005, "phase ripple {ripple}°");
+    assert!(
+        worst_gd < 0.03,
+        "group delay off by {:.1} %",
+        100.0 * worst_gd
+    );
+}
