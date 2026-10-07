@@ -460,6 +460,21 @@ rising level, so the onset lies below the reported band; the harmonic window's r
 (the lowest columns read about 2 dB low before, numpy replica). Scripts for these runs lived
 in the session scratchpad; `jsine.py` and `jphase.py` stay on pupu in `~/rew-dl`.
 
+**Mechanism (offline, 2026-10-07, the crosscheck captures of runs 114727Z–170514Z).** Not the
+path and not an onset transient: replacing in 5 by the linear prediction (the analysed IR
+convolved with in 2) reproduces ac2's H2 at 22 Hz to 1 dB (−62.8 vs −63.8 dBr on 170514Z
+`dist`). The loopback (out 2 → in 2) has the interface's DC-blocking high-pass: its spectrum
+is 29 dB below the emitted sweep's at 1 Hz and 14 dB at 2 Hz, so the reference reaches the
+regularisation (−60 dB re its peak) at about 2 Hz with a steep edge. The division turns over
+there, and that edge rings as a zero-phase 0–6 Hz swell around the arrival: −22 dBr at
+±0.1 s, −40 dBr at −0.5 s (H2's window for L = 0.7 s), −43 … −90 dBr in the post-roll noise
+windows. The harmonic window (0.1 s, 13 ms fall) carries it about 25 dB down into the
+40–60 Hz bands. The 10 Hz / 5.5 s requests read the same H2 (−60 … −63 dBr) but their noise
+windows sit on the swell as well, so it shows only as a high floor; which side wins on a
+20 Hz request varies run to run. Fix: the harmonic and noise windows are taken from the
+response high-passed (raised cosine in log f) from the emitted start to the lowest analysed
+fundamental; the H1 window, linear response, IR and room keep the full response.
+
 **Level convention of the hand scripts (correction).** `jsine.py`, `jphase.py` and the E3 replica
 sweeps scaled a "−30 dBFS" level as a peak of √2·10^(−30/20); in the full-scale-sine convention
 ac2 and REW use (0 dBFS = a full-scale sine) that is −27 dBFS — 3 dB above the −30 allowed for

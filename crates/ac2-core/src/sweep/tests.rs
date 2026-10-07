@@ -862,3 +862,26 @@ fn reference_level_is_the_mid_band_gain_under_hf_roll_off() {
         r.reference_db
     );
 }
+
+#[test]
+fn a_dc_blocked_loopback_leaves_the_lowest_harmonics_clean() {
+    // An interface's DC blocking high-pass (second order at 2 Hz) on the loopback takes the
+    // reference's sub-sonic tail down to the regularisation; the path itself is flat to 1 Hz
+    // with a small, known H2. The lowest columns must read that H2, not the low-frequency
+    // swell the division leaves around the arrival.
+    let s = SweepSpec {
+        grid: LogGrid::covering(48, 20.0, 20_000.0),
+        ..spec(ess(20.0, 20_000.0, 5.5))
+    };
+    let x = emitted(&s, 1, 0.37);
+    let reference = delayed(&dc_blocked(&dc_blocked(&x, 2.0), 2.0), REF_DELAY, REF_GAIN);
+    // H2 at −80 dB re the fundamental.
+    let a2 = 2e-4 / amp();
+    let mut mic = delayed(&dc_blocked(&poly(&x, a2, 0.0), 1.0), MIC_DELAY, MIC_GAIN);
+    Noise(13).add(&mut mic, 1e-7);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let (_, h2, _) = analytic(amp(), a2, 0.0);
+    let e2 = max_err(&r, &r.harmonics[0], 20.0, 40.0, |_| 20.0 * h2.log10());
+    eprintln!("dc-blocked loopback, 20–40 Hz: H2 max error {e2:.2} dB");
+    assert!(e2 <= 1.0, "{e2}");
+}

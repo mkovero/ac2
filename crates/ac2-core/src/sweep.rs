@@ -574,6 +574,37 @@ fn interp(s: &[f64], x: f64) -> f64 {
     s[i] * (1.0 - t) + s[i + 1] * t
 }
 
+/// `spec` (bins `bin_hz` apart) weighted by a zero-phase high-pass: 0 up to `from`, a
+/// raised cosine in log-frequency up to `to`, 1 above.
+///
+/// Below the emitted start the reference carries no sweep, and a loopback's own DC-blocking
+/// high-pass takes the little the fade-in leaves there down to the regularisation, so the
+/// division turns over abruptly a few hertz up. That edge rings for about the inverse of its
+/// width, a zero-phase low-frequency swell around the arrival that still holds −40 dB re
+/// the fundamental half a second away, where H2's window and the noise windows lie. The
+/// harmonic windows are 0.1 s at most with edges of a few tens of milliseconds, so their
+/// side lobes carry that swell some 25 dB down into the lowest harmonic bands, where it
+/// reads as H2 up to 20 dB above the path's own, or as a floor as high. No analysed
+/// harmonic needs content below `f_lo` (the k-th order's bands start above 1.25·f_lo), and
+/// a transition spanning the octaves of the fade-in rings for a small fraction of a harmonic
+/// window.
+fn high_passed(spec: &[Complex64], bin_hz: f64, from: f64, to: f64) -> Vec<Complex64> {
+    let span = (to / from).ln();
+    spec.iter()
+        .enumerate()
+        .map(|(k, &z)| {
+            let f = k as f64 * bin_hz;
+            if f >= to {
+                z
+            } else if f <= from {
+                Complex64::new(0.0, 0.0)
+            } else {
+                z * (0.5 - 0.5 * (PI * (f / from).ln() / span).cos())
+            }
+        })
+        .collect()
+}
+
 /// Half-Hann rise over `rise` samples, flat, half-Hann fall over the last `fall` samples.
 fn taper(len: usize, rise: usize, fall: usize) -> Vec<f64> {
     (0..len)
@@ -662,6 +693,17 @@ pub fn analyse_recording(
     }
     let scale = 1.0 / cuts.len() as f64;
     acc.iter_mut().for_each(|z| *z *= scale);
+    // Lowest fundamental analysed for distortion.
+    let f_lo = timing.full_level_hz().max(2.0 / timing.window_s());
+    let h_harm = fft_inverse(
+        high_passed(
+            &acc,
+            fs / n as f64,
+            timing.emitted.start_hz.min(0.5 * f_lo),
+            f_lo,
+        ),
+        n,
+    );
     let h = fft_inverse(acc, n);
 
     // Arrival: the strongest sample from slightly before the reference to half the
@@ -690,9 +732,13 @@ pub fn analyse_recording(
     let bin_w = fs / nw as f64;
     let t_k = |k: u8| d - (l * f64::from(k).ln() * fs).round() as i64;
 
-    // Fundamental (distortion reference) and every order in the same window.
+    // Fundamental (distortion reference) and every order in the same window; the harmonics
+    // from the response without its content below the analysed band (see `high_passed`).
     let spectra: Vec<Vec<f64>> = (1..=k_max)
-        .map(|k| power_spectrum(&segment(&h, t_k(k) - pre_n as i64, &w), nw))
+        .map(|k| {
+            let src = if k == 1 { &h } else { &h_harm };
+            power_spectrum(&segment(src, t_k(k) - pre_n as i64, &w), nw)
+        })
         .collect();
     // Noise: windows like the harmonic ones, tiled back from just before the end of the
     // post-roll (which every repeat's record covers fully) over its second half, where the
@@ -704,11 +750,10 @@ pub fn analyse_recording(
     let noise_windows = usize::try_from((noise_end - noise_first) / w_len as i64)
         .unwrap_or(0)
         .max(1);
-    let noise = noise_power(&h, noise_end, noise_windows, &w, nw);
+    let noise = noise_power(&h_harm, noise_end, noise_windows, &w, nw);
 
     let freqs = spec.grid.frequencies();
     let (f1, f2) = (spec.ess.start_hz, spec.ess.end_hz);
-    let f_lo = timing.full_level_hz().max(2.0 / timing.window_s());
     let f_top = (f2 * (-spec.ess.fade_out_s / l).exp()).min(HARMONIC_FS_FRACTION * fs);
     let mut harmonics: Vec<HarmonicCurve> = (2..=k_max)
         .map(|order| HarmonicCurve {
