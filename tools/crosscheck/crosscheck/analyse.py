@@ -132,9 +132,12 @@ class Analysis:
         counts = {}
         for c in self.checks:
             counts[c.status] = counts.get(c.status, 0) + 1
-        return {"source": str(self.run.root), "fixture": self.run.fixture, "manifest": self.run.manifest,
-                "summary": counts, "checks": [asdict(c) for c in self.checks], "tables": self.tables,
-                "notes": self.notes}
+        from . import baseline
+        res = {"source": str(self.run.root), "fixture": self.run.fixture, "manifest": self.run.manifest,
+               "summary": counts, "checks": [asdict(c) for c in self.checks], "tables": self.tables,
+               "notes": self.notes}
+        return baseline.annotate(res, baseline.nominal_maps_from_truth(
+            {n: p.truth for n, p in self.run.paths.items()}))
 
     def path(self, p: PathData):
         self.notes.extend(f"{p.name}: {n}" for n in p.notes)

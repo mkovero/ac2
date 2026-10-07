@@ -7,11 +7,12 @@ reruns the hand comparison of 2026-10-07 (`docs/rigs/pupu.md`, "REW cross-check,
 and adds an ambient SPL check and the speaker path.
 
 ```
-crosscheck/      the package (python -m crosscheck {preflight,run,analyse})
+crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare})
 rigs/pupu.toml   ports, roles, paths, levels, stage settings for pupu
-tolerances.toml  PASS / WARN limits for every comparison
+tolerances.toml  PASS / WARN limits for every comparison, compare steps
+baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json)
 reference/       documented truth of 2026-10-07 (used when analysing the fixtures)
-rig-run.sh       dev host: copy to the rig, run there, fetch the run, analyse here
+rig-run.sh       dev host: copy to the rig, run there, fetch the run, analyse and compare here
 tests/           pytest: dsp, safety policy, JACK dummy server, fixtures smoke test
 ```
 
@@ -80,8 +81,9 @@ python -m crosscheck analyse /work/ac2-scratch/crosscheck-fixtures --out /tmp/xc
 
 `rig-run.sh` copies the package to `~/crosscheck` on the rig and runs it under `ssh -t`, so
 the operator can confirm and press Ctrl-C there. It then copies `runs/<UTC time>` back to
-`runs/` here (git-ignored; set `CROSSCHECK_RUNS` to change that) and writes
-`runs/<UTC time>/report/`.
+`/work/ac2-crosscheck/runs` when that directory exists, else `runs/` here (git-ignored; set
+`CROSSCHECK_RUNS` to change that), writes `runs/<UTC time>/report/` and compares the run with
+the baselines (below); differences are printed, they do not fail the script.
 
 ### The Genelec stage is audible: the operator must be present
 
@@ -219,6 +221,32 @@ calibration mapping, one table of checks per group, the data tables and the plot
   - **room** (speaker): ac2's `room_metrics` against REW's RT60 export and a numpy Schroeder
     integration of REW's IR.
   - **ambient SPL**: Leq Z/A/C from ac2, REW and numpy; third-octave levels.
+
+## Baselines and compare
+
+`baselines/<rig>/<stage>-<level>dbfs.json` (`ambient.json` for the silent stage) hold a
+reviewed run's verdict and value for every check, its limits, and where it came from (run,
+date, ac2 build, REW version, flags, suite commit). Tables, plots and audio stay in the run.
+
+```
+python -m crosscheck compare runs/<UTC time>                 # against baselines/, every stage
+python -m crosscheck compare runs/<UTC time> --baseline f.json
+python -m crosscheck baseline runs/<UTC time> [--stage xone]  # write / update from a run
+```
+
+- **Matching**: a check's key is its id with the tone frequency replaced by the one the sine
+  plan asked for (`xone.sine_mag.REW offline@50Hz`, whether 50 Hz played at 47.8 or
+  51.275 Hz). Without the plan, a tone pairs with the nearest one of the same check within
+  6 %. A stage is compared only with the baseline of the same stage and level.
+- **compare** lists, per stage, the build pair, status changes (worse / better), judged
+  values that moved more than max(unit step, half the pass limit) (`[compare]` in
+  `tolerances.toml`), INFO / INCONCLUSIVE values that moved (context only), and checks new or
+  missing. It writes `report/compare.md` and exits 1 when a status got worse or a judged value
+  moved, so it can gate.
+- **Updating a baseline**: after a run on a new build has been reviewed and its differences
+  are understood, run `baseline` on it (it prints what changed and refuses a run with FAILs
+  unless `--force`, which is for a FAIL that is a known, documented gap) and commit the
+  files with the ac2 build hash in the message.
 
 ## Fixtures (2026-10-07)
 

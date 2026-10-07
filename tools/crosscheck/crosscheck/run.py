@@ -152,7 +152,9 @@ def main(a) -> int:
            "ac2_version": rep.get("ac2_build"), "rew_version": rep.get("rew_version"),
            "flags": {"emit": a.emit, "emit_speaker": a.emit_speaker, "allow_electrical_level": a.allow_electrical_level,
                      "stages": want, "skip": a.skip},
-           "mains_hz": rig["rig"].get("mains_hz", 50.0), "paths": {}, "preflight": rep}
+           "mains_hz": rig["rig"].get("mains_hz", 50.0), "paths": {}, "preflight": rep,
+           # the rig gets a copy without .git; rig-run.sh passes the commit it copied
+           "suite_commit": os.environ.get("CROSSCHECK_SUITE_COMMIT") or None}
     ctx = stages.Ctx(rig=rig, policy=base, out=out, ac2=ac2, rew=rew, manifest=man, yes=a.yes,
                      skip=set(x for x in a.skip.split(",") if x), fs=rep["jack_fs"])
     ctx.save()

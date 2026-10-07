@@ -65,3 +65,17 @@ d50 = { pass = 0.02, warn = 0.05 }
 
 [coherence]
 min_fraction_099 = 0.95     # live TF: share of columns 31 Hz - 20 kHz at gamma^2 >= 0.99 (info below)
+
+[compare]
+# `compare` flags a judged value that moved more than max(step[unit], pass_fraction × pass
+# limit) from its baseline. The unit step is about the take-to-take scatter of a quiet band;
+# a band held to a wider limit is that much noisier (Xone at -50 vs -30 dBFS: 20-100 Hz
+# bands 0.03 dB / 0.4 deg apart), so half its pass limit is the smallest move that is the
+# analysis or the build rather than the take.
+pass_fraction = 0.5
+[compare.step]
+dB = 0.02
+"°" = 0.1
+rel = 0.02                  # group delay vs truth, relative: 2 %
+"µs" = 0.2
+"" = 0.01                   # coherence share, D50

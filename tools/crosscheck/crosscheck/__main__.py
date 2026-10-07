@@ -1,4 +1,4 @@
-"""python -m crosscheck {preflight,run,analyse} — see README.md."""
+"""python -m crosscheck {preflight,run,analyse,baseline,compare} — see README.md."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,20 @@ def main(argv=None) -> int:
     an.add_argument("--out", type=Path, help="report directory (default: <source>/report)")
     an.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
     an.add_argument("--no-plots", action="store_true")
+
+    bl = sub.add_parser("baseline", help="write the baselines (one per stage and level) from a reviewed run")
+    bl.add_argument("source", type=Path, help="run directory with report/results.json")
+    bl.add_argument("--stage", action="append", help="only this stage (repeatable; default: all in the run)")
+    bl.add_argument("--dir", type=Path, help="baseline directory (default: the suite's baselines/)")
+    bl.add_argument("--force", action="store_true", help="accept a run with FAILs")
+    bl.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
+
+    cp = sub.add_parser("compare", help="compare a run with the baselines of its stages and levels")
+    cp.add_argument("source", type=Path, help="run directory with report/results.json")
+    cp.add_argument("--baseline", type=Path, help="baseline file or directory (default: the suite's baselines/)")
+    cp.add_argument("--stage", action="append", help="only this stage (repeatable)")
+    cp.add_argument("--out", type=Path, help="where compare.md goes (default: <source>/report)")
+    cp.add_argument("--tolerances", type=Path, help="tolerances TOML (default: the suite's)")
 
     for name, hlp in (("preflight", "read-only checks of the rig, no emission"),
                       ("run", "preflight, then the stages; emitting stages need the flags below")):
@@ -49,6 +63,27 @@ def main(argv=None) -> int:
         s = res["summary"]
         print(f"{path}: " + ", ".join(f"{k} {s.get(k, 0)}" for k in report.STATUS_ORDER))
         return 1 if s.get("FAIL") else 0
+    if a.cmd == "baseline":
+        from . import baseline
+        try:
+            lines, written = baseline.write_baselines(a.source, a.dir, a.stage, a.force, a.tolerances)
+        except (ValueError, FileNotFoundError) as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 2
+        print("\n".join(lines))
+        for p in written:
+            print(f"wrote {p}")
+        return 0
+    if a.cmd == "compare":
+        from . import baseline
+        try:
+            rc, blocks, path = baseline.compare(a.source, a.baseline, a.tolerances, a.stage, a.out)
+        except FileNotFoundError as e:
+            print(f"stopped: {e}", file=sys.stderr)
+            return 2
+        print("\n".join(baseline.summary_lines(blocks)))
+        print(f"{path}: " + ("differences beyond the baseline" if rc else "no worse status, no value beyond its step"))
+        return rc
     from . import run
     from .levels import PolicyError
     try:

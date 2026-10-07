@@ -1,0 +1,17 @@
+{
+ "schema": 1,
+ "rig": "pupu",
+ "stage": "ambient",
+ "level_dbfs": null,
+ "provenance": {"run": "20261007T100854Z", "started": "2026-10-07T10:08:55Z", "ac2_build": "0.0.0+badbfc1f8877", "rew_version": "5.40 Beta 135 API 0.9.8", "flags": {"emit": "-50dbfs", "emit_speaker": null, "allow_electrical_level": null, "stages": ["ambient", "xone"], "skip": ""}, "suite_commit": null},
+ "summary": {"PASS": 5, "INCONCLUSIVE": 1, "INFO": 1},
+ "checks": {
+  "ambient.bands.REW RTA": {"status": "INFO", "value": 3.90986, "unit": "dB", "tol": null},
+  "ambient.bands.ac2 RTA": {"status": "INCONCLUSIVE", "value": 7.21948, "unit": "dB", "tol": [1.0, 2.0]},
+  "ambient.leq.A.REW": {"status": "PASS", "value": -0.00144011, "unit": "dB", "tol": [0.5, 1.0]},
+  "ambient.leq.A.ac2": {"status": "PASS", "value": -0.0193296, "unit": "dB", "tol": [0.5, 1.0]},
+  "ambient.leq.A.ac2_rew": {"status": "PASS", "value": -0.0178895, "unit": "dB", "tol": [0.5, 1.0]},
+  "ambient.leq.C.ac2": {"status": "PASS", "value": -0.0104706, "unit": "dB", "tol": [0.5, 1.0]},
+  "ambient.leq.Z.ac2": {"status": "PASS", "value": -0.0143997, "unit": "dB", "tol": [0.5, 1.0]}
+ }
+}
