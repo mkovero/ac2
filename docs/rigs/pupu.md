@@ -551,6 +551,6 @@ Xone tones are now 15, 26.25, 35, 40.5, 56.2, 60.5, 93.9, 1040 and 10000 Hz: eac
 two harmonics clear and together they cover H2..H5 below 100 Hz (`tests/test_rig_tones.py`).
 Run `20261007T193836Z`: 243 PASS, 1 WARN (10Hz-11s H3 at 26 Hz −3.0 dB vs sine, 11 dB over its
 floor), 0 FAIL; judged harmonic comparisons 3 → 19. Of the 164 INCONCLUSIVE, 60 are the mains
-bands no tone can avoid and 102 harmonics below floor (the Xone's H3..H5 sit under −115 dBr):
+bands no tone can avoid, 101 harmonics below floor (the Xone's H3..H5 sit under −115 dBr), 2 LF H2 bounds and the 1040 Hz group delay:
 those need a lower floor, not a different tone. The 1040 Hz displayed group delay still has a
 mains column beside it. Baseline `xone-10dbfs.json` re-taken from this run.
