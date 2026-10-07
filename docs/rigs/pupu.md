@@ -523,3 +523,20 @@ ringing (longer rise trades against H2 tail leakage in rooms); `meas new rta` ha
 option, so the suite cannot judge ac2's RTA; C50/C80 are reported when the decay meets the
 noise before the clarity boundary (should be refused like T20/T30); a tonal line inside the
 1/3-oct floor band reads as a harmonic. Speaker path at −50 dBFS is noise-limited below 1 kHz.
+
+### Electrical runs at proper level (2026-10-07 evening, ac2d 2638893 → 8c3a658)
+
+At −50 dBFS the electrical comparisons below 1 kHz were noise-limited (all five FAILs of the
+first baselines were REW's analysis or scatter, none ac2's). With the operator's go the suite now
+drives the electrical paths up to −10 dBFS (`electrical_max_dbfs`, backstop −6 in code; the
+speaker stays at −50). Xone −20: 192 PASS, 1 FAIL (REW's own H2 at 10 kHz). Xone −10: 196 PASS,
+1 FAIL — ac2's H2 at 22 Hz on the 20 Hz request, −63.7 dBr vs −86.1 by steady sines.
+
+Cause: the loopback reference (FF400 out 2 → in 2) falls 29 dB at 1 Hz below the emitted sweep
+(DC blocking); the deconvolution's edge at the regularisation level rings as a 0–6 Hz swell
+around the arrival, and the short H2 window's side lobes carry it into 40–60 Hz. A linear
+replica of the path read the same H2, so it was never the Xone. Fixed in 8c3a658: the H2–H5 and
+noise windows read the response high-passed below the lowest analysed fundamental.
+Xone −10 on 8c3a658: 198 PASS, 0 WARN, 0 FAIL; dist H2 at 22 Hz +1.1 dB vs sine (was +22.4),
+10 Hz requests now read a value (−0.2 dB) instead of a bound. Baselines `xone-10dbfs`
+(8c3a658) and `xone-20dbfs` (2638893) in `tools/crosscheck/baselines/pupu/`.
