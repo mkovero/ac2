@@ -226,7 +226,6 @@ impl AppState {
 
     /// ←/→ (`d`) or Enter (`0`) on a line of the Display page: changes it at once.
     fn display_change(&mut self, row: DisplayRow, d: i32, out: &mut Vec<Request>) {
-        let _ = out;
         if let Overlay::Settings(s) = &mut self.overlay {
             s.display = row;
         }
@@ -255,6 +254,21 @@ impl AppState {
                     self.prefs.spectrograph_span_s = Some(span);
                     self.prefs_dirty = true;
                 }
+            }
+            // The panes' G keys, so the spectrograph's history comes and goes as it does
+            // there; which panes show and which has the focus stay as they were.
+            DisplayRow::SpectrumView | DisplayRow::SweepView if d != 0 => {
+                let layout = self.layout;
+                let c = if row == DisplayRow::SpectrumView {
+                    CommandId::Spectrograph
+                } else {
+                    CommandId::SweepView
+                };
+                // Three views: back one is forward two.
+                for _ in 0..if d > 0 { 1 } else { 2 } {
+                    self.command(c, &Keymap::default(), out);
+                }
+                self.layout = layout;
             }
             DisplayRow::LevelAxes if d == 0 => {
                 crate::prefs::LevelPrefs::default().apply(&mut self.view);

@@ -291,6 +291,10 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
         st.prefs.key_hints,
         st.prefs.spl_hold_ms,
         st.view.spectrum.spectrograph.span_s,
+        crate::settings::PaneViews {
+            spectrum: st.view.spectrum.mode,
+            sweep: st.view.distortion.mode,
+        },
     );
     for (row, value) in rows {
         let focused = s.display == row;

@@ -21,6 +21,7 @@ use ac2_proto::model::{Generator, ServerInfo, ServerMode};
 use ac2_proto::units::Dbfs;
 use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
 use ac2_scene::theme::ThemeName;
+use ac2_scene::view::{SpectrumMode, SweepMode};
 
 use crate::cal_view::CalView;
 use crate::leq_dialog::LeqDialog;
@@ -238,16 +239,20 @@ pub enum DisplayRow {
     Theme,
     KeyHints,
     SplHold,
+    SpectrumView,
     Spectrograph,
+    SweepView,
     LevelAxes,
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 5] = [
+    pub const ALL: [DisplayRow; 7] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::SplHold,
+        DisplayRow::SpectrumView,
         DisplayRow::Spectrograph,
+        DisplayRow::SweepView,
         DisplayRow::LevelAxes,
     ];
 
@@ -256,6 +261,8 @@ impl DisplayRow {
             DisplayRow::Theme => "Theme",
             DisplayRow::KeyHints => "Key hints",
             DisplayRow::SplHold => "SPL number holds",
+            DisplayRow::SpectrumView => "Spectrum pane shows",
+            DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::Spectrograph => "Spectrograph history",
             DisplayRow::LevelAxes => "Level axes",
         }
@@ -293,12 +300,38 @@ pub fn step_span(s: u32, d: i32) -> u32 {
     all[(i + d).clamp(0, all.len() as i32 - 1) as usize]
 }
 
+/// What the spectrum pane's view is called (G steps it).
+pub fn spectrum_view_name(m: SpectrumMode) -> &'static str {
+    match m {
+        SpectrumMode::Spectrum => "the spectrum",
+        SpectrumMode::Split => "the spectrum over its spectrograph",
+        SpectrumMode::Spectrograph => "the spectrograph",
+    }
+}
+
+/// What the sweep pane's view is called (G steps it).
+pub fn sweep_view_name(m: SweepMode) -> &'static str {
+    match m {
+        SweepMode::Response => "response and distortion",
+        SweepMode::Ir => "the impulse response",
+        SweepMode::Room => "the room parameters",
+    }
+}
+
+/// The views of the panes the Display page shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaneViews {
+    pub spectrum: SpectrumMode,
+    pub sweep: SweepMode,
+}
+
 /// What the Display page shows for each line: title, value, whose.
 pub fn display_rows(
     theme: ThemeName,
     key_hints: bool,
     spl_hold_ms: Option<u32>,
     span_s: u32,
+    views: PaneViews,
 ) -> Vec<(DisplayRow, String)> {
     DisplayRow::ALL
         .iter()
@@ -319,6 +352,8 @@ pub fn display_rows(
                     }
                 },
                 DisplayRow::Spectrograph => format!("last {span_s} s"),
+                DisplayRow::SpectrumView => spectrum_view_name(views.spectrum).to_owned(),
+                DisplayRow::SweepView => sweep_view_name(views.sweep).to_owned(),
                 DisplayRow::LevelAxes => {
                     "each pane's as last left · Enter resets them to the defaults".into()
                 }
@@ -934,7 +969,11 @@ mod tests {
         assert_eq!(step_hold(None, -1), None);
         assert_eq!(step_span(10, 1), 30);
         assert_eq!(step_span(120, 1), 120);
-        let rows = display_rows(ThemeName::Light, false, Some(500), 30);
+        let views = PaneViews {
+            spectrum: SpectrumMode::Split,
+            sweep: SweepMode::Room,
+        };
+        let rows = display_rows(ThemeName::Light, false, Some(500), 30, views);
         let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
         assert_eq!(
             texts,
@@ -942,7 +981,9 @@ mod tests {
                 "light",
                 "hidden",
                 "0.50 s",
+                "the spectrum over its spectrograph",
                 "last 30 s",
+                "the room parameters",
                 "each pane's as last left · Enter resets them to the defaults",
             ]
         );

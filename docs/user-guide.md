@@ -1193,7 +1193,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+↑` | Display offset +3 dB of the selected curve | `offset_up_coarse` |
 | `Alt+Shift+↓` | Display offset −3 dB of the selected curve | `offset_down_coarse` |
 | `Alt+Home` | Display offset of the selected curve back to 0 | `offset_clear` |
-| `Shift+O` | Open audio session… | `session_open` |
+| `Shift+O` | Open audio session: Settings › Audio… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
 | `Shift+L` | Leq windows and limits of the SPL meter: Settings › SPL / Leq… | `leq_windows` |

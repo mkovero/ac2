@@ -219,8 +219,26 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     assert_eq!(t.st.prefs.spl_hold_ms, Some(250));
     t.key("Down");
     t.key("Right");
+    assert_eq!(
+        t.st.view.spectrum.mode,
+        ac2_scene::view::SpectrumMode::Split
+    );
+    t.key("Left");
+    assert_eq!(
+        t.st.view.spectrum.mode,
+        ac2_scene::view::SpectrumMode::Spectrum
+    );
+    t.key("Down");
+    t.key("Right");
     assert_eq!(t.st.view.spectrum.spectrograph.span_s, 60);
     assert_eq!(t.st.prefs.spectrograph_span_s, Some(60));
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(t.st.view.distortion.mode, ac2_scene::view::SweepMode::Ir);
+    assert_eq!(
+        t.st.layout_prefs().sweep_view,
+        ac2_scene::view::SweepMode::Ir
+    );
     t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::LevelAxes);
     t.st.view.tf.magnitude_db = ac2_scene::axis::Range { lo: -3.0, hi: 3.0 };
