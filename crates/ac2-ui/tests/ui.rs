@@ -2535,7 +2535,7 @@ fn key_hints() {
 
 /// The SPL meter maximised (W): the held level large and centred with `LAF · dBFS` under
 /// it, the level bar, the statistics and the footer; W again, full screen: the stage view,
-/// the meter alone on the screen.
+/// the meter alone on the screen, without the calibration footer.
 #[test]
 fn spl_meter_big_and_stage() {
     if !have_gpu("spl_meter_big_and_stage") {

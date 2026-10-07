@@ -377,7 +377,17 @@ impl Stack {
 /// the meter has run) and, at the bottom, the calibration. Secondary text grows with the
 /// pane. Laid out from the bottom up, so on a small pane the footer wraps or is cut, the
 /// statistics wrap and the number shrinks rather than anything running into anything else.
-pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport) -> SplScene {
+/// On the `stage` (full screen) the meter is read across a room: the calibration line is
+/// drawn only while the reading is stale or stopped, when what the level rests on matters
+/// for judging it; otherwise its room goes to the number. (The history, Shift+B, belongs to
+/// the Leq windows: it leaves this view.)
+pub fn spl_scene(
+    r: &SplReadout,
+    stage: bool,
+    status: &Status,
+    theme: &Theme,
+    size: Viewport,
+) -> SplScene {
     let mut c = Canvas::new(size, theme);
     let pad = 12.0;
     let strip = canvas::banner_strip(&mut c, status, pad, size.width - 2.0 * pad, size, theme);
@@ -409,7 +419,12 @@ pub fn spl_scene(r: &SplReadout, status: &Status, theme: &Theme, size: Viewport)
         h if h >= 160.0 => 2,
         _ => 1,
     };
-    let footer = footer_rows(&r.cal, area.w, small, max_rows);
+    let captioned = !stage || r.stale.is_some();
+    let footer = if captioned {
+        footer_rows(&r.cal, area.w, small, max_rows)
+    } else {
+        Vec::new()
+    };
     let line_h = 1.25 * small;
     let footer_top = area.bottom() - footer.len() as f32 * line_h;
     let gap = (0.5 * stat_size).max(6.0);
@@ -827,7 +842,13 @@ mod tests {
     #[test]
     fn scene_carries_the_strings() {
         let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", Some(5.0));
-        let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(400.0, 200.0));
+        let s = spl_scene(
+            &r,
+            false,
+            &Status::default(),
+            &Theme::dark(),
+            vp(400.0, 200.0),
+        );
         assert!(s.banners.is_empty());
         assert_eq!(s.strip.h, 0.0);
         assert_eq!(s.area, Rect::new(12.0, 12.0, 376.0, 176.0));
@@ -861,7 +882,7 @@ mod tests {
             (1280.0, 800.0),
             (1920.0, 1080.0),
         ] {
-            let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(w, h));
+            let s = spl_scene(&r, false, &Status::default(), &Theme::dark(), vp(w, h));
             let n = number(&s, &r);
             let b = label_box(n);
             let cx = s.area.x + s.area.w / 2.0;
@@ -876,7 +897,13 @@ mod tests {
         }
         // Full screen: read across a room.
         assert!(last > 300.0, "{last}");
-        let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(1920.0, 1080.0));
+        let s = spl_scene(
+            &r,
+            false,
+            &Status::default(),
+            &Theme::dark(),
+            vp(1920.0, 1080.0),
+        );
         let stat = s.scene.layers[2]
             .labels
             .iter()
@@ -888,8 +915,20 @@ mod tests {
             let mut f = frame(LevelScale::DbSpl);
             f.meta.level = v;
             let r2 = readout(&f, "cal 94 dB · 3 h ago", None);
-            let s2 = spl_scene(&r2, &Status::default(), &Theme::dark(), vp(1280.0, 800.0));
-            let s1 = spl_scene(&r, &Status::default(), &Theme::dark(), vp(1280.0, 800.0));
+            let s2 = spl_scene(
+                &r2,
+                false,
+                &Status::default(),
+                &Theme::dark(),
+                vp(1280.0, 800.0),
+            );
+            let s1 = spl_scene(
+                &r,
+                false,
+                &Status::default(),
+                &Theme::dark(),
+                vp(1280.0, 800.0),
+            );
             assert_eq!(number(&s2, &r2).size, number(&s1, &r).size, "{v}");
         }
     }
@@ -899,6 +938,7 @@ mod tests {
         let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", None);
         let s = spl_scene(
             &r,
+            false,
             &crate::banner::tests::everything(),
             &Theme::dark(),
             vp(400.0, 300.0),
@@ -920,14 +960,19 @@ mod tests {
         f.meta.weighting = Weighting::Z;
         f.meta.duration = Seconds(360.0);
         let cal = "MM1 34804 · uncalibrated · mic curve: MM1 34804 90°";
-        for stale in [Some(9.0), None] {
+        for (stale, stage) in [
+            (Some(9.0), false),
+            (None, false),
+            (Some(9.0), true),
+            (None, true),
+        ] {
             let r = readout(&f, cal, stale);
             let widths = (220..=900).step_by(20).chain((960..=1920).step_by(96));
             for w in widths {
                 let heights = (150..=420).step_by(15).chain((480..=1080).step_by(60));
                 for h in heights {
                     let size = vp(w as f32, h as f32);
-                    let s = spl_scene(&r, &Status::default(), &Theme::dark(), size);
+                    let s = spl_scene(&r, stage, &Status::default(), &Theme::dark(), size);
                     let labels = &s.scene.layers[2].labels;
                     let boxes: Vec<(&str, Rect)> = labels
                         .iter()
@@ -970,10 +1015,12 @@ mod tests {
                             "{w}×{h}: heading over bar"
                         );
                     }
-                    // Wide enough, the heading is whole and the footer one row.
+                    // Wide enough, the heading is whole and the footer one row (on the
+                    // stage only while stale).
                     if w >= 600 {
                         assert!(texts.contains(&SINCE), "{w}×{h}: {texts:?}");
-                        assert!(texts.contains(&cal), "{w}×{h}: {texts:?}");
+                        let footer = !stage || stale.is_some();
+                        assert_eq!(texts.contains(&cal), footer, "{w}×{h}: {texts:?}");
                     }
                     assert!(
                         !texts.iter().any(|t| t.contains("since") && t != &heading.0),
@@ -1015,7 +1062,7 @@ mod tests {
     fn narrow_meter_wraps_the_statistics() {
         let r = readout(&frame(LevelScale::DbSpl), "cal 94 dB · 3 h ago", None);
         let stats = |w: f32| {
-            let s = spl_scene(&r, &Status::default(), &Theme::dark(), vp(w, 260.0));
+            let s = spl_scene(&r, false, &Status::default(), &Theme::dark(), vp(w, 260.0));
             s.scene.layers[2]
                 .labels
                 .iter()
@@ -1038,6 +1085,47 @@ mod tests {
                     b.text
                 );
             }
+        }
+    }
+
+    /// Full screen: no calibration line unless the reading is stale or stopped; its room
+    /// goes to the number and the statistics move down. Outside full screen it stays.
+    #[test]
+    fn the_stage_has_no_calibration_line_unless_stale() {
+        let cal = "MM1 34804 · cal 94 dB · 3 h ago";
+        let th = Theme::dark();
+        for (w, h) in [(640.0, 400.0), (1280.0, 720.0), (1920.0, 1080.0)] {
+            let at = format!("{w}×{h}");
+            let scene = |stage, stale: Option<f64>| {
+                let r = readout(&frame(LevelScale::DbSpl), cal, stale);
+                let s = spl_scene(&r, stage, &Status::default(), &th, vp(w, h));
+                (r, s)
+            };
+            let since_y = |s: &SplScene| {
+                s.scene.layers[2]
+                    .labels
+                    .iter()
+                    .find(|l| l.text == SINCE)
+                    .expect("since")
+                    .pos[1]
+            };
+            let (r, bare) = scene(true, None);
+            assert!(!texts(&bare.scene).contains(&cal), "{at}");
+            let (_, windowed) = scene(false, None);
+            assert!(texts(&windowed.scene).contains(&cal), "{at}");
+            assert!(
+                since_y(&bare) > since_y(&windowed),
+                "{at}: the room goes to the number"
+            );
+            assert!(
+                number(&bare, &r).size >= number(&windowed, &r).size,
+                "{at}: the number never shrinks for it"
+            );
+            // Stale or stopped: what the level rests on is back with the warning.
+            let (_, stale) = scene(true, Some(5.0));
+            let all = texts(&stale.scene);
+            assert!(all.contains(&cal), "{at}: {all:?}");
+            assert!(all.iter().any(|t| t.starts_with("STALE")), "{at}: {all:?}");
         }
     }
 

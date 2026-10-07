@@ -865,7 +865,7 @@ pub fn spl(
 ) -> Option<SplScene> {
     let (r, tf) = spl_meters(st).find_map(|m| spl_readout_of(st, m, keymap, now))?;
     let status = status(st, &[tf], None, now);
-    Some(spl_scene(&r, &status, theme, size))
+    Some(spl_scene(&r, st.stage_view(), &status, theme, size))
 }
 
 /// The meter + Leq view of the SPL meter the pane shows (else the first one with both

@@ -2,6 +2,13 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+SPL meter stage (operator, 2026-10-07: "SPL meter view does not need to show the grey
+calibration line when in fullscreen"):
+- **No calibration line on the meter's stage**: in full screen the meter alone draws its
+  grey calibration footer only while the reading is STALE / STOPPED; its room goes to the
+  number and the statistics. Outside full screen as before; meter + Leq already follows the
+  Leq stage's caption rule (its footer is the Leq caption).
+
 Notifications that fit their text (operator, 2026-10-07: "right bottom notify box …
 the box does not scale by text in any reasonable manner, its useless like this"):
 - **A toast's box fits its text**: as wide as its longest line up to 45 % of the window

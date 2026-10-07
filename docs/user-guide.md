@@ -1045,7 +1045,8 @@ meter reads **A-weighted, Fast** (`LAF`) unless you choose otherwise, in the app
   meter's figures since its start or the last **R**, not the Leq windows (**G**), which
   keep their own lengths and are never reset by R.
   The secondary figures grow with the pane: **W** twice (or W, then F11) makes the meter
-  full screen, to be read across the room.
+  full screen, to be read across the room; there the grey calibration line shows only
+  with STALE (or STOPPED), otherwise its room goes to the number.
 - **Readable, not flickering.** The number takes a new reading twice a second with F and I
   and once a second with S, as a hand-held meter's display does; the bar moves with every
   frame. The reading is the time-weighted level at that instant — the time weighting is
