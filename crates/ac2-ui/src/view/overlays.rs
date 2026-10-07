@@ -24,6 +24,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::Offer(_) => super::session::offer(app, ctx, ch),
         Overlay::NewLog(_) => super::leq::new_log(app, ctx, ch),
         Overlay::Delete(_) => delete(app, ctx, ch),
+        Overlay::Choose(_) => choose(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }
@@ -75,6 +76,72 @@ fn delete(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         });
     if let Some(m) = msg {
         app.dispatch(Msg::Delete(m));
+    }
+}
+
+/// A question with a few answers: what deleting a measurement does with its traces, where
+/// a trace moves. The highlighted answer is what Enter takes; one that cannot be taken says
+/// why under it.
+fn choose(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    let Overlay::Choose(p) = &app.state.overlay else {
+        return;
+    };
+    let p = p.as_ref().clone();
+    backdrop(ctx);
+    let mut msg = None;
+    egui::Area::new(egui::Id::new("ac2-choose"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 90.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(520.0);
+                ui.label(RichText::new(&p.title).strong().size(16.0));
+                ui.add_space(6.0);
+                for (i, l) in p.lines.iter().enumerate() {
+                    let t = RichText::new(l);
+                    ui.label(if i == 0 {
+                        t.color(ch.dim)
+                    } else {
+                        t.color(ch.warn)
+                    });
+                }
+                ui.add_space(8.0);
+                for (i, c) in p.choices.iter().enumerate() {
+                    let mut text = RichText::new(&c.label);
+                    if c.blocked.is_some() {
+                        text = text.color(ch.dim);
+                    } else if i == p.index {
+                        text = text.strong();
+                    }
+                    let r = ui.add_sized(
+                        [ui.available_width(), 24.0],
+                        egui::Button::selectable(i == p.index, text),
+                    );
+                    if r.clicked() {
+                        msg = Some(Some(i));
+                    }
+                    if let Some(why) = &c.blocked {
+                        ui.label(
+                            RichText::new(format!("    not possible: {why}"))
+                                .small()
+                                .color(ch.dim),
+                        );
+                    }
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    // A question whose answers include Cancel needs no second one.
+                    if !p.choices.iter().any(|c| c.label == "Cancel")
+                        && ui.button("Cancel").clicked()
+                    {
+                        msg = Some(None);
+                    }
+                    ui.label(RichText::new(&p.hint).small().color(ch.dim));
+                });
+            });
+        });
+    if let Some(m) = msg {
+        app.dispatch(Msg::Choose(m));
     }
 }
 

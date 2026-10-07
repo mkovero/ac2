@@ -8,6 +8,7 @@
 use ac2_proto::model::{
     AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, MeasConfig, MeasKind,
     Measurement, Operand, Smoothing, SmoothingFraction, SmoothingMode, TraceKind, TraceMeta,
+    TraceOwner,
 };
 use ac2_proto::units::MeasId;
 
@@ -26,14 +27,36 @@ pub struct Candidate {
 
 impl Candidate {
     /// Every live transfer, spectrum and RTA measurement (not a math channel: capture one
-    /// to use it), then every stored trace of those kinds, in list order.
-    pub fn all(ms: &[&Measurement], traces: &[&TraceMeta]) -> Vec<Candidate> {
+    /// to use it), then every stored trace of those kinds, in list order — `owner`'s live
+    /// curve and traces first: the channel is made on that measurement.
+    pub fn all(
+        ms: &[&Measurement],
+        traces: &[&TraceMeta],
+        owner: Option<TraceOwner>,
+    ) -> Vec<Candidate> {
+        let mut v = Self::listed(ms, traces);
+        if let Some(owner) = owner {
+            let mine = |c: &Candidate| match c.operand {
+                Operand::Meas { meas } => owner == TraceOwner::Meas { meas },
+                Operand::Trace { trace } => traces
+                    .iter()
+                    .any(|t| t.id == trace && t.edit.owner == owner),
+            };
+            // Stable: the list's order within each part.
+            v.sort_by_key(|c| !mine(c));
+        }
+        v
+    }
+
+    fn listed(ms: &[&Measurement], traces: &[&TraceMeta]) -> Vec<Candidate> {
         let live = ms.iter().filter_map(|m| {
             let domain = match m.config.kind {
                 MeasKind::Transfer { .. } => MathDomain::Transfer,
                 MeasKind::Spectrum { .. } => MathDomain::Spectrum,
                 MeasKind::Rta { .. } => MathDomain::Rta,
-                MeasKind::Spl { .. } | MeasKind::Math { .. } => return None,
+                MeasKind::Spl { .. } | MeasKind::Math { .. } | MeasKind::Sweep { .. } => {
+                    return None;
+                }
             };
             Some(Candidate {
                 operand: Operand::Meas { meas: m.id },
@@ -123,6 +146,8 @@ pub struct MathForm {
     pub candidates: Vec<Candidate>,
     /// The channel being edited; `None` for a new one.
     pub edit: Option<MeasId>,
+    /// Where the channel is listed: the measurement selected when it was made.
+    pub owner: TraceOwner,
     /// The name the dialog last filled in: while the name field still holds it, it follows
     /// the expression.
     auto_name: String,
@@ -180,7 +205,11 @@ impl Form {
     /// The new-math-channel dialog over `candidates`; `first` is preselected as A (the
     /// focused measurement or the selected trace). `None` with fewer than two candidates of
     /// one kind.
-    pub fn math(candidates: Vec<Candidate>, first: Option<Operand>) -> Result<Form, String> {
+    pub fn math(
+        candidates: Vec<Candidate>,
+        first: Option<Operand>,
+        owner: TraceOwner,
+    ) -> Result<Form, String> {
         let pairable = |d: MathDomain| candidates.iter().filter(|c| c.domain == d).count() >= 2;
         let a = first
             .and_then(|o| candidates.iter().find(|c| c.operand == o))
@@ -209,6 +238,7 @@ impl Form {
         f.math = Some(Box::new(MathForm {
             candidates,
             edit: None,
+            owner,
             auto_name: String::new(),
             mode: SmoothingMode::MagnitudePhase,
         }));
@@ -255,6 +285,7 @@ impl Form {
         f.math = Some(Box::new(MathForm {
             candidates,
             edit: Some(m.id),
+            owner: config.owner,
             // An edited channel keeps its name unless the operator types another.
             auto_name: String::new(),
             mode: config
@@ -520,7 +551,7 @@ impl Form {
                 }
             }
         };
-        let mut config = MathConfig::of(domain, expr);
+        let mut config = MathConfig::of(m.owner, domain, expr);
         if let Some(r) = p.reference {
             config.reference = MathReference::Operand { operand: r };
         }
@@ -625,7 +656,7 @@ mod tests {
             spec(4, "Spec 2"),
         ];
         let refs: Vec<&Measurement> = ms.iter().collect();
-        Candidate::all(&refs, &[])
+        Candidate::all(&refs, &[], None)
     }
 
     fn focus(f: &mut Form, id: FieldId) {
@@ -643,7 +674,8 @@ mod tests {
     /// A ÷ B by default, named after itself; B follows A's kind.
     #[test]
     fn defaults_and_names() {
-        let f = Form::math(candidates(), None).unwrap_or_else(|e| panic!("{e}"));
+        let f =
+            Form::math(candidates(), None, TraceOwner::Imported).unwrap_or_else(|e| panic!("{e}"));
         let c = f.math_config().unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(c.name, "Main L ÷ Sub");
         let MeasKind::Math { config } = c.kind else {
@@ -659,8 +691,12 @@ mod tests {
             }
         );
         // A spectrum as A: its operators are − and +, B a spectrum.
-        let mut f = Form::math(candidates(), Some(Operand::Meas { meas: MeasId(3) }))
-            .unwrap_or_else(|e| panic!("{e}"));
+        let mut f = Form::math(
+            candidates(),
+            Some(Operand::Meas { meas: MeasId(3) }),
+            TraceOwner::Imported,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
         let c = math_of(&f);
         assert_eq!(c.domain, MathDomain::Spectrum);
         assert_eq!(
@@ -685,7 +721,8 @@ mod tests {
     /// The average ticks every operand of A's kind; leaving all but one out is refused.
     #[test]
     fn average_ticks() {
-        let mut f = Form::math(candidates(), None).unwrap_or_else(|e| panic!("{e}"));
+        let mut f =
+            Form::math(candidates(), None, TraceOwner::Imported).unwrap_or_else(|e| panic!("{e}"));
         focus(&mut f, FieldId::Operator);
         f.cycle(4);
         let c = math_of(&f);
@@ -712,6 +749,7 @@ mod tests {
     fn edit_prefills() {
         let mut m = tf(9, "Main + Sub");
         let mut c = MathConfig::of(
+            TraceOwner::Meas { meas: MeasId(1) },
             MathDomain::Transfer,
             MathExpr::Binary {
                 a: Operand::Meas { meas: MeasId(1) },
@@ -725,7 +763,7 @@ mod tests {
         m.config.kind = MeasKind::Math { config: c.clone() };
         let ms = [tf(1, "Main L"), tf(2, "Sub")];
         let refs: Vec<&Measurement> = ms.iter().collect();
-        let mut cands = Candidate::all(&refs, &[]);
+        let mut cands = Candidate::all(&refs, &[], None);
         cands.push(Candidate {
             operand: Operand::Trace { trace: TraceId(5) },
             name: "Sub alone".into(),

@@ -242,8 +242,29 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         .collect();
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
 
+    // The legend groups a measurement's curves: its live curve, its stored traces, the
+    // math channels made on it, group by group in the tree's order.
+    let ms = st.measurements();
+    // The group of the measurement the pane shows leads, as its curve does.
+    let groups = ac2_scene::meas_list::group_order(&ms);
+    let lead = focus_tf(st).map(|m| match &m.config.kind {
+        ac2_proto::model::MeasKind::Math { config } => config.owner,
+        _ => ac2_proto::model::TraceOwner::Meas { meas: m.id },
+    });
+    let rank = |g: ac2_proto::model::TraceOwner| {
+        if Some(g) == lead {
+            0
+        } else {
+            1 + groups.iter().position(|x| *x == g).unwrap_or(groups.len())
+        }
+    };
+    let mut ranks: Vec<usize> = Vec::new();
     let mut traces: Vec<TfTrace<'_>> = Vec::new();
     for l in &live {
+        ranks.push(rank(match &l.meas.config.kind {
+            ac2_proto::model::MeasKind::Math { config } => config.owner,
+            _ => ac2_proto::model::TraceOwner::Meas { meas: l.meas.id },
+        }));
         let FrameData::Tf(f) = &l.tf.frame.data else {
             continue;
         };
@@ -276,6 +297,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         traces.push(t);
     }
     for (data, cols) in &stored {
+        ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs);
         t.selected = st.selected_trace == Some(data.meta.id);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
@@ -288,6 +310,10 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         }
         traces.push(t);
     }
+    let mut order: Vec<usize> = (0..traces.len()).collect();
+    order.sort_by_key(|i| (ranks.get(*i).copied().unwrap_or(usize::MAX), *i));
+    let mut slots: Vec<Option<TfTrace<'_>>> = traces.into_iter().map(Some).collect();
+    let traces: Vec<TfTrace<'_>> = order.iter().filter_map(|i| slots[*i].take()).collect();
     let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
     let focus = focus_tf(st);
     let mut status = status(st, &shown, focus, now);

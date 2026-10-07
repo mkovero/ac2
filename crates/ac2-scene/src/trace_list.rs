@@ -12,7 +12,7 @@ use crate::primitives::Color;
 pub fn kind_name(t: &TraceMeta) -> &'static str {
     match (t.kind, &t.source) {
         (TraceKind::Target, _) => "target",
-        (_, TraceSource::IrCapture { .. }) => "sweep",
+        (_, TraceSource::Sweep { .. }) => "sweep run",
         (TraceKind::Sweep, TraceSource::Imported { .. }) => "imported sweep",
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",
@@ -32,8 +32,29 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
     }
 }
 
-/// The list's order, which the selection keys follow too: slotted traces by slot, then the
-/// rest in display order (oldest first).
+/// What a sweep run played: `3 s −50.0 dBFS` (`2 × 3 s …` when averaged).
+pub fn run_settings(t: &TraceMeta) -> Option<String> {
+    let TraceSource::Sweep {
+        sweep,
+        level,
+        repeats,
+        ..
+    } = &t.source
+    else {
+        return None;
+    };
+    let d = sweep.duration.0;
+    let secs = format::fixed(d, if d.fract() == 0.0 { 0 } else { 1 });
+    let times = if *repeats > 1 {
+        format!("{repeats} × ")
+    } else {
+        String::new()
+    };
+    Some(format!("{times}{secs} s {} dBFS", format::level(level.0)))
+}
+
+/// The list's order within a group, which the selection keys follow too: slotted traces by
+/// slot, then the rest in display order (oldest first).
 pub fn sort_key(t: &TraceMeta) -> (u8, u32, TraceId) {
     (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id)
 }
@@ -90,9 +111,11 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             let locked = t.edit.locked.then(|| "locked".to_owned());
             let no_data = (!i.has_data).then(|| "no data yet".to_owned());
             let smooth = smoothing_text(t);
+            let run = run_settings(t);
             // Dropped from the end first: what the eye and the colour already say last.
             let parts = |extra: bool| -> String {
                 let mut v = vec![kind.to_owned()];
+                v.extend(run.clone());
                 v.extend(slot.clone());
                 v.extend(hidden.clone());
                 if extra {
@@ -186,6 +209,7 @@ mod tests {
         TraceMeta {
             id: TraceId(id),
             edit: TraceEdit {
+                owner: ac2_proto::model::TraceOwner::Imported,
                 name: name.into(),
                 color: Rgb {
                     r: 10,
@@ -223,8 +247,11 @@ mod tests {
     }
 
     fn swept() -> TraceSource {
-        TraceSource::IrCapture {
+        TraceSource::Sweep {
+            meas: MeasId(3),
+            meas_name: "Genelec".into(),
             run: SweepId(1),
+            number: 1,
             epoch: SessionEpoch(1),
             sweep: EssSpec {
                 start: Hz(20.0),
@@ -252,7 +279,7 @@ mod tests {
     fn every_kind_is_named() {
         let cases = [
             (TraceKind::Transfer, captured(), "capture"),
-            (TraceKind::Sweep, swept(), "sweep"),
+            (TraceKind::Sweep, swept(), "sweep run"),
             (TraceKind::Transfer, imported(), "imported"),
             (TraceKind::Sweep, imported(), "imported sweep"),
             (TraceKind::Target, imported(), "target"),
@@ -364,9 +391,19 @@ mod tests {
             "Main L S3: capture · slot 3 · hidden · 1/6 oct, hidden"
         );
         assert_eq!(rows[1].details, ["target"]);
-        assert_eq!(rows[2].details, ["sweep · no data yet", "sweep"]);
-        assert_eq!(rows[3].details, ["sweep"]);
-        assert_eq!(rows[3].describe, "Sweep 2: sweep, shown");
+        assert_eq!(
+            rows[2].details,
+            [
+                "sweep run · 1 s −20.0 dBFS · no data yet",
+                "sweep run · 1 s −20.0 dBFS",
+                "sweep run"
+            ]
+        );
+        assert_eq!(rows[3].details, ["sweep run · 1 s −20.0 dBFS", "sweep run"]);
+        assert_eq!(
+            rows[3].describe,
+            "Sweep 2: sweep run · 1 s −20.0 dBFS, shown"
+        );
         assert_eq!(rows[3].color, Color::from_rgba8([10, 20, 30, 255]));
     }
 

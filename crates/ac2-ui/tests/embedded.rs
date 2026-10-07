@@ -597,6 +597,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
 
+    let sweeps_before = sweep_count(&d.st);
     d.key("Shift+S");
     d.send(Msg::Text("S".into()));
     d.until(
@@ -619,6 +620,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
         assert_eq!(f.fields[f.focus].display(), "1 s (quick look)");
     }
     d.key("Enter");
+    arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
         s.stimulus.phase == StimPhase::Armed
             && s.daemon().is_some_and(|x| {
@@ -694,6 +696,7 @@ fn room_parameters_of_a_sweep_from_the_app() -> R {
     })?;
     d.key("Escape");
 
+    let sweeps_before = sweep_count(&d.st);
     d.key("Shift+S");
     d.send(Msg::Text("S".into()));
     d.until(
@@ -714,6 +717,7 @@ fn room_parameters_of_a_sweep_from_the_app() -> R {
         assert_eq!(f.fields[f.focus].display(), "2 s");
     }
     d.key("Enter");
+    arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
         s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
     })?;
@@ -819,6 +823,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     assert_eq!(rows[1].used, Some(InputUse::Measurement));
     assert_eq!(d.st.operation(), None);
 
+    let sweeps_before = sweep_count(&d.st);
     d.key("Shift+S");
     d.send(Msg::Text("S".into()));
     d.until(
@@ -839,6 +844,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
         }
     }
     d.key("Enter");
+    arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
         s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
     })?;
@@ -848,7 +854,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
         step(s).as_deref() == Some("sweep 1 of 2")
     })?;
     let p = d.st.operation().ok_or("progress")?;
-    assert_eq!(p.title, "sweep \"Sweep 1\"");
+    assert_eq!(p.title, "sweep \"Run 1\"");
     assert!(
         p.remaining
             .is_some_and(|r| r.ends_with("left") || r == "finishing")
@@ -1974,10 +1980,33 @@ fn a_preset_replaces_the_windows_from_the_app() -> R {
     Ok(())
 }
 
+/// Sweep measurements the daemon lists.
+fn sweep_count(s: &AppState) -> usize {
+    s.daemon().map_or(0, |x| {
+        x.measurements
+            .iter()
+            .filter(|m| matches!(m.config.kind, ac2_proto::model::MeasKind::Sweep { .. }))
+            .count()
+    })
+}
+
+/// After the sweep dialog's Enter: the new sweep measurement is listed and selected, and
+/// making it armed nothing; Space on the sweep pane then arms its run.
+fn arm_new_sweep(d: &mut Driver, before: usize) -> R {
+    d.until("the sweep measurement made, nothing armed", |s| {
+        sweep_count(s) > before
+            && s.stimulus.phase == StimPhase::Idle
+            && s.sweep_meas().is_some_and(|m| Some(m.id) == s.selected)
+    })?;
+    d.key("Space");
+    Ok(())
+}
+
 /// One short sweep from the dialog, played and stored (the simulated rig: no real audio).
 fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
     use ac2_ui::forms::FieldId;
     let before = d.st.sweep_traces().len();
+    let sweeps_before = sweep_count(&d.st);
     d.key("Shift+S");
     d.send(Msg::Text("S".into()));
     d.until(
@@ -1996,6 +2025,7 @@ fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
         f.cycle(-1);
     }
     d.key("Enter");
+    arm_new_sweep(d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
         s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
     })?;
@@ -2014,6 +2044,24 @@ fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
         .ok_or_else(|| "the new sweep is not selected".into())
 }
 
+/// The selected sweep measurement run again (Space, Enter): its second run, selected.
+fn run_again(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
+    let before = d.st.sweep_traces().len();
+    d.key("Space");
+    d.until("armed with the sweep", |s| {
+        s.stimulus.phase == StimPhase::Armed
+    })?;
+    d.key("Enter");
+    d.until("the run stored, the stimulus off", |s| {
+        s.sweep.run.is_none()
+            && s.sweep_traces().len() == before + 1
+            && s.stimulus.phase == StimPhase::Idle
+            && s.daemon().is_some_and(|x| x.generator.owner.is_none())
+    })?;
+    d.st.selected_trace
+        .ok_or_else(|| "the new run is not selected".into())
+}
+
 /// From an empty daemon, two sweeps, then the transfer pane chooses between them: V selects
 /// each in turn and the sweep pane follows; A hides one, V skips it; N on the sweep pane
 /// selects for the transfer pane too.
@@ -2024,7 +2072,7 @@ fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let first = sweep_from_the_dialog(&mut d)?;
-    let second = sweep_from_the_dialog(&mut d)?;
+    let second = run_again(&mut d)?;
     assert_ne!(first, second);
     let shown = |s: &AppState| s.shown_sweep().map(|(t, _)| t.meta.id);
     let name = |s: &AppState, id| {
@@ -2047,8 +2095,8 @@ fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     assert_eq!(
         listed,
         [
-            (n1.as_str(), "sweep", true, false),
-            (n2.as_str(), "sweep", true, true)
+            (n1.as_str(), "sweep run", true, false),
+            (n2.as_str(), "sweep run", true, true)
         ]
     );
 
@@ -4072,9 +4120,9 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
     Ok(())
 }
 
-/// The stimulus follows the view, from an empty daemon on the simulated rig: one sweep from
-/// the dialog; then on the sweep view Space arms and Enter plays a re-sweep with the same
-/// settings (a second result, no dialog); on the transfer view Space and Enter play pink
+/// The stimulus follows the view, from an empty daemon on the simulated rig: a sweep
+/// measurement from the dialog, run once; then on the sweep view Space arms and Enter plays
+/// it again with the same settings (a second run under it, no dialog); on the transfer view Space and Enter play pink
 /// noise at the level typed for the sweep, and the transfer measurement sees the rig's path.
 #[test]
 fn the_stimulus_follows_the_view_from_the_app() -> R {
@@ -4086,6 +4134,7 @@ fn the_stimulus_follows_the_view_from_the_app() -> R {
     measure_from_empty(&mut d)?;
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
+    let sweeps_before = sweep_count(&d.st);
     d.key("Shift+S");
     d.send(Msg::Text("S".into()));
     d.until(
@@ -4104,6 +4153,7 @@ fn the_stimulus_follows_the_view_from_the_app() -> R {
         f.cycle(-1);
     }
     d.key("Enter");
+    arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
         s.stimulus.phase == StimPhase::Armed
     })?;
@@ -4130,10 +4180,10 @@ fn the_stimulus_follows_the_view_from_the_app() -> R {
     };
     assert_eq!(
         hint(&d.st).as_deref(),
-        Some("Space arms: re-sweep 1 s −26 dBFS")
+        Some("Space arms: sweep Sweep 1 · 1 s −26 dBFS")
     );
 
-    // The sweep view: Space arms the re-sweep (no dialog), Enter plays it.
+    // The sweep view: Space arms the next run (no dialog), Enter plays it.
     d.key("Space");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("armed with the re-sweep", |s| {
@@ -4146,7 +4196,7 @@ fn the_stimulus_follows_the_view_from_the_app() -> R {
     })?;
     assert_eq!(
         hint(&d.st).as_deref(),
-        Some("Enter fires: re-sweep 1 s −26 dBFS")
+        Some("Enter fires: sweep Sweep 1 · 1 s −26 dBFS")
     );
     d.key("Enter");
     d.until("the second sweep stored", |s| {
@@ -4154,7 +4204,7 @@ fn the_stimulus_follows_the_view_from_the_app() -> R {
     })?;
     let all = sweeps(&d.st);
     let settings = |src: &TraceSource| match src {
-        TraceSource::IrCapture {
+        TraceSource::Sweep {
             sweep,
             level,
             repeats,
@@ -4170,7 +4220,7 @@ fn the_stimulus_follows_the_view_from_the_app() -> R {
         )),
         _ => None,
     };
-    assert_eq!(all[1].0, "Sweep 2");
+    assert_eq!((all[0].0.as_str(), all[1].0.as_str()), ("Run 1", "Run 2"));
     assert!(settings(&all[0].1).is_some());
     assert_eq!(
         settings(&all[0].1),
@@ -4337,4 +4387,167 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
         })
     })?;
     Ok(())
+}
+
+/// The measurement tree from an empty daemon, keyboard only: a transfer measurement, two
+/// captures filed under it, a math channel made on it; a sweep measurement that plays
+/// nothing until Space and Enter, two runs under it; the transfer measurement deleted with
+/// its traces kept, which then list under Imported.
+#[test]
+fn the_measurement_tree_from_an_empty_daemon() -> R {
+    use ac2_proto::model::{MathOp, Operand, TraceOwner};
+    use ac2_scene::meas_list::TreeKey;
+    use ac2_ui::forms::FieldId;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
+    let under_tf = TraceOwner::Meas { meas: tf };
+
+    // Two captures, filed under the measurement they came from.
+    d.key("Ctrl+1");
+    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    d.key("Ctrl+2");
+    d.until("slot 2", |s| s.slots()[1].is_some())?;
+    let (a, b) = (
+        d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?,
+        d.st.slots()[1].map(|t| t.id).ok_or("slot 2")?,
+    );
+    for id in [a, b] {
+        assert_eq!(d.st.trace_meta(id)?.edit.owner, under_tf);
+    }
+
+    // A math channel made with the measurement selected lives under it.
+    d.send(Msg::SelectMeas(tf));
+    d.key("Shift+M");
+    d.send(Msg::Text("M".into()));
+    d.until(
+        "the math dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.math.is_some()),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        assert!(f.pick_operand(FieldId::OperandA, Operand::Trace { trace: a }));
+        assert!(f.pick_operand(FieldId::OperandB, Operand::Trace { trace: b }));
+    }
+    d.key("Enter");
+    let math = |s: &AppState| {
+        s.measurements()
+            .into_iter()
+            .find(
+                |m| matches!(&m.config.kind, MeasKind::Math { config } if config.owner == under_tf),
+            )
+            .map(|m| m.id)
+    };
+    d.until("the math channel under the measurement", |s| {
+        math(s).is_some()
+    })?;
+    let math_id = math(&d.st).ok_or("math")?;
+    if let Some(MeasKind::Math { config }) = d.st.meas(math_id).map(|m| &m.config.kind) {
+        assert!(matches!(
+            config.expr,
+            ac2_proto::model::MathExpr::Binary {
+                op: MathOp::Divide,
+                ..
+            }
+        ));
+    }
+    let keys: Vec<TreeKey> = d.st.tree_rows().iter().map(|r| r.key).collect();
+    assert_eq!(
+        &keys[..5],
+        &[
+            TreeKey::Meas(tf),
+            TreeKey::Live(tf),
+            TreeKey::Trace(a),
+            TreeKey::Trace(b),
+            TreeKey::Math(math_id)
+        ]
+    );
+
+    // A sweep measurement: made by the dialog, it waits; nothing plays.
+    let sweeps_before = sweep_count(&d.st);
+    d.key("Shift+S");
+    d.send(Msg::Text("S".into()));
+    d.until(
+        "the sweep dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep),
+    )?;
+    if let Overlay::Form(f) = &mut d.st.overlay {
+        f.set_text(FieldId::Level, "-20");
+        f.set_text(FieldId::From, "100 Hz");
+        f.set_text(FieldId::To, "5 kHz");
+        f.focus = f
+            .fields
+            .iter()
+            .position(|x| x.id == FieldId::Duration)
+            .ok_or("duration")?;
+        f.cycle(-1);
+    }
+    d.key("Enter");
+    d.until("the sweep measurement listed", |s| {
+        sweep_count(s) > sweeps_before && s.sweep_meas().is_some_and(|m| Some(m.id) == s.selected)
+    })?;
+    let sweep = d.st.sweep_meas().map(|m| m.id).ok_or("sweep measurement")?;
+    std::thread::sleep(Duration::from_millis(300));
+    d.pump();
+    let st = d.st.daemon().ok_or("state")?;
+    assert!(!st.generator.armed && !st.generator.firing, "nothing armed");
+    assert!(st.sweep.is_none(), "nothing played");
+    // Space arms its run, Enter plays it; twice.
+    for n in 1..=2 {
+        d.key("Space");
+        d.until("armed with the sweep", |s| {
+            s.stimulus.phase == StimPhase::Armed
+        })?;
+        d.key("Enter");
+        d.until("the run stored, the stimulus off", |s| {
+            runs_of(s, sweep).len() == n
+                && s.sweep.run.is_none()
+                && s.stimulus.phase == StimPhase::Idle
+                && s.daemon().is_some_and(|x| x.generator.owner.is_none())
+        })?;
+    }
+    assert_eq!(runs_of(&d.st, sweep), ["Run 1", "Run 2"]);
+
+    // Delete the transfer measurement, keeping what it owns: under Imported now.
+    d.send(Msg::SelectMeas(tf));
+    d.key("Delete");
+    let Overlay::Choose(c) = &d.st.overlay else {
+        return Err(format!("{:?}", d.st.overlay).into());
+    };
+    assert_eq!(
+        c.lines[0],
+        "transfer function · running · it has 2 traces and 1 math channel."
+    );
+    assert_eq!(c.index, ac2_scene::meas_list::KEEP);
+    d.key("Enter");
+    d.until("the measurement gone, its traces under Imported", |s| {
+        s.meas(tf).is_none()
+            && [a, b].iter().all(|t| {
+                s.trace_meta(*t)
+                    .is_ok_and(|m| m.edit.owner == TraceOwner::Imported)
+            })
+            && matches!(s.meas(math_id).map(|m| &m.config.kind),
+                Some(MeasKind::Math { config }) if config.owner == TraceOwner::Imported)
+    })?;
+    let names: Vec<String> = d.st.tree_rows().iter().map(|r| r.name.clone()).collect();
+    let at = names
+        .iter()
+        .position(|n| n == "Imported")
+        .ok_or("Imported")?;
+    assert_eq!(names.len(), at + 4, "{names:?}");
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
+/// The names of sweep measurement `meas`'s runs, oldest first.
+fn runs_of(s: &AppState, meas: ac2_proto::units::MeasId) -> Vec<String> {
+    let owner = ac2_proto::model::TraceOwner::Meas { meas };
+    s.daemon().map_or(Vec::new(), |x| {
+        x.traces
+            .iter()
+            .filter(|t| t.edit.owner == owner && t.kind == ac2_proto::model::TraceKind::Sweep)
+            .map(|t| t.edit.name.clone())
+            .collect()
+    })
 }

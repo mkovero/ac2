@@ -1,5 +1,6 @@
-//! The new-measurement dialogs: a few fields that build a `meas.create`, and the sweep
-//! dialog that sets up an `ir.capture`. Inputs and outputs are picked by name from the
+//! The new-measurement dialogs: a few fields that build a `meas.create` (a sweep
+//! measurement's too: its settings, run later with `sweep.run`), and the dialogs that edit
+//! a math channel or a sweep measurement. Inputs and outputs are picked by name from the
 //! session's channels (inputs with their meters in the view), never typed as numbers. Pure
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
@@ -9,10 +10,10 @@
 
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, MeasConfig, MeasKind, Measurement, OpenSession, Operand,
-    RtaConfig, Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, SweepInputs, SweepRequest,
-    TimeWeighting, TransferConfig, Weighting,
+    RtaConfig, Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting,
+    TransferConfig, Weighting,
 };
-use ac2_proto::units::{Dbfs, Hz, Seconds};
+use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,8 +22,10 @@ pub enum FormKind {
     Spectrum,
     Rta,
     Spl,
-    /// Sweep measurement (harmonic distortion).
+    /// Sweep measurement (harmonic distortion): created, run later.
     Sweep,
+    /// A sweep measurement's settings edited (for its next run).
+    SweepEdit,
     /// A new math channel ([`crate::math_dialog`]).
     Math,
     /// A math channel edited.
@@ -38,36 +41,33 @@ impl FormKind {
             FormKind::Spl => "New SPL meter",
             FormKind::Math => "New math channel (A ÷ × + − B, or the average of several)",
             FormKind::MathEdit => "Edit math channel",
-            FormKind::Sweep => "Sweep measurement (response and harmonic distortion)",
+            FormKind::Sweep => "New sweep measurement (response and harmonic distortion)",
+            FormKind::SweepEdit => "Edit sweep measurement (its next run)",
         }
     }
 
     /// What Enter does.
     pub fn submit(self) -> &'static str {
         match self {
-            FormKind::Sweep => "Enter arms the sweep (then Enter plays it, Esc stops)",
-            FormKind::MathEdit => "Enter applies",
+            FormKind::Sweep => {
+                "Enter creates it; nothing plays · Space on the sweep pane arms a run, Enter plays it"
+            }
+            FormKind::MathEdit | FormKind::SweepEdit => "Enter applies",
             _ => "Enter creates and starts",
         }
     }
 
-    /// What closing the dialog does to the stimulus, for a dialog that arms one.
+    /// What closing the dialog does to the stimulus, for a dialog that arms one (none
+    /// does: a sweep measurement is created without arming).
     pub fn close_note(self) -> Option<String> {
-        match self {
-            FormKind::Sweep => Some(format!(
-                "Esc closes and disarms a stimulus armed but not playing · one that plays keeps \
-                 playing: {} or the strip's Stop stops it",
-                crate::keys::STOP_ANYWHERE.label()
-            )),
-            _ => None,
-        }
+        None
     }
 
     /// The button that does it.
     pub fn verb(self) -> &'static str {
         match self {
-            FormKind::Sweep => "Arm",
-            FormKind::MathEdit => "Apply",
+            FormKind::Sweep => "Create",
+            FormKind::MathEdit | FormKind::SweepEdit => "Apply",
             _ => "Create and start",
         }
     }
@@ -217,13 +217,6 @@ impl Field {
     }
 }
 
-/// A sweep the dialog set up: what `ir.capture` gets once armed and fired.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SweepPlan {
-    pub request: SweepRequest,
-    pub name: String,
-}
-
 /// Sweep durations offered, shortest first: → is longer, ← shorter.
 const DURATIONS: [(&str, f64); 4] = [
     ("1 s (quick look)", 1.0),
@@ -276,6 +269,8 @@ pub struct Form {
     pub selected: bool,
     /// The math channel dialog's own state ([`crate::math_dialog`]).
     pub math: Option<Box<crate::math_dialog::MathForm>>,
+    /// The sweep measurement this dialog edits.
+    pub sweep_edit: Option<MeasId>,
 }
 
 /// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
@@ -359,6 +354,7 @@ impl Form {
             error: None,
             selected: false,
             math: None,
+            sweep_edit: None,
         }
     }
 
@@ -393,7 +389,9 @@ impl Form {
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
             // Built by [`Form::sweep`] and [`Form::math`].
-            FormKind::Sweep | FormKind::Math | FormKind::MathEdit => Vec::new(),
+            FormKind::Sweep | FormKind::SweepEdit | FormKind::Math | FormKind::MathEdit => {
+                Vec::new()
+            }
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -516,12 +514,90 @@ impl Form {
         Self::new(FormKind::Sweep, fields)
     }
 
-    /// The sweep the dialog sets up, checked against the session and the daemon's ceiling.
-    pub fn sweep_plan(
+    /// The dialog editing sweep measurement `m`: its settings as the fields. The name stays
+    /// the measurement's.
+    pub fn edit_sweep(
+        m: &Measurement,
+        open: Option<&OpenSession>,
+        inputs: &[(u16, String)],
+        outputs: &[(u16, String)],
+    ) -> Result<Self, String> {
+        let MeasKind::Sweep { config: c } = &m.config.kind else {
+            return Err(format!("{} is not a sweep measurement", m.config.name));
+        };
+        let mut f = Self::sweep(open, 0, inputs, outputs, &[], Some(c.level));
+        f.kind = FormKind::SweepEdit;
+        f.sweep_edit = Some(m.id);
+        let nearest = |v: f64, opts: &[f64]| {
+            opts.iter()
+                .enumerate()
+                .min_by(|a, b| (a.1 - v).abs().total_cmp(&(b.1 - v).abs()))
+                .map_or(0, |(i, _)| i)
+        };
+        let durations = DURATIONS.map(|d| d.1);
+        let tails = TAILS.map(|t| t.1);
+        let repeats = REPEATS.map(|r| f64::from(r.1));
+        let speaker = c
+            .outputs
+            .iter()
+            .copied()
+            .find(|o| open.and_then(|o| o.config.loopback).map(|l| l.output) != Some(*o))
+            .or_else(|| c.outputs.first().copied());
+        for field in &mut f.fields {
+            match (field.id, &mut field.value) {
+                (
+                    FieldId::Reference,
+                    Value::Channel {
+                        channels, index, ..
+                    },
+                ) => {
+                    *index = channels.iter().position(|x| *x == c.reference_input);
+                }
+                (
+                    FieldId::Measurement,
+                    Value::Channel {
+                        channels, index, ..
+                    },
+                ) => {
+                    *index = channels.iter().position(|x| *x == c.measurement_input);
+                }
+                (
+                    FieldId::Output,
+                    Value::Channel {
+                        channels, index, ..
+                    },
+                ) => {
+                    *index = speaker.and_then(|s| channels.iter().position(|x| *x == s));
+                }
+                (FieldId::From, Value::Text(t)) => {
+                    *t = ac2_scene::format::freq_readout(c.sweep.start.0)
+                }
+                (FieldId::To, Value::Text(t)) => {
+                    *t = ac2_scene::format::freq_readout(c.sweep.end.0)
+                }
+                (FieldId::Duration, Value::Choice { index, .. }) => {
+                    *index = nearest(c.sweep.duration.0, &durations);
+                }
+                (FieldId::Repeats, Value::Choice { index, .. }) => {
+                    *index = nearest(f64::from(c.repeats), &repeats);
+                }
+                (FieldId::Tail, Value::Choice { index, .. }) => {
+                    *index = nearest(c.tail.map_or(1.0, |t| t.0), &tails);
+                }
+                (FieldId::Name, Value::Text(t)) => *t = m.config.name.clone(),
+                _ => {}
+            }
+        }
+        Ok(f)
+    }
+
+    /// The sweep measurement the dialog makes (or its new settings), checked against the
+    /// session and the daemon's ceiling.
+    pub fn sweep_meas(
         &self,
         open: Option<&OpenSession>,
         ceiling: Option<Dbfs>,
-    ) -> Result<SweepPlan, String> {
+    ) -> Result<MeasConfig, String> {
         let open = open.ok_or("no open audio session")?;
         let captured = &open.config.input_channels;
         let input = |id: FieldId, what: &str| -> Result<u16, String> {
@@ -594,20 +670,20 @@ impl Form {
         if name.is_empty() {
             return Err("type a name".into());
         }
-        Ok(SweepPlan {
-            request: SweepRequest {
-                inputs: SweepInputs::Channels {
-                    reference,
-                    measurement,
-                },
-                outputs,
-                level: Some(Dbfs(level)),
-                sweep: EssSpec::with_fades(Hz(from), Hz(to), Seconds(duration)),
-                repeats,
-                gate: None,
-                tail: Some(Seconds(tail)),
-            },
+        Ok(MeasConfig {
             name: name.to_owned(),
+            kind: MeasKind::Sweep {
+                config: SweepConfig {
+                    reference_input: reference,
+                    measurement_input: measurement,
+                    outputs,
+                    level: Dbfs(level),
+                    sweep: EssSpec::with_fades(Hz(from), Hz(to), Seconds(duration)),
+                    repeats,
+                    gate: None,
+                    tail: Some(Seconds(tail)),
+                },
+            },
         })
     }
 
@@ -768,7 +844,7 @@ impl Form {
         let pick = |id: FieldId| self.choice_index(id).unwrap_or(0);
         let smoothing = SMOOTHING[pick(FieldId::Smoothing).min(SMOOTHING.len() - 1)].1;
         let kind = match self.kind {
-            FormKind::Sweep => return Err("a sweep makes no measurement".into()),
+            FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
             FormKind::Math | FormKind::MathEdit => return self.math_config(),
             FormKind::Transfer => {
                 let r = input(FieldId::Reference, "reference input")?;
@@ -828,6 +904,7 @@ fn form_kind(k: &MeasKind) -> FormKind {
         MeasKind::Rta { .. } => FormKind::Rta,
         MeasKind::Spl { .. } => FormKind::Spl,
         MeasKind::Math { .. } => FormKind::Math,
+        MeasKind::Sweep { .. } => FormKind::Sweep,
     }
 }
 
@@ -1063,6 +1140,14 @@ mod tests {
         assert_eq!(f.focus, f.fields.len() - 1);
     }
 
+    /// The settings of the sweep measurement the dialog makes.
+    fn swept(f: &Form, o: &OpenSession) -> Result<SweepConfig, String> {
+        match f.sweep_meas(Some(o), None)?.kind {
+            MeasKind::Sweep { config } => Ok(config),
+            _ => Err("not a sweep".into()),
+        }
+    }
+
     fn outs() -> Vec<(u16, String)> {
         vec![(0, "Out 1".into()), (1, "Out 2".into())]
     }
@@ -1084,8 +1169,8 @@ mod tests {
             }),
         );
         let mut f = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[], Some(Dbfs(-50.0)));
-        let duration = |f: &Form| f.sweep_plan(Some(&o), None).expect("plan").request.sweep;
-        let repeats = |f: &Form| f.sweep_plan(Some(&o), None).expect("plan").request.repeats;
+        let duration = |f: &Form| swept(f, &o).expect("plan").sweep;
+        let repeats = |f: &Form| swept(f, &o).expect("plan").repeats;
         assert_eq!(duration(&f).duration, Seconds(3.0));
         assert_eq!(repeats(&f), 1);
         focus(&mut f, FieldId::Duration);
@@ -1120,7 +1205,7 @@ mod tests {
         let mut f = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[2], Some(Dbfs(-50.0)));
         assert_eq!(f.channel(FieldId::Reference), None);
         assert_eq!(f.fields[0].display(), "choose the reference");
-        let e = f.sweep_plan(Some(&o), None).expect_err("no reference");
+        let e = swept(&f, &o).expect_err("no reference");
         assert!(e.contains("choose the reference"), "{e}");
         // → takes the first input, ← from nothing the last.
         f.focus_field(0);
@@ -1128,14 +1213,8 @@ mod tests {
         assert_eq!(f.channel(FieldId::Reference), Some(2));
         f.cycle(-1);
         assert_eq!(f.channel(FieldId::Reference), Some(1));
-        let p = f.sweep_plan(Some(&o), None).expect("plan");
-        assert_eq!(
-            p.request.inputs,
-            SweepInputs::Channels {
-                reference: 1,
-                measurement: 2
-            }
-        );
+        let p = swept(&f, &o).expect("plan");
+        assert_eq!((p.reference_input, p.measurement_input), (1, 2));
 
         let o = open(
             vec![0, 1, 2],
@@ -1147,7 +1226,7 @@ mod tests {
         let f = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[1], Some(Dbfs(-50.0)));
         assert_eq!(f.channel(FieldId::Reference), Some(2));
         assert_eq!(f.channel(FieldId::Measurement), Some(1));
-        assert!(f.sweep_plan(Some(&o), None).is_ok());
+        assert!(swept(&f, &o).is_ok());
     }
 
     /// A text field gets its text selected with the focus (and by Ctrl+A): typing replaces

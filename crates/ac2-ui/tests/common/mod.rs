@@ -470,7 +470,11 @@ impl Rig {
             let mut seat = measurement(5, "Seat 3", transfer(3), None, Some(&TF_GRID));
             seat.running = false;
             s.commit(Change::Measurement(Patch::Set(seat)));
-            let mut config = MathConfig::power_average(MathDomain::Transfer, of.clone());
+            let mut config = MathConfig::power_average(
+                ac2_proto::model::TraceOwner::Imported,
+                MathDomain::Transfer,
+                of.clone(),
+            );
             config.smoothing = Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,
                 mode: SmoothingMode::MagnitudePhase,
@@ -531,6 +535,7 @@ impl Rig {
             );
             s.commit(Change::Measurement(Patch::Set(mic2)));
             let config = MathConfig::of(
+                ac2_proto::model::TraceOwner::Imported,
                 MathDomain::Spectrum,
                 MathExpr::Binary {
                     a,

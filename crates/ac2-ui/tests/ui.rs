@@ -1322,8 +1322,9 @@ fn session_dialog() {
         a.state.overlay == Overlay::None
     });
 
-    // Shift+S: the sweep dialog, inputs and outputs by name; a typed level arms it, Enter
-    // plays it and the result opens the distortion pane.
+    // Shift+S: the sweep dialog, inputs and outputs by name, a typed level; Enter makes the
+    // sweep measurement (nothing armed), Space on the sweep pane arms its run, Enter plays
+    // it and the result opens the distortion pane.
     h.key_press_modifiers(Modifiers::SHIFT, Key::S);
     h.event(Event::Text("S".into()));
     step_until(
@@ -1344,6 +1345,12 @@ fn session_dialog() {
     h.step();
     snapshot(&mut h, "sweep_dialog");
     h.key_press(Key::Enter);
+    step_until(&mut h, "the sweep measurement, nothing armed", |a| {
+        a.state.sweep_meas().is_some()
+            && a.state.layout.focus == PaneKind::Distortion
+            && a.state.daemon().is_some_and(|s| !s.generator.armed)
+    });
+    h.key_press(Key::Space);
     step_until(&mut h, "armed with the sweep", |a| {
         a.state.daemon().is_some_and(|s| {
             s.generator.armed
@@ -1357,7 +1364,7 @@ fn session_dialog() {
     step_until(&mut h, "sweep stored and shown", |a| {
         a.state.layout.focus == PaneKind::Distortion && a.state.shown_sweep().is_some()
     });
-    assert_eq!(fake.executions("ir.capture"), 1);
+    assert_eq!(fake.executions("sweep.run"), 1);
     // The sweep left nothing armed: the stimulus is off (STIM OFF) and the lease was given
     // back.
     step_until(&mut h, "stimulus off and released", |a| {
@@ -1430,6 +1437,7 @@ fn sweep_progress_strip() {
         s.commit(Change::Generator(g));
         s.commit(Change::Sweep(SweepRun {
             id: SweepId(1),
+            meas: ac2_proto::units::MeasId(1),
             owner: ClientId("other".into()),
             name: "Sweep 1".into(),
             reference_input: 0,
@@ -2626,4 +2634,63 @@ fn settings_pages() {
             a.state.my_client_id().map(|c| c.0.as_str()) == Some("ac2-ui test")
         });
     }
+}
+
+/// The measurement tree: captures filed under the measurement they came from, the imported
+/// target under Imported, a folded group; then Delete on a measurement that owns traces asks
+/// Keep / Delete / Cancel.
+#[test]
+fn measurement_tree_and_delete_choices() {
+    if !have_gpu("measurement_tree_and_delete_choices") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
+    step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
+    h.key_press(Key::N);
+    step_until(&mut h, "delay tower", |a| {
+        a.state.selected == Some(MeasId(2))
+    });
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num3);
+    step_until(&mut h, "slot 3", |a| a.state.slots()[2].is_some());
+    h.key_press(Key::Z);
+    step_until(&mut h, "target prompt", |a| {
+        matches!(a.state.overlay, Overlay::Prompt(_))
+    });
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../ac2-traces/tests/fixtures/house_curve.txt");
+    h.event(Event::Text(path.to_string_lossy().into_owned()));
+    h.key_press(Key::Enter);
+    step_until(&mut h, "four stored traces with data", |a| {
+        a.state.traces.len() == 4
+    });
+    // The sweep-less spectrum's group folded with its arrow.
+    let names: Vec<String> = h
+        .state()
+        .state
+        .tree_rows()
+        .iter()
+        .map(|r| r.name.clone())
+        .collect();
+    assert!(names.iter().any(|n| n == "Imported"), "{names:?}");
+    h.state_mut().dispatch(ac2_ui::state::Msg::ToggleGroup(
+        ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) },
+    ));
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::SelectMeas(MeasId(1)));
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "measurement_tree");
+    h.key_press(Key::Delete);
+    step_until(&mut h, "the three answers", |a| {
+        matches!(a.state.overlay, Overlay::Choose(_))
+    });
+    h.step();
+    snapshot(&mut h, "measurement_delete_choices");
+    h.key_press(Key::Escape);
+    step_until(&mut h, "cancelled", |a| a.state.overlay == Overlay::None);
 }

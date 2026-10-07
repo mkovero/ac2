@@ -1339,6 +1339,7 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
     TraceMeta {
         id: TraceId(id),
         edit: TraceEdit {
+            owner: ac2_proto::model::TraceOwner::Imported,
             name: format!("t{id}"),
             color: Rgb { r: 1, g: 2, b: 3 },
             visible: true,
@@ -1667,6 +1668,7 @@ fn math_channel_edit() {
         "Prediction",
         MeasKind::Math {
             config: MathConfig::of(
+                ac2_proto::model::TraceOwner::Imported,
                 MathDomain::Transfer,
                 MathExpr::Binary {
                     a: Operand::Meas { meas: MeasId(1) },
@@ -3401,7 +3403,7 @@ fn sweep_progress_strip_counts_steps_and_time_left() {
     s.sweep = Some(run.clone());
     t.conn(mirror(s.clone()));
     let p = t.st.operation().expect("progress");
-    assert_eq!(p.title, "sweep \"Sweep 1\"");
+    assert_eq!(p.title, "sweep \"Run 1\"");
     assert_eq!(p.step, "sweep 1 of 2");
     assert_eq!(p.fraction, 0.0);
     assert_eq!(p.remaining.as_deref(), Some("about 9 s left"));
@@ -3533,7 +3535,7 @@ fn close_session_and_delete_measurement() {
     t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys);
     let r = t.key("Enter");
     assert!(
-        matches!(r.as_slice(), [Request::Call { cmd: Command::MeasDelete { meas: MeasId(1) }, what }]
+        matches!(r.as_slice(), [Request::Call { cmd: Command::MeasDelete { meas: MeasId(1), traces: ac2_proto::model::OwnedTraces::Keep }, what }]
             if what == "Main L deleted"),
         "{r:?}"
     );
@@ -3598,7 +3600,9 @@ fn new_measurements_start_and_become_selected() {
             MeasKind::Spectrum { config } => ("spectrum", config.input),
             MeasKind::Rta { config } => ("rta", config.input),
             MeasKind::Spl { config } => ("spl", config.input),
-            MeasKind::Transfer { .. } | MeasKind::Math { .. } => ("tf", 99),
+            MeasKind::Transfer { .. } | MeasKind::Math { .. } | MeasKind::Sweep { .. } => {
+                ("tf", 99)
+            }
         };
         assert_eq!(kind, (want, 1));
     }
@@ -3656,11 +3660,65 @@ fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
     assert!(!t.st.open_session_when_empty);
 }
 
+/// The sweep measurement the dialog makes in these tests, as the mirror lists it.
+fn sweep_measurement() -> Measurement {
+    meas(
+        5,
+        "Sweep 1",
+        MeasKind::Sweep {
+            config: SweepConfig {
+                reference_input: 0,
+                measurement_input: 1,
+                outputs: vec![0],
+                level: Dbfs(-50.0),
+                sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+                repeats: 1,
+                gate: None,
+                tail: Some(Seconds(1.0)),
+            },
+        },
+    )
+}
+
+/// The daemon's state with the sweep measurement, the lease this client's.
+fn sweep_state() -> State {
+    let mut s = daemon_state();
+    s.measurements.push(sweep_measurement());
+    s.generator.owner = Some(ClientId("c1".into()));
+    s
+}
+
+/// The dialog makes the sweep measurement (−50 dBFS, 3 s, out 1); the mirror lists it;
+/// Space on the sweep pane arms its run.
+fn sweep_armed(t: &mut T) {
+    t.type_key("Shift+S", "S");
+    let Overlay::Form(f) = &mut t.st.overlay else {
+        panic!("no dialog");
+    };
+    f.set_text(crate::forms::FieldId::Level, "-50");
+    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|x| matches!(x, Request::CreateMeas { .. })),
+        "{r:?}"
+    );
+    t.conn(ConnEvent::MeasCreated(Box::new(sweep_measurement())));
+    t.conn(mirror(sweep_state()));
+    assert!(t.st.sweep_view());
+    let r = t.key("Space");
+    assert!(
+        r.iter().any(|x| matches!(x, Request::StimArm { .. })),
+        "{r:?}"
+    );
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+}
+
 fn sweep_run(status: SweepStatus) -> SweepRun {
     SweepRun {
         id: SweepId(4),
+        meas: MeasId(5),
         owner: ClientId("c1".into()),
-        name: "Sweep 1".into(),
+        name: "Run 1".into(),
         reference_input: 0,
         measurement_input: 1,
         outputs: vec![0],
@@ -3678,7 +3736,14 @@ fn sweep_run(status: SweepStatus) -> SweepRun {
 fn sweep_meta(id: u32) -> TraceMeta {
     TraceMeta {
         kind: TraceKind::Sweep,
-        source: TraceSource::IrCapture {
+        edit: TraceEdit {
+            owner: TraceOwner::Meas { meas: MeasId(5) },
+            ..stored(id, None, 2).edit
+        },
+        source: TraceSource::Sweep {
+            meas: MeasId(5),
+            meas_name: "Sweep 1".into(),
+            number: 1,
             run: SweepId(4),
             epoch: SessionEpoch(2),
             sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
@@ -3741,7 +3806,8 @@ fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
 }
 
 /// The sweep from the palette's dialog to the distortion pane, keyboard only: the dialog
-/// arms the sweep, Enter plays it, the stored result opens the pane, Esc ends sweep mode.
+/// creates a sweep measurement and arms nothing, Space on the sweep pane arms its run,
+/// Enter plays it, the stored result opens the pane.
 #[test]
 fn sweep_from_the_dialog_to_the_distortion_pane() {
     let mut t = T::new();
@@ -3794,6 +3860,33 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     }
     t.text("-50");
     let r = t.key("Enter");
+    let c = r
+        .iter()
+        .find_map(|x| match x {
+            Request::CreateMeas { config } => Some(config.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no measurement made: {r:?}"));
+    let MeasKind::Sweep { config: sc } = &c.kind else {
+        panic!("{c:?}");
+    };
+    assert_eq!(c.name, "Sweep 1");
+    assert_eq!(sc.level, Dbfs(-50.0));
+    assert_eq!(sc.outputs, vec![0]);
+    assert_eq!((sc.reference_input, sc.measurement_input), (0, 1));
+    assert_eq!(sc.repeats, 1);
+    assert!(
+        !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
+        "creating it arms nothing: {r:?}"
+    );
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.layout.focus, PaneKind::Distortion);
+    // Listed, it waits; Space on the sweep pane arms its run.
+    assert_eq!(c.kind, sweep_measurement().config.kind);
+    t.conn(ConnEvent::MeasCreated(Box::new(sweep_measurement())));
+    t.conn(mirror(sweep_state()));
+    assert_eq!(t.st.sweep_meas().map(|m| m.id), Some(MeasId(5)));
+    let r = t.key("Space");
     let settings = r
         .iter()
         .find_map(|x| match x {
@@ -3815,20 +3908,20 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         t.last_toast()
     );
 
-    // Enter plays it: `ir.capture` under the held lease.
+    // Enter plays it: `sweep.run` of the measurement under the held lease, its settings
+    // as stored (nothing changed while armed).
     let r = t.key("Enter");
     match r.as_slice() {
-        [Request::Sweep { request, name }] => {
-            assert_eq!(name, "Sweep 1");
-            assert_eq!(request.level, Some(Dbfs(-50.0)));
-            assert_eq!(
-                request.inputs,
-                SweepInputs::Channels {
-                    reference: 0,
-                    measurement: 1
-                }
-            );
-            assert_eq!(request.repeats, 1);
+        [
+            Request::Sweep {
+                meas,
+                label,
+                update,
+            },
+        ] => {
+            assert_eq!(*meas, MeasId(5));
+            assert_eq!(label, "Sweep 1");
+            assert!(update.is_none());
         }
         other => panic!("{other:?}"),
     }
@@ -3839,8 +3932,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
 
     // Recorded: the daemon has disarmed; the stimulus is off while the analysis runs.
-    let mut s = daemon_state();
-    s.generator.owner = Some(ClientId("c1".into()));
+    let mut s = sweep_state();
     s.sweep = Some(sweep_run(SweepStatus::Analysing));
     let r = t.conn(mirror(s.clone()));
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
@@ -3860,7 +3952,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert!(t.st.sweep.plan.is_none());
     assert_eq!(t.st.stimulus.signal, Signal::Pink);
     assert!(
-        t.last_toast().contains("Shift+S sweeps again"),
+        t.last_toast().contains("Space runs it again"),
         "{}",
         t.last_toast()
     );
@@ -3868,7 +3960,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
     assert!(!t.st.stimulus_live(), "STIM OFF after the sweep");
     assert!(
-        t.last_toast().contains("sweep stored"),
+        t.last_toast().contains("Run 1 of Sweep 1 stored"),
         "{}",
         t.last_toast()
     );
@@ -3934,13 +4026,9 @@ fn a_sweep_submitted_during_a_stop_arms_after_it() {
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
     assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
 
-    t.type_key("Shift+S", "S");
-    let Overlay::Form(f) = &mut t.st.overlay else {
-        panic!("no dialog");
-    };
-    f.set_text(crate::forms::FieldId::Level, "-50");
-    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
-    let r = t.key("Enter");
+    t.conn(mirror(sweep_state()));
+    t.key("Alt+5");
+    let r = t.key("Space");
     assert!(
         !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
         "nothing armed into the lease being released: {r:?}"
@@ -3968,20 +4056,12 @@ fn a_sweep_submitted_during_a_stop_arms_after_it() {
 #[test]
 fn a_failed_sweep_says_why_and_disarms() {
     let mut t = T::new();
-    t.type_key("Shift+S", "S");
-    let Overlay::Form(f) = &mut t.st.overlay else {
-        panic!("no dialog");
-    };
-    f.set_text(crate::forms::FieldId::Level, "-50");
-    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
-    t.key("Enter");
-    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    sweep_armed(&mut t);
     t.key("Enter");
     t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
         sweep_run(SweepStatus::Playing { repeat: 1 }),
     ))));
-    let mut s = daemon_state();
-    s.generator.owner = Some(ClientId("c1".into()));
+    let mut s = sweep_state();
     s.sweep = Some(sweep_run(SweepStatus::Failed {
         reason: SweepFailure::NoReference,
         msg: "the reference input carries no sweep".into(),
@@ -3996,7 +4076,8 @@ fn a_failed_sweep_says_why_and_disarms() {
     );
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
     assert!(!t.st.stimulus_live());
-    assert!(!t.st.layout.is_shown(PaneKind::Distortion));
+    // The sweep measurement stays, waiting for the next Space.
+    assert_eq!(t.st.sweep_meas().map(|m| m.id), Some(MeasId(5)));
 }
 
 /// The top bar's autosave indicator follows the daemon's `autosave` entity: nothing when the
@@ -5627,36 +5708,36 @@ fn next_hint(t: &T) -> Option<String> {
         .map(|(n, w)| ac2_scene::stimulus::hint(n, &w, "L").0)
 }
 
-/// One sweep from the dialog (−50 dBFS, 3 s, out 1), played and stored as trace 7: the
-/// request it played.
-fn sweep_once(t: &mut T) -> SweepRequest {
+/// The sweep measurement from the dialog (−50 dBFS, 3 s, out 1), run once and stored as
+/// trace 7: its settings.
+fn sweep_once(t: &mut T) -> SweepConfig {
     sweep_stored_as(t, 7)
 }
 
-/// One sweep from the dialog, played and stored as trace `id`: the request it played.
-fn sweep_stored_as(t: &mut T, id: u32) -> SweepRequest {
-    t.type_key("Shift+S", "S");
-    let Overlay::Form(f) = &mut t.st.overlay else {
-        panic!("no dialog");
-    };
-    f.set_text(crate::forms::FieldId::Level, "-50");
-    assert!(f.set_channel(crate::forms::FieldId::Reference, 0));
-    t.key("Enter");
-    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+/// The sweep measurement from the dialog, run and stored as trace `id`: its settings.
+fn sweep_stored_as(t: &mut T, id: u32) -> SweepConfig {
+    if t.st.sweep_meas().is_none() {
+        sweep_armed(t);
+    } else {
+        t.key("Space");
+        t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    }
     assert_eq!(
         next_hint(t).as_deref(),
-        Some("Enter fires: sweep 3 s −50 dBFS")
+        Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
     let r = t.key("Enter");
-    let [Request::Sweep { request, .. }] = r.as_slice() else {
+    let [Request::Sweep { meas, update, .. }] = r.as_slice() else {
         panic!("{r:?}");
     };
-    let request = request.clone();
+    assert_eq!((*meas, update.is_none()), (MeasId(5), true));
+    let MeasKind::Sweep { config: request } = sweep_measurement().config.kind else {
+        unreachable!()
+    };
     t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
         sweep_run(SweepStatus::Playing { repeat: 1 }),
     ))));
-    let mut s = daemon_state();
-    s.generator.owner = Some(ClientId("c1".into()));
+    let mut s = sweep_state();
     s.traces = (7..=id).map(sweep_meta).collect();
     s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(id) }));
     t.conn(mirror(s));
@@ -5697,8 +5778,8 @@ fn a_finished_sweep_fits_the_sweep_panes_level_axis() {
     assert_eq!(t.st.view.distortion.range_db, fitted);
 }
 
-/// On the sweep view Space arms a re-sweep with the last sweep's parameters and Enter plays
-/// it, without the dialog; the top bar names it before it plays.
+/// On the sweep view Space arms a run of the sweep measurement with its settings and Enter
+/// plays it, without the dialog; the top bar names it before it plays.
 #[test]
 fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     let mut t = T::new();
@@ -5707,7 +5788,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     assert!(t.st.sweep_view());
     assert_eq!(
         next_hint(&t).as_deref(),
-        Some("Space arms: re-sweep 3 s −50 dBFS")
+        Some("Space arms: sweep Sweep 1 · 3 s −50 dBFS")
     );
     let r = t.key("Space");
     assert_eq!(t.st.overlay, Overlay::None, "no dialog");
@@ -5724,13 +5805,25 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     assert_eq!(
         next_hint(&t).as_deref(),
-        Some("Enter fires: re-sweep 3 s −50 dBFS")
+        Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
+    // A level changed while armed is the measurement's from now on: stored before the run.
+    t.key("Down");
     let r = t.key("Enter");
     match r.as_slice() {
-        [Request::Sweep { request, name }] => {
-            assert_eq!(*request, first, "the same parameters");
-            assert_eq!(name, "Sweep 2");
+        [
+            Request::Sweep {
+                meas,
+                label,
+                update,
+            },
+        ] => {
+            assert_eq!((*meas, label.as_str()), (MeasId(5), "Sweep 1"));
+            let Some(MeasKind::Sweep { config }) = update.as_ref().map(|u| &u.kind) else {
+                panic!("{update:?}");
+            };
+            assert_eq!(config.level, Dbfs(-51.0));
+            assert_eq!(config.sweep, first.sweep, "the same sweep");
         }
         other => panic!("{other:?}"),
     }
@@ -5738,8 +5831,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
         sweep_run(SweepStatus::Playing { repeat: 1 }),
     ))));
-    let mut s = daemon_state();
-    s.generator.owner = Some(ClientId("c1".into()));
+    let mut s = sweep_state();
     s.traces = vec![sweep_meta(7), sweep_meta(8)];
     s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(8) }));
     let r = t.conn(mirror(s));
@@ -5764,7 +5856,10 @@ fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
     t.st.stimulus.level = Some(Dbfs(-40.0));
     t.key("Alt+5");
     assert!(t.st.sweep_view(), "{:?}", t.st.layout.focus);
-    assert_eq!(next_hint(&t).as_deref(), Some("Space sets up a sweep"));
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space sets up a sweep measurement")
+    );
     let r = t.key("Space");
     assert!(
         !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
@@ -5826,7 +5921,7 @@ fn space_on_the_live_views_drives_the_generator() {
     );
     assert_eq!(
         next_hint(&t).as_deref(),
-        Some("Enter fires: re-sweep 3 s −50 dBFS")
+        Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
     // And back: Space on the transfer view makes it the noise again; Enter fires the noise.
     t.key("Alt+1");
@@ -5888,4 +5983,252 @@ fn g_steps_the_spectrum_panes_views() {
     let mut u = T::new();
     u.st.set_prefs(prefs);
     assert_eq!(u.st.view.spectrum.mode, SpectrumMode::Spectrograph);
+}
+
+/// The measurement tree as the operator sees it: Main L with two captures and a math
+/// channel made on it, the spectrum, an import; captures stay under Main L.
+fn tree_state() -> State {
+    let mut s = daemon_state();
+    let main = TraceOwner::Meas { meas: MeasId(1) };
+    let capture = |id: u32, name: &str| {
+        let mut t = stored(id, None, 2);
+        t.edit.name = name.into();
+        t.edit.owner = main;
+        t
+    };
+    let mut imported = stored(5, None, 2);
+    imported.edit.name = "1083 94cm".into();
+    s.traces = vec![capture(3, "pre-EQ"), capture(4, "post-EQ"), imported];
+    s.measurements.push(meas(
+        6,
+        "pre ÷ post",
+        MeasKind::Math {
+            config: MathConfig::of(
+                main,
+                MathDomain::Transfer,
+                MathExpr::Binary {
+                    a: Operand::Trace { trace: TraceId(3) },
+                    op: MathOp::Divide,
+                    b: Operand::Trace { trace: TraceId(4) },
+                },
+            ),
+        },
+    ));
+    s
+}
+
+fn tree_names(t: &T) -> Vec<String> {
+    t.st.tree_rows().iter().map(|r| r.name.clone()).collect()
+}
+
+#[test]
+fn the_tree_lists_what_each_measurement_owns_and_folds() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    assert_eq!(
+        tree_names(&t),
+        [
+            "TF  Main L",
+            "Main L (live)",
+            "pre-EQ",
+            "post-EQ",
+            "pre ÷ post",
+            "FFT  Sub",
+            "Sub (live)",
+            "Imported",
+            "1083 94cm"
+        ]
+    );
+    // V steps through the traces in the tree's order.
+    t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(3)));
+    t.key("V");
+    assert_eq!(t.st.selected_trace, Some(TraceId(4)));
+    // Folding Main L hides its rows; its arrow (or the palette command) unfolds it.
+    t.st.update(
+        Msg::ToggleGroup(TraceOwner::Meas { meas: MeasId(1) }),
+        &t.keys,
+    );
+    assert_eq!(
+        tree_names(&t),
+        [
+            "TF  Main L",
+            "FFT  Sub",
+            "Sub (live)",
+            "Imported",
+            "1083 94cm"
+        ]
+    );
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.update(Msg::Command(CommandId::ToggleGroup), &t.keys);
+    assert_eq!(tree_names(&t).len(), 9);
+}
+
+/// Shift+A on a measurement hides its live curve, its traces and its math channel; again
+/// shows them.
+#[test]
+fn shift_a_hides_a_measurement_with_everything_under_it() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let r = t.key("Shift+A");
+    let hidden: Vec<TraceId> = r
+        .iter()
+        .filter_map(|x| match x {
+            Request::Call {
+                cmd: Command::TraceUpdate { trace, edit },
+                ..
+            } if !edit.visible => Some(*trace),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hidden, [TraceId(3), TraceId(4)]);
+    assert!(t.st.hidden_meas.contains("Main L"));
+    assert!(t.st.hidden_meas.contains("pre ÷ post"));
+    assert!(!t.st.hidden_meas.contains("Sub"));
+    // The daemon hid them: Shift+A again shows the whole group.
+    let mut s = tree_state();
+    for tr in &mut s.traces[..2] {
+        tr.edit.visible = false;
+    }
+    t.conn(mirror(s));
+    let r = t.key("Shift+A");
+    let shown = r
+        .iter()
+        .filter(|x| {
+            matches!(x, Request::Call { cmd: Command::TraceUpdate { edit, .. }, .. } if edit.visible)
+        })
+        .count();
+    assert_eq!(shown, 2);
+    assert!(!t.st.hidden_meas.contains("Main L"));
+}
+
+/// Shift+F2 asks where the selected trace goes; Enter files it there (a `trace.update` with
+/// its new owner). Where it is now cannot be picked.
+#[test]
+fn move_files_a_trace_under_another_measurement() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    t.key("Shift+F2");
+    let Overlay::Choose(c) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(c.title, "Move 1083 94cm to…");
+    let labels: Vec<&str> = c.choices.iter().map(|x| x.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        ["TF  Main L", "FFT  Sub", "Imported (under no measurement)"]
+    );
+    assert!(c.choices[2].blocked.is_some(), "it is filed there");
+    assert_eq!(c.index, 0);
+    let r = t.key("Enter");
+    match r.as_slice() {
+        [
+            Request::Call {
+                cmd: Command::TraceUpdate { trace, edit },
+                what,
+            },
+        ] => {
+            assert_eq!(*trace, TraceId(5));
+            assert_eq!(edit.owner, TraceOwner::Meas { meas: MeasId(1) });
+            assert_eq!(what, "1083 94cm moved to Main L");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(t.st.overlay, Overlay::None);
+    // A math channel moves with `meas.update`.
+    t.st.update(Msg::SelectMeas(MeasId(6)), &t.keys);
+    t.key("Shift+F2");
+    t.key("Down");
+    t.key("Down");
+    let r = t.key("Enter");
+    let moved = match r.as_slice() {
+        [
+            Request::Call {
+                cmd: Command::MeasUpdate { meas, config },
+                ..
+            },
+        ] => (*meas, config.kind.clone()),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(moved.0, MeasId(6));
+    assert!(matches!(moved.1, MeasKind::Math { config } if config.owner == TraceOwner::Imported));
+}
+
+/// Deleting a measurement that owns traces asks every time: keep them (the default),
+/// delete them too, or cancel — keyboard only.
+#[test]
+fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert!(t.key("Delete").is_empty());
+    let Overlay::Choose(c) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(c.title, "Delete measurement Main L?");
+    assert_eq!(
+        c.lines[0],
+        "transfer function · running · it has 2 traces and 1 math channel."
+    );
+    assert_eq!(c.index, ac2_scene::meas_list::KEEP);
+    // Esc cancels; nothing is sent.
+    assert!(t.key("Esc").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    let deleted = |r: &[Request]| match r {
+        [
+            Request::Call {
+                cmd: Command::MeasDelete { meas, traces },
+                ..
+            },
+        ] => Some((*meas, *traces)),
+        _ => None,
+    };
+    // Enter keeps them.
+    t.key("Delete");
+    let r = t.key("Enter");
+    assert_eq!(deleted(&r), Some((MeasId(1), OwnedTraces::Keep)));
+    // → then Enter deletes them too; → → then Enter cancels.
+    t.key("Delete");
+    t.key("Right");
+    let r = t.key("Enter");
+    assert_eq!(deleted(&r), Some((MeasId(1), OwnedTraces::Delete)));
+    t.key("Delete");
+    t.key("Right");
+    t.key("Right");
+    assert!(t.key("Enter").is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+/// Shift+M files the new math channel under the measurement selected, and offers its live
+/// curve and traces first.
+#[test]
+fn a_new_math_channel_lives_under_the_selected_measurement() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("Shift+M");
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    let m = f.math.as_ref().expect("math dialog");
+    assert_eq!(m.owner, TraceOwner::Meas { meas: MeasId(1) });
+    let first: Vec<&str> = m
+        .candidates
+        .iter()
+        .take(3)
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(first, ["Main L", "pre-EQ", "post-EQ"]);
+    let r = t.key("Enter");
+    let c = r
+        .iter()
+        .find_map(|x| match x {
+            Request::CreateMeas { config } => Some(config.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{r:?}"));
+    assert!(matches!(&c.kind, MeasKind::Math { config }
+        if config.owner == TraceOwner::Meas { meas: MeasId(1) }));
 }

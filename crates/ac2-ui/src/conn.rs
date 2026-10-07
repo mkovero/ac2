@@ -167,10 +167,14 @@ pub enum Request {
     StimSet(GeneratorDesired),
     /// Stop and release; without a lease, `gen.stop` (any client may stop the output).
     StimStop,
-    /// `ir.capture` under the held lease (the generator armed with the sweep).
+    /// `sweep.run` of sweep measurement `meas` under the held lease (the generator armed
+    /// with its sweep); `update` first stores the settings it is run with (a level or
+    /// outputs changed while armed), so the run plays what the top bar said.
     Sweep {
-        request: ac2_proto::model::SweepRequest,
-        name: String,
+        meas: MeasId,
+        /// The measurement's name, for messages.
+        label: String,
+        update: Option<Box<ac2_proto::model::MeasConfig>>,
     },
     /// `delay.find` on `meas` in `band` over `observation`, to insert `pick` from; the
     /// reducer decides what to insert once the finding is back.
@@ -655,7 +659,7 @@ fn request_name(r: &Request) -> String {
         Request::StimArm { .. } => "arm".into(),
         Request::StimSet(_) => "stimulus".into(),
         Request::StimStop => "stop".into(),
-        Request::Sweep { name, .. } => format!("sweep {name}"),
+        Request::Sweep { label, .. } => format!("sweep {label}"),
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
         Request::Import { path, .. } => format!("import {}", path.display()),
         Request::ImportCurve { path, .. } => format!("import curve {}", path.display()),
@@ -686,8 +690,8 @@ enum StimOp {
     Stop,
     Detect(crate::session_dialog::DetectRequest),
     Sweep {
-        request: ac2_proto::model::SweepRequest,
-        name: String,
+        meas: MeasId,
+        update: Option<Box<ac2_proto::model::MeasConfig>>,
     },
 }
 
@@ -1176,7 +1180,16 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                     }
                 };
                 let id = m.id;
+                let job = m.config.kind.is_job();
                 o.send(ConnEvent::MeasCreated(Box::new(m)));
+                // A sweep measurement waits: only a fired run plays it.
+                if !job {
+                    o.send(ConnEvent::Reply {
+                        what: format!("{name} created: Space on the sweep pane arms a run"),
+                        result: Ok(()),
+                    });
+                    return;
+                }
                 let (what, result) = match c.call(Command::MeasStart { meas: id }).await {
                     Ok(_) => (format!("{name} created and started"), Ok(())),
                     Err(e) => (name, Err(format!("created but not started: {e}"))),
@@ -1193,8 +1206,8 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
         Request::StimStop => {
             let _ = stim.send(StimOp::Stop);
         }
-        Request::Sweep { request, name } => {
-            let _ = stim.send(StimOp::Sweep { request, name });
+        Request::Sweep { meas, update, .. } => {
+            let _ = stim.send(StimOp::Sweep { meas, update });
         }
         Request::LeqBackfill { meas, ask } => {
             let (c, o) = (client.clone(), out.clone());
@@ -1396,15 +1409,26 @@ async fn stimulus_task(client: Client, mut ops: mpsc::UnboundedReceiver<StimOp>,
                         None => StimEvent::Failed("no stimulus lease held".into()),
                     },
                     StimOp::Stop => stop(&client, &mut lease).await,
-                    StimOp::Sweep { request, name } => match &lease {
-                        Some(l) => match client
-                            .call(Command::IrCapture {
-                                lease_token: l.token(),
-                                request: Box::new(request),
-                                name,
-                            })
-                            .await
-                            .and_then(|r| expect_body!("ir.capture", r, ReplyBody::Sweep(s) => s))
+                    StimOp::Sweep { meas, update } => match &lease {
+                        Some(l) => match async {
+                            if let Some(config) = update {
+                                client
+                                    .call(Command::MeasUpdate {
+                                        meas,
+                                        config: *config,
+                                    })
+                                    .await?;
+                            }
+                            client
+                                .call(Command::SweepRun {
+                                    lease_token: l.token(),
+                                    meas,
+                                    name: None,
+                                })
+                                .await
+                                .and_then(|r| expect_body!("sweep.run", r, ReplyBody::Sweep(s) => s))
+                        }
+                        .await
                         {
                             Ok(run) => StimEvent::SweepStarted(Box::new(run)),
                             Err(e) => StimEvent::Failed(e.to_string()),

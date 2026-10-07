@@ -35,7 +35,7 @@ use ac2_scene::{axis::Range, format};
 use crate::anim::FreqNav;
 use crate::cal_view::{CalAction, CalView};
 use crate::conn::{ConnEvent, DataSnapshot, Request, StimEvent};
-use crate::forms::{Form, FormKind, SweepPlan};
+use crate::forms::{Form, FormKind};
 use crate::keys::{Chord, CommandId, Keymap, RESERVED, STOP_ANYWHERE, Scope};
 use crate::leq_dialog::LeqDialog;
 use crate::palette::Palette;
@@ -45,7 +45,10 @@ use crate::settings::{Page, Settings};
 
 #[path = "state_display.rs"]
 mod display;
-pub use display::{DeletePrompt, DeleteTarget, LEVEL_ZOOM_FACTOR, level_range};
+pub use display::{
+    ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, LEVEL_ZOOM_FACTOR, MoveWhat,
+    level_range,
+};
 #[path = "state_settings.rs"]
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
@@ -104,8 +107,8 @@ impl PaneKind {
             PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
             PaneKind::Spectrum => k.publishes_levels(),
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
-            // Sweep traces, not measurements.
-            PaneKind::Distortion => false,
+            // Sweep measurements: the pane shows their runs.
+            PaneKind::Distortion => matches!(k, MeasKind::Sweep { .. }),
         }
     }
 
@@ -120,8 +123,9 @@ impl PaneKind {
     /// The pane that shows measurements of kind `k`.
     pub fn for_kind(k: &MeasKind) -> PaneKind {
         match k.stream() {
-            Stream::Spec | Stream::Rta => PaneKind::Spectrum,
-            Stream::Spl => PaneKind::Spl,
+            Some(Stream::Spec | Stream::Rta) => PaneKind::Spectrum,
+            Some(Stream::Spl) => PaneKind::Spl,
+            None => PaneKind::Distortion,
             _ => PaneKind::Transfer,
         }
     }
@@ -189,7 +193,7 @@ impl SmoothTarget {
                 MeasKind::Transfer { .. } => Smoothable::Transfer,
                 MeasKind::Spectrum { .. } => Smoothable::Spectrum,
                 MeasKind::Rta { .. } => Smoothable::Rta,
-                MeasKind::Spl { .. } => Smoothable::No,
+                MeasKind::Spl { .. } | MeasKind::Sweep { .. } => Smoothable::No,
                 MeasKind::Math { config } => match config.domain {
                     MathDomain::Transfer => Smoothable::Transfer,
                     MathDomain::Spectrum => Smoothable::Spectrum,
@@ -677,6 +681,9 @@ pub enum Overlay {
     /// The confirmation before the selected measurement or stored trace is deleted (or,
     /// for a measurement a math channel computes from, why it cannot be).
     Delete(Box<DeletePrompt>),
+    /// A question with a few answers (←/→ or ↑/↓ pick, Enter takes it, Esc cancels):
+    /// what deleting a measurement does with its traces, where a trace moves.
+    Choose(Box<ChoicePrompt>),
 }
 
 impl Overlay {
@@ -853,6 +860,12 @@ pub enum Msg {
     NewLog(bool),
     /// Mouse on the delete confirmation: `true` deletes, `false` keeps it.
     Delete(bool),
+    /// Mouse on a question's answers: one taken, or `None` (cancel).
+    Choose(Option<usize>),
+    /// A group's arrow in the measurement tree: folds or unfolds it.
+    ToggleGroup(ac2_proto::model::TraceOwner),
+    /// A live curve's dot in the tree: shown / hidden (this app's display).
+    ToggleMeasShown(MeasId),
     /// Ctrl+wheel on a pane: its level axis zooms by `factor` (> 1 in) about `about_db`.
     LevelZoom {
         pane: PaneKind,
@@ -915,11 +928,21 @@ pub enum FormMsg {
     Cancel,
 }
 
-/// The sweep measurement as this client runs it.
+/// A run of a sweep measurement, armed (or arming): Enter plays it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweepPlan {
+    pub meas: MeasId,
+    /// The measurement's name.
+    pub name: String,
+    /// Its settings when armed: the generator is armed with its sweep, level and outputs.
+    pub config: ac2_proto::model::SweepConfig,
+}
+
+/// Sweep measurements as this client runs them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SweepUi {
-    /// The dialog's sweep: armed (or arming) with it, Enter plays it; cleared by a stop
-    /// and once the run it started has ended.
+    /// The run armed (or arming): Enter plays it; cleared by a stop and once the run it
+    /// started has ended.
     pub plan: Option<SweepPlan>,
     /// The run this client started, followed until it is stored or fails.
     pub run: Option<SweepId>,
@@ -936,11 +959,6 @@ pub struct SweepUi {
     /// The mirrored run's step (any client's run) and when this client first saw it, in
     /// `now_s`: the progress strip counts the time within a step from it.
     pub step_seen: Option<(SweepId, SweepStatus, f64)>,
-    /// The last sweep this client played, as played (level and outputs as fired): Space on
-    /// the sweep view arms it again.
-    pub last: Option<SweepPlan>,
-    /// The armed sweep is a re-sweep from the sweep view (not one the dialog set up).
-    pub again: bool,
     /// A finished run's result: once its data is in, the sweep pane's level axis frames it.
     pub fit: Option<TraceId>,
 }
@@ -972,6 +990,8 @@ pub struct AppState {
     /// Measurements whose live curves this app hides, by name (as `ui.toml` keeps them):
     /// display only, they keep measuring.
     pub hidden_meas: BTreeSet<String>,
+    /// Groups of the measurement tree folded in this app (their rows not listed).
+    pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
     /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
     /// time.
@@ -1118,6 +1138,7 @@ impl AppState {
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
             hidden_meas: BTreeSet::new(),
+            collapsed: BTreeSet::new(),
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
             spectrum_fit: BTreeMap::new(),
@@ -1206,7 +1227,7 @@ impl AppState {
     }
 
     /// Stored trace `id` as mirrored, or why not.
-    fn trace_meta(&self, id: TraceId) -> Result<TraceMeta, String> {
+    pub fn trace_meta(&self, id: TraceId) -> Result<TraceMeta, String> {
         self.daemon()
             .and_then(|s| s.traces.iter().find(|t| t.id == id))
             .cloned()
@@ -1284,7 +1305,7 @@ impl AppState {
                     return stored(t);
                 }
                 let m = self.pane_meas(pane)?;
-                let stream = m.config.kind.stream();
+                let stream = m.config.kind.stream()?;
                 let applied = self
                     .data
                     .as_ref()
@@ -1364,12 +1385,72 @@ impl AppState {
         v
     }
 
-    /// Every stored trace in the list's order (slotted by slot, then the rest oldest first):
-    /// the order V / Shift+V step through.
+    /// Every stored trace in the tree's order (group by group; in a group slotted by slot,
+    /// then the rest oldest first): the order V / Shift+V step through and legends follow.
     pub fn trace_list(&self) -> Vec<&TraceMeta> {
-        let mut v = self.stored_traces();
-        v.sort_by_key(|t| ac2_scene::trace_list::sort_key(t));
-        v
+        let ms = self.measurements();
+        ac2_scene::meas_list::trace_order(&ms, &self.stored_traces())
+    }
+
+    /// The measurement tree beside the panes.
+    pub fn tree_rows(&self) -> Vec<ac2_scene::meas_list::TreeRow> {
+        let traces: Vec<ac2_scene::trace_list::TraceItem<'_>> = self
+            .stored_traces()
+            .into_iter()
+            .map(|meta| ac2_scene::trace_list::TraceItem {
+                meta,
+                has_data: self.traces.contains_key(&meta.id),
+            })
+            .collect();
+        ac2_scene::meas_list::tree_rows(&ac2_scene::meas_list::TreeInput {
+            meas: self.meas_items(),
+            traces,
+            collapsed: &self.collapsed,
+            selected: self.selected,
+            selected_trace: self.selected_trace,
+            keys_on_trace: self.keys_on_trace(),
+            sweep: self.daemon().and_then(|s| s.sweep.as_ref()),
+        })
+    }
+
+    /// Every measurement with this app's display of it.
+    fn meas_items(&self) -> Vec<ac2_scene::meas_list::MeasItem<'_>> {
+        self.measurements()
+            .into_iter()
+            .map(|m| {
+                let e = self.edit(m.id);
+                let expression = match &m.config.kind {
+                    MeasKind::Math { config } => {
+                        Some(ac2_scene::math::expression(&config.expr, |o| {
+                            self.operand_name(o)
+                        }))
+                    }
+                    _ => None,
+                };
+                ac2_scene::meas_list::MeasItem {
+                    meas: m,
+                    expression,
+                    offset_db: e.offset_db,
+                    inverted: e.inverted,
+                    hidden: self.meas_hidden(m),
+                }
+            })
+            .collect()
+    }
+
+    /// The group (measurement or imported) that owns what is selected: the selected trace's
+    /// owner, a math channel's owner, else the selected measurement.
+    pub fn selected_group(&self) -> Option<ac2_proto::model::TraceOwner> {
+        use ac2_proto::model::TraceOwner;
+        if let Some(t) = self.selected_trace_meta().filter(|_| self.keys_on_trace()) {
+            let ms = self.measurements();
+            return Some(ac2_scene::meas_list::group_of(t, &ms));
+        }
+        let m = self.selected_meas()?;
+        Some(match &m.config.kind {
+            MeasKind::Math { config } => config.owner,
+            _ => TraceOwner::Meas { meas: m.id },
+        })
     }
 
     /// The sidebar's rows of stored traces.
@@ -1412,27 +1493,9 @@ impl AppState {
     /// keys act on unless a stored trace was selected after it.
     pub fn meas_rows(&self) -> Vec<ac2_scene::meas_list::MeasRow> {
         let active = !self.keys_on_trace();
-        self.measurements()
-            .into_iter()
-            .map(|m| {
-                let e = self.edit(m.id);
-                let expression = match &m.config.kind {
-                    MeasKind::Math { config } => {
-                        Some(ac2_scene::math::expression(&config.expr, |o| {
-                            self.operand_name(o)
-                        }))
-                    }
-                    _ => None,
-                };
-                let item = ac2_scene::meas_list::MeasItem {
-                    meas: m,
-                    expression,
-                    offset_db: e.offset_db,
-                    inverted: e.inverted,
-                    hidden: self.meas_hidden(m),
-                };
-                ac2_scene::meas_list::meas_row(&item, self.selected, active)
-            })
+        self.meas_items()
+            .iter()
+            .map(|item| ac2_scene::meas_list::meas_row(item, self.selected, active))
             .collect()
     }
 
@@ -1856,6 +1919,10 @@ impl AppState {
                 MeasKind::Spectrum { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Rta { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Spl { config } => vec![(config.input, InputUse::Measurement)],
+                MeasKind::Sweep { config } => vec![
+                    (config.reference_input, InputUse::Reference),
+                    (config.measurement_input, InputUse::Measurement),
+                ],
                 // Every live operand's inputs.
                 MeasKind::Math { config } => ms
                     .iter()
@@ -2090,6 +2157,13 @@ impl AppState {
                 self.reveal_trace();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),
+            Msg::ToggleGroup(g) => {
+                if !self.collapsed.remove(&g) {
+                    self.collapsed.insert(g);
+                }
+            }
+            Msg::ToggleMeasShown(id) => self.toggle_meas_hidden(id, None),
+            Msg::Choose(pick) => self.choose(pick, out),
             Msg::RenameTrace(id) => {
                 if self.selected_trace != Some(id) {
                     self.select_trace(Some(id));
@@ -2214,7 +2288,7 @@ impl AppState {
                 self.command(CommandId::StimulusStop, keymap, out);
                 self.selected_trace = None;
             } else {
-                self.close_overlay(out);
+                self.close_overlay();
             }
             return;
         }
@@ -2294,6 +2368,21 @@ impl AppState {
                     self.new_log(true, out);
                 } else if chord.key == Key::N {
                     self.new_log(false, out);
+                }
+                return;
+            }
+            Overlay::Choose(c) => {
+                let n = c.choices.len();
+                match chord.key {
+                    Key::ArrowDown | Key::ArrowRight | Key::Tab if n > 0 => {
+                        c.index = (c.index + 1).min(n - 1);
+                    }
+                    Key::ArrowUp | Key::ArrowLeft if n > 0 => c.index = c.index.saturating_sub(1),
+                    Key::Enter => {
+                        let i = c.index;
+                        self.choose(Some(i), out);
+                    }
+                    _ => {}
                 }
                 return;
             }
@@ -2434,30 +2523,13 @@ impl AppState {
     }
 
     /// Esc with a window open: the topmost window closes (a dialog over a view closes back
-    /// to the view) and the stimulus is left alone, except that the sweep dialog leaves
-    /// nothing armed behind it. A playing stimulus keeps playing: the stop chord or the
-    /// strip's Stop stops it.
-    fn close_overlay(&mut self, out: &mut Vec<Request>) {
+    /// to the view) and the stimulus is left alone: no dialog arms one.
+    fn close_overlay(&mut self) {
         match &mut self.overlay {
             Overlay::Settings(s) if s.inner_open() => {
                 s.close_inner();
             }
-            Overlay::Form(f) if f.kind == FormKind::Sweep => {
-                self.overlay = Overlay::None;
-                self.disarm_unfired(out);
-            }
             _ => self.overlay = Overlay::None,
-        }
-    }
-
-    /// Disarms a stimulus armed (or arming) that is not playing: nothing is left armed
-    /// behind a window that was closed. One that plays is left playing.
-    fn disarm_unfired(&mut self, out: &mut Vec<Request>) {
-        self.stimulus.arm_after_stop = false;
-        let firing = self.daemon().is_some_and(|s| s.generator.firing);
-        if matches!(self.stimulus.phase, StimPhase::Armed | StimPhase::Arming) && !firing {
-            self.stimulus.phase = StimPhase::Stopping;
-            out.push(Request::StimStop);
         }
     }
 
@@ -2775,8 +2847,8 @@ impl AppState {
                 NextKey::Enter,
                 match &self.sweep.plan {
                     Some(p) => NextStimulus::Sweep {
-                        again: self.sweep.again,
-                        duration_s: p.request.sweep.duration.0,
+                        meas: p.name.clone(),
+                        duration_s: p.config.sweep.duration.0,
                         level,
                     },
                     None => self.generator_stimulus(),
@@ -2784,14 +2856,16 @@ impl AppState {
             )),
             StimPhase::Idle if self.sweep_view() => Some((
                 NextKey::Space,
-                self.sweep
-                    .last
-                    .as_ref()
-                    .map_or(NextStimulus::SweepDialog, |p| NextStimulus::Sweep {
-                        again: true,
-                        duration_s: p.request.sweep.duration.0,
-                        level: p.request.level,
-                    }),
+                self.sweep_meas()
+                    .and_then(|m| match &m.config.kind {
+                        MeasKind::Sweep { config } => Some(NextStimulus::Sweep {
+                            meas: m.config.name.clone(),
+                            duration_s: config.sweep.duration.0,
+                            level: Some(config.level),
+                        }),
+                        _ => None,
+                    })
+                    .unwrap_or(NextStimulus::SweepDialog),
             )),
             StimPhase::Idle => Some((NextKey::Space, self.generator_stimulus())),
             _ => None,
@@ -2831,7 +2905,14 @@ impl AppState {
         {
             return;
         }
-        let Some(last) = self.sweep.last.clone() else {
+        let Some(plan) = self.sweep_meas().and_then(|m| match &m.config.kind {
+            MeasKind::Sweep { config } => Some(SweepPlan {
+                meas: m.id,
+                name: m.config.name.clone(),
+                config: config.clone(),
+            }),
+            _ => None,
+        }) else {
             self.open_sweep_dialog(keymap, out);
             return;
         };
@@ -2846,33 +2927,30 @@ impl AppState {
             ));
             return;
         }
-        // The level was typed for that sweep; the ceiling may have come down since.
-        if let (Some(l), Some(c)) = (last.request.level, self.ceiling())
-            && l.0 > c.0
+        // The level was typed for the measurement; the ceiling may have come down since.
+        if let Some(c) = self.ceiling()
+            && plan.config.level.0 > c.0
         {
             self.error(format!(
-                "the last sweep's {} is above the daemon's ceiling {}: Shift+S sets a new one",
-                dbfs(l.0),
+                "{}'s level {} is above the daemon's ceiling {}: edit it (palette: edit the \
+                 selected measurement)",
+                plan.name,
+                dbfs(plan.config.level.0),
                 dbfs(c.0)
             ));
             return;
         }
-        let plan = SweepPlan {
-            name: self.resweep_name(&last.name),
-            request: last.request,
-        };
         let phase = self.stimulus.phase;
         // A noise queued behind the stop gives way to the sweep this view arms.
         self.stimulus.arm_after_stop = false;
-        self.sweep.again = true;
         self.arm_sweep(plan, force, out);
         match phase {
             StimPhase::Stopping => {
                 self.toast("stopping… arms the re-sweep once the stop is done (Esc cancels)");
             }
             StimPhase::Armed => self.toast(format!(
-                "armed: re-{} · Enter plays the sweep · Esc stops",
-                self.stimulus.describe()
+                "armed: a run of {} · Enter plays the sweep · Esc stops",
+                self.sweep.plan.as_ref().map_or("", |p| p.name.as_str())
             )),
             _ => {}
         }
@@ -2903,21 +2981,20 @@ impl AppState {
         self.arm(force, keymap, out);
     }
 
-    /// `Sweep 1` → `Sweep 2`: the last name's stem with the first number no stored trace
-    /// has taken.
-    fn resweep_name(&self, last: &str) -> String {
-        let stem = match last.rsplit_once(' ') {
-            Some((s, n)) if !s.is_empty() && n.parse::<u32>().is_ok() => s,
-            _ => last,
-        };
-        let taken: Vec<&str> = self
-            .daemon()
-            .map(|s| s.traces.iter().map(|t| t.edit.name.as_str()).collect())
-            .unwrap_or_default();
-        (2u32..)
-            .map(|n| format!("{stem} {n}"))
-            .find(|n| !taken.contains(&n.as_str()))
-            .unwrap_or_else(|| last.to_string())
+    /// The sweep measurement Space on the sweep view runs: the selected measurement when
+    /// it is one, else the owner of the selected (or shown) run, else the pane's.
+    pub fn sweep_meas(&self) -> Option<&Measurement> {
+        let is = |m: &&Measurement| matches!(m.config.kind, MeasKind::Sweep { .. });
+        let owner_of = |t: &TraceMeta| t.edit.owner.meas().and_then(|id| self.meas(id));
+        self.selected_meas()
+            .filter(is)
+            .or_else(|| self.selected_trace_meta().and_then(owner_of).filter(is))
+            .or_else(|| {
+                self.shown_sweep()
+                    .and_then(|(t, _)| owner_of(&t.meta))
+                    .filter(is)
+            })
+            .or_else(|| self.pane_meas(PaneKind::Distortion))
     }
 
     fn arm(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
@@ -3000,9 +3077,9 @@ impl AppState {
             })
             .unwrap_or_default();
         let sweeps = self.daemon().map_or(0, |s| {
-            s.traces
+            s.measurements
                 .iter()
-                .filter(|t| t.kind == TraceKind::Sweep)
+                .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
                 .count()
         });
         let f = Form::sweep(
@@ -3019,12 +3096,12 @@ impl AppState {
         }
     }
 
-    /// The dialog's sweep becomes the stimulus: armed with it (or re-sent when already
-    /// armed); Enter then plays it.
+    /// A run of the sweep measurement becomes the stimulus: armed with its settings (or
+    /// re-sent when already armed); Enter then plays it.
     fn arm_sweep(&mut self, plan: SweepPlan, force: bool, out: &mut Vec<Request>) {
-        let r = &plan.request;
+        let r = &plan.config;
         self.stimulus.signal = Signal::Ess { sweep: r.sweep };
-        self.stimulus.level = r.level;
+        self.stimulus.level = Some(r.level);
         self.stimulus.outputs = r.outputs.clone();
         self.sweep.plan = Some(plan);
         match self.stimulus.phase {
@@ -3048,24 +3125,34 @@ impl AppState {
         }
     }
 
-    /// Enter while armed with a sweep: `ir.capture` with the current level and outputs.
+    /// Enter while armed with a sweep: `sweep.run` of its measurement. A level or outputs
+    /// changed while armed become the measurement's settings first: the run plays what the
+    /// top bar named, and the next run the same.
     fn fire_sweep(&mut self, out: &mut Vec<Request>) {
         let Some(plan) = &self.sweep.plan else {
             return;
         };
-        let mut request = plan.request.clone();
-        request.level = self.stimulus.level;
-        request.outputs = self.stimulus.outputs.clone();
-        if let Signal::Ess { sweep } = self.stimulus.signal {
-            request.sweep = sweep;
+        let mut c = plan.config.clone();
+        if let Some(l) = self.stimulus.level {
+            c.level = l;
         }
-        let name = plan.name.clone();
-        self.stimulus.phase = StimPhase::FireRequested;
-        self.sweep.last = Some(SweepPlan {
-            request: request.clone(),
-            name: name.clone(),
+        c.outputs = self.stimulus.outputs.clone();
+        if let Signal::Ess { sweep } = self.stimulus.signal {
+            c.sweep = sweep;
+        }
+        let update = (c != plan.config).then(|| {
+            Box::new(ac2_proto::model::MeasConfig {
+                name: plan.name.clone(),
+                kind: MeasKind::Sweep { config: c },
+            })
         });
-        out.push(Request::Sweep { request, name });
+        let (meas, label) = (plan.meas, plan.name.clone());
+        self.stimulus.phase = StimPhase::FireRequested;
+        out.push(Request::Sweep {
+            meas,
+            label,
+            update,
+        });
     }
 
     /// A stop ends the sweep set-up: the next arm is noise again.
@@ -3105,8 +3192,11 @@ impl AppState {
             }
             SweepStatus::Done { trace } => {
                 self.sweep.run = None;
-                // The new result is selected: listed highlighted, named in the captions,
-                // and what the trace keys change.
+                // The new result is selected under its measurement: listed highlighted,
+                // named in the captions, and what the trace keys change.
+                self.selected = Some(r.meas);
+                self.collapsed
+                    .remove(&ac2_proto::model::TraceOwner::Meas { meas: r.meas });
                 self.selected_trace = Some(trace);
                 self.sweep.shown = Some(trace);
                 self.sweep.fit = Some(trace);
@@ -3114,8 +3204,11 @@ impl AppState {
                 self.release_after_sweep(out);
                 self.layout.shown[PaneKind::Distortion.index()] = true;
                 self.layout.focus = PaneKind::Distortion;
+                let of = self
+                    .meas(r.meas)
+                    .map_or_else(String::new, |m| format!(" of {}", m.config.name));
                 self.toast(format!(
-                    "sweep stored as {:?}: U dB / %, H impulse response, Shift+S sweeps again",
+                    "{}{of} stored: U dB / %, Shift+I impulse response, Space runs it again",
                     r.name
                 ));
             }
@@ -3156,12 +3249,25 @@ impl AppState {
     }
 
     /// The sweep trace the distortion pane shows: the selected trace when it is a sweep,
-    /// else the sweep selected last, else the newest.
+    /// else the newest run of the selected sweep measurement, else the sweep selected last,
+    /// else the newest.
     pub fn shown_sweep(&self) -> Option<(&TraceData, &GridDef)> {
         let all = self.sweep_traces();
         let find = |id: TraceId| all.iter().find(|(t, _)| t.meta.id == id).copied();
+        let newest_of = |m: &Measurement| {
+            let owner = ac2_proto::model::TraceOwner::Meas { meas: m.id };
+            all.iter()
+                .filter(|(t, _)| t.meta.edit.owner == owner)
+                .max_by_key(|(t, _)| t.meta.id)
+                .copied()
+        };
         self.selected_trace
             .and_then(find)
+            .or_else(|| {
+                self.selected_meas()
+                    .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
+                    .and_then(newest_of)
+            })
             .or_else(|| self.sweep.shown.and_then(find))
             .or_else(|| all.last().copied())
     }
@@ -3973,6 +4079,11 @@ impl AppState {
                 }
             }
             C::NewMath => {
+                // The channel lives under the measurement selected now (a selected trace's
+                // or math channel's owner): its live curve and traces are offered first.
+                let owner = self
+                    .selected_group()
+                    .unwrap_or(ac2_proto::model::TraceOwner::Imported);
                 // A starts as what the focused pane shows: its measurement, or the selected
                 // trace.
                 let first = self
@@ -3985,12 +4096,32 @@ impl AppState {
                         };
                         self.pane_meas(p).map(|m| Operand::Meas { meas: m.id })
                     });
-                match Form::math(self.math_candidates(), first) {
+                match Form::math(self.math_candidates(Some(owner)), first, owner) {
                     Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
                     Err(e) => self.error(e),
                 }
             }
-            C::EditMath => {
+            C::EditMeas => {
+                // A sweep measurement selected (or the sweep pane's) edits its settings.
+                let sweep = self
+                    .selected_meas()
+                    .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
+                    .or_else(|| {
+                        (self.layout.focus == PaneKind::Distortion)
+                            .then(|| self.sweep_meas())
+                            .flatten()
+                    })
+                    .cloned();
+                if let Some(m) = sweep {
+                    let open = self.open_session().cloned();
+                    let (inputs, outputs) =
+                        (self.session_input_names(), self.session_output_names());
+                    match Form::edit_sweep(&m, open.as_ref(), &inputs, &outputs) {
+                        Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+                        Err(e) => self.error(e),
+                    }
+                    return;
+                }
                 let m = self
                     .selected_meas()
                     .filter(|m| matches!(m.config.kind, MeasKind::Math { .. }))
@@ -4001,12 +4132,27 @@ impl AppState {
                             .find(|m| matches!(m.config.kind, MeasKind::Math { .. }))
                     })
                     .cloned();
-                match m.map(|m| Form::edit_math(&m, self.math_candidates())) {
+                let owner = m.as_ref().and_then(|m| match &m.config.kind {
+                    MeasKind::Math { config } => Some(config.owner),
+                    _ => None,
+                });
+                let candidates = self.math_candidates(owner);
+                match m.map(|m| Form::edit_math(&m, candidates)) {
                     Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
                     Some(Err(e)) => self.error(e),
-                    None => self.error("select a math channel first (N)"),
+                    None => self.error("select a math channel or a sweep measurement first"),
                 }
             }
+            C::HideGroup => self.toggle_group_shown(out),
+            C::MoveTrace => self.ask_move(),
+            C::ToggleGroup => match self.selected_group() {
+                Some(g) => {
+                    if !self.collapsed.remove(&g) {
+                        self.collapsed.insert(g);
+                    }
+                }
+                None => self.error("select a measurement first (click it in the list, N)"),
+            },
             C::InputMics => {
                 let rows: Vec<InputSetup> = self
                     .daemon()
@@ -4988,7 +5134,7 @@ impl AppState {
             // As Esc: the sweep dialog leaves nothing armed behind it.
             FormMsg::Cancel => {
                 if matches!(self.overlay, Overlay::Form(_)) {
-                    self.close_overlay(out);
+                    self.close_overlay();
                 }
             }
             FormMsg::Focus(i) => {
@@ -5011,13 +5157,23 @@ impl AppState {
         let open = self.open_session().cloned();
         let ceiling = self.ceiling();
         if let Overlay::Form(f) = &mut self.overlay
-            && f.kind == FormKind::Sweep
+            && matches!(f.kind, FormKind::Sweep | FormKind::SweepEdit)
         {
-            match f.sweep_plan(open.as_ref(), ceiling) {
-                Ok(plan) => {
+            // A sweep measurement is made (or changed) without arming: Space on the sweep
+            // pane arms its run, Enter plays it.
+            match f.sweep_meas(open.as_ref(), ceiling) {
+                Ok(config) => {
+                    let req = match f.sweep_edit {
+                        Some(meas) => Request::Call {
+                            what: format!("{} changed: its next run uses it", config.name),
+                            cmd: Command::MeasUpdate { meas, config },
+                        },
+                        None => Request::CreateMeas { config },
+                    };
+                    out.push(req);
                     self.overlay = Overlay::None;
-                    self.sweep.again = false;
-                    self.arm_sweep(plan, false, out);
+                    self.layout.shown[PaneKind::Distortion.index()] = true;
+                    self.layout.focus = PaneKind::Distortion;
                 }
                 Err(e) => f.error = Some(e),
             }
@@ -5494,8 +5650,12 @@ impl AppState {
     }
 
     /// What a math channel can combine: the live measurements and the stored traces.
-    fn math_candidates(&self) -> Vec<crate::math_dialog::Candidate> {
-        crate::math_dialog::Candidate::all(&self.measurements(), &self.trace_list())
+    /// What a math channel can combine; `owner`'s live curve and traces first.
+    fn math_candidates(
+        &self,
+        owner: Option<ac2_proto::model::TraceOwner>,
+    ) -> Vec<crate::math_dialog::Candidate> {
+        crate::math_dialog::Candidate::all(&self.measurements(), &self.trace_list(), owner)
     }
 
     /// Note the spectrum / RTA measurements that started since the last state: each fits
@@ -5604,8 +5764,8 @@ impl AppState {
 pub(crate) fn spectrum_stream(m: &Measurement) -> Option<Stream> {
     m.config
         .kind
-        .publishes_levels()
-        .then(|| m.config.kind.stream())
+        .stream()
+        .filter(|_| m.config.kind.publishes_levels())
 }
 
 /// Fetched trace data takes the mirrored metadata, except the display smoothing: that one
@@ -5793,6 +5953,7 @@ pub fn meas_input(k: &MeasKind) -> Option<u16> {
         MeasKind::Spectrum { config } => Some(config.input),
         MeasKind::Rta { config } => Some(config.input),
         MeasKind::Spl { config } => Some(config.input),
+        MeasKind::Sweep { config } => Some(config.measurement_input),
         MeasKind::Math { .. } => None,
     }
 }

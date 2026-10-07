@@ -1,8 +1,9 @@
 //! Top bar (link, session, stimulus) and the measurement list.
 
+use ac2_proto::model::TraceOwner;
 use ac2_scene::autosave::AutosaveTone;
 use ac2_scene::format;
-use ac2_scene::meas_list::Mark;
+use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
 use ac2_scene::recording::RecordingTone;
 use eframe::egui::{self, Color32, RichText};
 
@@ -563,170 +564,166 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 }
 
 fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
-    let mut clicked = None;
-    let mut clicked_trace = None;
-    let mut renamed_trace = None;
-    let mut toggled_trace = None;
     let tips = RowTips {
         meas: format!(
-            "Click selects it · {} / {} step through the focused pane's measurements · {} \
-             shows / hides its curves · {} deletes it (asks first)",
+            "Click selects it · the arrow folds it · {} / {} step through the focused pane's \
+             measurements · {} shows / hides its curve, {} everything under it · {} deletes it \
+             (asks first)",
             key_hint(app, CommandId::NextMeasurement),
             key_hint(app, CommandId::PrevMeasurement),
             key_hint(app, CommandId::ToggleSelected),
+            key_hint(app, CommandId::HideGroup),
             key_hint(app, CommandId::DeleteSelected)
         ),
         eye: key_hint(app, CommandId::ToggleSelected),
         select: format!(
-            "Click selects it (again: deselects) · double click renames · {} / {} step through the shown traces",
+            "Click selects it (again: deselects) · double click renames · {} moves it · {} / {} \
+             step through the shown traces",
+            key_hint(app, CommandId::MoveTrace),
             key_hint(app, CommandId::NextTrace),
             key_hint(app, CommandId::PrevTrace)
         ),
     };
     inputs(app, ui, ch);
+    let mut msg = None;
     {
         let st = &app.state;
-        ui.label(RichText::new("Measurements").strong());
-        ui.add_space(4.0);
-        let ms = st.measurements();
-        if ms.is_empty() {
-            ui.label(RichText::new("none").color(ch.dim));
-        }
-        for row in st.meas_rows() {
-            let mut text = RichText::new(&row.text);
-            if row.hidden {
-                text = text.color(ch.dim);
-            }
-            // Filled: the keys act on it. Outlined: still the selected measurement, while a
-            // stored trace selected after it has the keys.
-            let b = match row.mark {
-                Mark::Active => egui::Button::selectable(true, text),
-                Mark::Selected => egui::Button::new(text)
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::new(1.0, ch.focus)),
-                Mark::None => egui::Button::selectable(false, text),
-            };
-            let r = ui
-                .add(b.wrap_mode(egui::TextWrapMode::Wrap))
-                .on_hover_text(&tips.meas);
-            if r.clicked() {
-                clicked = Some(row.id);
-            }
-        }
-        ui.add_space(12.0);
-        traces_header(app, ui, ch);
-        ui.add_space(4.0);
-        let rows = st.trace_rows();
-        if rows.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Measurements").strong());
             ui.label(
                 RichText::new(format!(
-                    "{} captures the selected TF",
+                    "{} selects a trace · {} shows / hides",
+                    key_hint(app, CommandId::NextTrace),
+                    key_hint(app, CommandId::ToggleSelected)
+                ))
+                .small()
+                .color(ch.dim),
+            );
+        });
+        ui.add_space(4.0);
+        let rows = st.tree_rows();
+        if rows.is_empty() {
+            ui.label(RichText::new("none").color(ch.dim));
+        }
+        for row in &rows {
+            if let Some(m) = tree_row(ui, row, &tips, ch) {
+                msg = Some(m);
+            }
+        }
+        if !rows.iter().any(|r| matches!(r.key, TreeKey::Trace(_))) && !rows.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "{} captures the selected TF under it",
                     key_hint(app, CommandId::Slot1)
                 ))
+                .small()
                 .color(ch.dim),
             );
         }
-        for row in &rows {
-            match trace_row(ui, row, &tips, ch) {
-                Some(RowClick::Select) => clicked_trace = Some(row.id),
-                Some(RowClick::Eye) => toggled_trace = Some(row.id),
-                Some(RowClick::Rename) => renamed_trace = Some(row.id),
-                None => {}
-            }
-        }
     }
-    if let Some(id) = clicked {
-        app.dispatch(Msg::SelectMeas(id));
-    }
-    if let Some(id) = clicked_trace {
-        app.dispatch(Msg::SelectTrace(id));
-    }
-    if let Some(id) = toggled_trace {
-        app.dispatch(Msg::ToggleShown(id));
-    }
-    if let Some(id) = renamed_trace {
-        app.dispatch(Msg::RenameTrace(id));
+    if let Some(m) = msg {
+        app.dispatch(m);
     }
 }
 
-/// "Traces" and the keys that act on the list.
-fn traces_header(app: &App, ui: &mut egui::Ui, ch: &Chrome) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("Traces").strong());
-        ui.label(
-            RichText::new(format!(
-                "{} selects · {} shows / hides",
-                key_hint(app, CommandId::NextTrace),
-                key_hint(app, CommandId::ToggleSelected)
-            ))
-            .small()
-            .color(ch.dim),
-        );
-    });
-}
-
-/// The tooltips of the list's rows, with the keys that do the same.
+/// The tooltips of the tree's rows, with the keys that do the same.
 struct RowTips {
     meas: String,
-    /// The key that shows / hides the selected trace.
+    /// The key that shows / hides the selected curve.
     eye: String,
     select: String,
 }
 
-/// What a click on a trace row did.
-enum RowClick {
-    /// The row: select (again: deselect).
-    Select,
-    /// Its colour dot: show / hide.
-    Eye,
-    /// A double click on the row: rename.
-    Rename,
-}
-
 /// Width of a row's colour dot, which is also its show / hide toggle.
 const EYE_W: f32 = 18.0;
+/// How far a row under a header is indented.
+const INDENT: f32 = 14.0;
 
-/// One stored trace: its colour dot (filled when shown, a ring when hidden; a click shows
-/// or hides it) and its name over what it is, highlighted when selected.
-fn trace_row(
-    ui: &mut egui::Ui,
-    row: &ac2_scene::trace_list::TraceRow,
-    tips: &RowTips,
-    ch: &Chrome,
-) -> Option<RowClick> {
-    let c = row.color;
-    let color = Color32::from_rgba_unmultiplied(
-        (c.r * 255.0).round() as u8,
-        (c.g * 255.0).round() as u8,
-        (c.b * 255.0).round() as u8,
-        255,
-    );
+/// One row of the measurement tree: a header (its fold arrow, its tag and name over its
+/// state) or a row under it (its tree line, its dot when it has a curve to show or hide,
+/// its name over what it is).
+fn tree_row(ui: &mut egui::Ui, row: &TreeRow, tips: &RowTips, ch: &Chrome) -> Option<Msg> {
     let mut click = None;
+    let group = match row.key {
+        TreeKey::Meas(meas) => Some(TraceOwner::Meas { meas }),
+        TreeKey::Imported => Some(TraceOwner::Imported),
+        _ => None,
+    };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        let (r, eye) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
-        let what = if row.shown { "Hide" } else { "Show" };
-        let label = format!("{what} {}", row.name);
-        eye.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
-        let centre = egui::pos2(r.center().x, r.min.y + 9.0);
-        if row.shown {
-            ui.painter().circle_filled(centre, 5.5, color);
+        if let (Some(folded), Some(g)) = (row.collapsed, group) {
+            let what = if folded { "Unfold" } else { "Fold" };
+            let (rect, r) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
+            let label = format!("{what} {}", row.name);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+            // Drawn, not a glyph: the arrow characters are missing from the UI font.
+            let c = egui::pos2(rect.center().x, rect.min.y + 9.0);
+            let color = if r.hovered() { ch.text } else { ch.dim };
+            let points = if folded {
+                vec![
+                    c + egui::vec2(-2.5, -4.5),
+                    c + egui::vec2(3.5, 0.0),
+                    c + egui::vec2(-2.5, 4.5),
+                ]
+            } else {
+                vec![
+                    c + egui::vec2(-4.5, -2.5),
+                    c + egui::vec2(4.5, -2.5),
+                    c + egui::vec2(0.0, 3.5),
+                ]
+            };
+            ui.painter().add(egui::Shape::convex_polygon(
+                points,
+                color,
+                egui::Stroke::NONE,
+            ));
+            let r = r.on_hover_text(label);
+            if r.clicked() {
+                click = Some(Msg::ToggleGroup(g));
+            }
         } else {
-            ui.painter()
-                .circle_stroke(centre, 4.5, egui::Stroke::new(1.5, color));
+            ui.add_space(INDENT);
+            ui.label(
+                RichText::new(if row.last { "└" } else { "├" })
+                    .color(ch.dim)
+                    .monospace(),
+            );
         }
-        if eye.hovered() {
-            ui.painter()
-                .circle_stroke(centre, 8.0, egui::Stroke::new(1.0, ch.border));
+        // A curve's dot: filled when shown, a ring when hidden; a click shows or hides it.
+        let dot = match (row.key, row.dot) {
+            (TreeKey::Trace(_), Some((c, shown))) => Some((to_color32(c), shown)),
+            (TreeKey::Live(_), _) => Some((ch.text, !row.hidden)),
+            _ => None,
+        };
+        if let Some((color, shown)) = dot {
+            let (r, eye) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
+            let what = if shown { "Hide" } else { "Show" };
+            let label = format!("{what} {}", row.name);
+            eye.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+            let centre = egui::pos2(r.center().x, r.min.y + 9.0);
+            if shown {
+                ui.painter().circle_filled(centre, 5.5, color);
+            } else {
+                ui.painter()
+                    .circle_stroke(centre, 4.5, egui::Stroke::new(1.5, color));
+            }
+            if eye.hovered() {
+                ui.painter()
+                    .circle_stroke(centre, 8.0, egui::Stroke::new(1.0, ch.border));
+            }
+            let tip = format!(
+                "{what} this curve · {} shows / hides the selected one",
+                tips.eye
+            );
+            if eye.on_hover_text(tip).clicked() {
+                click = Some(match row.key {
+                    TreeKey::Trace(id) => Msg::ToggleShown(id),
+                    TreeKey::Live(id) => Msg::ToggleMeasShown(id),
+                    _ => return,
+                });
+            }
         }
-        let tip = format!(
-            "{what} this trace · {} shows / hides the selected one",
-            tips.eye
-        );
-        if eye.on_hover_text(tip).clicked() {
-            click = Some(RowClick::Eye);
-        }
-        // The longest detail line that fits beside the dot, measured as drawn.
+        // The longest detail line that fits beside the name, measured as drawn.
         let room = ui.available_width() - 2.0 * ui.spacing().button_padding.x;
         let small = egui::TextStyle::Small.resolve(ui.style());
         let detail = row
@@ -742,28 +739,61 @@ fn trace_row(
             .or(row.details.last())
             .cloned()
             .unwrap_or_default();
+        let name_color = match row.dot {
+            _ if row.hidden => ch.dim,
+            Some((c, _)) => to_color32(c),
+            None => ch.text,
+        };
         let mut job = egui::text::LayoutJob::default();
         let body = egui::TextStyle::Body.resolve(ui.style());
-        job.append(
-            &row.name,
-            0.0,
-            egui::TextFormat::simple(body, if row.shown { color } else { ch.dim }),
-        );
+        let mut fmt = egui::TextFormat::simple(body, name_color);
+        if row.depth == 0 {
+            fmt.font_id.size += 0.5;
+        }
+        job.append(&row.name, 0.0, fmt);
         job.append("\n", 0.0, egui::TextFormat::simple(small.clone(), ch.dim));
         job.append(&detail, 0.0, egui::TextFormat::simple(small, ch.dim));
         job.wrap.max_width = room;
+        // Filled: the keys act on it. Outlined: still the selected measurement, while a
+        // stored trace selected after it has the keys.
+        let b = match row.mark {
+            Mark::Active => egui::Button::selectable(true, job),
+            Mark::Selected => egui::Button::new(job)
+                .fill(Color32::TRANSPARENT)
+                .stroke(egui::Stroke::new(1.0, ch.focus)),
+            Mark::None => egui::Button::selectable(false, job),
+        };
+        let tip = match row.key {
+            TreeKey::Trace(_) => format!("{}\n{}", row.describe, tips.select),
+            _ => format!("{}\n{}", row.describe, tips.meas),
+        };
         let r = ui
-            .add(egui::Button::selectable(row.selected, job).wrap_mode(egui::TextWrapMode::Wrap))
-            .on_hover_text(format!("{}\n{}", row.describe, tips.select));
+            .add(b.wrap_mode(egui::TextWrapMode::Wrap))
+            .on_hover_text(tip);
         // A double click's second click also reads as a click: check it first, or it would
         // deselect the row the first click selected.
-        if r.double_clicked() {
-            click = Some(RowClick::Rename);
+        if let TreeKey::Trace(id) = row.key
+            && r.double_clicked()
+        {
+            click = Some(Msg::RenameTrace(id));
         } else if r.clicked() {
-            click = Some(RowClick::Select);
+            click = Some(match row.key {
+                TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => Msg::SelectMeas(id),
+                TreeKey::Trace(id) => Msg::SelectTrace(id),
+                TreeKey::Imported => Msg::ToggleGroup(TraceOwner::Imported),
+            });
         }
     });
     click
+}
+
+fn to_color32(c: ac2_scene::primitives::Color) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        (c.r * 255.0).round() as u8,
+        (c.g * 255.0).round() as u8,
+        (c.b * 255.0).round() as u8,
+        255,
+    )
 }
 
 #[cfg(test)]

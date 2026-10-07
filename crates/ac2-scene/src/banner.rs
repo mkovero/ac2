@@ -888,7 +888,11 @@ pub(crate) mod tests {
             let of: Vec<Operand> = (1..=s.len() as u32)
                 .map(|m| Operand::Meas { meas: MeasId(m) })
                 .collect();
-            let c = MathConfig::power_average(MathDomain::Transfer, of.clone());
+            let c = MathConfig::power_average(
+                ac2_proto::model::TraceOwner::Imported,
+                MathDomain::Transfer,
+                of.clone(),
+            );
             let a = MathState {
                 operands: of
                     .into_iter()

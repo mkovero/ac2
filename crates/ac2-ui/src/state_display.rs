@@ -4,7 +4,9 @@
 //! measured value changes: an offset is drawn, never applied to the stored columns.
 
 use ac2_proto::Command;
-use ac2_proto::model::{LevelScale, MeasKind, Measurement, Operand, TraceKind, TraceMeta};
+use ac2_proto::model::{
+    LevelScale, MeasKind, Measurement, Operand, OwnedTraces, TraceKind, TraceMeta, TraceOwner,
+};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Db, MeasId, TraceId};
 use ac2_scene::axis::Range;
@@ -32,6 +34,39 @@ pub struct DeletePrompt {
     /// How toasts name it: `slot 1 (Main L S1)`, `TF 2`.
     pub label: String,
     pub confirm: ac2_scene::trace_list::DeleteConfirm,
+}
+
+/// What a question's answer acts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChoicePurpose {
+    /// Deleting measurement `meas` that owns traces or math channels: keep, delete, cancel
+    /// ([`ac2_scene::meas_list::KEEP`] …).
+    DeleteOwned { meas: MeasId },
+    /// Filing a stored trace (or a math channel) under the owner of the answer picked.
+    Move(MoveWhat),
+}
+
+/// What "Move to measurement…" moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MoveWhat {
+    Trace(TraceId),
+    Math(MeasId),
+}
+
+/// A question with a few answers, keyboard-driven.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChoicePrompt {
+    pub purpose: ChoicePurpose,
+    /// How toasts name what it acts on.
+    pub label: String,
+    pub title: String,
+    pub lines: Vec<String>,
+    pub choices: Vec<ac2_scene::meas_list::Choice>,
+    /// Where each answer files it (Move only).
+    pub owners: Vec<TraceOwner>,
+    /// The answer Enter takes.
+    pub index: usize,
+    pub hint: String,
 }
 
 /// What the offset keys change.
@@ -342,7 +377,9 @@ impl AppState {
                     if !m.config.kind.publishes_levels() {
                         continue;
                     }
-                    let stream = m.config.kind.stream();
+                    let Some(stream) = m.config.kind.stream() else {
+                        continue;
+                    };
                     if let Some((f, freqs)) = live(stream, m) {
                         let level = match &f.data {
                             ac2_proto::FrameData::Spec(s) => &s.level,
@@ -388,23 +425,201 @@ impl AppState {
             self.toggle_shown(id, out);
             return;
         }
-        let Some(name) = self.selected_meas().map(|m| m.config.name.clone()) else {
+        let Some(id) = self.selected_meas().map(|m| m.id) else {
             self.error(SELECT_FIRST);
+            return;
+        };
+        self.toggle_meas_hidden(id, Some(keymap));
+    }
+
+    /// Shows or hides measurement `id`'s live curves (this app's display only).
+    pub(super) fn toggle_meas_hidden(&mut self, id: MeasId, keymap: Option<&crate::keys::Keymap>) {
+        let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
             return;
         };
         if self.hidden_meas.remove(&name) {
             self.toast(format!("{name} shown"));
         } else {
             let key = keymap
-                .first_chord(
-                    crate::keys::CommandId::ToggleSelected,
-                    crate::keys::Scope::Global,
-                )
-                .map_or_else(|| "the palette".to_owned(), |c| c.label());
+                .and_then(|k| {
+                    k.first_chord(
+                        crate::keys::CommandId::ToggleSelected,
+                        crate::keys::Scope::Global,
+                    )
+                })
+                .map_or_else(|| "its dot".to_owned(), |c| c.label());
             self.toast(format!(
                 "{name} hidden: it keeps measuring · {key} shows it"
             ));
             self.hidden_meas.insert(name);
+        }
+    }
+
+    /// Shift+A: hides the selected measurement's whole group — its live curve, its stored
+    /// traces and the math channels made on it — or, when all of it is hidden, shows it
+    /// again. With a trace selected, its group.
+    pub(super) fn toggle_group_shown(&mut self, out: &mut Vec<Request>) {
+        let Some(group) = self.selected_group() else {
+            self.error(SELECT_FIRST);
+            return;
+        };
+        let ms = self.measurements();
+        let traces: Vec<TraceMeta> = self
+            .stored_traces()
+            .into_iter()
+            .filter(|t| ac2_scene::meas_list::group_of(t, &ms) == group)
+            .cloned()
+            .collect();
+        let live: Vec<String> = ms
+            .iter()
+            .filter(|m| match &m.config.kind {
+                MeasKind::Math { config } => config.owner == group,
+                _ => group == TraceOwner::Meas { meas: m.id },
+            })
+            .map(|m| m.config.name.clone())
+            .collect();
+        let name = match group {
+            TraceOwner::Meas { meas } => self
+                .meas(meas)
+                .map_or_else(|| "the group".to_owned(), |m| m.config.name.clone()),
+            TraceOwner::Imported => "Imported".to_owned(),
+        };
+        let any_shown = traces.iter().any(|t| t.edit.visible)
+            || live.iter().any(|n| !self.hidden_meas.contains(n));
+        for n in &live {
+            if any_shown {
+                self.hidden_meas.insert(n.clone());
+            } else {
+                self.hidden_meas.remove(n);
+            }
+        }
+        for t in traces.into_iter().filter(|t| t.edit.visible == any_shown) {
+            let mut edit = t.edit.clone();
+            edit.visible = !any_shown;
+            out.push(Request::Call {
+                what: format!(
+                    "{} {}",
+                    t.edit.name,
+                    if any_shown { "hidden" } else { "shown" }
+                ),
+                cmd: Command::TraceUpdate { trace: t.id, edit },
+            });
+        }
+        self.toast(if any_shown {
+            format!("{name} and everything under it hidden (it keeps measuring)")
+        } else {
+            format!("{name} and everything under it shown")
+        });
+    }
+
+    /// "Move to measurement…": asks where the selected stored trace (or math channel) is
+    /// filed: under another measurement, or in the imported group.
+    pub(super) fn ask_move(&mut self) {
+        let (what, label, current) =
+            if let Some(t) = self.selected_trace_meta().filter(|_| self.keys_on_trace()) {
+                (MoveWhat::Trace(t.id), t.edit.name.clone(), t.edit.owner)
+            } else if let Some(m) = self.selected_meas() {
+                match &m.config.kind {
+                    MeasKind::Math { config } => {
+                        (MoveWhat::Math(m.id), m.config.name.clone(), config.owner)
+                    }
+                    _ => {
+                        self.error(
+                            "select a stored trace or a math channel to move (a measurement is a \
+                         group of its own)",
+                        );
+                        return;
+                    }
+                }
+            } else {
+                self.error(SELECT_FIRST);
+                return;
+            };
+        let ms = self.measurements();
+        let q = ac2_scene::meas_list::move_choices(&label, current, &ms);
+        let index = q.default;
+        self.overlay = Overlay::Choose(Box::new(ChoicePrompt {
+            purpose: ChoicePurpose::Move(what),
+            label,
+            title: q.title,
+            lines: q.lines,
+            choices: q.choices,
+            owners: q.owners,
+            index,
+            hint: q.hint,
+        }));
+    }
+
+    /// The answer to the open question (`None`: cancel).
+    pub(super) fn choose(&mut self, pick: Option<usize>, out: &mut Vec<Request>) {
+        let Overlay::Choose(c) = &self.overlay else {
+            return;
+        };
+        let c = c.as_ref().clone();
+        let Some(i) = pick else {
+            self.overlay = Overlay::None;
+            return;
+        };
+        if let Some(why) = c.choices.get(i).and_then(|x| x.blocked.clone()) {
+            self.error(format!("not possible: {why}"));
+            return;
+        }
+        self.overlay = Overlay::None;
+        match c.purpose {
+            ChoicePurpose::DeleteOwned { meas } => {
+                let traces = match i {
+                    ac2_scene::meas_list::KEEP => OwnedTraces::Keep,
+                    ac2_scene::meas_list::DELETE => OwnedTraces::Delete,
+                    _ => return,
+                };
+                self.hidden_meas.remove(&c.label);
+                let what = match traces {
+                    OwnedTraces::Keep => {
+                        format!("{} deleted; its traces are under Imported", c.label)
+                    }
+                    OwnedTraces::Delete => format!("{} deleted with its traces", c.label),
+                };
+                self.call(out, Command::MeasDelete { meas, traces }, what);
+            }
+            ChoicePurpose::Move(what) => {
+                let Some(owner) = c.owners.get(i).copied() else {
+                    return;
+                };
+                let place = match owner {
+                    TraceOwner::Meas { meas } => self
+                        .meas(meas)
+                        .map_or_else(|| format!("measurement {meas}"), |m| m.config.name.clone()),
+                    TraceOwner::Imported => "Imported".to_owned(),
+                };
+                self.collapsed.remove(&owner);
+                match what {
+                    MoveWhat::Trace(id) => {
+                        let Ok(t) = self.trace_meta(id) else {
+                            return;
+                        };
+                        let mut edit = t.edit.clone();
+                        edit.owner = owner;
+                        self.call(
+                            out,
+                            Command::TraceUpdate { trace: id, edit },
+                            format!("{} moved to {place}", c.label),
+                        );
+                    }
+                    MoveWhat::Math(id) => {
+                        let Some(mut config) = self.meas(id).map(|m| m.config.clone()) else {
+                            return;
+                        };
+                        if let MeasKind::Math { config: mc } = &mut config.kind {
+                            mc.owner = owner;
+                        }
+                        self.call(
+                            out,
+                            Command::MeasUpdate { meas: id, config },
+                            format!("{} moved to {place}", c.label),
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -421,12 +636,65 @@ impl AppState {
             return;
         };
         let operand = Operand::Meas { meas: m.id };
-        let users: Vec<String> = self
+        let owner = TraceOwner::Meas { meas: m.id };
+        let owned: Vec<TraceId> = self
+            .stored_traces()
+            .iter()
+            .filter(|t| t.edit.owner == owner)
+            .map(|t| t.id)
+            .collect();
+        let maths: Vec<&Measurement> = self
+            .measurements()
+            .into_iter()
+            .filter(
+                |x| matches!(&x.config.kind, MeasKind::Math { config } if config.owner == owner),
+            )
+            .collect();
+        // Math channels it owns go (or stay) with it; the others refuse as before.
+        let outside: Vec<String> = self
             .measurements()
             .iter()
-            .filter(|x| matches!(&x.config.kind, MeasKind::Math { config } if config.expr.names(operand)))
+            .filter(|x| matches!(&x.config.kind, MeasKind::Math { config } if config.expr.names(operand) && config.owner != owner))
             .map(|x| x.config.name.clone())
             .collect();
+        if outside.is_empty() && (!owned.is_empty() || !maths.is_empty()) {
+            // Keep leaves its math channels computing from it: refused if they name it.
+            let keep_blocked: Vec<String> = maths
+                .iter()
+                .filter(|x| matches!(&x.config.kind, MeasKind::Math { config } if config.expr.names(operand)))
+                .map(|x| x.config.name.clone())
+                .collect();
+            // Delete takes its traces: refused if a math channel elsewhere names one.
+            let delete_blocked: Vec<String> = self
+                .measurements()
+                .iter()
+                .filter(|x| {
+                    matches!(&x.config.kind, MeasKind::Math { config }
+                    if config.owner != owner
+                        && owned.iter().any(|t| config.expr.names(Operand::Trace { trace: *t })))
+                })
+                .map(|x| x.config.name.clone())
+                .collect();
+            let q = ac2_scene::meas_list::delete_choices(
+                &m,
+                owned.len(),
+                maths.len(),
+                &keep_blocked,
+                &delete_blocked,
+            );
+            self.overlay = Overlay::Choose(Box::new(ChoicePrompt {
+                purpose: ChoicePurpose::DeleteOwned { meas: m.id },
+                label: m.config.name.clone(),
+                title: q.title,
+                lines: q.lines,
+                choices: q.choices,
+                owners: Vec::new(),
+                index: q.default,
+                hint: q.hint,
+            }));
+            return;
+        }
+        let users = outside;
         let (target, confirm) = if users.is_empty() {
             (
                 DeleteTarget::Meas(m.id),
@@ -479,9 +747,13 @@ impl AppState {
             DeleteTarget::Meas(meas) => {
                 // A measurement of that name made later starts shown.
                 self.hidden_meas.remove(&label);
+                // It owns nothing (else the three-answer question was asked).
                 self.call(
                     out,
-                    Command::MeasDelete { meas },
+                    Command::MeasDelete {
+                        meas,
+                        traces: OwnedTraces::Keep,
+                    },
                     format!("{label} deleted"),
                 );
             }

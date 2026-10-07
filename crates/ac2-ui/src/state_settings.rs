@@ -567,7 +567,7 @@ impl AppState {
     pub(super) fn settings_msg(&mut self, m: SettingsMsg, out: &mut Vec<Request>) {
         match m {
             SettingsMsg::Page(p) => self.settings_page(p, out),
-            SettingsMsg::Close => self.close_overlay(out),
+            SettingsMsg::Close => self.close_overlay(),
             SettingsMsg::Ceiling => {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.session.finish_edit();

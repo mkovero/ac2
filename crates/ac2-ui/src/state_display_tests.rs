@@ -803,7 +803,7 @@ fn meas_deleted(r: &[Request]) -> Option<(MeasId, String)> {
     match r {
         [
             Request::Call {
-                cmd: Command::MeasDelete { meas },
+                cmd: Command::MeasDelete { meas, .. },
                 what,
             },
         ] => Some((*meas, what.clone())),
@@ -830,7 +830,7 @@ fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
             p.confirm.lines,
             [
                 "transfer function · running",
-                "Its live curve and settings go; captured traces stay."
+                "Its live curve and settings go; it owns no stored traces."
             ]
         );
         assert!(!p.confirm.refused);
@@ -884,6 +884,7 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
         "Sum",
         MeasKind::Math {
             config: MathConfig::of(
+                ac2_proto::model::TraceOwner::Imported,
                 MathDomain::Transfer,
                 MathExpr::Binary {
                     a: Operand::Meas { meas: MeasId(1) },

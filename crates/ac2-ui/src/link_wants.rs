@@ -67,6 +67,8 @@ impl AppState {
                     MathDomain::Rta if spectrum => &[Stream::Rta],
                     _ => &[],
                 },
+                // Its results are stored traces, fetched as traces.
+                MeasKind::Sweep { .. } => &[],
             };
             out.extend(
                 streams

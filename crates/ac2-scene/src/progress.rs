@@ -84,6 +84,7 @@ mod tests {
     fn run(status: SweepStatus) -> SweepRun {
         SweepRun {
             id: SweepId(1),
+            meas: ac2_proto::units::MeasId(1),
             owner: ClientId("ui".into()),
             name: "Sweep 3".into(),
             reference_input: 0,

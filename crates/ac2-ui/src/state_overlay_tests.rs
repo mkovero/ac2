@@ -365,45 +365,23 @@ fn palette_and_lists_page_and_wheel() {
 }
 
 #[test]
-fn closing_the_sweep_dialog_leaves_nothing_armed() {
-    // Armed (noise), the sweep dialog open: Esc closes it and disarms.
+fn closing_the_sweep_dialog_leaves_the_stimulus_alone() {
+    // The dialog makes a sweep measurement; it never arms. Armed (noise) behind it: Esc
+    // closes it and the noise stays armed.
     let mut t = T::new();
     t.st.stimulus.level = Some(Dbfs(-30.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.type_key("Shift+S", "S");
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep));
-    assert!(
-        FormKind::Sweep
-            .close_note()
-            .is_some_and(|n| n.contains("Shift+Esc"))
-    );
-    let r = t.key("Esc");
-    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    assert_eq!(FormKind::Sweep.close_note(), None);
+    assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
-    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert!(
-        !t.st.stimulus_live(),
-        "nothing armed behind the closed dialog"
-    );
-
+    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
     // The Cancel button does the same.
-    t.key("Space");
-    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.type_key("Shift+S", "S");
-    let r = t.st.update(Msg::Form(FormMsg::Cancel), &t.keys);
-    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
+    assert!(t.st.update(Msg::Form(FormMsg::Cancel), &t.keys).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-
-    // Still arming (the reply not back yet): disarmed too.
-    let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-30.0));
-    t.key("Space");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Arming);
-    t.type_key("Shift+S", "S");
-    let r = t.key("Esc");
-    assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
 
     // Playing: closing the dialog leaves it playing; the stop chord stops it.
     let mut t = with_window(Window::Sweep);
@@ -413,19 +391,6 @@ fn closing_the_sweep_dialog_leaves_nothing_armed() {
     t.type_key("Shift+S", "S");
     let r = t.key("Shift+Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-
-    // Nothing armed: closing it sends nothing.
-    let mut t = T::new();
-    t.type_key("Shift+S", "S");
-    assert!(t.key("Esc").is_empty());
-    // Other dialogs leave an armed stimulus armed: they never arm one.
-    let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-30.0));
-    t.key("Space");
-    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    t.st.update(Msg::Command(CommandId::NewSpectrum), &t.keys);
-    assert!(t.key("Esc").is_empty());
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
 }
 
 #[test]

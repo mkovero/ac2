@@ -37,6 +37,7 @@ pub(crate) fn data() -> TraceData {
         meta: TraceMeta {
             id: TraceId(3),
             edit: TraceEdit {
+                owner: ac2_proto::model::TraceOwner::Imported,
                 name: "1083 sweep".into(),
                 color: Rgb { r: 1, g: 2, b: 3 },
                 visible: true,
@@ -49,7 +50,10 @@ pub(crate) fn data() -> TraceData {
                 smoothing: None,
             },
             kind: TraceKind::Sweep,
-            source: TraceSource::IrCapture {
+            source: TraceSource::Sweep {
+                meas: ac2_proto::units::MeasId(1),
+                meas_name: "Sweep".into(),
+                number: 1,
                 run: SweepId(1),
                 epoch: SessionEpoch(1),
                 sweep: EssSpec::with_fades(Hz(20.0), Hz(4000.0), Seconds(3.0)),

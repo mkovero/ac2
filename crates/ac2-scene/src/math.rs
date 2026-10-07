@@ -278,7 +278,11 @@ mod tests {
 
     fn avg(statuses: &[OperandStatus]) -> (MathConfig, MathState) {
         let of: Vec<Operand> = (1..=statuses.len() as u32).map(meas).collect();
-        let c = MathConfig::power_average(MathDomain::Transfer, of.clone());
+        let c = MathConfig::power_average(
+            ac2_proto::model::TraceOwner::Imported,
+            MathDomain::Transfer,
+            of.clone(),
+        );
         let s = MathState {
             operands: of
                 .into_iter()
@@ -355,6 +359,7 @@ mod tests {
         };
         let cfg = |op| {
             MathConfig::of(
+                ac2_proto::model::TraceOwner::Imported,
                 MathDomain::Transfer,
                 MathExpr::Binary {
                     a: meas(1),
@@ -395,6 +400,7 @@ mod tests {
             "Sum: left out S2: does not combine (another level scale, grid or time base)"
         );
         let spec = MathConfig::of(
+            ac2_proto::model::TraceOwner::Imported,
             MathDomain::Spectrum,
             MathExpr::Binary {
                 a: meas(1),

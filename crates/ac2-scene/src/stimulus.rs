@@ -1,8 +1,8 @@
 //! What the stimulus keys start next, as the top bar says it.
 //!
-//! The focused view decides what Space arms: the sweep view a re-sweep with the last
-//! sweep's parameters (the dialog when there is none), every other view the noise
-//! generator for live measuring. Enter fires what is armed. The hint names it with its
+//! The focused view decides what Space arms: the sweep view a run of the selected sweep
+//! measurement with its settings (the new-sweep-measurement dialog when there is none),
+//! every other view the noise generator for live measuring. Enter fires what is armed. The hint names it with its
 //! level, so the operator reads what will play before it plays.
 
 use ac2_proto::model::{OutputSetup, Signal};
@@ -21,13 +21,13 @@ pub enum Stimulus {
         outputs: Vec<u16>,
         labels: Vec<OutputSetup>,
     },
-    /// A sweep: the one the dialog set up, or a re-sweep with the last sweep's parameters.
+    /// A run of the sweep measurement named `meas`, with its settings.
     Sweep {
-        again: bool,
+        meas: String,
         duration_s: f64,
         level: Option<Dbfs>,
     },
-    /// The sweep view with no sweep yet: Space opens the sweep dialog.
+    /// The sweep view with no sweep measurement yet: Space opens the dialog that makes one.
     SweepDialog,
 }
 
@@ -40,14 +40,15 @@ pub enum Next {
     Enter,
 }
 
-/// The top bar's hint, long and short: `Enter fires: re-sweep 3 s −50 dBFS`,
+/// The top bar's hint, long and short: `Enter fires: sweep Genelec 1 m · 3 s −50 dBFS`,
 /// `Space arms: pink −50 dBFS → out 1`. `level_key` names the key that types a level, for
 /// the generator without one.
 pub fn hint(next: Next, what: &Stimulus, level_key: &str) -> (String, String) {
     match (next, what) {
-        (Next::Space, Stimulus::SweepDialog) => {
-            ("Space sets up a sweep".into(), "Space: sweep…".into())
-        }
+        (Next::Space, Stimulus::SweepDialog) => (
+            "Space sets up a sweep measurement".into(),
+            "Space: sweep…".into(),
+        ),
         (Next::Space, Stimulus::Generator { level: None, .. }) => {
             let s = format!("{level_key} types a level");
             (s.clone(), s)
@@ -60,7 +61,7 @@ pub fn hint(next: Next, what: &Stimulus, level_key: &str) -> (String, String) {
     }
 }
 
-/// `pink −50 dBFS → out 1`, `re-sweep 3 s −50 dBFS`, `sweep 1 s −20 dBFS`.
+/// `pink −50 dBFS → out 1`, `sweep Genelec 1 m · 3 s −50 dBFS`.
 pub fn describe(what: &Stimulus) -> String {
     match what {
         Stimulus::Generator {
@@ -75,16 +76,15 @@ pub fn describe(what: &Stimulus) -> String {
             crate::rig::stimulus_outputs(outputs, labels)
         ),
         Stimulus::Sweep {
-            again,
+            meas,
             duration_s,
             level,
         } => format!(
-            "{} {} s {}",
-            if *again { "re-sweep" } else { "sweep" },
+            "sweep {meas} · {} s {}",
             short_number(*duration_s),
             level_text(*level)
         ),
-        Stimulus::SweepDialog => "new sweep".into(),
+        Stimulus::SweepDialog => "new sweep measurement".into(),
     }
 }
 
@@ -130,7 +130,7 @@ mod tests {
 
     fn resweep() -> Stimulus {
         Stimulus::Sweep {
-            again: true,
+            meas: "Genelec 1 m".into(),
             duration_s: 3.0,
             level: Some(Dbfs(-50.0)),
         }
@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(
             hint(Next::Enter, &resweep(), "L"),
             (
-                "Enter fires: re-sweep 3 s −50 dBFS".into(),
+                "Enter fires: sweep Genelec 1 m · 3 s −50 dBFS".into(),
                 "Enter fires".into()
             )
         );
@@ -150,13 +150,13 @@ mod tests {
             "Enter fires: pink −50 dBFS → out 1"
         );
         let first = Stimulus::Sweep {
-            again: false,
+            meas: "Sweep 1".into(),
             duration_s: 1.0,
             level: Some(Dbfs(-20.5)),
         };
         assert_eq!(
             hint(Next::Enter, &first, "L").0,
-            "Enter fires: sweep 1 s −20.5 dBFS"
+            "Enter fires: sweep Sweep 1 · 1 s −20.5 dBFS"
         );
     }
 
@@ -165,7 +165,7 @@ mod tests {
         assert_eq!(
             hint(Next::Space, &resweep(), "L"),
             (
-                "Space arms: re-sweep 3 s −50 dBFS".into(),
+                "Space arms: sweep Genelec 1 m · 3 s −50 dBFS".into(),
                 "Space arms".into()
             )
         );
@@ -199,7 +199,10 @@ mod tests {
         );
         assert_eq!(
             hint(Next::Space, &Stimulus::SweepDialog, "L"),
-            ("Space sets up a sweep".into(), "Space: sweep…".into())
+            (
+                "Space sets up a sweep measurement".into(),
+                "Space: sweep…".into()
+            )
         );
     }
 }

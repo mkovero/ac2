@@ -346,7 +346,7 @@ commands! {
     Fullscreen => "fullscreen", "Window full screen on / off", [Global];
     KeyHints => "key_hints", "Key hints on / off", [Global];
 
-    StimulusArm => "stimulus_arm", "Stimulus: arm what the view plays (sweep view: re-sweep; others: the generator)", [Global];
+    StimulusArm => "stimulus_arm", "Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator)", [Global];
     StimulusFire => "stimulus_fire", "Stimulus: fire what is armed (named in the top bar)", [Global];
     StimulusStop => "stimulus_stop", "Stimulus: stop and disarm (no window open)", [Global];
     StopAnywhere => "stimulus_stop_anywhere", "Stimulus: stop and disarm, also with a window open", [Global];
@@ -430,7 +430,10 @@ commands! {
     NewRta => "meas_new_rta", "New RTA…", [Global];
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
     NewMath => "meas_new_math", "New math channel: A ÷ × + − B, or the average of several (mic positions)…", [Global];
-    EditMath => "math_edit", "Edit the selected math channel: operands, operator, method…", [Global];
+    EditMeas => "meas_edit", "Edit the selected math channel (operands, operator, method) or sweep measurement (its next run)…", [Global];
+    HideGroup => "hide_group", "Show / hide the selected measurement with every trace under it", [Global];
+    MoveTrace => "move_trace", "Move the selected trace or math channel to another measurement (or Imported)…", [Global];
+    ToggleGroup => "toggle_group", "Fold / unfold the selected measurement in the list", [Global];
     InputSetup => "input_setup", "Input setup: Settings › Inputs & outputs (names, roles, mics, max level)…", [Global];
     Calibrations => "calibrations", "Calibrations: Settings › Calibration (mics, curves, sensitivities)…", [Global];
     InputMics => "input_mics", "Input setup: type mic names (3=M30, 4=ECM)…", [Global];
@@ -646,6 +649,10 @@ pub fn defaults() -> Vec<Binding> {
         // A is free in every pane; the digits stay the slots' show / hide. It acts on what
         // was selected last: a measurement or a stored trace.
         (C::ToggleSelected, S::Global, k(K::A)),
+        // Shift+A, a step on from A: the whole group (the measurement and its traces).
+        (C::HideGroup, S::Global, sh(K::A)),
+        // Shift+F2, beside F2 (rename): where the trace is listed.
+        (C::MoveTrace, S::Global, sh(K::F2)),
         (C::InsertDelay, S::Transfer, k(K::X)),
         (C::InsertStrongest, S::Transfer, sh(K::X)),
         (C::TypeDelay, S::Transfer, k(K::D)),
@@ -1094,7 +1101,8 @@ mod tests {
             CommandId::NewSpectrum,
             CommandId::NewRta,
             CommandId::NewSpl,
-            CommandId::EditMath,
+            CommandId::EditMeas,
+            CommandId::ToggleGroup,
             CommandId::AverageComplex,
             CommandId::AverageCoherence,
             CommandId::ImportTrace,
