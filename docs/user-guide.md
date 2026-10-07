@@ -204,6 +204,15 @@ to that view's. The top bar says what the keys will do: `Space arms: sweep Genel
 −50 dBFS`,
 `Enter fires: pink −50 dBFS → out 1`. Esc and Shift+Esc stop as always.
 
+**Stopping the last transfer measurement stops the stimulus.** The noise is there to excite
+transfer functions: when **S** (or the palette) stops a transfer measurement and no other
+transfer measurement is still running, the app also stops the stimulus it holds, armed or
+playing, faded out and released as Esc does (`Main L stopped · stimulus stopped (no transfer
+measurement left running)`). Another transfer measurement still running keeps it playing;
+SPL meters, spectra and RTAs do not keep it (they measure whatever plays); a sweep is never
+stopped this way, nor another client's stimulus. `ac2 meas stop` stops only the measurement:
+a script gets no side effect it did not ask for.
+
 ## Transfer measurement
 
 The transfer pane shows **magnitude**, **phase** and **coherence** of measurement / reference

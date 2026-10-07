@@ -6235,3 +6235,149 @@ fn a_new_math_channel_lives_under_the_selected_measurement() {
     assert!(matches!(&c.kind, MeasKind::Math { config }
         if config.owner == TraceOwner::Meas { meas: MeasId(1) }));
 }
+
+/// Arms the generator at −20 dBFS and, with `fire`, plays it.
+fn play_noise(t: &mut T, fire: bool) {
+    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    if fire {
+        t.key("Enter");
+        t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
+        assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    }
+}
+
+/// What a measurement stop asked for: its toast text, and whether the stimulus stop went
+/// with it.
+fn meas_stop(r: &[Request]) -> (String, bool) {
+    let what = r
+        .iter()
+        .find_map(|x| match x {
+            Request::Call {
+                cmd: Command::MeasStop { .. },
+                what,
+            } => Some(what.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no measurement stop: {r:?}"));
+    (what, r.iter().any(|x| matches!(x, Request::StimStop)))
+}
+
+const STIM_TOO: &str = "Main L stopped · stimulus stopped (no transfer measurement left running)";
+
+#[test]
+fn stopping_the_last_transfer_stops_the_stimulus() {
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    play_noise(&mut t, true);
+    let r = t.key("S");
+    assert_eq!(meas_stop(&r), (STIM_TOO.into(), true));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+    t.conn(ConnEvent::Reply {
+        what: STIM_TOO.into(),
+        result: Ok(()),
+    });
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    // One toast says both; the stop's own "stimulus stopped" would repeat it.
+    assert_eq!(t.last_toast(), STIM_TOO);
+    // The next operator stop says so again.
+    play_noise(&mut t, true);
+    t.key("Escape");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(t.last_toast(), "stimulus stopped");
+}
+
+#[test]
+fn stopping_the_last_transfer_disarms_an_armed_stimulus() {
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    play_noise(&mut t, false);
+    assert_eq!(meas_stop(&t.key("S")), (STIM_TOO.into(), true));
+}
+
+#[test]
+fn every_stop_path_of_a_transfer_stops_the_stimulus() {
+    // S on the transfer pane, S on the IR pane, the palette's command (any pane), and the
+    // command on the sweep view with the transfer measurement selected.
+    enum Via {
+        Key,
+        Palette,
+    }
+    for (focus, via) in [
+        (PaneKind::Transfer, Via::Key),
+        (PaneKind::Ir, Via::Key),
+        (PaneKind::Transfer, Via::Palette),
+        (PaneKind::Distortion, Via::Palette),
+    ] {
+        let mut t = T::new();
+        t.st.layout.focus = PaneKind::Transfer;
+        play_noise(&mut t, true);
+        t.st.layout.focus = focus;
+        t.st.selected = Some(MeasId(1));
+        let r = match via {
+            Via::Key => t.key("S"),
+            Via::Palette => t.st.update(Msg::Command(CommandId::StartStop), &t.keys),
+        };
+        assert_eq!(meas_stop(&r), (STIM_TOO.into(), true), "{focus:?}");
+    }
+}
+
+#[test]
+fn another_running_transfer_keeps_the_stimulus() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.push(meas(3, "Main R", transfer()));
+    t.conn(mirror(s.clone()));
+    t.st.layout.focus = PaneKind::Transfer;
+    t.st.selected = Some(MeasId(1));
+    play_noise(&mut t, true);
+    assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    // A stopped one does not count: with Main R stopped, Main L is the last running.
+    s.measurements[2].running = false;
+    t.conn(mirror(s));
+    assert_eq!(meas_stop(&t.key("S")), (STIM_TOO.into(), true));
+}
+
+#[test]
+fn stopping_a_spectrum_keeps_the_stimulus() {
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    play_noise(&mut t, true);
+    t.st.layout.focus = PaneKind::Spectrum;
+    assert_eq!(meas_stop(&t.key("S")), ("Sub stopped".into(), false));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+}
+
+#[test]
+fn a_stimulus_this_app_does_not_hold_keeps_playing() {
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    // Another client's noise: its lease is not this app's to end.
+    let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("other".into()));
+    s.generator.armed = true;
+    s.generator.firing = true;
+    t.conn(mirror(s.clone()));
+    assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
+    // Nothing playing at all.
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
+    // This client's lease as only the mirror shows it.
+    s.generator.owner = Some(ClientId("c1".into()));
+    t.conn(mirror(s));
+    assert_eq!(meas_stop(&t.key("S")), (STIM_TOO.into(), true));
+}
+
+#[test]
+fn a_sweep_is_never_stopped_by_a_transfer_stop() {
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    play_noise(&mut t, true);
+    t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
+    assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
+    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+}

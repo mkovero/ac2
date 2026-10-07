@@ -347,6 +347,9 @@ pub struct Stimulus {
     /// landed (not into the lease the stop is releasing). Any stop, a lost or failed lease,
     /// a closed window and a new connection drop it.
     pub arm_after_stop: bool,
+    /// The stop in flight went out with a measurement stop whose reply already says the
+    /// stimulus stopped: its own "stimulus stopped" would say it twice.
+    pub stop_announced: bool,
 }
 
 impl Default for Stimulus {
@@ -357,6 +360,7 @@ impl Default for Stimulus {
             outputs: vec![0],
             phase: StimPhase::Idle,
             arm_after_stop: false,
+            stop_announced: false,
         }
     }
 }
@@ -3245,6 +3249,48 @@ impl AppState {
         }
     }
 
+    /// Stopping `stopping` stops the stimulus too when it is the last transfer measurement
+    /// running and this app holds the lease, armed or playing: the noise is there to excite
+    /// transfer functions, and with none left measuring it only makes the room loud. SPL,
+    /// spectrum and RTA read whatever plays and need no stimulus of their own, so they keep
+    /// nothing playing; a sweep is its own measurement and is never cut by this. The stop is
+    /// the one Esc sends (faded out, disarmed, the lease released); another client's stimulus
+    /// is never stopped this way. Says whether it stopped.
+    fn stop_stimulus_with(&mut self, stopping: &Measurement, out: &mut Vec<Request>) -> bool {
+        let transfer = |m: &Measurement| matches!(m.config.kind, MeasKind::Transfer { .. });
+        if !transfer(stopping) || self.sweep.run.is_some() || self.sweep.plan.is_some() {
+            return false;
+        }
+        let other_running = self
+            .measurements()
+            .iter()
+            .any(|m| m.id != stopping.id && m.running && transfer(m));
+        if other_running || !self.holds_stimulus() {
+            return false;
+        }
+        self.stimulus.arm_after_stop = false;
+        self.stimulus.phase = StimPhase::Stopping;
+        self.stimulus.stop_announced = true;
+        out.push(Request::StimStop);
+        true
+    }
+
+    /// This app holds the stimulus lease, armed or playing: its own arm landed, or the
+    /// mirror names this client as the owner of a live generator.
+    fn holds_stimulus(&self) -> bool {
+        match self.stimulus.phase {
+            StimPhase::Armed | StimPhase::FireRequested | StimPhase::Firing => true,
+            StimPhase::Stopping => false,
+            StimPhase::Idle | StimPhase::Arming => self.daemon().is_some_and(|s| {
+                (s.generator.armed || s.generator.firing)
+                    && s.generator
+                        .owner
+                        .as_ref()
+                        .is_some_and(|o| Some(o) == self.my_client_id())
+            }),
+        }
+    }
+
     /// Sweep traces with their data, oldest first.
     pub fn sweep_traces(&self) -> Vec<(&TraceData, &GridDef)> {
         self.traces
@@ -4313,12 +4359,24 @@ impl AppState {
             }
             C::StartStop => {
                 if let Some(m) = self.focused_pane_meas() {
-                    let (cmd, what) = if m.running {
-                        (Command::MeasStop { meas: m.id }, "stopped")
+                    if m.running {
+                        let stim = if self.stop_stimulus_with(&m, out) {
+                            " · stimulus stopped (no transfer measurement left running)"
+                        } else {
+                            ""
+                        };
+                        self.call(
+                            out,
+                            Command::MeasStop { meas: m.id },
+                            format!("{} stopped{stim}", m.config.name),
+                        );
                     } else {
-                        (Command::MeasStart { meas: m.id }, "started")
-                    };
-                    self.call(out, cmd, format!("{} {what}", m.config.name));
+                        self.call(
+                            out,
+                            Command::MeasStart { meas: m.id },
+                            format!("{} started", m.config.name),
+                        );
+                    }
                 }
             }
 
@@ -5561,6 +5619,7 @@ impl AppState {
             }
             StimEvent::Stopped => {
                 self.stimulus.phase = StimPhase::Idle;
+                let announced = std::mem::take(&mut self.stimulus.stop_announced);
                 if std::mem::take(&mut self.stimulus.arm_after_stop) && !self.sweep.arm_after_stop {
                     self.arm_after_stopped(out);
                 }
@@ -5571,7 +5630,7 @@ impl AppState {
                     plan => {
                         self.sweep.plan = plan;
                         self.end_sweep_mode();
-                        if !releasing {
+                        if !releasing && !announced {
                             self.toast("stimulus stopped");
                         }
                     }
@@ -5580,6 +5639,7 @@ impl AppState {
             StimEvent::Lost(msg) => {
                 self.stimulus.phase = StimPhase::Idle;
                 self.stimulus.arm_after_stop = false;
+                self.stimulus.stop_announced = false;
                 self.sweep.releasing = false;
                 self.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
@@ -5588,6 +5648,7 @@ impl AppState {
             StimEvent::Failed(msg) => {
                 self.sweep.releasing = false;
                 self.stimulus.arm_after_stop = false;
+                self.stimulus.stop_announced = false;
                 if std::mem::take(&mut self.sweep.arm_after_stop) {
                     self.end_sweep_mode();
                 }

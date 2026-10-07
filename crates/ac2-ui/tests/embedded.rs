@@ -331,6 +331,52 @@ fn empty_embedded_daemon_measures_from_the_app() -> R {
     Ok(())
 }
 
+/// From an empty daemon: with the noise playing for the only transfer measurement, S stops
+/// the measurement and the stimulus with it (faded and released as Esc does), and one toast
+/// says both.
+#[test]
+fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
+    use ac2_ui::state::PaneKind;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
+    assert_eq!(d.st.layout.focus, PaneKind::Transfer);
+
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("pink playing", |s| {
+        s.daemon().is_some_and(|x| {
+            x.generator.firing
+                && x.generator.settings.as_ref().map(|g| g.signal)
+                    == Some(ac2_proto::model::Signal::Pink)
+        })
+    })?;
+    // Only what this stop says.
+    d.st.toasts.clear();
+    d.key("S");
+    d.until("the measurement and the noise stopped", |s| {
+        s.stimulus.phase == StimPhase::Idle
+            && s.meas(m.id).is_some_and(|x| !x.running)
+            && s.daemon().is_some_and(|x| {
+                !x.generator.firing && !x.generator.armed && x.generator.owner.is_none()
+            })
+    })?;
+    let stopped = format!(
+        "{} stopped · stimulus stopped (no transfer measurement left running)",
+        m.config.name
+    );
+    d.until("the toast", |s| s.toasts.iter().any(|t| t.text == stopped))?;
+    assert!(
+        !d.st.toasts.iter().any(|t| t.text == "stimulus stopped"),
+        "said twice"
+    );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// The IR pane from an empty daemon: the wheel zooms its time axis about the pointer, a drag
 /// pans it, Ctrl+wheel zooms the amplitude, a click puts the cursor on the arrival and the
 /// readout reads that sample of the IR as drawn.

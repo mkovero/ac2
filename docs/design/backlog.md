@@ -93,6 +93,13 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Stimulus conveniences (operator, 2026-10-07: "it could stop also stop stimulus if you stop
+running transfer measurement, somehow I would expect it"):
+- **Stopping the last running transfer measurement stops the stimulus** this app holds
+  (armed or playing), the way Esc does, with one toast for both; another running transfer
+  measurement keeps it, a sweep and another client's stimulus are never stopped by it.
+  `ac2 meas stop` is unchanged (no side effects for scripts).
+
 A measurement owns its traces (operator, 2026-10-07: "this becomes little bit confusing to
 see 'measurements' and 'traces' at the transfer screen, I would imagine transfer measurement
 includes set of traces and mathing should be within the measurement, as a trace"; "I would
