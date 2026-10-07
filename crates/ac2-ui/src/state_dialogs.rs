@@ -410,6 +410,20 @@ impl AppState {
         }
     }
 
+    /// The delay operand `o`'s phase is referred to, seconds: a live measurement's applied
+    /// delay, a stored trace's delay at capture; `None` for a curve without one.
+    pub fn operand_delay(&self, o: Operand) -> Option<f64> {
+        match o {
+            Operand::Meas { meas } => self.meas(meas)?.delay.as_ref().map(|d| d.applied.0),
+            Operand::Trace { trace } => self
+                .daemon()?
+                .traces
+                .iter()
+                .find(|t| t.id == trace)
+                .map(|t| t.delay.0),
+        }
+    }
+
     /// What a math channel can combine: the live measurements and the stored traces.
     /// What a math channel can combine; `owner`'s live curve and traces first.
     pub(super) fn math_candidates(

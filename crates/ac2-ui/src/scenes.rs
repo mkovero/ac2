@@ -169,7 +169,14 @@ fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<Math
         FrameData::Rta(f) => f.meta.math.as_deref(),
         _ => None,
     }?;
-    Some(MathStatus::new(config, state, |o| st.operand_name(o)))
+    Some(
+        MathStatus::new(config, state, |o| st.operand_name(o)).with_arrival(
+            config,
+            state,
+            |o| st.operand_delay(o),
+            st.view.temperature_c,
+        ),
+    )
 }
 
 /// The banner status of the math channel `focus` shows, unless it is stopped (its last

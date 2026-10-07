@@ -595,3 +595,141 @@ fn an_ambiguous_finding_awaits_a_pick() {
     }
     stop.join().unwrap();
 }
+
+/// An acoustic path whose delay re the reference is `samples`, fraction included: the whole
+/// part as the path's delay and the fraction as a Blackman-windowed sinc, long enough that
+/// its group delay is flat to well under a thousandth of a sample below 15 kHz.
+fn fractional_rig(samples: f64) -> ac2_audio::FakeBackend {
+    use ac2_audio::FakeConfig;
+    use ac2_audio::fake::{FakeDrive, FakePath};
+    const HALF: usize = 128;
+    let whole = samples.floor();
+    let centre = HALF as f64 + (samples - whole);
+    let n = 2 * HALF + 1;
+    let fir = (0..n)
+        .map(|i| {
+            let x = i as f64 - centre;
+            let sinc = if x.abs() < 1e-12 {
+                1.0
+            } else {
+                (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x)
+            };
+            // Blackman window centred on the fractional peak, zero at ±(HALF + 1).
+            let w =
+                2.0 * std::f64::consts::PI * (x + HALF as f64 + 1.0) / (2.0 * HALF as f64 + 2.0);
+            let win = 0.42 - 0.5 * w.cos() + 0.08 * (2.0 * w).cos();
+            (f64::from(ACOUSTIC_GAIN) * sinc * win) as f32
+        })
+        .collect();
+    let delay_frames = LOOP_DELAY + whole as u32 - HALF as u32;
+    ac2_audio::FakeBackend::new(FakeConfig {
+        sample_rate: FS,
+        block_frames: BLOCK,
+        inputs: 4,
+        outputs: 2,
+        drive: FakeDrive::Manual,
+        seed: 7,
+        paths: vec![
+            FakePath::loopback(0, 0, LOOP_DELAY),
+            FakePath::acoustic(0, 1, delay_frames, fir, 1e-5),
+        ],
+        ..FakeConfig::default()
+    })
+    .unwrap()
+}
+
+#[test]
+fn tracking_applies_a_fractional_arrival() {
+    init_log();
+    const TRUE_DELAY: f64 = 600.37;
+    let backend = fractional_rig(TRUE_DELAY);
+    let mut cfg = config(backend.clone(), inproc("tf-fractional"));
+    cfg.lease_expiry = Duration::from_secs(60);
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    assert!(
+        delay_state(c.ok(Command::DelayTrack {
+            meas: MeasId(1),
+            enabled: true,
+        }))
+        .tracking
+    );
+    let tok = match c.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::GenSet {
+        lease_token: tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
+    let mut d = driver(&backend);
+    for _ in 0..8 {
+        run_tf(&mut d, &sub, 0.5, 0);
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+    // Two agreeing windows put the arrival in with its fraction, not rounded to 600.
+    let st = snapshot_delay(&mut c);
+    assert_eq!(st.nudged_samples, 0.0);
+    assert!(
+        (st.applied_samples - TRUE_DELAY).abs() < 0.02,
+        "tracked {} vs {TRUE_DELAY}",
+        st.applied_samples
+    );
+    // The fraction goes in as a phase rotation: the aligned curve is flat to 10 kHz, where a
+    // whole-sample delay would leave −0.37 · 360° · 10 kHz / 48 kHz ≈ −28°.
+    let rev = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state.measurements[0].config_rev.0,
+        other => panic!("{other:?}"),
+    };
+    for _ in 0..4 {
+        run_tf(&mut d, &sub, 0.5, rev);
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+    let f = run_tf(&mut d, &sub, 0.5, rev);
+    let t = tf(&f);
+    assert!((t.meta.delay.0 * f64::from(FS) - st.applied_samples).abs() < 1e-6);
+    let i10k = (0..t.phase.len())
+        .min_by(|&a, &b| {
+            (grid_freq(a) - 10_000.0)
+                .abs()
+                .total_cmp(&(grid_freq(b) - 10_000.0).abs())
+        })
+        .unwrap();
+    assert_eq!(t.validity[i10k], ValidityMask::NONE);
+    assert!(
+        t.phase[i10k].abs() < 1.0,
+        "phase at {:.0} Hz: {}°",
+        grid_freq(i10k),
+        t.phase[i10k]
+    );
+    // Further agreeing windows find the same arrival and leave the delay where it is.
+    for _ in 0..4 {
+        run_tf(&mut d, &sub, 0.5, rev);
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+    assert_eq!(snapshot_delay(&mut c).applied_samples, st.applied_samples);
+
+    c.ok(Command::GenStop);
+    let stop = std::thread::spawn(move || h.shutdown());
+    while !stop.is_finished() {
+        d.run_blocks(4);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    stop.join().unwrap();
+}

@@ -104,11 +104,11 @@ pub(crate) enum ControlMsg {
         token: u64,
         result: Box<Result<ac2_core::delay::FinderResult, String>>,
     },
-    /// Delay tracking of `meas` agreed on a new delay.
+    /// Delay tracking of `meas` agreed on a new arrival, in (fractional) samples.
     DelayTracked {
         meas: MeasId,
         epoch: SessionEpoch,
-        samples: i64,
+        samples: f64,
     },
     /// A `session.detect_loopback` started under `token` finished.
     LoopbackDetected {

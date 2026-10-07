@@ -499,7 +499,10 @@ of its own); `phase: own alignments` when an operand shares no time base with th
 import, a capture from an earlier session: each keeps its own alignment, their relative
 arrival is unknown); `magnitude only` against a target. **A ÷ B** and **A × B** take the
 lower coherence of the two per frequency, so the coherence mask blanks where either is
-unreliable.
+unreliable. **A ÷ B**, **A − B** and **A + B** of two transfer functions on one time base also
+say how far apart their operands arrive, by the delays their phases are referred to:
+`Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C` (A − B, to 0.1 µs, a slope the phase pane
+hardly shows).
 
 **The average (spatial average).** A speaker sounds different from seat to seat, so tune to
 the average of several mic positions rather than to one spot. Make one transfer measurement
@@ -583,7 +586,9 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   gone; tracking (**Y**) follows the arrival and keeps your steps on top of it. A stopped or hidden measurement has no live curve to move:
   the keys only say so (**S** starts it) and leave the delay alone. Delays are kept to
   fractions of a sample (the finder's estimate is inserted exactly, `600.25samples` can be
-  typed), shown in the measurement list to the microsecond.
+  typed), shown in the measurement list to the microsecond. Tracking moves to a fractional
+  arrival too once two windows agree within a tenth of a sample, and leaves the delay alone
+  while the arrival stays within 0.05 sample of it.
 - A larger change keeps what it can: a stage of the analysis keeps its averages while the
   change is small next to its window (about 2.4 ms at full rate, 9 ms and 28 ms for the
   lower ranges at 48 kHz); only the stages beyond that start over and show *settling*.

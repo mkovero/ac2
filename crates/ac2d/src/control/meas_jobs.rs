@@ -18,6 +18,11 @@ use crate::util::{perr, wall_ns};
 
 use super::{Control, DelaySource, MAX_DELAY_S, check_find, delay_samples, static_grid};
 
+/// A tracked arrival closer than this to the applied one, samples, leaves the delay alone:
+/// half the tracker's fine agreement, below which two estimates are the same arrival, and a
+/// phase step of under 2° at 10 kHz (48 kHz) that a resettle would not be worth.
+const TRACK_TOLERANCE_SAMPLES: f64 = 0.05;
+
 impl Control {
     pub(super) fn job_env(&self, rt: &Runtime) -> JobEnv {
         self.env_at(rt.epoch)
@@ -431,7 +436,7 @@ impl Control {
         self.answer(&p.routing_id, &p.client, p.id, reply, Instant::now());
     }
 
-    pub(super) fn tracked(&mut self, meas: MeasId, epoch: SessionEpoch, samples: i64) {
+    pub(super) fn tracked(&mut self, meas: MeasId, epoch: SessionEpoch, samples: f64) {
         let Some(fs) = self
             .session
             .as_ref()
@@ -446,12 +451,14 @@ impl Control {
         let Some(d) = &m.delay else {
             return;
         };
-        // `samples` is the arrival; the operator's nudge from it stays on top.
+        // `samples` is the arrival; the operator's nudge from it stays on top. A move smaller
+        // than the tracker's own scatter would only shuffle the fraction's phase rotation
+        // back and forth without aligning anything better.
         if d.tracking
-            && (d.applied_samples - d.nudged_samples).round() as i64 != samples
+            && ((d.applied_samples - d.nudged_samples) - samples).abs() > TRACK_TOLERANCE_SAMPLES
             && let Err(e) = self.set_delay(
                 meas,
-                Seconds((samples as f64 + d.nudged_samples) / fs),
+                Seconds((samples + d.nudged_samples) / fs),
                 DelaySource::Tracking,
             )
         {

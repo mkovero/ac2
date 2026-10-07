@@ -411,7 +411,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!(
-            "sweep {} stored as trace {tid}: arrival {:.2} ms, reference {:+.1} dB{}",
+            "sweep {} stored as trace {tid}: arrival {:.3} ms, reference {:+.1} dB{}",
             run.id.0,
             a.arrival_s * 1000.0,
             a.reference_db,

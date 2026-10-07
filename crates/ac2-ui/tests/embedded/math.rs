@@ -195,6 +195,27 @@ fn math_channels_from_an_empty_daemon() -> R {
         tf_legend(&d.st, avg)
     );
 
+    // The ratio's phase keeps A's arrival relative to B: its legend says how far apart they
+    // are, to 0.1 µs, by the delays each one's phase is referred to — the second position,
+    // over the capture of the average taken at no delay.
+    d.conn.send(Request::Call {
+        cmd: Command::DelaySet {
+            meas: second,
+            delay: ac2_proto::units::Seconds(12.3e-6),
+        },
+        what: "delay".into(),
+    });
+    d.until("the delay set", |s| {
+        s.meas(second)
+            .and_then(|m| m.delay.as_ref())
+            .is_some_and(|x| (x.applied.0 - 12.3e-6).abs() < 1e-12)
+    })?;
+    assert!(
+        tf_legend(&d.st, avg).contains(" ÷ Average of 2 S1 · arrival Δ +12.3 µs · +4.2 mm @ 20 °C"),
+        "{}",
+        tf_legend(&d.st, avg)
+    );
+
     // One operand stopped: no ratio, and the banner says which and why.
     d.conn.send(Request::Call {
         cmd: Command::MeasStop { meas: second },

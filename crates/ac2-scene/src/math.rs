@@ -119,6 +119,31 @@ fn transfer_notes(expr: &MathExpr, phase: PhaseBasis) -> Vec<&'static str> {
     notes
 }
 
+/// How far apart the two operands of a transfer ÷, − or + arrive, A − B, by the delays
+/// their phases are referred to (`delay_of`, seconds): `arrival Δ +3.7 µs · +1.3 mm @ 20 °C`.
+/// What these operators show depends on that relative arrival — a ratio's phase slope, where
+/// a difference or a sum cancels — and a few µs is a slope the phase pane hardly shows. Only
+/// on a shared time base: operands each aligned on their own clock have no relative arrival,
+/// and a cascade's delays add rather than compare.
+pub fn arrival_note(
+    expr: &MathExpr,
+    phase: PhaseBasis,
+    delay_of: impl Fn(Operand) -> Option<f64>,
+    temp_c: f64,
+) -> Option<String> {
+    let MathExpr::Binary { a, op, b } = expr else {
+        return None;
+    };
+    if *op == MathOp::Multiply || phase != PhaseBasis::SharedTimeBase {
+        return None;
+    }
+    let (da, db) = (delay_of(*a)?, delay_of(*b)?);
+    Some(format!(
+        "arrival Δ {}",
+        crate::readout::arrival_difference(da, db, temp_c)
+    ))
+}
+
 /// A math channel's frame, as the display tells it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MathStatus {
@@ -134,6 +159,8 @@ pub struct MathStatus {
     pub left_out: Vec<String>,
     /// Legend notes: `phase: own alignments`, `no coherence` …
     pub notes: Vec<&'static str>,
+    /// The operands' arrival difference ([`arrival_note`]), when the caller knows their delays.
+    pub arrival: Option<String>,
 }
 
 impl MathStatus {
@@ -163,7 +190,22 @@ impl MathStatus {
                 })
                 .collect(),
             notes,
+            arrival: None,
         }
+    }
+
+    /// This status with the operands' arrival difference ([`arrival_note`]) in its tag.
+    pub fn with_arrival(
+        mut self,
+        c: &MathConfig,
+        s: &MathState,
+        delay_of: impl Fn(Operand) -> Option<f64>,
+        temp_c: f64,
+    ) -> Self {
+        if c.domain == MathDomain::Transfer {
+            self.arrival = arrival_note(&c.expr, s.phase, delay_of, temp_c);
+        }
+        self
     }
 
     /// Whether the frame carries a result at all.
@@ -183,7 +225,8 @@ impl MathStatus {
         }
     }
 
-    /// The legend tag: `3 of 4 positions · power avg`; `Main L + Sub · no coherence`.
+    /// The legend tag: `3 of 4 positions · power avg`; `Main L + Sub · no coherence`;
+    /// `Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C`.
     pub fn tag(&self) -> String {
         let head = match self.method {
             Some(m) => format!("{} · {} avg", self.count(), method_name(m)),
@@ -191,6 +234,7 @@ impl MathStatus {
         };
         std::iter::once(head.as_str())
             .chain(self.notes.iter().copied())
+            .chain(self.arrival.as_deref())
             .collect::<Vec<_>>()
             .join(" · ")
     }
@@ -424,6 +468,86 @@ mod tests {
         assert_eq!(
             MathStatus::new(&spec, &both, name).tag(),
             "Seat 1 − Seat 2 · level difference"
+        );
+    }
+
+    /// A ratio, difference or sum of two operands on one time base says how far apart they
+    /// arrive, to 0.1 µs; a cascade, operands on their own clocks, or an operand without a
+    /// delay say nothing.
+    #[test]
+    fn binary_transfer_carries_the_arrival_difference() {
+        let cfg = |op, b| {
+            MathConfig::of(
+                ac2_proto::model::TraceOwner::Imported,
+                MathDomain::Transfer,
+                MathExpr::Binary { a: meas(1), op, b },
+            )
+        };
+        let state = |b, phase| MathState {
+            operands: [meas(1), b]
+                .into_iter()
+                .map(|operand| OperandState {
+                    operand,
+                    status: OperandStatus::Included,
+                })
+                .collect(),
+            phase,
+        };
+        let s2 = Operand::Trace { trace: TraceId(2) };
+        // Seat 1 at 600.37 samples, S2 at 600 (48 kHz).
+        let delay_of = |o: Operand| match o {
+            Operand::Meas { .. } => Some(600.37 / 48_000.0),
+            Operand::Trace { .. } => Some(600.0 / 48_000.0),
+        };
+        let tag = |op, b, phase: PhaseBasis| {
+            let (c, s) = (cfg(op, b), state(b, phase));
+            MathStatus::new(&c, &s, name)
+                .with_arrival(&c, &s, delay_of, 20.0)
+                .tag()
+        };
+        assert_eq!(
+            tag(MathOp::Divide, s2, PhaseBasis::SharedTimeBase),
+            "Seat 1 ÷ S2 · arrival Δ +7.7 µs · +2.6 mm @ 20 °C"
+        );
+        assert_eq!(
+            tag(MathOp::Subtract, s2, PhaseBasis::SharedTimeBase),
+            "Seat 1 − S2 · no coherence · arrival Δ +7.7 µs · +2.6 mm @ 20 °C"
+        );
+        assert_eq!(
+            tag(MathOp::Divide, s2, PhaseBasis::OwnAlignments),
+            "Seat 1 ÷ S2 · phase: own alignments"
+        );
+        assert_eq!(
+            tag(MathOp::Multiply, s2, PhaseBasis::SharedTimeBase),
+            "Seat 1 × S2"
+        );
+        let (c, s) = (
+            cfg(MathOp::Divide, s2),
+            state(s2, PhaseBasis::SharedTimeBase),
+        );
+        let no_delay = MathStatus::new(&c, &s, name).with_arrival(
+            &c,
+            &s,
+            |o| matches!(o, Operand::Meas { .. }).then_some(0.0125),
+            20.0,
+        );
+        assert_eq!(no_delay.tag(), "Seat 1 ÷ S2");
+        // Levels have no arrival.
+        let spec = MathConfig::of(
+            ac2_proto::model::TraceOwner::Imported,
+            MathDomain::Spectrum,
+            MathExpr::Binary {
+                a: meas(1),
+                op: MathOp::Subtract,
+                b: s2,
+            },
+        );
+        let s = state(s2, PhaseBasis::NoPhase);
+        assert_eq!(
+            MathStatus::new(&spec, &s, name)
+                .with_arrival(&spec, &s, delay_of, 20.0)
+                .tag(),
+            "Seat 1 − S2 · level difference"
         );
     }
 

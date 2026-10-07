@@ -156,7 +156,8 @@ referred to), **Smoothing**, **Name** (follows the expression — `Main L ÷ Sub
 — until the operator types one). A starts as the selected trace, else what the focused pane
 shows. *Edit the selected math channel…* opens the same dialog on an existing one and sends
 `meas.update`. The legend shows the expression and what it means (`Main L + Sub · no
-coherence`); a spectrum math channel's caption says `level difference` / `power sum`. The UI
+coherence`), and for a transfer ÷, − or + on one time base how far apart the operands arrive by
+the delays their phases are referred to (`· arrival Δ +3.7 µs · +1.3 mm @ 20 °C`, A − B); a spectrum math channel's caption says `level difference` / `power sum`. The UI
 does no maths: the dialog builds a configuration, the daemon combines and refuses with a
 reason.
 
