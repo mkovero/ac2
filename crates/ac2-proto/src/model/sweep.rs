@@ -104,7 +104,8 @@ pub struct SweepRun {
     pub level: Dbfs,
     /// Sweep as requested.
     pub sweep: EssSpec,
-    /// Actual sweep duration (the rate constant is rounded).
+    /// Actual duration of each emitted sweep: the rate constant is rounded, and the sweep
+    /// starts two octaves below the requested start at a rising level.
     pub sweep_duration: Seconds,
     /// Silence after each sweep.
     pub post_roll: Seconds,
@@ -187,7 +188,7 @@ pub struct SweepInfo {
     pub sample_rate: Hz,
     /// Rate constant L of the sweep: harmonic k's impulse sits at −L·ln k.
     pub rate: Seconds,
-    /// Actual sweep duration.
+    /// Actual duration of each emitted sweep (from two octaves below the requested start).
     pub duration: Seconds,
     /// Sweeps averaged.
     pub repeats: u8,

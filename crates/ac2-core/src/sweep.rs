@@ -17,9 +17,9 @@
 //!
 //! Orders `k` and `k+1` lie `L·ln((k+1)/k)` apart; the gap shrinks with `k`, so the highest
 //! order analysed sets one window (10 % of the gap above it before `t_k`, 90 % of the gap
-//! below it after) used for every order, for the fundamental's distortion reference and for
-//! the noise estimate. Equal windows give equal noise and time resolution, so ratios compare
-//! like with like.
+//! below it after; once capped, at least a third before `t_k`) used for every order, for the
+//! fundamental's distortion reference and for the noise estimate. Equal windows give equal
+//! noise and time resolution, so ratios compare like with like.
 //!
 //! # Distortion and validity
 //!
@@ -66,6 +66,21 @@ pub const DISTORTION_MIN_CELLS: f64 = 3.0;
 pub const FLOOR_BAND_OCT: f64 = 1.0 / 3.0;
 /// Longest harmonic window, seconds: it still resolves fundamentals down to 2/W = 20 Hz.
 pub const MAX_WINDOW_S: f64 = 0.1;
+/// The emitted sweep starts at least this factor (two octaves) below the asked start
+/// frequency, unless held up by [`MIN_EMITTED_START_HZ`], and rises to full level over those
+/// octaves. A path answers a sweep's switch-on with a
+/// transient over roughly its first two octaves; that transient does not follow the sweep's
+/// phase, so the deconvolution cannot tell it from the harmonic impulses and books it as
+/// distortion of the lowest fundamentals (on an electrical path, H2 up to 22 dB above the
+/// steady-sine value). Starting lower puts it below the analysed band; the rising level keeps
+/// the added low frequencies, where a loudspeaker's excursion grows fastest, below full level.
+pub const ONSET_EXTENSION: f64 = 4.0;
+/// The noise floor is averaged over the windows that fit from this fraction of the post-roll
+/// to its end: the post-roll is long enough for the system's decay (see
+/// [`SweepSpec::tail_s`]), which is meant to be over by its second half.
+const NOISE_REGION_START: f64 = 0.5;
+/// The emitted sweep never starts below this, Hz.
+pub const MIN_EMITTED_START_HZ: f64 = 1.0;
 /// Audio kept before each sweep's onset when the repeats are cut apart, seconds.
 pub const PRE_ROLL_S: f64 = 0.1;
 /// Shortest silence after each sweep, seconds.
@@ -94,7 +109,8 @@ const CLIP: f64 = 0.999;
 /// What was played and how to analyse it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SweepSpec {
-    /// The sweep as emitted.
+    /// The sweep as asked: its band is the one analysed. What is emitted is
+    /// [`SweepTiming::emitted`].
     pub ess: EssConfig,
     /// Emitted level, dBFS RMS of the constant-envelope part.
     pub level_dbfs: f64,
@@ -178,7 +194,10 @@ impl From<GeneratorError> for SweepError {
 /// each repeat needs after it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SweepTiming {
-    /// The sweep as generated.
+    /// The sweep as emitted: [`SweepSpec::ess`] at the same rate, started up to
+    /// [`ONSET_EXTENSION`] lower and fading in up to the asked start.
+    pub emitted: EssConfig,
+    /// The emitted sweep as generated.
     pub plan: EssPlan,
     /// Harmonic window before `t_k`, seconds.
     pub pre_s: f64,
@@ -206,7 +225,8 @@ impl SweepTiming {
         if !spec.level_dbfs.is_finite() {
             return Err(SweepError::Sweep(GeneratorError::NonFiniteLevel));
         }
-        let plan = EssPlan::new(&spec.ess, spec.sample_rate)?;
+        let emitted = extended(&spec.ess, spec.sample_rate)?;
+        let plan = EssPlan::new(&emitted, spec.sample_rate)?;
         let k = f64::from(spec.max_order);
         let l = plan.rate_s;
         let pre_s = PRE_FRACTION * l * ((k + 1.0) / k).ln();
@@ -214,11 +234,20 @@ impl SweepTiming {
         // The noise in a window grows with its length while the sweep's energy per hertz
         // grows with L: capping the window lets a longer sweep lower the floor.
         let shrink = (MAX_WINDOW_S / (pre_s + post_s)).min(1.0);
-        let (pre_s, post_s) = (pre_s * shrink, post_s * shrink);
+        let (mut pre_s, mut post_s) = (pre_s * shrink, post_s * shrink);
+        // The k-th harmonic's IR is band-limited from k·f_lo ≥ 4/W up, and that band edge
+        // rings about W/4 on each side of t_k: a rise of W/3 keeps it, where the next-higher
+        // order still lies a whole window away so the windows do not overlap.
+        let window = pre_s + post_s;
+        if l * ((k + 1.0) / k).ln() >= window {
+            pre_s = pre_s.max(window / 3.0);
+            post_s = window - pre_s;
+        }
         let post_roll_s = MIN_POST_ROLL_S
             .max(4.0 * (pre_s + post_s))
             .max(spec.tail_s.unwrap_or(0.0));
         Ok(Self {
+            emitted,
             plan,
             pre_s,
             post_s,
@@ -246,10 +275,40 @@ impl SweepTiming {
         self.pre_s + self.post_s
     }
 
+    /// Lowest frequency the emitted sweep plays at full level, Hz.
+    pub fn full_level_hz(&self) -> f64 {
+        self.emitted.start_hz * (self.emitted.fade_in_s / self.plan.rate_s).exp()
+    }
+
     /// Time of the k-th harmonic's impulse response re the linear one, seconds (negative).
     pub fn harmonic_time_s(&self, k: u8) -> f64 {
         -self.plan.rate_s * f64::from(k).ln()
     }
+}
+
+/// The sweep emitted for `asked`: the same rate, started up to [`ONSET_EXTENSION`] lower and
+/// fading in (half-cosine in time, so raised-cosine in log-frequency) up to the asked start,
+/// which replaces the asked fade-in. The start is a whole number of cycles per rate constant
+/// (`f·L` an integer, which keeps the harmonics' impulses in phase), at least
+/// [`MIN_EMITTED_START_HZ`] and one cycle; when no such start lies below the asked one, the
+/// asked sweep is emitted unchanged.
+fn extended(asked: &EssConfig, fs: f64) -> Result<EssConfig, SweepError> {
+    let rate = EssPlan::new(asked, fs)?.rate_s;
+    let cycles = (asked.start_hz * rate).round();
+    let lowest = (cycles / ONSET_EXTENSION)
+        .floor()
+        .max((MIN_EMITTED_START_HZ * rate).ceil())
+        .max(1.0);
+    if lowest >= cycles {
+        return Ok(*asked);
+    }
+    let start_hz = lowest / rate;
+    Ok(EssConfig {
+        start_hz,
+        duration_s: rate * (asked.end_hz / start_hz).ln(),
+        fade_in_s: rate * (asked.start_hz / start_hz).ln(),
+        ..*asked
+    })
 }
 
 /// One harmonic order's distortion curve.
@@ -286,7 +345,8 @@ pub struct SweepAnalysis {
     pub harmonic_window_s: (f64, f64),
     /// Linear window before and after the arrival, s.
     pub linear_window_s: (f64, f64),
-    /// Start of the noise window re the arrival, s.
+    /// Start of the earliest noise window re the arrival, s (the windows tile from there to
+    /// the end of the post-roll).
     pub noise_window_s: f64,
     /// Grid column frequencies (fundamental), Hz.
     pub frequencies: Vec<f64>,
@@ -362,7 +422,7 @@ fn locate(
     count: usize,
 ) -> Result<(Vec<usize>, f64), SweepError> {
     let fs = spec.sample_rate;
-    let inv = EssInverse::new(&spec.ess, fs, spec.level_dbfs)?;
+    let inv = EssInverse::new(&timing.emitted, fs, spec.level_dbfs)?;
     let m = timing.sweep_samples();
     // The matched-filter peak a unit loopback of the emitted sweep produces.
     let amp = dbfs_to_rms(spec.level_dbfs) * std::f64::consts::SQRT_2;
@@ -473,6 +533,22 @@ fn segment(h: &[f64], start: i64, w: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+/// Power spectrum averaged over `count` adjacent windows `w` of `h` ending at `end`. The
+/// power one window estimates in a resolution cell is exponentially distributed (its spread
+/// equals its mean), and 1/f noise leaves only a few cells in a band at low frequencies, so a
+/// single window's floor swings by several dB between runs; the mean of `count` independent
+/// windows cuts the spread by about √count.
+fn noise_power(h: &[f64], end: i64, count: usize, w: &[f64], nw: usize) -> Vec<f64> {
+    let len = w.len() as i64;
+    let mut acc = vec![0.0; nw / 2 + 1];
+    for j in 0..count as i64 {
+        let p = power_spectrum(&segment(h, end - (j + 1) * len, w), nw);
+        acc.iter_mut().zip(&p).for_each(|(a, v)| *a += v);
+    }
+    acc.iter_mut().for_each(|a| *a /= count.max(1) as f64);
+    acc
+}
+
 fn power_spectrum(x: &[f64], n: usize) -> Vec<f64> {
     fft_forward(x, n).iter().map(Complex64::norm_sqr).collect()
 }
@@ -548,14 +624,21 @@ pub fn analyse_recording(
     let spectra: Vec<Vec<f64>> = (1..=k_max)
         .map(|k| power_spectrum(&segment(&h, t_k(k) - pre_n as i64, &w), nw))
         .collect();
-    // Noise: the same window ending just before the end of the post-roll, which every
-    // repeat's record covers fully.
-    let noise_start = ((timing.post_roll_s - NOISE_MARGIN_S) * fs).floor() as i64 - w_len as i64;
-    let noise = power_spectrum(&segment(&h, noise_start, &w), nw);
+    // Noise: windows like the harmonic ones, tiled back from just before the end of the
+    // post-roll (which every repeat's record covers fully) over its second half, where the
+    // system's own decay has ended. With the window at most MAX_WINDOW_S and the post-roll at
+    // least MIN_POST_ROLL_S, at least four fit.
+    let noise_end = ((timing.post_roll_s - NOISE_MARGIN_S) * fs).floor() as i64;
+    let noise_start = noise_end - w_len as i64;
+    let noise_first = (NOISE_REGION_START * timing.post_roll_s * fs).ceil() as i64;
+    let noise_windows = usize::try_from((noise_end - noise_first) / w_len as i64)
+        .unwrap_or(0)
+        .max(1);
+    let noise = noise_power(&h, noise_end, noise_windows, &w, nw);
 
     let freqs = spec.grid.frequencies();
     let (f1, f2) = (spec.ess.start_hz, spec.ess.end_hz);
-    let f_lo = (f1 * (spec.ess.fade_in_s / l).exp()).max(2.0 / timing.window_s());
+    let f_lo = timing.full_level_hz().max(2.0 / timing.window_s());
     let f_top = (f2 * (-spec.ess.fade_out_s / l).exp()).min(HARMONIC_FS_FRACTION * fs);
     let mut harmonics: Vec<HarmonicCurve> = (2..=k_max)
         .map(|order| HarmonicCurve {
@@ -683,7 +766,7 @@ pub fn analyse_recording(
     let room_end = (((timing.post_roll_s - NOISE_MARGIN_S) * fs).floor() as i64).max(d + 2);
     let room_ir: Vec<f64> = (room_start..room_end).map(at).collect();
     let excited = (
-        f1 * (spec.ess.fade_in_s / l).exp(),
+        timing.full_level_hz(),
         f2 * (-spec.ess.fade_out_s / l).exp(),
     );
     let room = crate::room::analyse(&room_ir, fs, (room_start - d) as f64 / fs, excited);
@@ -698,7 +781,7 @@ pub fn analyse_recording(
         first_onset_s: onsets[0] as f64 / fs,
         harmonic_window_s: (pre_n as f64 / fs, post_n as f64 / fs),
         linear_window_s: (lin_pre as f64 / fs, lin_post as f64 / fs),
-        noise_window_s: (noise_start - d) as f64 / fs,
+        noise_window_s: (noise_end - (noise_windows * w_len) as i64 - d) as f64 / fs,
         frequencies: freqs,
         magnitude_db,
         phase_deg,

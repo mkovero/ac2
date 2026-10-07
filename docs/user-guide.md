@@ -750,6 +750,12 @@ speaker's output and on the loopback output; ac2 records the loopback (reference
 divides one by the other, and separates the harmonics, which arrive before the linear impulse
 response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md).
 
+The sweep starts about two octaves below the asked start frequency at a rising level, reaching
+full level at the asked start, so the response and distortion are reported from the asked start
+(the extension adds a little to the duration). A path's switch-on transient in those first
+octaves would otherwise read as distortion. Mind the loudspeaker's excursion when asking for a
+very low start: the extension plays lower still, though below full level.
+
 - **App:** a sweep is a **measurement** like a transfer function: **Shift+S** (or **New sweep
   measurement** in the palette) opens the dialog that makes one: reference, mic and the
   speaker's output by name (the session's loopback output always plays too), the **level**

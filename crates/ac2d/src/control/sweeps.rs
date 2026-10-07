@@ -133,7 +133,7 @@ impl Control {
         let sweeps = (0..req.repeats)
             .map(|_| {
                 CoreGenerator::new(&GeneratorConfig {
-                    signal: CoreSignal::Ess(spec.ess),
+                    signal: CoreSignal::Ess(timing.emitted),
                     sample_rate: fs,
                     seed: 0,
                     band: CoreBandLimit::NONE,

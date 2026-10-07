@@ -19,6 +19,17 @@ One synchronised exponential sine sweep per repeat (`ac2_core::generator::EssPla
   `L·ln(f2/f1)` after rounding). Half-cosine fades: in over the first 1/6 octave of the sweep,
   out over the last 1/24 octave (`EssSpec::with_fades`), so it starts and stops without a step.
   Distortion is not reported for fundamentals inside the fades: their level is lower there.
+- **onset extension**: the emitted sweep starts about two octaves below the requested `f1`, at
+  the same `L`, at the lowest whole number of cycles per `L` that is ≤ `f1/4` (≥ 1 Hz), and
+  fades in over those octaves (a half-cosine in time, i.e. raised-cosine in log-frequency),
+  replacing the requested fade-in; it reaches full level at `f1` (`SweepTiming::emitted`). The
+  requested duration still covers `f1…f2`; the extension adds `L·ln(f1/f_start)`. Why: a path
+  answers a sweep's switch-on with a transient over roughly its first two octaves that does not
+  follow the sweep's phase, so the deconvolution books it as harmonics of the lowest
+  fundamentals (on an electrical path H2 up to 22 dB above the steady-sine value, gone when the
+  sweep started 1.7 octaves lower). The rising level keeps the added octaves, where a
+  loudspeaker's excursion grows fastest, below full level. A requested start at or below 1 Hz
+  is emitted as requested.
 - **level** is typed by the operator, dBFS RMS of the constant-envelope part (0 dBFS RMS = a
   full-scale sine, so a sweep at `L` dBFS peaks at `10^(L/20)` FS, crest factor √2). No
   default; refused above the daemon's ceiling (§5.4), and the output path's peak limit holds.
@@ -59,6 +70,10 @@ fundamental's distortion reference:
 - pre = 0.1·g_K (before `t_k`, half-Hann rise), post = 0.9·g_(K−1) (after `t_k`, half-Hann fall
   over its last 20 %), both scaled down so the window is at most 100 ms. For 20 Hz–20 kHz in
   3 s: L = 0.45 s (rounded), window 8 ms + 90 ms.
+- once capped, the rise is at least a third of the window (W/3 before `t_k`) whenever the window
+  still fits in `g_K`: the k-th harmonic IR is band-limited from `k·f_lo ≥ 4/W` up and that band
+  edge rings about W/4 on each side of `t_k`, so a short rise cuts it and the lowest columns
+  read ~2 dB low; with `W ≤ g_K` the windows still do not overlap.
 - why the cap: the sweep's energy per hertz grows with L, the noise inside a window with its
   length. Uncapped (W ∝ L) a longer sweep would only lengthen the window; capped, a sweep of
   twice the duration lowers the floor by 3 dB, as repeats do.
@@ -66,7 +81,7 @@ fundamental's distortion reference:
   the noise floor compare like with like. A harmonic IR longer than the window (a long room
   tail at that frequency) is truncated, as in any gated measurement.
 - low-frequency limit: a 100 ms window resolves ≈ 2/W = 20 Hz; fundamentals below
-  `max(f1·2^(1/6), 2/W)` are not reported.
+  `max(f1, 2/W)` are not reported (`f1·2^(1/6)` when the start is not extended).
 - high-frequency limit: harmonic k exists for fundamentals up to `f2/k` (the sweep stops at
   f2) and below `0.45·fs/k` (anti-alias filters).
 
@@ -91,9 +106,12 @@ H2 `½a2A²`, H3 `¼a3A³` — the analytic values the tests compare against.
 
 ## Noise floor and validity
 
-A window of the same shape and length is cut from the deconvolved silence after the linear
-response (ending 10 ms before the end of the post-roll, which every repeat's record covers
-fully). Its spectrum, averaged over 1/3 octave (noise is smooth in frequency, and a steady floor
+Windows of the same shape and length are cut from the deconvolved silence after the linear
+response, tiled back from 10 ms before the end of the post-roll (which every repeat's record
+covers fully) over its second half (≥ 4 windows: W ≤ 100 ms, post-roll ≥ 1 s), and their power
+spectra averaged: one window's power per resolution cell is exponentially distributed and 1/f
+noise leaves few cells per band at low frequencies, so a single window's floor swings by
+several dB between runs; K windows cut the spread by about √K. The averaged spectrum, averaged over 1/3 octave (noise is smooth in frequency, and a steady floor
 keeps one noisy estimate from being compared with another), gives
 `floor_k(f) = 10·log10(N(k·f)/P_1(f))` per order and the THD floor (power sum). A point is
 **valid** when `HD_k ≥ floor_k + 6 dB`: the noise inside the window then adds at most 1.25 dB.
@@ -158,6 +176,9 @@ recorder → analysis, f32 audio):
 | Hammerstein (same polynomial → 2nd-order low-pass at 2 kHz) | HD2 / HD3 vs `HD·|G(kf)|/|G(f)|` | ±1 dB | 0.16 / 0.21 dB |
 | linear system + noise | harmonics valid | ≤ 5 % of points | passes; level − floor median within 1.5 dB |
 | same, 4 repeats vs 1 | floor | −6 ± 1.5 dB | −5.3 dB |
+| memoryless, 10 Hz–20 kHz, 5.5 s (capped window) | HD2 / HD3, 20–40 Hz | ±0.5 dB | 0.05 / 0.05 dB (2.1 dB H2 with an 8 ms rise) |
+| memoryless, 50 Hz–6 kHz, 3 s, emitted from 11.5 Hz | HD2 / HD3, 50–100 Hz | ±0.5 dB | 0.13 / 0.07 dB |
+| 1/f noise, 32 seeds, capped window, 1 s post-roll | floor spread, 4 windows vs 1 | < 0.7× | 0.86 vs 1.89 dB |
 | daemon + fake rig (H2 −40 dB, H3 −50 dB at −20 dBFS), 100 Hz–5 kHz, 1 s | HD2 / HD3, 200 Hz–1.4 kHz | ±0.5 dB | 0.10 / 0.15 dB |
 
 ## Protocol and storage

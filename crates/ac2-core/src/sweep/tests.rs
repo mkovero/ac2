@@ -90,6 +90,20 @@ fn poly(x: &[f64], a2: f64, a3: f64) -> Vec<f64> {
     x.iter().map(|v| v + a2 * v * v + a3 * v * v * v).collect()
 }
 
+/// One-pole DC blocker at `fc`, as every converter path has: an even-order term's DC part
+/// (the sweep's squared envelope) would otherwise reach the record unattenuated.
+fn dc_blocked(x: &[f64], fc: f64) -> Vec<f64> {
+    let a = 1.0 / (1.0 + TAU * fc / FS);
+    let mut y = vec![0.0; x.len()];
+    let (mut px, mut py) = (0.0, 0.0);
+    for (o, &v) in y.iter_mut().zip(x) {
+        py = a * (py + v - px);
+        px = v;
+        *o = py;
+    }
+    y
+}
+
 /// RBJ second-order low-pass, Q = 1/√2.
 struct LowPass {
     b: [f64; 3],
@@ -425,11 +439,132 @@ fn timing_follows_the_sweep() {
     // A long sweep needs a longer silence after it.
     let long = SweepTiming::new(&spec(ess(20.0, 20_000.0, 60.0))).expect("timing");
     assert!(long.post_roll_s >= 4.0 * long.window_s() - 1e-9);
-    // A long sweep's window is capped (the floor then falls with L), split as before.
+    // A long sweep's window is capped (the floor then falls with L) and rises over a third
+    // of it before t_k.
     assert!((long.window_s() - MAX_WINDOW_S).abs() < 1e-12);
-    assert!((long.pre_s / long.post_s - t.pre_s / t.post_s).abs() < 1e-9);
+    assert!((long.pre_s - MAX_WINDOW_S / 3.0).abs() < 1e-12);
     assert!((db_to_percent(-40.0) - 1.0).abs() < 1e-12);
     assert!(is_valid(-40.0, -46.0) && !is_valid(-40.0, -45.0));
+}
+
+#[test]
+fn the_lowest_columns_read_the_harmonic_level() {
+    // A capped window (L·ln(6/5) > 100 ms), so the octave above the lowest resolved
+    // fundamental, 2/W = 20 Hz, lies inside the sweep.
+    let (a2, a3) = (0.2, 1.265);
+    let s = SweepSpec {
+        grid: LogGrid {
+            ppo: 48,
+            k_min: -288,
+            k_max: 239,
+        },
+        ..spec(ess(10.0, 20_000.0, 5.5))
+    };
+    let t = SweepTiming::new(&s).expect("timing");
+    assert!((t.window_s() - MAX_WINDOW_S).abs() < 1e-12);
+    let (reference, mic) = record(&s, 1, |x| dc_blocked(&poly(x, a2, a3), 1.0), 1e-5, 5);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let (_, h2, h3) = analytic(amp(), a2, a3);
+    let (h2_db, h3_db) = (20.0 * h2.log10(), 20.0 * h3.log10());
+    let f_lo = 2.0 / t.window_s();
+    let e2 = max_err(&r, &r.harmonics[0], f_lo, 2.0 * f_lo, |_| h2_db);
+    let e3 = max_err(&r, &r.harmonics[1], f_lo, 2.0 * f_lo, |_| h3_db);
+    eprintln!("lowest octave: H2 max error {e2:.3} dB, H3 max error {e3:.3} dB");
+    assert!(e2 <= 0.5 && e3 <= 0.5);
+}
+
+#[test]
+fn the_sweep_starts_below_the_asked_band_and_harmonics_read_from_its_start() {
+    let (a2, a3) = (0.2, 1.265);
+    let f1 = 50.0;
+    let s = spec(ess(f1, 6000.0, 3.0));
+    let t = SweepTiming::new(&s).expect("timing");
+    // At least two octaves lower, a whole number of cycles per L, at the asked rate.
+    let e = t.emitted;
+    assert!(e.start_hz <= f1 / ONSET_EXTENSION && e.start_hz > f1 / (2.0 * ONSET_EXTENSION));
+    let cycles = e.start_hz * t.plan.rate_s;
+    assert!((cycles - cycles.round()).abs() < 1e-9);
+    let asked = EssPlan::new(&s.ess, FS).expect("plan");
+    assert!((t.plan.rate_s - asked.rate_s).abs() < 1e-12);
+    // Full level from the asked start; the added octaves stay below it.
+    assert!((t.full_level_hz() - f1).abs() < 1e-9);
+    let below = ((t.plan.rate_s * (f1 / e.start_hz).ln() * FS) as usize).saturating_sub(1);
+    let peak = |r: std::ops::Range<usize>| r.map(|n| t.plan.sample(n).abs()).fold(0.0, f64::max);
+    assert!(peak(0..below / 2) < 0.5 && peak(0..t.plan.len) <= 1.0);
+
+    let (reference, mic) = record(&s, 1, |x| dc_blocked(&poly(x, a2, a3), 1.0), 1e-5, 6);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let (_, h2, h3) = analytic(amp(), a2, a3);
+    let e2 = max_err(&r, &r.harmonics[0], f1, 2.0 * f1, |_| 20.0 * h2.log10());
+    let e3 = max_err(&r, &r.harmonics[1], f1, 2.0 * f1, |_| 20.0 * h3.log10());
+    eprintln!("from the asked start: H2 max error {e2:.3} dB, H3 max error {e3:.3} dB");
+    assert!(e2 <= 0.5 && e3 <= 0.5);
+    for (i, &f) in r.frequencies.iter().enumerate() {
+        if (f1..=6000.0 / 3.0 / 1.15).contains(&f) {
+            assert!(r.thd_db[i].is_finite() && r.thd_floor_db[i].is_finite());
+        }
+        // The linear response covers the asked band only.
+        assert_eq!(
+            r.magnitude_db[i].is_finite(),
+            (f1..=6000.0).contains(&f),
+            "{f}"
+        );
+    }
+}
+
+#[test]
+fn a_start_at_the_floor_is_emitted_as_asked() {
+    let s = spec(ess(MIN_EMITTED_START_HZ, 20_000.0, 5.0));
+    let t = SweepTiming::new(&s).expect("timing");
+    assert_eq!(t.emitted, s.ess);
+}
+
+/// Deterministic 1/f noise (Kellet's three-pole pinking filter on Gaussian noise).
+fn pink(len: usize, seed: u64) -> Vec<f64> {
+    let mut g = Noise(seed);
+    let mut b = [0.0f64; 3];
+    (0..len)
+        .map(|_| {
+            let x = g.gauss();
+            b[0] = 0.99765 * b[0] + 0.099_046 * x;
+            b[1] = 0.963 * b[1] + 0.296_516_4 * x;
+            b[2] = 0.57 * b[2] + 1.052_691_3 * x;
+            b[0] + b[1] + b[2] + 0.1848 * x
+        })
+        .collect()
+}
+
+#[test]
+fn averaged_noise_windows_steady_the_floor() {
+    // A capped window in a minimum post-roll, as a long default sweep has; the floor of a
+    // low fundamental's H2 is read the way the analysis reads it.
+    let w_len = (MAX_WINDOW_S * FS) as usize;
+    let w = taper(w_len, w_len / 3, w_len / 7);
+    let nw = 4 * w_len.next_power_of_two();
+    let end = ((MIN_POST_ROLL_S - NOISE_MARGIN_S) * FS) as i64;
+    let count = ((MIN_POST_ROLL_S - NOISE_MARGIN_S - NOISE_REGION_START * MIN_POST_ROLL_S)
+        / MAX_WINDOW_S) as usize;
+    assert!(count >= 3, "{count} windows");
+    let min_hz = 2.0 * DISTORTION_MIN_CELLS / MAX_WINDOW_S;
+    let floor = |count: usize, seed: u64| {
+        let h = pink((MIN_POST_ROLL_S * FS) as usize, seed);
+        let p = noise_power(&h, end, count, &w, nw);
+        db10(band_power(
+            &p,
+            FS / nw as f64,
+            2.0 * 25.0,
+            FLOOR_BAND_OCT,
+            min_hz,
+        ))
+    };
+    let spread = |count: usize| {
+        let v: Vec<f64> = (1..=32).map(|seed| floor(count, seed)).collect();
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+    };
+    let (one, many) = (spread(1), spread(count));
+    eprintln!("noise floor spread: 1 window {one:.2} dB, {count} windows {many:.2} dB");
+    assert!(many < 0.7 * one, "{one} vs {many}");
 }
 
 /// Linear convolution by FFT.
