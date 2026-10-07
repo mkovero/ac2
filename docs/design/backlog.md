@@ -3,6 +3,12 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to
 `backlog-done.md` with the commit when it lands.
 
+## Queued after the module split of state.rs / control.rs (operator, 2026-10-07)
+
+- **A typed delay (`D`) should move the live curve like a Ctrl+. step** (0e04f25 counts it as a
+  new arrival, so nothing moves): operator answered "yes". Rounding a capture's fractional nudge
+  to the 0.1 ms grid with `,` / `.` is fine as is.
+
 ## Performance and platforms (2026-10-05, after the laptop / Pi performance pass)
 
 Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SPL (PLAN
