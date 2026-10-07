@@ -2,7 +2,7 @@
 
 use ac2_proto::model::{
     MathConfig, MathDomain, MathExpr, MathOp, MathReference, MeasConfig, MeasKind, Operand,
-    Smoothing, SmoothingMode, State, TraceKind,
+    Smoothing, SmoothingMode, State, TraceKind, TraceOwner,
 };
 use ac2_proto::{Command, model::Measurement};
 
@@ -76,6 +76,20 @@ pub(crate) fn find_operand(s: &State, r: &MeasRef) -> Result<Operand, CliError> 
     }
 }
 
+/// Where a new math channel is listed when `--under` does not say: under its first operand
+/// when that is a measurement, else where that trace is filed (the CLI's stand-in for the
+/// app's "the measurement selected when it was made").
+fn default_owner(s: &State, first: Operand) -> TraceOwner {
+    match first {
+        Operand::Meas { meas } => TraceOwner::Meas { meas },
+        Operand::Trace { trace } => s
+            .traces
+            .iter()
+            .find(|t| t.id == trace)
+            .map_or(TraceOwner::Imported, |t| t.edit.owner),
+    }
+}
+
 /// An operand's name as the daemon's state has it.
 fn operand_name(s: &State, o: Operand) -> String {
     match o {
@@ -114,7 +128,7 @@ fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
                 MeasKind::Math { .. } => Err(CliError::Usage(format!(
                     "{name} is a math channel: capture it (`ac2 trace capture`) and use the trace"
                 ))),
-                MeasKind::Spl { .. } => Err(not()),
+                MeasKind::Spl { .. } | MeasKind::Sweep { .. } => Err(not()),
             }
         }
         Operand::Trace { trace } => {
@@ -288,10 +302,19 @@ pub(crate) fn math_config(
         (None, Some(m)) => m.config.name.clone(),
         (None, None) => ac2_scene::math::default_name(&expr, |o| operand_name(s, o)),
     };
+    let owner = match (&a.under, a.imported, old) {
+        (_, true, _) => TraceOwner::Imported,
+        (Some(r), false, _) => TraceOwner::Meas {
+            meas: find_meas(s, r)?.id,
+        },
+        (None, false, Some(c)) => c.owner,
+        (None, false, None) => default_owner(s, first),
+    };
     Ok(MeasConfig {
         name,
         kind: MeasKind::Math {
             config: MathConfig {
+                owner,
                 domain,
                 expr,
                 reference,

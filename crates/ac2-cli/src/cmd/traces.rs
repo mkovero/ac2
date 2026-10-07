@@ -79,6 +79,40 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 )
             })?;
         }
+        TraceCmd::Move {
+            traces,
+            to,
+            imported,
+        } => {
+            let s = state(&c).await?;
+            let owner = match (to, imported) {
+                (Some(m), false) => TraceOwner::Meas {
+                    meas: find_meas(&s, m)?.id,
+                },
+                (None, true) => TraceOwner::Imported,
+                _ => {
+                    return Err(CliError::Usage("give --to MEAS or --imported".into()));
+                }
+            };
+            let ts = traces
+                .iter()
+                .map(|r| find_trace(&s, r).cloned())
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut moved = Vec::new();
+            for t in ts {
+                let r = c
+                    .call(Command::TraceUpdate {
+                        trace: t.id,
+                        edit: TraceEdit {
+                            owner,
+                            ..t.edit.clone()
+                        },
+                    })
+                    .await?;
+                moved.push(expect_body!("trace.update", r, ReplyBody::Trace(t) => t)?);
+            }
+            out.emit(&moved, || output::traces(&moved))?;
+        }
         TraceCmd::Average {
             traces,
             name,

@@ -100,6 +100,13 @@ pub enum Cmd {
         #[arg(long)]
         watch: bool,
     },
+    /// Run a sweep measurement (`meas new sweep`) with its settings: each run is stored as
+    /// a sweep trace under it.
+    Sweep {
+        /// Action.
+        #[command(subcommand)]
+        cmd: SweepCmd,
+    },
     /// Sweep measurement: response, harmonic distortion and impulse response.
     Ir {
         /// Action.
@@ -393,6 +400,9 @@ pub enum MeasKindArg {
     Rta,
     /// SPL meter.
     Spl,
+    /// Sweep measurement: settings only (`--ref`, `--meas`, `--out`, `--level`, …); `ac2
+    /// sweep run` plays it.
+    Sweep,
 }
 
 /// Frequency weighting.
@@ -498,10 +508,17 @@ pub enum MeasCmd {
         /// Id or name.
         meas: MeasRef,
     },
-    /// Delete a measurement.
+    /// Delete a measurement. One that owns stored traces or math channels needs
+    /// `--keep-traces` (they move to the imported group) or `--delete-traces`.
     Rm {
         /// Id or name.
         meas: MeasRef,
+        /// Keep its traces and math channels, moved to the imported group.
+        #[arg(long, conflicts_with = "delete_traces")]
+        keep_traces: bool,
+        /// Delete its traces and math channels with it.
+        #[arg(long)]
+        delete_traces: bool,
     },
 }
 
@@ -514,12 +531,30 @@ pub struct MeasNew {
     /// Name.
     #[arg(long)]
     pub name: String,
-    /// Reference input (tf).
+    /// Reference input (tf, sweep).
     #[arg(long = "ref")]
     pub reference: Option<Channel>,
-    /// Measurement input (tf).
+    /// Measurement input (tf, sweep).
     #[arg(long = "meas")]
     pub measurement: Option<Channel>,
+    /// Sweep: outputs playing it, the speaker's and the loopback's, e.g. `1,2`.
+    #[arg(long = "out", value_name = "OUTS")]
+    pub outputs: Option<Channels>,
+    /// Sweep: RMS level, e.g. `-50dbfs`; required for a sweep (there is no default level).
+    #[arg(long, allow_hyphen_values = true)]
+    pub level: Option<LevelDbfs>,
+    /// Sweep: duration (default 3 s).
+    #[arg(long, value_name = "TIME")]
+    pub duration: Option<Time>,
+    /// Sweep: sweeps played and averaged per run (1 … 8, default 1).
+    #[arg(long, value_parser = clap::value_parser!(u8).range(1..=8))]
+    pub repeats: Option<u8>,
+    /// Sweep: gate the linear response this long after the arrival.
+    #[arg(long, value_name = "TIME")]
+    pub gate: Option<Time>,
+    /// Sweep: silence recorded after each sweep (at most 20 s).
+    #[arg(long, value_name = "TIME")]
+    pub tail: Option<Time>,
     /// Input (spectrum, rta, spl).
     #[arg(long)]
     pub input: Option<Channel>,
@@ -549,10 +584,10 @@ pub struct MeasNew {
     /// RTA band fraction, 1/N octave.
     #[arg(long, value_enum, default_value = "3")]
     pub fraction: FractionArg,
-    /// RTA lowest band.
+    /// RTA lowest band; sweep start frequency.
     #[arg(long, default_value = "20hz")]
     pub from: Freq,
-    /// RTA highest band.
+    /// RTA highest band; sweep end frequency.
     #[arg(long, default_value = "20khz")]
     pub to: Freq,
     /// Frequency weighting (rta: default z; spl: default a).
@@ -638,6 +673,13 @@ pub struct MathArgs {
     /// Name (default for `new`: the expression, e.g. `Main L ÷ Sub`).
     #[arg(long)]
     pub name: Option<String>,
+    /// The measurement it is listed under (default for `new`: its first operand when that is
+    /// a measurement, else where that trace is filed).
+    #[arg(long, value_name = "MEAS", conflicts_with = "imported")]
+    pub under: Option<MeasRef>,
+    /// List it in the imported group, under no measurement.
+    #[arg(long)]
+    pub imported: bool,
 }
 
 /// A math operator.
@@ -1180,6 +1222,18 @@ pub enum TraceCmd {
         #[arg(required = true)]
         traces: Vec<MeasRef>,
     },
+    /// File traces under another measurement, or in the imported group (`--imported`).
+    Move {
+        /// Trace ids or names.
+        #[arg(required = true)]
+        traces: Vec<MeasRef>,
+        /// The measurement to file them under.
+        #[arg(long, value_name = "MEAS", conflicts_with = "imported")]
+        to: Option<MeasRef>,
+        /// The imported group, under no measurement.
+        #[arg(long)]
+        imported: bool,
+    },
     /// Average traces into a new trace.
     Average {
         /// Trace ids or names (at least two).
@@ -1429,9 +1483,30 @@ pub struct IrCaptureArgs {
     /// what the sweep needs), at most 20 s.
     #[arg(long, value_name = "TIME")]
     pub tail: Option<Time>,
-    /// Name of the stored trace.
-    #[arg(long, default_value = "sweep")]
-    pub name: String,
+    /// Name of the stored run (default: `Run <number>`).
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Take the stimulus lease over from another client.
+    #[arg(long)]
+    pub force: bool,
+}
+
+/// `sweep …`.
+#[derive(Debug, Subcommand)]
+pub enum SweepCmd {
+    /// Run a sweep measurement in the foreground with its settings (Enter plays, Esc/Ctrl-C
+    /// stops); the run is stored as a sweep trace under it, and a summary printed.
+    Run(SweepRunArgs),
+}
+
+/// `sweep run`.
+#[derive(Debug, Args)]
+pub struct SweepRunArgs {
+    /// The sweep measurement, by id or name.
+    pub meas: MeasRef,
+    /// Name of the stored run (default: `Run <number>`).
+    #[arg(long)]
+    pub name: Option<String>,
     /// Take the stimulus lease over from another client.
     #[arg(long)]
     pub force: bool,

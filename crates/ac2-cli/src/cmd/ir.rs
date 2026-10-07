@@ -1,5 +1,11 @@
-//! `ir capture`: a sweep measurement in the foreground (`docs/design/sweep-distortion.md`);
-//! `ir metrics`: the room parameters of a stored sweep (`docs/design/room-metrics.md`).
+//! `ir capture` and `sweep run`: a sweep measurement run in the foreground
+//! (`docs/design/sweep-distortion.md`, `docs/design/measurement-tree.md`); `ir metrics`: the
+//! room parameters of a stored sweep (`docs/design/room-metrics.md`).
+//!
+//! `ir capture` takes the sweep's settings as flags and runs the sweep measurement with
+//! exactly those settings, making one when there is none: the same command again is the
+//! next run of the same measurement. `sweep run` runs a measurement made with `meas new
+//! sweep`. Each run is stored under its measurement.
 //!
 //! Safety as `gen`: the level is a required typed dBFS value, checked against the daemon's
 //! ceiling before the lease is acquired; the command acquires and *arms* with the sweep
@@ -9,10 +15,10 @@
 
 use ac2_client::{Client, LeaseLost, OnDrop, StimulusLease, expect_body};
 use ac2_proto::model::{
-    EssSpec, GeneratorDesired, GeneratorSettings, Signal, SweepInputs, SweepRequest, SweepStatus,
-    TraceData,
+    EssSpec, GeneratorDesired, GeneratorSettings, MeasConfig, MeasKind, Measurement, Signal, State,
+    SweepConfig, SweepStatus, TraceData,
 };
-use ac2_proto::units::{SweepId, TraceId};
+use ac2_proto::units::{Dbfs, Hz, Seconds, SweepId, TraceId};
 use ac2_proto::{Command, ReplyBody};
 use ac2_scene::distortion::{self, Reading};
 use ac2_scene::room::{BandSet, room_table};
@@ -23,7 +29,7 @@ use tokio::sync::mpsc;
 use super::gen_::{Input, input, say};
 use super::{connect, find_meas, find_trace, state};
 use crate::CliError;
-use crate::args::{Cli, IrCaptureArgs, IrCmd, IrMetricsArgs};
+use crate::args::{Cli, IrCaptureArgs, IrCmd, IrMetricsArgs, SweepCmd, SweepRunArgs};
 use crate::output::{self, Out};
 use crate::units::channels_text;
 use crate::watch::{Key, RawTerm, quit_signal};
@@ -72,79 +78,119 @@ pub fn print_room(out: &mut Out<'_>, data: &TraceData, set: BandSet) -> Result<(
     Ok(())
 }
 
-/// The request `ir capture` sends, validated without a daemon; inputs from `--meas` are
-/// resolved by the caller.
-pub fn request(a: &IrCaptureArgs) -> Result<SweepRequest, CliError> {
-    let (from, to) = (a.from.0, a.to.0);
-    if from.0 >= to.0 {
+/// A sweep's settings as typed (`meas new sweep`, `ir capture`).
+pub struct SweepFlags {
+    pub reference: u16,
+    pub mic: u16,
+    pub outputs: Vec<u16>,
+    pub level: Dbfs,
+    pub from: Hz,
+    pub to: Hz,
+    pub duration: Seconds,
+    pub repeats: u8,
+    pub gate: Option<Seconds>,
+    pub tail: Option<Seconds>,
+}
+
+/// The sweep measurement settings of `f`, validated without a daemon.
+pub fn sweep_config(f: &SweepFlags) -> Result<SweepConfig, CliError> {
+    if f.from.0 >= f.to.0 {
         return Err(CliError::Usage("--from must be below --to".into()));
     }
-    if a.duration.0.0 <= 0.0 {
+    if f.duration.0 <= 0.0 {
         return Err(CliError::Usage("--duration must be positive".into()));
     }
-    if a.outputs.0.is_empty() {
+    if f.outputs.is_empty() {
         return Err(CliError::Usage("--out needs at least one channel".into()));
     }
-    let inputs = match (a.reference, a.mic) {
-        (Some(r), Some(m)) if r == m => {
-            return Err(CliError::Usage(
-                "--ref and --mic are the same input: the mic is the measurement".into(),
-            ));
-        }
-        (Some(r), Some(m)) => SweepInputs::Channels {
-            reference: r.0,
-            measurement: m.0,
-        },
-        // Resolved against the daemon's measurements.
-        _ => SweepInputs::Channels {
-            reference: 0,
-            measurement: 0,
-        },
-    };
-    Ok(SweepRequest {
-        inputs,
+    if f.reference == f.mic {
+        return Err(CliError::Usage(
+            "the reference and the mic are the same input: the mic is the measurement".into(),
+        ));
+    }
+    Ok(SweepConfig {
+        reference_input: f.reference,
+        measurement_input: f.mic,
+        outputs: f.outputs.clone(),
+        level: f.level,
+        sweep: EssSpec::with_fades(f.from, f.to, f.duration),
+        repeats: f.repeats,
+        gate: f.gate,
+        tail: f.tail,
+    })
+}
+
+/// The settings `ir capture` runs with; `inputs` (reference, mic) are the typed ones or
+/// those of the `--meas` transfer measurement, resolved by the caller.
+pub fn request(a: &IrCaptureArgs, (reference, mic): (u16, u16)) -> Result<SweepConfig, CliError> {
+    sweep_config(&SweepFlags {
+        reference,
+        mic,
         outputs: a.outputs.0.clone(),
-        level: Some(a.level.0),
-        sweep: EssSpec::with_fades(from, to, a.duration.0),
+        level: a.level.0,
+        from: a.from.0,
+        to: a.to.0,
+        duration: a.duration.0,
         repeats: a.repeats,
         gate: a.gate.map(|g| g.0),
         tail: a.tail.map(|t| t.0),
     })
 }
 
-fn describe(r: &SweepRequest) -> String {
-    let inputs = match r.inputs {
-        SweepInputs::Channels {
-            reference,
-            measurement,
-        } => format!("in {} re in {}", measurement + 1, reference + 1),
-        SweepInputs::Measurement { meas } => format!("inputs of measurement {meas}"),
-    };
+fn describe(r: &SweepConfig) -> String {
     format!(
-        "sweep {} – {}, {} s × {} at {} on out {} · {inputs}",
+        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {}",
         ac2_scene::format::freq_readout(r.sweep.start.0),
         ac2_scene::format::freq_readout(r.sweep.end.0),
         ac2_scene::format::fixed(r.sweep.duration.0, 1),
         r.repeats,
-        output::dbfs(r.level.map_or(f64::NAN, |l| l.0)),
-        channels_text(&r.outputs)
+        output::dbfs(r.level.0),
+        channels_text(&r.outputs),
+        r.measurement_input + 1,
+        r.reference_input + 1
     )
 }
 
-async fn capture(cli: &Cli, a: &IrCaptureArgs, out: &mut Out<'_>) -> Result<(), CliError> {
-    let mut req = request(a)?;
-    let c = connect(cli, true).await?;
-    let st = state(&c).await?;
-    if let Some(m) = &a.meas {
-        req.inputs = SweepInputs::Measurement {
-            meas: find_meas(&st, m)?.id,
-        };
+/// The sweep measurement `ir capture` runs: the one with exactly these settings (repeating
+/// the command is a re-run of the same measurement, as Space is in the app's sweep view),
+/// else a new one named `Sweep <n>`.
+pub(crate) async fn sweep_meas_for(
+    c: &Client,
+    st: &State,
+    config: &SweepConfig,
+) -> Result<Measurement, CliError> {
+    if let Some(m) = st
+        .measurements
+        .iter()
+        .find(|m| matches!(&m.config.kind, MeasKind::Sweep { config: x } if x == config))
+    {
+        return Ok(m.clone());
     }
+    let name = (1u32..)
+        .map(|n| format!("Sweep {n}"))
+        .find(|n| st.measurements.iter().all(|m| m.config.name != *n))
+        .unwrap_or_else(|| "Sweep".into());
+    super::basic::meas_call(
+        c,
+        Command::MeasCreate {
+            config: MeasConfig {
+                name,
+                kind: MeasKind::Sweep {
+                    config: config.clone(),
+                },
+            },
+        },
+    )
+    .await
+}
+
+/// Checks before the lease is taken: the level against the daemon's ceiling, an open session.
+fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
     let ceiling = st.generator.ceiling;
-    if a.level.0.0 > ceiling.0 {
+    if config.level.0 > ceiling.0 {
         return Err(CliError::Refused(format!(
             "level {} is above the daemon's ceiling {}",
-            output::dbfs(a.level.0.0),
+            output::dbfs(config.level.0),
             output::dbfs(ceiling.0)
         )));
     }
@@ -153,9 +199,55 @@ async fn capture(cli: &Cli, a: &IrCaptureArgs, out: &mut Out<'_>) -> Result<(), 
             "no open session; open one with `ac2 session open`".into(),
         ));
     }
+    Ok(())
+}
+
+async fn capture(cli: &Cli, a: &IrCaptureArgs, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, true).await?;
+    let st = state(&c).await?;
+    let inputs = match (&a.meas, a.reference, a.mic) {
+        (Some(m), _, _) => match &find_meas(&st, m)?.config.kind {
+            MeasKind::Transfer { config } => (config.reference_input, config.measurement_input),
+            _ => {
+                return Err(CliError::Usage(format!(
+                    "{} is not a transfer measurement",
+                    m.0
+                )));
+            }
+        },
+        (None, Some(r), Some(m)) => (r.0, m.0),
+        _ => return Err(CliError::Usage("give --ref and --mic, or --meas".into())),
+    };
+    let config = request(a, inputs)?;
+    check_runnable(&st, &config)?;
+    let m = sweep_meas_for(&c, &st, &config).await?;
     let lease = c.acquire_lease(a.force, OnDrop::StopAndRelease).await?;
     let keys = input()?;
-    foreground(&c, lease, req, a.name.clone(), out, keys).await
+    foreground(&c, lease, &m, a.name.clone(), out, keys).await
+}
+
+/// `sweep run`: a sweep measurement with its own settings.
+async fn sweep_run(cli: &Cli, a: &SweepRunArgs, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, true).await?;
+    let st = state(&c).await?;
+    let m = find_meas(&st, &a.meas)?.clone();
+    let MeasKind::Sweep { config } = &m.config.kind else {
+        return Err(CliError::Usage(format!(
+            "{} is not a sweep measurement (`ac2 meas new sweep …` makes one)",
+            m.config.name
+        )));
+    };
+    check_runnable(&st, config)?;
+    let lease = c.acquire_lease(a.force, OnDrop::StopAndRelease).await?;
+    let keys = input()?;
+    foreground(&c, lease, &m, a.name.clone(), out, keys).await
+}
+
+/// `sweep …`.
+pub(crate) async fn sweep(cli: &Cli, cmd: &SweepCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    match cmd {
+        SweepCmd::Run(a) => sweep_run(cli, a, out).await,
+    }
 }
 
 /// How a run ended.
@@ -168,17 +260,21 @@ enum End {
 async fn foreground(
     c: &Client,
     mut lease: StimulusLease,
-    req: SweepRequest,
-    name: String,
+    meas: &Measurement,
+    name: Option<String>,
     out: &mut Out<'_>,
     (term, mut rx): (Option<RawTerm>, mpsc::UnboundedReceiver<Input>),
 ) -> Result<(), CliError> {
+    let MeasKind::Sweep { config: req } = &meas.config.kind else {
+        return Err(CliError::Usage(format!(
+            "{} is not a sweep measurement",
+            meas.config.name
+        )));
+    };
     let raw = term.is_some();
     let settings = GeneratorSettings {
         signal: Signal::Ess { sweep: req.sweep },
-        level: req
-            .level
-            .ok_or_else(|| CliError::Usage("--level is required".into()))?,
+        level: req.level,
         band: None,
         outputs: req.outputs.clone(),
     };
@@ -194,10 +290,11 @@ async fn foreground(
         raw,
         "armed",
         &format!(
-            "ARMED  {}\nEnter: play the sweep   Esc, q, Ctrl-C: cancel",
-            describe(&req)
+            "ARMED  {} · {}\nEnter: play the sweep   Esc, q, Ctrl-C: cancel",
+            meas.config.name,
+            describe(req)
         ),
-        json!({ "request": req, "client_id": c.client_id() }),
+        json!({ "meas": meas.id, "settings": req, "client_id": c.client_id() }),
     );
     let mut watch = c.watch();
     let quit = quit_signal();
@@ -218,13 +315,13 @@ async fn foreground(
                 }
                 Some(Input::Key(Key::Enter)) if run.is_none() => {
                     let r = c
-                        .call(Command::IrCapture {
+                        .call(Command::SweepRun {
                             lease_token: lease.token(),
-                            request: Box::new(req.clone()),
+                            meas: meas.id,
                             name: name.clone(),
                         })
                         .await
-                        .and_then(|r| expect_body!("ir.capture", r, ReplyBody::Sweep(s) => s));
+                        .and_then(|r| expect_body!("sweep.run", r, ReplyBody::Sweep(s) => s));
                     match r {
                         Ok(s) => {
                             run = Some((s.id, s.repeats));
@@ -434,7 +531,6 @@ mod tests {
     use super::*;
     use crate::output::Out;
     use crate::units::{Channel, Channels, Freq, LevelDbfs, Time};
-    use ac2_proto::units::{Dbfs, Hz, Seconds};
 
     fn args() -> IrCaptureArgs {
         IrCaptureArgs {
@@ -449,22 +545,16 @@ mod tests {
             repeats: 1,
             gate: None,
             tail: None,
-            name: "sweep".into(),
+            name: None,
             force: false,
         }
     }
 
     #[test]
     fn the_request_carries_the_typed_values() {
-        let r = request(&args()).expect("request");
-        assert_eq!(
-            r.inputs,
-            SweepInputs::Channels {
-                reference: 1,
-                measurement: 0
-            }
-        );
-        assert_eq!(r.level, Some(Dbfs(-50.0)));
+        let r = request(&args(), (1, 0)).expect("request");
+        assert_eq!((r.reference_input, r.measurement_input), (1, 0));
+        assert_eq!(r.level, Dbfs(-50.0));
         assert_eq!(r.outputs, vec![0, 1]);
         assert_eq!(
             r.sweep,
@@ -476,10 +566,8 @@ mod tests {
         );
         let mut a = args();
         a.from = Freq(Hz(30_000.0));
-        assert!(request(&a).is_err());
-        let mut a = args();
-        a.mic = Some(Channel(1));
-        assert!(request(&a).is_err());
+        assert!(request(&a, (1, 0)).is_err());
+        assert!(request(&args(), (1, 1)).is_err());
     }
 
     type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -552,14 +640,17 @@ mod tests {
         a.from = Freq(Hz(100.0));
         a.to = Freq(Hz(5000.0));
         a.duration = Time(Seconds(1.0));
-        a.name = "rig sweep".into();
-        let req = request(&a)?;
+        a.name = Some("rig sweep".into());
+        let req = request(&a, (0, 1))?;
+        let st = c.snapshot().await?.state;
+        let meas = sweep_meas_for(&c, &st, &req).await?;
+        assert_eq!(meas.config.name, "Sweep 1");
         let lease = c.acquire_lease(false, OnDrop::StopAndRelease).await?;
         let (tx, rx) = mpsc::unbounded_channel();
         let mut buf = Vec::new();
         let mut out = Out::new(true, &mut buf);
         tx.send(Input::Key(Key::Enter))?;
-        foreground(&c, lease, req, a.name.clone(), &mut out, (None, rx)).await?;
+        foreground(&c, lease, &meas, a.name.clone(), &mut out, (None, rx)).await?;
         let lines: Vec<serde_json::Value> = String::from_utf8(buf)?
             .lines()
             .filter_map(|l| serde_json::from_str(l).ok())
@@ -647,15 +738,18 @@ mod tests {
         a.to = Freq(Hz(10_000.0));
         a.duration = Time(Seconds(1.0));
         a.tail = Some(Time(Seconds(2.0)));
-        a.name = "hall".into();
-        let req = request(&a)?;
+        a.name = Some("hall".into());
+        let req = request(&a, (0, 2))?;
         assert_eq!(req.tail, Some(Seconds(2.0)));
+        let st = c.snapshot().await?.state;
+        let hall = sweep_meas_for(&c, &st, &req).await?;
+        assert_eq!(hall.config.name, "Sweep 2");
         let lease = c.acquire_lease(false, OnDrop::StopAndRelease).await?;
         let (tx, rx) = mpsc::unbounded_channel();
         let mut buf = Vec::new();
         let mut out = Out::new(true, &mut buf);
         tx.send(Input::Key(Key::Enter))?;
-        foreground(&c, lease, req, a.name.clone(), &mut out, (None, rx)).await?;
+        foreground(&c, lease, &hall, a.name.clone(), &mut out, (None, rx)).await?;
         let (code, text) = ac2(&ep, &["ir", "metrics", "hall"]).await?;
         assert_eq!(code, 0, "{text}");
         eprintln!("{text}");

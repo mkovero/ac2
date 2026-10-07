@@ -165,6 +165,25 @@ pub fn meas_kind(k: &MeasKind) -> String {
                 ac2_proto::model::MathExpr::Binary { .. } => format!("{what} math: {e}"),
             }
         }
+        MeasKind::Sweep { config } => format!(
+            "sweep in {} re in {}, {} – {}, {} s × {} at {} on out {}",
+            config.measurement_input + 1,
+            config.reference_input + 1,
+            format::freq_readout(config.sweep.start.0),
+            format::freq_readout(config.sweep.end.0),
+            format::fixed(config.sweep.duration.0, 1),
+            config.repeats,
+            dbfs(config.level.0),
+            crate::units::channels_text(&config.outputs)
+        ),
+    }
+}
+
+/// Where a trace or math channel is filed: `#3` (measurement 3) or `imported`.
+pub fn owner_text(o: ac2_proto::model::TraceOwner) -> String {
+    match o {
+        ac2_proto::model::TraceOwner::Meas { meas } => format!("#{meas}"),
+        ac2_proto::model::TraceOwner::Imported => "imported".into(),
     }
 }
 
@@ -389,7 +408,9 @@ fn source_text(s: &TraceSource) -> String {
                     .join(", ")
             )
         }
-        TraceSource::IrCapture { run, .. } => format!("sweep {run}"),
+        TraceSource::Sweep {
+            meas_name, number, ..
+        } => format!("run {number} of {meas_name}"),
     }
 }
 
@@ -407,6 +428,7 @@ fn kind_text(k: TraceKind) -> &'static str {
 pub fn traces(t_: &[TraceMeta]) -> String {
     let mut t = table(&[
         "id",
+        "under",
         "slot",
         "name",
         "kind",
@@ -418,6 +440,7 @@ pub fn traces(t_: &[TraceMeta]) -> String {
     for tr in t_ {
         t.add_row(vec![
             tr.id.to_string(),
+            owner_text(tr.edit.owner),
             tr.edit.slot.map(|s| s.to_string()).unwrap_or_default(),
             tr.edit.name.clone(),
             kind_text(tr.kind).to_owned(),
@@ -502,16 +525,17 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         | TraceSource::Math {
             epoch, at_sample, ..
         } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
-        TraceSource::IrCapture { epoch, .. } => format!("\n  epoch       {}", epoch.0),
+        TraceSource::Sweep { epoch, .. } => format!("\n  epoch       {}", epoch.0),
         _ => String::new(),
     };
     format!(
-        "trace {} {:?}{}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  nudge       {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
+        "trace {} {:?}{}\n  under       {}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  nudge       {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
         t.id,
         t.edit.name,
         t.edit
             .slot
             .map_or_else(String::new, |s| format!(" (slot {s})")),
+        owner_text(t.edit.owner),
         kind_text(t.kind),
         source_text(&t.source),
         time_base(&t.source),

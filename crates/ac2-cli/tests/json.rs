@@ -826,7 +826,8 @@ async fn trace_commands_json() -> R {
                 "polarity": "normal",
                 "delay_nudge": 0.0,
                 "slot": 1,
-                "smoothing": null
+                "smoothing": null,
+                "owner": { "type": "meas", "meas": 1 }
             },
             "kind": { "type": "transfer" },
             "source": {

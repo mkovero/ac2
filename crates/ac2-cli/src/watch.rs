@@ -708,10 +708,6 @@ pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
     .await
 }
 
-fn main_stream(k: &MeasKind) -> Stream {
-    k.stream()
-}
-
 /// `meas list --watch`.
 pub async fn meas_list(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
     let started = Instant::now();
@@ -735,10 +731,20 @@ pub async fn meas_list(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
         let mut rows = Vec::new();
         let mut key = vec![view.rev.0, u64::from(latest.responding)];
         for m in &state.measurements {
-            let topic = Topic::Data {
-                meas: m.id,
-                stream: main_stream(&m.config.kind),
+            // A sweep measurement publishes nothing: its results are its runs.
+            let Some(stream) = m.config.kind.stream() else {
+                t.add_row(vec![
+                    m.id.to_string(),
+                    m.config.name.clone(),
+                    output::meas_kind(&m.config.kind),
+                    output::yes(m.running),
+                    format::NO_VALUE.to_owned(),
+                    format::NO_VALUE.to_owned(),
+                ]);
+                rows.push(json!({ "id": m.id, "name": m.config.name, "running": m.running }));
+                continue;
             };
+            let topic = Topic::Data { meas: m.id, stream };
             let tf = latest.get(&topic);
             key.push(tf.map_or(0, |t| t.frame.stamp.seq));
             key.push(tf.map_or(0, |t| u64::from(t.stale)));

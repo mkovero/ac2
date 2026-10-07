@@ -225,7 +225,56 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         ))),
         None => Ok(()),
     };
+    let sweep_only = [
+        ("out", n.outputs.is_some()),
+        ("level", n.level.is_some()),
+        ("duration", n.duration.is_some()),
+        ("repeats", n.repeats.is_some()),
+        ("gate", n.gate.is_some()),
+        ("tail", n.tail.is_some()),
+    ];
+    if n.kind != MeasKindArg::Sweep
+        && let Some((flag, _)) = sweep_only.iter().find(|(_, given)| *given)
+    {
+        return Err(CliError::Usage(format!(
+            "--{flag} applies to a sweep, not {:?}",
+            n.kind
+        )));
+    }
     let kind = match n.kind {
+        MeasKindArg::Sweep => {
+            refuse(n.input, "input")?;
+            if n.smooth.is_some() || n.start {
+                return Err(CliError::Usage(
+                    "a sweep measurement has no smoothing and no job to start: `ac2 sweep run` \
+                     plays it"
+                        .into(),
+                ));
+            }
+            MeasKind::Sweep {
+                config: super::ir::sweep_config(&super::ir::SweepFlags {
+                    reference: need(n.reference, "ref")?,
+                    mic: need(n.measurement, "meas")?,
+                    outputs: n
+                        .outputs
+                        .as_ref()
+                        .map(|o| o.0.clone())
+                        .ok_or_else(|| CliError::Usage("sweep needs --out".into()))?,
+                    level: n.level.map(|l| l.0).ok_or_else(|| {
+                        CliError::Usage("sweep needs --level: a sweep has no default level".into())
+                    })?,
+                    from: n.from.0,
+                    to: n.to.0,
+                    duration: n.duration.map_or(
+                        ac2_proto::units::Seconds(ac2_proto::model::EssSpec::DEFAULT_DURATION_S),
+                        |d| d.0,
+                    ),
+                    repeats: n.repeats.unwrap_or(1),
+                    gate: n.gate.map(|g| g.0),
+                    tail: n.tail.map(|t| t.0),
+                })?,
+            }
+        }
         MeasKindArg::Tf => {
             refuse(n.input, "input")?;
             if n.ppo == 0 || n.ppo > 96 {
@@ -369,13 +418,49 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
             let m = meas_call(&c, cmd).await?;
             out.emit(&m, || output::measurement(&m))?;
         }
-        MeasCmd::Rm { meas } => {
+        MeasCmd::Rm {
+            meas,
+            keep_traces,
+            delete_traces,
+        } => {
             let snap = c.snapshot().await?;
             let m = find_meas(&snap.state, meas)?;
+            let owner = TraceOwner::Meas { meas: m.id };
+            let traces = snap
+                .state
+                .traces
+                .iter()
+                .filter(|t| t.edit.owner == owner)
+                .count();
+            let maths = snap
+                .state
+                .measurements
+                .iter()
+                .filter(|x| matches!(&x.config.kind, MeasKind::Math { config } if config.owner == owner))
+                .count();
+            // What it owns goes nowhere by default: the operator says which.
+            let what = match (keep_traces, delete_traces) {
+                (true, _) => OwnedTraces::Keep,
+                (_, true) => OwnedTraces::Delete,
+                _ if traces + maths == 0 => OwnedTraces::Keep,
+                _ => {
+                    return Err(CliError::Usage(format!(
+                        "{} owns {traces} trace(s) and {maths} math channel(s): add \
+                         --keep-traces (moved to the imported group) or --delete-traces",
+                        m.config.name
+                    )));
+                }
+            };
             // Guarded by the rev the name was resolved at: if the measurements changed in
             // between, the daemon refuses instead of deleting the wrong one.
             let r = c
-                .call_expect(Command::MeasDelete { meas: m.id }, snap.rev)
+                .call_expect(
+                    Command::MeasDelete {
+                        meas: m.id,
+                        traces: what,
+                    },
+                    snap.rev,
+                )
                 .await?;
             let rev = expect_body!("meas.delete", r, ReplyBody::Ack { rev } => rev)?;
             let name = m.config.name.clone();
@@ -644,7 +729,13 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
             });
             let result = watch::spl(&c, id, input, until, out).await;
             if created {
-                let _ = c.call(Command::MeasDelete { meas: id }).await;
+                // A meter made for this view owns nothing.
+                let _ = c
+                    .call(Command::MeasDelete {
+                        meas: id,
+                        traces: OwnedTraces::Keep,
+                    })
+                    .await;
             } else if !running {
                 let _ = c.call(Command::MeasStop { meas: id }).await;
             }
