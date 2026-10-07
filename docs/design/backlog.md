@@ -110,6 +110,19 @@ choose trace from dropdown, then choose operator and then choose another trace �
   math channel…* / *Edit the selected math channel…*; `ac2 math new / set` replaces
   `ac2 meas new avg` and `ac2 trace math`; `trace.math` and the A − B / A / B palette entries
   are gone. PROTO 22, session format 10.
+From the operator (2026-10-06, "a settings page instead of gazillion configurables under
+ctrl+k"; "how do you set system max output limit from UI?"):
+- **Settings** (Ctrl+P, ⚙): one full-window view with pages Inputs & outputs, Audio,
+  Calibration, SPL / Leq, Recording, Display, Connection; the session dialog, the
+  calibrations view and the Leq dialog are pages, their keys open them; each setting says
+  this app / the rig (`docs/design/settings.md`).
+- **System max level at run time** (`gen.ceiling`, PROTO 23): any client lowers it at once
+  (a stimulus above it stops), a raise needs a typed confirmation and silence, never above
+  `--max-level`; kept by the daemon across restarts; `ac2 gen ceiling`.
+- **Outputs by name**: the rig's output labels (`session.outputs`), S ticks the stimulus
+  outputs in Settings; the top bar names them.
+- **Server features** on the Connection page: mode, mDNS name, authorized clients (authorize
+  a refused key, revoke), refused keys (`server.*`).
 
 From the 645f5ec deploy on pupu and the operator (2026-10-06):
 - **"arm+fire to re-sweep with same parameters on sweep view; drive the gen for live

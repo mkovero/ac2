@@ -356,8 +356,9 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 
 ### 5.4 Generator
 - Pink (free-running, filtered), white, periodic pink, sine, ESS. Seeded RNG.
-  Band-limit filters. Level always typed by the operator (dBFS RMS); global max
-  enforced in daemon.
+  Band-limit filters. Level always typed by the operator (dBFS RMS); the system max level
+  is enforced in the daemon and its output path: any client lowers it at once, a raise is
+  confirmed and never passes the `--max-level` bound (`docs/design/settings.md`).
 - Periodic pink: period P defined at full rate, a power of two, with
   P ≥ largest stage's full-rate window span **and** P > W + T, where W is the full width
   of the delay search interval (2 s for ±1 s) and T the significant response-tail
@@ -513,7 +514,7 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
 ### 8.2 Keyboard
 - One binding table, scoped (global / transfer / spectrum / SPL / IR), test-enforced: no dead keys, no conflicts.
 - Layout-safe defaults: no `[ ] + -` (unreachable on Nordic layouts). Bindings user-configurable in TOML.
-- `H` (or `F1`) help overlay (`/` is Shift+7 on Nordic layouts); `Ctrl/Cmd+K` command palette (fuzzy, shows key per command); the focused pane's most used keys on a hint line (`Shift+H` on / off).
+- `H` (or `F1`) help overlay (`/` is Shift+7 on Nordic layouts); `Ctrl/Cmd+K` command palette (fuzzy, shows key per command); the focused pane's most used keys on a hint line (`Shift+H` on / off); `Ctrl/Cmd+P` Settings: every setting in one full-window view, a page per area, each marked this app / the rig.
 - Stimulus cluster reserved: `Space` arm, `Enter` fire, `Esc` stop, `↑/↓` level — with no
   window open. An open window (help, palette, prompt, dialog, view) owns the keyboard:
   `↑/↓` move or scroll it, `←/→` change a choice, `Enter` confirms, `Esc` closes the topmost
@@ -567,7 +568,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu, 2026-10-04) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access, tester 2026-10-05; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history, peak limits (LCpeak, LAFmax), measuring-position correction and alarm hysteresis (`docs/design/leq.md`); acoustic calibration dialog in the app (`docs/design/q7-calibration.md` §12); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); ISO 3382-1 room parameters per band from the sweep IR (`docs/design/room-metrics.md`); live spatial average of transfer functions (`docs/design/spatial-average.md`); audio that stops is reported and reopened by itself (`docs/design/audio-recovery.md`); open — ASIO, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress (post-1.0): done — ESS sweep with H2…H5 / THD and IR (`docs/design/sweep-distortion.md`), rolling Leq windows, limits, alarms and presets with the per-second SPL log, run clock, new log and history, peak limits (LCpeak, LAFmax), measuring-position correction and alarm hysteresis (`docs/design/leq.md`); acoustic calibration dialog in the app (`docs/design/q7-calibration.md` §12); spectrograph under the spectrum (`docs/design/spectrograph.md`); delay change without resettle and sub-sample delay (`docs/design/delay-no-resettle.md`); output-vs-input clock drift detection (`docs/design/multi-device.md`); raw capture files: record to f32 WAV/RF64 + sidecar, replay as a session, replay within stated tolerance (`docs/design/raw-capture.md`); ISO 3382-1 room parameters per band from the sweep IR (`docs/design/room-metrics.md`); live spatial average of transfer functions (`docs/design/spatial-average.md`); audio that stops is reported and reopened by itself (`docs/design/audio-recovery.md`); Settings view, system max level at run time, output names and server features (`docs/design/settings.md`); open — ASIO, multi-device support (resampling) and input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames:
 transfer, delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE,

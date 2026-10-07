@@ -42,6 +42,12 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
 4. Start the daemon on pupu:
    `cd ~/ac2-test && setsid nohup bin/ac2d --listen tcp://0.0.0.0 --name pupu --max-level -50 > d-net.log 2>&1 </dev/null &`.
    Check `d-net.log`: "autosave restored … no audio session opened" is normal.
+   `--max-level -50` is now the **hard bound**: the system max level in force can be lowered
+   (or raised again up to −50) from any client — Settings › Inputs & outputs, or
+   `bin/ac2 --remote 192.168.9.27 gen ceiling -60dbfs` — and is kept in
+   `~/.config/ac2/rig.json`, so a restart comes up at min(kept, bound). A restart with a
+   higher `--max-level` does not raise a level that was lowered; raise it explicitly
+   (`gen ceiling -50dbfs --yes`). The daemon log's `ac2d::audit` lines say who changed it.
 5. Reopen audio (from ketunkolo):
    `bin/ac2 --remote 192.168.9.27 session open --backend jack --in 1-2 --outputs 2 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
    Restored measurements resume; check `meas list`.

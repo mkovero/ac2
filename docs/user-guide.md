@@ -21,8 +21,9 @@ across the network it requires pairing ([install.md](install.md#remote-use-foh--
 
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on the session: transfer functions (`tf`), spectrum,
-RTA and SPL meters. In the app, **Shift+O** opens the session dialog
-([below](#the-session-dialog)), and the command palette (**Ctrl+K**) has *New transfer
+RTA and SPL meters. In the app every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
+the top bar; [below](#settings)); **Shift+O** opens its Audio page to open a session
+([the session's channels](#inputs--outputs-and-audio)), and the command palette (**Ctrl+K**) has *New transfer
 measurement…*, *New spectrum…*, *New RTA…* and *New SPL meter…* (created, started and
 selected on **Enter**), *Delete selected measurement* and *Close audio session*. Until there
 is a session, or a measurement, the transfer pane says which of these comes next. This
@@ -49,11 +50,49 @@ once a minute (*audio arrives in bursts on …*) with the device and buffer to c
 dialog preselects a real interface whenever the daemon lists one. Choosing
 *Simulated rig* in the app's connect dialog starts it ready to measure (session open, a
 transfer measurement "demo" running); *This computer's audio* starts with no session and
-opens the session dialog.
+opens Settings on its Audio page.
 
-### The session dialog
+### Settings
 
-Nothing in the dialog is a channel number to type. From the top:
+**Ctrl+P** (palette *Settings…*, or the ⚙ at the right of the top bar) opens every setting
+in one view over the window, below the top bar — what drives the speakers stays in sight.
+The pages are in a sidebar: **Ctrl+PgUp / Ctrl+PgDn** (or **Ctrl+Tab**) step through them,
+**Alt+1 … Alt+7** jump to one, a click picks one. Ctrl+P opens the page last shown; Esc
+closes the view (a dialog or confirmation over a page first); **Shift+Esc** still stops
+the stimulus. Each page says whose its settings are: **this app** (kept in `ui.toml` on
+this computer) or **the rig — all clients** (kept by the daemon; every connected app sees a
+change at once).
+
+| Page | What | Opened also by |
+|---|---|---|
+| Inputs & outputs | inputs and outputs by name, roles, mics, the stimulus outputs, the reference, the **system max level** | palette *Input setup…*, *Stimulus outputs…* |
+| Audio | backend, device, rate, buffer; Enter opens the session | **Shift+O** |
+| Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
+| SPL / Leq | the SPL pane's meter's Leq windows and limits ([below](#leq-windows-and-limits)) | **Shift+L** |
+| Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
+| Display | theme, key hints, how long the SPL number holds, spectrograph history, level axes reset | |
+| Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
+
+**System max level.** The generator never plays above the rig's maximum (dBFS RMS): the
+top of the Inputs & outputs page shows it with its bound
+(`−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`) and who changed it last. Type a level
+on its row and **Enter**: a lower one applies at once for every client — a stimulus armed
+or playing above it is stopped. A higher one asks you to type **raise** first, is refused
+while anything is armed or playing, and can never pass the bound the daemon was started
+with (`ac2d --max-level`, default −10 dBFS). The daemon keeps the level across restarts. On
+the command line: `ac2 gen ceiling`, `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
+
+**Connection.** In network mode the page lists the clients the rig accepts (name and key
+fingerprint) and the keys it refused lately (fingerprint, address, how often, when): **A**
+on a refused key and a name authorizes it — the client connects on its next retry —,
+*Authorize a client by its key…* takes a name and the key `ac2 auth show` prints, **Delete**
+twice revokes a client (its requests are refused at once; you cannot revoke your own).
+
+### Inputs & outputs and Audio
+
+Nothing on these pages is a channel number to type. The Audio page holds the backend and
+the device; the Inputs & outputs page their channels. Enter on either opens (or reopens)
+the session with what both say. From the top:
 
 - **Backend** (**←/→**): every backend the daemon offers, with what it is; one it cannot use
   now says why and what to do (*PipeWire is running but its JACK library isn't in use:
@@ -70,9 +109,15 @@ Nothing in the dialog is a channel number to type. From the top:
 - **Roles**: **R** Reference (the loopback return, one input), **M** measurement mic (any
   number; **N** names one — the name is the mic's identity for calibrations; a named mic's
   row says which curve and calibration it uses, and **←/→** on it choose the curve: off, 0°,
-  90° …), **S** Stimulus
-  (the output feeding the system and the loopback). **Space** puts a row in or out of the
-  session. The mouse works too: the boxes, the R / M / S chips, a double click on a name.
+  90° …), **S** Stimulus (the outputs the stimulus plays on; this app's choice, remembered
+  per device; when the open session already has the output the stimulus moves there at
+  once). **Space** puts a row in or out of the session. The mouse works too: the boxes, the
+  R / M / S chips, a double click on a name.
+- **Output names**: **N** on an output names it for the whole rig (`Main L`, `Sub`; empty
+  clears it); every client shows the name, and the top bar names the stimulus outputs by it
+  (`→ Main L, Main R`).
+- **Reference**: the line under the channels says the reference pair the session opens with
+  (`Reference (loopback): input 1 · Loop ← output 1 · Main L`).
 - **Detect loopback…** (**D**): asks for a level (no default; the stimulus level you typed
   last is offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus
   output — under the stimulus lease and the global ceiling, faded in and out — and marks the
@@ -81,7 +126,7 @@ Nothing in the dialog is a channel number to type. From the top:
   from your stimulus output*). The session's inputs, outputs and loopback follow from the
   roles; the roles and mic names are remembered per device (`ui.toml`) and come back next
   time. With a Reference, at least one mic and no measurements yet, one more **Enter**
-  creates *Reference → <mic>* transfer measurements. **Esc** closes the dialog; the
+  creates *Reference → <mic>* transfer measurements. **Esc** closes Settings; the
   stimulus is left as it was (**Shift+Esc** stops it).
 
 The measurement dialogs pick inputs the same way: by name, with their meters, **←/→**.
@@ -141,7 +186,8 @@ make it play by accident:
   arms nothing);
 - one client holds the stimulus at a time (a lease it keeps refreshing). If that client
   disappears, the daemon fades the output out within 1.5 s;
-- the daemon has a global maximum level (`ac2d --max-level`, default −10 dBFS RMS);
+- the rig has a system maximum level (Settings › Inputs & outputs, `ac2 gen ceiling`),
+  never above the daemon's bound (`ac2d --max-level`, default −10 dBFS RMS);
 - loading a session or restarting the daemon always comes up disarmed.
 
 **What Space and Enter start depends on the focused view.** On the transfer, spectrum /
@@ -683,8 +729,8 @@ per directory), `--no-autosave` keeps everything in memory only.
 
 ## Calibration and SPL
 
-Inputs carry a **mic name** (**N** on the input in the session dialog or in the
-Calibrations view, `ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`).
+Inputs carry a **mic name** (**N** on the input in Settings › Inputs & outputs or
+Calibration, `ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`).
 Two things are stored, in the calibration store of the daemon's machine:
 
 - **Sensitivity** (dB SPL of 0 dBFS) — per device, input and mic. It calibrates the whole
@@ -732,8 +778,8 @@ says it).
 
 ### The Calibrations view
 
-The **Calibrations** view (palette; **Input setup…** opens it on the selected measurement's
-input) lists what each input uses, every mic with its curves (file, points, range, data
+The **Calibration** page of Settings (palette *Calibrations…*; it opens on the selected
+measurement's input) lists what each input uses, every mic with its curves (file, points, range, data
 sheet sensitivity, which inputs use it) and every sensitivity calibration (device, input,
 mic, calibrator level and frequency, reading, age). **↑/↓** move; **←/→** choose an input's
 curve; **N** names the mic on an input; **I** imports a curve file for the focused mic (type
@@ -1029,12 +1075,12 @@ layouts. The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** s
 level (±1 dB, with Shift ±3 dB). With **Alt** the arrows move the selected curve's display
 offset instead, with **Ctrl** they pan the focused pane's level axis.
 
-**An open window owns the keyboard.** With the help, the palette, a prompt, a dialog or the
-calibrations view open, **↑/↓** move the selection or scroll (**PageUp / PageDown**,
-**Home / End** where a list is long: the help, the palette, the calibrations view, a pane's
+**An open window owns the keyboard.** With the help, the palette, a prompt, a dialog or
+Settings open, **↑/↓** move the selection or scroll (**PageUp / PageDown**,
+**Home / End** where a list is long: the help, the palette, the Calibration page, a pane's
 measurement list), **←/→** change a choice, **Enter** confirms and **Esc** closes the
-topmost window only — the electrical calibration dialog closes back to the calibrations
-view. None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never
+topmost window only — the electrical calibration dialog closes back to the Calibration
+page, the next Esc closes Settings. None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never
 stops while a window is open, and the mouse wheel scrolls the window rather than zooming the
 plot behind it. The help and the delay candidates leave the other keys working (try a key
 while reading), except the stimulus's. **Shift+Esc** stops the stimulus from anywhere,
@@ -1079,6 +1125,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `H` or `F1` | Show / hide key bindings | `help` |
 | `Ctrl+K` | Command palette | `palette` |
+| `Ctrl+P` | Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
 | `F11` | Window full screen on / off | `fullscreen` |
 | `Shift+H` | Key hints on / off | `key_hints` |
@@ -1149,7 +1196,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+O` | Open audio session… | `session_open` |
 | `Shift+M` | New math channel: A ÷ × + − B, or the average of several (mic positions)… | `meas_new_math` |
 | `Shift+S` | New sweep measurement: response and harmonic distortion… | `sweep_new` |
-| `Shift+L` | Leq windows and limits of the SPL meter… | `leq_windows` |
+| `Shift+L` | Leq windows and limits of the SPL meter: Settings › SPL / Leq… | `leq_windows` |
 
 #### Transfer function
 
@@ -1231,7 +1278,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Command | `keys.toml` |
 |---|---|
-| Stimulus: type output channels… | `stimulus_outputs` |
+| Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
 | Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
@@ -1250,8 +1297,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New SPL meter… | `meas_new_spl` |
 | Edit the selected math channel: operands, operator, method… | `math_edit` |
 | Delete selected measurement | `meas_delete` |
-| Input setup: mic, mic curve and calibration of each input… | `input_setup` |
-| Calibrations: mics, curves and sensitivity calibrations… | `calibrations` |
+| Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
+| Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |
 | Input setup: type mic names (3=M30, 4=ECM)… | `input_mics` |
 | Mic curve: next curve on the selected measurement's input (off → 0° → 90° …) | `mic_curve` |
 | Mic curve on input N… (e.g. 2=90°, 2=off) | `mic_curve_input` |
@@ -1309,6 +1356,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 meas new / list / start / stop / rm` | transfer (`tf`), `spectrum`, `rta` and `spl` measurements (math channels are listed too) |
 | `ac2 math new / set` | math channels: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
+| `ac2 gen ceiling [LEVEL] [--yes]` | the system max level: shown with its bound and who changed it; a lower level applies at once, a higher one needs `--yes` and nothing armed |
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
 | `ac2 ir capture` | a sweep: response, distortion and impulse response, stored as a trace |
 | `ac2 trace capture / list / show / rename / display / slot / rm / average / import / export / smooth / mic` | stored traces |
