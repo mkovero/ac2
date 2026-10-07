@@ -77,6 +77,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         meas: MeasId(meas),
         meta: TfMeta {
             delay: Seconds(0.0125),
+            nudged: Seconds(0.0),
             frozen: false,
             smoothing: Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,
@@ -353,6 +354,8 @@ impl Rig {
             let tracking = DelayState {
                 applied: Seconds(0.0125),
                 applied_samples: 600.0,
+                nudged: Seconds(0.0),
+                nudged_samples: 0.0,
                 tracking: true,
                 awaiting_pick: false,
                 last_finding: None,
@@ -360,6 +363,8 @@ impl Rig {
             let fixed = DelayState {
                 applied: Seconds(0.0141),
                 applied_samples: 677.0,
+                nudged: Seconds(0.0),
+                nudged_samples: 0.0,
                 tracking: false,
                 awaiting_pick: false,
                 last_finding: None,

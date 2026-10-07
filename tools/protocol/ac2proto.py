@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 24
+PROTO_VERSION = 25
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -149,7 +149,7 @@ _MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERA
 _POSITION = [("level", None), ("peak", None)]
 _PEAK = [("level", None), ("judgement", None)]
 META = {
-    "tf": [("delay", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
+    "tf": [("delay", None), ("nudged", None), ("frozen", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
            ("math", _MATH)],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),

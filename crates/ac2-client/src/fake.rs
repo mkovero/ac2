@@ -844,6 +844,8 @@ impl Shared {
                             Some(DelayState {
                                 applied: Seconds(0.0),
                                 applied_samples: 0.0,
+                                nudged: Seconds(0.0),
+                                nudged_samples: 0.0,
                                 tracking: false,
                                 awaiting_pick: false,
                                 last_finding: None,
@@ -982,12 +984,16 @@ impl Shared {
             }
             C::DelayNudge { meas, by } => {
                 let mut m = self.meas(meas)?;
-                let now = m
+                let st = m
                     .delay
-                    .as_ref()
-                    .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?
-                    .applied;
-                set_delay(&mut m, Seconds(now.0 + by.0))?;
+                    .as_mut()
+                    .ok_or_else(|| err(ErrorCode::Invalid, "not a transfer measurement"))?;
+                // A step from the arrival: the daemon keeps what nudges added apart.
+                st.awaiting_pick = false;
+                st.applied = Seconds(st.applied.0 + by.0);
+                st.applied_samples = st.applied.0 * 48_000.0;
+                st.nudged = Seconds(st.nudged.0 + by.0);
+                st.nudged_samples = st.nudged.0 * 48_000.0;
                 self.put_meas(m)
             }
             C::DelayTrack { meas, enabled } => {
@@ -1385,6 +1391,7 @@ fn finding(kind: FakeFinding, band: FinderBand, now: u64) -> DelayFinding {
 }
 
 /// An operator-set delay (insert or typed), which also resolves an ambiguous finding.
+/// A new arrival (insert, typed value): nothing nudged from it, as the daemon does.
 fn set_delay(m: &mut Measurement, d: Seconds) -> Result<(), ProtoError> {
     let st = m
         .delay
@@ -1393,6 +1400,8 @@ fn set_delay(m: &mut Measurement, d: Seconds) -> Result<(), ProtoError> {
     st.awaiting_pick = false;
     st.applied = d;
     st.applied_samples = d.0 * 48_000.0;
+    st.nudged = Seconds(0.0);
+    st.nudged_samples = 0.0;
     Ok(())
 }
 

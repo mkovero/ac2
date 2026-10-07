@@ -331,6 +331,7 @@ impl Shared {
             m.delay.as_ref().map_or(Seconds(0.0), |d| d.applied),
         );
         t.edit.smoothing = config.smoothing;
+        t.edit.delay_nudge = m.delay.as_ref().map_or(Seconds(0.0), |d| d.nudged);
         t.edit.owner = TraceOwner::Meas { meas };
         t.depth = Some(config.depth);
         let c = synthetic(&grid);
@@ -587,6 +588,7 @@ impl Shared {
                     frozen: m.frozen,
                     delay: m.delay.as_ref().map(|d| SavedDelay {
                         applied: d.applied,
+                        nudged: d.nudged,
                         tracking: d.tracking,
                     }),
                 })
@@ -682,6 +684,8 @@ impl Shared {
             let delay = sm.delay.map(|d| DelayState {
                 applied: d.applied,
                 applied_samples: d.applied.0 * 48_000.0,
+                nudged: d.nudged,
+                nudged_samples: d.nudged.0 * 48_000.0,
                 tracking: d.tracking,
                 awaiting_pick: false,
                 last_finding: None,

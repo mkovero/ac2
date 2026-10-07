@@ -542,6 +542,7 @@ pub(crate) fn combine(
             meas,
             meta: TfMeta {
                 delay: Seconds(delay),
+                nudged: Seconds(0.0),
                 frozen: false,
                 smoothing: None,
                 mic_curve,

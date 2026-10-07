@@ -290,6 +290,10 @@ pub struct TfMeta {
     /// Delay applied to the reference; for a math channel, the delay its phase is referred
     /// to.
     pub delay: Seconds,
+    /// The part of `delay` that `delay.nudge` steps added to the arrival
+    /// ([`crate::model::DelayState::nudged`]) when this frame was made; 0 for a math channel.
+    /// A view's shared time base refers the curve to `delay − nudged`.
+    pub nudged: Seconds,
     /// Display frozen.
     pub frozen: bool,
     /// Live smoothing applied.

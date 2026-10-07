@@ -235,6 +235,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         offset_db: 0.0,
         polarity: Polarity::Normal,
         nudge: Seconds(0.0),
+        delay_nudge: Seconds(0.0),
         time_base: TimeBase::Shared {
             epoch: SessionEpoch(1),
             delay: Seconds(0.001),

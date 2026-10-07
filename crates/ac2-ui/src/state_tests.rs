@@ -18,6 +18,8 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     let delay = matches!(kind, MeasKind::Transfer { .. }).then(|| DelayState {
         applied: Seconds(0.0125),
         applied_samples: 600.0,
+        nudged: Seconds(0.0),
+        nudged_samples: 0.0,
         tracking: false,
         awaiting_pick: false,
         last_finding: None,
@@ -6694,4 +6696,31 @@ fn deleting_keeps_the_stimulus_when_a_stop_would() {
     play_noise(&mut t, true);
     t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
     assert_eq!(delete(&mut t, 1), ("Main L deleted".into(), false));
+}
+
+/// A measurement's delay step is something to see on its live curve: stopped or hidden,
+/// the keys send nothing and say why.
+#[test]
+fn delay_steps_need_the_live_curve() {
+    let mut s = daemon_state();
+    if let Some(m) = s.measurements.iter_mut().find(|m| m.id == MeasId(1)) {
+        m.running = false;
+    }
+    let mut t = T::new();
+    t.conn(mirror(s));
+    for k in ["Ctrl+.", "Ctrl+,", "Alt+.", "Alt+,"] {
+        assert!(t.key(k).is_empty(), "{k}");
+        assert_eq!(
+            t.last_toast(),
+            "Main L is stopped \u{2014} its delay applies to the live curve; S starts it"
+        );
+    }
+    let mut t = T::new();
+    t.st.hidden_meas.insert("Main L".into());
+    assert!(t.key("Ctrl+.").is_empty());
+    assert!(
+        t.last_toast().starts_with("Main L is hidden"),
+        "{}",
+        t.last_toast()
+    );
 }

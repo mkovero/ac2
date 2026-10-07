@@ -1,7 +1,7 @@
 {
  "topic": "d/1/tf",
  "header": {
-  "v": 24,
+  "v": 25,
   "kind": "tf",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -38,6 +38,7 @@
   "meta": {
    "tf": {
     "delay": 0.0125,
+    "nudged": 0.0,
     "frozen": false,
     "smoothing": {
      "fraction": "sixth",

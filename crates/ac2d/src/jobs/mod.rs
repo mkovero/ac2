@@ -276,6 +276,8 @@ pub(crate) enum JobCmd {
     SetDelay {
         samples: f64,
         seconds: f64,
+        /// What the operator's nudges added to the arrival, samples.
+        nudged_samples: f64,
         rev: Rev,
         resume: bool,
     },

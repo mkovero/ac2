@@ -304,6 +304,23 @@ fn transfer_magnitude_delay_timing_and_ir() {
     let f = run_tf(&mut d, &sub, 0.05, rev);
     let t = tf(&f);
     assert!((t.meta.delay.0 - applied / f64::from(FS)).abs() < 1e-12);
+    // The step is kept apart from the arrival: the frame and the state say what it added.
+    assert!((t.meta.nudged.0 - 1.0 / f64::from(FS)).abs() < 1e-15);
+    let st = snapshot_delay(&mut c);
+    assert_eq!(st.nudged_samples, 1.0);
+    // A capture records the applied delay and draws where the live curve is: the step is
+    // its display nudge.
+    match c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "stepped".into(),
+        slot: None,
+    }) {
+        ReplyBody::Trace(m) => {
+            assert!((m.delay.0 - applied / f64::from(FS)).abs() < 1e-12);
+            assert!((m.edit.delay_nudge.0 - 1.0 / f64::from(FS)).abs() < 1e-15);
+        }
+        other => panic!("{other:?}"),
+    }
     let cols = band(t, 10_000.0);
     assert!(
         cols.len() > 200,
@@ -326,11 +343,14 @@ fn transfer_magnitude_delay_timing_and_ir() {
     }
     let (rev, applied) = nudge(&mut c, -1.0);
     assert!((applied - inserted).abs() < 1e-6, "{applied}");
+    assert_eq!(snapshot_delay(&mut c).nudged_samples, 0.0);
     let t = run_tf(&mut d, &sub, 0.05, rev);
     let t = tf(&t);
     assert!(band(t, 10_000.0).iter().all(|&i| t.phase[i].abs() < 3.0));
 
-    // Tracking: two agreeing windows at the inserted delay leave it where it is.
+    // Tracking follows the arrival and keeps the operator's steps from it: two agreeing
+    // windows at the inserted arrival leave a delay stepped 3 samples later where it is.
+    let (rev, _) = nudge(&mut c, 3.0);
     match c.ok(Command::DelayTrack {
         meas: MeasId(1),
         enabled: true,
@@ -339,17 +359,22 @@ fn transfer_magnitude_delay_timing_and_ir() {
         other => panic!("{other:?}"),
     }
     run_tf(&mut d, &sub, 1.0, rev);
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => assert_eq!(
-            s.state.measurements[0]
-                .delay
-                .as_ref()
-                .unwrap()
-                .applied_samples,
-            inserted
-        ),
-        other => panic!("{other:?}"),
-    }
+    let st = snapshot_delay(&mut c);
+    assert_eq!(
+        (st.applied_samples, st.nudged_samples),
+        (inserted + 3.0, 3.0)
+    );
+    let (rev, _) = nudge(&mut c, -3.0);
+    run_tf(&mut d, &sub, 1.0, rev);
+    assert_eq!(snapshot_delay(&mut c).applied_samples, inserted);
+    // A typed value is a new arrival: nothing nudged from it.
+    nudge(&mut c, 2.0);
+    let st = delay_state(c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(inserted / f64::from(FS)),
+    }));
+    assert_eq!((st.applied_samples, st.nudged_samples), (inserted, 0.0));
+    assert_eq!(st.nudged, Seconds(0.0));
 
     // The loopback monitor locked at the cable delay and committed it.
     let locked = TimingState::Locked {

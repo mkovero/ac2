@@ -97,6 +97,7 @@ impl Control {
                 frozen: m.frozen,
                 delay: m.delay.as_ref().map(|d| SavedDelay {
                     applied: d.applied,
+                    nudged: d.nudged,
                     tracking: d.tracking,
                 }),
             })
@@ -329,12 +330,16 @@ impl Control {
             let delay = matches!(sm.config.kind, MeasKind::Transfer { .. }).then(|| {
                 let d = sm.delay.unwrap_or(SavedDelay {
                     applied: Seconds(0.0),
+                    nudged: Seconds(0.0),
                     tracking: false,
                 });
                 let samples = fs.map_or(0.0, |fs| delay_samples(d.applied.0, fs));
+                let nudged = fs.map_or(0.0, |fs| delay_samples(d.nudged.0, fs));
                 DelayState {
                     applied: fs.map_or(d.applied, |fs| Seconds(samples / fs)),
                     applied_samples: samples,
+                    nudged: fs.map_or(d.nudged, |fs| Seconds(nudged / fs)),
+                    nudged_samples: nudged,
                     tracking: d.tracking,
                     awaiting_pick: false,
                     last_finding: None,

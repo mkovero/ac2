@@ -108,6 +108,13 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     if let Some(d) = &m.delay {
         // Distance stays in the transfer legend's reference line.
         text.push_str(&format!(" · {}", format::delay(d.applied.0)));
+        // The steps the live curve was moved by, as its legend's nudge tag says.
+        if d.nudged.0 != 0.0 {
+            text.push_str(&format!(
+                " · nudged {} ms",
+                format::signed(d.nudged.0 * 1000.0, 2)
+            ));
+        }
         if d.tracking && d.awaiting_pick {
             text.push_str(" · tracking paused");
         } else if d.tracking {

@@ -25,7 +25,40 @@ Now:
   limit (a fresh insert from 0, a wrong arrival corrected) the ladder restarts as before.
 
 The per-trace display nudge (`,` `.`, decision 8a) is unchanged: it shifts how a trace is
-drawn; the new keys change what the measurement aligns to.
+drawn; the new keys change what the measurement aligns to — and are seen the same way (next
+section).
+
+## What the keys mean on the view
+
+The transfer panes draw every curve of the session's shared time base as if measured with
+the reference's delay (decision 8a, `ac2_scene::trace`). Referred to the *applied* delay, a
+change of the compensation cancels: a curve that is not the reference does not move at all,
+and when the stepped curve is the reference every other curve is redrawn against the new
+reference delay and turns with it, so the whole picture moves together and looks unchanged
+(seen on the rig: `Δt` of every stored trace changed by the step, nothing appeared to move).
+
+So the daemon keeps the operator's steps apart: `DelayState::nudged` is what `delay.nudge`
+added to the arrival (`applied = arrival + nudged`), and every TF frame states it
+(`TfMeta::nudged`). The view's time base of a live curve is the arrival, `applied − nudged`.
+Its columns carry `e^{+jω·applied}`, so the curve is drawn `e^{+jω(τ_ref + nudged)}`: a
+step Δ moves it by `e^{+jωΔ}`, exactly as a display nudge `ν = Δ` moves a trace (Ctrl+. and
+`.` both lead the phase; Ctrl+, and `,` both lag it — no key is flipped), and since the
+reference is an arrival too, no other curve moves, whichever curve is the reference.
+
+- **Insert / typed value** set a new arrival: `nudged` = 0 (nothing on the view moves).
+- **Nudge** adds its step to `nudged` (at most ±10 s).
+- **Tracking** compares the finder's whole-sample estimates with the arrival (not the
+  applied delay) and moves the arrival, keeping `nudged`: the operator's offset survives a
+  drifting arrival (before, tracking pulled a whole-sample step back within seconds).
+- **Captures** record `TraceMeta::delay` = applied (what the columns carry) and
+  `edit.delay_nudge` = `nudged`: drawn exactly where the live curve was, with the offset
+  visible and adjustable on the trace.
+- **Math channels** keep using the applied delay: they combine the measured transfer
+  functions, not display offsets (as a stored operand's display nudge is not in them).
+- **Stopped or hidden** measurement: the app's keys refuse with a toast (no live curve shows
+  the step; a silent change would only surprise at the next start). `ac2 delay nudge` and
+  `delay.nudge` still apply to a stopped measurement.
+- **Sessions** save `nudged` with the delay (session format 12).
 
 ## The two halves of a delay
 
@@ -133,8 +166,8 @@ already buffered are cut at the same whole-sample delay and just get the new pha
   step (an operator action that keeps the last finding: it refines it). The daemon snaps the
   delay in samples to 10⁻⁶ sample so whole-sample values stay exactly whole (no rotation is
   applied to them at all).
-- **Sessions**: the saved form (`applied: Seconds`) is unchanged — the session format does
-  not change; a loaded delay is no longer rounded to whole samples.
+- **Sessions**: the saved form (`applied: Seconds`, and since format 12 `nudged`); a loaded
+  delay is not rounded to whole samples.
 - **TF frame shape** is unchanged (the live spatial average and other consumers see the same
   frames; the curve just stops going back to settling).
 

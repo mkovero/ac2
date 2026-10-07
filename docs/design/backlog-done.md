@@ -2,6 +2,19 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+Measurement delay keys (operator, 2026-10-07: "if I start the measurement then measurement
+delay change -does something- but not what I expect … it would look similar to when
+changing delay between traces"; "if I choose … the sweep measurement's trace as reference
+and change tf2 measurement delay then the live curve would be at different position"):
+- **Ctrl / Alt + `,` `.` move only the measurement's live curve**, the way `,` `.` move a
+  trace, whichever curve is the phase reference; stored traces never move. Before, with the
+  live curve as the reference every overlay turned with it (the picture looked unchanged,
+  the stored traces' `Δt` changed by the step), and against a stored reference nothing
+  moved. The daemon keeps the steps apart from the arrival (`DelayState::nudged`,
+  `TfMeta::nudged`); the view's time base is the arrival; captures carry the steps as their
+  display nudge; tracking keeps them. Stopped or hidden: a toast, no change. PROTO 25,
+  session format 12 (`delay-no-resettle.md`, "What the keys mean on the view").
+
 Math channels at the frame cap (pupu, 2026-10-07, measured with a throwaway CURVE subscriber
 counting bytes per topic; a680dcd):
 - **A math channel was re-formed and re-sent on every hand-off**: two ÷ channels of stored

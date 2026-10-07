@@ -51,6 +51,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
             meas: MeasId(meas),
             meta: TfMeta {
                 delay: Seconds(inserted),
+                nudged: Seconds(0.0),
                 frozen: false,
                 smoothing: None,
                 mic_curve: false,

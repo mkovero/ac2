@@ -53,7 +53,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -84,6 +84,9 @@ pub struct SavedMeasurement {
 pub struct SavedDelay {
     /// Applied delay.
     pub applied: Seconds,
+    /// What `delay.nudge` steps added to the arrival
+    /// ([`ac2_proto::model::DelayState::nudged`]).
+    pub nudged: Seconds,
     /// Tracking on.
     pub tracking: bool,
 }

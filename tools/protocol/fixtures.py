@@ -106,6 +106,7 @@ def tf_frame():
         LOG_GRID,
         {
             "delay": 0.0125,
+            "nudged": 0.0,
             "frozen": False,
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
@@ -494,6 +495,8 @@ def measurement():
         "delay": {
             "applied": 0.0125,
             "applied_samples": 600.25,
+            "nudged": 0.25 / 48000.0,
+            "nudged_samples": 0.25,
             "tracking": True,
             "awaiting_pick": False,
             "last_finding": finding(),

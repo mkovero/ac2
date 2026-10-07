@@ -561,11 +561,20 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   the speed of sound at the set temperature); **,** and **.** nudge the selected trace's
   display by 0.1 ms; **Y** tracks the delay continuously.
 - **Ctrl+,** and **Ctrl+.** move the measurement's own delay by one sample, **Alt+,** and
-  **Alt+.** by a tenth of a sample. The curve moves at once: the transfer function keeps its
-  averages and turns them to the new delay instead of starting over, so you can walk the
-  phase into place by eye. Delays are kept to fractions of a sample (the finder's estimate is
-  inserted exactly, `600.25samples` can be typed), shown in the measurement list to the
-  microsecond.
+  **Alt+.** by a tenth of a sample. Its live curve moves at once, and only it: the same way
+  **,** / **.** move a stored trace (Ctrl+. like **.**, Ctrl+, like **,**), whichever curve
+  is the phase reference — the stored traces stay where they are, also when the live curve
+  is the reference. The legend tags the live curve `nudge +0.21 ms` and the measurement list
+  says `nudged +0.21 ms` after its delay; the reference line and the distance keep the
+  measured arrival. A capture taken then is drawn exactly where the live curve was (its
+  trace carries the step as its own nudge, which **,** / **.** adjust). The transfer function
+  keeps its averages and turns them to the new delay instead of starting over, so you can
+  walk the phase into place by eye. **D** (a typed delay) and **1** (the finder's) set a new
+  arrival: nothing moves and the nudge is gone; tracking (**Y**) follows the arrival and
+  keeps your steps on top of it. A stopped or hidden measurement has no live curve to move:
+  the keys only say so (**S** starts it) and leave the delay alone. Delays are kept to
+  fractions of a sample (the finder's estimate is inserted exactly, `600.25samples` can be
+  typed), shown in the measurement list to the microsecond.
 - A larger change keeps what it can: a stage of the analysis keeps its averages while the
   change is small next to its window (about 2.4 ms at full rate, 9 ms and 28 ms for the
   lower ranges at 48 kHz); only the stages beyond that start over and show *settling*.

@@ -41,6 +41,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                     meas: MeasId(meas),
                     meta: TfMeta {
                         delay: Seconds(0.001),
+                        nudged: Seconds(0.0),
                         frozen: eff,
                         smoothing: None,
                         mic_curve: false,

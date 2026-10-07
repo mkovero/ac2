@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 24`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 25`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -522,14 +522,23 @@ list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an expli
 value) clears `last_finding`; a delay tracking moves keeps it. `delay.nudge` moves the
 applied delay by `by` (either sign, fractions of a sample allowed) and keeps
 `last_finding` (it refines that delay); like `delay.insert` and `delay.set` it resolves
-`awaiting_pick`. Delays are not rounded to whole samples: the finder's fractional estimate
+`awaiting_pick`. The daemon keeps what nudges added apart as `nudged`: the applied delay is
+the *arrival* plus `nudged`. `delay.insert` and `delay.set` set a new arrival (`nudged` 0);
+`delay.nudge` adds its step to `nudged` (refused beyond ±10 s); tracking compares the
+finder's estimates with the arrival and moves it, keeping `nudged`. A view's shared time
+base refers the live curve to the arrival, so a nudge moves that curve alone, like a
+trace's `delay_nudge` (`docs/design/delay-no-resettle.md`, "What the keys mean"). A
+capture records the applied delay as `TraceMeta.delay` and `nudged` as its
+`edit.delay_nudge`. Delays are not rounded to whole samples: the finder's fractional estimate
 is inserted as found, and the delay in samples is kept to 10⁻⁶ sample. A change of the
 delay does not restart the transfer function: each analysis stage keeps its averages,
 turned to the new delay, while the change is small next to its window, and only the other
 stages show `settling` again (`docs/design/delay-no-resettle.md`).
 
 `DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`
-(f64: samples at the session rate, fraction included),
+(f64: samples at the session rate, fraction included), `nudged: Seconds` and
+`nudged_samples` (f64; the part of `applied` the operator's `delay.nudge` steps added to
+the arrival),
 `tracking` (the operator's switch), `awaiting_pick`, `last_finding: DelayFinding | nil`. An
 `ambiguous` finding sets `awaiting_pick` (decision 1c): tracking is paused — it moves nothing
 — until the operator resolves it with `delay.insert` or `delay.set`, or runs `delay.find`
@@ -1025,7 +1034,7 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `frozen`, `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `frozen`, `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
@@ -1166,8 +1175,8 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.csv         one SPL log per SPL meter (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 10, saved_at, measurements:
-[{id, config: MeasConfig, running, frozen, delay: {applied, tracking} | null}], spl_logs:
+`session.json`: `{format: "ac2-session", version: 12, saved_at, measurements:
+[{id, config: MeasConfig, running, frozen, delay: {applied, nudged, tracking} | null}], spl_logs:
 [{meas, file}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace

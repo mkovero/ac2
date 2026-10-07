@@ -107,7 +107,9 @@ pub struct TfScene {
     pub banners: Vec<BannerRow>,
 }
 
-fn legend_entry(t: &DisplayTrace, nudge_s: f64, selected: bool) -> LegendEntry {
+/// `nudge_s`: the trace's display nudge; `stepped_s`: what a live curve's delay steps added
+/// to its arrival, drawn as a nudge too (so tagged with it) but not part of `Δ`.
+fn legend_entry(t: &DisplayTrace, nudge_s: f64, stepped_s: f64, selected: bool) -> LegendEntry {
     let mut tags: Vec<String> = t.note.iter().cloned().collect();
     match t.relation {
         PhaseRelation::Reference => tags.push("ref".to_string()),
@@ -117,8 +119,8 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64, selected: bool) -> LegendEntry {
             tags.push(format!("Δt {}", signed_ms(t.shift_s + nudge_s)));
         }
     }
-    if nudge_s != 0.0 {
-        tags.push(format!("nudge {}", signed_ms(nudge_s)));
+    if nudge_s + stepped_s != 0.0 {
+        tags.push(format!("nudge {}", signed_ms(nudge_s + stepped_s)));
     }
     if t.inverted {
         tags.push("inv".to_string());
@@ -442,11 +444,14 @@ pub fn transfer_scene(
     }
 
     // Legend and cursor values, top-left / top-right of the first pane.
-    let nudges: Vec<f64> = traces.iter().map(|t| t.nudge.0).collect();
+    let nudges: Vec<(f64, f64)> = traces
+        .iter()
+        .map(|t| (t.nudge.0, t.delay_nudge.0))
+        .collect();
     let legend: Vec<LegendEntry> = shown
         .iter()
         .zip(&nudges)
-        .map(|(t, n)| legend_entry(t, *n, selected == Some(t.key)))
+        .map(|(t, (n, s))| legend_entry(t, *n, *s, selected == Some(t.key)))
         .collect();
     let cursor = view
         .cursor_hz
@@ -610,6 +615,7 @@ mod tests {
             offset_db: 0.0,
             polarity: Polarity::Normal,
             nudge: Seconds(0.0),
+            delay_nudge: Seconds(0.0),
             time_base: TimeBase::Shared {
                 epoch: SessionEpoch(1),
                 delay: Seconds(delay),

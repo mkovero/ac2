@@ -1105,6 +1105,8 @@ impl Control {
                 let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
                     applied: Seconds(0.0),
                     applied_samples: 0.0,
+                    nudged: Seconds(0.0),
+                    nudged_samples: 0.0,
                     tracking: false,
                     awaiting_pick: false,
                     last_finding: None,
@@ -1176,6 +1178,8 @@ impl Control {
                     m.delay = Some(DelayState {
                         applied: Seconds(0.0),
                         applied_samples: 0.0,
+                        nudged: Seconds(0.0),
+                        nudged_samples: 0.0,
                         tracking: false,
                         awaiting_pick: false,
                         last_finding: None,
@@ -1513,9 +1517,12 @@ impl Control {
             let mut changed = false;
             if let Some(d) = &mut m.delay {
                 let samples = delay_samples(d.applied.0, fs);
-                if samples != d.applied_samples {
+                let nudged = delay_samples(d.nudged.0, fs);
+                if samples != d.applied_samples || nudged != d.nudged_samples {
                     d.applied_samples = samples;
                     d.applied = Seconds(samples / fs);
+                    d.nudged_samples = nudged;
+                    d.nudged = Seconds(nudged / fs);
                     m.config_rev = Rev(self.store.rev().0 + 1);
                     changed = true;
                 }
@@ -1903,6 +1910,8 @@ impl Control {
                 let d = m.delay.clone().unwrap_or(DelayState {
                     applied: Seconds(0.0),
                     applied_samples: 0.0,
+                    nudged: Seconds(0.0),
+                    nudged_samples: 0.0,
                     tracking: false,
                     awaiting_pick: false,
                     last_finding: None,
@@ -1915,6 +1924,7 @@ impl Control {
                     idx(config.measurement_input)?,
                     d.applied_samples,
                     d.applied.0,
+                    d.nudged_samples,
                     m.frozen,
                     m.config_rev,
                     d.tracking,
@@ -2100,6 +2110,11 @@ impl Control {
     /// describes the applied delay, and a refusal must not keep showing as the reason there
     /// is no delay. The operator's insert or value resolves an ambiguous finding, so tracking
     /// resumes (decision 1c); a delay tracking moved changes neither.
+    ///
+    /// An insert or a typed value is a new arrival: nothing is nudged from it. A nudge moves
+    /// the applied delay away from the arrival by its step (the view then moves this curve
+    /// alone). Tracking moves the arrival and keeps the operator's offset from it: its
+    /// `delay` already includes that offset.
     fn set_delay(
         &mut self,
         meas: MeasId,
@@ -2121,11 +2136,26 @@ impl Control {
         };
         let samples = delay_samples(delay.0, fs);
         let mut m = self.meas(meas)?.clone();
+        let nudged = match (&m.delay, source) {
+            (_, DelaySource::Insert | DelaySource::Typed) | (None, _) => 0.0,
+            (Some(d), DelaySource::Nudge) => {
+                delay_samples((d.nudged_samples + samples - d.applied_samples) / fs, fs)
+            }
+            (Some(d), DelaySource::Tracking) => d.nudged_samples,
+        };
+        if (nudged / fs).abs() > MAX_DELAY_S {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("the delay may be nudged by at most ±{MAX_DELAY_S} s from the arrival"),
+            ));
+        }
         let rev = Rev(self.store.rev().0 + 1);
         let operator = source != DelaySource::Tracking;
         if let Some(d) = &mut m.delay {
             d.applied = Seconds(samples / fs);
             d.applied_samples = samples;
+            d.nudged = Seconds(nudged / fs);
+            d.nudged_samples = nudged;
             if source == DelaySource::Typed {
                 d.last_finding = None;
             }
@@ -2138,6 +2168,7 @@ impl Control {
             j.send(JobCmd::SetDelay {
                 samples,
                 seconds: samples / fs,
+                nudged_samples: nudged,
                 rev,
                 resume: operator,
             });
@@ -2218,10 +2249,14 @@ impl Control {
         let Some(d) = &m.delay else {
             return;
         };
+        // `samples` is the arrival; the operator's nudge from it stays on top.
         if d.tracking
-            && d.applied_samples.round() as i64 != samples
-            && let Err(e) =
-                self.set_delay(meas, Seconds(samples as f64 / fs), DelaySource::Tracking)
+            && (d.applied_samples - d.nudged_samples).round() as i64 != samples
+            && let Err(e) = self.set_delay(
+                meas,
+                Seconds((samples as f64 + d.nudged_samples) / fs),
+                DelaySource::Tracking,
+            )
         {
             tracing::warn!("tracked delay not applied: {}", e.msg);
         }

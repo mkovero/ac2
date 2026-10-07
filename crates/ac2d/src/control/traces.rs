@@ -243,31 +243,38 @@ impl Control {
         if let MeasKind::Math { config } = &m.config.kind {
             return self.capture_math(&m, config, &frame, kind, grid, columns, name, slot);
         }
-        let (delay, smoothing, depth, input): (Seconds, Option<Smoothing>, _, u16) =
-            match (&frame.data, &m.config.kind) {
-                (FrameData::Tf(f), MeasKind::Transfer { config }) => (
-                    f.meta.delay,
-                    f.meta.smoothing,
-                    Some(config.depth),
-                    config.measurement_input,
-                ),
-                (FrameData::Spec(f), MeasKind::Spectrum { config }) => (
-                    Seconds(0.0),
-                    f.meta.smoothing.map(|fraction| Smoothing {
-                        fraction,
-                        mode: SmoothingMode::Magnitude,
-                    }),
-                    None,
-                    config.input,
-                ),
-                (_, MeasKind::Rta { config }) => (Seconds(0.0), None, None, config.input),
-                _ => {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        "the measurement changed kind since its last result",
-                    ));
-                }
-            };
+        let (delay, nudged, smoothing, depth, input): (
+            Seconds,
+            Seconds,
+            Option<Smoothing>,
+            _,
+            u16,
+        ) = match (&frame.data, &m.config.kind) {
+            (FrameData::Tf(f), MeasKind::Transfer { config }) => (
+                f.meta.delay,
+                f.meta.nudged,
+                f.meta.smoothing,
+                Some(config.depth),
+                config.measurement_input,
+            ),
+            (FrameData::Spec(f), MeasKind::Spectrum { config }) => (
+                Seconds(0.0),
+                Seconds(0.0),
+                f.meta.smoothing.map(|fraction| Smoothing {
+                    fraction,
+                    mode: SmoothingMode::Magnitude,
+                }),
+                None,
+                config.input,
+            ),
+            (_, MeasKind::Rta { config }) => (Seconds(0.0), Seconds(0.0), None, None, config.input),
+            _ => {
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    "the measurement changed kind since its last result",
+                ));
+            }
+        };
         let (cal, mic) = self.cal_and_mic(input);
         // A transfer function is a ratio of two inputs: no calibration applies to it.
         let cal = if kind == TraceKind::Transfer {
@@ -277,8 +284,13 @@ impl Control {
         };
         let id = self.traces.alloc();
         let mut edit = meta::new_edit(id, name, slot, TraceOwner::Meas { meas });
-        // The capture holds the unsmoothed curve and shows it as the measurement did.
+        // The capture holds the unsmoothed curve and shows it as the measurement did: with
+        // its smoothing, and its phase where the live curve was drawn. The columns carry the
+        // applied delay's compensation (`delay`, the time base); what the operator's nudges
+        // added to the arrival becomes the trace's display nudge, which draws it exactly
+        // there and stays visible and undoable on the trace.
         edit.smoothing = smoothing;
+        edit.delay_nudge = nudged;
         let t = TraceMeta {
             id,
             edit,

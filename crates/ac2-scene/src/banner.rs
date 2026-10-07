@@ -663,6 +663,8 @@ pub(crate) mod tests {
             delay: Some(DelayState {
                 applied: Seconds(0.0),
                 applied_samples: 0.0,
+                nudged: Seconds(0.0),
+                nudged_samples: 0.0,
                 tracking: false,
                 awaiting_pick: false,
                 last_finding: Some(refused),

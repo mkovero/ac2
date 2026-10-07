@@ -550,6 +550,261 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     Ok(())
 }
 
+/// The transfer pane as drawn: each curve's wrapped phase at column `col`, and its legend.
+fn drawn_phase(s: &AppState, col: usize) -> Vec<(ac2_scene::trace::TraceKey, f64, String)> {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1100.0,
+        height: 600.0,
+    };
+    let sc = ac2_ui::scenes::transfer(s, &Theme::dark(), size, now);
+    sc.traces
+        .iter()
+        .map(|t| {
+            let legend = sc
+                .legend
+                .iter()
+                .find(|l| l.key == t.key)
+                .map_or(String::new(), |l| l.text.clone());
+            (t.key, t.phase_wrapped_deg[col], legend)
+        })
+        .collect()
+}
+
+fn phase_of(v: &[(ac2_scene::trace::TraceKey, f64, String)], k: ac2_scene::trace::TraceKey) -> f64 {
+    v.iter().find(|x| x.0 == k).map_or(f64::NAN, |x| x.1)
+}
+
+/// The operator's case from an empty daemon: a running transfer measurement whose live
+/// curve is the phase reference, a capture of it and a sweep run on the same pane. Ctrl+.
+/// steps of the measurement's delay move its live curve the way `.` moves a stored trace
+/// (both later: phase leads more, e^{+jωΔ}), and neither stored curve moves at all, though
+/// the moved curve is the reference. Stopped, the keys say why they do nothing.
+#[test]
+fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
+    use ac2_scene::trace::TraceKey;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
+    let run = sweep_from_the_dialog(&mut d)?;
+    d.send(Msg::Command(CommandId::FocusTransfer));
+    for _ in 0..4 {
+        if d.st.selected == Some(m.id) {
+            break;
+        }
+        d.send(Msg::Command(CommandId::NextMeasurement));
+    }
+    assert_eq!(d.st.selected, Some(m.id));
+    let running = |s: &AppState| {
+        s.daemon()
+            .is_some_and(|x| x.measurements.iter().any(|y| y.id == m.id && y.running))
+    };
+    if !running(&d.st) {
+        d.send(Msg::Command(CommandId::StartStop));
+    }
+    d.until("running", |s| {
+        s.daemon()
+            .is_some_and(|x| x.measurements.iter().any(|y| y.id == m.id && y.running))
+    })?;
+    // The level typed before stays: arm and fire.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.tf_frames(m.id, 240)?;
+    d.send(Msg::Command(CommandId::Slot1));
+    d.until("the capture in slot 1", |s| {
+        s.daemon()
+            .is_some_and(|x| x.traces.iter().any(|t| t.edit.slot == Some(1)))
+    })?;
+    let cap =
+        d.st.daemon()
+            .and_then(|x| x.traces.iter().find(|t| t.edit.slot == Some(1)))
+            .map(|t| t.id)
+            .ok_or("capture")?;
+    d.until("the capture's data", |s| s.traces.contains_key(&cap))?;
+    d.until("the run's data", |s| s.traces.contains_key(&run))?;
+    let live = TraceKey::Live(m.id);
+    let before = drawn_phase(&d.st, 240);
+    let legend = |v: &[(TraceKey, f64, String)], k| {
+        v.iter()
+            .find(|x| x.0 == k)
+            .map_or(String::new(), |x| x.2.clone())
+    };
+    assert!(legend(&before, live).contains("· ref"), "{before:?}");
+    let applied = |s: &AppState| {
+        s.daemon()
+            .and_then(|x| x.measurements.iter().find(|y| y.id == m.id))
+            .and_then(|m| m.delay.as_ref())
+            .map(|d| d.applied_samples)
+    };
+    let a0 = applied(&d.st).ok_or("delay")?;
+    for _ in 0..10 {
+        d.key("Ctrl+.");
+    }
+    let want = a0 + 10.0;
+    let topic = Topic::Data {
+        meas: m.id,
+        stream: Stream::Tf,
+    };
+    let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
+    d.until("a frame at the new delay", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Tf(tf) => (tf.meta.delay.0 - want / rate).abs() < 1e-9,
+                _ => false,
+            })
+        })
+    })?;
+    let after = drawn_phase(&d.st, 240);
+    let f = 1000.0;
+    let wrap = |x: f64| (x + 180.0).rem_euclid(360.0) - 180.0;
+    let moved = wrap(phase_of(&after, live) - phase_of(&before, live));
+    // Ten samples later: the curve leads by 360°·f·10/fs (75° at 1 kHz, 48 kHz).
+    let expect = 360.0 * f * 10.0 / rate;
+    assert!(
+        (moved - expect).abs() < 5.0,
+        "live moved {moved:.1}°, expected {expect:.1}° — before {before:?} after {after:?}"
+    );
+    for k in [TraceKey::Stored(cap), TraceKey::Stored(run)] {
+        assert_eq!(
+            phase_of(&after, k).to_bits(),
+            phase_of(&before, k).to_bits(),
+            "{k:?} moved: before {before:?} after {after:?}"
+        );
+    }
+    assert!(legend(&after, live).contains("· ref"), "{after:?}");
+    assert!(
+        legend(&after, live).contains(&format!(
+            "nudge {} ms",
+            ac2_scene::format::signed(10.0 / rate * 1000.0, 2)
+        )),
+        "{after:?}"
+    );
+    // A capture now carries the steps as its display nudge and is drawn where the live
+    // curve is.
+    d.send(Msg::Command(CommandId::Slot2));
+    d.until("the capture in slot 2", |s| {
+        s.daemon()
+            .is_some_and(|x| x.traces.iter().any(|t| t.edit.slot == Some(2)))
+    })?;
+    let cap2 =
+        d.st.daemon()
+            .and_then(|x| x.traces.iter().find(|t| t.edit.slot == Some(2)))
+            .ok_or("capture 2")?
+            .clone();
+    assert!(
+        (cap2.edit.delay_nudge.0 - 10.0 / rate).abs() < 1e-12,
+        "{:?}",
+        cap2.edit
+    );
+    d.until("the second capture's data", |s| {
+        s.traces.contains_key(&cap2.id)
+    })?;
+    let with2 = drawn_phase(&d.st, 240);
+    let off = wrap(phase_of(&with2, TraceKey::Stored(cap2.id)) - phase_of(&with2, live));
+    assert!(
+        off.abs() < 3.0,
+        "capture {off:.1}° off the live curve: {with2:?}"
+    );
+    // The same direction as `.` on the stored capture: a 0.1 ms step leads by 36°.
+    for _ in 0..6 {
+        if d.st.selected_trace == Some(cap) {
+            break;
+        }
+        d.send(Msg::Command(CommandId::NextTrace));
+    }
+    assert_eq!(d.st.selected_trace, Some(cap));
+    let pre = drawn_phase(&d.st, 240);
+    let n0 =
+        d.st.daemon()
+            .and_then(|x| x.traces.iter().find(|t| t.id == cap))
+            .map(|t| t.edit.delay_nudge.0)
+            .ok_or("capture")?;
+    d.key(".");
+    d.until("the capture nudged", |s| {
+        s.daemon().is_some_and(|x| {
+            x.traces
+                .iter()
+                .any(|t| t.id == cap && t.edit.delay_nudge.0 > n0 + 0.000_05)
+        })
+    })?;
+    let post = drawn_phase(&d.st, 240);
+    let nudged =
+        wrap(phase_of(&post, TraceKey::Stored(cap)) - phase_of(&pre, TraceKey::Stored(cap)));
+    assert!(
+        moved.signum() == nudged.signum() && (nudged - 36.0).abs() < 1.0,
+        "Ctrl+. moved the live curve {moved:.1}°, `.` the capture {nudged:.1}°"
+    );
+
+    // The sweep run as the reference: the steps move the live curve against it, alone.
+    for _ in 0..8 {
+        if d.st.selected_trace == Some(run) {
+            break;
+        }
+        d.send(Msg::Command(CommandId::NextTrace));
+    }
+    assert_eq!(d.st.selected_trace, Some(run));
+    d.send(Msg::Command(CommandId::PhaseReference));
+    let pre = drawn_phase(&d.st, 240);
+    assert!(
+        legend(&pre, TraceKey::Stored(run)).contains("· ref"),
+        "{pre:?}"
+    );
+    for _ in 0..10 {
+        d.key("Ctrl+,");
+    }
+    d.until("a frame back at the first delay", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Tf(tf) => (tf.meta.delay.0 - a0 / rate).abs() < 1e-9,
+                _ => false,
+            })
+        })
+    })?;
+    let post = drawn_phase(&d.st, 240);
+    let back = wrap(phase_of(&post, live) - phase_of(&pre, live));
+    assert!(
+        (back + expect).abs() < 5.0,
+        "live moved {back:.1}°, expected {:.1}° — before {pre:?} after {post:?}",
+        -expect
+    );
+    for (k, _, _) in &pre {
+        if *k != live {
+            assert_eq!(
+                phase_of(&post, *k).to_bits(),
+                phase_of(&pre, *k).to_bits(),
+                "{k:?} moved: before {pre:?} after {post:?}"
+            );
+        }
+    }
+    d.stop()?;
+
+    // Stopped: no live curve to move, so the keys change nothing and say why.
+    d.send(Msg::Command(CommandId::StartStop));
+    d.until("stopped", |s| {
+        s.daemon()
+            .is_some_and(|x| x.measurements.iter().any(|y| y.id == m.id && !y.running))
+    })?;
+    let a1 = applied(&d.st).ok_or("delay")?;
+    d.key("Ctrl+.");
+    let toast =
+        d.st.toasts
+            .last()
+            .map(|t| t.text.clone())
+            .unwrap_or_default();
+    assert!(toast.contains("is stopped"), "{toast}");
+    d.synced()?;
+    assert_eq!(applied(&d.st), Some(a1));
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 #[test]
 fn empty_local_daemon_measures_from_the_app() -> R {
     // A stand-alone daemon as `ac2 daemon start` runs it, here on the simulated rig.

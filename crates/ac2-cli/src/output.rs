@@ -226,9 +226,14 @@ pub fn measurement(m: &Measurement) -> String {
     );
     if let Some(d) = &m.delay {
         s.push_str(&format!(
-            "  delay {} ({} samples){}",
+            "  delay {} ({} samples){}{}",
             ms(d.applied.0),
             format::fixed(d.applied_samples, 2),
+            if d.nudged_samples != 0.0 {
+                format!(", nudged {} samples", format::signed(d.nudged_samples, 2))
+            } else {
+                String::new()
+            },
             if d.tracking { ", tracking" } else { "" }
         ));
     }

@@ -80,6 +80,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         offset_db: 0.0,
         polarity: Polarity::Normal,
         nudge: Seconds(0.0),
+        delay_nudge: Seconds(0.0),
         time_base: TimeBase::Shared {
             epoch: SessionEpoch(1),
             delay: Seconds(delay),

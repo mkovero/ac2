@@ -39,6 +39,8 @@
     "delay": {
      "applied": 0.0125,
      "applied_samples": 600.25,
+     "nudged": 5.208333333333333e-06,
+     "nudged_samples": 0.25,
      "tracking": true,
      "awaiting_pick": false,
      "last_finding": {

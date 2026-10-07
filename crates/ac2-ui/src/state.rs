@@ -3535,10 +3535,29 @@ impl AppState {
 
     /// Moves the selected transfer measurement's delay by `samples` (`delay.nudge`); the
     /// daemon keeps the averages where it can, so the curve moves at once.
+    ///
+    /// A step is something the operator sees: its live curve moves as a `.` / `,` display
+    /// nudge of the same size would move it (a later delay leads the phase, e^{+jωΔ}), and no
+    /// other curve moves. With no live curve on the pane (stopped, or hidden) the step would
+    /// change nothing visible now and surprise later, so it is refused with the reason.
     fn nudge_delay(&mut self, samples: f64, out: &mut Vec<Request>) {
         let Some(m) = self.need_tf() else {
             return;
         };
+        if !m.running {
+            self.toast(format!(
+                "{} is stopped \u{2014} its delay applies to the live curve; S starts it",
+                m.config.name
+            ));
+            return;
+        }
+        if self.meas_hidden(&m) {
+            self.toast(format!(
+                "{} is hidden \u{2014} its delay applies to the live curve; show it first",
+                m.config.name
+            ));
+            return;
+        }
         let Some(rate) = self.open_session().map(|s| f64::from(s.sample_rate_hz)) else {
             self.error(format!(
                 "{}: no audio session (a delay in samples needs its rate)",

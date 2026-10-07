@@ -31,6 +31,19 @@
 //! delay reads 1 ms higher. Traces without a shared time base (imported, averaged, math,
 //! another session epoch — decision 8a "marked independent") keep their own alignment:
 //! `Δ = −ν`. The rotation changes phase only; magnitude and coherence are untouched.
+//!
+//! # A measurement's own delay steps
+//!
+//! The time base of a live curve is its *arrival* `τ_k = D_k − n_k`: the applied delay `D_k`
+//! less what the operator's delay steps (`delay.nudge`, Ctrl / Alt + `,` `.`) added to it,
+//! `n_k`. Its columns hold `H(f) · e^{+jωD_k}`, so it is drawn as
+//! `H(f) · e^{+jω(τ_ref + n_k + ν_k)}`: a step of the measurement's delay moves its own
+//! curve by `e^{+jωΔ}` — the direction a `.` display nudge of the same size moves a trace —
+//! and, as `τ_ref` is an arrival too, moves no other curve even when it is the reference.
+//! Referred to `D_k` instead, the step would cancel on every curve but the reference, and on
+//! the reference it would drag every other curve along: the whole picture would turn
+//! together and the step would look like nothing. A capture records `D_k` with `n_k` as its
+//! display nudge, so it is drawn exactly where the live curve was.
 
 use ac2_proto::frame::{FrameStamp, TfFrame, ValidityMask};
 use ac2_proto::model::{
@@ -77,6 +90,10 @@ pub struct TfTrace<'a> {
     pub polarity: Polarity,
     /// Per-trace delay nudge on top of the measured delay (decision 8a).
     pub nudge: Seconds,
+    /// Live curves: what the measurement's delay steps added to its arrival (`n_k` of the
+    /// module docs). Already in the columns and kept out of the time base, so it draws as a
+    /// nudge; the legend's nudge tag includes it.
+    pub delay_nudge: Seconds,
     pub time_base: TimeBase,
     /// Live traces: age of the newest frame. Stored traces: `None`.
     pub freshness: Option<Freshness>,
@@ -115,9 +132,11 @@ impl<'a> TfTrace<'a> {
             offset_db: 0.0,
             polarity: Polarity::Normal,
             nudge: Seconds(0.0),
+            delay_nudge: frame.meta.nudged,
+            // The arrival: see "A measurement's own delay steps" in the module docs.
             time_base: TimeBase::Shared {
                 epoch: stamp.session_epoch,
-                delay: frame.meta.delay,
+                delay: Seconds(frame.meta.delay.0 - frame.meta.nudged.0),
             },
             freshness: Some(freshness),
             smoothing: frame.meta.smoothing,
@@ -166,6 +185,7 @@ impl<'a> TfTrace<'a> {
             offset_db: m.edit.offset.0,
             polarity: m.edit.polarity,
             nudge: m.edit.delay_nudge,
+            delay_nudge: Seconds(0.0),
             time_base,
             freshness: None,
             smoothing: m.edit.smoothing,
@@ -713,6 +733,7 @@ mod tests {
                 offset_db: 0.0,
                 polarity: Polarity::Normal,
                 nudge: Seconds(0.0),
+                delay_nudge: Seconds(0.0),
                 time_base,
                 freshness: None,
                 smoothing: None,
@@ -983,6 +1004,114 @@ mod tests {
             let got = d.phase_unwrapped_deg[i] - d.phase_unwrapped_deg[i0];
             assert!((got - want).abs() < 1e-2, "{}: {got} vs {want}", d.freqs[i]);
             assert!((d.group_delay_s[i] - 0.002).abs() < 1e-6);
+        }
+    }
+
+    /// A live TF frame of a pure-delay path `tau` measured with the reference delayed by
+    /// `applied`, of which `nudged` came from the operator's delay steps.
+    fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
+        let n = freqs.len();
+        TfFrame {
+            meas: MeasId(1),
+            meta: ac2_proto::frame::TfMeta {
+                delay: Seconds(applied),
+                nudged: Seconds(nudged),
+                frozen: false,
+                smoothing: None,
+                mic_curve: false,
+                math: None,
+            },
+            mag: vec![0.0; n],
+            phase: measured_phase(freqs, tau, applied),
+            coh: vec![1.0; n],
+            validity: vec![ValidityMask::NONE; n],
+        }
+    }
+
+    /// Drawn phase of every curve: a live measurement (arrival 10 ms) with its capture and a
+    /// sweep run (arrival 12 ms), before and after the measurement's delay is stepped by
+    /// `step`, with the reference `wanted`.
+    fn stepped(wanted: Option<TraceKey>, step: f64) -> (Vec<DisplayTrace>, Vec<DisplayTrace>) {
+        let (tau, run_tau) = (0.010, 0.012);
+        let cap = Data::delay(300, tau, tau);
+        let run = Data::delay(300, run_tau, run_tau);
+        let mut stamp = ac2_proto::samples::stamp(None);
+        stamp.session_epoch = EPOCH;
+        let draw = |frame: &TfFrame| {
+            let live = TfTrace::live(
+                frame,
+                &stamp,
+                &cap.freqs,
+                "TF 2",
+                Color::WHITE,
+                Freshness::Fresh { age_s: 0.0 },
+            );
+            let mut c = cap.trace(9, shared(tau));
+            c.key = TraceKey::Stored(TraceId(1));
+            let mut r = run.trace(9, shared(run_tau));
+            r.key = TraceKey::Stored(TraceId(2));
+            display_traces(
+                &[live, c, r],
+                &DisplayCache::default(),
+                wanted,
+                &CoherenceStyle::default(),
+            )
+            .1
+        };
+        let before = draw(&live_frame(&cap.freqs, tau, tau, 0.0));
+        let after = draw(&live_frame(&cap.freqs, tau, tau + step, step));
+        (before, after)
+    }
+
+    /// The measurement's delay stepped later moves its live curve by e^{+jωΔ} — what a
+    /// display nudge `ν = Δ` does to a trace — and no stored curve, with the live curve as
+    /// the reference and with a stored sweep run as the reference. Earlier moves it back.
+    #[test]
+    fn a_delay_step_moves_the_live_curve_alone() {
+        for step in [0.000_2, -0.000_05] {
+            // What a display nudge of the step does to a curve.
+            let plain = Data::delay(300, 0.010, 0.010);
+            let mut t = plain.trace(1, shared(0.010));
+            let draw = |t: &TfTrace<'_>| {
+                display_traces(
+                    std::slice::from_ref(t),
+                    &DisplayCache::default(),
+                    None,
+                    &CoherenceStyle::default(),
+                )
+                .1
+                .remove(0)
+            };
+            let unnudged = draw(&t);
+            t.nudge = Seconds(step);
+            let nudged = draw(&t);
+            for wanted in [None, Some(TraceKey::Stored(TraceId(2)))] {
+                let (before, after) = stepped(wanted, step);
+                let r = if wanted.is_some() { 2 } else { 0 };
+                assert_eq!(after[r].relation, PhaseRelation::Reference, "{wanted:?}");
+                for (i, f) in before[0].freqs.iter().enumerate() {
+                    let moved =
+                        wrap_deg(after[0].phase_wrapped_deg[i] - before[0].phase_wrapped_deg[i]);
+                    let want = wrap_deg(360.0 * f * step);
+                    assert!(
+                        wrap_deg(moved - want).abs() < 1e-3,
+                        "{wanted:?} {f} Hz: {moved} vs {want}"
+                    );
+                    let by_nudge =
+                        wrap_deg(nudged.phase_wrapped_deg[i] - unnudged.phase_wrapped_deg[i]);
+                    assert!(wrap_deg(moved - by_nudge).abs() < 1e-3, "{f} Hz");
+                }
+                for k in [1, 2] {
+                    assert_eq!(after[k].shift_s.to_bits(), before[k].shift_s.to_bits());
+                    assert_eq!(
+                        after[k].phase_wrapped_deg, before[k].phase_wrapped_deg,
+                        "{wanted:?}"
+                    );
+                }
+                // The live curve's arrival against the reference is unchanged; the step
+                // draws as a nudge.
+                assert_eq!(after[0].shift_s.to_bits(), before[0].shift_s.to_bits());
+            }
         }
     }
 }

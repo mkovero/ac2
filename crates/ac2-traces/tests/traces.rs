@@ -720,6 +720,7 @@ fn session_sample() -> Session {
                 frozen: false,
                 delay: Some(SavedDelay {
                     applied: Seconds(0.0125),
+                    nudged: Seconds(0.000_25),
                     tracking: false,
                 }),
             },
@@ -899,16 +900,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 11", "\"version\": 10")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 12", "\"version\": 11")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 10
+            found: 11
         }
     );
-    assert!(e.to_string().contains("reads version 11 only"), "{e}");
+    assert!(e.to_string().contains("reads version 12 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

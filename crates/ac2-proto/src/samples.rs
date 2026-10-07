@@ -495,6 +495,8 @@ fn measurement() -> Measurement {
         delay: Some(DelayState {
             applied: Seconds(0.0125),
             applied_samples: 600.25,
+            nudged: Seconds(0.25 / 48_000.0),
+            nudged_samples: 0.25,
             tracking: true,
             awaiting_pick: false,
             last_finding: Some(finding()),
@@ -1518,6 +1520,7 @@ pub fn tf_frame() -> Frame {
             meas: MeasId(1),
             meta: TfMeta {
                 delay: Seconds(0.0125),
+                nudged: Seconds(0.0),
                 frozen: false,
                 smoothing: Some(Smoothing {
                     fraction: SmoothingFraction::Sixth,
