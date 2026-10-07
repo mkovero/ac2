@@ -294,3 +294,17 @@ status` the backend's reason ("No JACK server: start JACK"). jackd started again
 the session reopened by itself on attempt 6 at 19:03:44 (the next backoff step), epoch 2, the
 same measurements running, SPL fresh, the Leq caption counting "offline 31 s"; the FF400 kept
 its settings. Not tried: a hung (not stopped) jackd, as after the FF400 reset.
+
+## Deploy of 360c6b8 (2026-10-07)
+
+Protocol 23, session format 10 (math channels, Settings, stimulus by view). Same procedure as
+645f5ec: `state dump`, both SPL meters' logs and all 8 traces saved first
+(`/work/ac2-scratch/deploy-360c6b8/` on the dev host); after the swap the six measurements were
+recreated (FOH SPL with five C windows at 70 dB; a second FOH SPL with `--preset din15905`,
+which brings LAeq 30 min ≤ 99 and LCpeak ≤ 135; Spectrum 1 at 1/3 oct, Spectrum 2 unsmoothed;
+TF 1 stopped, TF 2 running) and the traces imported hidden. The system max level reads −50 dBFS,
+the `--max-level` bound; changes made in Settings now persist in the daemon's `rig.json`.
+
+**Reopen probe, real hardware:** jackd stopped and started again 6 s later; the daemon logged
+"the audio device is back: reopening now" and reopened at once (8.1 s without audio in all,
+against 12 s after jackd's return with the backoff alone on 645f5ec).
