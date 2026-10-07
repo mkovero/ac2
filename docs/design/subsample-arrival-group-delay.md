@@ -1,6 +1,6 @@
 # Sub-sample arrival on the sweep; group delay that holds below 100 Hz
 
-Status: §1–4 implemented (2026-10-07). The sweep's arrival is
+Status: §1–5 implemented (2026-10-07). The sweep's arrival is
 the band-limited peak (±32 samples zero-padded ×16, then a parabola: ±16 left ≈ 0.002 sample of
 bias from the cut tails, ±32 ≈ 0.0004) with the phase, the IR's `t0` and the room times
 referred to it (`ac2-core::sweep`); live tracking inserts the fractional mean of two results
@@ -9,7 +9,7 @@ arrival is more than 0.05 sample from the applied one: a 600.37-sample path trac
 0.02 sample with the phase flat to 1° at 10 kHz); readouts show the arrival to the µs, and the
 A − B difference to 0.1 µs in `ac2 trace delay-diff` and in the legend of a transfer math
 channel ÷, − or + on one time base (`arrival Δ +3.7 µs · +1.3 mm @ 20 °C`); group delay is the
-coherence-weighted slope fit, span in the pane title. §5 not started. Originally proposed by
+coherence-weighted slope fit, span in the pane title; §5 removed the LF phase ripple. Originally proposed by
 the operator, 2026-10-07: "sub sample precision sounds worthwhile, write design doc about it,
 below 100 [Hz] difference worries me". Inputs: the REW cross-check on pupu
 (`docs/rigs/pupu.md`, "REW cross-check, electrical"), `delay-no-resettle.md` (fractional
@@ -201,4 +201,5 @@ mains near 50 Hz); the ±1/12-octave fit averages it out.
   period 1.1 Hz) reads within 4.6 % from 16 to 25 Hz at ±1/24 (the neighbour difference: 18 %)
   but up to ≈ 10 % at 45–50 Hz, where the ripple's slope is a larger part of a smaller group
   delay and five columns no longer span its period; ±1/12 stays within 2.6 % from 16 to 50 Hz.
-  Finding the ripple (§5) matters more than the span.
+  With the ripple gone (§5) the remaining LF error is noise inside the gate, which the fit
+  averages.
