@@ -54,3 +54,18 @@ def test_at_follows_a_long_delay_between_columns():
     # without the delay taken out the unwrap cannot follow half a turn per column
     h0 = Analysis.at(a, f, H, ft, tau=0.0)
     assert np.abs(np.angle(h0[1] / want[1])) > 0.5
+
+
+def test_a_sweep_divided_by_the_reference_reads_the_meas_harmonic_less_the_reference_s():
+    import numpy as np
+    from crosscheck.analyse import dual_channel_harmonic_dbr
+    tones = [{"f": f, "ratio_db": -17.4, "ratio_deg": 0.0} for f in (20.0, 100.0)]
+    d = 10 ** (-90 / 20)
+    t = 10 ** (-17.4 / 20)
+    clean = dict(tones[0], h_vec={"3": {"meas": [d, 0.0], "ref": [0.0, 0.0]}})
+    assert abs(dual_channel_harmonic_dbr(tones, clean, 3) - -90.0) < 1e-9
+    # the reference's harmonic, carried through the path, in phase with the meas one: half of it comes off
+    half = dict(tones[0], h_vec={"3": {"meas": [d, 0.0], "ref": [d / 2 / t, 0.0]}})
+    assert abs(dual_channel_harmonic_dbr(tones, half, 3) - (-90 + 20 * np.log10(0.5))) < 1e-9
+    # k·f outside the tones: no truth to form
+    assert dual_channel_harmonic_dbr(tones, dict(tones[1], h_vec=half["h_vec"]), 3) is None

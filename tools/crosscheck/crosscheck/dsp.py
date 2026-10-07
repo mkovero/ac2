@@ -250,6 +250,21 @@ def sine_phasor(x: np.ndarray, f: float, fs: float) -> complex:
     return complex(a, -b)
 
 
+def sine_harmonic_phasors(x: np.ndarray, f: float, fs: float, kmax: int = 5) -> dict[int, complex]:
+    """Phasors of the fundamental and harmonics 2..kmax (k·f below Nyquist), fitted jointly by
+    least squares over a whole number of fundamental periods: fitted one at a time, the
+    fundamental's tail (≈90 dB above a harmonic) leaks into a harmonic's fit."""
+    per = fs / f
+    n = int(np.floor(len(x) / per) * per) or len(x)
+    t = np.arange(n) / fs
+    ks = [k for k in range(1, kmax + 1) if k * f < fs / 2]
+    cols = [np.ones(n)]
+    for k in ks:
+        cols += [np.cos(2 * np.pi * k * f * t), np.sin(2 * np.pi * k * f * t)]
+    c = np.linalg.lstsq(np.vstack(cols).T, x[:n], rcond=None)[0]
+    return {k: complex(c[1 + 2 * i], -c[2 + 2 * i]) for i, k in enumerate(ks)}
+
+
 MAINLOBE_BINS = 3  # Blackman: main lobe ±3 bins
 
 

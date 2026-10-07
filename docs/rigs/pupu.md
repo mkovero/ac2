@@ -554,3 +554,19 @@ floor), 0 FAIL; judged harmonic comparisons 3 → 19. Of the 164 INCONCLUSIVE, 6
 bands no tone can avoid, 101 harmonics below floor (the Xone's H3..H5 sit under −115 dBr), 2 LF H2 bounds and the 1040 Hz group delay:
 those need a lower floor, not a different tone. The 1040 Hz displayed group delay still has a
 mains column beside it. Baseline `xone-10dbfs.json` re-taken from this run.
+
+### Harmonic truth net of the reference (2026-10-07, ac2d 8c3a658, −10 dBFS)
+
+The WARN at 26 Hz (ac2 H3 −3.0 dB under the steady sine on every sweep variant) was the suite's
+truth, not ac2: ac2 divides the measurement by the measured loopback reference
+(`crates/ac2-core/src/sweep.rs`), so a harmonic the reference input carries (RME DA out2 → AD in2,
+H2/H3 near −98/−104 dBr at low frequency) comes off the measurement's, carried through the path.
+The steady sine read the meas input alone. The sine stage now fits both inputs' harmonic phasors
+jointly with the fundamental (fitted one at a time, the fundamental leaks ~45 dB into them) and
+ac2's sweeps are judged against D_m − T(k·f)·D_r; REW, which deconvolves each input by its own
+stimulus, stays judged against the meas input alone. Run `20261007T200249Z`: H3 at 26 Hz −0.4 to
++0.9 dB (was −2.1 to −3.0), every ac2 harmonic comparison within ±2.4 dB; 253 PASS, 1 WARN,
+0 FAIL. The WARN is open: ac2's H2 at 20–25 Hz reads +1.3 to +3.2 dB over the net truth, most on
+the sweeps that start at 20 Hz (dist, dist-probe +3.2 at 22 Hz), less from 10 Hz; ac2's own
+floor there, which holds the mains hum, is 12–17 dB under the reading, so it is not the 50 Hz
+line in the H2 band. Baseline `xone-10dbfs.json` re-taken from this run.

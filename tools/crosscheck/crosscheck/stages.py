@@ -282,7 +282,12 @@ def sine_stage(ctx: Ctx, pname: str):
         tone = {"f": f, "f_requested": t["f_req"], "seconds": t["seconds"], "ratio_db": float(20 * np.log10(abs(ratio))),
                 "ratio_deg": float(np.degrees(np.angle(ratio))), "meas_level_dbfs": hm["level_dbfs"],
                 "ref_level_dbfs": hr["level_dbfs"],
-                "h_dbr": {str(k): float(v) for k, v in hm["h_dbr"].items() if np.isfinite(v)}}
+                "h_dbr": {str(k): float(v) for k, v in hm["h_dbr"].items() if np.isfinite(v)},
+                "h_ref_dbr": {str(k): float(v) for k, v in hr["h_dbr"].items() if np.isfinite(v)},
+                # each input's harmonic phasors over the meas fundamental's, one take: a sweep
+                # divided by the measured reference reads the meas harmonic less the
+                # reference's carried through the path, which needs both with their phases
+                "h_vec": _h_vec(m, r, f, fs)}
         if pairs:
             ph = []
             for s in (-1, 1):
@@ -312,6 +317,15 @@ def sine_stage(ctx: Ctx, pname: str):
 
 
 # ---------------------------------------------------------------- REW offline
+
+
+def _c(z: complex) -> list[float]:
+    return [float(z.real), float(z.imag)]
+
+
+def _h_vec(m: np.ndarray, r: np.ndarray, f: float, fs: float) -> dict:
+    hm, hr = dsp.sine_harmonic_phasors(m, f, fs), dsp.sine_harmonic_phasors(r, f, fs)
+    return {str(k): {"meas": _c(hm[k] / hm[1]), "ref": _c(hr[k] / hm[1])} for k in hm if k > 1}
 
 
 def sweep_start_hz(x: np.ndarray, fs: float) -> float:

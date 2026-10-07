@@ -28,6 +28,25 @@ TOLERANCES = Path(__file__).resolve().parent.parent / "tolerances.toml"
 MAINS_GUARD_HZ = 2.0
 
 
+def dual_channel_harmonic_dbr(tones: list[dict], tone: dict, k: int) -> float | None:
+    """Harmonic k of `tone` as a sweep divided by the measured reference reads it, dBr: the
+    meas input's harmonic phasor less the reference input's carried through the path,
+    D_m − T(k·f)·D_r, over the meas fundamental. T(k·f) is the meas÷ref ratio interpolated
+    between the tones (dB and unwrapped phase, linear in log f); None when k·f lies outside
+    them or the tone has no phasors."""
+    hv = (tone.get("h_vec") or {}).get(str(k))
+    pts = sorted((x["f"], x["ratio_db"], x["ratio_deg"]) for x in tones if "ratio_db" in x)
+    fk = k * tone["f"]
+    if hv is None or len(pts) < 2 or not pts[0][0] <= fk <= pts[-1][0]:
+        return None
+    lf = np.log([a for a, _, _ in pts])
+    mag = np.interp(np.log(fk), lf, [b for _, b, _ in pts])
+    ph = np.interp(np.log(fk), lf, np.unwrap(np.radians([c for _, _, c in pts])))
+    tk = 10 ** (mag / 20) * np.exp(1j * ph)
+    d = complex(*hv["meas"]) - tk * complex(*hv["ref"])
+    return float(20 * np.log10(abs(d))) if abs(d) > 0 else None
+
+
 @dataclass
 class Check:
     id: str
@@ -851,6 +870,19 @@ class Analysis:
                 ct = dsp.classify(tv, tfl if tfl is not None else np.nan, margin)
                 rows.append([f"{fc:g}", f"H{k}", "steady sine", _fmt_lvl(tone.get("meas_level_dbfs")), _fmt_h(ct),
                              _fmt(ct.get("floor")), _fmt(ct.get("margin")), ct["kind"]])
+                rv = (tone.get("h_ref_dbr") or {}).get(str(k))
+                if rv is not None:
+                    rows.append([f"{fc:g}", f"H{k}", "steady sine, reference input", _fmt_lvl(tone.get("ref_level_dbfs")),
+                                 f"{rv:.1f}", "—", "—", "info"])
+                # ac2 divides by the measured reference, so its truth is the meas harmonic less
+                # the reference's carried through the path at k·f
+                net = dual_channel_harmonic_dbr(tones, tone, k)
+                ct_net = ct
+                if net is not None:
+                    ct_net = {**dsp.classify(net, tfl if tfl is not None else np.nan, margin),
+                              "label": f"sine net of reference (meas alone {tv:.1f})"}
+                    rows.append([f"{fc:g}", f"H{k}", "steady sine, net of reference", "—", _fmt_h(ct_net),
+                                 _fmt(ct_net.get("floor")), _fmt(ct_net.get("margin")), ct_net["kind"]])
                 for name, s in sources.items():
                     b = s.trace.freq
                     i = _nearest_finite(b["freq_hz"], b[f"h{k}_db"], fc)
@@ -864,7 +896,7 @@ class Analysis:
                         fund = s.level_dbfs + ri + b["mag_db"][i]
                     rows.append([f"{b['freq_hz'][i]:.1f}", f"H{k}", name, _fmt_lvl(fund), _fmt_h(ca), _fmt(ca.get("floor")),
                                  _fmt(ca.get("margin")), ca["kind"]])
-                    self._cmp_h(p, name, fc, k, ca, ct, th)
+                    self._cmp_h(p, name, fc, k, ca, ct_net, th)
                 for rs in (p.rew, p.rew_live):
                     if rs is None or rs.meas_dist is None:
                         continue
@@ -906,7 +938,8 @@ class Analysis:
             d = ca["value"] - ct["value"]
             self.add(id=f"{p.name}.h{k}.{name}.{fc:g}", group="harmonics", path=p.name,
                      title=f"{name} H{k} at {fc:g} Hz vs steady sine", value=d, unit="dB", tol=th, status=judge(d, th),
-                     meaning=f"{name} {ca['value']:.1f} dBr (floor {_fmt(ca.get('floor'))}), sine {ct['value']:.1f} dBr")
+                     meaning=f"{name} {ca['value']:.1f} dBr (floor {_fmt(ca.get('floor'))}), "
+                             f"{ct.get('label', 'sine')} {ct['value']:.1f} dBr")
         elif ca["kind"] != "none" and ct["kind"] != "none":
             short = max(ca.get("shortfall") or 0, ct.get("shortfall") or 0)
             claim = ""
@@ -1006,7 +1039,10 @@ class Analysis:
     # ------------------------------------------------------------ LF H2 onset
     def lf_h2_onset(self, p: PathData):
         t = p.truth or {}
-        pts = sorted((x["f"], x["h_dbr"]["2"]) for x in t.get("tones", []) if x.get("h_dbr") and "2" in x["h_dbr"])
+        tones = [x for x in t.get("tones", []) if x.get("h_dbr") and "2" in x["h_dbr"]]
+        # ac2 divides by the measured reference: its truth is the meas H2 net of the reference's
+        net = {id(x): dual_channel_harmonic_dbr(t.get("tones", []), x, 2) for x in tones}
+        pts = sorted((x["f"], net[id(x)] if net[id(x)] is not None else x["h_dbr"]["2"]) for x in tones)
         if len(pts) < 2:
             return
         tf_, tv = np.array([a for a, _ in pts]), np.array([b for _, b in pts])

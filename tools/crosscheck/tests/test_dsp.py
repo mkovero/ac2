@@ -259,3 +259,13 @@ def test_band_mean_reads_power_in_a_null():
     H = 1 + np.exp(-2j * np.pi * f * (1 / 2000) * 1.0)
     out = dsp.band_mean(f, H, np.array([1000.0]), frac=1 / 48)
     assert abs(abs(out[0]) - np.sqrt(np.mean(np.abs(H[(f >= 1000 * 2 ** (-1 / 96)) & (f < 1000 * 2 ** (1 / 96))]) ** 2))) < 1e-9
+
+
+def test_harmonic_phasors_are_fitted_with_the_fundamental_so_it_does_not_leak():
+    fs, f = 96000.0, 26.263
+    t = np.arange(int(2.0 * fs)) / fs
+    x = 0.3 * np.cos(2 * np.pi * f * t) + 0.3e-5 * np.cos(2 * np.pi * 3 * f * t + 1.0)
+    h = dsp.sine_harmonic_phasors(x, f, fs)
+    assert abs(20 * np.log10(abs(h[3] / h[1])) - -100.0) < 0.01
+    assert abs(np.angle(h[3] / h[1]) - 1.0) < 1e-3
+    assert abs(h[2] / h[1]) < 1e-9
