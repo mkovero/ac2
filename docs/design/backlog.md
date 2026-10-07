@@ -30,6 +30,10 @@ decision 4). Measured numbers: PLAN §9.0.
 - **No flow control to slow clients**: a Wi-Fi client can lag up to the 48-frame send queue;
   client-paced credit is designed in `docs/design/flow-control.md`, not implemented (wire
   change).
+- **Frame size on slow links**: a remote `tf` frame is ≈ 7.8 KB, ≈ 1.9 Mbit/s per
+  measurement at 30 fps. Compacting `validity` saves ≈ 25 % losslessly; compression and
+  display quantisation weighed in `docs/design/wire-size.md`. Not needed until a field
+  report shows bandwidth, not latency, limiting a remote client.
 - **Delay finder full searches run on the transfer job's thread**: every 2 s while tracking,
   about 33 ms on a desktop core, likely 150–250 ms on a Pi; `detect_period` is ~60 % of it.
 - **A weighting could reuse the C filter** (A = C + one more section): two biquads per
