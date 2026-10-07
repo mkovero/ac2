@@ -760,9 +760,9 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ToggleSelected, "show/hide", 80),
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
+                    hint(C::CoherenceMask, "coherence mask", 65),
+                    hint(C::PhaseUnwrap, "wrap/unwrap", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
-                    hint(C::ToggleIr, "IR", 40),
-                    hint(C::MaximizePane, "maximise", 50),
                     hint(C::OffsetUp, "offset", 45),
                 ]
             }

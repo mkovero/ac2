@@ -112,9 +112,9 @@ mod tests {
                 "A show/hide",
                 "Ctrl+1 capture",
                 "X find delay",
+                "B coherence mask",
+                "P wrap/unwrap",
                 "K smoothing",
-                "Shift+I IR",
-                "W maximise",
                 "Alt+↑ offset",
                 "H all keys"
             ]
