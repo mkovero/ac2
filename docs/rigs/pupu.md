@@ -468,3 +468,43 @@ sweeps they were compared with. The steady-sine H2 "truth" above is therefore ab
 for a second-order term (≈ 1 dB per dB) relative to a true −30 dBFS; the onset excess (13–22 dB)
 and the group-delay and phase comparisons (level-independent) are unaffected. The cross-check
 suite (`tools/crosscheck/`) uses the full-scale-sine convention throughout and asserts it.
+
+## First `tools/crosscheck` runs (2026-10-07, ac2d badbfc1 → 2638893)
+
+Suite runs from the dev host (`tools/crosscheck/rig-run.sh`); REW speaker stimulus
+`~/rew-dl/sweep96k-20-20k.wav` (20 Hz–20 kHz, 512k, peak −50 dBFS, saved from REW's
+generator through the GUI). Reports in `tools/crosscheck/runs/` on the dev host (git-ignored).
+
+| run | build | stages | FAIL | WARN | PASS | INCONCLUSIVE |
+|---|---|---|---|---|---|---|
+| 20261007T100854Z | badbfc1 | ambient, Xone −50 | 32 → 0 after suite triage | 32 → 8 | 117 → 156 | 140 → 162 |
+| 20261007T104217Z | 3309fff | Genelec −50 (audible, operator present) | 64 → 3 after triage | 25 → 13 | 41 → 75 | 104 → 161 |
+| 20261007T113432Z | 2638893 | Xone −50 | 2 (REW's own GD fit) | 1 | 175 | 156 |
+| 20261007T114727Z | 2638893 | Xone −30 (drop-in, removed after) | 0 | 1 (REW GD at 97 Hz) | 186 | 143 |
+
+Most first-run failures were the suite's: it compared ac2's phase, now referred to the
+sub-sample arrival, with absolute steady-sine phase (13° at 10 kHz for 3.6 µs; on the speaker
+path the 3.6 ms delay wrapped band sums into +15…+33 dB "differences"); noise-floor and mains
+handling; REW's offline import refers each channel to its own timing marker, so its path delay
+is put back from the direct estimate. Two were ac2's and are fixed in 2638893: the sweep's
+reference level read the matched-filter peak, which weights the 20–40 kHz anti-alias roll-off
+(−0.125 dB; now the mid-band gain, −0.006 dB vs steady sine), and an f32 rounding of the output
+limit refused pink noise whose peak sat exactly at the limit at −50/−60 dBFS.
+
+Xone −30 dBFS, 2638893, ac2 sweep 10 Hz–40 kHz 5.5 s:
+
+- vs REW offline import: magnitude +0.003 / +0.002 / +0.009 dB, phase +0.09 / +0.01 / +0.01°
+  (20–100 / 100–1000 / 1000–20000 Hz).
+- vs steady sines: phase +0.041° at 20.5 Hz, +0.004° at 31.5 Hz, +0.0004° at 1 kHz; group delay
+  (±1/12-oct fit) +2.3 % at 20.5 Hz, +0.2 % at 31.5 Hz, +7.6 % at 47.8 Hz, −0.09 µs at 1 kHz,
+  +0.01 µs at 10 kHz. Before the column-centre fix the displayed GD was ±30 % below 100 Hz.
+- H2/H3 floors vs the raw capture's floor: within 0.21 dB on every sweep.
+- LF H2 excess at 22 Hz: now only a bound (ac2's H2 there is below its floor); the onset
+  artefact of the first run (−53 dBr) is gone with the sweep emitted from below the asked band.
+- ac2 live TF vs the direct cross-spectrum (γ² ≥ 0.99): ≤ 0.013 dB, ≤ 0.14°.
+
+Left open (ac2): +0.09…0.13 dB at 16 Hz from the linear window's pre-arrival rise cutting LF
+ringing (longer rise trades against H2 tail leakage in rooms); `meas new rta` has no averaging
+option, so the suite cannot judge ac2's RTA; C50/C80 are reported when the decay meets the
+noise before the clarity boundary (should be refused like T20/T30); a tonal line inside the
+1/3-oct floor band reads as a harmonic. Speaker path at −50 dBFS is noise-limited below 1 kHz.
