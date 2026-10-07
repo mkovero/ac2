@@ -124,7 +124,27 @@ fn traces_survive_a_restart() {
     );
 
     let kept = capture(&h, &backend, &mut c);
+    assert_eq!(kept.edit.owner, TraceOwner::Meas { meas: MeasId(1) });
     let kept_data = trace_data(&mut c, kept.id);
+    // A sweep measurement is restored with its settings (and never as running).
+    let sweep = MeasConfig {
+        name: "Genelec 1 m".into(),
+        kind: MeasKind::Sweep {
+            config: SweepConfig {
+                reference_input: 0,
+                measurement_input: 1,
+                outputs: vec![0],
+                level: Dbfs(-50.0),
+                sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+                repeats: 2,
+                gate: None,
+                tail: None,
+            },
+        },
+    };
+    c.ok(Command::MeasCreate {
+        config: sweep.clone(),
+    });
     autosave_event(&sub, |a| a.state == AutosaveState::Pending);
     let saved = autosave_event(&sub, |a| a.state == AutosaveState::Saved);
     let saved_at = saved.saved_at.expect("saved_at");
@@ -142,8 +162,14 @@ fn traces_survive_a_restart() {
     let back = trace_data(&mut c, kept.id);
     let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
     assert_eq!(bits(&back.mag_db), bits(&kept_data.mag_db));
-    assert_eq!(st.measurements.len(), 1);
+    assert_eq!(st.measurements.len(), 2);
     assert_eq!(st.measurements[0].config, transfer("main"));
+    assert_eq!(st.measurements[1].config, sweep);
+    assert!(!st.measurements[1].running);
+    assert_eq!(
+        st.traces[0].edit.owner,
+        TraceOwner::Meas { meas: MeasId(1) }
+    );
     assert!(st.session.open.is_none(), "no audio session is opened");
     assert!(!st.generator.armed && !st.generator.firing);
     assert_eq!(st.generator.owner, None);

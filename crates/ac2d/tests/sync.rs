@@ -156,7 +156,10 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
         meas: MeasId(2),
         config: spl("now an spl", 0),
     });
-    b.ok(Command::MeasDelete { meas: MeasId(1) });
+    b.ok(Command::MeasDelete {
+        meas: MeasId(1),
+        traces: ac2_proto::model::OwnedTraces::Keep,
+    });
     let target = snapshot(&mut b);
     // Three creates, the update (the meter's `spl_log` entity, then the measurement), the
     // delete.

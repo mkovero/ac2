@@ -870,8 +870,48 @@ impl Shared {
                 m.config_rev = Rev(self.rev.0 + 1);
                 self.put_meas(m)
             }
-            C::MeasDelete { meas } => {
+            C::MeasDelete { meas, traces } => {
                 self.meas(meas)?;
+                // What it owns: kept under the imported group, or deleted with it.
+                let owner = TraceOwner::Meas { meas };
+                let owned: Vec<TraceMeta> = self
+                    .state
+                    .traces
+                    .iter()
+                    .filter(|t| t.edit.owner == owner)
+                    .cloned()
+                    .collect();
+                let maths: Vec<Measurement> = self
+                    .state
+                    .measurements
+                    .iter()
+                    .filter(|m| matches!(&m.config.kind, MeasKind::Math { config } if config.owner == owner))
+                    .cloned()
+                    .collect();
+                match traces {
+                    OwnedTraces::Keep => {
+                        for mut t in owned {
+                            t.edit.owner = TraceOwner::Imported;
+                            self.commit(Change::Trace(Patch::Set(t)));
+                        }
+                        for mut m in maths {
+                            if let MeasKind::Math { config } = &mut m.config.kind {
+                                config.owner = TraceOwner::Imported;
+                            }
+                            self.commit(Change::Measurement(Patch::Set(m)));
+                        }
+                    }
+                    OwnedTraces::Delete => {
+                        for m in maths {
+                            self.commit(Change::Measurement(Patch::Deleted(m.id)));
+                        }
+                        for t in owned {
+                            self.traces.data.remove(&t.id);
+                            self.traces.sweeps.remove(&t.id);
+                            self.commit(Change::Trace(Patch::Deleted(t.id)));
+                        }
+                    }
+                }
                 if self.state.spl_logs.iter().any(|l| l.meas == meas) {
                     self.commit(Change::SplLog(Patch::Deleted(meas)));
                 }
@@ -962,15 +1002,15 @@ impl Shared {
             C::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot)?,
             C::TraceList => ReplyBody::Traces(self.state.traces.clone()),
             C::TraceGet { trace } => self.trace_get(trace)?,
-            C::IrCapture {
+            C::SweepRun {
                 lease_token,
-                request,
+                meas,
                 name,
             } => {
                 self.expire_lease();
                 self.check_lease(lease_token)?;
                 self.refresh();
-                self.ir_capture(client, *request, name)?
+                self.sweep_run(client, meas, name)?
             }
             C::TraceUpdate { trace, edit } => self.trace_update(trace, edit)?,
             C::TraceDelete { trace } => self.trace_delete(trace)?,

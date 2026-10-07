@@ -13,6 +13,7 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
     DelayState, GenAction, MeasKind, Measurement, Session, SessionFile, SessionRef, SweepFailure,
+    TraceOwner,
 };
 use ac2_proto::units::{ClientId, MeasId, Rev, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
@@ -206,6 +207,36 @@ impl Control {
                 grids.insert(sm.id, g);
             }
         }
+        // Every owner is a measurement of the session that can own (not a math channel).
+        let owner_ok = |o: TraceOwner| match o.meas() {
+            None => true,
+            Some(id) => data
+                .measurements
+                .iter()
+                .any(|m| m.id == id && !matches!(m.config.kind, MeasKind::Math { .. })),
+        };
+        let owners = data
+            .traces
+            .iter()
+            .map(|t| (format!("trace {}", t.meta.id), t.meta.edit.owner))
+            .chain(
+                data.measurements
+                    .iter()
+                    .filter_map(|m| match &m.config.kind {
+                        MeasKind::Math { config } => {
+                            Some((format!("math channel {}", m.id), config.owner))
+                        }
+                        _ => None,
+                    }),
+            );
+        for (what, owner) in owners {
+            if !owner_ok(owner) {
+                return Err(perr(
+                    ErrorCode::Invalid,
+                    format!("{what} is filed under a measurement the session does not hold"),
+                ));
+            }
+        }
         for t in &data.traces {
             if data
                 .traces
@@ -310,11 +341,13 @@ impl Control {
                 }
             });
             let grid_id = grids.remove(&sm.id).map(|g| self.register_grid(g));
+            let running = sm.running && sm.config.kind.is_job();
             let mut meas = Measurement {
                 id: sm.id,
                 config: sm.config,
                 config_rev: Rev(self.store.rev().0 + 1),
-                running: sm.running,
+                // A sweep measurement never runs on its own: only `sweep.run` plays it.
+                running,
                 frozen: sm.frozen,
                 delay,
                 grid_id,

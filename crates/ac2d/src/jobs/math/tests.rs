@@ -87,6 +87,7 @@ fn meas(m: u32) -> Operand {
 
 fn avg(members: &[u32], method: AverageMethod) -> MathConfig {
     MathConfig::of(
+        ac2_proto::model::TraceOwner::Imported,
         MathDomain::Transfer,
         MathExpr::Average {
             of: members.iter().map(|m| meas(*m)).collect(),
@@ -96,7 +97,11 @@ fn avg(members: &[u32], method: AverageMethod) -> MathConfig {
 }
 
 fn binary(a: Operand, op: MathOp, b: Operand) -> MathConfig {
-    MathConfig::of(MathDomain::Transfer, MathExpr::Binary { a, op, b })
+    MathConfig::of(
+        ac2_proto::model::TraceOwner::Imported,
+        MathDomain::Transfer,
+        MathExpr::Binary { a, op, b },
+    )
 }
 
 fn run(c: &MathConfig, seen: &[Option<f64>], answers: &[Answer]) -> TfFrame {

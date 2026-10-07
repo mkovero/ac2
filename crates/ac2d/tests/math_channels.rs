@@ -67,7 +67,7 @@ fn math(name: &str, domain: MathDomain, expr: MathExpr) -> MeasConfig {
     MeasConfig {
         name: name.into(),
         kind: MeasKind::Math {
-            config: MathConfig::of(domain, expr),
+            config: MathConfig::of(ac2_proto::model::TraceOwner::Imported, domain, expr),
         },
     }
 }
@@ -77,6 +77,7 @@ fn average(name: &str, members: &[u32]) -> MeasConfig {
         name: name.into(),
         kind: MeasKind::Math {
             config: MathConfig::power_average(
+                ac2_proto::model::TraceOwner::Imported,
                 MathDomain::Transfer,
                 members.iter().map(|m| meas(*m)).collect(),
             ),
@@ -290,7 +291,12 @@ fn power_average_of_three_positions() {
     );
 
     // Operands stay transfers on the channel's grid, and are not deleted under it.
-    let e = c.call(Command::MeasDelete { meas: MeasId(2) }).unwrap_err();
+    let e = c
+        .call(Command::MeasDelete {
+            meas: MeasId(2),
+            traces: ac2_proto::model::OwnedTraces::Keep,
+        })
+        .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let mut other_grid = tf_on("Seat 2", 2);
     if let MeasKind::Transfer { config } = &mut other_grid.kind {
@@ -335,8 +341,14 @@ fn power_average_of_three_positions() {
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
     // Deleting the channel frees its operands.
-    c.ok(Command::MeasDelete { meas: MeasId(4) });
-    c.ok(Command::MeasDelete { meas: MeasId(2) });
+    c.ok(Command::MeasDelete {
+        meas: MeasId(4),
+        traces: ac2_proto::model::OwnedTraces::Keep,
+    });
+    c.ok(Command::MeasDelete {
+        meas: MeasId(2),
+        traces: ac2_proto::model::OwnedTraces::Keep,
+    });
     r.h.shutdown();
 }
 
@@ -511,7 +523,10 @@ fn ratio_edit_capture_and_summation() {
             Operand::Trace { trace: imp.id },
         ),
     }));
-    c.ok(Command::MeasDelete { meas: own });
+    c.ok(Command::MeasDelete {
+        meas: own,
+        traces: ac2_proto::model::OwnedTraces::Keep,
+    });
     let e = c
         .call(Command::MeasCreate {
             config: binary("x", MathDomain::Transfer, meas(1), MathOp::Divide, meas(4)),

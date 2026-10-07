@@ -12,7 +12,8 @@ use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathConfig,
     MathExpr, MeasKind, Measurement, MicCurveId, MicState, NamedOperand, Operand, Smoothing,
-    SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta, TraceMicCurve, TraceSource,
+    SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta, TraceMicCurve, TraceOwner,
+    TraceSource,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -200,6 +201,15 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_edit(&name, slot).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let m = self.meas(meas)?.clone();
+        if !m.config.kind.is_job() {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!(
+                    "{} is a sweep measurement: each run is stored as a trace already",
+                    m.config.name
+                ),
+            ));
+        }
         let frame = self
             .jobs
             .get(&meas)
@@ -266,7 +276,7 @@ impl Control {
             cal
         };
         let id = self.traces.alloc();
-        let mut edit = meta::new_edit(id, name, slot);
+        let mut edit = meta::new_edit(id, name, slot, TraceOwner::Meas { meas });
         // The capture holds the unsmoothed curve and shows it as the measurement did.
         edit.smoothing = smoothing;
         let t = TraceMeta {
@@ -365,7 +375,8 @@ impl Control {
             ));
         }
         let id = self.traces.alloc();
-        let mut edit = meta::new_edit(id, name, slot);
+        // Filed where the math channel is listed: under the measurement it was made on.
+        let mut edit = meta::new_edit(id, name, slot, config.owner);
         edit.smoothing = smoothing;
         let t = TraceMeta {
             id,
@@ -403,6 +414,9 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_values(&edit).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let mut t = self.trace_meta(id)?.clone();
+        if edit.owner != t.edit.owner {
+            self.check_owner(edit.owner)?;
+        }
         if edit.smoothing.is_some() && !ac2_traces::smooth::smoothable(t.kind) {
             return Err(perr(
                 ErrorCode::Invalid,
@@ -456,8 +470,15 @@ impl Control {
         };
         let mic = first.and_then(|m| m.mic.clone());
         let mic = if same(&|m| m.mic == mic) { mic } else { None };
+        // Filed with its inputs when they share an owner, else in the imported group.
+        let owner = first.map_or(TraceOwner::Imported, |m| m.edit.owner);
+        let owner = if same(&|m| m.edit.owner == owner) {
+            owner
+        } else {
+            TraceOwner::Imported
+        };
         let id = self.traces.alloc();
-        let mut edit = meta::new_edit(id, name, None);
+        let mut edit = meta::new_edit(id, name, None, owner);
         edit.smoothing = smoothing;
         let t = TraceMeta {
             id,
@@ -521,7 +542,7 @@ impl Control {
         let id = self.traces.alloc();
         let t = TraceMeta {
             id,
-            edit: meta::new_edit(id, name, None),
+            edit: meta::new_edit(id, name, None, TraceOwner::Imported),
             kind: imp.kind,
             source: TraceSource::Imported {
                 file_name,

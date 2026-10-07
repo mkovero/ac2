@@ -365,13 +365,25 @@ async fn expect_rev_conflict() -> R {
     f.lock()
         .commit(Change::Measurement(Patch::Set(spl_meas(1, "x"))));
     let e = c
-        .call_expect(Command::MeasDelete { meas: MeasId(1) }, Rev(0))
+        .call_expect(
+            Command::MeasDelete {
+                meas: MeasId(1),
+                traces: ac2_proto::model::OwnedTraces::Keep,
+            },
+            Rev(0),
+        )
         .await
         .err()
         .ok_or("expected conflict")?;
     assert_eq!(e.code(), Some(ErrorCode::Conflict));
-    c.call_expect(Command::MeasDelete { meas: MeasId(1) }, Rev(1))
-        .await?;
+    c.call_expect(
+        Command::MeasDelete {
+            meas: MeasId(1),
+            traces: ac2_proto::model::OwnedTraces::Keep,
+        },
+        Rev(1),
+    )
+    .await?;
     Ok(())
 }
 

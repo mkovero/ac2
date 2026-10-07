@@ -96,6 +96,7 @@ fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> 
             name: name.into(),
             kind: MeasKind::Math {
                 config: MathConfig::of(
+                    ac2_proto::model::TraceOwner::Imported,
                     MathDomain::Transfer,
                     MathExpr::Binary {
                         a: Operand::Trace { trace: a },
@@ -119,7 +120,10 @@ fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> 
         name: name.into(),
         slot: None,
     }));
-    c.ok(Command::MeasDelete { meas: m.id });
+    c.ok(Command::MeasDelete {
+        meas: m.id,
+        traces: ac2_proto::model::OwnedTraces::Keep,
+    });
     t
 }
 
@@ -382,6 +386,7 @@ fn capture_average_math_export_import() {
                     name: "x".into(),
                     kind: MeasKind::Math {
                         config: MathConfig::of(
+                            ac2_proto::model::TraceOwner::Imported,
                             MathDomain::Transfer,
                             MathExpr::Binary {
                                 a: Operand::Trace { trace: aligned.id },
@@ -906,6 +911,43 @@ fn session_save_load_round_trip() {
         meas: MeasId(1),
         delay: Seconds(0.0025),
     });
+    // Owners travel with the session: a math channel under the transfer measurement, a
+    // sweep measurement (settings only) owning nothing yet.
+    c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "pre ÷ target".into(),
+            kind: MeasKind::Math {
+                config: MathConfig::of(
+                    TraceOwner::Meas { meas: MeasId(1) },
+                    MathDomain::Transfer,
+                    MathExpr::Binary {
+                        a: Operand::Trace { trace: a.id },
+                        op: MathOp::Divide,
+                        b: Operand::Trace { trace: tgt.id },
+                    },
+                ),
+            },
+        },
+    });
+    c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "Genelec 1 m".into(),
+            kind: MeasKind::Sweep {
+                config: SweepConfig {
+                    reference_input: 0,
+                    measurement_input: 1,
+                    outputs: vec![0],
+                    level: Dbfs(-50.0),
+                    sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
+                    repeats: 1,
+                    gate: None,
+                    tail: Some(Seconds(2.0)),
+                },
+            },
+        },
+    });
+    assert_eq!(a.edit.owner, TraceOwner::Meas { meas: MeasId(1) });
+    assert_eq!(tgt.edit.owner, TraceOwner::Imported);
     let saved = state(c);
     let saved_data: Vec<TraceData> = saved.traces.iter().map(|t| data(c, t.id)).collect();
     let info = match c.ok(Command::FileSave {
@@ -918,10 +960,14 @@ fn session_save_load_round_trip() {
     };
     assert_eq!(
         (info.name.as_str(), info.measurements, info.traces),
-        ("friday show", 1, 2)
+        ("friday show", 3, 2)
     );
 
     // Change things, then load.
+    c.ok(Command::MeasDelete {
+        meas: MeasId(2),
+        traces: OwnedTraces::Delete,
+    });
     c.ok(Command::TraceDelete { trace: a.id });
     c.ok(Command::MeasCreate {
         config: transfer("other"),
@@ -953,13 +999,15 @@ fn session_save_load_round_trip() {
         .call(Command::GenRefresh { lease_token: r.tok })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::LeaseRequired);
-    // Measurements and traces as saved.
-    assert_eq!(after.measurements.len(), 1);
-    let (m0, s0) = (&after.measurements[0], &saved.measurements[0]);
-    assert_eq!(
-        (m0.id, &m0.config, m0.running),
-        (s0.id, &s0.config, s0.running)
-    );
+    // Measurements and traces as saved, owners included.
+    assert_eq!(after.measurements.len(), 3);
+    for (m0, s0) in after.measurements.iter().zip(&saved.measurements) {
+        assert_eq!(
+            (m0.id, &m0.config, m0.running),
+            (s0.id, &s0.config, s0.running)
+        );
+    }
+    let m0 = &after.measurements[0];
     assert_eq!(m0.delay.as_ref().unwrap().applied, Seconds(0.0025));
     assert_eq!(after.traces, saved.traces);
     for (t, d) in saved.traces.iter().zip(&saved_data) {
@@ -1009,7 +1057,7 @@ fn session_save_load_round_trip() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
-        text.replace("\"version\": 10", "\"version\": 11"),
+        text.replace("\"version\": 11", "\"version\": 12"),
     )
     .unwrap();
     let e = c
@@ -1023,8 +1071,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 11,
-            supported: 10
+            found: 12,
+            supported: 11
         })
     );
     assert_eq!(traces(c).len(), n);
@@ -1058,6 +1106,199 @@ fn session_save_load_round_trip() {
         other => panic!("{other:?}"),
     }
     r.h.shutdown();
+}
+
+/// Who owns what: a capture is filed under its measurement, a math channel's capture under
+/// the math channel's owner, an average with its inputs' common owner; a trace moves by
+/// `trace.update`, a math channel by `meas.update`; deleting a measurement keeps what it
+/// owns (in the imported group) or deletes it, and refuses while a math channel that stays
+/// would lose an operand.
+#[test]
+fn owners_capture_move_and_delete() {
+    let mut r = rig("owners");
+    let c = &mut r.c;
+    let main = TraceOwner::Meas { meas: MeasId(1) };
+    let cap = |c: &mut Client, meas: MeasId, name: &str| {
+        trace(c.ok(Command::TraceCapture {
+            meas,
+            name: name.into(),
+            slot: None,
+        }))
+    };
+    let pre = cap(c, MeasId(1), "pre-EQ");
+    let post = cap(c, MeasId(1), "post-EQ");
+    assert_eq!((pre.edit.owner, post.edit.owner), (main, main));
+
+    // A math channel made on the measurement: listed and captured under it.
+    let math = match c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "pre ÷ post".into(),
+            kind: MeasKind::Math {
+                config: MathConfig::of(
+                    main,
+                    MathDomain::Transfer,
+                    MathExpr::Binary {
+                        a: Operand::Trace { trace: pre.id },
+                        op: MathOp::Divide,
+                        b: Operand::Trace { trace: post.id },
+                    },
+                ),
+            },
+        },
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::MeasStart { meas: math.id });
+    for _ in 0..2 {
+        run(&mut r.d, 0.5);
+        c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let frozen = cap(c, math.id, "pre ÷ post 21:04");
+    assert_eq!(frozen.edit.owner, main);
+    let avg = trace(c.ok(Command::TraceAverage {
+        traces: vec![pre.id, post.id],
+        method: AverageMethod::Power,
+        reference: DelayReference::Trace { trace: pre.id },
+        name: "avg".into(),
+    }));
+    assert_eq!(avg.edit.owner, main);
+
+    // Owners must exist and must not be math channels; math cannot own math.
+    let mv = |c: &mut Client, t: &TraceMeta, owner: TraceOwner| {
+        let mut e = t.edit.clone();
+        e.owner = owner;
+        c.call(Command::TraceUpdate {
+            trace: t.id,
+            edit: e,
+        })
+    };
+    let e = mv(c, &avg, TraceOwner::Meas { meas: MeasId(99) }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{}", e.msg);
+    let e = mv(c, &avg, TraceOwner::Meas { meas: math.id }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
+    let avg = trace(mv(c, &avg, TraceOwner::Imported).unwrap());
+    assert_eq!(avg.edit.owner, TraceOwner::Imported);
+    let mut under_math = MathConfig::of(
+        TraceOwner::Meas { meas: math.id },
+        MathDomain::Transfer,
+        MathExpr::Binary {
+            a: Operand::Trace { trace: pre.id },
+            op: MathOp::Divide,
+            b: Operand::Trace { trace: avg.id },
+        },
+    );
+    let e = c
+        .call(Command::MeasCreate {
+            config: MeasConfig {
+                name: "nested".into(),
+                kind: MeasKind::Math {
+                    config: under_math.clone(),
+                },
+            },
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
+
+    // A math channel moves without restarting: its config rev stays.
+    let MeasKind::Math { config } = &math.config.kind else {
+        unreachable!()
+    };
+    let moved = match c.ok(Command::MeasUpdate {
+        meas: math.id,
+        config: MeasConfig {
+            name: math.config.name.clone(),
+            kind: MeasKind::Math {
+                config: MathConfig {
+                    owner: TraceOwner::Imported,
+                    ..config.clone()
+                },
+            },
+        },
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    let before_rev = state(c)
+        .measurements
+        .iter()
+        .find(|m| m.id == math.id)
+        .unwrap()
+        .config_rev;
+    assert_eq!(moved.config_rev, before_rev);
+    assert!(moved.running);
+    // Back under the measurement for the delete below.
+    c.ok(Command::MeasUpdate {
+        meas: math.id,
+        config: math.config.clone(),
+    });
+
+    // A second measurement and a math channel elsewhere computing from one of its traces.
+    c.ok(Command::MeasCreate {
+        config: transfer("side"),
+    });
+    let side = state(c).measurements.iter().map(|m| m.id).max().unwrap();
+    c.ok(Command::MeasStart { meas: side });
+    for _ in 0..2 {
+        run(&mut r.d, 0.5);
+        c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let s1 = cap(c, side, "side 1");
+    under_math.owner = TraceOwner::Imported;
+    under_math.expr = MathExpr::Binary {
+        a: Operand::Trace { trace: s1.id },
+        op: MathOp::Divide,
+        b: Operand::Trace { trace: avg.id },
+    };
+    under_math.reference = MathReference::Operand {
+        operand: Operand::Trace { trace: s1.id },
+    };
+    let user = match c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: "side ÷ avg".into(),
+            kind: MeasKind::Math { config: under_math },
+        },
+    }) {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    // Deleting side with its traces would take an operand from a math channel that stays.
+    let e = c
+        .call(Command::MeasDelete {
+            meas: side,
+            traces: OwnedTraces::Delete,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+    assert!(e.msg.contains("side ÷ avg"), "{}", e.msg);
+    // Kept, they move to the imported group and the math channel keeps its operand.
+    c.ok(Command::MeasDelete {
+        meas: side,
+        traces: OwnedTraces::Keep,
+    });
+    let st = state(c);
+    assert_eq!(
+        st.traces.iter().find(|t| t.id == s1.id).unwrap().edit.owner,
+        TraceOwner::Imported
+    );
+    c.ok(Command::MeasDelete {
+        meas: user.id,
+        traces: OwnedTraces::Keep,
+    });
+
+    // The main measurement with its traces: the math channel under it goes too.
+    c.ok(Command::MeasDelete {
+        meas: MeasId(1),
+        traces: OwnedTraces::Delete,
+    });
+    let st = state(c);
+    assert!(
+        st.measurements
+            .iter()
+            .all(|m| m.id != MeasId(1) && m.id != math.id)
+    );
+    let left: Vec<&str> = st.traces.iter().map(|t| t.edit.name.as_str()).collect();
+    assert_eq!(left, ["avg", "side 1"]);
 }
 
 /// A mic curve put on a trace captured without one: the served magnitude is corrected by

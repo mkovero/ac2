@@ -1,6 +1,6 @@
 //! Trace and session commands of the fake daemon, on the same `ac2-traces` code the real
 //! daemon uses. Captures are synthetic: a flat −6 dB response with a 2nd-order roll-off
-//! below 80 Hz, the measurement's delay compensated, coherence 0.95. A sweep (`ir.capture`)
+//! below 80 Hz, the measurement's delay compensated, coherence 0.95. A sweep run (`sweep.run`)
 //! is stored at once (no audio): that response with H2 at −40 dB rising 12 dB/oct below
 //! 100 Hz, H3 at −50 dB, H4 and H5 in the noise, the floor at −80 dB.
 
@@ -101,7 +101,7 @@ impl Shared {
         ReplyBody::Trace(meta)
     }
 
-    /// `ir.capture` (lease already checked): needs the generator armed and a level, then
+    /// `sweep.run` (lease already checked): needs the generator armed and a level, then
     /// stores a synthetic sweep trace and reports the run playing, then done.
     /// `rec.start`: a recording that never grows (the fake writes no file); its size is
     /// the header alone.
@@ -165,16 +165,33 @@ impl Shared {
         Ok(ReplyBody::Recording(run))
     }
 
-    pub(super) fn ir_capture(
+    /// `sweep.run`, as the daemon: the measurement's settings, a run stored under it.
+    pub(super) fn sweep_run(
         &mut self,
         client: &ClientId,
-        req: SweepRequest,
-        name: String,
+        meas: MeasId,
+        name: Option<String>,
     ) -> Result<ReplyBody, ProtoError> {
-        meta::check_edit(&name, None).map_err(|e| err(ErrorCode::Invalid, e))?;
-        let Some(level) = req.level else {
-            return Err(err(ErrorCode::Refused, "type the sweep level"));
+        let m = self.meas(meas)?;
+        let MeasKind::Sweep { config: req } = m.config.kind.clone() else {
+            return Err(err(ErrorCode::Invalid, "not a sweep measurement"));
         };
+        let number = self
+            .state
+            .traces
+            .iter()
+            .filter_map(|t| match &t.source {
+                TraceSource::Sweep {
+                    meas: x, number, ..
+                } if *x == meas => Some(*number),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let name = name.unwrap_or_else(|| format!("Run {number}"));
+        meta::check_edit(&name, None).map_err(|e| err(ErrorCode::Invalid, e))?;
+        let level = req.level;
         if level.0 > self.state.generator.ceiling.0 {
             return Err(err(ErrorCode::Refused, "level above ceiling"));
         }
@@ -184,16 +201,7 @@ impl Shared {
                 "arm the stimulus first (gen.set armed)",
             ));
         }
-        let (reference, measurement) = match req.inputs {
-            SweepInputs::Channels {
-                reference,
-                measurement,
-            } => (reference, measurement),
-            SweepInputs::Measurement { meas } => match &self.meas(meas)?.config.kind {
-                MeasKind::Transfer { config } => (config.reference_input, config.measurement_input),
-                _ => return Err(err(ErrorCode::Invalid, "not a transfer measurement")),
-            },
-        };
+        let (reference, measurement) = (req.reference_input, req.measurement_input);
         let (f1, f2) = (req.sweep.start.0, req.sweep.end.0);
         let k = |f: f64| (f / 1000.0).log2() * 48.0;
         let grid = GridDef::Log {
@@ -206,6 +214,7 @@ impl Shared {
         let rate = req.sweep.duration.0 / (f2 / f1).ln();
         let mut run = SweepRun {
             id,
+            meas,
             owner: client.clone(),
             name: name.clone(),
             reference_input: reference,
@@ -229,8 +238,11 @@ impl Shared {
             name,
             None,
             TraceKind::Sweep,
-            TraceSource::IrCapture {
+            TraceSource::Sweep {
+                meas,
+                meas_name: m.config.name.clone(),
                 run: id,
+                number,
                 epoch: self.state.session.epoch,
                 sweep: req.sweep,
                 level,
@@ -242,6 +254,7 @@ impl Shared {
             sweep.info.arrival,
         );
         meta.mic = None;
+        meta.edit.owner = TraceOwner::Meas { meas };
         self.add_trace(meta, grid, columns);
         self.traces.sweeps.insert(tid, sweep);
         run.status = SweepStatus::Done { trace: tid };
@@ -270,7 +283,7 @@ impl Shared {
     ) -> TraceMeta {
         TraceMeta {
             id,
-            edit: meta::new_edit(id, name, slot),
+            edit: meta::new_edit(id, name, slot, TraceOwner::Imported),
             kind,
             source,
             grid_id: grid.id(),
@@ -318,6 +331,7 @@ impl Shared {
             m.delay.as_ref().map_or(Seconds(0.0), |d| d.applied),
         );
         t.edit.smoothing = config.smoothing;
+        t.edit.owner = TraceOwner::Meas { meas };
         t.depth = Some(config.depth);
         let c = synthetic(&grid);
         Ok(self.add_trace(t, grid, c))
@@ -362,10 +376,12 @@ impl Shared {
         name: String,
         source: TraceSource,
         d: Derived,
+        owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_edit(&name, None).map_err(|e| err(ErrorCode::Invalid, e))?;
         let id = self.alloc_trace();
-        let t = Self::new_meta(id, name, None, d.kind, source, &d.grid, d.delay);
+        let mut t = Self::new_meta(id, name, None, d.kind, source, &d.grid, d.delay);
+        t.edit.owner = owner;
         Ok(self.add_trace(t, d.grid, d.columns))
     }
 
@@ -383,6 +399,15 @@ impl Shared {
         let refs: Vec<&StoredTrace> = inputs.iter().collect();
         let d = ops::average(&refs, method, reference)
             .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+        // As the daemon: with its inputs when they share an owner.
+        let owner = refs
+            .first()
+            .map_or(TraceOwner::Imported, |t| t.meta.edit.owner);
+        let owner = if refs.iter().all(|t| t.meta.edit.owner == owner) {
+            owner
+        } else {
+            TraceOwner::Imported
+        };
         self.derived(
             name,
             TraceSource::Average {
@@ -391,6 +416,7 @@ impl Shared {
                 reference,
             },
             d,
+            owner,
         )
     }
 

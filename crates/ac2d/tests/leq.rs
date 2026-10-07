@@ -401,7 +401,12 @@ async fn windows_go_over_and_recover_and_survive() {
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
     // Deleting the meter deletes its log entity.
-    c.call(Command::MeasDelete { meas: M }).await.unwrap();
+    c.call(Command::MeasDelete {
+        meas: M,
+        traces: ac2_proto::model::OwnedTraces::Keep,
+    })
+    .await
+    .unwrap();
     let deadline = Instant::now() + WAIT;
     while state(&c).await.spl_logs.iter().any(|l| l.meas == M) {
         assert!(Instant::now() < deadline, "entity not deleted");

@@ -26,8 +26,8 @@ use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalState, DelayOutcome, DelayState,
     FinderBand, GenAction, GenAudit, Generator, GeneratorDesired, GeneratorSettings, InputSetup,
     Lease as WireLease, LoopbackDetection, MeasConfig, MeasKind, Measurement, MicState, Session,
-    SessionConfig, SweepFailure, SweepInputs, SweepRequest, SweepRun, SweepStatus, TimingStatus,
-    TraceKind, TraceMeta, TraceSource,
+    SessionConfig, SweepConfig, SweepFailure, SweepRun, SweepStatus, TimingStatus, TraceKind,
+    TraceMeta, TraceSource,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{
@@ -62,6 +62,7 @@ mod cal;
 mod files;
 mod leq;
 mod maths;
+mod owners;
 mod recording;
 mod recovery;
 pub(crate) mod rig;
@@ -247,6 +248,9 @@ struct SourceKey {
 /// The `ir.capture` run in progress.
 struct ActiveSweep {
     run: SweepRun,
+    /// The measurement's name and the run's number within it, for the trace.
+    meas_name: String,
+    number: u32,
     spec: SweepSpec,
     /// The recorder; gone once the recording is in.
     job: Option<JobHandle>,
@@ -437,6 +441,51 @@ fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             config.check().map_err(|m| perr(ErrorCode::Invalid, m))?;
         }
         MeasKind::Math { config } => maths::validate(config)?,
+        MeasKind::Sweep { config } => validate_sweep(config)?,
+    }
+    Ok(())
+}
+
+/// Checks of a sweep measurement's settings that need no session (the session's inputs,
+/// outputs and rate, and the ceiling, are checked at every run).
+fn validate_sweep(c: &SweepConfig) -> Result<(), ProtoError> {
+    let inv = |m: String| Err(perr(ErrorCode::Invalid, m));
+    if c.reference_input == c.measurement_input {
+        return inv("the reference and the measurement are the same input".into());
+    }
+    if c.outputs.is_empty() {
+        return inv("no output channels".into());
+    }
+    for (i, o) in c.outputs.iter().enumerate() {
+        if c.outputs[..i].contains(o) {
+            return inv(format!("output {o} listed twice"));
+        }
+    }
+    if !(1..=SweepConfig::MAX_REPEATS).contains(&c.repeats) {
+        return inv(format!("repeats must be 1 … {}", SweepConfig::MAX_REPEATS));
+    }
+    if !(c.level.0.is_finite() && c.level.0 <= 0.0) {
+        return inv("the level must be a finite dBFS value ≤ 0".into());
+    }
+    if c.gate.is_some_and(|g| !(g.0.is_finite() && g.0 > 0.0)) {
+        return inv("the gate must be a positive time".into());
+    }
+    if c.tail
+        .is_some_and(|t| !(t.0.is_finite() && t.0 <= SweepConfig::MAX_TAIL.0))
+    {
+        return inv(format!(
+            "the silence after each sweep is at most {} s",
+            SweepConfig::MAX_TAIL.0
+        ));
+    }
+    let s = c.sweep;
+    let runs_up =
+        s.start.0.is_finite() && s.end.0.is_finite() && s.start.0 > 0.0 && s.end.0 > s.start.0;
+    let lasts = s.duration.0.is_finite() && s.duration.0 > 0.0;
+    if !(runs_up && lasts) {
+        return inv(
+            "the sweep must run up from a positive start frequency, for a positive time".into(),
+        );
     }
     Ok(())
 }
@@ -483,6 +532,22 @@ fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<SmoothingChange> {
             Some(SmoothingChange::Transfer(b.smoothing))
         }
         _ => None,
+    }
+}
+
+/// Refuses the job commands for a sweep measurement: it has no job, `sweep.run` plays it.
+fn not_a_sweep(m: &Measurement) -> Result<(), ProtoError> {
+    if m.config.kind.is_job() {
+        Ok(())
+    } else {
+        Err(perr(
+            ErrorCode::Invalid,
+            format!(
+                "{} is a sweep measurement: it has no job to start, stop, freeze or reset; \
+                 sweep.run plays it",
+                m.config.name
+            ),
+        ))
     }
 }
 
@@ -1032,6 +1097,7 @@ impl Control {
 
             Command::MeasCreate { config } => {
                 validate_meas(&config)?;
+                self.check_meas_owner(None, &config.kind)?;
                 let grid = self.grid_of(None, &config.kind)?;
                 let id = MeasId(self.next_meas);
                 self.next_meas += 1;
@@ -1059,7 +1125,15 @@ impl Control {
             Command::MeasUpdate { meas, config } => {
                 validate_meas(&config)?;
                 let mut m = self.meas(meas)?.clone();
+                self.check_meas_owner(Some(meas), &config.kind)?;
                 self.check_operand_update(meas, &config.kind)?;
+                if owners::owner_only(&m.config, &config) {
+                    // Moving a math channel changes where it is listed, not what it
+                    // computes: its job and its frames' config rev go on.
+                    m.config = config;
+                    self.commit(Change::Measurement(Patch::Set(m.clone())));
+                    return Ok(ReplyBody::Measurement(m));
+                }
                 let grid = self.grid_of(Some(meas), &config.kind)?;
                 let old_leq = match &m.config.kind {
                     MeasKind::Spl { config } => Some(config.leq.clone()),
@@ -1122,18 +1196,10 @@ impl Control {
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }
-            Command::MeasDelete { meas } => {
-                self.meas(meas)?;
-                self.check_operand_delete(meas)?;
-                self.stop_job(meas);
-                self.s
-                    .outbox
-                    .clear(&ac2_proto::Subscription::Meas(meas).prefix());
-                self.drop_spl_log(meas);
-                ack(self.commit(Change::Measurement(Patch::Deleted(meas))))
-            }
+            Command::MeasDelete { meas, traces } => self.meas_delete(meas, traces),
             Command::MeasStart { meas } => {
                 let mut m = self.meas(meas)?.clone();
+                not_a_sweep(&m)?;
                 if !m.running
                     && self.session.is_some()
                     && let Some(g) = self.start_job(&m)?
@@ -1146,6 +1212,7 @@ impl Control {
             }
             Command::MeasStop { meas } => {
                 let mut m = self.meas(meas)?.clone();
+                not_a_sweep(&m)?;
                 self.stop_job(meas);
                 m.running = false;
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
@@ -1153,6 +1220,7 @@ impl Control {
             }
             Command::MeasFreeze { meas, frozen } => {
                 let mut m = self.meas(meas)?.clone();
+                not_a_sweep(&m)?;
                 m.frozen = frozen;
                 if let Some(j) = self.jobs.get(&meas) {
                     j.send(JobCmd::Freeze(frozen));
@@ -1161,6 +1229,7 @@ impl Control {
                 Ok(ReplyBody::Measurement(m))
             }
             Command::MeasReset { meas } => {
+                not_a_sweep(self.meas(meas)?)?;
                 if let MeasKind::Math { .. } = self.meas(meas)?.config.kind {
                     // Its operands hold the averages; resetting one is the operator's choice.
                     return Err(perr(
@@ -1294,11 +1363,11 @@ impl Control {
             Command::SplLogNew { meas } => self.spl_log_new(meas),
             Command::SplHistoryGet { meas, seconds } => self.spl_history_get(meas, seconds),
 
-            Command::IrCapture {
+            Command::SweepRun {
                 lease_token,
-                request,
+                meas,
                 name,
-            } => self.ir_capture(client, lease_token, *request, name),
+            } => self.sweep_run(client, lease_token, meas, name),
 
             Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
                 self.store.snapshot(self.s.incarnation),
@@ -1785,6 +1854,8 @@ impl Control {
                 MeasKind::Transfer { config } => config.measurement_input,
                 // Its operands' mic curves are in their results already.
                 MeasKind::Math { .. } => continue,
+                // Runs only when fired; each run reads the input's mic then.
+                MeasKind::Sweep { .. } => continue,
             };
             job.send(JobCmd::Cal(Box::new(self.input_cal(rt, input))));
         }
@@ -1792,7 +1863,7 @@ impl Control {
 
     /// Starts the job of `m` on the open session; returns its grid when it has one.
     fn start_job(&mut self, m: &Measurement) -> Result<Option<GridDef>, ProtoError> {
-        if self.session.is_none() {
+        if self.session.is_none() || !m.config.kind.is_job() {
             return Ok(None);
         }
         let mut leq = matches!(m.config.kind, MeasKind::Spl { .. }).then(|| self.leq_setup(m.id));
@@ -1896,6 +1967,7 @@ impl Control {
                         .map_err(inv)?;
                 (Box::new(a), None)
             }
+            MeasKind::Sweep { .. } => return Ok(None),
             MeasKind::Math { config } => {
                 let (grids, stored) =
                     math.ok_or_else(|| perr(ErrorCode::Internal, "math channel without setup"))?;

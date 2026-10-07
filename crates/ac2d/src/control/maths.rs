@@ -421,11 +421,6 @@ impl Control {
         }
     }
 
-    /// Refuses deleting measurement `meas` while a math channel names it.
-    pub(super) fn check_operand_delete(&self, meas: MeasId) -> Result<(), ProtoError> {
-        self.named_by(Operand::Meas { meas })
-    }
-
     /// Refuses deleting trace `trace` while a math channel names it.
     pub(super) fn check_trace_operand_delete(&self, trace: TraceId) -> Result<(), ProtoError> {
         self.named_by(Operand::Trace { trace })

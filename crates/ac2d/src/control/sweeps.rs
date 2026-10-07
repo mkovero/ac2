@@ -1,4 +1,5 @@
-//! `ir.capture`: the sweep measurement run (`docs/design/sweep-distortion.md`).
+//! `sweep.run`: a run of a sweep measurement (`docs/design/sweep-distortion.md`), with the
+//! settings the measurement holds; its result is a sweep trace the measurement owns.
 //!
 //! A run plays under the stimulus lease like firing does: the caller must hold the lease
 //! and have armed the generator. The recorder job is attached to the capture fan-out before
@@ -16,33 +17,41 @@ use std::time::Instant;
 use super::{
     ActiveSweep, CalState, Change, ClientId, Control, ControlMsg, CoreBandLimit, CoreGenerator,
     CoreSignal, ErrorCode, GenAction, GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource,
-    MeasKind, ProtoError, Recording, ReplyBody, Seconds, SweepAnalysis, SweepError, SweepFailure,
-    SweepId, SweepInputs, SweepRequest, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta,
-    TraceSource, WallNs, block_index, dbfs_to_rms, gen_err, jobs, perr,
+    MeasKind, ProtoError, Recording, ReplyBody, Seconds, SweepAnalysis, SweepConfig, SweepError,
+    SweepFailure, SweepId, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta, TraceSource,
+    WallNs, block_index, dbfs_to_rms, gen_err, jobs, perr,
 };
 use crate::sweep;
 use crate::util::wall_ns;
 use ac2_audio::Gain;
 use ac2_proto::model::Signal;
+use ac2_proto::model::TraceOwner;
+use ac2_proto::units::MeasId;
 use ac2_traces::meta;
 
 impl Control {
-    pub(super) fn ir_capture(
+    pub(super) fn sweep_run(
         &mut self,
         client: &ClientId,
         token: LeaseToken,
-        req: SweepRequest,
-        name: String,
+        meas: MeasId,
+        name: Option<String>,
     ) -> Result<ReplyBody, ProtoError> {
         self.check_lease(Instant::now());
         self.lease_check(client, token)?;
-        meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
-        let Some(level) = req.level else {
+        let m = self.meas(meas)?;
+        let MeasKind::Sweep { config } = &m.config.kind else {
             return Err(perr(
-                ErrorCode::Refused,
-                "type the sweep level: a sweep has no default level",
+                ErrorCode::Invalid,
+                format!("{} is not a sweep measurement", m.config.name),
             ));
         };
+        let req: SweepConfig = config.clone();
+        let meas_name = m.config.name.clone();
+        let number = self.next_run_number(meas);
+        let name = name.unwrap_or_else(|| format!("Run {number}"));
+        meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        let level = req.level;
         if !level.0.is_finite() {
             return Err(perr(ErrorCode::Invalid, "level must be finite"));
         }
@@ -80,21 +89,7 @@ impl Control {
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(ErrorCode::Refused, "no open session to play into"));
         };
-        let (reference, measurement) = match req.inputs {
-            SweepInputs::Channels {
-                reference,
-                measurement,
-            } => (reference, measurement),
-            SweepInputs::Measurement { meas } => match &self.meas(meas)?.config.kind {
-                MeasKind::Transfer { config } => (config.reference_input, config.measurement_input),
-                _ => {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!("measurement {meas} is not a transfer function"),
-                    ));
-                }
-            },
-        };
+        let (reference, measurement) = (req.reference_input, req.measurement_input);
         if reference == measurement {
             return Err(perr(
                 ErrorCode::Invalid,
@@ -127,10 +122,10 @@ impl Control {
                 ));
             }
         }
-        if !(1..=SweepRequest::MAX_REPEATS).contains(&req.repeats) {
+        if !(1..=SweepConfig::MAX_REPEATS).contains(&req.repeats) {
             return Err(perr(
                 ErrorCode::Invalid,
-                format!("repeats must be 1 … {}", SweepRequest::MAX_REPEATS),
+                format!("repeats must be 1 … {}", SweepConfig::MAX_REPEATS),
             ));
         }
         let fs = f64::from(rt.sample_rate);
@@ -234,6 +229,7 @@ impl Control {
 
         let run = SweepRun {
             id,
+            meas,
             owner: client.clone(),
             name,
             reference_input: reference,
@@ -269,6 +265,8 @@ impl Control {
             .map(|m| ac2_proto::model::MicState { curve: None, ..m });
         self.sweep = Some(ActiveSweep {
             run: run.clone(),
+            meas_name,
+            number,
             spec,
             job: Some(job),
             epoch: self.epoch(),
@@ -384,10 +382,18 @@ impl Control {
         let tid = self.traces.alloc();
         let t = TraceMeta {
             id: tid,
-            edit: meta::new_edit(tid, run.name.clone(), None),
+            edit: meta::new_edit(
+                tid,
+                run.name.clone(),
+                None,
+                TraceOwner::Meas { meas: run.meas },
+            ),
             kind: TraceKind::Sweep,
-            source: TraceSource::IrCapture {
+            source: TraceSource::Sweep {
+                meas: run.meas,
+                meas_name: active.meas_name.clone(),
                 run: run.id,
+                number: active.number,
                 epoch: active.epoch,
                 sweep: run.sweep,
                 level: run.level,

@@ -1,6 +1,7 @@
-//! Sweep measurement (`ir.capture`) end to end on a fake rig whose acoustic path distorts
-//! with known harmonics: from an empty daemon through session, lease, arm and capture to
-//! a stored sweep trace with H2/H3 at their analytic levels; aborts discard the run.
+//! Sweep measurements (`MeasKind::Sweep`, `sweep.run`) end to end on a fake rig whose
+//! acoustic path distorts with known harmonics: from an empty daemon through a sweep
+//! measurement that waits, session, lease, arm and run to stored runs it owns with H2/H3 at
+//! their analytic levels; aborts discard the run.
 #![allow(clippy::unwrap_used)]
 
 mod common;
@@ -11,10 +12,11 @@ use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    EssSpec, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, Signal, SweepFailure,
-    SweepInputs, SweepRequest, SweepRun, SweepStatus, TraceKind, TraceSource,
+    EssSpec, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, MeasConfig, MeasKind,
+    OwnedTraces, Signal, SweepConfig, SweepFailure, SweepRun, SweepStatus, TraceKind, TraceOwner,
+    TraceSource,
 };
-use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, Seconds, TraceId};
+use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, ErrorCode, ReplyBody};
 use ac2d::{Daemon, FAKE_RIG_DISTORTION};
 use common::*;
@@ -40,18 +42,43 @@ fn distorting_rig() -> FakeBackend {
     .unwrap()
 }
 
-fn request(level: Option<f64>) -> SweepRequest {
-    SweepRequest {
-        inputs: SweepInputs::Channels {
-            reference: 0,
-            measurement: 1,
-        },
+fn request(level: f64) -> SweepConfig {
+    SweepConfig {
+        reference_input: 0,
+        measurement_input: 1,
         outputs: vec![0],
-        level: level.map(Dbfs),
+        level: Dbfs(level),
         sweep: EssSpec::with_fades(Hz(100.0), Hz(5000.0), Seconds(1.0)),
         repeats: 1,
         gate: None,
         tail: None,
+    }
+}
+
+/// A sweep measurement with `config`: created, never started.
+fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId {
+    match c.ok(Command::MeasCreate {
+        config: MeasConfig {
+            name: name.into(),
+            kind: MeasKind::Sweep { config },
+        },
+    }) {
+        ReplyBody::Measurement(m) => {
+            assert!(!m.running, "a sweep measurement waits for sweep.run");
+            m.id
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+fn start(c: &mut Client, token: LeaseToken, meas: MeasId) -> SweepRun {
+    match c.ok(Command::SweepRun {
+        lease_token: token,
+        meas,
+        name: None,
+    }) {
+        ReplyBody::Sweep(r) => r,
+        other => panic!("{other:?}"),
     }
 }
 
@@ -61,7 +88,7 @@ fn arm(c: &mut Client, token: LeaseToken) {
         desired: GeneratorDesired {
             settings: GeneratorSettings {
                 signal: Signal::Ess {
-                    sweep: request(None).sweep,
+                    sweep: request(LEVEL).sweep,
                 },
                 level: Dbfs(LEVEL),
                 band: None,
@@ -133,28 +160,69 @@ fn setup() -> (
 fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let (_h, _b, mut c, sub, ka, mut d, token) = setup();
 
-    // Refused before it is armed, without a level, above the ceiling.
-    let capture = |c: &mut Client, level: Option<f64>| {
-        c.call(Command::IrCapture {
+    // A sweep measurement is settings only: creating it plays nothing, and it has no job.
+    let meas = create(&mut c, "Genelec 1 m", request(LEVEL));
+    let loud = create(&mut c, "too loud", request(-5.0));
+    let st = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state,
+        other => panic!("{other:?}"),
+    };
+    assert!(!st.generator.armed && !st.generator.firing && st.sweep.is_none());
+    for cmd in [
+        Command::MeasStart { meas },
+        Command::MeasReset { meas },
+        Command::TraceCapture {
+            meas,
+            name: "x".into(),
+            slot: None,
+        },
+    ] {
+        assert_eq!(c.call(cmd).unwrap_err().code, ErrorCode::Invalid);
+    }
+    let bad = MeasKind::Sweep {
+        config: SweepConfig {
+            level: Dbfs(f64::NAN),
+            ..request(LEVEL)
+        },
+    };
+    let e = c
+        .call(Command::MeasCreate {
+            config: MeasConfig {
+                name: "no level".into(),
+                kind: bad,
+            },
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
+
+    // Refused before it is armed, above the ceiling.
+    let capture = |c: &mut Client, meas: MeasId| {
+        c.call(Command::SweepRun {
             lease_token: token,
-            request: Box::new(request(level)),
-            name: "sweep 1".into(),
+            meas,
+            name: None,
         })
     };
-    let e = capture(&mut c, Some(LEVEL)).unwrap_err();
+    let e = capture(&mut c, meas).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert!(e.msg.contains("arm"), "{}", e.msg);
     arm(&mut c, token);
-    let e = capture(&mut c, None).unwrap_err();
-    assert_eq!(e.code, ErrorCode::Refused);
-    assert!(e.msg.contains("level"), "{}", e.msg);
-    let e = capture(&mut c, Some(-5.0)).unwrap_err();
+    let e = capture(&mut c, loud).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     assert!(e.msg.contains("maximum"), "{}", e.msg);
 
-    let ReplyBody::Sweep(run0) = capture(&mut c, Some(LEVEL)).unwrap() else {
+    let ReplyBody::Sweep(run0) = capture(&mut c, meas).unwrap() else {
         panic!("not a sweep");
     };
+    assert_eq!((run0.meas, run0.name.as_str()), (meas, "Run 1"));
+    // Its measurement cannot go while the run plays.
+    let e = c
+        .call(Command::MeasDelete {
+            meas,
+            traces: OwnedTraces::Keep,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert_eq!(run0.status, SweepStatus::Playing { repeat: 1 });
     // While it plays, the generator fires the sweep and other stimulus commands wait.
     let st = match c.ok(Command::StateSnapshot) {
@@ -197,7 +265,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let last = st.generator.last_action.as_ref().unwrap();
     assert_eq!(last.action, ac2_proto::model::GenAction::Stop);
     assert!(last.client.is_none(), "disarmed by the daemon");
-    let e = capture(&mut c, Some(LEVEL)).unwrap_err();
+    let e = capture(&mut c, meas).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert!(e.msg.contains("arm"), "{}", e.msg);
 
@@ -206,7 +274,12 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         other => panic!("{other:?}"),
     };
     assert_eq!(data.meta.kind, TraceKind::Sweep);
-    assert!(matches!(data.meta.source, TraceSource::IrCapture { .. }));
+    assert!(matches!(
+        &data.meta.source,
+        TraceSource::Sweep { meas: m, number: 1, meas_name, .. } if *m == meas && meas_name == "Genelec 1 m"
+    ));
+    assert_eq!(data.meta.edit.owner, TraceOwner::Meas { meas });
+    assert_eq!(data.meta.edit.name, "Run 1");
     // The arrival is the acoustic path's delay re the loopback.
     let want = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
     assert!(
@@ -271,6 +344,7 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         other => panic!("{other:?}"),
     };
     assert_eq!(back.kind, TraceKind::Sweep);
+    assert_eq!(back.edit.owner, TraceOwner::Imported);
     assert!((back.delay.0 - data.meta.delay.0).abs() < 1e-12);
     assert!(matches!(&back.source, TraceSource::Imported { notes, .. } if notes.is_empty()));
     let again = match c.ok(Command::TraceGet { trace: back.id }) {
@@ -280,21 +354,47 @@ fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let s2 = again.sweep.expect("sweep data after import");
     assert_eq!((s2.ir, s2.info), (s.ir, s.info));
     assert_eq!(s2.harmonics.len(), s.harmonics.len());
+
+    // Run again: the measurement's settings, the next number, under the same measurement.
+    arm(&mut c, token);
+    let run1 = start(&mut c, token, meas);
+    assert_eq!(run1.name, "Run 2");
+    let done = run_until(&mut d, &mut c, &sub, &ka, token, |r| {
+        r.id == run1.id && !r.active()
+    });
+    let SweepStatus::Done { trace: second } = done.status else {
+        panic!("sweep failed: {:?}", done.status);
+    };
+    let st = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state,
+        other => panic!("{other:?}"),
+    };
+    let t2 = st.traces.iter().find(|t| t.id == second).unwrap();
+    assert_eq!(t2.edit.owner, TraceOwner::Meas { meas });
+    assert!(matches!(t2.source, TraceSource::Sweep { number: 2, .. }));
+
+    // Deleted with its runs kept: they move to the imported group.
+    c.ok(Command::MeasDelete {
+        meas,
+        traces: OwnedTraces::Keep,
+    });
+    let st = match c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state,
+        other => panic!("{other:?}"),
+    };
+    assert!(st.measurements.iter().all(|m| m.id != meas));
+    for id in [trace, second] {
+        let t = st.traces.iter().find(|t| t.id == id).unwrap();
+        assert_eq!(t.edit.owner, TraceOwner::Imported, "{}", t.edit.name);
+    }
 }
 
 #[test]
 fn stopping_or_losing_the_lease_discards_the_run() {
     let (_h, _b, mut c, sub, ka, mut d, token) = setup();
+    let meas = create(&mut c, "sweep", request(LEVEL));
     arm(&mut c, token);
-    let start = |c: &mut Client| match c.ok(Command::IrCapture {
-        lease_token: token,
-        request: Box::new(request(Some(LEVEL))),
-        name: "sweep".into(),
-    }) {
-        ReplyBody::Sweep(r) => r,
-        other => panic!("{other:?}"),
-    };
-    let r = start(&mut c);
+    let r = start(&mut c, token, meas);
     run(&mut d, 0.5);
     c.ok(Command::GenStop);
     let failed = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
@@ -316,7 +416,7 @@ fn stopping_or_losing_the_lease_discards_the_run() {
 
     // Lease expiry: no refresh while the device runs on.
     arm(&mut c, token);
-    let r = start(&mut c);
+    let r = start(&mut c, token, meas);
     let deadline = Instant::now() + T;
     let ended = loop {
         assert!(Instant::now() < deadline, "the run outlived its lease");
@@ -344,17 +444,16 @@ fn stopping_or_losing_the_lease_discards_the_run() {
 #[test]
 fn a_failed_sweep_leaves_the_generator_disarmed() {
     let (_h, _b, mut c, sub, ka, mut d, token) = setup();
-    arm(&mut c, token);
-    let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
-        lease_token: token,
-        request: Box::new(SweepRequest {
+    let meas = create(
+        &mut c,
+        "unheard",
+        SweepConfig {
             outputs: vec![1],
-            ..request(Some(LEVEL))
-        }),
-        name: "unheard".into(),
-    }) else {
-        panic!("not a sweep");
-    };
+            ..request(LEVEL)
+        },
+    );
+    arm(&mut c, token);
+    let r = start(&mut c, token, meas);
     let ended = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
         x.id == r.id && !x.active()
     });
@@ -417,23 +516,16 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         ReplyBody::Lease(l) => l.lease_token,
         other => panic!("{other:?}"),
     };
-    arm(&mut c, token);
-    let req = SweepRequest {
-        inputs: SweepInputs::Channels {
-            reference: 0,
-            measurement: 2,
-        },
+    let req = SweepConfig {
+        reference_input: 0,
+        measurement_input: 2,
         sweep: EssSpec::with_fades(Hz(100.0), Hz(10_000.0), Seconds(1.0)),
         tail: Some(Seconds(2.0)),
-        ..request(Some(LEVEL))
+        ..request(LEVEL)
     };
-    let ReplyBody::Sweep(r) = c.ok(Command::IrCapture {
-        lease_token: token,
-        request: Box::new(req),
-        name: "hall".into(),
-    }) else {
-        panic!("not a sweep");
-    };
+    let meas = create(&mut c, "hall", req);
+    arm(&mut c, token);
+    let r = start(&mut c, token, meas);
     assert!((r.post_roll.0 - 2.0).abs() < 1e-3, "{:?}", r.post_roll);
     let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
         x.id == r.id && !x.active()
