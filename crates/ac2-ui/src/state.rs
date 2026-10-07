@@ -940,6 +940,8 @@ pub struct SweepUi {
     pub last: Option<SweepPlan>,
     /// The armed sweep is a re-sweep from the sweep view (not one the dialog set up).
     pub again: bool,
+    /// A finished run's result: once its data is in, the sweep pane's level axis frames it.
+    pub fit: Option<TraceId>,
 }
 
 /// Everything the UI holds.
@@ -2994,6 +2996,8 @@ impl AppState {
                 // and what the trace keys change.
                 self.selected_trace = Some(trace);
                 self.sweep.shown = Some(trace);
+                self.sweep.fit = Some(trace);
+                self.fit_new_sweep();
                 self.release_after_sweep(out);
                 self.layout.shown[PaneKind::Distortion.index()] = true;
                 self.layout.focus = PaneKind::Distortion;
@@ -4839,6 +4843,7 @@ impl AppState {
                     follow_meta(&mut t, &m);
                 }
                 self.traces.insert(t.meta.id, (t, g));
+                self.fit_new_sweep();
             }
             ConnEvent::Reply { what, result } => {
                 if let Overlay::Settings(s) = &mut self.overlay {

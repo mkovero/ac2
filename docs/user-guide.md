@@ -270,7 +270,9 @@ pans.
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, the sweep pane's
 distortion) is its own, and the app remembers it in `ui.toml` for the next start (a fit made
 for one show is a fair start for the next; **Ctrl+Home** forgets it). A spectrum that starts
-still fits its level axis on its first frame:
+still fits its level axis on its first frame, and a new sweep result fits the sweep pane's
+(its harmonics and THD, as **Shift+Home** does, the frequency axis left as it is; a zoom
+after that stays until the next sweep):
 
 - **Ctrl+I** / **Ctrl+O** zoom the focused pane's level axis in / out about its middle;
   **Ctrl+wheel** zooms it about the level under the pointer.

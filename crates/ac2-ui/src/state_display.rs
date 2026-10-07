@@ -263,6 +263,27 @@ impl AppState {
         }
     }
 
+    /// A finished sweep's data is in: the sweep pane's level axis frames its harmonics and
+    /// THD, as Shift+Home does (frequency left as it is). Distortion levels differ by tens
+    /// of dB from one device or drive level to the next, so a range kept from the last
+    /// result often shows the new one off the plot. Only once per result: a zoom after it
+    /// stays until the next sweep.
+    pub(super) fn fit_new_sweep(&mut self) {
+        let Some(id) = self.sweep.fit else {
+            return;
+        };
+        if !self.traces.contains_key(&id) {
+            return;
+        }
+        self.sweep.fit = None;
+        if self.shown_sweep().map(|(t, _)| t.meta.id) != Some(id) {
+            return;
+        }
+        if let Some(fit) = level::fit(self.level_values(PaneKind::Distortion)) {
+            self.view.distortion.range_db = fit;
+        }
+    }
+
     /// Every level pane `p` draws in the shown frequency range, as drawn (offsets
     /// included).
     fn level_values(&self, p: PaneKind) -> Vec<f64> {

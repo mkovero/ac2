@@ -93,6 +93,13 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Done
 
+Sweep level axis (operator, 2026-10-07: "sweep distortion could shift+home as everything
+else by default after measurement"):
+- **A new sweep result showed on the last range** (or the one remembered in `ui.toml`), often
+  tens of dB off → once its data is in, the sweep pane's level axis frames its harmonics and
+  THD as Shift+Home does (frequency untouched); a later zoom stays until the next result,
+  and the app's start keeps the remembered range.
+
 - **`ir_capture_on_the_simulated_rig` H3 on macOS** was not flaky: the test checked the
   *maximum* H3 over the sweep, which reads −49.03 dB on Linux every run and −48.92 on macOS
   against −50 ± 1. H3 sits near the rig's noise, so the maximum of its scattered estimate is

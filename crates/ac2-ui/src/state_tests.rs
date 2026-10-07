@@ -5621,6 +5621,11 @@ fn next_hint(t: &T) -> Option<String> {
 /// One sweep from the dialog (−50 dBFS, 3 s, out 1), played and stored as trace 7: the
 /// request it played.
 fn sweep_once(t: &mut T) -> SweepRequest {
+    sweep_stored_as(t, 7)
+}
+
+/// One sweep from the dialog, played and stored as trace `id`: the request it played.
+fn sweep_stored_as(t: &mut T, id: u32) -> SweepRequest {
     t.type_key("Shift+S", "S");
     let Overlay::Form(f) = &mut t.st.overlay else {
         panic!("no dialog");
@@ -5643,12 +5648,44 @@ fn sweep_once(t: &mut T) -> SweepRequest {
     ))));
     let mut s = daemon_state();
     s.generator.owner = Some(ClientId("c1".into()));
-    s.traces = vec![sweep_meta(7)];
-    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(7) }));
+    s.traces = (7..=id).map(sweep_meta).collect();
+    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(id) }));
     t.conn(mirror(s));
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
     request
+}
+
+/// A finished sweep frames the sweep pane's level axis once its data is in, as Shift+Home
+/// would (frequency untouched); a zoom after that stays until the next result, and a
+/// result fetched again does not refit.
+#[test]
+fn a_finished_sweep_fits_the_sweep_panes_level_axis() {
+    let mut t = T::new();
+    let start = t.st.view.distortion.range_db;
+    let freq = t.st.view.freq;
+    sweep_once(&mut t);
+    // Not before its data: there is nothing to fit yet.
+    assert_eq!(t.st.view.distortion.range_db, start);
+    let (d, g) = sweep_data(7);
+    t.conn(ConnEvent::Trace(d.clone(), g.clone()));
+    let fitted = t.st.view.distortion.range_db;
+    assert_ne!(fitted, start);
+    // Harmonics at −40 dB over floors at −80 dB, framed with a margin.
+    assert!(fitted.lo < -80.0 && fitted.lo > -100.0, "{fitted:?}");
+    assert!(fitted.hi > -40.0 && fitted.hi < -20.0, "{fitted:?}");
+    assert_eq!(t.st.view.freq, freq);
+    // The operator zooms; the same result fetched again keeps the zoom.
+    t.key("Ctrl+I");
+    let zoomed = t.st.view.distortion.range_db;
+    assert_ne!(zoomed, fitted);
+    t.conn(ConnEvent::Trace(d, g));
+    assert_eq!(t.st.view.distortion.range_db, zoomed);
+    // The next sweep's result is framed again.
+    sweep_stored_as(&mut t, 8);
+    let (d, g) = sweep_data(8);
+    t.conn(ConnEvent::Trace(d, g));
+    assert_eq!(t.st.view.distortion.range_db, fitted);
 }
 
 /// On the sweep view Space arms a re-sweep with the last sweep's parameters and Enter plays
