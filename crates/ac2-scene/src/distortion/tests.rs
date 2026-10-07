@@ -189,6 +189,7 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         Some(SweepView {
             data: &d,
             freqs: &f,
+            color: Color::from_rgba8([1, 2, 3, 255]),
         }),
         &status(),
         &view,
@@ -261,6 +262,7 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         Some(SweepView {
             data: &d,
             freqs: &f,
+            color: Color::from_rgba8([1, 2, 3, 255]),
         }),
         &status(),
         &view,
@@ -330,6 +332,7 @@ fn caption_and_legend_never_overlap_in_small_panes() {
                 Some(SweepView {
                     data: &d,
                     freqs: &f,
+                    color: Color::from_rgba8([1, 2, 3, 255]),
                 }),
                 &status(),
                 &view,
@@ -401,6 +404,7 @@ fn lone_valid_points_are_short_lines_and_noise_is_dashed() {
         Some(SweepView {
             data: &d,
             freqs: &f,
+            color: Color::from_rgba8([1, 2, 3, 255]),
         }),
         &status(),
         &ViewState::default(),

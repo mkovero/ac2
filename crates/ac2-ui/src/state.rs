@@ -1405,19 +1405,36 @@ impl AppState {
         ac2_scene::meas_list::trace_order(&ms, &self.stored_traces())
     }
 
-    /// The measurement tree beside the panes.
-    pub fn tree_rows(&self) -> Vec<ac2_scene::meas_list::TreeRow> {
-        let traces: Vec<ac2_scene::trace_list::TraceItem<'_>> = self
-            .stored_traces()
+    /// The colour every curve is drawn in (live, stored, math), in every pane, legend and
+    /// tree dot: each measurement's colour family.
+    pub fn curve_colours(
+        &self,
+        theme: &ac2_scene::theme::Theme,
+    ) -> ac2_scene::families::CurveColours {
+        ac2_scene::families::curve_colours(theme, &self.measurements(), &self.stored_traces())
+    }
+
+    /// Stored traces as the tree and the trace list get them.
+    fn trace_items(
+        &self,
+        colours: &ac2_scene::families::CurveColours,
+    ) -> Vec<ac2_scene::trace_list::TraceItem<'_>> {
+        self.stored_traces()
             .into_iter()
             .map(|meta| ac2_scene::trace_list::TraceItem {
                 meta,
                 has_data: self.traces.contains_key(&meta.id),
+                color: colours.trace(meta.id),
             })
-            .collect();
+            .collect()
+    }
+
+    /// The measurement tree beside the panes.
+    pub fn tree_rows(&self) -> Vec<ac2_scene::meas_list::TreeRow> {
+        let colours = self.curve_colours(&ac2_scene::theme::Theme::by_name(self.theme));
         ac2_scene::meas_list::tree_rows(&ac2_scene::meas_list::TreeInput {
-            meas: self.meas_items(),
-            traces,
+            meas: self.meas_items(&colours),
+            traces: self.trace_items(&colours),
             collapsed: &self.collapsed,
             selected: self.selected,
             selected_trace: self.selected_trace,
@@ -1427,8 +1444,10 @@ impl AppState {
     }
 
     /// Every measurement with this app's display of it.
-    fn meas_items(&self) -> Vec<ac2_scene::meas_list::MeasItem<'_>> {
-        let theme = ac2_scene::theme::Theme::by_name(self.theme);
+    fn meas_items(
+        &self,
+        colours: &ac2_scene::families::CurveColours,
+    ) -> Vec<ac2_scene::meas_list::MeasItem<'_>> {
         self.measurements()
             .into_iter()
             .map(|m| {
@@ -1447,7 +1466,7 @@ impl AppState {
                     offset_db: e.offset_db,
                     inverted: e.inverted,
                     hidden: self.meas_hidden(m),
-                    color: crate::scenes::meas_color(self, &theme, m.id),
+                    color: colours.meas(m.id),
                 }
             })
             .collect()
@@ -1470,15 +1489,8 @@ impl AppState {
 
     /// The sidebar's rows of stored traces.
     pub fn trace_rows(&self) -> Vec<ac2_scene::trace_list::TraceRow> {
-        let items: Vec<ac2_scene::trace_list::TraceItem<'_>> = self
-            .stored_traces()
-            .into_iter()
-            .map(|meta| ac2_scene::trace_list::TraceItem {
-                meta,
-                has_data: self.traces.contains_key(&meta.id),
-            })
-            .collect();
-        ac2_scene::trace_list::trace_rows(&items, self.selected_trace)
+        let colours = self.curve_colours(&ac2_scene::theme::Theme::by_name(self.theme));
+        ac2_scene::trace_list::trace_rows(&self.trace_items(&colours), self.selected_trace)
     }
 
     /// The rows of pane `p`'s measurement list (its title chip): `TF  Main L`, `TF  TF 2 ·
@@ -1508,7 +1520,8 @@ impl AppState {
     /// keys act on unless a stored trace was selected after it.
     pub fn meas_rows(&self) -> Vec<ac2_scene::meas_list::MeasRow> {
         let active = !self.keys_on_trace();
-        self.meas_items()
+        let colours = self.curve_colours(&ac2_scene::theme::Theme::by_name(self.theme));
+        self.meas_items(&colours)
             .iter()
             .map(|item| ac2_scene::meas_list::meas_row(item, self.selected, active))
             .collect()

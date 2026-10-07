@@ -247,7 +247,11 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         selected: false,
     };
     let traces: Vec<TfTrace<'_>> = std::iter::once(live)
-        .chain(traces_data.iter().map(|d| TfTrace::stored(d, &freqs)))
+        .chain(
+            traces_data
+                .iter()
+                .map(|d| TfTrace::stored(d, &freqs, theme.trace_color(1))),
+        )
         .collect();
     let cache = DisplayCache::default();
     let s = transfer_scene(&traces, &cache, &Status::default(), &view, &theme, SIZE);

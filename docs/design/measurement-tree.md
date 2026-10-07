@@ -108,12 +108,32 @@ re-imported is an import (`imported`), a sweep export a run under Imported until
   Shift+A toggles the selected item's whole group (live curves are this app's display, the
   traces' visibility the daemon's). V steps through the traces in the tree's order.
 - Every row that stands for a curve — a live curve, a stored trace or sweep run, a math
-  channel's result — has a dot in exactly the colour the panes draw that curve in (live
-  curves and math results: the theme's trace colour at the measurement's place in the
-  list; stored traces: their own colour), filled when shown, a ring when hidden; a click
-  on it shows / hides the curve. A curve no visible pane draws keeps its colour. Headers
-  (a measurement, Imported) stand for a group and have no dot. The list's header says
-  what filled and ring mean.
+  channel's result — has a dot in exactly the colour the panes draw that curve in, filled
+  when shown, a ring when hidden; a click on it shows / hides the curve. A curve no visible
+  pane draws keeps its colour. Headers (a measurement, Imported) stand for a group and have
+  no dot. The list's header says what filled and ring mean.
 - The transfer pane's legend groups by the same order: a measurement's live curve, its
-  traces and its math channels together. (Colour families per measurement are not done:
-  trace colours stay the daemon's per-trace palette.)
+  traces and its math channels together.
+
+## Colour families
+
+One rule, `ac2_scene::families::curve_colours`, colours every curve for the panes, legends,
+cursor readouts and tree dots:
+- Each measurement (not a math channel) owns a **hue** from the theme's eight families
+  (`Theme::families`, per theme: Okabe & Ito's six hues at lightnesses that stay apart in
+  simulated protan / deutan vision, then violet and cyan). Assignment follows the
+  measurement id, so deleting one repaints no other: id `n` prefers family `(n − 1) mod 8`;
+  walking the measurements by id, one whose family is taken takes the next free one. Past
+  eight measurements the families repeat.
+- Its **live curve** is the family's base colour. Its stored traces (captures, sweep runs,
+  in tree order: slot, then oldest first) and then its math channels' results take the
+  family's **shades**: the base's OKLCH hue and chroma at 0.1 steps of OKLab lightness,
+  nearest first, lighter before darker, kept inside the theme's lightness range (3:1
+  contrast against the plot, and still showing the hue). Three shades, then they repeat.
+  A sweep measurement has no live curve: its first run takes the base.
+- **Imported** traces (and those of a deleted measurement kept) are the neutral grey family.
+  A trace or math channel **moved** to another measurement takes that measurement's family
+  and its place in it.
+- The daemon's per-trace colour (`TraceEdit.color`, on the wire and in session files) is
+  not used for drawing; it stays on the wire unchanged for scripts.
+

@@ -625,6 +625,12 @@ Imported              1 trace
   listed changes; its curve, name and settings stay (a locked trace moves too).
 - The panes' legends follow the tree: a measurement's live curve, its traces and its math
   channels together, group by group.
+- **Each measurement has its own colour family**: its live curve in the family's colour,
+  its captures, sweep runs and math results in lighter and darker shades of the same hue, so
+  the curves of one measurement read as a group in every pane. Imports are grey; a trace
+  moved to another measurement takes that measurement's colours. Colours follow the
+  measurement, not its place in the list: deleting one measurement leaves the others'
+  colours alone.
 - **Deleting a measurement that owns traces asks every time**: *Keep them (move to Imported)*,
   *Delete them too*, or *Cancel* — **←/→** choose, **Enter** takes it (Keep is the default),
   **Esc** cancels. An answer that would leave a math channel without an operand says so and

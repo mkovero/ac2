@@ -151,6 +151,8 @@ pub struct SweepView<'a> {
     pub data: &'a TraceData,
     /// Column frequencies of its grid.
     pub freqs: &'a [f64],
+    /// The colour its fundamental is drawn in ([`crate::families`]).
+    pub color: Color,
 }
 
 /// How a legend entry shows what it names.
@@ -586,15 +588,11 @@ pub fn distortion_scene(
             })
             .collect();
         let (points, _) = gapped(&xs, &ys, None, |_, _| false);
-        let c0 = t.data.meta.edit.color;
         if !points.is_empty() {
             c.data.polylines.push(Polyline {
                 points,
                 alpha: vec![],
-                stroke: Stroke::solid(
-                    Color::from_rgba8([c0.r, c0.g, c0.b, 255]),
-                    theme.trace_width,
-                ),
+                stroke: Stroke::solid(t.color, theme.trace_width),
                 clip: Some(fundamental),
             });
         }

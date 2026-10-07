@@ -149,7 +149,7 @@ impl<'a> TfTrace<'a> {
     /// A stored trace; colour, offset, polarity and nudge come from its edit record.
     /// Captured traces keep their epoch's shared time base; every other source is
     /// independent (decision 8a).
-    pub fn stored(data: &'a Arc<TraceData>, freqs: &'a [f64]) -> Self {
+    pub fn stored(data: &'a Arc<TraceData>, freqs: &'a [f64], color: Color) -> Self {
         let m = &data.meta;
         let time_base = match m.source.shared_epoch() {
             Some(epoch) => TimeBase::Shared {
@@ -172,11 +172,10 @@ impl<'a> TfTrace<'a> {
             )),
             _ => None,
         };
-        let c = m.edit.color;
         Self {
             key: TraceKey::Stored(m.id),
             name: m.edit.name.clone(),
-            color: Color::from_rgba8([c.r, c.g, c.b, 255]),
+            color,
             freqs,
             mag_db: &data.mag_db,
             phase_deg: data.phase_deg.as_deref(),
@@ -904,7 +903,10 @@ mod tests {
         let kept = |traces: &[TfTrace<'_>], style: &CoherenceStyle| {
             format!("{:?}", display_traces(traces, &cache, None, style))
         };
-        let mut traces = vec![live.trace(1, shared(0.001)), TfTrace::stored(&data, &freqs)];
+        let mut traces = vec![
+            live.trace(1, shared(0.001)),
+            TfTrace::stored(&data, &freqs, Color::WHITE),
+        ];
         let first = kept(&traces, &style);
         assert_eq!(first, fresh(&traces, &style));
         assert_eq!(cache.len(), 1);
@@ -929,7 +931,7 @@ mod tests {
         let mut refetched = (*data).clone();
         refetched.mag_db[9] = 12.0;
         let refetched = Arc::new(refetched);
-        traces[1] = TfTrace::stored(&refetched, &freqs);
+        traces[1] = TfTrace::stored(&refetched, &freqs, Color::WHITE);
         assert_eq!(kept(&traces, &other), fresh(&traces, &other));
         let (_, d) = display_traces(&traces, &cache, None, &other);
         assert_eq!(d[1].magnitude_db[9], 12.0);

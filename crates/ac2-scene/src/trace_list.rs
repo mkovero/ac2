@@ -65,6 +65,8 @@ pub struct TraceItem<'a> {
     pub meta: &'a TraceMeta,
     /// Its columns have arrived (a trace without them is listed but draws nothing yet).
     pub has_data: bool,
+    /// The colour it is drawn in ([`crate::families`]).
+    pub color: Color,
 }
 
 /// One row of the list.
@@ -131,7 +133,6 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             }
             details.push(kind.to_owned());
             details.dedup();
-            let c = t.edit.color;
             let describe = format!(
                 "{}: {}, {}",
                 t.edit.name,
@@ -145,7 +146,7 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
                 slot: t.edit.slot,
                 shown: t.edit.visible,
                 selected: selected == Some(t.id),
-                color: Color::from_rgba8([c.r, c.g, c.b, 255]),
+                color: i.color,
                 details,
                 describe,
             }
@@ -357,18 +358,22 @@ mod tests {
             TraceItem {
                 meta: &sweep_b,
                 has_data: true,
+                color: Color::from_rgba8([10, 20, 30, 255]),
             },
             TraceItem {
                 meta: &slot3,
                 has_data: true,
+                color: Color::from_rgba8([1, 2, 3, 255]),
             },
             TraceItem {
                 meta: &sweep_a,
                 has_data: false,
+                color: Color::from_rgba8([1, 2, 3, 255]),
             },
             TraceItem {
                 meta: &target,
                 has_data: true,
+                color: Color::from_rgba8([1, 2, 3, 255]),
             },
         ];
         let rows = trace_rows(&items, Some(TraceId(7)));
@@ -419,6 +424,7 @@ mod tests {
             &[TraceItem {
                 meta: &t,
                 has_data: true,
+                color: Color::from_rgba8([1, 2, 3, 255]),
             }],
             None,
         );

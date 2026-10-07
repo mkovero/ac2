@@ -192,16 +192,11 @@ pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
     st.pane_meas(PaneKind::Transfer)
 }
 
-/// The colour of measurement `id`'s live curve (or math result) in every pane: the theme's
-/// trace colour at its place in the measurement list, which [`pane_order`] carries along,
-/// so the curve keeps its colour whichever measurement a pane leads with.
+/// The colour of measurement `id`'s live curve (or math result) in every pane: its colour
+/// family's ([`ac2_scene::families`]), so it keeps its colour whichever measurement a pane
+/// leads with.
 pub fn meas_color(st: &AppState, theme: &Theme, id: MeasId) -> ac2_scene::primitives::Color {
-    let i = st
-        .measurements()
-        .iter()
-        .position(|m| m.id == id)
-        .unwrap_or(0);
-    theme.trace_color(i)
+    st.curve_colours(theme).meas(id)
 }
 
 /// Measurements in list order with the one pane `p` shows first (its legend row and
@@ -217,14 +212,14 @@ struct LiveTf<'a> {
     meas: &'a Measurement,
     tf: &'a TopicFrame,
     cols: Arc<GridColumns>,
-    color: usize,
 }
 
 /// The transfer view: every transfer measurement with a frame, plus visible stored traces.
 pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfScene {
     let grids = st.data.as_ref().map(|d| &d.grids);
+    let colours = st.curve_colours(theme);
     let mut live = Vec::new();
-    for (i, m) in pane_order(st, PaneKind::Transfer) {
+    for (_, m) in pane_order(st, PaneKind::Transfer) {
         // A hidden measurement keeps its colour: showing it again brings back the same curve.
         if !is_tf(m) || st.meas_hidden(m) {
             continue;
@@ -244,7 +239,6 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             meas: m,
             tf,
             cols: columns(grid),
-            color: i,
         });
     }
     let mut stored: Vec<(&Arc<ac2_proto::model::TraceData>, Arc<GridColumns>)> = st
@@ -286,7 +280,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             &l.tf.frame.stamp,
             &l.cols.freqs,
             l.meas.config.name.clone(),
-            theme.trace_color(l.color),
+            colours.meas(l.meas.id),
             freshness(st, l.tf),
         );
         let e = st.edit(l.meas.id);
@@ -311,7 +305,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     }
     for (data, cols) in &stored {
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
-        let mut t = TfTrace::stored(data, &cols.freqs);
+        let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.selected_trace == Some(data.meta.id);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
@@ -412,10 +406,10 @@ pub(crate) fn with_spectrum<R>(
         meas: &'a Measurement,
         tf: &'a TopicFrame,
         cols: Arc<GridColumns>,
-        color: usize,
     }
+    let colours = st.curve_colours(theme);
     let mut cols = Vec::new();
-    for (i, m) in pane_order(st, PaneKind::Spectrum) {
+    for (_, m) in pane_order(st, PaneKind::Spectrum) {
         if st.meas_hidden(m) {
             continue;
         }
@@ -437,7 +431,6 @@ pub(crate) fn with_spectrum<R>(
             meas: m,
             tf,
             cols: columns(g),
-            color: i,
         });
     }
     let notes: Vec<Option<String>> = cols
@@ -454,7 +447,7 @@ pub(crate) fn with_spectrum<R>(
     let mut traces = Vec::new();
     for (c, note) in cols.iter().zip(&notes) {
         let name = c.meas.config.name.clone();
-        let color = theme.trace_color(c.color);
+        let color = colours.meas(c.meas.id);
         let mut t = match &c.tf.frame.data {
             FrameData::Spec(f) => SpectrumTrace::spectrum(
                 f,
@@ -527,11 +520,10 @@ pub(crate) fn with_spectrum<R>(
         cols,
     } in &stored
     {
-        let c = data.meta.edit.color;
         traces.push(SpectrumTrace {
             key: TraceKey::Stored(data.meta.id),
             name: data.meta.edit.name.clone(),
-            color: ac2_scene::primitives::Color::from_rgba8([c.r, c.g, c.b, 255]),
+            color: colours.trace(data.meta.id),
             freqs: &cols.freqs,
             edges: &cols.edges,
             level: &data.mag_db,
@@ -688,8 +680,7 @@ pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPan
     if st.view.distortion.mode == ac2_scene::view::SweepMode::Ir
         && let Some((d, _)) = shown
     {
-        let c = d.meta.edit.color;
-        let color = ac2_scene::primitives::Color::from_rgba8([c.r, c.g, c.b, 255]);
+        let color = st.curve_colours(theme).trace(d.meta.id);
         if let Some(s) = sweep_ir_scene(d, color, &status, &st.view, theme, size) {
             return SweepPane::Ir(Box::new(s));
         }
@@ -697,9 +688,11 @@ pub fn sweep(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> SweepPan
     let freqs = shown
         .map(|(_, g)| column_frequencies(g))
         .unwrap_or_default();
+    let colours = st.curve_colours(theme);
     let view = shown.map(|(d, _)| SweepView {
         data: d,
         freqs: &freqs,
+        color: colours.trace(d.meta.id),
     });
     SweepPane::Distortion(Box::new(distortion_scene(
         view, &status, &st.view, theme, size,

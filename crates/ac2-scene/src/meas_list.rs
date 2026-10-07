@@ -238,7 +238,7 @@ pub fn group_of(t: &TraceMeta, meas: &[&Measurement]) -> TraceOwner {
 }
 
 /// The group a math channel is listed in (`None`: not a math channel).
-fn math_group(m: &Measurement, meas: &[&Measurement]) -> Option<TraceOwner> {
+pub(crate) fn math_group(m: &Measurement, meas: &[&Measurement]) -> Option<TraceOwner> {
     let MeasKind::Math { config } = &m.config.kind else {
         return None;
     };
@@ -678,12 +678,12 @@ pub fn delete_refused(m: &Measurement, users: &[String]) -> DeleteConfirm {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use ac2_proto::model::*;
     use ac2_proto::units::*;
 
-    fn tf(id: u32, name: &str) -> Measurement {
+    pub(crate) fn tf(id: u32, name: &str) -> Measurement {
         Measurement {
             id: MeasId(id),
             config: MeasConfig {
@@ -782,7 +782,7 @@ mod tests {
         );
     }
 
-    fn with_kind(id: u32, name: &str, kind: MeasKind, running: bool) -> Measurement {
+    pub(crate) fn with_kind(id: u32, name: &str, kind: MeasKind, running: bool) -> Measurement {
         Measurement {
             id: MeasId(id),
             config: MeasConfig {
@@ -794,7 +794,7 @@ mod tests {
         }
     }
 
-    fn sweep_config() -> SweepConfig {
+    pub(crate) fn sweep_config() -> SweepConfig {
         SweepConfig {
             reference_input: 0,
             measurement_input: 1,
@@ -807,7 +807,7 @@ mod tests {
         }
     }
 
-    fn trace(id: u32, name: &str, owner: TraceOwner, source: TraceSource) -> TraceMeta {
+    pub(crate) fn trace(id: u32, name: &str, owner: TraceOwner, source: TraceSource) -> TraceMeta {
         TraceMeta {
             id: TraceId(id),
             edit: TraceEdit {
@@ -839,7 +839,7 @@ mod tests {
         }
     }
 
-    fn captured() -> TraceSource {
+    pub(crate) fn captured() -> TraceSource {
         TraceSource::Captured {
             meas: MeasId(1),
             meas_name: "Main L".into(),
@@ -848,7 +848,7 @@ mod tests {
         }
     }
 
-    fn run(number: u32) -> TraceSource {
+    pub(crate) fn run(number: u32) -> TraceSource {
         TraceSource::Sweep {
             meas: MeasId(2),
             meas_name: "Genelec 1 m".into(),
@@ -935,6 +935,7 @@ mod tests {
                 .map(|meta| TraceItem {
                     meta,
                     has_data: true,
+                    color: Color::from_rgba8([1, 2, 3, 255]),
                 })
                 .collect(),
             collapsed,
@@ -1084,6 +1085,7 @@ mod tests {
                 .map(|meta| TraceItem {
                     meta,
                     has_data: true,
+                    color: Color::from_rgba8([1, 2, 3, 255]),
                 })
                 .collect(),
             collapsed: &none,

@@ -7,6 +7,9 @@
 
 use crate::primitives::{Color, Colormap, Stroke};
 
+/// How many measurement colour families a theme has before they repeat.
+pub const FAMILIES: usize = 8;
+
 /// Which built-in theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeName {
@@ -41,8 +44,21 @@ pub struct Theme {
     pub banner_fault: BannerColors,
     pub banner_warning: BannerColors,
     pub banner_info: BannerColors,
-    /// Trace colours in assignment order.
+    /// Categorical colours for things that are not a measurement's curves (harmonic
+    /// orders, Leq columns, the focus ring).
     pub traces: [Color; 8],
+    /// Base colour of each measurement's colour family ([`crate::families`]): one hue
+    /// apiece, far enough apart in OKLCH hue that a family's lighter and darker shades do
+    /// not run into the next family. The first six are Okabe & Ito's hues, which stay
+    /// apart under the common colour-vision deficiencies; violet and cyan extend the set.
+    /// The lightness of each is chosen (per theme) so the six stay apart in simulated
+    /// protan and deutan vision too, where hue alone collapses (tested in `families`).
+    pub families: [Color; FAMILIES],
+    /// Base of the neutral family (grey): imported traces, which belong to no measurement.
+    pub neutral: Color,
+    /// OKLab lightness range a family's shades stay in: inside it every shade keeps 3:1
+    /// contrast against the plot and still shows its hue (not washed to white or black).
+    pub shade_lightness: (f64, f64),
     pub trace_width: f32,
     /// Opacity multiplier of a STALE trace (decision 2a: stale traces dim).
     pub stale_alpha: f32,
@@ -100,6 +116,18 @@ impl Theme {
                 hex(0x3d8fd1), // blue, lightened from 0072b2 for contrast on dark
                 hex(0xbbbbbb), // grey in place of black
             ],
+            families: [
+                hex(0x1cb1ff), // sky blue
+                hex(0xdf9900), // orange
+                hex(0x2eefb1), // bluish green
+                hex(0xc7519a), // reddish purple
+                hex(0xe6da39), // yellow
+                hex(0xc45000), // vermillion
+                hex(0x8562d4), // violet
+                hex(0x00818c), // cyan
+            ],
+            neutral: hex(0xbbbbbb),
+            shade_lightness: (0.45, 0.92),
             trace_width: 1.6,
             stale_alpha: 0.35,
             bar_alpha: 0.55,
@@ -146,6 +174,18 @@ impl Theme {
                 hex(0x000000), // black
                 hex(0x857a00), // yellow, darkened to olive
             ],
+            families: [
+                hex(0x0089c9), // blue
+                hex(0x916200), // orange, darkened
+                hex(0x008761), // bluish green, darkened
+                hex(0x95216e), // reddish purple, darkened
+                hex(0x968d00), // yellow, darkened to olive
+                hex(0x883500), // vermillion, darkened
+                hex(0x8c68dc), // violet
+                hex(0x005e66), // cyan, darkened to teal
+            ],
+            neutral: hex(0x6b6b6b),
+            shade_lightness: (0.30, 0.70),
             trace_width: 1.6,
             stale_alpha: 0.35,
             bar_alpha: 0.5,
@@ -192,6 +232,18 @@ impl Theme {
                 hex(0x5aa9ff),
                 hex(0xffffff),
             ],
+            families: [
+                hex(0x00a7f4),
+                hex(0xde9800),
+                hex(0x2aedaf),
+                hex(0xd15ba4),
+                hex(0xe3d734),
+                hex(0xcf5605),
+                hex(0xa07ef4),
+                hex(0x6ef1ff),
+            ],
+            neutral: hex(0xffffff),
+            shade_lightness: (0.45, 0.95),
             trace_width: 2.6,
             stale_alpha: 0.45,
             bar_alpha: 0.7,
@@ -288,6 +340,16 @@ mod tests {
         for t in all() {
             let r = contrast_ratio(t.level_ok, t.plot_background);
             assert!(r >= 3.0, "{:?} level_ok: contrast {r:.2}", t.name);
+        }
+    }
+
+    #[test]
+    fn family_bases_stand_out_from_the_plot() {
+        for t in all() {
+            for (i, c) in t.families.iter().chain([&t.neutral]).enumerate() {
+                let r = contrast_ratio(*c, t.plot_background);
+                assert!(r >= 3.0, "{:?} family {i}: contrast {r:.2}", t.name);
+            }
         }
     }
 

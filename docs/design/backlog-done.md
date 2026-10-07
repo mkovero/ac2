@@ -2,6 +2,13 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+Colour families (operator, 2026-10-07: "give each measurement its own colour family"):
+- **Each measurement has a hue; its captures, sweep runs and math results are shades of
+  it**, imports grey. One rule in `ac2_scene::families` for panes, legends and tree dots;
+  hue by measurement id (a deletion repaints nobody); shades by OKLab lightness, 3:1
+  contrast on every theme; the first six families tested apart under simulated protan and
+  deutan vision. The daemon's per-trace colour is no longer drawn; wire unchanged.
+
 Measurement delay keys (operator, 2026-10-07: "if I start the measurement then measurement
 delay change -does something- but not what I expect … it would look similar to when
 changing delay between traces"; "if I choose … the sweep measurement's trace as reference

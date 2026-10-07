@@ -24,6 +24,7 @@ pub mod banner;
 pub mod cal;
 mod canvas;
 pub mod distortion;
+pub mod families;
 pub mod finding;
 pub mod format;
 pub mod grid;

@@ -6166,6 +6166,25 @@ fn tree_dots_have_the_colours_of_their_curves() {
         .map(|(c, _)| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8))
         .collect();
     assert_eq!(colours.len(), 6, "each curve its own colour");
+    // Each measurement its own colour family: Main L's live curve, captures and math result
+    // share its hue, Sub has another, the import is grey, and the daemon's per-trace colour
+    // is not what is drawn.
+    let hue = |c: Color| ac2_scene::families::oklch(c).2.to_degrees();
+    let gap = |a: Color, b: Color| {
+        let d = (hue(a) - hue(b)).rem_euclid(360.0);
+        d.min(360.0 - d)
+    };
+    let main = curve("Main L");
+    assert_eq!(main, theme.families[0]);
+    assert_eq!(curve("Sub"), theme.families[1]);
+    for n in ["pre-EQ", "post-EQ", "pre ÷ post"] {
+        assert!(gap(curve(n), main) < 8.0, "{n} in Main L's family");
+    }
+    assert_eq!(curve("1083 94cm"), theme.neutral);
+    for m in &metas {
+        let c = m.edit.color;
+        assert_ne!(curve(&m.edit.name), Color::from_rgba8([c.r, c.g, c.b, 255]));
+    }
     for r in rows.iter().filter(|r| r.depth == 0) {
         assert_eq!(r.dot, None, "{} is a group", r.name);
     }
@@ -6179,6 +6198,17 @@ fn tree_dots_have_the_colours_of_their_curves() {
     let rows = t.st.tree_rows();
     let row = rows.iter().find(|r| r.name == "pre ÷ post").expect("row");
     assert_eq!(row.dot.map(|d| d.1), Some(false));
+
+    // Moved under Sub, the import takes Sub's family.
+    let mut moved = tree_state();
+    moved.traces[2].edit.owner = TraceOwner::Meas { meas: MeasId(2) };
+    let mut u = T::new();
+    u.conn(mirror(moved));
+    let rows = u.st.tree_rows();
+    let row = rows.iter().find(|r| r.name == "1083 94cm").expect("row");
+    let (c, _) = row.dot.expect("dot");
+    assert!(gap(c, sub) < 8.0, "{c:?} in Sub's family");
+    assert_ne!(c, sub, "a shade, not Sub's live curve");
 }
 
 #[test]
