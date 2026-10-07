@@ -567,25 +567,30 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   usual case). **1** inserts the peak's delay; for the first arrival, run the finder in a
   band without the crossover (palette: *Delay finder: mid / sub band* or a custom band, CLI
   `--band`) and compare.
-- **D** types a delay (`12.5ms`, `600samples`, or a distance such as `4.3m`, converted with
-  the speed of sound at the set temperature); **,** and **.** nudge the selected trace's
-  display by 0.1 ms; **Y** tracks the delay continuously.
-- **Ctrl+,** and **Ctrl+.** move the measurement's own delay by one sample, **Alt+,** and
-  **Alt+.** by a tenth of a sample. Its live curve moves at once, and only it: the same way
-  **,** / **.** move a stored trace (Ctrl+. like **.**, Ctrl+, like **,**), whichever curve
-  is the phase reference — the stored traces stay where they are, also when the live curve
-  is the reference. The legend tags the live curve `nudge +0.21 ms`, the measurement list
-  says `nudged +0.21 ms` after its delay (both count its **,** / **.** nudge in), and the
-  toast names the step and that total: `Main L: nudged +1 sample → +0.21 ms`; the reference line and the distance keep the
-  measured arrival. A capture taken then is drawn exactly where the live curve was (its
-  trace carries the step as its own nudge, which **,** / **.** adjust). The transfer function
-  keeps its averages and turns them to the new delay instead of starting over, so you can
-  walk the phase into place by eye. **D** (a typed delay) is the same move in one go: the
-  arrival stays, the live curve alone moves to the typed delay and the nudge is its distance
-  from the arrival (`Main L: delay 12.00 ms → nudged −0.50 ms`). **1** (the finder's) sets a new arrival: nothing moves and the nudge is
-  gone; tracking (**Y**) follows the arrival and keeps your steps on top of it. A stopped or hidden measurement has no live curve to move:
-  the keys only say so (**S** starts it) and leave the delay alone. Delays are kept to
-  fractions of a sample (the finder's estimate is inserted exactly, `600.25samples` can be
+- A measurement has one delay, the daemon's. **D** types it (`12.5ms`, `600samples`, or a
+  distance such as `4.3m`, converted with the speed of sound at the set temperature);
+  **,** and **.** step it by 0.1 ms, **Ctrl+,** and **Ctrl+.** by one sample, **Alt+,** and
+  **Alt+.** by a tenth of a sample; **Y** tracks it continuously. Its live curve moves at
+  once, and only it, whichever curve is the phase reference — the stored traces stay where
+  they are, also when the live curve is the reference; **,** / **.** on a selected stored
+  trace move that trace the same way. The measurement list says the delay and how far it is
+  from the measured arrival, `delay 12.60 ms (+0.10 ms from arrival)` (no bracket at the
+  arrival), the legend tags the live curve `+0.10 ms from arrival`, and the toast names the
+  step and where it lands: `Main L: delay +0.1 ms → 12.60 ms (+0.10 ms from arrival)`,
+  `Main L: delay +1 sample → 12.521 ms (+0.021 ms from arrival)`. The reference line and the
+  distance keep the measured arrival. A capture taken then is drawn exactly where the live
+  curve was (its trace starts with the same offset from the arrival, which **,** / **.**
+  adjust). The transfer function keeps its averages and turns them to the new delay instead
+  of starting over, so you can walk the phase into place by eye. **D** is the same move in
+  one go: the arrival stays and the live curve alone moves to the typed delay
+  (`Main L: delay 12.00 ms (−0.50 ms from arrival)`). **1** (the finder's) sets a new
+  arrival: nothing moves and the offset is gone; tracking (**Y**) follows the arrival and
+  keeps your offset on top of it. A stopped or hidden measurement has no live curve to move:
+  the keys only say so (**S** starts it) and leave the delay alone. Steps of 0.1 ms are
+  fractional samples at most rates (9.6 samples at 96 kHz): the daemon keeps the fraction and
+  holds the delay to a millionth of a sample, so stepping out and back lands exactly where
+  you started. Delays are kept to fractions of a sample (the finder's estimate is inserted
+  exactly, `600.25samples` can be
   typed), shown in the measurement list to the microsecond. Tracking moves to a fractional
   arrival too once two windows agree within a tenth of a sample, and leaves the delay alone
   while the arrival stays within 0.05 sample of it.
@@ -676,8 +681,11 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
   gives it up; `none` frees its slot), so the digit keys reach it.
 - The trace keys act on the selected trace when its curve is on the transfer pane (else on
-  the live measurement): **U** inverts it, **,** / **.** nudge it (`Sweep 2: nudged +0.1 ms →
-  +0.30 ms`, and its row says `nudged +0.30 ms`), **E** makes it the phase
+  the live measurement): **U** inverts it, **,** / **.** move its delay by 0.1 ms, said as
+  a measurement's is (`Sweep 2: delay +0.1 ms → +0.30 ms from arrival`, its row says
+  `delay +0.30 ms from arrival` and its legend `+0.30 ms from arrival`; a stored trace keeps
+  only its offset from the arrival it was measured at — for an imported or averaged trace,
+  its own alignment — so no absolute delay is shown), **E** makes it the phase
   reference, **K** / **Shift+K** smooth it, and **Mic curve on the selected trace…** corrects
   it. The offset keys (**J**, **Alt+↑/↓**, below) act on a selected trace of any kind. A
   target curve takes an offset only (it has no phase); a
@@ -1413,8 +1421,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+.` | Delay of the measurement +0.1 sample | `delay_up_fine` |
 | `U` | Invert polarity of selected trace (display) | `invert` |
 | `J` | Type dB offset of selected trace… | `offset` |
-| `,` | Nudge selected trace 0.1 ms earlier | `nudge_earlier` |
-| `.` | Nudge selected trace 0.1 ms later | `nudge_later` |
+| `,` | Delay −0.1 ms of the measurement, or of the selected stored trace | `nudge_earlier` |
+| `.` | Delay +0.1 ms of the measurement, or of the selected stored trace | `nudge_later` |
 | `E` | Make selected trace the phase reference | `phase_reference` |
 | `Z` | Load a target curve file… | `target` |
 | `Shift+I` | Show / hide IR pane | `toggle_ir` |

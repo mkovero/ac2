@@ -46,7 +46,7 @@ pub struct TfPane {
 pub struct LegendEntry {
     pub key: TraceKey,
     pub name: String,
-    /// Short flags: `ref`, `indep.`, `inv`, `+3.0 dB`, `Δt +1.50 ms`, `nudge +0.25 ms`,
+    /// Short flags: `ref`, `indep.`, `inv`, `+3.0 dB`, `Δt +1.50 ms`, `+0.25 ms from arrival`,
     /// `STALE 3.2 s`.
     pub tags: Vec<String>,
     /// `name · tag · tag`, as drawn.
@@ -108,8 +108,9 @@ pub struct TfScene {
     pub banners: Vec<BannerRow>,
 }
 
-/// `nudge_s`: the trace's display nudge; `stepped_s`: what a live curve's delay steps added
-/// to its arrival, drawn as a nudge too (so tagged with it) but not part of `Δ`.
+/// `nudge_s`: a stored trace's delay from its arrival (its display nudge); `stepped_s`: a
+/// live curve's delay from its measured arrival, already in its columns and not part of
+/// `Δ`. Either is tagged the same way: `+0.10 ms from arrival`.
 fn legend_entry(t: &DisplayTrace, nudge_s: f64, stepped_s: f64, selected: bool) -> LegendEntry {
     let mut tags: Vec<String> = t.note.iter().cloned().collect();
     match t.relation {
@@ -120,9 +121,7 @@ fn legend_entry(t: &DisplayTrace, nudge_s: f64, stepped_s: f64, selected: bool) 
             tags.push(format!("Δt {}", signed_ms(t.shift_s + nudge_s)));
         }
     }
-    if nudge_s + stepped_s != 0.0 {
-        tags.push(format!("nudge {}", format::nudge(nudge_s + stepped_s)));
-    }
+    tags.extend(format::from_arrival(nudge_s + stepped_s));
     if t.inverted {
         tags.push("inv".to_string());
     }
@@ -879,7 +878,7 @@ mod tests {
             [
                 "Main L · ref · 1/6 oct",
                 "Delay tower · Δt +1.50 ms · inv · +3.0 dB · STALE 3.2 s",
-                "imported · indep. · nudge +0.25 ms · 1/24 oct mag only"
+                "imported · indep. · +0.25 ms from arrival · 1/24 oct mag only"
             ]
         );
         assert_eq!(

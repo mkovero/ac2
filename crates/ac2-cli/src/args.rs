@@ -798,7 +798,7 @@ pub enum DelayCmd {
         pick: PickArg,
     },
     /// Set the delay: `12.5ms`, `600samples` or a distance `4.3m`. The arrival stays: the
-    /// live curve alone moves, the value's distance from the arrival is its nudge.
+    /// live curve alone moves, and the value's distance from it is the offset from the arrival.
     Set {
         /// Transfer measurement.
         meas: MeasRef,

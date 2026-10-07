@@ -41,7 +41,7 @@
 //! # A measurement's own delay steps
 //!
 //! The time base of a live curve is its *arrival* `τ_k = D_k − n_k`: the applied delay `D_k`
-//! less what the operator's delay steps (`delay.nudge`, Ctrl / Alt + `,` `.`) added to it,
+//! less what the operator's delay steps (`delay.nudge`: `,` `.` and Ctrl / Alt) added to it,
 //! `n_k`. Its columns hold `H(f) · e^{+jωD_k}`, so it is drawn as
 //! `H(f) · e^{+jω(τ_ref + n_k + ν_k)}`: a step of the measurement's delay moves its own
 //! curve by `e^{+jωΔ}` — the direction a `.` display nudge of the same size moves a trace —

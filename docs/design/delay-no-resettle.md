@@ -24,9 +24,10 @@ Now:
   28 ms on the 4 kHz stage); only the stages beyond that settle again. Beyond every stage's
   limit (a fresh insert from 0, a wrong arrival corrected) the ladder restarts as before.
 
-The per-trace display nudge (`,` `.`, decision 8a) is unchanged: it shifts how a trace is
-drawn; the new keys change what the measurement aligns to — and are seen the same way (next
-section).
+A measurement has one delay: plain `,` `.` step it by 0.1 ms through `delay.nudge` too, so
+every key on a live measurement changes what it aligns to (there is no separate display
+nudge of a live curve). On a selected stored trace `,` `.` stay its display nudge
+(decision 8a), seen the same way (next section).
 
 ## What the keys mean on the view
 
@@ -45,8 +46,20 @@ step Δ moves it by `e^{+jωΔ}`, exactly as a display nudge `ν = Δ` moves a t
 `.` both lead the phase; Ctrl+, and `,` both lag it — no key is flipped), and since the
 reference is an arrival too, no other curve moves, whichever curve is the reference.
 
+Every front end says the measurement's delay as one value and its offset from the arrival,
+`delay 12.60 ms (+0.10 ms from arrival)` (list row, toasts, `ac2 meas list`), and tags the
+live curve `+0.10 ms from arrival` in the legend. A stored trace's display nudge is said in
+the same words — `delay +0.10 ms from arrival` in its row, the same legend tag, toasts
+`<name>: delay +0.1 ms → +0.10 ms from arrival` — because it is the same quantity: a
+capture starts with `delay_nudge = nudged`, and both draw the curve `e^{+jω(τ_ref + ν)}`. A
+trace shows the offset alone: it records the applied delay as its time base but not the
+arrival it had at capture, so after its nudge is changed no honest absolute delay is left.
+
 - **Insert** sets a new arrival: `nudged` = 0 (nothing on the view moves).
-- **Nudge** adds its step to `nudged` (at most ±10 s).
+- **Step** (`delay.nudge`: `,` `.` 0.1 ms, Ctrl a sample, Alt a tenth) adds its step to
+  `nudged` (at most ±10 s). At 96 kHz 0.1 ms is 9.6 samples; the 10⁻⁶-sample snap makes
+  whole 0.1 ms steps out and back land exactly on the start
+  (`crates/ac2d/tests/transfer.rs`, `tenth_millisecond_steps_at_96_khz_return_exactly`).
 - **Typed value** keeps the arrival: `nudged` = typed − arrival, so the live curve alone moves
   to it, as the same run of steps would.
 - **Tracking** moves the arrival to the tracker's result: whole samples while two windows
@@ -54,7 +67,7 @@ reference is an arrival too, no other curve moves, whichever curve is the refere
   daemon leaves the delay alone while that arrival is within 0.05 sample of the applied
   arrival (applied − nudged), so tracking a steady path does not keep turning the phase by
   its own scatter; a move goes in as any other (whole samples in time, the fraction as
-  phase), keeping the operator's nudge on top.
+  phase), keeping the operator's offset on top.
 - **Finder** runs on the raw, unaligned pair: the applied delay never enters it.
 - **IR view**: built from the full-rate stage's averaged H1, whose time origin is now the
   exact applied delay including the fraction (`IrMeta::inserted_delay`).

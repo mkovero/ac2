@@ -554,11 +554,11 @@ fn trace_keys_act_on_the_selected_trace() {
     assert_eq!(what, "t13: offset −3.5 dB");
     let (_, edit, what) = trace_update(&t.key("."));
     assert!((edit.delay_nudge.0 - 0.000_1).abs() < 1e-15);
-    assert_eq!(what, "t13: nudged +0.1 ms → +0.10 ms");
-    // The mirror still has no nudge (no reply here): the step from there.
+    assert_eq!(what, "t13: delay +0.1 ms → +0.10 ms from arrival");
+    // The mirror is still at the arrival (no reply here): the step from there.
     let (_, edit, what) = trace_update(&t.key(","));
     assert!((edit.delay_nudge.0 + 0.000_1).abs() < 1e-15);
-    assert_eq!(what, "t13: nudged −0.1 ms → −0.10 ms");
+    assert_eq!(what, "t13: delay −0.1 ms → −0.10 ms from arrival");
     assert!(t.key("E").is_empty());
     assert_eq!(
         t.st.view.tf.phase_reference,

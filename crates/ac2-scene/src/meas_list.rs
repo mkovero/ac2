@@ -65,8 +65,6 @@ pub struct MeasItem<'a> {
     pub offset_db: f64,
     /// Drawn inverted (this app's).
     pub inverted: bool,
-    /// Display nudge of its live curve, seconds (this app's).
-    pub nudge_s: f64,
     /// Its live curves are hidden in this app (it keeps measuring).
     pub hidden: bool,
     /// The colour its curve is drawn in, in every pane and legend: its row's dot has it.
@@ -87,7 +85,7 @@ pub enum Mark {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeasRow {
     pub id: MeasId,
-    /// `TF  Main L` over `running · 12.34 ms · tracking`.
+    /// `TF  Main L` over `running · delay 12.34 ms (+0.02 ms from arrival) · tracking`.
     pub text: String,
     pub hidden: bool,
     pub mark: Mark,
@@ -108,14 +106,12 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
         text.push_str(" · hidden");
     }
     if let Some(d) = &m.delay {
-        // Distance stays in the transfer legend's reference line.
-        text.push_str(&format!(" · {}", format::delay(d.applied.0)));
-    }
-    // How far the live curve was moved from its arrival, delay steps and display nudge
-    // together, as its legend's nudge tag and the nudge toasts say.
-    let stepped = m.delay.as_ref().map_or(0.0, |d| d.nudged.0);
-    if let Some(n) = format::nudged_tag(stepped + item.nudge_s) {
-        text.push_str(&format!(" · {n}"));
+        // One delay and how far it is from the measured arrival, as the legend and the
+        // delay toasts say it. Distance stays in the transfer legend's reference line.
+        text.push_str(&format!(
+            " · {}",
+            format::meas_delay(d.applied.0, d.nudged.0)
+        ));
     }
     if let Some(d) = &m.delay {
         if d.tracking && d.awaiting_pick {
@@ -722,50 +718,46 @@ pub(crate) mod tests {
             expression: None,
             offset_db: 0.0,
             inverted: false,
-            nudge_s: 0.0,
             hidden: false,
             color: Color::from_rgba8([0, 0, u8::try_from(m.id.0).unwrap_or(0), 255]),
         }
     }
 
     #[test]
-    fn rows_say_the_nudge_the_legend_says() {
-        let mut m = tf(2, "TF 2");
-        m.delay = Some(DelayState {
-            applied: Seconds(0.012_5),
-            applied_samples: 600.0,
-            nudged: Seconds(1.0 / 48_000.0),
-            nudged_samples: 1.0,
+    fn rows_say_one_delay_and_its_offset_from_the_arrival() {
+        let state = |applied: f64, nudged: f64| DelayState {
+            applied: Seconds(applied / 48_000.0),
+            applied_samples: applied,
+            nudged: Seconds(nudged / 48_000.0),
+            nudged_samples: nudged,
             tracking: false,
             awaiting_pick: false,
             last_finding: None,
-        });
+        };
+        let mut m = tf(2, "TF 2");
+        m.delay = Some(state(600.0, 0.0));
+        let r = meas_row(&item(&m), None, true);
+        assert_eq!(r.text, "TF  TF 2\n     running · delay 12.50 ms");
+        // 0.1 ms later than the arrival.
+        m.delay = Some(state(604.8, 4.8));
         let r = meas_row(&item(&m), None, true);
         assert_eq!(
             r.text,
-            "TF  TF 2\n     running · 12.50 ms · nudged +0.02 ms"
+            "TF  TF 2\n     running · delay 12.60 ms (+0.10 ms from arrival)"
         );
-        // Delay steps and the display nudge move the same curve: one total.
-        let nudged = MeasItem {
-            nudge_s: -0.000_3,
-            ..item(&m)
-        };
-        let r = meas_row(&nudged, None, true);
+        // One sample earlier.
+        m.delay = Some(state(599.0, -1.0));
+        let r = meas_row(&item(&m), None, true);
         assert_eq!(
             r.text,
-            "TF  TF 2\n     running · 12.50 ms · nudged −0.28 ms"
+            "TF  TF 2\n     running · delay 12.479 ms (−0.021 ms from arrival)"
         );
         let mut plain = tf(3, "TF 3");
         plain.delay = None;
-        let r = meas_row(
-            &MeasItem {
-                nudge_s: 0.000_1,
-                ..item(&plain)
-            },
-            None,
-            true,
+        assert_eq!(
+            meas_row(&item(&plain), None, true).text,
+            "TF  TF 3\n     running"
         );
-        assert_eq!(r.text, "TF  TF 3\n     running · nudged +0.10 ms");
     }
 
     #[test]

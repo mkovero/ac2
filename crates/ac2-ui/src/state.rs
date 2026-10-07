@@ -331,13 +331,12 @@ pub enum ConnState {
     },
 }
 
-/// Display edits of a live trace (decision 8a: per-trace nudge; offset and polarity are
-/// display only and go to the scene, which applies them).
+/// Display edits of a live trace: offset and polarity are display only and go to the
+/// scene, which applies them. Its delay is the measurement's, in the daemon.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct LiveEdit {
     pub offset_db: f64,
     pub inverted: bool,
-    pub nudge_s: f64,
 }
 
 /// What a measurement stop's or delete's toast adds when the stimulus stopped with it.
@@ -838,7 +837,7 @@ pub const COHERENCE_MASKS: [Option<f32>; 5] = [None, Some(0.3), Some(0.5), Some(
 pub const PAN_OCTAVES: f64 = 1.0 / 3.0;
 /// Zoom step: half an octave of span per key press each side.
 pub const ZOOM_FACTOR: f64 = 1.5;
-/// Delay nudge step.
+/// Plain `,` / `.` step: a measurement's delay, or a stored trace's nudge.
 pub const NUDGE_S: f64 = 0.000_1;
 
 /// Fine step of a measurement's own delay, in samples: 0.1 sample is 7.5° at 10 kHz and

@@ -340,48 +340,55 @@ fn transfer_commands() {
             ..
         }]
     ));
-    // U / J / , . are display edits, not commands.
+    // U / J are display edits, not commands.
     assert!(t.key("U").is_empty());
     assert!(t.st.edit(MeasId(1)).inverted);
     t.type_key("J", "j");
     t.text("+3,5 dB");
     t.key("Enter");
     assert_eq!(t.st.edit(MeasId(1)).offset_db, 3.5);
-    t.key(".");
-    assert!(
-        t.last_toast().ends_with(": nudged +0.1 ms → +0.10 ms"),
-        "{}",
-        t.last_toast()
-    );
-    t.key(".");
-    assert!(t.last_toast().ends_with(": nudged +0.1 ms → +0.20 ms"));
-    t.key(",");
-    assert!(t.last_toast().ends_with(": nudged −0.1 ms → +0.10 ms"));
-    assert!((t.st.edit(MeasId(1)).nudge_s - 0.000_1).abs() < 1e-15);
-    // Ctrl / Alt on the same keys move the measurement's own delay: a whole sample, a tenth.
-    // The toast's total is the step on top of the display nudge (+0.1 ms), as the row says.
-    for (key, samples, what) in [
-        ("Ctrl+.", 1.0, "+1 sample → +0.12 ms"),
-        ("Ctrl+,", -1.0, "−1 sample → +0.08 ms"),
-        ("Alt+.", 0.1, "+0.1 sample → +0.10 ms"),
-        ("Alt+,", -0.1, "−0.1 sample → +0.10 ms"),
+    // A measurement has one delay, the daemon's: plain , . step it by 0.1 ms, Ctrl / Alt on
+    // the same keys by a whole sample or a tenth. The mirror is at the arrival (12.50 ms)
+    // and gets no reply here, so each toast is one step from there.
+    for (key, by, what) in [
+        (".", 0.000_1, "+0.1 ms → 12.60 ms (+0.10 ms from arrival)"),
+        (",", -0.000_1, "−0.1 ms → 12.40 ms (−0.10 ms from arrival)"),
+        (
+            "Ctrl+.",
+            1.0 / 48_000.0,
+            "+1 sample → 12.521 ms (+0.021 ms from arrival)",
+        ),
+        (
+            "Ctrl+,",
+            -1.0 / 48_000.0,
+            "−1 sample → 12.479 ms (−0.021 ms from arrival)",
+        ),
+        (
+            "Alt+.",
+            0.1 / 48_000.0,
+            "+0.1 sample → 12.502 ms (+0.002 ms from arrival)",
+        ),
+        (
+            "Alt+,",
+            -0.1 / 48_000.0,
+            "−0.1 sample → 12.498 ms (−0.002 ms from arrival)",
+        ),
     ] {
         let r = t.key(key);
         match r.as_slice() {
             [
                 Request::Call {
-                    cmd: Command::DelayNudge { meas, by },
+                    cmd: Command::DelayNudge { meas, by: b },
                     what: w,
                 },
             ] => {
                 assert_eq!(*meas, MeasId(1));
-                assert!((by.0 - samples / 48_000.0).abs() < 1e-15, "{key}");
-                assert!(w.ends_with(&format!(": nudged {what}")), "{w}");
+                assert!((b.0 - by).abs() < 1e-15, "{key}");
+                assert_eq!(*w, format!("Main L: delay {what}"), "{key}");
             }
             r => panic!("{key}: {r:?}"),
         }
     }
-    assert!((t.st.edit(MeasId(1)).nudge_s - 0.000_1).abs() < 1e-15);
     // Typed delay.
     t.type_key("D", "d");
     match &t.st.overlay {
@@ -393,7 +400,7 @@ fn transfer_commands() {
         matches!(
             r.as_slice(),
             [Request::Call { cmd: Command::DelaySet { delay: Seconds(d), .. }, what }]
-                if (*d - 0.0125).abs() < 1e-12 && what.ends_with(": delay 12.50 ms → nudged +0.10 ms")
+                if (*d - 0.0125).abs() < 1e-12 && what == "Main L: delay 12.50 ms"
         ),
         "{r:?}"
     );
@@ -436,31 +443,35 @@ fn call_text(r: &[Request]) -> &str {
 }
 
 #[test]
-fn delay_toasts_name_the_step_and_the_whole_nudge() {
+fn delay_toasts_name_the_step_the_delay_and_its_offset_from_the_arrival() {
     let mut t = T::new();
-    // Not nudged: a typed delay is just the delay.
+    // At the arrival: a typed delay is just the delay.
     t.type_key("D", "d");
     assert_eq!(call_text(&t.key("Enter")), "Main L: delay 12.50 ms");
-    // Two samples of delay steps on the arrival.
+    // 0.05 ms (2.4 samples) of delay steps on the arrival.
     let mut s = daemon_state();
     for m in &mut s.measurements {
         if let Some(d) = &mut m.delay {
-            d.applied = Seconds(602.0 / 48_000.0);
-            d.applied_samples = 602.0;
-            d.nudged = Seconds(2.0 / 48_000.0);
-            d.nudged_samples = 2.0;
+            d.applied = Seconds(602.4 / 48_000.0);
+            d.applied_samples = 602.4;
+            d.nudged = Seconds(2.4 / 48_000.0);
+            d.nudged_samples = 2.4;
         }
     }
     t.conn(mirror(s));
     assert_eq!(
         call_text(&t.key("Ctrl+.")),
-        "Main L: nudged +1 sample → +0.06 ms"
+        "Main L: delay +1 sample → 12.571 ms (+0.071 ms from arrival)"
     );
     assert_eq!(
         call_text(&t.key("Alt+,")),
-        "Main L: nudged −0.1 sample → +0.04 ms"
+        "Main L: delay −0.1 sample → 12.548 ms (+0.048 ms from arrival)"
     );
-    // A typed delay keeps the arrival (12.50 ms): the nudge is the rest.
+    assert_eq!(
+        call_text(&t.key(".")),
+        "Main L: delay +0.1 ms → 12.65 ms (+0.15 ms from arrival)"
+    );
+    // A typed delay keeps the arrival (12.50 ms): the offset is the rest.
     t.type_key("D", "d");
     for _ in 0..10 {
         t.key("Backspace");
@@ -468,8 +479,14 @@ fn delay_toasts_name_the_step_and_the_whole_nudge() {
     t.text("12");
     assert_eq!(
         call_text(&t.key("Enter")),
-        "Main L: delay 12.00 ms → nudged −0.50 ms"
+        "Main L: delay 12.00 ms (−0.50 ms from arrival)"
     );
+    t.type_key("D", "d");
+    for _ in 0..10 {
+        t.key("Backspace");
+    }
+    t.text("12.5");
+    assert_eq!(call_text(&t.key("Enter")), "Main L: delay 12.50 ms");
 }
 
 #[test]

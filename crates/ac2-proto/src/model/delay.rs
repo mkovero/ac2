@@ -228,11 +228,12 @@ pub struct DelayState {
     /// Applied delay in samples at the session rate (exact value used by DSP, fractions
     /// included: the whole samples shift the reference, the fraction rotates the phase).
     pub applied_samples: f64,
-    /// How far `delay.nudge` steps have moved the applied delay from the arrival it was
-    /// last set to (an insert, a typed value; tracking moves both and keeps this). The
-    /// shared time base refers the live curve to `applied − nudged`, the arrival: a step
-    /// then shows as a move of that curve alone, like a trace's display nudge, instead of
-    /// being undone by the time base (decision 8a).
+    /// The applied delay's offset from the arrival: what `delay.nudge` steps and typed
+    /// values (`delay.set`) moved it by since the last insert, which sets the arrival
+    /// (tracking moves both and keeps this). The shared time base refers the live curve to
+    /// `applied − nudged`, the arrival: a step then shows as a move of that curve alone,
+    /// like a stored trace's display nudge, instead of being undone by the time base
+    /// (decision 8a).
     pub nudged: Seconds,
     /// `nudged` in samples at the session rate, fractions included.
     pub nudged_samples: f64,

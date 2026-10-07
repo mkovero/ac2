@@ -733,3 +733,61 @@ fn tracking_applies_a_fractional_arrival() {
     }
     stop.join().unwrap();
 }
+
+/// The plain keys step a measurement's delay by 0.1 ms, which at 96 kHz is 9.6 samples: the
+/// daemon keeps the fraction (the engine rotates the phase for it) and snaps to a millionth
+/// of a sample, so whole 0.1 ms steps never accumulate float error. Steps out and back land
+/// exactly on the start, the arrival never moves, and ten steps are exactly 96 samples.
+#[test]
+fn tenth_millisecond_steps_at_96_khz_return_exactly() {
+    init_log();
+    let fs = 96_000_u32;
+    let backend = ac2_audio::FakeBackend::new(ac2_audio::FakeConfig {
+        sample_rate: fs,
+        block_frames: BLOCK,
+        inputs: 4,
+        outputs: 2,
+        drive: ac2_audio::fake::FakeDrive::Manual,
+        seed: 7,
+        ..ac2_audio::FakeConfig::default()
+    })
+    .unwrap();
+    let h = Daemon::start(config(backend, inproc("tf-96k"))).unwrap();
+    let (mut c, _sub) = connect(&h, &[]);
+    let mut s = session(true);
+    s.sample_rate_hz = Some(fs);
+    c.ok(Command::SessionOpen { config: s });
+    c.ok(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    let start = delay_state(c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(1201.0 / f64::from(fs)),
+    }));
+    let arrival = start.applied_samples - start.nudged_samples;
+    let step = |c: &mut Client, by: f64| {
+        delay_state(c.ok(Command::DelayNudge {
+            meas: MeasId(1),
+            by: Seconds(by),
+        }))
+    };
+    let mut st = start.clone();
+    for _ in 0..10 {
+        st = step(&mut c, 0.000_1);
+        assert_eq!(st.applied_samples - st.nudged_samples, arrival, "{st:?}");
+    }
+    assert_eq!(st.applied_samples, start.applied_samples + 96.0);
+    assert_eq!(st.nudged_samples, start.nudged_samples + 96.0);
+    for _ in 0..3 {
+        st = step(&mut c, -0.000_1);
+    }
+    assert_eq!(st.applied_samples, 1268.2);
+    for _ in 0..7 {
+        st = step(&mut c, -0.000_1);
+    }
+    assert_eq!(
+        (st.applied_samples, st.nudged_samples, st.applied),
+        (start.applied_samples, start.nudged_samples, start.applied)
+    );
+    h.shutdown();
+}

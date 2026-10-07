@@ -2,6 +2,21 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+One delay per measurement (operator, 2026-10-07: "measurement can have delay change and it
+can be nudged, this is confusing"; then "make sure the delay change is reported on
+measurements and traces in similar way"):
+- **Plain `,` / `.` step the measurement's delay** by 0.1 ms through the daemon
+  (`delay.nudge`), as Ctrl (a sample) and Alt (a tenth) do; the app's own display nudge of a
+  live curve is gone. Stopped or hidden, the plain keys refuse as Ctrl / Alt do. Whole
+  0.1 ms steps at 96 kHz (9.6 samples) return exactly to the start (10⁻⁶-sample snap).
+- **One vocabulary, no "nudged"**: measurement row `delay 12.60 ms (+0.10 ms from arrival)`,
+  toasts `Main L: delay +0.1 ms → 12.60 ms (+0.10 ms from arrival)` /
+  `Main L: delay 12.00 ms (−0.50 ms from arrival)`, legend `+0.10 ms from arrival`, CLI
+  `ac2 meas list` the same text plus samples. Stored traces: row
+  `delay +0.30 ms from arrival`, the same legend tag, toast
+  `Sweep 2: delay +0.1 ms → +0.30 ms from arrival`, `ac2 trace show` `from arrival`. A trace
+  says only the offset: it does not keep the arrival it had at capture. No wire change.
+
 Typed delay (operator, 2026-10-07: a typed delay should move the live curve like a Ctrl+.
 step — "yes"):
 - **A typed delay (`D`, `delay.set`) moves the live curve alone**: the arrival stays and the

@@ -161,49 +161,87 @@ pub fn sample_step(samples: f64) -> String {
     format!("{} {unit}", signed(samples, needed_decimals(samples, 3)))
 }
 
-/// A delay nudge: how far a curve was moved from its arrival, signed, in ms to 10 µs (half
-/// a sample at 48 kHz, so a one-sample nudge never reads as none): `+0.30 ms`, `−0.02 ms`.
-/// The list rows, the legend's nudge tag and the nudge toasts all say it this way.
-pub fn nudge(seconds: f64) -> String {
-    with_unit(signed(seconds * 1000.0, 2), " ms")
+/// A step in seconds as signed ms with as few decimals as it needs (up to 3): `+0.1 ms`.
+fn step_ms(seconds: f64) -> String {
+    let ms = seconds * 1000.0;
+    with_unit(signed(ms, needed_decimals(ms, 3)), " ms")
 }
 
-/// `nudged +0.30 ms` after a measurement's or a trace's state in its list row; `None` when
-/// it is not nudged.
-pub fn nudged_tag(seconds: f64) -> Option<String> {
-    (seconds != 0.0).then(|| format!("nudged {}", nudge(seconds)))
-}
-
-/// One step of a delay nudge, in the unit its keys step by.
+/// One step of a measurement's delay, in the unit its key steps by.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum NudgeStep {
-    /// A measurement's delay: whole or fractional samples of the session rate.
+pub enum DelayStep {
+    /// Whole or fractional samples of the session rate (Ctrl / Alt).
     Samples(f64),
-    /// A display nudge (a trace's, or a live curve's): seconds.
+    /// Seconds (the plain keys' 0.1 ms).
     Seconds(f64),
 }
 
-/// The toast after a nudge: the step taken, then the curve's whole nudge as its row and
-/// legend show it: `TF 2: nudged +1 sample → +0.02 ms`, `1083 94cm: nudged −0.1 ms → +0.20 ms`.
-pub fn nudge_toast(name: &str, step: NudgeStep, total_s: f64) -> String {
-    let step = match step {
-        NudgeStep::Samples(n) => sample_step(n),
-        NudgeStep::Seconds(s) => {
-            let ms = s * 1000.0;
-            with_unit(signed(ms, needed_decimals(ms, 3)), " ms")
-        }
-    };
-    format!("{name}: nudged {step} \u{2192} {}", nudge(total_s))
+/// A measurement's delay from its measured arrival, signed, to the precision of
+/// [`delay`] (so that a delay and its offset read to the same digit): `+0.02 ms`,
+/// `−0.002 ms`.
+pub fn arrival_offset(seconds: f64) -> String {
+    let ms_value = seconds * 1000.0;
+    with_unit(signed(ms_value, needed_decimals(ms_value, 3).max(2)), " ms")
 }
 
-/// The toast after a typed delay: the delay set, and the nudge from the arrival it keeps
-/// when there is one: `TF 2: delay 0.94 ms → nudged +0.02 ms`, `TF 2: delay 0.94 ms`.
-pub fn typed_delay_toast(name: &str, applied_s: f64, nudged_s: f64) -> String {
-    let set = format!("{name}: delay {}", delay(applied_s));
-    if is_zero_text(&fixed(nudged_s * 1000.0, 2)) {
-        return set;
+/// `+0.02 ms from arrival`: what the legend tags a live curve with and the delay text puts
+/// in brackets; `None` when the delay is the arrival (a float residue of the arithmetic
+/// included).
+pub fn from_arrival(seconds: f64) -> Option<String> {
+    let ms_value = seconds * 1000.0;
+    if !ms_value.is_finite() || is_zero_text(&fixed(ms_value.abs(), 3)) {
+        return None;
     }
-    format!("{set} \u{2192} nudged {}", nudge(nudged_s))
+    Some(format!("{} from arrival", arrival_offset(seconds)))
+}
+
+/// A measurement's one delay and its offset from the measured arrival, as its list row,
+/// its toasts and the CLI say it: `delay 0.94 ms (+0.02 ms from arrival)`, `delay 0.94 ms`.
+pub fn meas_delay(applied_s: f64, offset_s: f64) -> String {
+    format!("delay {}", delay_and_offset(applied_s, offset_s))
+}
+
+/// `0.94 ms (+0.02 ms from arrival)`, `0.94 ms`: [`meas_delay`] where a column already says
+/// "delay".
+pub fn delay_and_offset(applied_s: f64, offset_s: f64) -> String {
+    match from_arrival(offset_s) {
+        Some(o) => format!("{} ({o})", delay(applied_s)),
+        None => delay(applied_s),
+    }
+}
+
+/// The toast after a step of a measurement's delay: the step, then the delay it lands on:
+/// `TF 2: delay +0.1 ms → 0.94 ms (+0.02 ms from arrival)`, `TF 2: delay −1 sample → 12.50 ms`.
+pub fn delay_step_toast(name: &str, step: DelayStep, applied_s: f64, offset_s: f64) -> String {
+    let step = match step {
+        DelayStep::Samples(n) => sample_step(n),
+        DelayStep::Seconds(s) => step_ms(s),
+    };
+    format!(
+        "{name}: delay {step} \u{2192} {}",
+        delay_and_offset(applied_s, offset_s)
+    )
+}
+
+/// The toast after a typed delay: `TF 2: delay 0.94 ms (+0.02 ms from arrival)`.
+pub fn typed_delay_toast(name: &str, applied_s: f64, offset_s: f64) -> String {
+    format!("{name}: {}", meas_delay(applied_s, offset_s))
+}
+
+/// A stored trace's delay from the arrival it was captured at (its nudge), after its state
+/// in its list row: `delay +0.30 ms from arrival`; `None` at the arrival. A stored trace
+/// keeps the delay it was measured with only as the time base of its phase, not the
+/// arrival it had then, so only the offset is said; an imported or averaged trace's
+/// arrival is its own alignment.
+pub fn trace_delay(offset_s: f64) -> Option<String> {
+    from_arrival(offset_s).map(|o| format!("delay {o}"))
+}
+
+/// The toast after a step of a stored trace's delay, in the shape of a measurement's:
+/// `1083 94cm: delay −0.1 ms → +0.20 ms from arrival`, `… → at arrival`.
+pub fn trace_delay_toast(name: &str, step_s: f64, offset_s: f64) -> String {
+    let landed = from_arrival(offset_s).unwrap_or_else(|| "at arrival".to_owned());
+    format!("{name}: delay {} \u{2192} {landed}", step_ms(step_s))
 }
 
 /// An applied delay: milliseconds to 10 µs as everywhere else, with a third decimal when
@@ -406,40 +444,83 @@ mod tests {
     }
 
     #[test]
-    fn nudges_and_their_toasts() {
-        assert_eq!(nudge(0.000_3), "+0.30 ms");
-        assert_eq!(nudge(-0.000_3), "−0.30 ms");
-        // One sample at 48 kHz.
-        assert_eq!(nudge(1.0 / 48_000.0), "+0.02 ms");
-        assert_eq!(nudge(0.0), "0.00 ms");
-        assert_eq!(nudge(f64::NAN), "—");
-        assert_eq!(nudged_tag(0.0), None);
-        assert_eq!(nudged_tag(-0.000_126).as_deref(), Some("nudged −0.13 ms"));
+    fn a_trace_says_its_delay_as_a_measurement_does() {
+        assert_eq!(trace_delay(0.0), None);
         assert_eq!(
-            nudge_toast("TF 2", NudgeStep::Samples(1.0), 1.0 / 48_000.0),
-            "TF 2: nudged +1 sample → +0.02 ms"
+            trace_delay(0.000_3).as_deref(),
+            Some("delay +0.30 ms from arrival")
+        );
+        // One sample at 48 kHz still reads as a delay.
+        assert_eq!(
+            trace_delay(1.0 / 48_000.0).as_deref(),
+            Some("delay +0.021 ms from arrival")
         );
         assert_eq!(
-            nudge_toast("TF 2", NudgeStep::Samples(-0.1), -0.000_25),
-            "TF 2: nudged −0.1 sample → −0.25 ms"
+            trace_delay(-0.000_126).as_deref(),
+            Some("delay −0.126 ms from arrival")
         );
         assert_eq!(
-            nudge_toast("1083 94cm", NudgeStep::Seconds(0.000_1), 0.000_3),
-            "1083 94cm: nudged +0.1 ms → +0.30 ms"
+            trace_delay_toast("1083 94cm", 0.000_1, 0.000_3),
+            "1083 94cm: delay +0.1 ms → +0.30 ms from arrival"
         );
         assert_eq!(
-            nudge_toast("1083 94cm", NudgeStep::Seconds(-0.000_1), 0.0),
-            "1083 94cm: nudged −0.1 ms → 0.00 ms"
+            trace_delay_toast("1083 94cm", -0.000_1, 0.0),
+            "1083 94cm: delay −0.1 ms → at arrival"
+        );
+    }
+
+    #[test]
+    fn a_measurement_has_one_delay_and_its_offset_from_the_arrival() {
+        assert_eq!(arrival_offset(0.000_02), "+0.02 ms");
+        assert_eq!(arrival_offset(-0.000_002), "−0.002 ms");
+        assert_eq!(from_arrival(0.0), None);
+        // A float residue of the arithmetic is no offset.
+        assert_eq!(from_arrival(1e-12), None);
+        assert_eq!(from_arrival(-1e-12), None);
+        assert_eq!(from_arrival(f64::NAN), None);
+        assert_eq!(
+            from_arrival(0.000_02).as_deref(),
+            Some("+0.02 ms from arrival")
+        );
+        // A tenth of a sample at 96 kHz still shows.
+        assert_eq!(
+            from_arrival(0.1 / 96_000.0).as_deref(),
+            Some("+0.001 ms from arrival")
         );
         assert_eq!(
-            typed_delay_toast("TF 2", 0.000_94, 1.0 / 48_000.0),
-            "TF 2: delay 0.94 ms → nudged +0.02 ms"
+            meas_delay(0.000_94, 0.000_02),
+            "delay 0.94 ms (+0.02 ms from arrival)"
+        );
+        assert_eq!(
+            meas_delay(0.012_5, -0.001),
+            "delay 12.50 ms (−1.00 ms from arrival)"
+        );
+        assert_eq!(meas_delay(0.000_94, 0.0), "delay 0.94 ms");
+        assert_eq!(
+            delay_step_toast("TF 2", DelayStep::Seconds(0.000_1), 0.000_94, 0.000_02),
+            "TF 2: delay +0.1 ms → 0.94 ms (+0.02 ms from arrival)"
+        );
+        assert_eq!(
+            delay_step_toast("TF 2", DelayStep::Samples(-1.0), 0.012_5, 0.0),
+            "TF 2: delay −1 sample → 12.50 ms"
+        );
+        assert_eq!(
+            delay_step_toast(
+                "TF 2",
+                DelayStep::Samples(0.1),
+                0.0125 + 0.1 / 48_000.0,
+                0.1 / 48_000.0
+            ),
+            "TF 2: delay +0.1 sample → 12.502 ms (+0.002 ms from arrival)"
+        );
+        assert_eq!(
+            typed_delay_toast("TF 2", 0.000_94, 0.000_02),
+            "TF 2: delay 0.94 ms (+0.02 ms from arrival)"
         );
         assert_eq!(
             typed_delay_toast("TF 2", 0.012_5, -0.001),
-            "TF 2: delay 12.50 ms → nudged −1.00 ms"
+            "TF 2: delay 12.50 ms (−1.00 ms from arrival)"
         );
-        // A float residue of the arithmetic is no nudge.
         assert_eq!(
             typed_delay_toast("TF 2", 0.000_94, 1e-12),
             "TF 2: delay 0.94 ms"

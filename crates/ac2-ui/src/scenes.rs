@@ -10,7 +10,7 @@ use ac2_proto::FrameData;
 use ac2_proto::frame::ProtectionFlags;
 use ac2_proto::model::{LevelScale, MeasKind, Measurement, PhaseBasis, Polarity, TraceKind};
 use ac2_proto::topic::{Stream, Topic};
-use ac2_proto::units::{MeasId, Seconds, WallNs};
+use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::format;
@@ -297,7 +297,6 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         } else {
             Polarity::Normal
         };
-        t.nudge = Seconds(e.nudge_s);
         t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.

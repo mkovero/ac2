@@ -522,24 +522,28 @@ list. Inserting from a `no_estimate` finding is `refused`. `delay.set` (an expli
 value) clears `last_finding`; a delay tracking moves keeps it. `delay.nudge` moves the
 applied delay by `by` (either sign, fractions of a sample allowed) and keeps
 `last_finding` (it refines that delay); like `delay.insert` and `delay.set` it resolves
-`awaiting_pick`. The daemon keeps what nudges added apart as `nudged`: the applied delay is
-the *arrival* plus `nudged`. `delay.insert` sets a new arrival (`nudged` 0); `delay.set`
+`awaiting_pick`. A measurement has one delay, `applied`; the daemon keeps its offset from
+the arrival apart as `nudged`: the applied delay is the *arrival* plus `nudged`. `delay.insert` sets a new arrival (`nudged` 0); `delay.set`
 keeps the arrival and sets `nudged` to the value's distance from it, and `delay.nudge` adds
 its step to `nudged` (both refused beyond ±10 s from the arrival); tracking compares the
 finder's estimates with the arrival and moves it, keeping `nudged`. A view's shared time
-base refers the live curve to the arrival, so a nudge moves that curve alone, like a
-trace's `delay_nudge` (`docs/design/delay-no-resettle.md`, "What the keys mean"). A
+base refers the live curve to the arrival, so a step moves that curve alone, like a
+trace's `delay_nudge` (`docs/design/delay-no-resettle.md`, "What the keys mean"); the app's
+plain `,` / `.` (0.1 ms) and Ctrl / Alt (a sample, a tenth) all send `delay.nudge`, and its
+front ends say the delay with its offset: `delay 12.60 ms (+0.10 ms from arrival)`. A
 capture records the applied delay as `TraceMeta.delay` and `nudged` as its
-`edit.delay_nudge`. Delays are not rounded to whole samples: the finder's fractional estimate
-is inserted as found, and the delay in samples is kept to 10⁻⁶ sample. A change of the
+`edit.delay_nudge` (the trace's offset from that arrival). Delays are not rounded to whole
+samples: the finder's fractional estimate is inserted as found, and the delay in samples is
+kept to 10⁻⁶ sample, so whole 0.1 ms steps (9.6 samples at 96 kHz) out and back return
+exactly to the start. A change of the
 delay does not restart the transfer function: each analysis stage keeps its averages,
 turned to the new delay, while the change is small next to its window, and only the other
 stages show `settling` again (`docs/design/delay-no-resettle.md`).
 
 `DelayState` (a transfer measurement's `delay`): `applied: Seconds`, `applied_samples`
 (f64: samples at the session rate, fraction included), `nudged: Seconds` and
-`nudged_samples` (f64; the part of `applied` the operator's `delay.nudge` steps added to
-the arrival),
+`nudged_samples` (f64; the offset of `applied` from the arrival, which `delay.nudge` steps
+and `delay.set` move),
 `tracking` (the operator's switch), `awaiting_pick`, `last_finding: DelayFinding | nil`. An
 `ambiguous` finding sets `awaiting_pick` (decision 1c): tracking is paused — it moves nothing
 — until the operator resolves it with `delay.insert` or `delay.set`, or runs `delay.find`

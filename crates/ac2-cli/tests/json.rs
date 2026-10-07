@@ -303,6 +303,20 @@ async fn session_meas_delay_trace_flow() -> R {
     let d = ok_json(&f, &["delay", "nudge", "main-l", "-0.25samples", "--json"]).await?;
     let n = d["delay"]["applied_samples"].as_f64().unwrap_or(f64::NAN);
     assert!((n - 479.75).abs() < 1e-9, "{n}");
+    // One delay and its offset from the inserted arrival (12.5 ms), as the app says it.
+    let r = ac2(&f, &["meas", "list"]).await?;
+    assert!(
+        r.stdout.contains("9.995 ms (−2.505 ms from arrival)"),
+        "{}",
+        r.stdout
+    );
+    let r = ac2(&f, &["delay", "nudge", "main-l", "0samples"]).await?;
+    assert!(
+        r.stdout
+            .contains("delay 9.995 ms (−2.505 ms from arrival) · 479.75 samples"),
+        "{}",
+        r.stdout
+    );
     let d = ok_json(&f, &["delay", "track", "2", "on", "--json"]).await?;
     assert_eq!(d["delay"]["tracking"], true);
     // Delay commands refuse non-transfer measurements.

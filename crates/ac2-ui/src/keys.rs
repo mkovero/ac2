@@ -471,8 +471,8 @@ commands! {
     FinderObservation => "finder_observation", "Delay finder: observation length (s)…", [Transfer];
     Invert => "invert", "Invert polarity of selected trace (display)", [Transfer];
     Offset => "offset", "Type dB offset of selected trace…", [Transfer, Spectrum];
-    NudgeEarlier => "nudge_earlier", "Nudge selected trace 0.1 ms earlier", [Transfer];
-    NudgeLater => "nudge_later", "Nudge selected trace 0.1 ms later", [Transfer];
+    NudgeEarlier => "nudge_earlier", "Delay −0.1 ms of the measurement, or of the selected stored trace", [Transfer];
+    NudgeLater => "nudge_later", "Delay +0.1 ms of the measurement, or of the selected stored trace", [Transfer];
     PhaseReference => "phase_reference", "Make selected trace the phase reference", [Transfer];
     Target => "target", "Load a target curve file…", [Transfer];
     ToggleIr => "toggle_ir", "Show / hide IR pane", [Transfer, Ir];

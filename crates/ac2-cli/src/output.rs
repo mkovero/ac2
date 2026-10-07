@@ -206,9 +206,10 @@ pub fn measurements(ms_: &[Measurement]) -> String {
             meas_kind(&m.config.kind),
             yes(m.running),
             yes(m.frozen),
-            m.delay
-                .as_ref()
-                .map_or_else(|| format::NO_VALUE.to_owned(), |d| ms(d.applied.0)),
+            m.delay.as_ref().map_or_else(
+                || format::NO_VALUE.to_owned(),
+                |d| format::delay_and_offset(d.applied.0, d.nudged.0),
+            ),
             m.config_rev.to_string(),
         ]);
     }
@@ -225,15 +226,11 @@ pub fn measurement(m: &Measurement) -> String {
         if m.running { "running" } else { "stopped" }
     );
     if let Some(d) = &m.delay {
+        // One delay and its offset from the measured arrival, as the app's row says it.
         s.push_str(&format!(
-            "  delay {} ({} samples){}{}",
-            ms(d.applied.0),
+            "  {} · {} samples{}",
+            format::meas_delay(d.applied.0, d.nudged.0),
             format::fixed(d.applied_samples, 2),
-            if d.nudged_samples != 0.0 {
-                format!(", nudged {} samples", format::signed(d.nudged_samples, 2))
-            } else {
-                String::new()
-            },
             if d.tracking { ", tracking" } else { "" }
         ));
     }
@@ -534,7 +531,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         _ => String::new(),
     };
     format!(
-        "trace {} {:?}{}\n  under       {}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  nudge       {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
+        "trace {} {:?}{}\n  under       {}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  from arrival {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
         t.id,
         t.edit.name,
         t.edit
@@ -545,7 +542,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         source_text(&t.source),
         time_base(&t.source),
         ms(t.delay.0),
-        ms(t.edit.delay_nudge.0),
+        format::arrival_offset(t.edit.delay_nudge.0),
         match t.edit.polarity {
             Polarity::Normal => "normal",
             Polarity::Inverted => "inverted",

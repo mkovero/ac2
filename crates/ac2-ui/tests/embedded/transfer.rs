@@ -340,7 +340,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
         d.st.toasts
             .iter()
             // The total depends on whether the mirror caught up between the keys.
-            .any(|t| t.text.contains(": nudged −0.1 sample → ")),
+            .any(|t| t.text.contains(": delay −0.1 sample → ")),
         "{:?}",
         d.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
     );
@@ -518,13 +518,8 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
         );
     }
     assert!(legend(&after, live).contains("· ref"), "{after:?}");
-    assert!(
-        legend(&after, live).contains(&format!(
-            "nudge {} ms",
-            ac2_scene::format::signed(10.0 / rate * 1000.0, 2)
-        )),
-        "{after:?}"
-    );
+    let tag = ac2_scene::format::from_arrival(10.0 / rate).ok_or("an offset")?;
+    assert!(legend(&after, live).contains(&tag), "{tag}: {after:?}");
     // A capture now carries the steps as its display nudge and is drawn where the live
     // curve is.
     d.send(Msg::Command(CommandId::Slot2));
@@ -649,7 +644,8 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
 
 /// From an empty daemon: a delay typed in the `D` dialog moves the running measurement's
 /// live curve the way the same number of Ctrl+. steps does, and nothing else on the pane.
-/// The arrival stays where it was; the typed value's distance from it is the nudge.
+/// The arrival stays where it was; the typed value's distance from it is its offset from
+/// the arrival. Plain `.` then steps the same delay by 0.1 ms.
 #[test]
 fn a_typed_delay_moves_only_its_live_curve() -> R {
     use ac2_scene::trace::TraceKey;
@@ -739,6 +735,39 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         phase_of(&after, TraceKey::Stored(cap)).to_bits(),
         phase_of(&before, TraceKey::Stored(cap)).to_bits(),
         "the capture moved: before {before:?} after {after:?}"
+    );
+
+    // Plain `.` on the measurement steps the same one delay by 0.1 ms, through the daemon:
+    // the live curve alone moves, by 0.1 ms worth of samples.
+    d.send(Msg::Command(CommandId::SelectLive));
+    assert_eq!(d.st.selected_trace, None);
+    let step = 0.000_1 * rate;
+    let want = st.applied_samples + step;
+    d.key(".");
+    d.until("a frame 0.1 ms later", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Tf(tf) => (tf.meta.delay.0 - want / rate).abs() < 1e-9,
+                _ => false,
+            })
+        })
+    })?;
+    let stepped = delay(&d.st).ok_or("delay")?;
+    assert!(
+        (stepped.applied_samples - stepped.nudged_samples - arrival).abs() < 1e-6,
+        "the arrival moved: {arrival} → {stepped:?}"
+    );
+    let after_dot = drawn_phase(&d.st, 240);
+    let live_dot = drawn_curve(&d.st, live);
+    let off = rotation_residual(&live_after, &live_dot, step, rate);
+    assert!(
+        off.abs() < 2.0,
+        "`.` moved the live curve {off:+.1}° off 0.1 ms — before {after:?} after {after_dot:?}"
+    );
+    assert_eq!(
+        phase_of(&after_dot, TraceKey::Stored(cap)).to_bits(),
+        phase_of(&before, TraceKey::Stored(cap)).to_bits(),
+        "the capture moved: before {before:?} after {after_dot:?}"
     );
     d.stop()?;
     drop(d);

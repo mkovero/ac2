@@ -338,7 +338,7 @@ const PAIRS: [(CommandId, CommandId, &str); 10] = [
     (
         CommandId::NudgeEarlier,
         CommandId::NudgeLater,
-        "Nudge selected trace 0.1 ms earlier / later",
+        "Delay −0.1 / +0.1 ms of the measurement or the selected stored trace",
     ),
     (
         CommandId::OffsetUp,
