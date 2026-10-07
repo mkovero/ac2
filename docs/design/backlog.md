@@ -3,15 +3,6 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to
 `backlog-done.md` with the commit when it lands.
 
-## Delay restore (2026-10-07, after typed delays moved to keeping the arrival)
-
-- **No way to set an arbitrary value as a new arrival from the CLI.** `ac2 delay set` now keeps
-  the arrival and nudges, and `ac2 delay insert` takes only the finder's result. Restoring a
-  measurement's delay after a session-format bump (`delay set <meas> 44samples` on a fresh
-  measurement) therefore yields arrival 0, nudged 44: same audio, but the view's time base and
-  the "nudged" readouts differ from before. Needs a typed arrival on the wire (PROTO bump)
-  and a CLI flag; meanwhile re-find the arrival with `ac2 delay find --insert` on signal.
-
 ## Timing precision (operator, 2026-10-07, after the REW cross-check)
 
 - **Sub-sample sweep arrival, fractional tracking, A − B arrival readout, and a group delay
