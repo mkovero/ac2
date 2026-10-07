@@ -755,17 +755,69 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     // Nothing yet from a running measurement.
     let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
     assert_eq!(s.note.as_deref(), Some("Main L: no IR frame yet"));
-    // Its transfer stream says nothing drives the reference: banner and reason.
+    // Its transfer stream says nothing drives the reference: banner and reason, which
+    // follow this app's stimulus.
     t.conn(snapshot(vec![tf.clone()]));
-    let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+    let ir_and_banner = |t: &T| {
+        let s = crate::scenes::ir(&t.st, &t.keys, &theme, SIZE, now()).expect("scene");
+        assert!(
+            texts(&s).contains(&"NO REFERENCE".to_owned()),
+            "{:?}",
+            texts(&s)
+        );
+        let detail = s
+            .banners
+            .iter()
+            .find(|r| r.text == "NO REFERENCE")
+            .and_then(|r| r.detail.clone());
+        (s.note.unwrap_or_default(), detail.unwrap_or_default())
+    };
     assert_eq!(
-        s.note.as_deref(),
-        Some("no reference: nothing is driving the loopback")
+        ir_and_banner(&t),
+        (
+            "no reference: nothing is playing — Space arms, Enter starts the stimulus".into(),
+            "stimulus off: Space arms, Enter starts it".into()
+        )
     );
-    assert!(
-        texts(&s).contains(&"NO REFERENCE".to_owned()),
-        "{:?}",
-        texts(&s)
+    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    assert_eq!(
+        ir_and_banner(&t),
+        (
+            "no reference: armed — Enter starts the stimulus".into(),
+            "stimulus armed: Enter starts it".into()
+        )
+    );
+    t.key("Enter");
+    t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
+    assert_eq!(
+        ir_and_banner(&t),
+        (
+            "no reference: nothing is driving the loopback".into(),
+            "reference input below its floor; check the loopback patch".into()
+        )
+    );
+    t.key("Escape");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    // On the sweep view Space arms a sweep: the noise is armed from a transfer pane.
+    t.st.layout.focus = PaneKind::Distortion;
+    assert_eq!(
+        ir_and_banner(&t),
+        (
+            "no reference: nothing is playing — arm the stimulus from a transfer pane".into(),
+            "stimulus off: arm it from a transfer pane".into()
+        )
+    );
+    t.st.layout.focus = PaneKind::Ir;
+    // Another client's stimulus, armed and silent: not this app's keys to press.
+    let mut other = daemon_state();
+    other.generator.owner = Some(ClientId("other".into()));
+    other.generator.armed = true;
+    t.conn(mirror(other));
+    assert_eq!(
+        ir_and_banner(&t).0,
+        "no reference: nothing is driving the loopback"
     );
     // Stopped: no fault from a measurement that no longer runs, and the key that starts it.
     let mut st = daemon_state();

@@ -163,7 +163,11 @@ out 1 ──┬──► processor / amp / speaker ··· mic ──► in 2   (
 ```
 
 ac2 needs that reference: without signal on it, the transfer pane shows **NO REFERENCE**
-instead of a curve. With a loopback that also returns the generator's own output (the
+instead of a curve. Its detail says what to do: with this app's stimulus off, `stimulus
+off: Space arms, Enter starts it`; armed and silent, `stimulus armed: Enter starts it`; on
+the sweep view (where Space arms a sweep), `stimulus off: arm it from a transfer pane`;
+with the stimulus playing (or another client's), `reference input below its floor; check
+the loopback patch`. With a loopback that also returns the generator's own output (the
 **R** and **S** roles in the session dialog, `session open --loopback-out 1 --loopback-in 1`
 from the CLI), the daemon continuously checks the output → input timing and warns about
 dropped or repeated output samples.
@@ -571,7 +575,8 @@ hides it). The IR pane follows the transfer measurement and carries its banners 
 REFERENCE, NO SIGNAL, AUDIO STOPPED, DAEMON NOT RESPONDING); a kept IR is tagged and dimmed as
 its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it says why: `Main
 L stopped — S starts it` (**S** starts and stops it from the IR pane too), `no reference:
-nothing is driving the loopback`, `no signal: …`.
+nothing is playing — Space arms, Enter starts the stimulus` (or `armed — Enter starts the
+stimulus`, or, with the stimulus playing, `nothing is driving the loopback`), `no signal: …`.
 
 ## The measurement tree
 

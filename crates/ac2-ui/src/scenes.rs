@@ -117,6 +117,7 @@ pub fn status(
         audio_stopped: audio_stopped(st, now.wall),
         no_delay_estimate: tf_meas.and_then(no_delay_estimate),
         math: None,
+        drive: st.drive(),
     }
 }
 
@@ -596,7 +597,7 @@ pub fn ir(
     } else if status.audio_stopped.is_some() {
         IrMissing::AudioStopped
     } else if status.protection.contains(ProtectionFlags::NO_REFERENCE) {
-        IrMissing::NoReference
+        IrMissing::NoReference(status.drive.clone())
     } else if status.protection.contains(ProtectionFlags::NO_SIGNAL) {
         IrMissing::NoSignal
     } else {

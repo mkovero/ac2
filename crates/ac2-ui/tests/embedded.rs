@@ -331,7 +331,26 @@ fn empty_embedded_daemon_measures_from_the_app() -> R {
     Ok(())
 }
 
-/// From an empty daemon: with the noise playing for the only transfer measurement, S stops
+/// The transfer pane's NO REFERENCE detail, while it shows.
+fn no_reference(s: &AppState) -> Option<String> {
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1100.0,
+        height: 600.0,
+    };
+    ac2_ui::scenes::transfer(s, &Theme::dark(), size, now)
+        .banners
+        .into_iter()
+        .find(|b| b.text == "NO REFERENCE")
+        .and_then(|b| b.detail)
+}
+
+/// From an empty daemon: with the transfer measurement running and nothing playing, NO
+/// REFERENCE names the keys (Space arms, then Enter plays); with the noise playing for the
+/// only transfer measurement, S stops
 /// the measurement and the stimulus with it (faded and released as Esc does), and one toast
 /// says both.
 #[test]
@@ -343,8 +362,15 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     assert_eq!(d.st.layout.focus, PaneKind::Transfer);
 
+    // Running with nothing playing: NO REFERENCE says which keys start the noise.
+    d.until("the off reminder", |s| {
+        no_reference(s).as_deref() == Some("stimulus off: Space arms, Enter starts it")
+    })?;
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed and its reminder", |s| {
+        s.stimulus.phase == StimPhase::Armed
+            && no_reference(s).as_deref() == Some("stimulus armed: Enter starts it")
+    })?;
     d.key("Enter");
     d.until("pink playing", |s| {
         s.daemon().is_some_and(|x| {

@@ -231,6 +231,40 @@ fn transfer_view_two_traces_and_banner() {
     snapshot(&mut h, "transfer_two_traces_banner");
 }
 
+/// A running transfer measurement with nothing on its reference and this app's stimulus
+/// off: NO REFERENCE says which keys start it, beside the banner text.
+#[test]
+fn no_reference_reminds_of_the_stimulus_keys() {
+    if !have_gpu("no_reference_reminds_of_the_stimulus_keys") {
+        return;
+    }
+    let rig = common::Rig::start();
+    rig.set_tf_protection(ac2_proto::frame::ProtectionFlags::NO_REFERENCE);
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    step_until(&mut h, "NO REFERENCE on the live frames", |a| {
+        let s = ac2_ui::scenes::transfer(
+            &a.state,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport {
+                width: 1000.0,
+                height: 450.0,
+            },
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        s.banners.first().is_some_and(|b| {
+            b.text == "NO REFERENCE"
+                && b.detail.as_deref() == Some("stimulus off: Space arms, Enter starts it")
+        })
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "transfer_no_reference_reminder");
+}
+
 /// The IR pane of a stopped transfer measurement, maximised: its kept IR tagged `stopped`
 /// after the origin, as its transfer curve is, with no STALE banner; S starts it from here.
 #[test]

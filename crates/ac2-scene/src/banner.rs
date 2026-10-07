@@ -8,7 +8,7 @@
 //! | 1 | DAEMON NOT RESPONDING | fault | no keepalive for > 1.5 s |
 //! | 2 | AUDIO STOPPED · what, since | fault | `session.stopped` (the daemon is reopening the session) |
 //! | 3 | CLIP | fault | protection `CLIP` |
-//! | 4 | NO REFERENCE | fault | protection `NO_REFERENCE` |
+//! | 4 | NO REFERENCE | fault | protection `NO_REFERENCE` (the detail names the stimulus keys while nothing here plays) |
 //! | 5 | CHECK ROUTING | fault | protection `CHECK_ROUTING` (inputs identical or swapped) |
 //! | 6 | NO SIGNAL | fault | protection `NO_SIGNAL` |
 //! | 7 | NO AVERAGE · n OF m POSITIONS | fault | the shown spatial average has fewer than two usable positions |
@@ -125,6 +125,9 @@ pub struct Status {
     pub no_delay_estimate: Option<NoDelayEstimate>,
     /// The shown math channel (its name and what its newest frame combined).
     pub math: Option<(String, MathStatus)>,
+    /// What this app's stimulus is doing: NO REFERENCE's detail names the keys that start
+    /// it while nothing here plays.
+    pub drive: crate::stimulus::Drive,
 }
 
 /// Why a TF measurement has no delay the operator can rely on.
@@ -201,7 +204,7 @@ pub fn banners(s: &Status) -> Vec<Banner> {
         out.push(banner(
             BannerKind::NoReference,
             "NO REFERENCE".into(),
-            Some("reference input below its floor; check the loopback patch".into()),
+            Some(crate::stimulus::no_reference_detail(&s.drive)),
         ));
     }
     if p.contains(ProtectionFlags::CHECK_ROUTING) {
@@ -467,6 +470,7 @@ pub(crate) mod tests {
             audio_stopped: None,
             no_delay_estimate: Some(NoDelayEstimate::NotFound),
             math: None,
+            drive: Default::default(),
         }
     }
 
@@ -850,6 +854,57 @@ pub(crate) mod tests {
         assert_eq!(seen[0], "AUDIO STOPPED");
         assert_eq!(seen.last().map(String::as_str), Some(text));
         assert_eq!(fit_headline("AUDIO STOPPED", 60.0, 14.0), "AUDIO…");
+    }
+
+    /// NO REFERENCE's detail follows this app's stimulus, and every reminder fits beside
+    /// the banner text in a full-width row in every theme.
+    #[test]
+    fn no_reference_reminds_of_the_stimulus_keys() {
+        use crate::stimulus::Drive;
+        let detail = |drive: Drive| {
+            let s = Status {
+                protection: ProtectionFlags::NO_REFERENCE,
+                drive: drive.clone(),
+                ..Status::default()
+            };
+            let b = banners(&s);
+            assert_eq!(b[0].text, "NO REFERENCE");
+            let d = b[0].detail.clone().unwrap_or_default();
+            if drive != Drive::Playing {
+                for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
+                    let rows = layout_banners(&b, Rect::new(0.0, 0.0, 800.0, 200.0));
+                    let mut layer = Layer::default();
+                    draw_banners(&mut layer, &rows, &theme);
+                    assert!(
+                        layer.labels.iter().any(|l| l.text == d),
+                        "{d} not drawn at {} px",
+                        theme.font_size
+                    );
+                }
+            }
+            d
+        };
+        assert_eq!(
+            detail(Drive::Idle {
+                arm: "Space".into(),
+                fire: "Enter".into(),
+            }),
+            "stimulus off: Space arms, Enter starts it"
+        );
+        assert_eq!(
+            detail(Drive::Armed {
+                fire: "Enter".into(),
+            }),
+            "stimulus armed: Enter starts it"
+        );
+        assert_eq!(
+            detail(Drive::SweepView),
+            "stimulus off: arm it from a transfer pane"
+        );
+        assert_eq!(
+            detail(Drive::Playing),
+            "reference input below its floor; check the loopback patch"
+        );
     }
 
     #[test]

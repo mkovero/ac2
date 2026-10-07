@@ -27,6 +27,8 @@ pub struct Rig {
     thread: Option<JoinHandle<()>>,
     /// Further frames published with the rig's own, each round.
     extra: Arc<std::sync::Mutex<Vec<Published>>>,
+    /// Protection flags stamped on every transfer frame.
+    tf_protection: Arc<std::sync::Mutex<ac2_proto::frame::ProtectionFlags>>,
 }
 
 impl Drop for Rig {
@@ -402,7 +404,14 @@ impl Rig {
         }
         let stop = Arc::new(AtomicBool::new(false));
         let extra: Arc<std::sync::Mutex<Vec<Published>>> = Arc::default();
-        let (f, st, more) = (fake.clone(), stop.clone(), extra.clone());
+        let tf_protection: Arc<std::sync::Mutex<ac2_proto::frame::ProtectionFlags>> =
+            Arc::default();
+        let (f, st, more, prot) = (
+            fake.clone(),
+            stop.clone(),
+            extra.clone(),
+            tf_protection.clone(),
+        );
         let thread = std::thread::spawn(move || {
             let tf = |meas, gain, tau, bump| {
                 if smoothed {
@@ -430,9 +439,13 @@ impl Rig {
             while !st.load(Ordering::Acquire) {
                 {
                     let more = more.lock().unwrap().clone();
+                    let protection = *prot.lock().unwrap();
                     let mut s = f.lock();
                     for (data, grid) in frames.iter().chain(&more) {
-                        let stamp = s.stamp(seq, *grid);
+                        let mut stamp = s.stamp(seq, *grid);
+                        if matches!(data, FrameData::Tf(_)) {
+                            stamp.protection = protection;
+                        }
                         let mut data = data.clone();
                         // The meter has run since a fixed instant, as a real one runs since
                         // its start: its interval grows, the heading's time stays put.
@@ -453,7 +466,14 @@ impl Rig {
             stop,
             thread: Some(thread),
             extra,
+            tf_protection,
         }
+    }
+
+    /// Every transfer frame from now on carries `flags` (NO REFERENCE: nothing on the
+    /// reference input).
+    pub fn set_tf_protection(&self, flags: ac2_proto::frame::ProtectionFlags) {
+        *self.tf_protection.lock().unwrap() = flags;
     }
 
     /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a math

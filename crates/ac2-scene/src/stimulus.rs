@@ -88,6 +88,52 @@ pub fn describe(what: &Stimulus) -> String {
     }
 }
 
+/// What this app's own stimulus is doing, for a transfer measurement whose reference
+/// carries nothing (NO REFERENCE): with nothing armed or playing here the likely cause is
+/// that nobody started it, and the texts name the keys that start it; with it playing, the
+/// patch between output and reference input is what is left to check.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Drive {
+    /// Playing, a request in flight, or another client's stimulus: the loopback patch is
+    /// the suspect.
+    #[default]
+    Playing,
+    /// Nothing armed or playing: `arm` arms the generator on this view, `fire` plays it.
+    Idle { arm: String, fire: String },
+    /// The generator armed and silent: `fire` plays it.
+    Armed { fire: String },
+    /// Nothing playing and the sweep view focused: there the arm key arms a sweep, so the
+    /// generator is armed from a transfer pane.
+    SweepView,
+}
+
+/// NO REFERENCE's detail: `stimulus off: Space arms, Enter starts it`. Short enough to sit
+/// beside NO REFERENCE in a banner row in every theme.
+pub fn no_reference_detail(d: &Drive) -> String {
+    match d {
+        Drive::Playing => "reference input below its floor; check the loopback patch".into(),
+        Drive::Idle { arm, fire } => format!("stimulus off: {arm} arms, {fire} starts it"),
+        Drive::Armed { fire } => format!("stimulus armed: {fire} starts it"),
+        Drive::SweepView => "stimulus off: arm it from a transfer pane".into(),
+    }
+}
+
+/// The empty IR pane's reason without a reference, which has the room to say it whole:
+/// `no reference: nothing is playing — Space arms, Enter starts the stimulus` (it breaks
+/// at the dash in a narrow pane).
+pub fn no_reference_note(d: &Drive) -> String {
+    match d {
+        Drive::Playing => "no reference: nothing is driving the loopback".into(),
+        Drive::Idle { arm, fire } => {
+            format!("no reference: nothing is playing — {arm} arms, {fire} starts the stimulus")
+        }
+        Drive::Armed { fire } => format!("no reference: armed — {fire} starts the stimulus"),
+        Drive::SweepView => {
+            "no reference: nothing is playing — arm the stimulus from a transfer pane".into()
+        }
+    }
+}
+
 fn signal_name(s: &Signal) -> String {
     match s {
         Signal::White => "white".into(),
@@ -157,6 +203,54 @@ mod tests {
         assert_eq!(
             hint(Next::Enter, &first, "L").0,
             "Enter fires: sweep Sweep 1 · 1 s −20.5 dBFS"
+        );
+    }
+
+    fn idle() -> Drive {
+        Drive::Idle {
+            arm: "Space".into(),
+            fire: "Enter".into(),
+        }
+    }
+
+    /// NO REFERENCE says what to press while nothing here plays, and points at the patch
+    /// once something does.
+    #[test]
+    fn no_reference_names_the_keys_by_phase() {
+        let armed = Drive::Armed {
+            fire: "Enter".into(),
+        };
+        assert_eq!(
+            no_reference_detail(&idle()),
+            "stimulus off: Space arms, Enter starts it"
+        );
+        assert_eq!(
+            no_reference_detail(&armed),
+            "stimulus armed: Enter starts it"
+        );
+        assert_eq!(
+            no_reference_detail(&Drive::SweepView),
+            "stimulus off: arm it from a transfer pane"
+        );
+        assert_eq!(
+            no_reference_detail(&Drive::Playing),
+            "reference input below its floor; check the loopback patch"
+        );
+        assert_eq!(
+            no_reference_note(&idle()),
+            "no reference: nothing is playing — Space arms, Enter starts the stimulus"
+        );
+        assert_eq!(
+            no_reference_note(&armed),
+            "no reference: armed — Enter starts the stimulus"
+        );
+        assert_eq!(
+            no_reference_note(&Drive::SweepView),
+            "no reference: nothing is playing — arm the stimulus from a transfer pane"
+        );
+        assert_eq!(
+            no_reference_note(&Drive::Playing),
+            "no reference: nothing is driving the loopback"
         );
     }
 

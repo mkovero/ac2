@@ -99,6 +99,13 @@ running transfer measurement, somehow I would expect it"):
   (armed or playing), the way Esc does, with one toast for both; another running transfer
   measurement keeps it, a sweep and another client's stimulus are never stopped by it.
   `ac2 meas stop` is unchanged (no side effects for scripts).
+- **NO REFERENCE reminds of the stimulus keys** ("when you havent start stimulus but you
+  have started transfer there could be reminder that press space to arm and enter to
+  begin"): the banner detail says `stimulus off: Space arms, Enter starts it` / `stimulus
+  armed: Enter starts it` (the sweep view: `arm it from a transfer pane`), short enough to
+  show beside the banner text in every theme; the IR pane's reason has room for the whole
+  sentence (`nothing is playing — Space arms, Enter starts the stimulus`). Playing, the
+  loopback-patch text as before.
 
 A measurement owns its traces (operator, 2026-10-07: "this becomes little bit confusing to
 see 'measurements' and 'traces' at the transfer screen, I would imagine transfer measurement

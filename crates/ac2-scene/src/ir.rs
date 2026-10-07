@@ -340,14 +340,15 @@ pub fn note_lines(note: &str, width: f32, theme: &Theme) -> (Vec<String>, f32) {
 }
 
 /// Why the IR pane has no picture of its transfer measurement's impulse response.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IrMissing {
     /// The measurement is stopped (and never made an IR frame).
     Stopped,
     /// The session's audio stopped.
     AudioStopped,
-    /// Its transfer stream says the reference carries nothing.
-    NoReference,
+    /// Its transfer stream says the reference carries nothing, with this app's stimulus
+    /// doing this.
+    NoReference(crate::stimulus::Drive),
     /// Its transfer stream says the measurement input is below its floor.
     NoSignal,
     /// Running, nothing wrong known: the first frame is on its way.
@@ -363,7 +364,7 @@ pub fn missing_text(name: &str, why: IrMissing, key: &str) -> String {
         IrMissing::Stopped => format!("{name} stopped — {key} starts it"),
         IrMissing::Hidden => format!("{name} hidden — {key} shows it"),
         IrMissing::AudioStopped => format!("{name}: the audio stopped — the IR returns with it"),
-        IrMissing::NoReference => "no reference: nothing is driving the loopback".into(),
+        IrMissing::NoReference(d) => crate::stimulus::no_reference_note(&d),
         IrMissing::NoSignal => "no signal: the measurement input is below its floor".into(),
         IrMissing::NotYet => format!("{name}: no IR frame yet"),
     }
@@ -423,6 +424,7 @@ pub fn missing_scene(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stimulus::Drive;
     use crate::view::IrView;
     use ac2_proto::frame::IrMeta;
     use ac2_proto::units::{Hz, MeasId, Seconds};
@@ -655,8 +657,14 @@ mod tests {
             "TF 1: the audio stopped — the IR returns with it"
         );
         assert_eq!(
-            t(IrMissing::NoReference),
+            t(IrMissing::NoReference(Drive::Playing)),
             "no reference: nothing is driving the loopback"
+        );
+        assert_eq!(
+            t(IrMissing::NoReference(Drive::Armed {
+                fire: "Enter".into()
+            })),
+            "no reference: armed — Enter starts the stimulus"
         );
         assert_eq!(
             t(IrMissing::NoSignal),
@@ -672,7 +680,7 @@ mod tests {
             ..Status::default()
         };
         let s = missing_scene(
-            t(IrMissing::NoReference),
+            t(IrMissing::NoReference(Drive::Playing)),
             &status,
             &IrAxes::default(),
             &Theme::dark(),

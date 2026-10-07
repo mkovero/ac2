@@ -23,7 +23,7 @@ use ac2_proto::model::{
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
 use ac2_scene::spectrum::PeakHold;
-use ac2_scene::stimulus::{Next as NextKey, Stimulus as NextStimulus};
+use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
@@ -2879,6 +2879,51 @@ impl AppState {
             )),
             StimPhase::Idle => Some((NextKey::Space, self.generator_stimulus())),
             _ => None,
+        }
+    }
+
+    /// What this app's stimulus does for a reference that carries nothing (NO REFERENCE):
+    /// off or armed, the banner names the keys that start it on the focused view; playing,
+    /// in flight or another client's, the patch is the suspect.
+    pub fn drive(&self) -> Drive {
+        let key = |c: CommandId| {
+            RESERVED
+                .iter()
+                .find(|(_, id)| *id == c)
+                .map_or_else(String::new, |(k, _)| k.label())
+        };
+        let g = self.daemon().map(|s| &s.generator);
+        if self.sweep.run.is_some() || g.is_some_and(|g| g.firing) {
+            return Drive::Playing;
+        }
+        let mine = g
+            .and_then(|g| g.owner.as_ref())
+            .is_some_and(|o| Some(o) == self.my_client_id());
+        let armed = match self.stimulus.phase {
+            StimPhase::Armed => true,
+            StimPhase::Stopping => false,
+            StimPhase::Idle => match g {
+                Some(g) if g.armed && !mine => return Drive::Playing,
+                Some(g) => g.armed,
+                None => false,
+            },
+            StimPhase::Arming | StimPhase::FireRequested | StimPhase::Firing => {
+                return Drive::Playing;
+            }
+        };
+        // Armed with a sweep, Enter plays the sweep; Space on a live view re-arms the
+        // generator, so there the off reminder is the one that holds.
+        if armed && self.sweep.plan.is_none() {
+            Drive::Armed {
+                fire: key(CommandId::StimulusFire),
+            }
+        } else if self.sweep_view() {
+            Drive::SweepView
+        } else {
+            Drive::Idle {
+                arm: key(CommandId::StimulusArm),
+                fire: key(CommandId::StimulusFire),
+            }
         }
     }
 
