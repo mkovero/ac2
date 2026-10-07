@@ -1,0 +1,21 @@
+{
+  "source": "documented steady-sine truth, pupu Xone path (out 3 -> in 5 re loopback out 2 -> in 2), 2026-10-07: docs/rigs/pupu.md 'REW cross-check, electrical' and docs/design/subsample-arrival-group-delay.md. Hand scripts jsine.py (H2, Blackman 2 s, per-bin noise -108 dBr) and jphase.py (phase, GD from +-1/48-oct pairs).",
+  "level_note": "the hand scripts played amplitude 10^(L/20)*sqrt(2): their '-30 dBFS' is -27 dBFS in the full-scale-sine convention ac2 and REW use, 3 dB hotter than the -30 dBFS sweeps compared with it",
+  "emit_dbfs": -27.0,
+  "path": "xone",
+  "direct_delay_s": 3.70e-6,
+  "tones": [
+    {"f": 16.0, "ratio_deg": 10.125, "gd_s": 1535e-6},
+    {"f": 20.0, "gd_s": 1054e-6, "h_dbr": {"2": -75.0}},
+    {"f": 25.0, "gd_s": 706e-6},
+    {"f": 31.5, "ratio_deg": 5.399, "gd_s": 459e-6, "h_dbr": {"2": -71.0}},
+    {"f": 40.0, "gd_s": 290e-6},
+    {"f": 50.0, "gd_s": 187e-6, "h_dbr": {"2": -73.0}},
+    {"f": 80.0, "gd_s": 75e-6},
+    {"f": 100.0, "ratio_deg": 1.720, "gd_s": 49e-6, "h_dbr": {"2": -76.0}},
+    {"f": 1000.0, "h_dbr": {"2": -79.0}},
+    {"f": 10000.0, "ratio_deg": -7.207, "gd_s": 3.2e-6}
+  ],
+  "floor_note": "per-bin noise -108 dBr in a 2 s Blackman FFT; over the 7-bin main lobe about -99.5 dBr, used as the floor of every documented harmonic",
+  "floor_dbr": -99.5
+}

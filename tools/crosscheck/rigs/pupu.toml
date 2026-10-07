@@ -1,0 +1,135 @@
+# pupu: RME FF400, JACK 96 kHz / 256. Wiring and ceilings: docs/rigs/pupu.md.
+# The suite runs ON this host (JACK clients must be local; REW's API and its file imports
+# are local); rig-run.sh on the dev host copies the package here, runs it, fetches the run.
+
+[rig]
+name = "pupu"
+ssh = "mui@192.168.9.27"
+workdir = "~/crosscheck"                         # package + runs on the rig
+python = "~/ac2-test/venv-meas/bin/python"       # numpy + JACK-Client; scipy/matplotlib not needed here
+sample_rate = 96000
+system_max_dbfs = -50.0      # ac2d --max-level on this rig; speaker ceiling too
+electrical_max_dbfs = -30.0  # the most --allow-electrical-level may lift electrical-only outputs to
+speaker_max_dbfs = -50.0     # clamped to -50 in code whatever is written here
+mains_hz = 50.0
+
+# Outputs by 1-based channel. role: speaker | electrical | loopback. Anything not listed is refused.
+[outputs.1]
+port = "system:playback_1"
+role = "speaker"
+note = "Genelec 1083"
+[outputs.2]
+port = "system:playback_2"
+role = "loopback"
+note = "cable to in 2 (reference)"
+[outputs.3]
+port = "system:playback_3"
+role = "electrical"
+note = "Xone:62 to in 5"
+
+[inputs.1]
+port = "system:capture_1"
+note = "MM1 34804 at 90 degrees"
+[inputs.2]
+port = "system:capture_2"
+note = "loopback reference"
+[inputs.5]
+port = "system:capture_5"
+note = "Xone return"
+
+# The two paths the suite measures. forbidden_outputs: refused in that path's stages.
+[paths.xone]
+kind = "electrical"
+out = 3
+ref_out = 2
+meas_in = 5
+ref_in = 2
+forbidden_outputs = [1]
+
+[paths.genelec]
+kind = "speaker"
+out = 1
+ref_out = 2
+meas_in = 1
+ref_in = 2
+speaker_min_request_hz = 20.0   # never ask a sweep on the speaker to start lower
+speaker_min_emit_hz = 5.0       # refuse if ac2 says it will emit below this (its LF extension rises from there)
+
+[ac2]
+# The CLI must reach the rig's daemon from here. Either pair the rig's own CLI once
+# (README, "One-time setup") and use localhost, or run it on another paired host over ssh:
+#   cmd = ["ssh", "mui@192.168.9.25", "~/ac2-test/bin/ac2", "--remote", "192.168.9.27"]
+cmd = ["~/ac2-test/bin/ac2", "--remote", "localhost"]
+timeout = "5s"
+recordings_dir = "~/.local/share/ac2/recordings"  # ac2d --recordings default; `rec` files land here
+cal_store = "~/.config/ac2/calibrations.json"
+session_open = ["session", "open", "--backend", "jack", "--in", "1-8", "--outputs", "6",
+                "--loopback-out", "2", "--loopback-in", "2", "--mic", "1=MM1 34804"]
+systemd_unit = "ac2d.service"
+# The electrical drop-in (only with --allow-electrical-level): a runtime unit override,
+# gone at reboot, removed by the suite in its finally.
+dropin = "/run/user/{uid}/systemd/user/ac2d.service.d/90-crosscheck-electrical.conf"
+exec_start = "%h/ac2-test/bin/ac2d --listen tcp://0.0.0.0 --name pupu --max-level {level}"
+mic_input = 1
+
+[rew]
+api = "http://localhost:4735"
+stimulus = "/home/mui/rew-dl/sweep96k.wav"   # REW-generated 10 Hz - 40 kHz, 512k, peak -50 dBFS, 96 kHz float
+stimulus_speaker = "/home/mui/rew-dl/sweep96k-20-20k.wav"  # 20 Hz - 20 kHz for the speaker (README); 10 Hz is refused
+stimulus_channel = 1
+keep_measurements = false                    # delete the suite's imports from REW afterwards
+
+[pipewire]
+# Only the ambient stage uses it (REW's SPL meter and RTA read live input through the
+# jack-tunnel client pw_rew). Started if not running, stopped afterwards if the suite started it.
+start = [["systemctl", "--user", "start", "pipewire.socket", "pipewire.service", "wireplumber.service"]]
+stop = [["systemctl", "--user", "stop", "wireplumber.service", "pipewire.service", "pipewire.socket"]]
+is_active = ["systemctl", "--user", "is-active", "pipewire.service"]
+client = "pw_rew"
+# REW's wiring while its sweep path is in use (restored after the ambient stage)
+normal_capture = { capture_FL = "system:capture_5", capture_FR = "system:capture_2" }
+ambient_capture = { capture_FL = "system:capture_1" }
+
+[stages.ambient]
+seconds = 60
+
+[stages.sine]
+# Steady sines on each path. Frequencies are nudged so H2..H5 stay off 50 Hz multiples.
+xone_hz = [16, 20, 31.5, 50, 100, 1000, 10000]
+genelec_hz = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
+gd_pairs = true            # phase at f·2^(±1/48) for group delay (xone only)
+probe_seconds = 2.0
+min_periods = 40           # an LF tone gets at least this many periods
+max_seconds = 20.0
+noise_seconds = 10.0
+target_floor_dbr = { xone = -95.0, genelec = -80.0 }
+budget_seconds = { xone = 180.0, genelec = 180.0 }
+fade_seconds = 0.1
+settle_seconds = 0.5
+
+[stages.ac2_sweep]
+# Variants on the Xone path. plan = true: repeats/duration chosen from a probe to reach the
+# target floor within the budget; false: run exactly as written (comparable across runs).
+xone = [
+  { name = "10Hz-5.5s", from = "10hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "3Hz-5.5s", from = "3hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "10Hz-11s", from = "10hz", to = "40khz", duration = 11.0, repeats = 1, plan = false },
+  { name = "dist", from = "20hz", to = "40khz", duration = 5.5, repeats = 1, plan = true },
+]
+genelec = [
+  { name = "20Hz-5.5s", from = "20hz", to = "20khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "dist", from = "20hz", to = "20khz", duration = 5.5, repeats = 1, plan = true },
+]
+target_floor_dbr = { xone = -95.0, genelec = -80.0 }
+floor_band_hz = { xone = [100, 10000], genelec = [100, 10000] }
+budget_seconds = { xone = 180.0, genelec = 180.0 }
+max_repeats = 8
+max_duration = 30.0
+noise_lead_seconds = 1.0   # raw capture starts this long + one sweep before the sweep (noise windows)
+
+[stages.ac2_tf]
+settle_seconds = 20.0
+blocks = 8
+
+[stages.rew]
+repeats = 1

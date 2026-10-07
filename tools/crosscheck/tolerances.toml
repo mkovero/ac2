@@ -1,0 +1,67 @@
+# Tolerances: |value| <= pass -> PASS, <= warn -> WARN, else FAIL. A comparison resting on an
+# upper bound (a reading below floor + margin) is INCONCLUSIVE, never PASS/FAIL.
+# Values are the 2026-10-07 pupu agreement with some room (docs/rigs/pupu.md, "REW
+# cross-check, electrical"; docs/design/subsample-arrival-group-delay.md).
+
+[distortion]
+margin_db = 10.0            # a harmonic counts at floor + margin or above
+floor_disagree_db = 6.0     # flag a column where ac2's floor and the raw-recording floor differ more
+
+# magnitude (dB) and phase (deg): max |deviation from the band mean| and |band mean|
+[band.mag_lf]               # below 100 Hz
+pass = 0.05
+warn = 0.2
+[band.mag_mf]               # 100 Hz - 1 kHz
+pass = 0.03
+warn = 0.1
+[band.mag_hf]               # 1 - 20 kHz
+pass = 0.03
+warn = 0.1
+[band.phase]
+pass = 1.0
+warn = 3.0
+[band.mag_tf]               # live transfer, coherence-gated
+pass = 0.1
+warn = 0.3
+[band.mag_acoustic]         # speaker path: same recording or close in time, room unchanged
+pass = 0.3
+warn = 1.0
+[band.phase_acoustic]
+pass = 3.0
+warn = 10.0
+
+[level]
+convention_db = { pass = 0.1, warn = 0.5 }   # ac2 / REW / sine on the same digital level
+offset_db = { pass = 0.1, warn = 0.3 }       # ac2 meas/ref vs REW (meas - ref) absolute
+absolute_spl_db = { pass = 0.5, warn = 1.0 } # acoustic response in dB SPL, sources vs sine
+ambient_leq_db = { pass = 0.5, warn = 1.0 }  # Leq over the same window, broadband
+ambient_band_db = { pass = 1.0, warn = 2.0 } # per third octave
+
+[delay]
+electrical_us = { pass = 0.3, warn = 1.0 }   # arrival vs the direct cross-spectrum
+acoustic_us = { pass = 2.0, warn = 10.4 }    # one sample at 96 kHz as the warn limit
+ir_peak_cells = { pass = 1.0, warn = 2.0 }   # ac2 IR bucket (0.125 ms) vs REW peak
+
+[etc]
+median_db = { pass = 2.0, warn = 5.0 }       # cells within 60 dB of the peak, -5 ... 50 ms (different takes: noise differs)
+
+[gd]
+# relative error vs the steady-sine truth, per frequency at >= 16 Hz
+fit_rel = { pass = 0.10, warn = 0.25 }       # +-1/12 oct slope fit
+central_rel = { pass = 0.15, warn = 0.40 }   # ac2 as displayed (central difference)
+high_abs_us = { pass = 0.5, warn = 2.0 }     # above 1 kHz an absolute limit (GD is a few us)
+
+[harmonics]
+vs_truth_db = { pass = 3.0, warn = 6.0 }     # value vs steady-sine value
+lf_onset_excess_db = { pass = 3.0, warn = 6.0 }
+
+[room]
+edt_rel = { pass = 0.05, warn = 0.15 }
+t20_rel = { pass = 0.05, warn = 0.15 }
+t30_rel = { pass = 0.05, warn = 0.15 }
+c50_db = { pass = 0.5, warn = 1.5 }
+c80_db = { pass = 0.5, warn = 1.5 }
+d50 = { pass = 0.02, warn = 0.05 }
+
+[coherence]
+min_fraction_099 = 0.95     # live TF: share of columns 31 Hz - 20 kHz at gamma^2 >= 0.99 (info below)
