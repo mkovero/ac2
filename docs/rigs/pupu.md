@@ -566,7 +566,21 @@ jointly with the fundamental (fitted one at a time, the fundamental leaks ~45 dB
 ac2's sweeps are judged against D_m − T(k·f)·D_r; REW, which deconvolves each input by its own
 stimulus, stays judged against the meas input alone. Run `20261007T200249Z`: H3 at 26 Hz −0.4 to
 +0.9 dB (was −2.1 to −3.0), every ac2 harmonic comparison within ±2.4 dB; 253 PASS, 1 WARN,
-0 FAIL. The WARN is open: ac2's H2 at 20–25 Hz reads +1.3 to +3.2 dB over the net truth, most on
-the sweeps that start at 20 Hz (dist, dist-probe +3.2 at 22 Hz), less from 10 Hz; ac2's own
-floor there, which holds the mains hum, is 12–17 dB under the reading, so it is not the 50 Hz
-line in the H2 band. Baseline `xone-10dbfs.json` re-taken from this run.
+0 FAIL. The WARN: ac2's H2 at 20–25 Hz read +1.3 to +3.2 dB over the net truth, most on the
+sweeps that start at 20 Hz (dist, dist-probe +3.2 at 22 Hz).
+
+**Cause and fix (501330a).** Replaying the captures through `analyse_recording` with in 5
+replaced by its linear prediction (the analysed IR convolved with in 2, so no distortion at
+all) read H2 at 22 Hz at −90.5 dBr on the 20 Hz sweeps, 3 dB under the path's own: the harmonic
+windows' high-pass was zero-phase, and what its 4–20 Hz transition passes of the large response
+below the analysed band (the Xone's own roll-off) rang before the arrival as well, into H2's
+window at −L·ln 2 = −0.49 s. Moving the transition up lowered it, letting more below it through
+raised it. A fourth-order minimum-phase Butterworth at 0.75 × the lowest fundamental rings only
+after the arrival: the linear prediction reads −136 dBr (10 Hz sweeps −155 … −189), and an
+eighth order lifts the noise windows to −90. Run `20261007T204144Z` on 501330a: 247 PASS,
+0 WARN, 0 FAIL; LF H2 excess at 22 Hz −0.2 … +1.6 dB on all five sweeps (the 10 Hz / 3 Hz
+5.5 s requests, bounds before, now read values), the remaining ≈ +1 dB the same on every sweep
+and within the sine truth's interpolation between 15 and 26 Hz. The PASS → INCONCLUSIVE lines
+against the previous baseline are the 100 Hz line found this time (its detection at 6 dB over
+the local median varies run to run) and REW's H2 at 35 Hz 0.9 dB short of its floor + margin.
+Baseline `xone-10dbfs.json` re-taken from this run.
