@@ -503,6 +503,9 @@ def ac2_tf(ctx: Ctx, pname: str):
     level = ctx.policy.emit_speaker_dbfs if speaker else ctx.policy.electrical_level()
     level = ctx.policy.check(outs, level, speaker_stage=speaker)
     sc = rig["stages"]["ac2_tf"]
+    # Pink noise peaks well above its level (ac2 refuses a level whose peaks would clip); a live
+    # TF judged where γ² ≥ 0.99 needs no more than this, so hot electrical runs cap it here.
+    level = min(level, float(sc.get("max_level_dbfs", -20.0)))
     d = ctx.out / pname / "ac2_tf"
     d.mkdir(parents=True, exist_ok=True)
     name = f"xc-{pname}-tf"

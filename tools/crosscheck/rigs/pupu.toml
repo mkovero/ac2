@@ -130,6 +130,7 @@ noise_lead_seconds = 1.0   # raw capture starts this long + one sweep before the
 [stages.ac2_tf]
 settle_seconds = 20.0
 blocks = 8
+max_level_dbfs = -20.0  # pink noise's peaks sit well above its level
 
 [stages.rew]
 repeats = 1
