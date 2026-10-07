@@ -622,6 +622,18 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 .small()
                 .color(ch.dim),
             );
+            // What the rows' dots say, drawn as the rows draw them so the key matches.
+            for (shown, word) in [(true, "shown"), (false, "hidden")] {
+                let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 12.0), egui::Sense::hover());
+                let c = r.center();
+                if shown {
+                    ui.painter().circle_filled(c, 4.0, ch.dim);
+                } else {
+                    ui.painter()
+                        .circle_stroke(c, 3.25, egui::Stroke::new(1.25, ch.dim));
+                }
+                ui.label(RichText::new(word).small().color(ch.dim));
+            }
         });
         ui.add_space(4.0);
         let rows = st.tree_rows();
@@ -713,12 +725,7 @@ fn tree_row(ui: &mut egui::Ui, row: &TreeRow, tips: &RowTips, ch: &Chrome) -> Op
             );
         }
         // A curve's dot: filled when shown, a ring when hidden; a click shows or hides it.
-        let dot = match (row.key, row.dot) {
-            (TreeKey::Trace(_), Some((c, shown))) => Some((to_color32(c), shown)),
-            (TreeKey::Live(_), _) => Some((ch.text, !row.hidden)),
-            _ => None,
-        };
-        if let Some((color, shown)) = dot {
+        if let Some((color, shown)) = row.dot.map(|(c, shown)| (to_color32(c), shown)) {
             let (r, eye) = ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
             let what = if shown { "Hide" } else { "Show" };
             let label = format!("{what} {}", row.name);
@@ -741,8 +748,8 @@ fn tree_row(ui: &mut egui::Ui, row: &TreeRow, tips: &RowTips, ch: &Chrome) -> Op
             if eye.on_hover_text(tip).clicked() {
                 click = Some(match row.key {
                     TreeKey::Trace(id) => Msg::ToggleShown(id),
-                    TreeKey::Live(id) => Msg::ToggleMeasShown(id),
-                    _ => return,
+                    TreeKey::Live(id) | TreeKey::Math(id) => Msg::ToggleMeasShown(id),
+                    TreeKey::Meas(_) | TreeKey::Imported => return,
                 });
             }
         }

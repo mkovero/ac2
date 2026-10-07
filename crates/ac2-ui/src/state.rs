@@ -1428,6 +1428,7 @@ impl AppState {
 
     /// Every measurement with this app's display of it.
     fn meas_items(&self) -> Vec<ac2_scene::meas_list::MeasItem<'_>> {
+        let theme = ac2_scene::theme::Theme::by_name(self.theme);
         self.measurements()
             .into_iter()
             .map(|m| {
@@ -1446,6 +1447,7 @@ impl AppState {
                     offset_db: e.offset_db,
                     inverted: e.inverted,
                     hidden: self.meas_hidden(m),
+                    color: crate::scenes::meas_color(self, &theme, m.id),
                 }
             })
             .collect()

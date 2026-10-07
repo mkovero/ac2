@@ -107,6 +107,13 @@ re-imported is an import (`imported`), a sweep export a run under Imported until
   measurement (its header, its live curve or a math channel's row) or a stored trace.
   Shift+A toggles the selected item's whole group (live curves are this app's display, the
   traces' visibility the daemon's). V steps through the traces in the tree's order.
+- Every row that stands for a curve — a live curve, a stored trace or sweep run, a math
+  channel's result — has a dot in exactly the colour the panes draw that curve in (live
+  curves and math results: the theme's trace colour at the measurement's place in the
+  list; stored traces: their own colour), filled when shown, a ring when hidden; a click
+  on it shows / hides the curve. A curve no visible pane draws keeps its colour. Headers
+  (a measurement, Imported) stand for a group and have no dot. The list's header says
+  what filled and ring mean.
 - The transfer pane's legend groups by the same order: a measurement's live curve, its
   traces and its math channels together. (Colour families per measurement are not done:
   trace colours stay the daemon's per-trace palette.)

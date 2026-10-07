@@ -6024,6 +6024,161 @@ fn tree_names(t: &T) -> Vec<String> {
     t.st.tree_rows().iter().map(|r| r.name.clone()).collect()
 }
 
+/// Every tree row that stands for a curve has a dot in the colour the panes draw that curve
+/// in (live curves, stored traces, math results alike), a ring once it is hidden; the
+/// headers have none.
+#[test]
+fn tree_dots_have_the_colours_of_their_curves() {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::frame::{SpecFrame, SpecMeta};
+    use ac2_proto::{Frame, FrameData};
+    use ac2_scene::primitives::{Color, Viewport};
+    let mut s = tree_state();
+    for (i, t) in s.traces.iter_mut().enumerate() {
+        let v = 40 * (i as u8 + 1);
+        t.edit.color = Rgb {
+            r: v,
+            g: 255 - v,
+            b: 7,
+        };
+    }
+    let metas = s.traces.clone();
+    let mut t = T::new();
+    t.conn(mirror(s));
+    for m in &metas {
+        let grid = GridDef::Log {
+            ppo: 1,
+            k_min: -5,
+            k_max: 2,
+        };
+        t.conn(ConnEvent::Trace(
+            Arc::new(TraceData {
+                meta: m.clone(),
+                mag_db: vec![-10.0; 8],
+                phase_deg: None,
+                coherence: None,
+                sweep: None,
+            }),
+            Arc::new(grid),
+        ));
+    }
+    // Live frames of Main L, of the math channel on it and of Sub.
+    let spec_grid = GridDef::Linear {
+        fs: Hz(48_000.0),
+        n: 14,
+    };
+    let mut math = ac2_proto::samples::tf_frame();
+    if let FrameData::Tf(f) = &mut math.data {
+        f.meas = MeasId(6);
+    }
+    let spec = Frame {
+        stamp: ac2_proto::samples::stamp(Some(spec_grid.clone())),
+        data: FrameData::Spec(SpecFrame {
+            meas: MeasId(2),
+            meta: SpecMeta {
+                window: Window::Hann,
+                scale: LevelScale::Dbfs,
+                cal: CalStatus::Uncalibrated,
+                mic_curve: false,
+                smoothing: None,
+                math: None,
+            },
+            level: vec![-60.0; 8],
+        }),
+    };
+    let mut latest = Latest::default();
+    for f in [ac2_proto::samples::tf_frame(), math, spec] {
+        let f = TopicFrame {
+            topic: f.data.topic(),
+            frame: Arc::new(f),
+            received: Instant::now(),
+            since_new: std::time::Duration::ZERO,
+            age: Some(0.0),
+            stale: false,
+        };
+        latest.frames.insert(f.topic.to_string().into(), f);
+    }
+    let mut grids = std::collections::BTreeMap::new();
+    for g in [ac2_proto::samples::log_grid(), spec_grid] {
+        grids.insert(g.id(), Arc::new(g));
+    }
+    t.conn(ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids,
+        drained: Instant::now(),
+    })));
+
+    let theme = ac2_scene::theme::Theme::by_name(t.st.theme);
+    let size = Viewport {
+        width: 1000.0,
+        height: 450.0,
+    };
+    let now = crate::scenes::Now {
+        instant: Instant::now(),
+        wall: WallNs(0),
+    };
+    // The colour each curve is drawn in, by its name, from both panes.
+    let mut drawn: Vec<(String, Color)> = crate::scenes::transfer(&t.st, &theme, size, now)
+        .traces
+        .iter()
+        .map(|d| (d.name.clone(), d.color))
+        .collect();
+    drawn.extend(crate::scenes::with_spectrum(
+        &t.st,
+        &theme,
+        now,
+        |traces, _, _| {
+            traces
+                .iter()
+                .map(|d| (d.name.clone(), d.color))
+                .collect::<Vec<_>>()
+        },
+    ));
+    let curve = |name: &str| {
+        drawn
+            .iter()
+            .find(|(n, _)| n == name)
+            .unwrap_or_else(|| panic!("{name} drawn: {drawn:?}"))
+            .1
+    };
+    let rows = t.st.tree_rows();
+    let dot = |name: &str| {
+        rows.iter()
+            .find(|r| r.name == name)
+            .unwrap_or_else(|| panic!("{name} listed"))
+            .dot
+    };
+    for (row, name) in [
+        ("Main L (live)", "Main L"),
+        ("Sub (live)", "Sub"),
+        ("pre ÷ post", "pre ÷ post"),
+        ("pre-EQ", "pre-EQ"),
+        ("post-EQ", "post-EQ"),
+        ("1083 94cm", "1083 94cm"),
+    ] {
+        assert_eq!(dot(row), Some((curve(name), true)), "{row}");
+    }
+    let colours: std::collections::BTreeSet<[u8; 3]> = rows
+        .iter()
+        .filter_map(|r| r.dot)
+        .map(|(c, _)| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8))
+        .collect();
+    assert_eq!(colours.len(), 6, "each curve its own colour");
+    for r in rows.iter().filter(|r| r.depth == 0) {
+        assert_eq!(r.dot, None, "{} is a group", r.name);
+    }
+    // Hidden: a ring of the same colour.
+    let sub = curve("Sub");
+    t.st.update(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
+    let rows = t.st.tree_rows();
+    let row = rows.iter().find(|r| r.name == "Sub (live)").expect("row");
+    assert_eq!(row.dot, Some((sub, false)));
+    t.st.update(Msg::ToggleMeasShown(MeasId(6)), &t.keys);
+    let rows = t.st.tree_rows();
+    let row = rows.iter().find(|r| r.name == "pre ÷ post").expect("row");
+    assert_eq!(row.dot.map(|d| d.1), Some(false));
+}
+
 #[test]
 fn the_tree_lists_what_each_measurement_owns_and_folds() {
     let mut t = T::new();

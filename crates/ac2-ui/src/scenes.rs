@@ -192,6 +192,18 @@ pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
     st.pane_meas(PaneKind::Transfer)
 }
 
+/// The colour of measurement `id`'s live curve (or math result) in every pane: the theme's
+/// trace colour at its place in the measurement list, which [`pane_order`] carries along,
+/// so the curve keeps its colour whichever measurement a pane leads with.
+pub fn meas_color(st: &AppState, theme: &Theme, id: MeasId) -> ac2_scene::primitives::Color {
+    let i = st
+        .measurements()
+        .iter()
+        .position(|m| m.id == id)
+        .unwrap_or(0);
+    theme.trace_color(i)
+}
+
 /// Measurements in list order with the one pane `p` shows first (its legend row and
 /// caption lead).
 fn pane_order(st: &AppState, p: PaneKind) -> Vec<(usize, &Measurement)> {
@@ -389,7 +401,7 @@ pub fn spectrograph(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> S
 
 /// Calls `f` with the spectrum pane's traces (live, then stored), its banner status and
 /// the view on the level range of the scale its curves are in.
-fn with_spectrum<R>(
+pub(crate) fn with_spectrum<R>(
     st: &AppState,
     theme: &Theme,
     now: Now,
@@ -573,14 +585,9 @@ pub fn ir(
     if let Some(ir) = ir.filter(|_| !st.meas_hidden(m))
         && let FrameData::Ir(f) = &ir.frame.data
     {
-        let i = st
-            .measurements()
-            .iter()
-            .position(|x| x.id == m.id)
-            .unwrap_or(0);
         return Some(ir_scene(
             f,
-            theme.trace_color(i),
+            meas_color(st, theme, m.id),
             Some(freshness(st, ir)),
             &status,
             &st.view,

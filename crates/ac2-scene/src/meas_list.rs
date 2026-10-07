@@ -67,6 +67,8 @@ pub struct MeasItem<'a> {
     pub inverted: bool,
     /// Its live curves are hidden in this app (it keeps measuring).
     pub hidden: bool,
+    /// The colour its curve is drawn in, in every pane and legend: its row's dot has it.
+    pub color: Color,
 }
 
 /// What the list highlights on a row.
@@ -194,7 +196,11 @@ pub struct TreeRow {
     /// Drawn dimmed: the curve (or every curve of the group) is hidden in the panes.
     pub hidden: bool,
     pub mark: Mark,
-    /// A stored trace's colour and whether it is shown (its dot toggles it).
+    /// The colour of the curve the row stands for (its live curve, a stored trace or sweep
+    /// run, a math channel's result), as the panes draw it, and whether it is shown: filled
+    /// when shown, a ring when hidden, and a click on it toggles that. Headers have none:
+    /// they stand for a group, not a curve. A curve no visible pane draws right now keeps
+    /// its colour, so it reads the same when its pane comes back.
     pub dot: Option<(Color, bool)>,
     /// Everything about the row in one sentence (the tooltip, and what a screen reader says).
     pub describe: String,
@@ -306,7 +312,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 collapsed: None,
                 hidden: item.hidden,
                 mark: Mark::None,
-                dot: None,
+                dot: Some((item.color, !item.hidden)),
                 describe: format!("{}: the live curve, {state}", m.config.name),
             });
         }
@@ -368,7 +374,7 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 collapsed: None,
                 hidden: item.hidden,
                 mark: mark(m.id),
-                dot: None,
+                dot: Some((item.color, !item.hidden)),
             });
         }
         if let Some(c) = children.last_mut() {
@@ -707,6 +713,7 @@ mod tests {
             offset_db: 0.0,
             inverted: false,
             hidden: false,
+            color: Color::from_rgba8([0, 0, u8::try_from(m.id.0).unwrap_or(0), 255]),
         }
     }
 
@@ -967,7 +974,15 @@ mod tests {
         assert_eq!(t[0].collapsed, Some(false));
         assert_eq!(t[1].key, TreeKey::Live(MeasId(1)));
         assert_eq!(t[4].key, TreeKey::Math(MeasId(4)));
+        // Every row with a curve has a dot in its curve's colour, filled while shown; a
+        // header stands for a group and has none.
+        let colour = |id: u32| item(r.meas.iter().find(|m| m.id == MeasId(id)).expect("m")).color;
+        assert_eq!(t[1].dot, Some((colour(1), true)), "the live curve");
         assert_eq!(t[2].dot, Some((Color::from_rgba8([1, 2, 3, 255]), true)));
+        assert_eq!(t[4].dot, Some((colour(4), true)), "the math result");
+        for row in &t {
+            assert_eq!(row.dot.is_none(), row.depth == 0, "{row:?}");
+        }
         // The order V steps through: group by group.
         let metas: Vec<&TraceMeta> = r.traces.iter().rev().collect();
         let ms: Vec<&Measurement> = r.meas.iter().collect();
@@ -1073,6 +1088,7 @@ mod tests {
         assert_eq!(t[0].details[0], "running · hidden");
         assert!(t[0].hidden && t[1].hidden);
         assert_eq!(t[1].details[0], "live · hidden");
+        assert_eq!(t[1].dot, Some((item(&r.meas[0]).color, false)), "a ring");
         let sweep = t
             .iter()
             .find(|x| x.key == TreeKey::Meas(MeasId(2)))
