@@ -308,3 +308,10 @@ the `--max-level` bound; changes made in Settings now persist in the daemon's `r
 **Reopen probe, real hardware:** jackd stopped and started again 6 s later; the daemon logged
 "the audio device is back: reopening now" and reopened at once (8.1 s without audio in all,
 against 12 s after jackd's return with the backoff alone on 645f5ec).
+
+## Deploy of 1303a63 (2026-10-07)
+
+Protocol 24, session format 11 (measurement tree, sweep as a measurement kind, IR/sweep zoom
+and cursor). Backup in `/work/ac2-scratch/deploy-1303a63/`; restored as for 360c6b8, plus the
+operator's two math channels on stored traces (`ac2 math new --name … --op div --a "1083 94cm"
+--b "1083 94cm -30" --imported --start`, and `-30 ÷ 50 v2`), which came back with the same ids.
