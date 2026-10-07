@@ -55,6 +55,7 @@ class RewSet:
     meas_ir: formats.RewIR | None = None
     ref_ir: formats.RewIR | None = None
     meas_gd: formats.RewCurve | None = None
+    ref_gd: formats.RewCurve | None = None
     meas_dist: formats.RewDistortion | None = None
     rt60: dict | None = None
     summary: dict | None = None
@@ -183,12 +184,16 @@ def load_run(root: Path) -> RunData:
                            meas_ir=_maybe(formats.read_rew_ir, rd / "meas_ir.json"),
                            ref_ir=_maybe(formats.read_rew_ir, rd / "ref_ir.json"),
                            meas_gd=_maybe(formats.read_rew_curve, rd / "meas_gd.json"),
+                           ref_gd=_maybe(formats.read_rew_curve, rd / "ref_gd.json"),
                            meas_dist=_maybe(formats.read_rew_distortion, rd / "meas_dist.json"),
                            rt60=_json(rd / "meas_rt60.json"), summary=_json(rd / "meas_summary.json"))
             p.rec = _raw(rd / "rec.wav")
         sine = _json(d / "sine" / "results.json")
         if sine:
             p.truth = sine
+            plan = _json(d / "sine" / "plan.json")
+            if plan:
+                p.truth["plan"] = plan
         p.noise = _raw(d / "sine" / "noise.wav")
         paths[pname] = p
     amb = None

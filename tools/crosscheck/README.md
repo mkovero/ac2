@@ -179,11 +179,27 @@ calibration mapping, one table of checks per group, the data tables and the plot
 
 - **PASS / WARN / FAIL** compare `|value|` with (pass, warn) from `tolerances.toml`. Each row
   says what was compared with what.
-- **INCONCLUSIVE** means a reading below floor + `margin_db` (10 dB). Such a reading is an upper
-  bound "< X", never a value, and the row gives the shortfall. Comparisons that rest on bounds
-  never PASS or FAIL. One exception: a value more than the warn limit above a bound is a FAIL.
+- **INCONCLUSIVE** means the data cannot tell a pass from a fail:
+  - a reading below floor + `margin_db` (10 dB). Such a reading is an upper bound "< X",
+    never a value, and the row gives the shortfall. Comparisons that rest on bounds never
+    PASS or FAIL. One exception: a value more than the warn limit above a bound is a FAIL.
+  - a comparison whose own uncertainty (2σ: probe floors, phase scatter, a band's noise from
+    the recording's SNR, a room's fine structure) is wider than the pass limit. It FAILs only
+    when it misses the warn limit by more than that uncertainty.
+  - a truth or reading a mains line sits in (the sine GD pair, a sweep's harmonic band).
+- **INFO** rows are context, not judged: REW's offline delays (gone by design), REW's own GD
+  export, REW's RTA averaging, an electrical path's ETC skirts.
+- **One phase reference**: meas ÷ ref with the path's delay in it. ac2's reported arrival is
+  put back into its phase, and REW offline gets back the delay its timing markers removed
+  (from the direct estimate of the same recording).
 - **direct** sources are numpy cross-spectra of the same recording an app analysed. A
-  difference to them is the app's analysis, not the take.
+  difference to them is the app's analysis, not the take. A band's magnitude is its power
+  mean and its phase that of the complex mean, as ac2's columns read; the recording's delay
+  is taken out of the band sums and put back at the centre.
+- Columns left out of band comparisons, counted in each row: within 2 Hz of a mains line,
+  within 1/12 octave of a sweep's ends (1/6 below the top on speaker paths), and on speaker
+  paths comb nulls 10 dB below their 1/3-octave mean and columns whose noise alone exceeds
+  the pass limit.
 - Groups:
   - **magnitude / phase**: band-wise spread after removing the delay difference (1–20 kHz
     electrical, 200 Hz–5 kHz acoustic). ac2's TF is compared only where γ² ≥ 0.99.
@@ -225,14 +241,11 @@ convention used here, 3 dB hotter than the −30 dBFS sweeps it is compared with
   formats, `Generate RT60` with the `/rt60` export, the RTA mode and averaging names, and
   REW's absolute FR convention for an imported response (the `REW (SPL…)` rows assume FR =
   gain + drive level). Check these rows on the first run.
-- **ac2's RTA is captured as one frame:** `meas new rta` has no averaging option. Its
-  third-octave rows compare a snapshot with a 60 s average, so expect WARN in quiet,
-  fluctuating rooms.
-- **The ac2 arrival is whole-sample** in the builds of 2026-10-07: about 3.7 µs short on
-  the Xone path. The total-in-phase row is the one to judge.
-- **The speaker-path analysis has never seen real data.** It ran only on synthetic run
-  directories; on the first operator run, check the table shapes before trusting the
-  numbers.
+- **ac2's RTA is captured as one frame:** `meas new rta` has no averaging option, so its
+  third-octave row is INCONCLUSIVE (a snapshot against a 60 s average).
+- **Speaker paths at −50 dBFS** leave most of 20–1000 Hz below the noise limit: those band
+  rows are INCONCLUSIVE, and room clarity (C50/C80) is INCONCLUSIVE when ac2's decay meets
+  the noise before the boundary.
 - **Emission was not exercised here.** On the dev host the run side was exercised only
   against ac2d's fake backend and a JACK dummy server, and the systemd drop-in path was not
   exercised at all (it restarts the rig's ac2d).

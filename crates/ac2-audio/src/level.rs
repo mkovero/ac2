@@ -56,6 +56,13 @@ impl MaxLevel {
     pub fn linear(self) -> f32 {
         10f64.powf(self.db / 20.0) as f32
     }
+
+    /// Whether a signal of linear sample peak `peak` stays within the limit. Compared in f64:
+    /// a signal planned to sit exactly at the limit (a level at its ceiling) must pass, and the
+    /// f32 of [`Self::linear`] can round below the f64 peak by up to 6e-8 relative.
+    pub fn admits_peak(self, peak: f64) -> bool {
+        peak <= 10f64.powf(self.db / 20.0) * (1.0 + 1e-9)
+    }
 }
 
 /// Generator gain, ≤ 0 dB. Applied before the [`MaxLevel`] limit.
@@ -96,6 +103,22 @@ impl Gain {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_peak_exactly_at_the_limit_is_admitted() {
+        // f32 rounds 10^(-50/20) down: the peak of a signal planned at the limit must still pass
+        for db in [-60.0, -50.0, -40.0, -30.0, -20.0, -6.0, 0.0] {
+            let m = MaxLevel::from_peak_db(db).expect("level");
+            let peak = 10f64.powf(db / 20.0);
+            assert!(m.admits_peak(peak), "{db} dB");
+            assert!(!m.admits_peak(peak * (1.0 + 1e-6)), "{db} dB");
+        }
+        let m = MaxLevel::from_peak_db(-50.0).expect("level");
+        assert!(10f64.powf(-50.0 / 20.0) > f64::from(m.linear()));
+        // pink noise at its ceiling: rms(ceiling) × the clamped crest of 6
+        let rms = 10f64.powf(-50.0 / 20.0) / 6.0;
+        assert!(m.admits_peak(rms * 6.0));
+    }
 
     #[test]
     fn levels_reject_non_finite_and_above_full_scale() {

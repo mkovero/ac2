@@ -144,7 +144,7 @@ impl Control {
             .collect::<Result<Vec<_>, _>>()
             .map_err(gen_err)?;
         let crest = sweeps.first().map_or(1.0, CoreGenerator::crest_factor);
-        if dbfs_to_rms(level.0) * crest > f64::from(self.s.max_level.linear()) * (1.0 + 1e-9) {
+        if !self.s.max_level.admits_peak(dbfs_to_rms(level.0) * crest) {
             return Err(perr(
                 ErrorCode::Refused,
                 "the sweep's peak would exceed the output limit",

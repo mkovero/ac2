@@ -153,3 +153,109 @@ def test_sweep_harmonics_replica():
     d = int(np.argmax(np.abs(h[:1000])))
     r = dsp.sweep_harmonics(h, d, fs, L, np.array([200.0, 1000.0]))
     assert np.all(np.abs(r["h"][2] + 60) < 1.0)
+
+
+def _ess(fs, f1, f2, L, level_db=-20):
+    m = int(L * np.log(f2 / f1) * fs)
+    t = np.arange(m) / fs
+    return 10 ** (level_db / 20) * np.sin(2 * np.pi * f1 * L * np.expm1(t / L))
+
+
+def test_sweep_noise_floor_matches_the_noise_inside_the_record():
+    # The floor from a separate noise-only record of the same length (windows at the harmonic
+    # lags) must equal the noise the analysed record carries: read in h itself, in the silence
+    # after the linear IR, where only noise lands.
+    fs, L = 48000.0, 0.4
+    s = _ess(fs, 20.0, 20000.0, L)
+    pre, post = int(0.1 * fs), int(1.0 * fs)
+    ref = np.concatenate([np.zeros(pre), s, np.zeros(post)])
+    rng = np.random.default_rng(3)
+    sigma = 1e-4
+    meas = 0.5 * ref + sigma * rng.standard_normal(len(ref))
+    noise = sigma * rng.standard_normal(len(ref))
+    h = dsp.deconvolve(ref, meas)
+    hn = dsp.deconvolve(ref, noise)
+    freqs = np.array([300.0, 1000.0, 3000.0])
+    r = dsp.sweep_harmonics(h, 0, fs, L, freqs, kmax=3, pre=0.02, post=0.06, noise_h=hn)
+    # the same windows read in h's own silence, +0.3 … +0.9 s after the arrival
+    start2 = -round(L * np.log(2) * fs) - int(0.02 * fs)
+    h_quiet = np.roll(h, -(int(0.6 * fs) - start2))
+    r_in = dsp.sweep_harmonics(h, 0, fs, L, freqs, kmax=3, pre=0.02, post=0.06, noise_h=h_quiet)
+    assert np.all(np.abs(r["floor"][2] - r_in["floor"][2]) < 1.5), (r["floor"][2], r_in["floor"][2])
+    r8 = dsp.sweep_harmonics(h, 0, fs, L, freqs, kmax=3, pre=0.02, post=0.06, noise_h=hn, repeats=8)
+    assert np.allclose(r8["floor"][2], r["floor"][2] - 10 * np.log10(8))
+
+
+def test_gd_slope_err_and_sine_sigma():
+    f = 1000.0 * 2 ** (np.arange(-40, 41) / 96)
+    tau = 3e-6
+    rng = np.random.default_rng(5)
+    ph = -2 * np.pi * f * tau + 1e-4 * rng.standard_normal(len(f))
+    g, se, sp = dsp.gd_slope_err(f, ph, np.array([1000.0]), 1 / 12)
+    assert abs(g[0] - tau) < 4 * se[0]
+    assert 0.5e-4 < sp[0] < 2e-4
+    # a quadratic phase (group delay changing with f) is not noise
+    g2, se2, sp2 = dsp.gd_slope_err(f, -2 * np.pi * f * tau + 1e-7 * (f - 1000.0) ** 2, np.array([1000.0]), 1 / 12)
+    assert sp2[0] < 1e-9
+    # floor −80 dBr at 1 kHz over ±1/48 oct: 1e-4 rad / (2π·28.9 Hz) ≈ 0.55 µs
+    assert abs(dsp.sine_gd_sigma(1000.0, -80.0) - 1e-4 / (2 * np.pi * 1000 * (2 ** (1 / 48) - 2 ** (-1 / 48)))) < 1e-12
+
+
+def test_mains_columns():
+    c = np.array([49.0, 100.0, 148.0, 152.0, 180.0])
+    assert dsp.mains_columns(c, [50.0, 150.0], 1 / 48, guard_hz=0.0).tolist() == [False] * 5
+    assert dsp.mains_columns(c, [50.0, 150.0], 1 / 48, guard_hz=1.0).tolist() == [True, False, True, True, False]
+
+
+def test_avoid_mains_keeps_the_gd_pair_off_the_lines():
+    f = dsp.avoid_mains(50.0, 2.0, 50.0, pair=True)
+    lobe = dsp.MAINLOBE_BINS / 2.0
+    for s in (-1, 1):
+        fp = f * 2 ** (s / 48)
+        assert abs(fp - 50 * round(fp / 50)) > lobe
+    # without the pair the fundamental's neighbourhood is not checked
+    g = dsp.avoid_mains(50.0, 2.0, 50.0)
+    assert min(abs(g * 2 ** (s / 48) - 50) for s in (-1, 1)) < lobe
+
+
+def test_cross_spectrum_bands_keeps_a_delayed_path_whole():
+    # a 3.6 ms delay turns the phase half a turn across a 1/48-octave band at 10 kHz: without
+    # taking it out the band's complex sum cancels; with it the band reads the gain and delay
+    fs, n = 96000.0, 2 ** 18
+    rng = np.random.default_rng(3)
+    ref = rng.standard_normal(n)
+    d = 3.6e-3
+    D = int(round(d * fs))
+    meas = 0.5 * np.roll(ref, D)
+    c = np.array([1000.0, 10000.0])
+    H0, c0 = dsp.cross_spectrum_bands(meas, ref, fs, c)
+    H1, c1 = dsp.cross_spectrum_bands(meas, ref, fs, c, delay_s=D / fs)
+    assert np.all(np.abs(dsp.db(H1) - dsp.db(0.5)) < 0.05)
+    want = np.angle(np.exp(-2j * np.pi * c * D / fs))
+    assert np.all(np.abs(np.angle(H1 * np.exp(-1j * want))) < 0.02)
+    # without it Σ M·R* over the 10 kHz band sums half a turn of phase: it cancels
+    assert c1[1] > 0.99 and c0[1] < 0.5
+
+
+def test_band_noise_rel_falls_with_snr_and_band_width():
+    fs, n = 48000.0, 2 ** 17
+    rng = np.random.default_rng(5)
+    sig = rng.standard_normal(n)
+    noise = 0.01 * rng.standard_normal(4 * n)
+    meas = sig + 0.01 * rng.standard_normal(n)
+    c = np.array([200.0, 2000.0])
+    z = dsp.band_noise_rel(meas, noise, fs, c)
+    # SNR 40 dB per bin, then √n bins of averaging: wider bands (higher c) read lower
+    nb = c * (2 ** (1 / 96) - 2 ** (-1 / 96)) * n / fs
+    want = 0.01 / np.sqrt(nb)
+    assert np.all(np.abs(20 * np.log10(z / want)) < 1.5)
+    assert z[1] < z[0]
+
+
+def test_band_mean_reads_power_in_a_null():
+    # two equal reflections cancelling at the band centre: the complex mean is near zero,
+    # the power mean is the level a column reads (√2 / √2 = 1 for unit paths)
+    f = np.linspace(990, 1010, 201)
+    H = 1 + np.exp(-2j * np.pi * f * (1 / 2000) * 1.0)
+    out = dsp.band_mean(f, H, np.array([1000.0]), frac=1 / 48)
+    assert abs(abs(out[0]) - np.sqrt(np.mean(np.abs(H[(f >= 1000 * 2 ** (-1 / 96)) & (f < 1000 * 2 ** (1 / 96))]) ** 2))) < 1e-9

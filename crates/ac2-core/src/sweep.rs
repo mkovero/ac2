@@ -467,6 +467,12 @@ fn locate(
     if level_db < MIN_REFERENCE_DB {
         return Err(SweepError::NoReference { level_db });
     }
+    let i_ref = peaks
+        .iter()
+        .fold((0, 0.0f64), |a, p| if p.1 > a.1 { *p } else { a })
+        .0;
+    let level_db =
+        mid_band_gain_db(&y, i_ref, &inv.deconvolve(&ideal), spec, timing).unwrap_or(level_db);
     // A matched-filter peak far below the strongest is a sidelobe or a stray burst, not a
     // repeat of the same sweep.
     let mut onsets: Vec<usize> = peaks
@@ -486,6 +492,58 @@ fn locate(
         });
     }
     Ok((onsets, level_db))
+}
+
+/// The reference's gain re the emitted sweep over the log-middle half of the full-level band,
+/// dB: the power ratio of the deconvolved reference to the deconvolved ideal loopback there,
+/// each windowed around its peak, averaged per octave. The matched-filter peak weights frequencies linearly (a
+/// sweep spends equal time per octave but the impulse's energy is spread per hertz), so its
+/// ratio is the gain near the top of the band, where a converter's anti-alias roll-off sits;
+/// the middle of the band is where the loopback's gain is the level it passes on.
+/// None when the band holds no bin.
+fn mid_band_gain_db(
+    y: &[f64],
+    i_y: usize,
+    y_unit: &[f64],
+    spec: &SweepSpec,
+    timing: &SweepTiming,
+) -> Option<f64> {
+    let fs = spec.sample_rate;
+    let l = timing.plan.rate_s;
+    let f_full = timing.full_level_hz();
+    let f_top = (spec.ess.end_hz * (-spec.ess.fade_out_s / l).exp()).min(HARMONIC_FS_FRACTION * fs);
+    if f_top <= f_full {
+        return None;
+    }
+    let r = f_top / f_full;
+    let (lo, hi) = (f_full * r.powf(0.25), f_full * r.powf(0.75));
+    // Long enough for several bins below the band, short enough that the window's quarter
+    // before the peak stays clear of H2's impulse, L·ln 2 earlier.
+    let w_s = (8.0 / lo).max(0.1).min(2.0 * l * LN_2);
+    let nw = ((w_s * fs) as usize).next_power_of_two().max(64);
+    let pre = nw / 4;
+    let w = taper(nw, pre / 4, nw / 8);
+    let i_u = y_unit
+        .iter()
+        .enumerate()
+        .fold(
+            (0, 0.0f64),
+            |a, (i, v)| if v.abs() > a.1 { (i, v.abs()) } else { a },
+        )
+        .0;
+    let py = power_spectrum(&segment(y, i_y as i64 - pre as i64, &w), nw);
+    let pu = power_spectrum(&segment(y_unit, i_u as i64 - pre as i64, &w), nw);
+    let bin = fs / nw as f64;
+    // Per-bin power ratio weighted 1/f: equal weight per octave, like the sweep's own time.
+    let (mut acc, mut wsum) = (0.0, 0.0);
+    for (k, (a, b)) in py.iter().zip(&pu).enumerate() {
+        let f = k as f64 * bin;
+        if f >= lo && f <= hi && *b > 0.0 {
+            acc += a / b / f;
+            wsum += 1.0 / f;
+        }
+    }
+    (wsum > 0.0 && acc > 0.0).then(|| db10(acc / wsum))
 }
 
 /// Mean power of `s` (bins of an FFT with `bin_hz` spacing) over `octaves` around `f`, but

@@ -116,12 +116,25 @@ def analyse(a, run):
         m = np.isfinite(dd) & (fc >= 25) & (fc <= 16000)
         if m.any():
             v = float(np.max(np.abs(dd[m])))
+            st, why = judge(v, tb), ""
+            if k == "ac2 RTA":
+                # `ac2 meas new rta` cannot set averaging and the default is off: the captured
+                # trace is one analysis frame, a sample of a fluctuating noise, not the window's
+                # mean power the numpy column holds
+                st, why = "INCONCLUSIVE", ("; ac2's RTA was captured without averaging (one frame, the CLI "
+                                           "offers no averaging option), so it is not an estimate over the window")
+            elif k == "REW RTA":
+                # REW's 'Forever' average reads low against the power mean, increasingly at HF:
+                # an average of levels in dB under-reads noise (the mean of a log is below the log
+                # of the mean). Context, not a judgement of the suite's reference.
+                st, why = "INFO", ("; REW's own averaging (Forever) reads below the power mean, consistent "
+                                   "with averaging levels in dB")
             a.add(id=f"ambient.bands.{k}", group="ambient SPL", path="ambient",
-                  title=f"{k} vs numpy, third octaves 25 Hz-16 kHz", value=v, unit="dB", tol=tb,
-                  status=judge(v, tb),
+                  title=f"{k} vs numpy, third octaves 25 Hz-16 kHz", value=v, unit="dB",
+                  tol=None if st == "INFO" else tb, status=st,
                   meaning=f"largest |difference| over {int(m.sum())} bands, median {np.median(dd[m]):+.2f} dB; "
                           "an RTA reads a spectral density on its own resolution, the numpy column sums "
-                          "FFT bins between ideal base-10 band edges over the whole window")
+                          "FFT bins between ideal base-10 band edges over the whole window" + why)
     a.table("ambient: third-octave levels (dB SPL)", ["fc Hz"] + list(cols),
             [[f"{c:.0f}"] + [f"{cols[k][i]:.1f}" if np.isfinite(cols[k][i]) else "—" for k in cols]
              for i, c in enumerate(fc)])

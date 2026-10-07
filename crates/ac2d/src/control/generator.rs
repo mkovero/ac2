@@ -244,7 +244,7 @@ impl Control {
                 })
                 .map_err(gen_err)?;
                 let peak = dbfs_to_rms(st.level.0) * g.crest_factor();
-                if peak > f64::from(self.s.max_level.linear()) * (1.0 + 1e-9) {
+                if !self.s.max_level.admits_peak(peak) {
                     return Err(perr(
                         ErrorCode::Refused,
                         "the signal's peak would exceed the output limit",

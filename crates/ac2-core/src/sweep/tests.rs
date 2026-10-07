@@ -212,7 +212,11 @@ fn memoryless_polynomial_harmonics_and_thd() {
     // Arrival: the measurement path's delay re the loopback's.
     let want = (MIC_DELAY - REF_DELAY) as f64 / FS;
     assert!((r.arrival_s - want).abs() <= 0.5 / FS, "{}", r.arrival_s);
-    assert!((r.reference_db - 20.0 * REF_GAIN.log10()).abs() < 0.5);
+    assert!(
+        (r.reference_db - 20.0 * REF_GAIN.log10()).abs() < 0.02,
+        "{}",
+        r.reference_db
+    );
     assert_eq!(r.repeats, 1);
     assert!(!r.clipped);
 
@@ -815,5 +819,46 @@ fn low_frequency_phase_is_free_of_bin_ripple() {
         worst_gd < 0.03,
         "group delay off by {:.1} %",
         100.0 * worst_gd
+    );
+}
+
+#[test]
+fn reference_level_is_the_mid_band_gain_under_hf_roll_off() {
+    // A loopback whose gain falls towards the top of the band (a two-tap mean: cos(π f / fs),
+    // −3 dB at fs/4): the level it passes on is its mid-band gain, not the matched-filter
+    // peak, which weights the rolled-off top of the band most.
+    let s = spec(ess(50.0, 20_000.0, 3.0));
+    let x = emitted(&s, 1, 0.37);
+    let d = delayed(&x, REF_DELAY, REF_GAIN);
+    let reference: Vec<f64> = (0..d.len())
+        .map(|i| 0.5 * (d[i] + if i > 0 { d[i - 1] } else { 0.0 }))
+        .collect();
+    let mic = delayed(&x, MIC_DELAY, MIC_GAIN);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    // the two-tap power gain averaged per octave over the log-middle half of the full-level band
+    let t = SweepTiming::new(&s).expect("timing");
+    let f_full = t.full_level_hz();
+    let f_top = (20_000.0 * (-s.ess.fade_out_s / t.plan.rate_s).exp()).min(0.45 * FS);
+    let (lo, hi) = (
+        f_full * (f_top / f_full).powf(0.25),
+        f_full * (f_top / f_full).powf(0.75),
+    );
+    let n = 10_000;
+    let mean = (0..n)
+        .map(|i| {
+            let f = lo * (hi / lo).powf((i as f64 + 0.5) / n as f64);
+            (std::f64::consts::PI * f / FS).cos().powi(2)
+        })
+        .sum::<f64>()
+        / n as f64;
+    let want = 20.0 * REF_GAIN.log10() + 10.0 * mean.log10();
+    assert!(
+        want < 20.0 * REF_GAIN.log10() - 0.05,
+        "the roll-off must reach the band: {want}"
+    );
+    assert!(
+        (r.reference_db - want).abs() < 0.05,
+        "reference {} dB, mid-band gain {want} dB",
+        r.reference_db
     );
 }

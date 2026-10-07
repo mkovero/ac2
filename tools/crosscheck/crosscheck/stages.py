@@ -239,9 +239,10 @@ def sine_stage(ctx: Ctx, pname: str):
     # a short noise take for the probe floors
     fs, nz = jackio.play_record([], ins, pre_s=max(3 * probe_s, 4.0), post_s=0.0, expect_fs=ctx.fs, max_xruns=ctx.max_xruns)
     tones = []
+    pairs = sc.get("gd_pairs", False) and not speaker
     for f0 in [float(x) for x in sc[f"{pname}_hz"]]:
         seconds0 = max(probe_s, sc["min_periods"] / f0)
-        f = dsp.avoid_mains(f0, seconds0, mains)
+        f = dsp.avoid_mains(f0, seconds0, mains, pair=pairs)
         fs, x = take(f, seconds0)
         seg = _steady(x[:, 0], fs, 0.2, seconds0 + 2 * fade_s + settle, fade_s, settle)
         if not np.any(seg):
@@ -255,7 +256,6 @@ def sine_stage(ctx: Ctx, pname: str):
     for t in tones:
         g = t["probe_floor_dbr"] - target if np.isfinite(t["probe_floor_dbr"]) else 0.0
         want.append(min(max(t["probe_s"] * 10 ** (max(g, 0.0) / 10), t["probe_s"]), float(sc["max_seconds"])))
-    pairs = sc.get("gd_pairs", False) and not speaker
     per_tone_extra = 2 * max(probe_s, 1.0) if pairs else 0.0
     total = sum(want) + len(want) * (per_tone_extra + 1.0)
     scale = min(1.0, max(budget - len(want) * (per_tone_extra + 1.0), 1.0) / max(sum(want), 1e-9))

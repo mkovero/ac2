@@ -98,7 +98,7 @@ fn burst(
     })
     .map_err(|e| perr(ErrorCode::Refused, format!("burst level: {e}")))?;
     let peak = dbfs_to_rms(level_dbfs) * g.crest_factor();
-    if peak > f64::from(max_level.linear()) * (1.0 + 1e-9) {
+    if !max_level.admits_peak(peak) {
         return Err(perr(
             ErrorCode::Refused,
             "the burst's peak would exceed the output limit",

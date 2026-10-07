@@ -11,6 +11,21 @@ import time
 from pathlib import Path
 
 
+
+def event_errors(events: list[dict]) -> list[str]:
+    """The daemon's refusals and errors among a foreground command's JSON events: either an
+    `{"error": {"code", "msg"}}` reply or an event named error/refused."""
+    out = []
+    for e in events:
+        err = e.get("error")
+        if isinstance(err, dict):
+            out.append(f"{err.get('code', 'error')}: {err.get('msg', err)}")
+        elif err is not None:
+            out.append(str(err))
+        elif e.get("event") in ("error", "refused"):
+            out.append(str(e))
+    return out
+
 class Ac2Error(Exception):
     pass
 
@@ -126,7 +141,9 @@ class Ac2:
                 t0 = time.monotonic()
                 while time.monotonic() - t0 < hold_s:
                     if p.poll() is not None:
-                        raise Ac2Error(f"ac2 {' '.join(map(str, args))} exited early: {p.stderr.read()[-500:]}")
+                        t.join(2)
+                        why = "; ".join(event_errors(events)) or p.stderr.read()[-500:]
+                        raise Ac2Error(f"ac2 {' '.join(map(str, args))} exited early: {why}")
                     time.sleep(0.2)
                 if before_stop:
                     before_stop()
@@ -146,6 +163,6 @@ class Ac2:
             err = p.stderr.read()
             if err.strip():
                 self._log(err[-2000:])
-            for e in events:
-                if e.get("event") in ("error", "refused"):
-                    raise Ac2Error(f"ac2 {' '.join(map(str, args))}: {e}")
+            errs = event_errors(events)
+            if errs:
+                raise Ac2Error(f"ac2 {' '.join(map(str, args))}: {'; '.join(errs)}")

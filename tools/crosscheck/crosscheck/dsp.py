@@ -17,31 +17,40 @@ def log_centres(f_lo: float, f_hi: float, ppo: int = 48) -> np.ndarray:
 
 
 def band_mean(f: np.ndarray, H: np.ndarray, centres: np.ndarray, frac: float = 1 / 48) -> np.ndarray:
-    """Complex mean of H over each band [c·2^(−frac/2), c·2^(frac/2)); the nearest point when
-    a band holds none (a linear grid is sparser than 1/48 octave at low frequencies)."""
+    """H over each band [c·2^(−frac/2), c·2^(frac/2)): the power mean's magnitude with the complex
+    mean's phase; the nearest point when a band holds none (a linear grid is sparser than 1/48 octave at low frequencies)."""
     lo, hi = centres * 2 ** (-frac / 2), centres * 2 ** (frac / 2)
     a = np.searchsorted(f, lo)
     b = np.searchsorted(f, hi)
     out = np.empty(len(centres), dtype=complex)
     cs = np.concatenate([[0], np.cumsum(H)])
+    cp = np.concatenate([[0], np.cumsum(np.abs(H) ** 2)])
     for i, (x, y) in enumerate(zip(a, b)):
         if y > x:
-            out[i] = (cs[y] - cs[x]) / (y - x)
+            # magnitude: the band's mean power, as ac2's columns read it (a complex mean
+            # cancels inside a comb null); phase: that of the complex mean
+            z = cs[y] - cs[x]
+            out[i] = np.sqrt((cp[y] - cp[x]) / (y - x)) * (z / abs(z) if abs(z) > 0 else 1.0)
         else:
             out[i] = H[min(np.searchsorted(f, centres[i]), len(f) - 1)]
     return out
 
 
 def cross_spectrum_bands(meas: np.ndarray, ref: np.ndarray, fs: float, centres: np.ndarray,
-                         frac: float = 1 / 48) -> tuple[np.ndarray, np.ndarray]:
+                         frac: float = 1 / 48, delay_s: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """Direct transfer function meas/ref from one whole recording: in each band
-    H = Σ M·R* / Σ |R|², and the band's coherence |Σ M·R*|² / (Σ|M|² Σ|R|²). No window, no
-    deconvolution: the truth for a stationary path that both inputs saw."""
+    |H|² = Σ|M|² / Σ|R|² with the phase of Σ M·R*, and the band's coherence |Σ M·R*|² / (Σ|M|² Σ|R|²). No window, no
+    deconvolution: the truth for a stationary path that both inputs saw.
+
+    A path delay τ turns the phase by 2π·τ·Δf across a band (half a turn over a 1/48-octave
+    band at 10 kHz for 3.6 ms), and a complex sum over that cancels. `delay_s` is taken out
+    of every bin before the band sums and put back at the band centre, so the band reads the
+    response's own phase and magnitude; the coherence is unaffected."""
     M, R = np.fft.rfft(meas), np.fft.rfft(ref)
     fx = np.fft.rfftfreq(len(meas), 1 / fs)
     lo, hi = centres * 2 ** (-frac / 2), centres * 2 ** (frac / 2)
     a, b = np.searchsorted(fx, lo), np.searchsorted(fx, hi)
-    cmr = np.concatenate([[0], np.cumsum(M * np.conj(R))])
+    cmr = np.concatenate([[0], np.cumsum(M * np.conj(R) * np.exp(2j * np.pi * fx * delay_s))])
     crr = np.concatenate([[0], np.cumsum(np.abs(R) ** 2)])
     cmm = np.concatenate([[0], np.cumsum(np.abs(M) ** 2)])
     H = np.full(len(centres), np.nan + 0j)
@@ -50,10 +59,31 @@ def cross_spectrum_bands(meas: np.ndarray, ref: np.ndarray, fs: float, centres: 
         if y <= x:
             continue
         smr, srr, smm = cmr[y] - cmr[x], crr[y] - crr[x], cmm[y] - cmm[x]
-        if srr > 0:
-            H[i] = smr / srr
+        if srr > 0 and abs(smr) > 0:
+            # magnitude √(Σ|M|²/Σ|R|²): the band's mean power gain, as ac2's columns read it
+            # (the complex mean cancels inside a comb null); phase: that of Σ M·R*
+            H[i] = np.sqrt(smm / srr) * smr / abs(smr) * np.exp(-2j * np.pi * centres[i] * delay_s)
             coh[i] = abs(smr) ** 2 / (srr * smm) if smm > 0 else np.nan
     return H, coh
+
+
+def band_noise_rel(meas: np.ndarray, noise: np.ndarray, fs: float, centres: np.ndarray,
+                   frac: float = 1 / 48) -> np.ndarray:
+    """Relative error |δH|/|H| (1σ) a band of the direct estimate of `meas` carries from the
+    noise. Each bin's estimate errs by N/R; the band's |R|²-weighted mean of n bins with
+    independent noise errs by √(noise energy / signal energy / n). The noise energy is scaled
+    from a noise-only recording on the same input (energy grows with duration)."""
+    def band_energy(x):
+        X = np.abs(np.fft.rfft(x)) ** 2 / len(x)
+        fx = np.fft.rfftfreq(len(x), 1 / fs)
+        c = np.concatenate([[0], np.cumsum(X)])
+        a = np.searchsorted(fx, centres * 2 ** (-frac / 2))
+        b = np.searchsorted(fx, centres * 2 ** (frac / 2))
+        return c[b] - c[a], np.maximum(b - a, 1)
+    em, n = band_energy(meas)
+    en = band_energy(noise)[0] * len(meas) / len(noise)
+    sig = np.maximum(em - en, 1e-30)
+    return np.sqrt(en / sig / n)
 
 
 def db(x) -> np.ndarray:
@@ -160,6 +190,52 @@ def gd_slope(f: np.ndarray, phase_rad: np.ndarray, fc: np.ndarray, half_oct: flo
     return out
 
 
+
+def gd_slope_err(f: np.ndarray, phase_rad: np.ndarray, fc: np.ndarray, half_oct: float = 1 / 12,
+                 min_points: int = 4) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The ±half_oct slope fit of `gd_slope` with its noise: (group delay, its standard error,
+    the per-point phase noise σφ in rad). σφ comes from the residuals of a quadratic through the
+    same points, so the curvature a real group delay changing with frequency puts into the phase
+    is not counted as noise; the slope's standard error is σφ / √Σ(ω − ω̄)²."""
+    ph = np.unwrap(phase_rad)
+    fc = np.atleast_1d(fc)
+    g, se, sp = (np.full(len(fc), np.nan) for _ in range(3))
+    for i, c in enumerate(fc):
+        m = (f >= c * 2 ** -half_oct) & (f <= c * 2 ** half_oct) & np.isfinite(ph)
+        if m.sum() < min_points:
+            continue
+        x, y = 2 * np.pi * f[m], ph[m]
+        xm = x.mean()
+        sxx = np.sum((x - xm) ** 2)
+        g[i] = -np.sum((x - xm) * (y - y.mean())) / sxx
+        u = (x - xm) / (x.max() - x.min())
+        res = y - np.polyval(np.polyfit(u, y, 2), u)
+        sp[i] = np.sqrt(np.sum(res ** 2) / (m.sum() - 3))
+        se[i] = sp[i] / np.sqrt(sxx)
+    return g, se, sp
+
+
+def sine_gd_sigma(f: float, floor_dbr: float, half_oct: float = 1 / 48) -> float:
+    """Standard deviation of a steady-sine group delay taken from two phase readings at
+    f·2^(±half_oct), each with noise `floor_dbr` (noise power re the tone in the tone's bins).
+    A noise phasor N on a tone S moves its phase by |N|·sin θ/|S|, so each reading has
+    σφ = 10^(floor/20)/√2 and their difference 10^(floor/20); divided by Δω."""
+    df = f * (2 ** half_oct - 2 ** -half_oct)
+    return float(10 ** (floor_dbr / 20) / (2 * np.pi * df))
+
+
+def mains_columns(centres: np.ndarray, lines_hz, frac: float = 1 / 48, guard_hz: float = 1.0) -> np.ndarray:
+    """Columns whose band [c·2^(−frac/2), c·2^(frac/2)] widened by `guard_hz` on each side holds
+    one of `lines_hz`: there a stationary line on the measurement input (mains) is not part of
+    the response, and two takes, or a gated and an ungated estimate, read it differently."""
+    c = np.asarray(centres, float)
+    out = np.zeros(len(c), bool)
+    lo, hi = c * 2 ** (-frac / 2) - guard_hz, c * 2 ** (frac / 2) + guard_hz
+    for hz in np.atleast_1d(np.asarray(list(lines_hz), float)):
+        out |= (lo <= hz) & (hz <= hi)
+    return out
+
+
 # ---------------------------------------------------------------- steady sines
 
 
@@ -241,14 +317,22 @@ def _f(x):
 
 
 def avoid_mains(f: float, seconds: float, mains: float = 50.0, kmax: int = 5, guard_bins: int = 2,
-                max_rel: float = 0.06) -> float:
+                max_rel: float = 0.06, pair: bool = False) -> float:
     """Nearest frequency to f whose harmonics 2..kmax all stay clear of every mains multiple
-    by the window's main lobe plus `guard_bins` (bins of 1/seconds Hz)."""
+    by the window's main lobe plus `guard_bins` (bins of 1/seconds Hz). With `pair`, the group
+    delay pair f·2^(±1/48) must also clear every line by the main lobe: a line inside it adds a
+    phasor to the phase the pair's difference reads."""
     clear = (MAINLOBE_BINS + guard_bins) / seconds
+
+    def off(x):
+        return abs(x - mains * round(x / mains))
+
     for step in range(0, int(max_rel / 0.0005) + 1):
         for sgn in (1, -1):
             g = f * (1 + sgn * step * 0.0005)
-            ok = all(abs(k * g - mains * round(k * g / mains)) > clear for k in range(2, kmax + 1))
+            ok = all(off(k * g) > clear for k in range(2, kmax + 1))
+            if pair:
+                ok = ok and all(off(g * 2 ** (s / 48)) > MAINLOBE_BINS / seconds for s in (-1, 1))
             if ok:
                 return round(g, 3)
     return f
@@ -307,35 +391,40 @@ def _band_power(s, bin_hz, f, octv, min_hz):
 
 def sweep_harmonics(h: np.ndarray, d: int, fs: float, L: float, freqs: np.ndarray, kmax: int = 5,
                     pre: float = 0.0083229, post: float = 0.0916771, noise_h: np.ndarray | None = None,
-                    noise_offsets: int = 8) -> dict:
+                    noise_windows: int = 8, floor_oct: float = 1 / 3, repeats: int = 1) -> dict:
     """ac2's harmonic windows on a deconvolved exponential sweep (Farina): harmonic k sits
-    L·ln k before the linear IR. Returns Hk in dBr per frequency and, given the deconvolved
-    noise-only recording `noise_h`, the floor from `noise_offsets` windows power-averaged —
-    the cross-check of ac2's single-window floor."""
+    L·ln k before the linear IR. Returns Hk in dBr per frequency and, given `noise_h` — a
+    noise-only record as long as the analysed one, deconvolved by the same reference — the
+    floor in each harmonic's own window.
+
+    The noise windows sit at the harmonic's lag (and `noise_windows` neighbours tiled around
+    it), where the deconvolved noise is complete: a record deconvolved without circular
+    wrap-around holds noise only over (record + sweep) of its 2× padded length, so windows
+    spread over the whole buffer read the empty padding and come out several dB low. The floor
+    band is `floor_oct` wide (ac2's floor band) and a mean of `repeats` independent takes has
+    1/repeats of one take's noise power."""
     pre_n, post_n = max(round(pre * fs), 1), max(round(post * fs), 1)
     wl = pre_n + post_n
     w = _taper(wl, pre_n, max(post_n // 5, 1))
     nw = 4 * (1 << int(np.ceil(np.log2(wl))))
     bw = fs / nw
-    N = len(h)
     min_hz = 3 / (wl / fs)
 
     def spec(x, start):
         return np.abs(np.fft.rfft(x[(start + np.arange(wl)) % len(x)] * w, nw)) ** 2
 
-    sk = {k: spec(h, d - round(L * np.log(k) * fs) - pre_n) for k in range(1, kmax + 1)}
+    start = {k: d - round(L * np.log(k) * fs) - pre_n for k in range(1, kmax + 1)}
+    sk = {k: spec(h, start[k]) for k in range(1, kmax + 1)}
     p1 = np.array([_band_power(sk[1], bw, f, 1 / 24, min_hz) for f in freqs])
     res = {"p1": p1, "h": {}, "floor": {}}
     for k in range(2, kmax + 1):
         pk = np.array([_band_power(sk[k], bw, k * f, 1 / 24, min_hz) for f in freqs])
         res["h"][k] = 10 * np.log10(pk / p1)
         if noise_h is not None:
-            Nn = len(noise_h)
-            starts = [int(Nn * (j + 0.5) / noise_offsets) for j in range(noise_offsets)]
-            pn = np.mean([[_band_power(spec(noise_h, s0), bw, k * f, 1 / 24, min_hz) for f in freqs]
-                          for s0 in starts], axis=0)
-            res["floor"][k] = 10 * np.log10(pn / p1)
-    del N
+            offs = (np.arange(noise_windows) - noise_windows // 2) * wl
+            pn = np.mean([[_band_power(spec(noise_h, start[k] + o), bw, k * f, floor_oct, 2 * min_hz) for f in freqs]
+                          for o in offs], axis=0)
+            res["floor"][k] = 10 * np.log10(pn / p1 / max(repeats, 1))
     return res
 
 
