@@ -17,7 +17,7 @@ use ac2_proto::units::MeasId;
 use ac2_scene::theme::ThemeName;
 use ac2_ui::conn::Target;
 use ac2_ui::keys::Keymap;
-use ac2_ui::state::{ConnState, Overlay, PaneKind};
+use ac2_ui::state::{ConnState, Overlay, PaneKind, Severity};
 use ac2_ui::{App, AppOptions};
 use eframe::egui::{self, Event, Key, Modifiers};
 use egui_kittest::kittest::Queryable;
@@ -516,6 +516,71 @@ fn help_overlay() {
     // H closes it again.
     h.key_press(Key::H);
     step_until(&mut h, "help closed", |a| a.state.overlay == Overlay::None);
+}
+
+/// Notifications in the corner: an information, a long warning that wraps at the box's
+/// maximum width, an error naming a long path; stacked over the focused pane's key hints,
+/// each as wide as its text. A click dismisses one; the log keeps it.
+#[test]
+fn toasts_wrap_and_stack() {
+    if !have_gpu("toasts_wrap_and_stack") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.state_mut().state.toasts.clear();
+    let reply = |what: &str, result: Result<(), String>| {
+        ac2_ui::state::Msg::Conn(Box::new(ac2_ui::conn::ConnEvent::Reply {
+            what: what.into(),
+            result,
+        }))
+    };
+    h.state_mut()
+        .dispatch(reply("slot 1: Main L S1 captured", Ok(())));
+    // M with fewer than two shown stored traces is refused, saying what to do.
+    h.key_press(Key::M);
+    step_until(&mut h, "the warning", |a| {
+        a.state
+            .toasts
+            .iter()
+            .any(|t| t.severity == Severity::Warning)
+    });
+    h.state_mut().dispatch(reply(
+        "export /home/operator/.local/share/ac2/traces/festival-main-stage-left-hang-position-3-after-the-high-shelf.csv",
+        Err("cannot write the file: permission denied (the folder belongs to another user; choose another folder or fix its permissions)".into()),
+    ));
+    let texts: Vec<String> = h
+        .state()
+        .state
+        .toasts
+        .iter()
+        .map(|t| t.text.clone())
+        .collect();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    // Pinned up: they expire on the wall clock. A few passes so egui has measured the
+    // areas of places in the stack it had not drawn before.
+    for _ in 0..3 {
+        for t in &mut h.state_mut().state.toasts {
+            t.until_s = f64::from(u32::MAX);
+        }
+        h.step();
+    }
+    snapshot_when(
+        &mut h,
+        "toasts_stacked",
+        |a| {
+            for t in &mut a.state.toasts {
+                t.until_s = f64::from(u32::MAX);
+            }
+        },
+        |a| a.state.toasts.len() == 3,
+    );
+    // A click on the newest dismisses it; the log still has all three.
+    let newest = texts[2].clone();
+    h.get_by_label(&newest).click();
+    step_until(&mut h, "dismissed", |a| a.state.toasts.len() == 2);
+    assert_eq!(h.state().state.notices.len(), 3);
 }
 
 /// The keys belong to the reducer, so egui never holds keyboard focus: Tab and the arrows in
@@ -2023,7 +2088,7 @@ fn leq_tiles_from_an_empty_daemon() {
         a.state
             .toasts
             .iter()
-            .filter(|t| t.error && t.text.contains("over its limit"))
+            .filter(|t| t.severity == Severity::Fault && t.text.contains("over its limit"))
             .count()
             == 2
     });

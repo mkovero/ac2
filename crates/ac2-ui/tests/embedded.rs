@@ -25,7 +25,7 @@ use ac2_ui::embedded::{
 };
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::{Chord, CommandId, Keymap};
-use ac2_ui::state::{AppState, Msg, Overlay, PromptKind, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PromptKind, Severity, StimPhase};
 
 type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -1687,11 +1687,15 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
         t.len() >= 2 && t[..2].iter().all(quiet)
     })?;
     let seen = spl_log(&d.st).map_or(0, |l| l.alarms.len());
-    let toasts = d.st.toasts.len();
+    let seen_toast = d.st.toasts.last().map_or(0, |t| t.id);
     let new_toasts = move |s: &AppState, what: &str, error: bool| {
-        s.toasts[toasts.min(s.toasts.len())..]
+        s.toasts
             .iter()
-            .filter(|t| t.error == error && t.text.contains(what))
+            .filter(|t| {
+                t.id > seen_toast
+                    && (t.severity != Severity::Info) == error
+                    && t.text.contains(what)
+            })
             .count()
     };
 
@@ -1867,11 +1871,15 @@ fn a_peak_limit_and_the_position_correction_from_the_app() -> R {
             )
         })
     })?;
-    let toasts = d.st.toasts.len();
+    let seen_toast = d.st.toasts.last().map_or(0, |t| t.id);
     let new_toasts = move |s: &AppState, what: &str, error: bool| {
-        s.toasts[toasts.min(s.toasts.len())..]
+        s.toasts
             .iter()
-            .filter(|t| t.error == error && t.text.contains(what))
+            .filter(|t| {
+                t.id > seen_toast
+                    && (t.severity != Severity::Info) == error
+                    && t.text.contains(what)
+            })
             .count()
     };
     d.key("Space");
@@ -3096,7 +3104,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     assert!(
         d.st.toasts
             .iter()
-            .any(|t| t.error && t.text.contains("select"))
+            .any(|t| t.severity != Severity::Info && t.text.contains("select"))
     );
 
     d.key("V");
@@ -3115,7 +3123,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     d.until("the export written", |s| {
         s.toasts
             .iter()
-            .any(|t| !t.error && t.text.contains("exported to"))
+            .any(|t| t.severity == Severity::Info && t.text.contains("exported to"))
     })?;
     let csv = std::fs::read_to_string(&file)?;
     assert!(csv.starts_with("# ac2 trace export"), "{csv:.80}");
@@ -3153,9 +3161,11 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     retype(&mut d, &dir.path().join("gone/x.csv").display().to_string());
     d.key("Enter");
     d.until("the write error", |s| {
-        s.toasts
-            .iter()
-            .any(|t| t.error && t.text.contains("cannot write") && t.text.contains("gone"))
+        s.toasts.iter().any(|t| {
+            t.severity != Severity::Info
+                && t.text.contains("cannot write")
+                && t.text.contains("gone")
+        })
     })?;
 
     // A math channel of an unslotted stored trace: Shift+M starts with the selected trace

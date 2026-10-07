@@ -6,7 +6,7 @@ use crate::app::App;
 use crate::forms::Value;
 use crate::keys::{CommandId, Keymap, STOP_ANYWHERE, Scope};
 use crate::state::{FormMsg, HELP_LINE, Msg, Overlay};
-use crate::theme::Chrome;
+use crate::theme::{Chrome, c32};
 
 use crate::palette::PALETTE_ROWS;
 
@@ -16,6 +16,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
     match app.state.overlay.clone() {
         Overlay::None => {}
         Overlay::Help => help(app, ctx, ch),
+        Overlay::Notifications => notifications(app, ctx, ch),
         Overlay::Palette(_) => palette(app, ctx, ch),
         Overlay::Prompt(_) => prompt(app, ctx, ch),
         Overlay::DelayPick(_) => delay_pick(app, ctx, ch),
@@ -28,7 +29,7 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
     }
-    toasts(app, ctx, ch);
+    toasts(app, ctx, top);
 }
 
 /// The confirmation before the selected measurement or stored trace is deleted: which
@@ -854,28 +855,166 @@ fn caret_line(ui: &mut egui::Ui, text: &str, size: f32, ch: &Chrome) {
     });
 }
 
-fn toasts(app: &App, ctx: &egui::Context, ch: &Chrome) {
-    if app.state.toasts.is_empty() {
-        return;
-    }
-    egui::Area::new(egui::Id::new("ac2-toasts"))
-        .order(egui::Order::Tooltip)
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0))
-        .interactable(false)
-        .show(ctx, |ui| {
-            for t in app.state.toasts.iter().rev().take(4).rev() {
-                let frame = egui::Frame::new()
-                    .fill(if t.error { ch.fault } else { ch.raised })
-                    .stroke(egui::Stroke::new(1.0, ch.border))
-                    .corner_radius(4.0)
-                    .inner_margin(egui::Margin::symmetric(10, 6));
-                frame.show(ui, |ui| {
-                    let c = if t.error { Color32::WHITE } else { ch.text };
-                    ui.label(RichText::new(&t.text).color(c));
-                });
-                ui.add_space(4.0);
+/// Under the toasts: the panes' bottom margin (6) and the hint strip's inset (2) around the
+/// focused pane's key-hint line.
+const TOAST_BOTTOM_RESERVED: f32 = super::panes::HINT_H + 8.0;
+
+/// The toasts, laid out by [`ac2_scene::toast`] with the drawn font's measures: a click
+/// dismisses one, the pointer resting on them holds them all.
+fn toasts(app: &mut App, ctx: &egui::Context, top: f32) {
+    let mut held = false;
+    let mut dismiss = None;
+    if !app.state.toasts.is_empty() {
+        let theme = app.theme();
+        let screen = ctx.content_rect();
+        let font = egui::FontId::proportional(theme.font_size + 1.0);
+        let line_h = ctx.fonts_mut(|f| f.row_height(&font));
+        let measure = |s: &str| {
+            ctx.fonts_mut(|f| {
+                f.layout_no_wrap(s.to_owned(), font.clone(), Color32::WHITE)
+                    .size()
+                    .x
+            })
+        };
+        let area = ac2_scene::toast::area(
+            screen.width(),
+            screen.height(),
+            top - screen.min.y,
+            TOAST_BOTTOM_RESERVED,
+        );
+        let texts: Vec<&str> = app.state.toasts.iter().map(|t| t.text.as_str()).collect();
+        let boxes = ac2_scene::toast::stack(&texts, area, line_h, &measure);
+        let n = boxes.len();
+        for (k, b) in boxes.into_iter().enumerate() {
+            let t = &app.state.toasts[b.index];
+            let c = ac2_scene::toast::colors(t.severity, &theme);
+            let min = screen.min + egui::vec2(b.rect.x, b.rect.y);
+            let size = egui::vec2(b.rect.w, b.rect.h);
+            let text = t.text.clone();
+            let id = t.id;
+            // Keyed by place from the newest, not by toast: an area egui has not seen
+            // before is drawn invisibly for a pass to measure it, and a toast must show
+            // the moment it comes.
+            let resp = egui::Area::new(egui::Id::new(("ac2-toast", n - 1 - k)))
+                .order(egui::Order::Tooltip)
+                .fixed_pos(min)
+                .fade_in(false)
+                .show(ctx, |ui| {
+                    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                    let p = ui.painter();
+                    p.rect_filled(rect, 4.0, c32(c.background));
+                    p.rect_stroke(
+                        rect,
+                        4.0,
+                        egui::Stroke::new(1.0, c32(c.border)),
+                        egui::StrokeKind::Inside,
+                    );
+                    for (i, line) in b.lines.iter().enumerate() {
+                        p.text(
+                            rect.min
+                                + egui::vec2(
+                                    ac2_scene::toast::PAD_X,
+                                    ac2_scene::toast::PAD_Y + i as f32 * line_h,
+                                ),
+                            egui::Align2::LEFT_TOP,
+                            line,
+                            font.clone(),
+                            c32(c.text),
+                        );
+                    }
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text)
+                    });
+                    resp
+                })
+                .inner;
+            held |= resp.hovered();
+            if resp.clicked() {
+                dismiss = Some(id);
             }
+        }
+    }
+    if let Some(id) = dismiss {
+        app.dispatch(Msg::DismissToast(id));
+    } else if held != app.state.toasts_held {
+        app.dispatch(Msg::ToastsHeld(held));
+    }
+}
+
+/// The recent notifications, newest first, each with its severity and how long ago it
+/// came; scrolled by the keys like the help.
+fn notifications(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
+    backdrop(ctx);
+    let theme = app.theme();
+    let screen = ctx.content_rect();
+    let width = (screen.width() - 40.0).clamp(320.0, 760.0);
+    let left = screen.center().x - width / 2.0;
+    let now = app.state.now_s;
+    egui::Area::new(egui::Id::new("ac2-notifications"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(egui::pos2(left.max(screen.min.x), screen.min.y + 40.0))
+        .show(ctx, |ui| {
+            card(ch).show(ui, |ui| {
+                ui.set_width(width - 28.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Recent notifications").strong().size(16.0));
+                    ui.label(
+                        RichText::new(format!(
+                            "newest first · the last {} · ↑↓ PgUp PgDn scroll · Esc closes",
+                            ac2_scene::toast::LOG_LEN
+                        ))
+                        .color(ch.dim),
+                    );
+                });
+                ui.add_space(6.0);
+                if app.state.notices.is_empty() {
+                    ui.label(RichText::new("nothing yet").color(ch.dim));
+                }
+                let out = egui::ScrollArea::vertical()
+                    .max_height((screen.height() - 150.0).max(120.0))
+                    .auto_shrink([false, true])
+                    .vertical_scroll_offset(app.state.help_scroll)
+                    .show(ui, |ui| {
+                        for n in app.state.notices.iter().rev() {
+                            notice_row(ui, n, now, &theme, ch);
+                        }
+                    });
+                let max = (out.content_size.y - out.inner_rect.height()).max(0.0);
+                app.state.help_scroll = out.state.offset.y.clamp(0.0, max);
+                app.state.help_page = (out.inner_rect.height() - HELP_LINE).max(HELP_LINE);
+            });
         });
+}
+
+fn notice_row(
+    ui: &mut egui::Ui,
+    n: &crate::state::Notice,
+    now: f64,
+    theme: &ac2_scene::Theme,
+    ch: &Chrome,
+) {
+    use ac2_scene::banner::Severity;
+    let c = ac2_scene::toast::colors(n.severity, theme);
+    let word = match n.severity {
+        Severity::Info => "info",
+        Severity::Warning => "warning",
+        Severity::Fault => "error",
+    };
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!(" {word} "))
+                .small()
+                .color(c32(c.text))
+                .background_color(c32(c.background)),
+        );
+        let mut when = ac2_scene::format::ago(now - n.at_s);
+        if n.count > 1 {
+            when.push_str(&format!(" · ×{}", n.count));
+        }
+        ui.label(RichText::new(when).small().color(ch.dim));
+    });
+    ui.add(egui::Label::new(RichText::new(&n.text).color(ch.text)).wrap());
+    ui.add_space(6.0);
 }
 
 #[cfg(test)]

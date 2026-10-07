@@ -350,7 +350,7 @@ impl App {
             Touches::Tick if animating || self.state.animating() => {
                 vec![PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
             }
-            Touches::Tick => Vec::new(),
+            Touches::Tick | Touches::Toasts => Vec::new(),
             Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
             Touches::Mirror => match (&mirror, &self.state.mirror) {
                 (Some(a), Some(b)) if !crate::conn::mirror_differs(a, b) => Vec::new(),
@@ -425,7 +425,7 @@ impl App {
                     ..
                 } => {
                     let open = self.state.overlay != Overlay::None;
-                    let overlay = open && self.state.overlay != Overlay::Help;
+                    let overlay = open && !self.state.overlay.is_reading();
                     if overlay && key == Key::Backspace {
                         // Held, it keeps erasing typed text; where Backspace is Delete (the
                         // delete confirmation), one held press must not open and answer it.
@@ -470,6 +470,8 @@ enum Touches {
     Mirror,
     /// The SPL meter's Leq history.
     Spl,
+    /// The toasts' hover and dismissal: no pane.
+    Toasts,
     /// Keys, commands, replies: anything may change.
     All,
 }
@@ -479,6 +481,7 @@ impl Touches {
         use crate::conn::ConnEvent;
         match msg {
             Msg::Tick { .. } => Self::Tick,
+            Msg::ToastsHeld(_) | Msg::DismissToast(_) => Self::Toasts,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,
                 ConnEvent::Mirror(_) => Self::Mirror,

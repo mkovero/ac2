@@ -138,7 +138,7 @@ impl AppState {
     fn offset_target(&mut self) -> Option<OffsetTarget> {
         if let Some(t) = self.selected_trace_meta().cloned() {
             if t.edit.locked {
-                self.error(format!("{} is locked: its offset stays", trace_label(&t)));
+                self.warn(format!("{} is locked: its offset stays", trace_label(&t)));
                 return None;
             }
             return Some(OffsetTarget::Trace(t));
@@ -150,7 +150,7 @@ impl AppState {
         match self.pane_meas(pane).cloned() {
             Some(m) => Some(OffsetTarget::Live(m)),
             None => {
-                self.error(format!(
+                self.warn(format!(
                     "no {} measurement to offset ({SELECT_TRACE_FIRST_SHORT})",
                     pane.what()
                 ));
@@ -214,7 +214,7 @@ impl AppState {
                 || self.view.distortion.mode == ac2_scene::view::SweepMode::Response
         });
         if p.is_none() {
-            self.error(format!(
+            self.warn(format!(
                 "{} has no level axis to zoom",
                 self.layout.focus.title()
             ));
@@ -272,7 +272,7 @@ impl AppState {
                         format::fixed(fit.hi, 0)
                     ));
                 }
-                None => self.error(format!("{}: no curve shown to fit", p.title())),
+                None => self.warn(format!("{}: no curve shown to fit", p.title())),
             },
             _ => {}
         }
@@ -426,7 +426,7 @@ impl AppState {
             return;
         }
         let Some(id) = self.selected_meas().map(|m| m.id) else {
-            self.error(SELECT_FIRST);
+            self.warn(SELECT_FIRST);
             return;
         };
         self.toggle_meas_hidden(id, Some(keymap));
@@ -460,7 +460,7 @@ impl AppState {
     /// again. With a trace selected, its group.
     pub(super) fn toggle_group_shown(&mut self, out: &mut Vec<Request>) {
         let Some(group) = self.selected_group() else {
-            self.error(SELECT_FIRST);
+            self.warn(SELECT_FIRST);
             return;
         };
         let ms = self.measurements();
@@ -524,7 +524,7 @@ impl AppState {
                         (MoveWhat::Math(m.id), m.config.name.clone(), config.owner)
                     }
                     _ => {
-                        self.error(
+                        self.warn(
                             "select a stored trace or a math channel to move (a measurement is a \
                          group of its own)",
                         );
@@ -532,7 +532,7 @@ impl AppState {
                     }
                 }
             } else {
-                self.error(SELECT_FIRST);
+                self.warn(SELECT_FIRST);
                 return;
             };
         let ms = self.measurements();
@@ -561,7 +561,7 @@ impl AppState {
             return;
         };
         if let Some(why) = c.choices.get(i).and_then(|x| x.blocked.clone()) {
-            self.error(format!("not possible: {why}"));
+            self.warn(format!("not possible: {why}"));
             return;
         }
         self.overlay = Overlay::None;
@@ -633,7 +633,7 @@ impl AppState {
             return;
         }
         let Some(m) = self.selected_meas().cloned() else {
-            self.error(SELECT_FIRST);
+            self.warn(SELECT_FIRST);
             return;
         };
         let operand = Operand::Meas { meas: m.id };
@@ -720,7 +720,7 @@ impl AppState {
         };
         let label = trace_label(&t);
         if t.edit.locked {
-            self.error(format!("{label} is locked: it is not deleted"));
+            self.warn(format!("{label} is locked: it is not deleted"));
             return;
         }
         let Some(row) = self.trace_rows().into_iter().find(|r| r.id == t.id) else {

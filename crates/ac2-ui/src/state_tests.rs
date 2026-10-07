@@ -374,7 +374,11 @@ fn level_never_exceeds_the_ceiling() {
 fn arrows_without_level_send_nothing() {
     let mut t = T::new();
     assert!(t.key("Up").is_empty());
-    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    assert!(
+        t.st.toasts
+            .last()
+            .is_some_and(|x| x.severity == Severity::Warning)
+    );
     assert_eq!(t.st.stimulus.level, None);
 }
 
@@ -1546,7 +1550,11 @@ fn m_averages_the_shown_stored_traces() {
     // One shown trace is not enough.
     t.conn(with_traces(vec![stored(4, Some(1), 2)]));
     assert!(t.key("M").is_empty());
-    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    assert!(
+        t.st.toasts
+            .last()
+            .is_some_and(|x| x.severity == Severity::Warning)
+    );
     let mut hidden = stored(6, Some(3), 2);
     hidden.edit.visible = false;
     let mut target = stored(7, None, 2);
@@ -1888,6 +1896,109 @@ fn toasts_expire() {
     assert!(t.st.toasts.is_empty());
 }
 
+impl T {
+    fn tick(&mut self, now_s: f64) {
+        let keys = self.keys.clone();
+        self.st.update(Msg::Tick { now_s, dt_s: 0.016 }, &keys);
+    }
+}
+
+#[test]
+fn toast_time_follows_the_text_and_the_severity() {
+    let mut t = T::new();
+    t.st.toast("t13 selected");
+    t.st.warn("no shown stored traces (1 … 9 show a slot; Alt+V reaches hidden traces)");
+    t.st.fault("sweep failed: the audio stopped");
+    let until: Vec<f64> = t.st.toasts.iter().map(|x| x.until_s).collect();
+    let sev: Vec<Severity> = t.st.toasts.iter().map(|x| x.severity).collect();
+    assert_eq!(sev, [Severity::Info, Severity::Warning, Severity::Fault]);
+    for x in &t.st.toasts {
+        assert_eq!(x.until_s, ac2_scene::toast::duration_s(x.severity, &x.text));
+    }
+    assert!(until[0] < until[1] && until[1] < until[2], "{until:?}");
+    // The info goes first, the error stays longest.
+    t.tick(until[0] + 0.1);
+    assert_eq!(t.st.toasts.len(), 2);
+    t.tick(until[1] + 0.1);
+    assert_eq!(t.last_toast(), "sweep failed: the audio stopped");
+}
+
+#[test]
+fn hovering_holds_the_toasts_and_a_click_dismisses_one() {
+    let mut t = T::new();
+    t.st.toast("first");
+    t.st.toast("second");
+    let until = t.st.toasts[0].until_s;
+    t.tick(1.0);
+    let keys = t.keys.clone();
+    t.st.update(Msg::ToastsHeld(true), &keys);
+    // Held far past their time: still there, with the time they had left.
+    t.tick(until + 30.0);
+    assert_eq!(t.st.toasts.len(), 2);
+    t.st.update(Msg::ToastsHeld(false), &keys);
+    // They had `until - 1` left when the pointer came.
+    let gone = until + 30.0 + (until - 1.0);
+    t.tick(gone - 0.1);
+    assert_eq!(t.st.toasts.len(), 2, "the time held does not count");
+    t.tick(gone + 0.1);
+    assert!(t.st.toasts.is_empty());
+    // A click takes exactly that one away.
+    t.st.toast("a");
+    t.st.toast("b");
+    let a = t.st.toasts[0].id;
+    t.st.update(Msg::DismissToast(a), &keys);
+    assert_eq!(t.st.toasts.len(), 1);
+    assert_eq!(t.last_toast(), "b");
+}
+
+#[test]
+fn the_same_message_replaces_the_one_up_and_counts_in_the_log() {
+    let mut t = T::new();
+    t.st.warn("not connected");
+    t.st.toast("t13 selected");
+    t.tick(2.0);
+    t.st.warn("not connected");
+    let texts: Vec<&str> = t.st.toasts.iter().map(|x| x.text.as_str()).collect();
+    assert_eq!(texts, ["t13 selected", "not connected"]);
+    t.st.warn("not connected");
+    let n = t.st.notices.back().cloned();
+    assert_eq!(n.as_ref().map(|n| n.count), Some(2));
+    assert_eq!(t.st.notices.len(), 3);
+}
+
+#[test]
+fn the_notification_log_keeps_the_last_ones_and_opens_from_the_palette() {
+    let mut t = T::new();
+    for i in 0..(ac2_scene::toast::LOG_LEN + 10) {
+        t.st.toast(format!("message {i}"));
+    }
+    assert_eq!(t.st.notices.len(), ac2_scene::toast::LOG_LEN);
+    assert_eq!(
+        t.st.notices.front().map(|n| n.text.as_str()),
+        Some("message 10")
+    );
+    assert!(t.st.toasts.len() <= MAX_TOASTS);
+    // Expired toasts are still in the log.
+    t.tick(1000.0);
+    assert!(t.st.toasts.is_empty());
+    assert_eq!(t.st.notices.len(), ac2_scene::toast::LOG_LEN);
+    // The palette finds it by name and opens the window; the keys scroll it, Esc closes.
+    let keys = t.keys.clone();
+    let scope = t.st.layout.focus.scope();
+    let mut p = crate::palette::Palette::default();
+    p.type_text("recent notif");
+    assert_eq!(
+        p.entries(&keys, scope).first().map(|e| e.command),
+        Some(CommandId::Notifications)
+    );
+    t.st.update(Msg::Command(CommandId::Notifications), &keys);
+    assert_eq!(t.st.overlay, Overlay::Notifications);
+    t.key("Down");
+    assert_eq!(t.st.help_scroll, crate::state::HELP_LINE);
+    t.key("Escape");
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
 #[test]
 fn link_failure_clears_live_state() {
     let mut t = T::new();
@@ -2060,7 +2171,11 @@ fn refusal_inserts_nothing_and_says_why() {
     );
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    assert!(
+        t.st.toasts
+            .last()
+            .is_some_and(|x| x.severity == Severity::Warning)
+    );
     assert_eq!(t.last_toast(), "Main L: no delay estimate (no clear peak)");
     // The banner over the transfer pane carries the reason too.
     let mut s = daemon_state();
@@ -4939,7 +5054,11 @@ fn leq_history_and_alarm_toasts() {
         t.last_toast(),
         "FOH SPL: LAeq 30 min over its limit — 99.4 dB > 99.0 dB"
     );
-    assert!(t.st.toasts.last().is_some_and(|x| x.error));
+    assert!(
+        t.st.toasts
+            .last()
+            .is_some_and(|x| x.severity == Severity::Fault)
+    );
     t.conn(mirror(s.clone()));
     assert_eq!(t.st.toasts.len(), toasts + 1, "the same alarm toasts once");
     s.spl_logs[0].alarms.push(LeqAlarm {
@@ -5600,7 +5719,11 @@ fn layout_is_remembered_and_restored() {
     v.conn(connected);
     v.conn(mirror(state));
     assert_eq!(v.st.pane_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(4)));
-    assert!(!v.st.toasts.iter().any(|t| t.error), "{:?}", v.st.toasts);
+    assert!(
+        !v.st.toasts.iter().any(|t| t.severity != Severity::Info),
+        "{:?}",
+        v.st.toasts
+    );
     assert_eq!(
         v.st.prefs
             .layout

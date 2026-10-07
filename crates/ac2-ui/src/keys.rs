@@ -340,6 +340,7 @@ macro_rules! commands {
 
 commands! {
     Help => "help", "Show / hide key bindings", [Global];
+    Notifications => "notifications", "Recent notifications… (the messages that went by in the corner)", [Global];
     Palette => "palette", "Command palette", [Global];
     Settings => "settings", "Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection…", [Global];
     Quit => "quit", "Quit", [Global];
@@ -1147,6 +1148,7 @@ mod tests {
             CommandId::SplShowMeter,
             CommandId::SplShowLeq,
             CommandId::SplShowMeterLeq,
+            CommandId::Notifications,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {

@@ -22,6 +22,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
+pub use ac2_scene::banner::Severity;
 use ac2_scene::spectrum::PeakHold;
 use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
@@ -673,6 +674,8 @@ pub enum Overlay {
     #[default]
     None,
     Help,
+    /// The recent notifications, newest first: a message that went by is never lost.
+    Notifications,
     Palette(Palette),
     Prompt(Prompt),
     /// Candidate list of an ambiguous finding over the transfer pane. 1–3 or ↑/↓ and Enter
@@ -698,6 +701,12 @@ pub enum Overlay {
 }
 
 impl Overlay {
+    /// A window to read that leaves the keys working (except the stimulus's and those
+    /// that scroll it), with nothing typed into it.
+    pub fn is_reading(&self) -> bool {
+        matches!(self, Overlay::Help | Overlay::Notifications)
+    }
+
     /// The Settings view, when open.
     pub fn settings(&self) -> Option<&Settings> {
         match self {
@@ -778,15 +787,30 @@ pub struct Offer {
 /// within 5 s).
 pub const PREVIEW_RENEW_S: f64 = 2.0;
 
+/// A notification in the window's corner ([`ac2_scene::toast`] lays it out and says how
+/// long it stays).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Toast {
+    /// Names it for a click that dismisses it.
+    pub id: u64,
     pub text: String,
-    pub error: bool,
+    pub severity: Severity,
     pub until_s: f64,
 }
 
-/// How long a toast stays up.
-pub const TOAST_S: f64 = 4.0;
+/// A notification as the log keeps it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notice {
+    pub text: String,
+    pub severity: Severity,
+    /// When it last came ([`AppState::now_s`]).
+    pub at_s: f64,
+    /// How many times in a row it came.
+    pub count: u32,
+}
+
+/// Most toasts kept up at once; older ones go first (the log keeps them).
+pub const MAX_TOASTS: usize = 32;
 /// Coherence mask thresholds `B` cycles through (decision: blanking below γ²).
 pub const COHERENCE_MASKS: [Option<f32>; 5] = [None, Some(0.3), Some(0.5), Some(0.7), Some(0.9)];
 /// Pan step, octaves.
@@ -828,6 +852,10 @@ pub enum Msg {
         now_s: f64,
         dt_s: f64,
     },
+    /// The pointer came onto (`true`) or left the toasts.
+    ToastsHeld(bool),
+    /// A toast clicked away.
+    DismissToast(u64),
     /// A measurement clicked in the list: selected, and shown by its pane.
     SelectMeas(MeasId),
     /// A stored trace clicked in the list: selected, so the trace keys act on it (again:
@@ -1029,11 +1057,18 @@ pub struct AppState {
     /// Band and observation X / Shift+X run the finder with.
     pub finder: FinderChoice,
     pub overlay: Overlay,
-    /// How far the help overlay is scrolled, points from the top (the view clamps it).
+    /// How far the help overlay or the notification log is scrolled, points from the top
+    /// (the view clamps it).
     pub help_scroll: f32,
-    /// The help overlay's visible height, points, as the view last measured it: a page.
+    /// The scrolled window's visible height, points, as the view last measured it: a page.
     pub help_page: f32,
+    /// Shown notifications, oldest first.
     pub toasts: Vec<Toast>,
+    /// The pointer is over the toasts: none expires while the operator reads them.
+    pub toasts_held: bool,
+    toast_seq: u64,
+    /// The last [`ac2_scene::toast::LOG_LEN`] notifications, oldest first.
+    pub notices: std::collections::VecDeque<Notice>,
     pub now_s: f64,
     pub quit: bool,
     /// The window fills the screen (the app applies it).
@@ -1133,6 +1168,9 @@ impl AppState {
             help_scroll: 0.0,
             help_page: HELP_PAGE,
             toasts: Vec::new(),
+            toasts_held: false,
+            toast_seq: 0,
+            notices: std::collections::VecDeque::new(),
             now_s: 0.0,
             quit: false,
             fullscreen: false,
@@ -1222,13 +1260,13 @@ impl AppState {
         if p == PaneKind::Distortion {
             let m = self.selected_meas().cloned();
             if m.is_none() {
-                self.error("select a measurement first (N)");
+                self.warn("select a measurement first (N)");
             }
             return m;
         }
         let m = self.pane_meas(p).cloned();
         if m.is_none() {
-            self.error(match p {
+            self.warn(match p {
                 PaneKind::Transfer | PaneKind::Ir => {
                     "no transfer measurement: Ctrl+K → New transfer measurement…"
                 }
@@ -2168,11 +2206,23 @@ impl AppState {
             Msg::Settings(m) => self.settings_msg(m, out),
             Msg::IrNav(p, m) => self.ir_nav(p, m),
             Msg::Tick { now_s, dt_s } => {
+                let held = (now_s - self.now_s).max(0.0);
                 self.now_s = now_s;
                 self.nav.step(dt_s);
                 self.view.freq = self.nav.current();
+                if self.toasts_held {
+                    for t in &mut self.toasts {
+                        t.until_s += held;
+                    }
+                }
                 let now = self.now_s;
                 self.toasts.retain(|t| t.until_s > now);
+            }
+            Msg::ToastsHeld(held) => self.toasts_held = held,
+            Msg::DismissToast(id) => {
+                self.toasts.retain(|t| t.id != id);
+                // What moved under the pointer is not what it rested on.
+                self.toasts_held = false;
             }
             Msg::SelectMeas(id) => {
                 self.select(id);
@@ -2253,20 +2303,53 @@ impl AppState {
         }
     }
 
+    /// Information: what a key or a reply did.
     fn toast(&mut self, text: impl Into<String>) {
-        self.toasts.push(Toast {
-            text: text.into(),
-            error: false,
-            until_s: self.now_s + TOAST_S,
-        });
+        self.notify(Severity::Info, text.into());
     }
 
-    fn error(&mut self, text: impl Into<String>) {
+    /// A key refused or something missing, with what to do instead.
+    fn warn(&mut self, text: impl Into<String>) {
+        self.notify(Severity::Warning, text.into());
+    }
+
+    /// Something failed: a command, the link, the stimulus; an Leq limit went over.
+    fn fault(&mut self, text: impl Into<String>) {
+        self.notify(Severity::Fault, text.into());
+    }
+
+    /// Shows `text` and logs it. The same message again replaces the one up (newest, its
+    /// time restarted) rather than stacking copies, and counts up in the log.
+    fn notify(&mut self, severity: Severity, text: String) {
+        self.toasts
+            .retain(|t| !(t.severity == severity && t.text == text));
+        if self.toasts.len() >= MAX_TOASTS {
+            self.toasts.remove(0);
+        }
+        self.toast_seq += 1;
         self.toasts.push(Toast {
-            text: text.into(),
-            error: true,
-            until_s: self.now_s + TOAST_S * 1.5,
+            id: self.toast_seq,
+            until_s: self.now_s + ac2_scene::toast::duration_s(severity, &text),
+            text: text.clone(),
+            severity,
         });
+        match self.notices.back_mut() {
+            Some(n) if n.severity == severity && n.text == text => {
+                n.count += 1;
+                n.at_s = self.now_s;
+            }
+            _ => {
+                if self.notices.len() >= ac2_scene::toast::LOG_LEN {
+                    self.notices.pop_front();
+                }
+                self.notices.push_back(Notice {
+                    text,
+                    severity,
+                    at_s: self.now_s,
+                    count: 1,
+                });
+            }
+        }
     }
 
     /// Backspace in an open window: edits typed text, never deletes a measurement or a
@@ -2295,7 +2378,7 @@ impl AppState {
         // working, so it is no such window).
         if chord.key == Key::Backspace
             && !(chord.command || chord.alt)
-            && !matches!(self.overlay, Overlay::None | Overlay::Help)
+            && !(self.overlay == Overlay::None || self.overlay.is_reading())
         {
             self.swallow_text = None;
             self.backspace(out);
@@ -2321,7 +2404,7 @@ impl AppState {
         }
         let plain = !(chord.command || chord.alt);
         match &mut self.overlay {
-            Overlay::Help => {
+            Overlay::Help | Overlay::Notifications => {
                 let page = self.help_page.max(HELP_LINE);
                 match chord.key {
                     Key::ArrowDown | Key::ArrowUp if plain => {
@@ -2842,7 +2925,7 @@ impl AppState {
 
     fn step_level(&mut self, db: f64, out: &mut Vec<Request>) {
         let Some(l) = self.stimulus.level else {
-            self.error("no stimulus level yet: type one (L)");
+            self.warn("no stimulus level yet: type one (L)");
             return;
         };
         let ceiling = self.ceiling().map_or(0.0, |c| c.0);
@@ -2989,11 +3072,11 @@ impl AppState {
             return;
         };
         if !self.connected() {
-            self.error("not connected");
+            self.warn("not connected");
             return;
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
-            self.error(format!(
+            self.warn(format!(
                 "no audio session to sweep: {}",
                 open_session_hint(keymap)
             ));
@@ -3003,7 +3086,7 @@ impl AppState {
         if let Some(c) = self.ceiling()
             && plan.config.level.0 > c.0
         {
-            self.error(format!(
+            self.warn(format!(
                 "{}'s level {} is above the daemon's ceiling {}: edit it (palette: edit the \
                  selected measurement)",
                 plan.name,
@@ -3071,7 +3154,7 @@ impl AppState {
 
     fn arm(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
         if !self.connected() {
-            self.error("not connected");
+            self.warn("not connected");
             return;
         }
         if self.stimulus.level.is_none() {
@@ -3080,7 +3163,7 @@ impl AppState {
             return;
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
-            self.error(format!(
+            self.warn(format!(
                 "no audio session to play into: {}",
                 open_session_hint(keymap)
             ));
@@ -3110,11 +3193,11 @@ impl AppState {
             return;
         }
         if self.daemon().is_some_and(|s| s.session.open.is_none()) {
-            self.error("not armed: no audio session to play into");
+            self.warn("not armed: no audio session to play into");
             return;
         }
         if self.daemon().is_some_and(|s| s.session.stopped.is_some()) {
-            self.error("not armed: the audio stopped; the daemon is reopening the session");
+            self.warn("not armed: the audio stopped; the daemon is reopening the session");
             return;
         }
         if let Some(settings) = self.stimulus.settings() {
@@ -3130,7 +3213,7 @@ impl AppState {
     /// The sweep dialog over the open session's inputs and outputs, by name.
     fn open_sweep_dialog(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
         let Some(o) = self.open_session().cloned() else {
-            self.error(format!(
+            self.warn(format!(
                 "no audio session to sweep: {}",
                 open_session_hint(keymap)
             ));
@@ -3185,7 +3268,7 @@ impl AppState {
                 }
             }
             StimPhase::Firing | StimPhase::FireRequested => {
-                self.error(format!(
+                self.warn(format!(
                     "the stimulus is firing: {STOP_ANYWHERE} stops it, then arm the sweep"
                 ));
                 self.sweep.plan = None;
@@ -3287,7 +3370,7 @@ impl AppState {
             SweepStatus::Failed { msg, .. } => {
                 self.sweep.run = None;
                 self.release_after_sweep(out);
-                self.error(format!("sweep failed: {msg}"));
+                self.fault(format!("sweep failed: {msg}"));
             }
         }
     }
@@ -3399,7 +3482,7 @@ impl AppState {
     fn cycle_sweep(&mut self, d: i32) {
         let ids: Vec<TraceId> = self.sweep_traces().iter().map(|(t, _)| t.meta.id).collect();
         if ids.is_empty() {
-            self.error("no sweep results yet: Shift+S sets one up");
+            self.warn("no sweep results yet: Shift+S sets one up");
             return;
         }
         let cur = self.shown_sweep().map(|(t, _)| t.meta.id);
@@ -3530,7 +3613,7 @@ impl AppState {
         match self.selected_meas() {
             Some(m) if want.iter().any(|f| f(&m.config.kind)) => Some(m.clone()),
             _ => {
-                self.error(format!("select a {what} measurement first (N)"));
+                self.warn(format!("select a {what} measurement first (N)"));
                 None
             }
         }
@@ -3572,7 +3655,7 @@ impl AppState {
             return;
         }
         let Some(rate) = self.open_session().map(|s| f64::from(s.sample_rate_hz)) else {
-            self.error(format!(
+            self.warn(format!(
                 "{}: no audio session (a delay in samples needs its rate)",
                 m.config.name
             ));
@@ -3648,7 +3731,7 @@ impl AppState {
     fn pane_menu(&mut self, p: PaneKind) -> Overlay {
         let c = self.pane_candidates(p);
         if c.is_empty() {
-            self.error(format!("no {} measurements", p.what()));
+            self.warn(format!("no {} measurements", p.what()));
             return Overlay::None;
         }
         let shown = self.pane_meas(p).map(|m| m.id);
@@ -3660,7 +3743,7 @@ impl AppState {
     /// through [`SMOOTHING_STEPS`]; `to`: an explicit setting instead).
     fn smooth(&mut self, step: i32, to: Option<Option<SmoothingFraction>>, out: &mut Vec<Request>) {
         let Some(target) = self.smooth_target() else {
-            self.error("no transfer or spectrum measurement to smooth");
+            self.warn("no transfer or spectrum measurement to smooth");
             return;
         };
         let label = target.label();
@@ -3674,7 +3757,7 @@ impl AppState {
                 return;
             }
             Smoothable::No => {
-                self.error(format!(
+                self.warn(format!(
                     "{label}: smoothing applies to transfer and spectrum curves only"
                 ));
                 return;
@@ -3711,7 +3794,7 @@ impl AppState {
         match target {
             SmoothTarget::Trace(t) => {
                 if t.edit.locked {
-                    self.error(format!("{label} is locked"));
+                    self.warn(format!("{label} is locked"));
                     return;
                 }
                 let mut t = t.clone();
@@ -3755,7 +3838,7 @@ impl AppState {
         let p = self.layout.focus;
         let ids: Vec<MeasId> = self.pane_candidates(p).iter().map(|m| m.id).collect();
         if ids.is_empty() {
-            self.error(format!("no {} measurements", p.what()));
+            self.warn(format!("no {} measurements", p.what()));
             return;
         }
         let i = self
@@ -3776,7 +3859,7 @@ impl AppState {
             .map(|t| t.id)
             .collect();
         if ids.is_empty() {
-            self.error(if hidden {
+            self.warn(if hidden {
                 "no stored traces (Ctrl+1 … 9 capture one)"
             } else {
                 "no shown stored traces (1 … 9 show a slot; Alt+V reaches hidden traces)"
@@ -3842,7 +3925,7 @@ impl AppState {
             return Ok(None);
         }
         if t.edit.locked {
-            self.error(format!("{} is locked", trace_label(&t)));
+            self.warn(format!("{} is locked", trace_label(&t)));
             return Err(());
         }
         Ok(Some(t))
@@ -3866,6 +3949,14 @@ impl AppState {
                 } else {
                     self.help_scroll = 0.0;
                     Overlay::Help
+                };
+            }
+            C::Notifications => {
+                self.overlay = if self.overlay == Overlay::Notifications {
+                    Overlay::None
+                } else {
+                    self.help_scroll = 0.0;
+                    Overlay::Notifications
                 };
             }
             C::Palette => {
@@ -3903,7 +3994,7 @@ impl AppState {
                         }));
                     }
                 }
-                StimPhase::Idle => self.error("not armed: Space arms first"),
+                StimPhase::Idle => self.warn("not armed: Space arms first"),
                 _ => {}
             },
             C::StimulusStop | C::StopAnywhere => {
@@ -3988,7 +4079,7 @@ impl AppState {
                     let text = t.edit.slot.map(|n| n.to_string()).unwrap_or_default();
                     self.prompt(PromptKind::TraceSlot(t.id), text);
                 }
-                None => self.error(SELECT_TRACE_FIRST),
+                None => self.warn(SELECT_TRACE_FIRST),
             },
             C::TraceExport => match self.selected_trace_meta().map(|t| t.id) {
                 Some(id) => {
@@ -4007,11 +4098,11 @@ impl AppState {
                         .unwrap_or_default();
                     self.prompt(PromptKind::TraceExport(id), text);
                 }
-                None => self.error(SELECT_TRACE_FIRST),
+                None => self.warn(SELECT_TRACE_FIRST),
             },
             C::TraceRename => match self.selected_trace_meta().cloned() {
                 Some(t) => self.prompt(PromptKind::TraceRename(t.id), t.edit.name.clone()),
-                None => self.error(SELECT_TRACE_FIRST),
+                None => self.warn(SELECT_TRACE_FIRST),
             },
             C::SelectLive => self.select_live(),
             C::DeleteSelected => self.ask_delete(),
@@ -4129,7 +4220,7 @@ impl AppState {
             | C::ShowSlot9 => {
                 let slot = slot_of(c);
                 match self.slots()[usize::from(slot - 1)].map(|t| t.id) {
-                    None => self.error(format!(
+                    None => self.warn(format!(
                         "slot {slot} is empty (Ctrl+{slot} captures into it)"
                     )),
                     Some(id) => self.toggle_shown(id, out),
@@ -4141,7 +4232,7 @@ impl AppState {
             C::Reconnect => out.push(Request::Reconnect),
             C::OpenSession => {
                 if !self.connected() {
-                    self.error("not connected");
+                    self.warn("not connected");
                 } else {
                     self.open_settings(Page::Audio, out);
                 }
@@ -4155,7 +4246,7 @@ impl AppState {
                     _ if recording => {
                         self.call(out, Command::RecStop, "recording stopped".into());
                     }
-                    None => self.error(format!(
+                    None => self.warn(format!(
                         "no audio session to record: {}",
                         open_session_hint(keymap)
                     )),
@@ -4181,12 +4272,12 @@ impl AppState {
                 if self.connected() {
                     self.prompt(PromptKind::ReplayRecording, String::new());
                 } else {
-                    self.error("not connected");
+                    self.warn("not connected");
                 }
             }
             C::CloseSession => {
                 if self.open_session().is_none() {
-                    self.error("no audio session is open");
+                    self.warn("no audio session is open");
                 } else {
                     self.call(out, Command::SessionClose, "audio session closed".into());
                 }
@@ -4199,7 +4290,7 @@ impl AppState {
                     _ => FormKind::Transfer,
                 };
                 match self.open_session().cloned() {
-                    None => self.error(format!(
+                    None => self.warn(format!(
                         "no audio session to measure: {}",
                         open_session_hint(keymap)
                     )),
@@ -4245,7 +4336,7 @@ impl AppState {
                     });
                 match Form::math(self.math_candidates(Some(owner)), first, owner) {
                     Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                    Err(e) => self.error(e),
+                    Err(e) => self.warn(e),
                 }
             }
             C::EditMeas => {
@@ -4265,7 +4356,7 @@ impl AppState {
                         (self.session_input_names(), self.session_output_names());
                     match Form::edit_sweep(&m, open.as_ref(), &inputs, &outputs) {
                         Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                        Err(e) => self.error(e),
+                        Err(e) => self.warn(e),
                     }
                     return;
                 }
@@ -4286,8 +4377,8 @@ impl AppState {
                 let candidates = self.math_candidates(owner);
                 match m.map(|m| Form::edit_math(&m, candidates)) {
                     Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
-                    Some(Err(e)) => self.error(e),
-                    None => self.error("select a math channel or a sweep measurement first"),
+                    Some(Err(e)) => self.warn(e),
+                    None => self.warn("select a math channel or a sweep measurement first"),
                 }
             }
             C::HideGroup => self.toggle_group_shown(out),
@@ -4298,7 +4389,7 @@ impl AppState {
                         self.collapsed.insert(g);
                     }
                 }
-                None => self.error("select a measurement first (click it in the list, N)"),
+                None => self.warn("select a measurement first (click it in the list, N)"),
             },
             C::InputMics => {
                 let rows: Vec<InputSetup> = self
@@ -4325,7 +4416,7 @@ impl AppState {
                         .unwrap_or_default();
                     self.prompt(PromptKind::TraceMicCurve(t.id), text);
                 }
-                None => self.error("select a stored trace first (V, or click it in the list)"),
+                None => self.warn("select a stored trace first (V, or click it in the list)"),
             },
             C::CalDelete => {
                 let text = self.cal_delete_text();
@@ -4340,7 +4431,7 @@ impl AppState {
                     };
                     self.open_settings(page, out);
                 }
-                None => self.error("not connected to a daemon"),
+                None => self.warn("not connected to a daemon"),
             },
             C::MicCurveInput => {
                 let text = self
@@ -4393,7 +4484,7 @@ impl AppState {
                 {
                     let mut row = self.input_setup(input);
                     let Some(mic) = row.mic.clone() else {
-                        self.error(format!(
+                        self.warn(format!(
                             "input {} has no mic name: name it first (palette: Input setup…)",
                             u32::from(input) + 1
                         ));
@@ -4523,7 +4614,7 @@ impl AppState {
             C::Invert => match self.transfer_trace_for_edit() {
                 Err(()) => {}
                 Ok(Some(t)) if t.kind == TraceKind::Target => {
-                    self.error(format!("{}: a target curve has no phase", trace_label(&t)));
+                    self.warn(format!("{}: a target curve has no phase", trace_label(&t)));
                 }
                 Ok(Some(t)) => {
                     let mut edit = t.edit.clone();
@@ -4565,7 +4656,7 @@ impl AppState {
                 match self.transfer_trace_for_edit() {
                     Err(()) => {}
                     Ok(Some(t)) if t.kind == TraceKind::Target => {
-                        self.error(format!("{}: a target curve has no phase", trace_label(&t)));
+                        self.warn(format!("{}: a target curve has no phase", trace_label(&t)));
                     }
                     Ok(Some(t)) => {
                         let mut edit = t.edit.clone();
@@ -4588,7 +4679,7 @@ impl AppState {
             C::PhaseReference => match self.transfer_trace_for_edit() {
                 Err(()) => {}
                 Ok(Some(t)) if t.kind == TraceKind::Target => {
-                    self.error(format!("{}: a target curve has no phase", trace_label(&t)));
+                    self.warn(format!("{}: a target curve has no phase", trace_label(&t)));
                 }
                 Ok(Some(t)) => {
                     self.view.tf.phase_reference = Some(TraceKey::Stored(t.id));
@@ -4730,7 +4821,7 @@ impl AppState {
                         ),
                     }));
                 }
-                None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
+                None => self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
             },
             C::SplTimeWeighting
             | C::SplWeighting
@@ -4742,7 +4833,7 @@ impl AppState {
             | C::SplZ => self.spl_weightings(c, out),
             C::LeqWindows => match self.pane_meas(PaneKind::Spl) {
                 Some(_) => self.open_settings(Page::Leq, out),
-                None => self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
+                None => self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)"),
             },
         }
     }
@@ -4754,7 +4845,7 @@ impl AppState {
         use CommandId as C;
         use ac2_proto::model::{TimeWeighting as T, Weighting as W};
         let Some(mut m) = self.pane_meas(PaneKind::Spl).cloned() else {
-            self.error("no SPL meter: make one first (New SPL meter… in Ctrl+K)");
+            self.warn("no SPL meter: make one first (New SPL meter… in Ctrl+K)");
             return;
         };
         let MeasKind::Spl { config } = &mut m.config.kind else {
@@ -5033,7 +5124,7 @@ impl AppState {
                     .find(|m| m.id == meas)
                     .map(|m| m.config.name.clone())
                     .unwrap_or_default();
-                self.error(format!("{name}: Leq history from the log: {e}"));
+                self.fault(format!("{name}: Leq history from the log: {e}"));
             }
         }
     }
@@ -5069,7 +5160,7 @@ impl AppState {
         self.leq_alarms_seen = seen;
         for (name, a) in news {
             match ac2_scene::leq::alarm_text(&name, &a) {
-                (true, text) => self.error(text),
+                (true, text) => self.fault(text),
                 (false, text) => self.toast(text),
             }
         }
@@ -5114,7 +5205,7 @@ impl AppState {
                     && self.daemon().is_some_and(|s| s.session.stopped.is_some())
                 {
                     self.stimulus.arm_after_stop = false;
-                    self.error("not armed: the audio stopped; the daemon is reopening the session");
+                    self.warn("not armed: the audio stopped; the daemon is reopening the session");
                 }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
                 if let Some(p) = self.pending_select
@@ -5211,7 +5302,7 @@ impl AppState {
                     // The detection closed the preview on the daemon: reopen it now.
                     self.preview_sent_s = f64::NEG_INFINITY;
                 } else if let Err(e) = r {
-                    self.error(format!("detect loopback: {e}"));
+                    self.fault(format!("detect loopback: {e}"));
                 }
             }
             ConnEvent::SessionOpened { transfers } => {
@@ -5258,7 +5349,7 @@ impl AppState {
                 }
                 match result {
                     Ok(()) => self.toast(what),
-                    Err(e) => self.error(format!("{what}: {e}")),
+                    Err(e) => self.fault(format!("{what}: {e}")),
                 }
             }
             ConnEvent::DelayFound {
@@ -5280,7 +5371,7 @@ impl AppState {
                 }
                 match (what, result) {
                     (Some(w), Ok(_)) => self.toast(w),
-                    (Some(w), Err(e)) => self.error(format!("{w}: {e}")),
+                    (Some(w), Err(e)) => self.fault(format!("{w}: {e}")),
                     (None, _) => {}
                 }
             }
@@ -5647,7 +5738,7 @@ impl AppState {
             |m| m.config.name.clone(),
         );
         match (&finding.outcome, pick) {
-            (DelayOutcome::NoEstimate { reasons }, _) => self.error(format!(
+            (DelayOutcome::NoEstimate { reasons }, _) => self.warn(format!(
                 "{name}: no delay estimate ({})",
                 ac2_scene::finding::no_estimate_reasons(reasons)
             )),
@@ -5732,7 +5823,7 @@ impl AppState {
                 self.sweep.releasing = false;
                 self.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
-                self.error(format!("stimulus lease lost: {msg}"));
+                self.fault(format!("stimulus lease lost: {msg}"));
             }
             StimEvent::Failed(msg) => {
                 self.sweep.releasing = false;
@@ -5749,7 +5840,7 @@ impl AppState {
                     StimPhase::Stopping => StimPhase::Idle,
                     p => p,
                 };
-                self.error(format!("stimulus: {msg}"));
+                self.fault(format!("stimulus: {msg}"));
             }
         }
     }
@@ -5763,7 +5854,7 @@ impl AppState {
             .filter(|t| matches!(t.kind, TraceKind::Transfer | TraceKind::Sweep))
             .collect();
         if shown.len() < 2 {
-            self.error("average: show at least two stored transfer traces (1…9)");
+            self.warn("average: show at least two stored transfer traces (1…9)");
             return;
         }
         let ids: Vec<TraceId> = shown.iter().map(|t| t.id).collect();

@@ -196,7 +196,7 @@ impl AppState {
     pub(super) fn ir_key(&mut self, p: IrPane, c: CommandId) {
         use CommandId as C;
         let Some((e, t, y)) = self.ir_shown(p) else {
-            self.error(format!("{}: no impulse response shown", Self::ir_title(p)));
+            self.warn(format!("{}: no impulse response shown", Self::ir_title(p)));
             return;
         };
         let cursor = self.view.ir_axes(p).cursor_ms;
@@ -259,7 +259,7 @@ impl AppState {
                 match ac2_scene::ir::ir_values(&f, mode).and_then(level::fit) {
                     Some(r) => Some(r),
                     None => {
-                        self.error(format!("{}: no curve shown to fit", Self::ir_title(p)));
+                        self.warn(format!("{}: no curve shown to fit", Self::ir_title(p)));
                         return;
                     }
                 }

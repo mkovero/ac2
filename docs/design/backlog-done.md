@@ -2,6 +2,20 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+Notifications that fit their text (operator, 2026-10-07: "right bottom notify box …
+the box does not scale by text in any reasonable manner, its useless like this"):
+- **A toast's box fits its text**: as wide as its longest line up to 45 % of the window
+  (at least 320 px, never past the margins), words wrap, a long path breaks after a
+  separator, the box grows with its lines (at most 10, then `…`). Stacked upwards from just
+  above the focused pane's key hints; the oldest drop out when the room runs out. Before, an
+  egui `Area` sized itself from its first frame, so text was squeezed or clipped. Layout,
+  durations and colours in `ac2_scene::toast`, measured with the drawn font.
+- **Three kinds** in the banners' colours: information, warning (a refused key), error (a
+  failed command, link, stimulus, an Leq limit over). Time on screen grows with the words
+  and the kind; the pointer on them holds them; a click dismisses one; a repeat replaces
+  the one up.
+- **Recent notifications…** in the palette: the last 50, newest first, scrollable.
+
 Colour families (operator, 2026-10-07: "give each measurement its own colour family"):
 - **Each measurement has a hue; its captures, sweep runs and math results are shades of
   it**, imports grey. One rule in `ac2_scene::families` for panes, legends and tree dots;

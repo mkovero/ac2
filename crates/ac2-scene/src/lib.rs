@@ -48,6 +48,7 @@ pub mod stimulus;
 pub mod tf;
 pub mod theme;
 pub mod time;
+pub mod toast;
 pub mod trace;
 pub mod trace_list;
 pub mod view;
