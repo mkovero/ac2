@@ -2792,6 +2792,19 @@ fn measurement_tree_and_delete_choices() {
     ));
     h.state_mut()
         .dispatch(ac2_ui::state::Msg::SelectMeas(MeasId(1)));
+    // The IR pane follows the selection, and only the followed measurement's IR is
+    // received: Main L's was dropped while Delay tower was selected and comes back with
+    // the next frame after the resubscription, so the picture waits for it.
+    step_until(&mut h, "Main L's IR again", |a| {
+        a.state.data.as_ref().is_some_and(|d| {
+            d.latest
+                .get(&Topic::Data {
+                    meas: MeasId(1),
+                    stream: Stream::Ir,
+                })
+                .is_some()
+        })
+    });
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "measurement_tree");
