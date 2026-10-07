@@ -56,7 +56,7 @@ def test_electrical_above_rig_bound_needs_allowance():
         pol(emit="-30dbfs").check([3, 2], -30, speaker_stage=False)
     assert pol(emit="-30dbfs", allow="-30dbfs").check([3, 2], -30, speaker_stage=False) == -30
     with pytest.raises(PolicyError, match="electrical cap"):
-        pol(emit="-20dbfs", allow="-20dbfs").check([3, 2], -20, speaker_stage=False)
+        pol(emit="-8dbfs", allow="-8dbfs").check([3, 2], -8, speaker_stage=False)  # above pupu.toml's -10
     with pytest.raises(PolicyError, match="above --emit"):
         pol(emit="-40dbfs", allow="-30dbfs").check([3, 2], -35, speaker_stage=False)
 
@@ -104,3 +104,11 @@ def test_fades_start_and_end_at_zero():
     s = jackio.sine(50, 1.0, 1.0, 48000, 0.1)
     assert abs(s[0]) < 1e-12 and abs(s[-1]) < 1e-3
     assert np.max(np.abs(s[:100])) < 0.01
+
+
+def test_electrical_hard_backstop_whatever_the_config():
+    loose = replace(pol(emit="-3dbfs", allow="-3dbfs"), electrical_max_dbfs=0.0)
+    with pytest.raises(PolicyError, match="electrical cap"):
+        loose.check([3, 2], -3, speaker_stage=False)
+    ok = replace(pol(emit="-10dbfs", allow="-10dbfs"), electrical_max_dbfs=-10.0)
+    assert ok.check([3, 2], -10, speaker_stage=False) == -10

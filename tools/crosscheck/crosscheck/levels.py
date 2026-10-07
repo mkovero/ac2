@@ -14,9 +14,11 @@ import math
 import re
 from dataclasses import dataclass
 
-# Backstops that no config can raise: the speaker never above -50 dBFS, nothing above -30.
+# Backstops that no config can raise: the speaker never above -50 dBFS. Electrical-only paths
+# need a level well above their noise for the comparisons to be judgeable, and no ear is on
+# them; -6 dBFS keeps the sweep's and the sines' peaks clear of the converters' clip.
 SPEAKER_HARD_MAX_DBFS = -50.0
-ELECTRICAL_HARD_MAX_DBFS = -30.0
+ELECTRICAL_HARD_MAX_DBFS = -6.0
 # REW's stimulus file: refuse a file whose peak (after scaling) is above this. A -50 dBFS
 # sweep in the RMS convention of the hand scripts peaks at -47; in ours at -50.
 STIMULUS_PEAK_HARD_MAX_DBFS = -46.0

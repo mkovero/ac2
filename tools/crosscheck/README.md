@@ -62,10 +62,12 @@ From the dev host, in `tools/crosscheck`. The **default run** has all stages at 
 ./rig-run.sh --emit -50dbfs --emit-speaker -50dbfs
 ```
 
-The **electrical −30 dBFS** run has the Xone stages at −30 and the Genelec stages still at −50:
+The **electrical −10 dBFS** run has the Xone stages at −10 and the Genelec stages still at −50.
+Use it for judging: at −50 the electrical comparisons below 1 kHz are noise-limited (group
+delay and harmonics INCONCLUSIVE or failing on scatter), and no ear is on these paths:
 
 ```
-./rig-run.sh --emit -30dbfs --allow-electrical-level -30dbfs --emit-speaker -50dbfs
+./rig-run.sh --emit -10dbfs --allow-electrical-level -10dbfs --emit-speaker -50dbfs
 ```
 
 The pieces on their own:
@@ -102,9 +104,10 @@ reach of Ctrl-C.
   loopback.
 - **The speaker never goes above −50 dBFS**, whatever the config or the other flags say
   (`levels.SPEAKER_HARD_MAX_DBFS`). The Xone stages refuse out 1 (`forbidden_outputs`).
-- **Above the rig's −50 needs `--allow-electrical-level`**, capped at −30 by the config and
-  in code. That flag installs a runtime systemd drop-in, restarts ac2d with
-  `--max-level -30` and reopens the session. This happens only **after** the speaker stage.
+- **Above the rig's −50 needs `--allow-electrical-level`**, capped by the config
+  (`electrical_max_dbfs`, −10 on pupu) and at −6 in code (`levels.ELECTRICAL_HARD_MAX_DBFS`).
+  That flag installs a runtime systemd drop-in, restarts ac2d with `--max-level <level>` and
+  reopens the session. This happens only **after** the speaker stage.
   In a `finally` (also on Ctrl-C, SIGTERM or SIGHUP) the drop-in is removed, ac2d restarts,
   and `gen ceiling` must read a bound of −50 again. If it does not, the run says so loudly
   and exits 3. A drop-in left over from a crash is removed before anything else runs.

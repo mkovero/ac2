@@ -9,7 +9,7 @@ workdir = "~/crosscheck"                         # package + runs on the rig
 python = "~/ac2-test/venv-meas/bin/python"       # numpy + JACK-Client; scipy/matplotlib not needed here
 sample_rate = 96000
 system_max_dbfs = -50.0      # ac2d --max-level on this rig; speaker ceiling too
-electrical_max_dbfs = -30.0  # the most --allow-electrical-level may lift electrical-only outputs to
+electrical_max_dbfs = -10.0  # the most --allow-electrical-level may lift electrical-only outputs to
 speaker_max_dbfs = -50.0     # clamped to -50 in code whatever is written here
 mains_hz = 50.0
 
