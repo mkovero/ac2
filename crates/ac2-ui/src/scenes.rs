@@ -802,6 +802,7 @@ fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqVie
             .meta
             .run
             .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
+        stage: st.stage_view(),
     })
 }
 

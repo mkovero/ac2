@@ -226,6 +226,7 @@ fn scene_lays_tiles_out_and_colours_them() {
             history: true,
         },
         run: run_of(&c, &f),
+        stage: false,
     };
     let th = Theme::dark();
     let s = leq_scene(&v, &Status::default(), &th, size(1200.0, 700.0));
@@ -584,6 +585,7 @@ fn columns_view<'a>(c: &'a LeqConfig, f: &LeqFrame, h: Option<&'a LeqHistory>) -
         scale: f.meta.scale,
         layout: LeqLayout::default(),
         run: run_of(c, f),
+        stage: false,
     }
 }
 
@@ -1861,6 +1863,66 @@ fn the_run_shows_only_with_the_history() {
             assert!(top(&off) >= off.caption.bottom() - 0.5, "{at}");
             assert_caption_fits(&off, w, false, &at);
             assert_caption_fits(&on, w, true, &at);
+        }
+    }
+}
+
+/// Full screen: the caption (meter, calibration) is gone without the history and the
+/// windows take its room; with the history it is back with the run, and stale values keep
+/// it (its STALE is the warning).
+#[test]
+fn the_stage_has_no_caption_without_the_history() {
+    let th = Theme::dark();
+    let (c, f) = many(5, false, LevelScale::DbSpl);
+    for style in [LeqStyle::Columns, LeqStyle::Tiles] {
+        for (w, h) in [(1280.0, 720.0), (1920.0, 1080.0)] {
+            let at = format!("{style:?} at {w}×{h}");
+            let scene = |stage, history, stale: Option<&str>| {
+                let v = LeqView {
+                    layout: LeqLayout { style, history },
+                    stage,
+                    stale: stale.map(str::to_owned),
+                    ..columns_view(&c, &f, None)
+                };
+                leq_scene(&v, &Status::default(), &th, size(w, h))
+            };
+            let bare = scene(true, false, None);
+            let all = texts(&bare.scene);
+            assert!(
+                all.iter()
+                    .all(|t| !t.contains("FOH SPL") && !t.contains("cal 3 h ago")),
+                "{at}: {all:?}"
+            );
+            assert_eq!(bare.caption.h, 0.0, "{at}");
+            assert_eq!(bare.run, None, "{at}");
+            let top = |s: &LeqScene| {
+                s.tiles
+                    .iter()
+                    .chain(
+                        s.columns
+                            .iter()
+                            .flat_map(|k| k.columns.iter().map(|x| &x.rect)),
+                    )
+                    .map(|r| r.y)
+                    .fold(f32::INFINITY, f32::min)
+            };
+            let windowed = scene(false, false, None);
+            assert!(
+                top(&bare) < top(&windowed),
+                "{at}: the room goes to the windows"
+            );
+            assert_caption_fits(&windowed, w, false, &at);
+            // The history on: caption and run, as in the window.
+            let looking_back = scene(true, true, None);
+            assert_caption_fits(&looking_back, w, true, &at);
+            // Stale: the caption carries the warning.
+            let stale = scene(true, false, Some("STALE 4.2 s"));
+            assert!(
+                texts(&stale.scene)
+                    .iter()
+                    .any(|t| t.starts_with("STALE 4.2 s")),
+                "{at}"
+            );
         }
     }
 }

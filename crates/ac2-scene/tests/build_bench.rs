@@ -129,6 +129,7 @@ fn leq_view_with_four_hours_of_four_windows() {
                 history: true,
             },
             run: None,
+            stage: false,
         };
         leq_scene(&v, &Status::default(), &theme, SIZE)
     };

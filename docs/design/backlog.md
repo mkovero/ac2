@@ -116,6 +116,10 @@ running transfer measurement, somehow I would expect it"):
   offline would only be shown with shift+B history look"): `running … since … · LAeq total
   … · offline …` is drawn only with Shift+B on, in every SPL view; without it the windows
   and the number get its row. Per-window offline notes and `spl leq watch` unchanged.
+- **No caption line on the Leq stage** ("on Leq fullscreen view, the grey title-line
+  describing calibration and such is not necessary too"): in full screen the meter /
+  calibration line shows only with the history on (or STALE); its room goes to the windows
+  and the number. Outside full screen as before.
 
 A measurement owns its traces (operator, 2026-10-07: "this becomes little bit confusing to
 see 'measurements' and 'traces' at the transfer screen, I would imagine transfer measurement

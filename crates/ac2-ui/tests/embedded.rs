@@ -3471,7 +3471,10 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
             x.meter.form == MeterForm::Block
                 && x.leq.columns.as_ref().is_some_and(|k| k.columns.len() == 5)
                 && t.iter().filter(|l| l.starts_with("LAF · ")).count() == 1
-                && t.iter().filter(|l| l.starts_with("SPL 1 · ")).count() == 1
+                // The caption names the meter once; on the stage, without the history,
+                // there is no caption.
+                && t.iter().filter(|l| l.starts_with("SPL 1 · ")).count()
+                    == usize::from(!s.stage_view() || s.view.spl.layout.history)
                 && !t.iter().any(|l| l.starts_with("meter since"))
         })
     };

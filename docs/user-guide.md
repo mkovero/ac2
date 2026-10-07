@@ -1095,9 +1095,10 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   from the meter's log as the meter computed it; a new log clears it. The app remembers
   both. **W** gives the pane the whole
   window, once more (or **F11**) the whole screen: the **stage view**, nothing but the
-  columns (in meter + Leq, the number above them) and the caption with the meter's name,
-  the run and its calibration (arming or playing the stimulus changes nothing there; Esc
-  and Shift+Esc still stop it). W again goes back to the split layout.
+  columns (in meter + Leq, the number above them). The grey caption line (the meter's name,
+  its calibration) shows there only with the history on (Shift+B, then with the run), or
+  with STALE when the values are; otherwise its room goes to the windows. Arming or
+  playing the stimulus changes nothing there; Esc and Shift+Esc still stop it. W again goes back to the split layout.
 - Each column (and tile) says, large, its **state** (OK, NEAR, OVER, or "over in 47 s" when a
   filling window is on course to go over) and the **headroom**: the highest steady level for
   the next minute that keeps the window at or below its limit (**"stay ≤ 101.5 dB"**; while

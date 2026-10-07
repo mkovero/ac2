@@ -90,6 +90,9 @@ shortened down to the clock. Tested at 320–1920 px in columns and tiles: no ov
 
 The run belongs to the look back: it is drawn only with the history on (Shift+B), in every
 SPL view that has the windows (meter + Leq, Leq alone, tiles, columns, the stage view).
+In the stage view the whole caption line (meter, unit, calibration) follows the history
+too ("the grey title-line describing calibration and such is not necessary"), kept only
+while the values are stale (its STALE is the warning); outside full screen it stays.
 Without the history the windows and the number are the whole picture and take its row
 (operator, 2026-10-07). The per-window "offline for …" notes stay: they explain that
 window's value. The CLI (`spl leq watch`) prints the run regardless.

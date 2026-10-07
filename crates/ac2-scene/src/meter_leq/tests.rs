@@ -122,6 +122,7 @@ fn view<'a>(
         scale: f.meta.scale,
         layout: l,
         run: f.meta.run.map(|r| run_text(&r, c, |_| 7200)),
+        stage: false,
     }
 }
 
@@ -345,7 +346,10 @@ fn meter_and_windows_never_overlap() {
     let th = Theme::dark();
     let (c, f) = leq();
     let h = history(&c, &f);
-    for stale in [None, Some(9.0)] {
+    for (stale, stage) in [None, Some(9.0)]
+        .into_iter()
+        .flat_map(|s| [(s, false), (s, true)])
+    {
         let r = readout(stale);
         for layout in layouts() {
             let widths = (320..=960).step_by(64).chain([1280, 1600, 1920]);
@@ -355,16 +359,32 @@ fn meter_and_windows_never_overlap() {
                     let (w, ht) = (w as f32, ht as f32);
                     let mut v = view(&c, &f, Some(&h), layout);
                     v.stale = stale.map(|a| format!("STALE {}", crate::format::age(a)));
+                    v.stage = stage;
                     let s = meter_leq_scene(&r, &v, &Status::default(), &th, vp(w, ht));
-                    let at = format!("{layout:?} at {w}×{ht} ({stale:?})");
-                    check(&s, &r, w, ht, layout, &at);
+                    let at = format!("{layout:?} at {w}×{ht} ({stale:?}, stage {stage})");
+                    // On the stage without the history the caption is gone unless stale.
+                    let captioned = !stage || layout.history || stale.is_some();
+                    let n = if captioned {
+                        2 + usize::from(layout.history)
+                    } else {
+                        0
+                    };
+                    check(&s, &r, w, ht, layout, n, &at);
                 }
             }
         }
     }
 }
 
-fn check(s: &MeterLeqScene, r: &SplReadout, w: f32, ht: f32, layout: LeqLayout, at: &str) {
+fn check(
+    s: &MeterLeqScene,
+    r: &SplReadout,
+    w: f32,
+    ht: f32,
+    layout: LeqLayout,
+    caption_labels: usize,
+    at: &str,
+) {
     let all = labels(&s.leq.scene);
     let boxes: Vec<(&str, Rect)> = all
         .iter()
@@ -378,11 +398,7 @@ fn check(s: &MeterLeqScene, r: &SplReadout, w: f32, ht: f32, layout: LeqLayout, 
         .map(|l| (l.text.as_str(), label_box(l)))
         .collect();
     // The run only with the history on.
-    assert_eq!(
-        caption.len(),
-        2 + usize::from(layout.history),
-        "{at}: {caption:?}"
-    );
+    assert_eq!(caption.len(), caption_labels, "{at}: {caption:?}");
     for (i, (t, b)) in caption.iter().enumerate() {
         assert!(b.x >= -0.5 && b.right() <= w + 0.5, "{at}: {t:?} {b:?}");
         assert!(

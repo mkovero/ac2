@@ -942,6 +942,9 @@ pub struct LeqView<'a> {
     pub layout: LeqLayout,
     /// The log as a whole: run clock, start, total, gaps (`None` before its first second).
     pub run: Option<LeqRunText>,
+    /// Full screen (the stage view): the windows read across a room, so the caption (meter,
+    /// calibration) is drawn only with the history on or the values stale.
+    pub stage: bool,
 }
 
 /// The Leq view as drawn.
@@ -1206,14 +1209,24 @@ pub(crate) fn leq_scene_under<T>(
     let left_w = canvas::text_width(&caption_left(v, shared.as_deref()), fs);
     let right = crate::spl::cut(&right, (row_w - left_w).max(row_w * 0.5), fs);
     let left_room = row_w - canvas::text_width(&right, fs);
-    let cap = caption(
-        v,
-        &crate::spl::cut(&caption_left(v, shared.as_deref()), left_room, fs),
-        &right,
-        top,
-        size,
-        theme,
-    );
+    // On the stage the caption is the look back's (with the history) or the warning's
+    // (stale values): otherwise the windows and the number are the whole picture.
+    let captioned = !v.stage || v.layout.history || v.stale.is_some();
+    let cap = if captioned {
+        caption(
+            v,
+            &crate::spl::cut(&caption_left(v, shared.as_deref()), left_room, fs),
+            &right,
+            top,
+            size,
+            theme,
+        )
+    } else {
+        Caption {
+            height: 0.0,
+            run: None,
+        }
+    };
     let area = Rect::new(
         pad,
         top + cap.height,
@@ -1313,13 +1326,15 @@ pub(crate) fn leq_scene_under<T>(
     );
     // The caption: the meter (with the unit, and the weighting the columns' names leave
     // out), the run, and the calibration.
-    c.overlay.labels.push(label(
-        left,
-        [pad, top],
-        anchor(HAlign::Left, VAlign::Top),
-        theme.font_size,
-        theme.text_dim,
-    ));
+    if captioned {
+        c.overlay.labels.push(label(
+            left,
+            [pad, top],
+            anchor(HAlign::Left, VAlign::Top),
+            theme.font_size,
+            theme.text_dim,
+        ));
+    }
     if let Some((text, pos, size)) = &cap.run {
         c.overlay.labels.push(label(
             text.clone(),
@@ -1333,17 +1348,19 @@ pub(crate) fn leq_scene_under<T>(
             },
         ));
     }
-    c.overlay.labels.push(label(
-        right,
-        [size.width - pad, top],
-        anchor(HAlign::Right, VAlign::Top),
-        theme.font_size,
-        if v.stale.is_some() {
-            theme.banner_warning.background
-        } else {
-            theme.text_dim
-        },
-    ));
+    if captioned {
+        c.overlay.labels.push(label(
+            right,
+            [size.width - pad, top],
+            anchor(HAlign::Right, VAlign::Top),
+            theme.font_size,
+            if v.stale.is_some() {
+                theme.banner_warning.background
+            } else {
+                theme.text_dim
+            },
+        ));
+    }
     let judged = v
         .tiles
         .iter()
