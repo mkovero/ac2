@@ -333,3 +333,67 @@ before). Deployed with the user unit (`systemctl --user stop/start ac2d`), sessi
 from ketunkolo. Per-topic traffic over 30 s with a throwaway CURVE subscriber on the Pi:
 689.7 → 238.2 KiB/s (the two ÷ channels of stored traces 30 → 3.8 msg/s, the spectrum sum
 30 → 17.4 msg/s); ac2d CPU over 60 s 60 → 48 % of a core (the sum's thread 20.8 → 13.0 %).
+
+## REW cross-check, electrical (2026-10-07, ac2d a680dcd, REW 5.40 beta 135)
+
+REW runs on pupu itself (`~/REW`, headless on Xvfb `:5`, its API on localhost:4735, the GUI
+driven with xdotool). REW talks only ALSA and jackd owns the FF400, so REW reaches the
+interface through **PipeWire as a JACK client**: `pipewire`, `pipewire-alsa`, `wireplumber`
+and `pipewire-jack-client` (module-jack-tunnel; *not* `pipewire-jack`, which replaces libjack).
+`~/.config/pipewire/pipewire.conf.d/90-jack-tunnel.conf` fixes the graph at 96 kHz and makes a
+duplex tunnel client `pw_rew` with `jack.connect = false`;
+`~/.config/wireplumber/wireplumber.conf.d/90-rig-no-devices.conf` disables every device monitor,
+so PipeWire never opens the FF400 or the onboard card. The tunnel is wired by hand after each
+PipeWire start (a restart leaves it unconnected): `pw_rew:playback_FL → system:playback_2`,
+`playback_FR → system:playback_3`, `system:capture_5 → pw_rew:capture_FL`,
+`system:capture_2 → pw_rew:capture_FR`. In REW: device "PCM: pipewire", stereo only, input L,
+reference input R, Measure with "loopback as cal and timing reference", reference output L.
+Checked with a −60 dBFS REW sine: in 2 −57.6, in 5 −74.9 dBFS (the wiring table), no tone on
+ins 1, 3–4, 6–8. Dead ends: the alsa-plugins `jack` PCM (arecord works, REW's Java sound
+refuses every format on it) and `snd-aloop` (not built for the RT kernel). REW's API starts
+measurements only with a Pro licence; device, generator and reading results work without.
+
+Path: out 3 → Xone → in 5, reference out 2 → in 2. Ground truth: in 5 ÷ in 2 computed directly
+(numpy, cross-spectrum over the whole recording, 1/48-octave bands) from a recording of the
+same path.
+
+| comparison (1/48 oct, 31 Hz – 20 kHz) | magnitude | phase |
+|---|---|---|
+| ac2 sweep −50 dBFS vs REW offline import (same recording as truth) | ≤ 0.02 dB mean, ±0.08 dB below 100 Hz, ±0.02 above 1 kHz | — |
+| ac2 sweep −50 dBFS vs truth | ±0.17 dB below 100 Hz, ±0.03 dB above 1 kHz | ±0.65° |
+| ac2 sweep −30 dBFS vs REW live −30 dBFS (constant offset removed, see below) | ±0.017 dB below 100 Hz, ±0.005 dB above 1 kHz | ±0.7° |
+| ac2 transfer (pink-noise style FIFO of 8 blocks) fed one REW sweep | only where γ² ≥ 0.99 (138 points): 0.074 dB max | — |
+
+The live transfer measurement is not a sweep analyser: with the default 8-block FIFO a one-shot
+sweep leaves the average seconds later and coherence drops to 0.0001 there, which it shows.
+REW's offline import refers each channel to its own timing marker, which removes the 3.7 µs
+between in 5 and in 2 (a constant 3.25 µs in phase); live, with the loopback as timing
+reference, REW keeps it (3.7 µs, as the direct computation).
+
+**Level convention.** At 1 kHz: ac2 −17.33 dB, REW live −44.87 "dBFS" for a −30 dBFS sweep.
+A sine probe gives out 3 → in 5 −14.9 dB and out 2 → in 2 +2.4 dB (in 2's preamp trim). ac2
+reports measurement ÷ reference, −14.9 − 2.4 = −17.3 dB, the dual-channel convention: 0 dB means
+the measurement point carries what the reference point carries, so the loopback's own gain is
+in the number. REW's "loopback as cal" uses the loopback only for timing and shape (normalised to
+0 dB) and keeps the measurement channel's absolute level re the digital stimulus: −44.87 + 30 =
+−14.87 dB, the path's gain re what was emitted. Both are right for what they state; ac2's sweep
+already measures the difference (`reference_level`, 2.33 dB on this run, "reference +2.3 dB" in
+`ac2 ir` / `sweep run`).
+
+**Harmonic distortion disagrees** (−30 dBFS; the operator allowed −30 for electrical paths
+only, ac2d raised with a runtime drop-in and returned to −50 afterwards). Ground truth: steady
+sines at −30 dBFS (`~/rew-dl/jsine.py`, Blackman FFT of 2 s): the Xone path shows H2/H3 ≈ −71
+… −80 dBr at every frequency (bin noise −108 dBr); the loopback alone is clean (−110 … −120).
+
+| f | truth H2 | ac2 sweep H2 (its floor) | REW live H2 |
+|---|---|---|---|
+| 20 Hz | −75 | −53 (−75) | −90 |
+| 31.5 Hz | −71 | −60 (−82) | −87 |
+| 50 Hz | −73 | −69 (−87) | −97 |
+| 100 Hz | −76 | −86 (−84) | −92 |
+| 1 kHz | −79 | −79 (−80) | −88 |
+
+ac2 overstates H2 below about 63 Hz (22 dB at 20 Hz, falling about 6 dB per third octave) while
+calling it well above its floor: under investigation. Above 100 Hz ac2 agrees within a few dB
+but places the harmonics at its own floor; REW reads 8–15 dB below the steady sines throughout,
+unexplained. At −50 dBFS both are floor-limited.
