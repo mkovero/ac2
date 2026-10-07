@@ -9,6 +9,12 @@ Work found in use, not yet scheduled into a phase. Newest first. Move an item to
   new arrival, so nothing moves): operator answered "yes". Rounding a capture's fractional nudge
   to the 0.1 ms grid with `,` / `.` is fine as is.
 
+## Timing precision (operator, 2026-10-07, after the REW cross-check)
+
+- **Sub-sample sweep arrival, fractional tracking, A − B arrival readout, and a group delay
+  that holds below 100 Hz** (the displayed one swings ±30 % there on correct phase):
+  `subsample-arrival-group-delay.md`.
+
 ## Performance and platforms (2026-10-05, after the laptop / Pi performance pass)
 
 Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SPL (PLAN
