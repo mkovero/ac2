@@ -50,6 +50,16 @@ pub fn percent(db: f64) -> f64 {
     100.0 * 10f64.powf(db / 20.0)
 }
 
+/// Percent of the fundamental as dB re it (the inverse of [`percent`]); NaN for a value
+/// that is not a positive ratio.
+pub fn db_of_percent(p: f64) -> f64 {
+    if p > 0.0 {
+        20.0 * (p / 100.0).log10()
+    } else {
+        f64::NAN
+    }
+}
+
 /// `1.00 %`, `0.0316 %`: three significant digits.
 pub fn percent_text(db: f64) -> String {
     let p = percent(db);
@@ -720,7 +730,16 @@ pub fn sweep_ir_scene(
                 .map_or(0.0, |t| crate::room::table_height(t, theme)),
         ..size
     };
-    let mut sc = crate::ir::ir_scene(&frame, color, None, status, view, theme, ir_size);
+    let mut sc = crate::ir::ir_scene(
+        &frame,
+        color,
+        None,
+        status,
+        view,
+        &view.distortion.ir,
+        theme,
+        ir_size,
+    );
     sc.room = table.clone();
     if let Some(t) = &table {
         let rect = Rect::new(

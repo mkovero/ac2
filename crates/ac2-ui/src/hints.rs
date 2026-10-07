@@ -137,6 +137,10 @@ mod tests {
             pc(Scope::Ir),
             [
                 "G linear/log/ETC",
+                "I zoom time",
+                "Ctrl+I zoom level",
+                "C cursor",
+                "Shift+Home fit",
                 "N next measurement",
                 "Shift+I hide pane",
                 "W maximise",
@@ -165,6 +169,7 @@ mod tests {
                 "U dB/%",
                 "G response/IR/room",
                 "Shift+G linear/log/ETC",
+                "C cursor",
                 "W maximise",
                 "Shift+W hide pane",
                 "H all keys"
@@ -203,7 +208,7 @@ mod tests {
             c == CommandId::DistortionUnit
         });
         assert!(t.iter().all(|h| h.command != CommandId::DistortionUnit));
-        assert_eq!(t.len(), 7);
+        assert_eq!(t.len(), 8);
     }
 
     #[test]

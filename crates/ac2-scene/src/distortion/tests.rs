@@ -494,3 +494,43 @@ fn the_sweep_ir_marks_the_harmonics() {
     // H2 at −L·ln 2.
     assert!((harmonic_marks(d.sweep.as_ref().unwrap())[0].0 + 400.0 * 2f64.ln()).abs() < 1e-9);
 }
+
+/// The sweep's IR view keeps its own time axis and cursor: the IR pane's zoom does not
+/// move it, its own does, and its cursor reads the sweep IR.
+#[test]
+fn the_sweep_ir_has_its_own_axes_and_cursor() {
+    use crate::view::{IrAxes, IrMode};
+    let d = data();
+    let mut view = ViewState::default();
+    view.ir.axes.time_ms = Some(Range::new(0.0, 1.0));
+    let draw = |view: &ViewState| {
+        sweep_ir_scene(
+            &d,
+            Color::from_rgba8([255, 0, 0, 255]),
+            &status(),
+            view,
+            &Theme::dark(),
+            SIZE,
+        )
+        .expect("ir")
+    };
+    let sc = draw(&view);
+    assert_eq!(sc.x_axis.mapping.range, Range::new(-750.0, 249.0));
+    view.distortion.ir = IrAxes {
+        time_ms: Some(Range::new(-10.0, 30.0)),
+        cursor_ms: Some(0.2),
+        ..IrAxes::default()
+    };
+    view.ir.mode = IrMode::Etc;
+    let sc = draw(&view);
+    assert_eq!(sc.x_axis.mapping.range, Range::new(-10.0, 30.0));
+    let cur = sc.cursor.expect("cursor");
+    assert_eq!(cur.text(), "0 ms · 0.0 dB");
+    assert!(
+        sc.scene.layers[2]
+            .labels
+            .iter()
+            .any(|l| l.text == cur.text()),
+        "the readout is drawn"
+    );
+}

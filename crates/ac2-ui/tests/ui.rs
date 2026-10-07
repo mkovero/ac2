@@ -272,6 +272,19 @@ fn ir_pane_of_a_stopped_measurement() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "ir_stopped");
+    // The frequency panes' keys on its time and amplitude axes: I twice zooms time about
+    // the middle, Ctrl+I the amplitude, C puts the time cursor there with its readout.
+    h.key_press(Key::I);
+    h.key_press(Key::I);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::I);
+    h.key_press(Key::C);
+    step_until(&mut h, "zoomed, the cursor on", |a| {
+        let ax = a.state.view.ir.axes;
+        ax.time_ms.is_some() && ax.amplitude.is_some() && ax.cursor_ms.is_some()
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "ir_zoomed_cursor");
 }
 
 /// The top bar while recording: `REC` with the audio's length and size in the record
@@ -1393,6 +1406,13 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_percent");
+    // C: the cursor reads the fundamental, every order and THD, here in percent.
+    h.key_press(Key::C);
+    step_until(&mut h, "the cursor", |a| a.state.view.cursor_hz.is_some());
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "sweep_distortion_cursor");
+    h.key_press(Key::C);
     h.key_press_modifiers(Modifiers::SHIFT, Key::I);
     step_until(&mut h, "sweep IR", |a| {
         a.state.view.distortion.mode == ac2_scene::view::SweepMode::Ir

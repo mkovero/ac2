@@ -296,13 +296,13 @@ fn level_axis_zooms_pans_fits_and_resets_per_pane() {
     t.key("Alt+5");
     t.key("Ctrl+I");
     assert!((r(&t, PaneKind::Distortion).span() - 100.0 / 1.5).abs() < 1e-9);
-    // No level axis in the IR pane: said, nothing changes.
+    // The IR pane without an IR: said, nothing changes.
     t.key("Alt+3");
     let view = t.st.view;
     t.key("Ctrl+I");
     assert_eq!(t.st.view, view);
     assert!(
-        t.last_toast().contains("no level axis"),
+        t.last_toast().contains("no impulse response shown"),
         "{}",
         t.last_toast()
     );

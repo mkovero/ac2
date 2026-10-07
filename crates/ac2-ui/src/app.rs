@@ -101,6 +101,12 @@ pub(crate) struct CachedScene {
     pub y_level: Option<ac2_scene::axis::Mapping>,
     /// The spectrograph's time axis, when the spectrum pane shows it.
     pub time_axis: Option<ac2_scene::axis::Mapping>,
+    /// An IR picture's time and value axes, and which picture it is.
+    pub ir_axes: Option<(
+        ac2_scene::view::IrPane,
+        ac2_scene::axis::Mapping,
+        ac2_scene::axis::Mapping,
+    )>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
 }

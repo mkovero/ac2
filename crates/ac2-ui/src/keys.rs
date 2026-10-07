@@ -370,20 +370,20 @@ commands! {
     PrevMeasurement => "prev_measurement", "Select previous measurement of the focused pane", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
-    ZoomIn => "zoom_in", "Zoom frequency in", [Global];
-    ZoomOut => "zoom_out", "Zoom frequency out", [Global];
-    PanLeft => "pan_left", "Pan frequency down", [Global];
-    PanRight => "pan_right", "Pan frequency up", [Global];
-    ResetView => "reset_view", "Reset zoom (20 Hz – 20 kHz)", [Global];
-    LevelZoomIn => "level_zoom_in", "Zoom level axis in (vertical)", [Global];
-    LevelZoomOut => "level_zoom_out", "Zoom level axis out (vertical)", [Global];
+    ZoomIn => "zoom_in", "Zoom frequency in (IR: time)", [Global];
+    ZoomOut => "zoom_out", "Zoom frequency out (IR: time)", [Global];
+    PanLeft => "pan_left", "Pan frequency down (IR: earlier)", [Global];
+    PanRight => "pan_right", "Pan frequency up (IR: later)", [Global];
+    ResetView => "reset_view", "Reset zoom (20 Hz – 20 kHz; IR: the whole IR)", [Global];
+    LevelZoomIn => "level_zoom_in", "Zoom level axis in (vertical; IR: amplitude or dB)", [Global];
+    LevelZoomOut => "level_zoom_out", "Zoom level axis out (vertical; IR: amplitude or dB)", [Global];
     LevelPanUp => "level_pan_up", "Pan level axis up (towards higher levels)", [Global];
     LevelPanDown => "level_pan_down", "Pan level axis down (towards lower levels)", [Global];
-    LevelFit => "level_fit", "Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz", [Global];
+    LevelFit => "level_fit", "Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR)", [Global];
     LevelReset => "level_reset", "Level and frequency axes back to the pane's default", [Global];
-    ToggleCursor => "toggle_cursor", "Comparison cursor on / off", [Global];
-    CursorLeft => "cursor_left", "Cursor 1/12 octave down", [Global];
-    CursorRight => "cursor_right", "Cursor 1/12 octave up", [Global];
+    ToggleCursor => "toggle_cursor", "Comparison cursor on / off (IR: a time cursor)", [Global];
+    CursorLeft => "cursor_left", "Cursor 1/12 octave down (IR: earlier)", [Global];
+    CursorRight => "cursor_right", "Cursor 1/12 octave up (IR: later)", [Global];
     Slot1 => "slot_1", "Capture selected measurement to slot 1", [Global];
     Slot2 => "slot_2", "Capture selected measurement to slot 2", [Global];
     Slot3 => "slot_3", "Capture selected measurement to slot 3", [Global];
@@ -794,6 +794,10 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::IrMode, "linear/log/ETC", 90),
+                    hint(C::ZoomIn, "zoom time", 80),
+                    hint(C::LevelZoomIn, "zoom level", 65),
+                    hint(C::ToggleCursor, "cursor", 75),
+                    hint(C::LevelFit, "fit", 55),
                     hint(C::NextMeasurement, "next measurement", 60),
                     hint(C::ToggleIr, "hide pane", 70),
                     hint(C::MaximizePane, "maximise", 50),
@@ -822,6 +826,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::DistortionUnit, "dB/%", 70),
                     hint(C::SweepView, "response/IR/room", 75),
                     hint(C::IrMode, "linear/log/ETC", 70),
+                    hint(C::ToggleCursor, "cursor", 60),
                     hint(C::MaximizePane, "maximise", 50),
                     hint(C::HideDistortion, "hide pane", 40),
                 ]

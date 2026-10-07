@@ -8,14 +8,14 @@ use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use eframe::egui;
 
-use ac2_scene::view::{DistortionUnit, SplMode};
+use ac2_scene::view::{DistortionUnit, IrPane, SplMode};
 
 use crate::app::{App, CachedScene};
 use crate::hints::{self, KeyHint};
 use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
-use crate::state::{HintPlace, Msg, Overlay, PaneKind};
+use crate::state::{HintPlace, IrNavMsg, Msg, Overlay, PaneKind};
 use crate::theme::Chrome;
 use ac2_proto::units::MeasId;
 
@@ -89,7 +89,8 @@ fn slot(p: PaneKind) -> PlotSlot {
     PlotSlot(p as u32)
 }
 
-/// The axes of a pane's scene the mouse navigates: frequency, and level in dB.
+/// The axes of a pane's scene the mouse navigates: frequency, and level in dB (or, on a
+/// log scale, in percent of the fundamental); or an IR picture's time and value axes.
 #[derive(Clone, Copy, Debug, Default)]
 struct Axes {
     x: Option<Mapping>,
@@ -97,6 +98,8 @@ struct Axes {
     /// The spectrograph's time axis (seconds before the newest frame), when shown: a
     /// click there puts the cursor on a time as well as a frequency.
     time: Option<Mapping>,
+    /// An IR picture: which one, its time axis and its value axis.
+    ir: Option<(IrPane, Mapping, Mapping)>,
 }
 
 /// Scene for `pane` at `size`, from the cache when nothing changed.
@@ -115,6 +118,7 @@ fn scene_for(
             x: c.x_axis,
             y_level: c.y_level,
             time: c.time_axis,
+            ir: c.ir_axes,
         };
         return Some((c.scene.clone(), axes));
     }
@@ -139,6 +143,7 @@ fn scene_for(
                     x: Some(s.x_axis.mapping),
                     y_level: y,
                     time: None,
+                    ir: None,
                 },
             )
         }
@@ -159,6 +164,7 @@ fn scene_for(
                     x: Some(s.x_axis.mapping),
                     y_level: s.spectrum.as_ref().map(|sp| sp.y_axis.mapping),
                     time: Some(s.time_axis.mapping),
+                    ir: None,
                 },
             )
         }
@@ -177,13 +183,24 @@ fn scene_for(
                     x: Some(s.x_axis.mapping),
                     y_level: Some(s.y_axis.mapping),
                     time: None,
+                    ir: None,
                 },
             )
         }
-        PaneKind::Ir => (
-            scenes::ir(st, &app.keymap, theme, vp, now)?.scene,
-            Axes::default(),
-        ),
+        PaneKind::Ir => {
+            let s = scenes::ir(st, &app.keymap, theme, vp, now)?;
+            // Navigation needs an IR: the empty pane's axes only frame its reason.
+            let ir = st
+                .ir_extent(IrPane::Live)
+                .map(|_| (IrPane::Live, s.x_axis.mapping, s.y_axis.mapping));
+            (
+                s.scene,
+                Axes {
+                    ir,
+                    ..Axes::default()
+                },
+            )
+        }
         PaneKind::Spl => (
             scenes::spl_pane(st, &app.keymap, theme, vp, now)?,
             Axes::default(),
@@ -192,8 +209,9 @@ fn scene_for(
             let s = scenes::sweep(st, theme, vp, now);
             let axes = Axes {
                 x: s.x_axis(),
-                y_level: s.y_level(st.view.distortion.unit),
+                y_level: s.y_level(),
                 time: None,
+                ir: s.ir_axes().map(|(x, y)| (IrPane::Sweep, x, y)),
             };
             (s.scene(), axes)
         }
@@ -209,6 +227,7 @@ fn scene_for(
             x_axis: axes.x,
             y_level: axes.y_level,
             time_axis: axes.time,
+            ir_axes: axes.ir,
             unit_tip,
         },
     );
@@ -842,6 +861,10 @@ fn navigate(
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(pane));
     }
+    if let Some((which, x, y)) = axes.ir {
+        navigate_ir(app, ui, resp, plot_rect, which, x, y);
+        return;
+    }
     if resp.hovered()
         && crate::state::level_range(
             &app.state.view,
@@ -866,10 +889,18 @@ fn navigate(
                 i.pointer.hover_pos(),
             )
         });
+        // A log level axis is the distortion in percent of the fundamental: the level
+        // under the pointer is the dB that percent stands for.
         let about_db = axes
             .y_level
             .zip(pos)
-            .map(|(m, p)| m.from_px(p.y - plot_rect.min.y))
+            .map(|(m, p)| {
+                let v = m.from_px(p.y - plot_rect.min.y);
+                match m.scale {
+                    ac2_scene::axis::Scale::Linear => v,
+                    ac2_scene::axis::Scale::Log => ac2_scene::distortion::db_of_percent(v),
+                }
+            })
             .filter(|v| v.is_finite());
         if zoom != 1.0 {
             app.dispatch(Msg::LevelZoom {
@@ -934,6 +965,88 @@ fn navigate(
                 factor: f64::from((scroll / 200.0).exp()),
             });
         }
+    }
+}
+
+/// The mouse on an IR picture, as on a frequency pane: wheel zooms time about the pointer,
+/// a drag pans it, Ctrl+wheel zooms the value axis about the pointer, Shift+wheel pans it,
+/// a click places the cursor.
+fn navigate_ir(
+    app: &mut App,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    plot_rect: egui::Rect,
+    which: IrPane,
+    x: Mapping,
+    y: Mapping,
+) {
+    let ms_at = |pos: egui::Pos2| x.from_px(pos.x - plot_rect.min.x);
+    if resp.clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        app.dispatch(Msg::IrNav(which, IrNavMsg::Cursor { t_ms: ms_at(p) }));
+    }
+    if resp.dragged() {
+        let dx = resp.drag_delta().x;
+        let len = x.len_px();
+        if dx != 0.0 && len > 0.0 {
+            app.dispatch(Msg::IrNav(
+                which,
+                IrNavMsg::Pan {
+                    ms: -f64::from(dx / len) * x.range.span(),
+                },
+            ));
+        }
+    }
+    if !resp.hovered() {
+        return;
+    }
+    // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
+    let (zoom, shift, dx, scroll, pos) = ui.input(|i| {
+        let zoom = if i.modifiers.command {
+            i.zoom_delta()
+        } else {
+            1.0
+        };
+        (
+            zoom,
+            i.modifiers.shift,
+            i.smooth_scroll_delta.x,
+            i.smooth_scroll_delta.y,
+            i.pointer.hover_pos(),
+        )
+    });
+    if zoom != 1.0 {
+        let about = pos
+            .map(|p| y.from_px(p.y - plot_rect.min.y))
+            .filter(|v| v.is_finite());
+        app.dispatch(Msg::IrNav(
+            which,
+            IrNavMsg::ValueZoom {
+                about,
+                factor: f64::from(zoom),
+            },
+        ));
+    }
+    if shift && dx != 0.0 {
+        // As on the level axes: wheel up shows higher values, a tenth of the span a notch.
+        app.dispatch(Msg::IrNav(
+            which,
+            IrNavMsg::ValuePan {
+                by: f64::from(dx / 500.0) * y.range.span(),
+            },
+        ));
+    }
+    if scroll != 0.0
+        && let Some(p) = pos
+    {
+        app.dispatch(Msg::IrNav(
+            which,
+            IrNavMsg::Zoom {
+                about_ms: ms_at(p),
+                factor: f64::from((scroll / 200.0).exp()),
+            },
+        ));
     }
 }
 

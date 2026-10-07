@@ -322,17 +322,17 @@ const PAIRS: [(CommandId, CommandId, &str); 10] = [
     (
         CommandId::ZoomIn,
         CommandId::ZoomOut,
-        "Zoom frequency in / out",
+        "Zoom frequency in / out (IR: time)",
     ),
     (
         CommandId::PanLeft,
         CommandId::PanRight,
-        "Pan frequency down / up",
+        "Pan frequency down / up (IR: time)",
     ),
     (
         CommandId::CursorLeft,
         CommandId::CursorRight,
-        "Cursor 1/12 octave down / up",
+        "Cursor 1/12 octave down / up (IR: a step)",
     ),
     (
         CommandId::NudgeEarlier,
@@ -352,12 +352,12 @@ const PAIRS: [(CommandId, CommandId, &str); 10] = [
     (
         CommandId::LevelZoomIn,
         CommandId::LevelZoomOut,
-        "Zoom level axis in / out (vertical)",
+        "Zoom level axis in / out (vertical; IR: amplitude or dB)",
     ),
     (
         CommandId::LevelPanUp,
         CommandId::LevelPanDown,
-        "Pan level axis up / down",
+        "Pan level axis up / down (IR: amplitude or dB)",
     ),
 ];
 

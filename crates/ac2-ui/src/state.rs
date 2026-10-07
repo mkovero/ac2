@@ -52,6 +52,9 @@ pub use display::{
 #[path = "state_settings.rs"]
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
+#[path = "state_ir.rs"]
+mod ir_nav;
+pub use ir_nav::IrNavMsg;
 
 /// The panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -881,6 +884,8 @@ pub enum Msg {
     Leq(LeqMsg),
     /// Mouse on the Settings view.
     Settings(SettingsMsg),
+    /// Mouse on an impulse-response picture (the IR pane, the sweep pane's IR view).
+    IrNav(ac2_scene::view::IrPane, IrNavMsg),
 }
 
 /// What the mouse does on the Leq windows dialog.
@@ -2140,6 +2145,7 @@ impl AppState {
             Msg::LevelPan { pane, db } => self.level_pan(pane, db),
             Msg::Leq(m) => self.leq_msg(m, out),
             Msg::Settings(m) => self.settings_msg(m, out),
+            Msg::IrNav(p, m) => self.ir_nav(p, m),
             Msg::Tick { now_s, dt_s } => {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
@@ -3890,6 +3896,12 @@ impl AppState {
                 };
                 self.prefs.theme = Some(self.theme);
                 self.prefs_dirty = true;
+            }
+            // An IR picture navigates its time and value axes with the same keys.
+            c if ir_nav::is_nav(c) && self.ir_target().is_some() => {
+                if let Some(p) = self.ir_target() {
+                    self.ir_key(p, c);
+                }
             }
             C::ZoomIn | C::ZoomOut => {
                 let t = self.nav.target;

@@ -318,6 +318,24 @@ after that stays until the next sweep):
   on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
+The **impulse-response pictures** — the IR pane (**Alt+3**) and the sweep pane's IR view
+(**G**) — take the same keys and mouse on a **time axis** (ms re t = 0): **I** / **O** and the
+wheel zoom time (about the pointer; the keys about the cursor while it is in view), **←** /
+**→** and a drag pan it, **Home** shows the whole IR. The value axis is the amplitude in FS
+(linear view) or dB re the peak (log and ETC views): **Ctrl+I** / **Ctrl+O**, **Ctrl+↑** /
+**Ctrl+↓**, **Ctrl+wheel** and **Shift+wheel** move it; **Shift+Home** shows the whole IR
+with the value axis framing the curve (linear: ±110 % of its peak; log / ETC: from the noise
+to the peak); **Ctrl+Home** puts the defaults back (the whole IR, ±110 % of the peak, −60 …
++3 dB). Time zooms no closer than four samples and pans no further than one IR length
+outside the IR. **C** (or a click) puts a time cursor on the IR and **Shift+←** /
+**Shift+→** step it (a sample when zoomed in, a hundredth of the shown span otherwise); the
+readout under the origin line reads its sample: `1.25 ms · +0.500 FS` or `1.25 ms · −12.3 dB`.
+The IR pane and the sweep's IR view each keep their own zoom and cursor; the log / ETC
+ranges are remembered in `ui.toml` (`ir`, `sweep_ir`). The sweep's response & distortion
+view uses the frequency keys and mouse of the other panes, its level axis in dB or in % (the
+wheel zooms about the level under the pointer either way), and its cursor reads the
+fundamental, every harmonic and THD; the room table has no axes.
+
 **What the spectrum's level means.** A narrowband spectrum's levels are **per FFT bin**,
 and its axis says how wide a bin is: `dBFS per 1.46 Hz bin (tone)` (48 kHz / 32 768
 points), `dB SPL per 0.73 Hz bin (tone)`. A sine reads its RMS level whatever the FFT length
@@ -1237,20 +1255,20 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `N` | Select next measurement of the focused pane | `next_measurement` |
 | `Shift+N` | Select previous measurement of the focused pane | `prev_measurement` |
 | `T` | Theme: dark → light → high contrast | `cycle_theme` |
-| `I` | Zoom frequency in | `zoom_in` |
-| `O` | Zoom frequency out | `zoom_out` |
-| `←` | Pan frequency down | `pan_left` |
-| `→` | Pan frequency up | `pan_right` |
-| `Home` | Reset zoom (20 Hz – 20 kHz) | `reset_view` |
-| `Ctrl+I` | Zoom level axis in (vertical) | `level_zoom_in` |
-| `Ctrl+O` | Zoom level axis out (vertical) | `level_zoom_out` |
+| `I` | Zoom frequency in (IR: time) | `zoom_in` |
+| `O` | Zoom frequency out (IR: time) | `zoom_out` |
+| `←` | Pan frequency down (IR: earlier) | `pan_left` |
+| `→` | Pan frequency up (IR: later) | `pan_right` |
+| `Home` | Reset zoom (20 Hz – 20 kHz; IR: the whole IR) | `reset_view` |
+| `Ctrl+I` | Zoom level axis in (vertical; IR: amplitude or dB) | `level_zoom_in` |
+| `Ctrl+O` | Zoom level axis out (vertical; IR: amplitude or dB) | `level_zoom_out` |
 | `Ctrl+↑` | Pan level axis up (towards higher levels) | `level_pan_up` |
 | `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
-| `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz | `level_fit` |
+| `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR) | `level_fit` |
 | `Ctrl+Home` | Level and frequency axes back to the pane's default | `level_reset` |
-| `C` | Comparison cursor on / off | `toggle_cursor` |
-| `Shift+←` | Cursor 1/12 octave down | `cursor_left` |
-| `Shift+→` | Cursor 1/12 octave up | `cursor_right` |
+| `C` | Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
+| `Shift+←` | Cursor 1/12 octave down (IR: earlier) | `cursor_left` |
+| `Shift+→` | Cursor 1/12 octave up (IR: later) | `cursor_right` |
 | `Ctrl+1` | Capture selected measurement to slot 1 | `slot_1` |
 | `Ctrl+2` | Capture selected measurement to slot 2 | `slot_2` |
 | `Ctrl+3` | Capture selected measurement to slot 3 | `slot_3` |
@@ -1426,9 +1444,9 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 |---|---|
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `Alt+↑` offset · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Impulse response | `G` linear/log/ETC · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
+| Impulse response | `G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `C` cursor · `Shift+Home` fit · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq/both · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Shift+W` hide pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `C` cursor · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->
 

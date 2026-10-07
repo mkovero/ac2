@@ -72,63 +72,103 @@ pub const LEVEL_MIN_SPAN: f64 = 1.0;
 /// Narrowest span a fit frames: a flat trace still shows its ripple against a few dB.
 pub const LEVEL_FIT_MIN_SPAN: f64 = 6.0;
 
-/// Navigation of a vertical dB axis (transfer magnitude, spectrum level, distortion): zoom
-/// about a level, pan by dB, frame the shown data. The axis keeps its tick rules
-/// ([`crate::axis::linear_ticks`]), which label any range from a tenth of a dB to hundreds.
+/// The limits a linear axis is navigated within: its range stays inside `limits` and at
+/// least `min_span` wide. Every zoom and pan of a linear axis (level, IR time, IR amplitude)
+/// goes through one of these, so each keeps the value under the pointer where it was.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AxisBounds {
+    pub limits: Range,
+    pub min_span: f64,
+}
+
+impl AxisBounds {
+    /// The range kept within the limits, its span between `min_span` and the limits' span;
+    /// an invalid range is returned as it is.
+    pub fn clamp(&self, r: Range) -> Range {
+        if !r.is_valid() || !self.limits.is_valid() {
+            return r;
+        }
+        let max = self.limits.span();
+        let span = r.span().clamp(self.min_span.min(max), max);
+        let mid = (r.lo + r.hi) / 2.0;
+        let lo = (mid - span / 2.0).clamp(self.limits.lo, self.limits.hi - span);
+        Range::new(lo, lo + span)
+    }
+
+    /// Zoom by `factor` (> 1 zooms in) keeping `about` at the same place on the axis.
+    pub fn zoom(&self, r: Range, about: f64, factor: f64) -> Range {
+        if !(factor > 0.0 && factor.is_finite() && about.is_finite() && r.is_valid()) {
+            return r;
+        }
+        let max = self.limits.span();
+        let span = (r.span() / factor).clamp(self.min_span.min(max), max);
+        let t = ((about - r.lo) / r.span()).clamp(0.0, 1.0);
+        let lo = about - t * span;
+        self.clamp(Range::new(lo, lo + span))
+    }
+
+    /// Pan by `by` (positive shows higher values), keeping the span.
+    pub fn pan(&self, r: Range, by: f64) -> Range {
+        if !(by.is_finite() && r.is_valid()) {
+            return r;
+        }
+        self.clamp(Range::new(r.lo + by, r.hi + by))
+    }
+}
+
+/// The smallest 1, 2, 5 × 10ⁿ at least `x` (`x` > 0).
+fn nice(x: f64) -> f64 {
+    if !(x > 0.0 && x.is_finite()) {
+        return 1.0;
+    }
+    let p = 10f64.powf(x.log10().floor());
+    [1.0, 2.0, 5.0, 10.0]
+        .into_iter()
+        .map(|m| m * p)
+        .find(|s| *s >= x * (1.0 - 1e-9))
+        .unwrap_or(10.0 * p)
+}
+
+/// The 1-2-5 step one key press pans an axis showing `r` by: about a tenth of the span, so
+/// a few presses move a curve across the pane and the grid lines stay on round values.
+pub fn pan_step(r: Range) -> f64 {
+    nice(r.span() / 10.0)
+}
+
+/// Navigation of a vertical dB axis (transfer magnitude, spectrum level, distortion, the IR
+/// views' log and ETC levels): zoom about a level, pan by dB, frame the shown data. The axis
+/// keeps its tick rules ([`crate::axis::linear_ticks`]), which label any range from a tenth
+/// of a dB to hundreds.
 pub mod level {
-    use super::{LEVEL_FIT_MIN_SPAN, LEVEL_LIMIT_HI, LEVEL_LIMIT_LO, LEVEL_MIN_SPAN};
+    use super::{
+        AxisBounds, LEVEL_FIT_MIN_SPAN, LEVEL_LIMIT_HI, LEVEL_LIMIT_LO, LEVEL_MIN_SPAN, nice,
+    };
     use crate::axis::Range;
+
+    const BOUNDS: AxisBounds = AxisBounds {
+        limits: Range::new(LEVEL_LIMIT_LO, LEVEL_LIMIT_HI),
+        min_span: LEVEL_MIN_SPAN,
+    };
 
     /// The range kept within the limits, its span between [`LEVEL_MIN_SPAN`] and the
     /// limits' span; an invalid range is returned as it is.
     pub fn clamp(r: Range) -> Range {
-        if !r.is_valid() {
-            return r;
-        }
-        let span = r
-            .span()
-            .clamp(LEVEL_MIN_SPAN, LEVEL_LIMIT_HI - LEVEL_LIMIT_LO);
-        let mid = (r.lo + r.hi) / 2.0;
-        let lo = (mid - span / 2.0).clamp(LEVEL_LIMIT_LO, LEVEL_LIMIT_HI - span);
-        Range::new(lo, lo + span)
+        BOUNDS.clamp(r)
     }
 
     /// Zoom by `factor` (> 1 zooms in) keeping `about` at the same height.
     pub fn zoom(r: Range, about: f64, factor: f64) -> Range {
-        if !(factor > 0.0 && factor.is_finite() && about.is_finite() && r.is_valid()) {
-            return r;
-        }
-        let span = (r.span() / factor).clamp(LEVEL_MIN_SPAN, LEVEL_LIMIT_HI - LEVEL_LIMIT_LO);
-        let t = ((about - r.lo) / r.span()).clamp(0.0, 1.0);
-        let lo = about - t * span;
-        clamp(Range::new(lo, lo + span))
+        BOUNDS.zoom(r, about, factor)
     }
 
     /// Pan by `db` (positive shows higher levels), keeping the span.
     pub fn pan(r: Range, db: f64) -> Range {
-        if !(db.is_finite() && r.is_valid()) {
-            return r;
-        }
-        clamp(Range::new(r.lo + db, r.hi + db))
+        BOUNDS.pan(r, db)
     }
 
-    /// The 1-2-5 step one key press pans by: about a tenth of the span, so a few presses
-    /// move a trace across the pane and the grid lines stay on round values.
+    /// The 1-2-5 step one key press pans by ([`super::pan_step`]).
     pub fn pan_step(r: Range) -> f64 {
-        nice(r.span() / 10.0)
-    }
-
-    /// The smallest 1, 2, 5 × 10ⁿ at least `x` (`x` > 0).
-    fn nice(x: f64) -> f64 {
-        if !(x > 0.0 && x.is_finite()) {
-            return 1.0;
-        }
-        let p = 10f64.powf(x.log10().floor());
-        [1.0, 2.0, 5.0, 10.0]
-            .into_iter()
-            .map(|m| m * p)
-            .find(|s| *s >= x * (1.0 - 1e-9))
-            .unwrap_or(10.0 * p)
+        super::pan_step(r)
     }
 
     /// A range that frames `values` (dB; NaN and ±∞ ignored): from the lowest percent of
@@ -150,6 +190,90 @@ pub mod level {
         let step = nice((hi - lo) / 8.0);
         let r = Range::new((lo / step).floor() * step, (hi / step).ceil() * step);
         Some(clamp(r))
+    }
+}
+
+/// Narrowest time span of an IR view, in sample spacings: a few samples still show the
+/// shape between them, where one spacing alone would be a single segment.
+pub const IR_MIN_SPAN_SAMPLES: f64 = 4.0;
+/// Largest amplitude a linear IR view can show, FS: a transfer function with 40 dB of gain.
+pub const IR_AMPLITUDE_LIMIT: f64 = 100.0;
+/// Narrowest amplitude span of a linear IR view, FS (−120 dB re full scale).
+pub const IR_AMPLITUDE_MIN_SPAN: f64 = 1e-6;
+
+/// Navigation of a linear IR view's amplitude axis, FS.
+pub const IR_AMPLITUDE_BOUNDS: AxisBounds = AxisBounds {
+    limits: Range::new(-IR_AMPLITUDE_LIMIT, IR_AMPLITUDE_LIMIT),
+    min_span: IR_AMPLITUDE_MIN_SPAN,
+};
+
+/// Where an impulse response lies in time, ms re its t = 0: its first and last sample and
+/// their spacing. Its time axis is navigated within it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IrExtent {
+    /// From the first to the last sample; ±1 ms when there is no span.
+    pub full: Range,
+    /// The first sample's time.
+    pub t0_ms: f64,
+    pub dt_ms: f64,
+    /// Samples.
+    pub n: usize,
+}
+
+impl IrExtent {
+    /// `n` samples `dt_s` apart from `t0_s`.
+    pub fn of(t0_s: f64, dt_s: f64, n: usize) -> Self {
+        let (lo, dt) = (t0_s * 1000.0, dt_s * 1000.0);
+        let hi = lo + n.saturating_sub(1) as f64 * dt;
+        let full = if lo.is_finite() && hi.is_finite() && hi > lo {
+            Range::new(lo, hi)
+        } else {
+            Range::new(-1.0, 1.0)
+        };
+        Self {
+            full,
+            t0_ms: if lo.is_finite() { lo } else { 0.0 },
+            dt_ms: if dt > 0.0 && dt.is_finite() { dt } else { 0.0 },
+            n,
+        }
+    }
+
+    /// Time of sample `i`.
+    pub fn time_of(&self, i: usize) -> f64 {
+        self.t0_ms + i as f64 * self.dt_ms
+    }
+
+    /// `t_ms` moved to the nearest sample.
+    pub fn snap(&self, t_ms: f64) -> Option<f64> {
+        self.nearest(t_ms).map(|i| self.time_of(i))
+    }
+
+    /// The time axis's bounds: never narrower than [`IR_MIN_SPAN_SAMPLES`] samples, never
+    /// further outside the IR than its own length (beyond that there is nothing to see).
+    pub fn bounds(&self) -> AxisBounds {
+        let len = self.full.span();
+        AxisBounds {
+            limits: Range::new(self.full.lo - len, self.full.hi + len),
+            min_span: IR_MIN_SPAN_SAMPLES * self.dt_ms,
+        }
+    }
+
+    /// Index of the sample nearest `t_ms`.
+    pub fn nearest(&self, t_ms: f64) -> Option<usize> {
+        if self.n == 0 || !t_ms.is_finite() || self.dt_ms <= 0.0 {
+            return None;
+        }
+        let i = ((t_ms - self.t0_ms) / self.dt_ms).round();
+        Some(i.clamp(0.0, (self.n - 1) as f64) as usize)
+    }
+
+    /// One press of the cursor keys: a sample when zoomed in that far, else a hundredth of
+    /// the shown span in whole samples, so a few presses cross a reflection at any zoom.
+    pub fn cursor_step(&self, shown: Range) -> f64 {
+        if self.dt_ms <= 0.0 {
+            return shown.span() / 100.0;
+        }
+        (shown.span() / 100.0 / self.dt_ms).round().max(1.0) * self.dt_ms
     }
 }
 
@@ -357,21 +481,60 @@ pub enum IrMode {
     Etc,
 }
 
+/// Which impulse-response picture a set of IR axes belongs to: each keeps its own zoom
+/// and cursor, since the live IR (a few ms around the arrival) and a sweep's (hundreds of
+/// ms of room decay, harmonics before t = 0) are read at very different scales.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IrPane {
+    /// The IR pane: the focused transfer measurement's IR.
+    Live,
+    /// The sweep pane's impulse-response view.
+    Sweep,
+}
+
+/// The axes and the cursor of one impulse-response picture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IrAxes {
+    /// Time range in ms re t = 0; `None` = the whole IR.
+    pub time_ms: Option<Range>,
+    /// Amplitude range of the linear view, FS; `None` = ±110 % of the IR's peak.
+    pub amplitude: Option<Range>,
+    /// Level range of the log and ETC views, dB re the peak.
+    pub level_db: Range,
+    /// The cursor's time, ms re t = 0.
+    pub cursor_ms: Option<f64>,
+}
+
+impl IrAxes {
+    /// 60 dB under the peak: a room's decay and the noise floor under it, the peak a little
+    /// below the top.
+    pub const DEFAULT_LEVEL_DB: Range = Range::new(-60.0, 3.0);
+}
+
+impl Default for IrAxes {
+    fn default() -> Self {
+        Self {
+            time_ms: None,
+            amplitude: None,
+            level_db: Self::DEFAULT_LEVEL_DB,
+            cursor_ms: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IrView {
+    /// Shared by the IR pane and the sweep's IR view: one key steps both.
     pub mode: IrMode,
-    /// Time range in ms re the inserted delay; `None` = the whole published IR.
-    pub time_ms: Option<Range>,
-    /// Depth of the log / ETC views below the peak, dB.
-    pub log_depth_db: f64,
+    /// The IR pane's axes and cursor.
+    pub axes: IrAxes,
 }
 
 impl Default for IrView {
     fn default() -> Self {
         Self {
             mode: IrMode::Linear,
-            time_ms: None,
-            log_depth_db: 60.0,
+            axes: IrAxes::default(),
         }
     }
 }
@@ -393,6 +556,8 @@ pub struct DistortionView {
     pub range_db: Range,
     /// Which of the sweep's views the pane shows.
     pub mode: SweepMode,
+    /// The axes and cursor of its impulse-response view.
+    pub ir: IrAxes,
 }
 
 impl Default for DistortionView {
@@ -401,6 +566,7 @@ impl Default for DistortionView {
             unit: DistortionUnit::Db,
             range_db: Range::new(-100.0, 0.0),
             mode: SweepMode::Response,
+            ir: IrAxes::default(),
         }
     }
 }
@@ -522,8 +688,69 @@ impl Default for ViewState {
     }
 }
 
+impl ViewState {
+    /// The axes of IR picture `p`.
+    pub fn ir_axes(&self, p: IrPane) -> &IrAxes {
+        match p {
+            IrPane::Live => &self.ir.axes,
+            IrPane::Sweep => &self.distortion.ir,
+        }
+    }
+
+    pub fn ir_axes_mut(&mut self, p: IrPane) -> &mut IrAxes {
+        match p {
+            IrPane::Live => &mut self.ir.axes,
+            IrPane::Sweep => &mut self.distortion.ir,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// The time axis of an IR: zoom keeps the time under the pointer, never narrower than a
+    /// few samples; pan and zoom out stop one IR length outside it.
+    #[test]
+    fn ir_time_axis_bounds() {
+        // 48 kHz from −1 ms, 4801 samples: −1 … 99 ms.
+        let e = IrExtent::of(-0.001, 1.0 / 48_000.0, 4801);
+        assert!(close(e.full.lo, -1.0) && close(e.full.hi, 99.0), "{e:?}");
+        let b = e.bounds();
+        assert_eq!(b.limits, Range::new(-101.0, 199.0));
+        let z = b.zoom(e.full, 9.0, 4.0);
+        assert!(close(z.span(), 25.0));
+        assert!(close((9.0 - z.lo) / z.span(), 0.1));
+        // Never narrower than four samples.
+        let z = b.zoom(e.full, 0.0, 1e12);
+        assert!(close(z.span(), 4.0 / 48.0), "{z:?}");
+        // Out and away: the limits hold.
+        assert_eq!(b.zoom(e.full, 0.0, 1e-9), b.limits);
+        assert_eq!(b.pan(e.full, 1e6), Range::new(99.0, 199.0));
+        assert_eq!(b.pan(e.full, -1e6), Range::new(-101.0, -1.0));
+        // The nearest sample, clamped to the IR.
+        assert_eq!(e.nearest(0.0), Some(48));
+        assert_eq!(e.nearest(-50.0), Some(0));
+        assert_eq!(e.nearest(1e9), Some(4800));
+        assert_eq!(e.nearest(f64::NAN), None);
+        assert!(close(e.snap(0.03).expect("snapped"), 1.0 / 48.0));
+        // Cursor steps: a sample zoomed in, a hundredth of the span in whole samples out.
+        assert!(close(e.cursor_step(Range::new(0.0, 0.1)), 1.0 / 48.0));
+        assert!(close(e.cursor_step(e.full), 48.0 / 48.0));
+        // A single sample has no span: an axis around zero to draw on.
+        assert_eq!(IrExtent::of(0.0, 0.001, 1).full, Range::new(-1.0, 1.0));
+    }
+
+    /// The linear amplitude axis keeps a sign-symmetric picture's centre under the pointer
+    /// and stays inside ±100 FS.
+    #[test]
+    fn ir_amplitude_axis_bounds() {
+        let b = IR_AMPLITUDE_BOUNDS;
+        let r = Range::new(-0.55, 0.55);
+        let z = b.zoom(r, 0.0, 2.0);
+        assert!(close(z.lo, -0.275) && close(z.hi, 0.275), "{z:?}");
+        assert!(close(b.pan(r, 0.1).lo, -0.45));
+        assert_eq!(b.zoom(r, 0.0, 1e-9), Range::new(-100.0, 100.0));
+        assert!(close(b.zoom(r, 0.0, 1e12).span(), IR_AMPLITUDE_MIN_SPAN));
+    }
 
     /// dBFS and dB SPL keep their own level ranges: a calibrated spectrum starts on a
     /// dB SPL-sized axis, and zooming one scale leaves the other as it was.

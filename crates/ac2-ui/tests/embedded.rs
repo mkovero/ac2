@@ -331,6 +331,89 @@ fn empty_embedded_daemon_measures_from_the_app() -> R {
     Ok(())
 }
 
+/// The IR pane from an empty daemon: the wheel zooms its time axis about the pointer, a drag
+/// pans it, Ctrl+wheel zooms the amplitude, a click puts the cursor on the arrival and the
+/// readout reads that sample of the IR as drawn.
+#[test]
+fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
+    use ac2_scene::view::IrPane;
+    use ac2_ui::state::IrNavMsg;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    d.key("Alt+3");
+    // The level typed before is kept: Space arms, Enter fires.
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    // The rig's −6 dB path: an arrival of about 0.5 FS.
+    d.until("an IR with its arrival", |s| {
+        s.ir_frame_of(IrPane::Live)
+            .is_some_and(|f| f.linear.iter().map(|x| x.abs()).fold(0.0, f32::max) > 0.3)
+    })?;
+    d.stop()?;
+    let full = d.st.ir_extent(IrPane::Live).ok_or("extent")?;
+    // Wheel up (about four notches) with the pointer on t = 0.
+    d.send(Msg::IrNav(
+        IrPane::Live,
+        IrNavMsg::Zoom {
+            about_ms: 0.0,
+            factor: 4.0,
+        },
+    ));
+    let r = d.st.view.ir.axes.time_ms.ok_or("zoomed")?;
+    assert!((r.span() - full.full.span() / 4.0).abs() < 1e-9, "{r:?}");
+    let frac = |r: ac2_scene::axis::Range| -r.lo / r.span();
+    assert!((frac(r) - frac(full.full)).abs() < 1e-9, "t = 0 stays put");
+    // A drag of a tenth of the width to the right shows earlier times.
+    d.send(Msg::IrNav(
+        IrPane::Live,
+        IrNavMsg::Pan {
+            ms: -r.span() / 10.0,
+        },
+    ));
+    let p = d.st.view.ir.axes.time_ms.ok_or("panned")?;
+    assert!((p.lo - (r.lo - r.span() / 10.0)).abs() < 1e-9, "{p:?}");
+    d.send(Msg::IrNav(
+        IrPane::Live,
+        IrNavMsg::ValueZoom {
+            about: Some(0.0),
+            factor: 2.0,
+        },
+    ));
+    let a = d.st.view.ir.axes.amplitude.ok_or("amplitude")?;
+    assert!((a.lo + a.hi).abs() < 1e-9, "zoomed about 0: {a:?}");
+    // A click at the arrival: the cursor on its sample, the readout that sample's value.
+    d.send(Msg::IrNav(IrPane::Live, IrNavMsg::Cursor { t_ms: 0.0 }));
+    let now = ac2_ui::scenes::Now {
+        instant: Instant::now(),
+        wall: ac2_proto::units::WallNs(0),
+    };
+    let size = ac2_scene::primitives::Viewport {
+        width: 1100.0,
+        height: 600.0,
+    };
+    let s = ac2_ui::scenes::ir(&d.st, &d.keys, &Theme::dark(), size, now).ok_or("scene")?;
+    let cur = s.cursor.ok_or("no cursor")?;
+    assert!(cur.t_ms.abs() <= full.dt_ms / 2.0 + 1e-9, "{cur:?}");
+    let f = d.st.ir_frame_of(IrPane::Live).ok_or("frame")?;
+    let i = ac2_scene::ir::extent(&f).nearest(0.0).ok_or("sample")?;
+    let want = ac2_scene::format::amplitude_readout(f64::from(f.linear[i]));
+    assert_eq!(cur.value, want);
+    assert!(
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .any(|l| l.text == cur.text()),
+        "the readout is drawn"
+    );
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// The measurement's own delay from the keys: Ctrl+. a sample later, Alt+, a tenth earlier.
 /// The daemon keeps the averages, so the very next frames carry the new delay with the
 /// 1 kHz column still valid (never back to settling), and the measurement list shows the
@@ -650,6 +733,58 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
             other => return Err(format!("H{order} at 1 kHz: {other:?}").into()),
         }
     }
+    // The cursor at 1 kHz (a click in the pane) reads every order there, in dB and in %;
+    // the IR view (G) keeps its own time cursor.
+    d.send(Msg::CursorAt(Some(1000.0)));
+    let rows = |d: &Driver| -> R<Vec<(String, String)>> {
+        let now = ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        };
+        let size = ac2_scene::primitives::Viewport {
+            width: 1100.0,
+            height: 600.0,
+        };
+        match ac2_ui::scenes::sweep(&d.st, &Theme::dark(), size, now) {
+            ac2_ui::scenes::SweepPane::Distortion(s) => {
+                Ok(s.cursor.ok_or("no distortion cursor")?.rows)
+            }
+            _ => Err("not the distortion view".into()),
+        }
+    };
+    let value = |rows: &[(String, String)], n: &str| {
+        rows.iter()
+            .find(|r| r.0 == n)
+            .map(|r| r.1.clone())
+            .unwrap_or_default()
+    };
+    let db = rows(&d)?;
+    let h2: f64 = value(&db, "H2")
+        .trim_end_matches(" dB")
+        .replace('\u{2212}', "-")
+        .parse()?;
+    assert!((h2 + 40.0).abs() < 1.0, "{db:?}");
+    assert!(value(&db, "THD").ends_with(" dB"), "{db:?}");
+    d.key("U");
+    let pc = rows(&d)?;
+    let h2: f64 = value(&pc, "H2").trim_end_matches(" %").parse()?;
+    assert!((h2 - 1.0).abs() < 0.15, "{pc:?}");
+    d.key("U");
+    d.key("G");
+    assert_eq!(
+        d.st.ir_target(),
+        Some(ac2_scene::view::IrPane::Sweep),
+        "the sweep's IR view"
+    );
+    d.key("C");
+    assert!(d.st.view.distortion.ir.cursor_ms.is_some());
+    assert_eq!(
+        d.st.view.cursor_hz,
+        Some(1000.0),
+        "the frequency cursor stays"
+    );
+    d.key("G");
+    d.key("G");
     d.until("the stimulus off and the lease given back", |s| {
         s.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| {

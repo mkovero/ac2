@@ -49,6 +49,8 @@
 //! spectrum_dbfs = [-140.0, -40.0]
 //! spectrum_spl = [20.0, 120.0]
 //! distortion = [-100.0, 0.0]
+//! ir = [-80.0, 3.0]
+//! sweep_ir = [-90.0, 0.0]
 //!
 //! [window]
 //! width = 1600
@@ -137,6 +139,10 @@ pub struct LevelPrefs {
     pub spectrum_dbfs: Range,
     pub spectrum_spl: Range,
     pub distortion: Range,
+    /// The IR pane's log / ETC axis, dB re peak.
+    pub ir: Range,
+    /// The sweep pane's IR view's log / ETC axis, dB re peak.
+    pub sweep_ir: Range,
 }
 
 impl LevelPrefs {
@@ -147,6 +153,8 @@ impl LevelPrefs {
             spectrum_dbfs: view.spectrum.level,
             spectrum_spl: view.spectrum.level_spl,
             distortion: view.distortion.range_db,
+            ir: view.ir.axes.level_db,
+            sweep_ir: view.distortion.ir.level_db,
         }
     }
 
@@ -156,6 +164,8 @@ impl LevelPrefs {
         view.spectrum.level = self.spectrum_dbfs;
         view.spectrum.level_spl = self.spectrum_spl;
         view.distortion.range_db = self.distortion;
+        view.ir.axes.level_db = self.ir;
+        view.distortion.ir.level_db = self.sweep_ir;
     }
 }
 
@@ -304,6 +314,10 @@ struct LevelsFile {
     spectrum_spl: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     distortion: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ir: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sweep_ir: Option<[f64; 2]>,
 }
 
 impl LevelsFile {
@@ -323,6 +337,8 @@ impl LevelsFile {
             spectrum_dbfs: range("spectrum_dbfs", self.spectrum_dbfs, d.spectrum_dbfs)?,
             spectrum_spl: range("spectrum_spl", self.spectrum_spl, d.spectrum_spl)?,
             distortion: range("distortion", self.distortion, d.distortion)?,
+            ir: range("ir", self.ir, d.ir)?,
+            sweep_ir: range("sweep_ir", self.sweep_ir, d.sweep_ir)?,
         })
     }
 
@@ -335,6 +351,8 @@ impl LevelsFile {
             spectrum_dbfs: v(l.spectrum_dbfs, d.spectrum_dbfs),
             spectrum_spl: v(l.spectrum_spl, d.spectrum_spl),
             distortion: v(l.distortion, d.distortion),
+            ir: v(l.ir, d.ir),
+            sweep_ir: v(l.sweep_ir, d.sweep_ir),
         };
         (*l != d).then_some(f)
     }
@@ -1046,7 +1064,10 @@ mod tests {
         let mut p = UiPrefs::default();
         p.levels.spectrum_dbfs = Range::new(-140.0, -40.0);
         p.levels.transfer = Range::new(-24.5, 12.0);
+        p.levels.sweep_ir = Range::new(-90.0, 0.0);
         let text = p.to_toml();
+        assert!(text.contains("sweep_ir = [-90.0, 0.0]"), "{text}");
+        assert!(!text.contains("\nir ="), "{text}");
         assert!(text.contains("[levels]"), "{text}");
         assert!(text.contains("spectrum_dbfs = [-140.0, -40.0]"), "{text}");
         assert!(!text.contains("spectrum_spl"), "{text}");

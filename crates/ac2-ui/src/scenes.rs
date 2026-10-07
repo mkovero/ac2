@@ -583,6 +583,7 @@ pub fn ir(
             Some(freshness(st, ir)),
             &status,
             &st.view,
+            &st.view.ir.axes,
             theme,
             size,
         ));
@@ -615,7 +616,7 @@ pub fn ir(
     Some(missing_scene(
         missing_text(&m.config.name, why, &start),
         &status,
-        &st.view,
+        &st.view.ir.axes,
         theme,
         size,
     ))
@@ -646,16 +647,19 @@ impl SweepPane {
         }
     }
 
-    /// The distortion axis in dB, for zooming about the pointer (the percent axis is a log
-    /// of the same ratios: no dB value under the pointer).
-    pub fn y_level(
-        &self,
-        unit: ac2_scene::view::DistortionUnit,
-    ) -> Option<ac2_scene::axis::Mapping> {
+    /// The distortion axis, for zooming about the pointer: linear in dB, or the percent
+    /// of the fundamental on a log scale over the same ratios.
+    pub fn y_level(&self) -> Option<ac2_scene::axis::Mapping> {
         match self {
-            SweepPane::Distortion(s) if unit == ac2_scene::view::DistortionUnit::Db => {
-                Some(s.y_axis.mapping)
-            }
+            SweepPane::Distortion(s) => Some(s.y_axis.mapping),
+            _ => None,
+        }
+    }
+
+    /// The IR view's time and value axes, for navigation.
+    pub fn ir_axes(&self) -> Option<(ac2_scene::axis::Mapping, ac2_scene::axis::Mapping)> {
+        match self {
+            SweepPane::Ir(s) => Some((s.x_axis.mapping, s.y_axis.mapping)),
             _ => None,
         }
     }

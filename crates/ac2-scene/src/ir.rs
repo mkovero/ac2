@@ -11,11 +11,12 @@ use ac2_proto::frame::IrFrame;
 use crate::axis::{self, Axis, Range};
 use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label};
+use crate::format;
 use crate::primitives::{Color, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::readout;
 use crate::theme::Theme;
 use crate::time::Freshness;
-use crate::view::{IrMode, ViewState};
+use crate::view::{IrAxes, IrExtent, IrMode, ViewState};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrScene {
@@ -36,6 +37,26 @@ pub struct IrScene {
     pub banners: Vec<BannerRow>,
     /// Room parameters drawn under the plot (a sweep trace's IR), if any.
     pub room: Option<crate::room::RoomTable>,
+    /// The cursor's reading, when the cursor is on.
+    pub cursor: Option<IrCursor>,
+}
+
+/// What the IR cursor reads: the sample nearest its time, as the view draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IrCursor {
+    /// The sample's time, ms re t = 0.
+    pub t_ms: f64,
+    /// `1.25 ms`.
+    pub time: String,
+    /// `+0.500 FS` (linear), `−12.3 dB` (log, ETC).
+    pub value: String,
+}
+
+impl IrCursor {
+    /// The readout line: `1.25 ms · +0.500 FS`.
+    pub fn text(&self) -> String {
+        format!("{} · {}", self.time, self.value)
+    }
 }
 
 /// Time of every point, ms re the inserted delay.
@@ -46,25 +67,32 @@ pub fn times_ms(frame: &IrFrame) -> Vec<f64> {
         .collect()
 }
 
-/// Values drawn for `mode` and the y range they need. `None` when the mode has no data.
-pub fn ir_values(
-    frame: &IrFrame,
-    mode: IrMode,
-    depth_db: f64,
-) -> Option<(Vec<f64>, Range, String)> {
-    let finite_max = |v: &mut dyn Iterator<Item = f64>| {
-        v.filter(|x| x.is_finite())
-            .fold(f64::NEG_INFINITY, f64::max)
-    };
+/// Where `frame` lies in time: the extent its time axis is navigated within.
+pub fn extent(frame: &IrFrame) -> IrExtent {
+    IrExtent::of(frame.meta.t0.0, frame.meta.dt.0, frame.linear.len())
+}
+
+/// The value axis's title in `mode`.
+pub fn title(mode: IrMode) -> &'static str {
     match mode {
-        IrMode::Linear => {
-            let peak = finite_max(&mut frame.linear.iter().map(|x| f64::from(x.abs())));
-            let lim = if peak > 0.0 { peak * 1.1 } else { 1.0 };
-            let v = frame.linear.iter().map(|x| f64::from(*x)).collect();
-            Some((v, Range::new(-lim, lim), "Amplitude (FS)".into()))
-        }
+        IrMode::Linear => "Amplitude (FS)",
+        IrMode::Log => "dB re peak",
+        IrMode::Etc => "ETC dB re peak",
+    }
+}
+
+fn finite_max(v: impl Iterator<Item = f64>) -> f64 {
+    v.filter(|x| x.is_finite())
+        .fold(f64::NEG_INFINITY, f64::max)
+}
+
+/// Values drawn for `mode`: amplitude (FS) or dB re the peak; `None` when the mode has no
+/// data. A zero sample has no level: NaN in the log view.
+pub fn ir_values(frame: &IrFrame, mode: IrMode) -> Option<Vec<f64>> {
+    match mode {
+        IrMode::Linear => Some(frame.linear.iter().map(|x| f64::from(*x)).collect()),
         IrMode::Log => {
-            let peak = finite_max(&mut frame.linear.iter().map(|x| f64::from(x.abs())));
+            let peak = finite_max(frame.linear.iter().map(|x| f64::from(x.abs())));
             if peak.is_nan() || peak <= 0.0 {
                 return None;
             }
@@ -80,65 +108,94 @@ pub fn ir_values(
                     }
                 })
                 .collect();
-            Some((v, Range::new(-depth_db, 3.0), "dB re peak".into()))
+            Some(v)
         }
         IrMode::Etc => {
             let etc = frame.etc.as_ref()?;
-            let peak = finite_max(&mut etc.iter().map(|x| f64::from(*x)));
+            let peak = finite_max(etc.iter().map(|x| f64::from(*x)));
             if !peak.is_finite() {
                 return None;
             }
-            let v = etc.iter().map(|x| f64::from(*x) - peak).collect();
-            Some((v, Range::new(-depth_db, 3.0), "ETC dB re peak".into()))
+            Some(etc.iter().map(|x| f64::from(*x) - peak).collect())
         }
     }
 }
 
+/// The linear view's amplitude range when none was chosen: symmetric, 10 % over the peak,
+/// so both polarities of the arrival show at the same scale.
+pub fn auto_amplitude(frame: &IrFrame) -> Range {
+    let peak = finite_max(frame.linear.iter().map(|x| f64::from(x.abs())));
+    let lim = if peak > 0.0 { peak * 1.1 } else { 1.0 };
+    Range::new(-lim, lim)
+}
+
+/// The value axis's range in `mode` with `axes`.
+pub fn y_range(frame: &IrFrame, mode: IrMode, axes: &IrAxes) -> Range {
+    match mode {
+        IrMode::Linear => axes
+            .amplitude
+            .filter(Range::is_valid)
+            .unwrap_or_else(|| auto_amplitude(frame)),
+        IrMode::Log | IrMode::Etc => axes.level_db,
+    }
+}
+
+/// The time axis's range with `axes`: the chosen one, else the whole IR.
+pub fn time_range(frame: &IrFrame, axes: &IrAxes) -> Range {
+    axes.time_ms
+        .filter(Range::is_valid)
+        .unwrap_or(extent(frame).full)
+}
+
+/// The cursor's reading at `axes.cursor_ms`, at the nearest sample of the values `mode`
+/// draws.
+pub fn cursor_reading(frame: &IrFrame, mode: IrMode, axes: &IrAxes) -> Option<IrCursor> {
+    let t = axes.cursor_ms?;
+    let e = extent(frame);
+    let i = e.nearest(t)?;
+    let t_ms = e.time_of(i);
+    let v = ir_values(frame, mode)
+        .and_then(|v| v.get(i).copied())
+        .unwrap_or(f64::NAN);
+    let value = match mode {
+        IrMode::Linear => format::amplitude_readout(v),
+        IrMode::Log | IrMode::Etc => format::db_readout(v),
+    };
+    Some(IrCursor {
+        t_ms,
+        time: format::ir_time(t_ms, e.dt_ms),
+        value,
+    })
+}
+
+/// The IR `frame` in the view's mode on `axes` (the IR pane's or the sweep view's).
+#[allow(clippy::too_many_arguments)]
 pub fn ir_scene(
     frame: &IrFrame,
     color: Color,
     freshness: Option<Freshness>,
     status: &Status,
     view: &ViewState,
+    axes: &IrAxes,
     theme: &Theme,
     size: Viewport,
 ) -> IrScene {
+    let mode = view.ir.mode;
     let mut c = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
     let plot = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
     let t = times_ms(frame);
-    let full = match (t.first(), t.last()) {
-        (Some(a), Some(b)) if b > a => Range::new(*a, *b),
-        _ => Range::new(-1.0, 1.0),
-    };
-    let trange = view.ir.time_ms.filter(Range::is_valid).unwrap_or(full);
+    let trange = time_range(frame, axes);
     let x_axis = axis::linear_axis(trange, plot.x, plot.right(), "ms");
-    let values = ir_values(frame, view.ir.mode, view.ir.log_depth_db);
-    let (yrange, title) = values
-        .as_ref()
-        .map_or((Range::new(-1.0, 1.0), String::new()), |(_, r, t)| {
-            (*r, t.clone())
-        });
-    let title = if title.is_empty() {
-        match view.ir.mode {
-            IrMode::Linear => "Amplitude (FS)",
-            IrMode::Log => "dB re peak",
-            IrMode::Etc => "ETC dB re peak",
-        }
-        .to_string()
-    } else {
-        title
-    };
-    let y_unit = if view.ir.mode == IrMode::Linear {
-        "FS"
-    } else {
-        "dB"
-    };
+    let values = ir_values(frame, mode);
+    let yrange = y_range(frame, mode, axes);
+    let title = title(mode).to_string();
+    let y_unit = if mode == IrMode::Linear { "FS" } else { "dB" };
     let y_axis = axis::linear_axis(yrange, plot.bottom(), plot.y, y_unit);
     canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, &title, theme);
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
-    if view.ir.mode == IrMode::Linear {
+    if mode == IrMode::Linear {
         canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
     }
     // t = 0: where the inserted delay puts the arrival.
@@ -173,24 +230,26 @@ pub fn ir_scene(
     ));
 
     let note = match &values {
-        None if view.ir.mode == IrMode::Etc && frame.etc.is_none() => {
+        None if mode == IrMode::Etc && frame.etc.is_none() => {
             Some("ETC not published for this measurement".to_string())
         }
         None => Some("no impulse energy".to_string()),
         Some(_) => None,
     };
-    if let Some((v, _, _)) = &values {
+    if let Some(v) = &values {
         let xs: Vec<f32> = t.iter().map(|x| xm.to_px(*x)).collect();
-        // Log views: points below the floor sit on the floor instead of vanishing, so the
+        // Log views: points below the axis sit on its floor instead of vanishing, so the
         // decay stays a connected line.
         let floor = yrange.lo;
         let ys: Vec<f32> = v
             .iter()
             .map(|y| {
-                if view.ir.mode != IrMode::Linear && y.is_nan() {
+                if mode != IrMode::Linear && y.is_nan() {
                     ym.to_px(floor)
-                } else {
+                } else if mode != IrMode::Linear {
                     ym.to_px(y.max(floor))
+                } else {
+                    ym.to_px(*y)
                 }
             })
             .collect();
@@ -206,6 +265,20 @@ pub fn ir_scene(
             stroke: Stroke::solid(color.with_alpha(dim), (theme.trace_width * 0.75).max(1.0)),
             clip: Some(plot),
         });
+    }
+    let cursor = values
+        .as_ref()
+        .and_then(|_| cursor_reading(frame, mode, axes));
+    if let Some(cur) = &cursor {
+        canvas::vline(&mut c.overlay, plot, xm.to_px(cur.t_ms), theme.cursor);
+        // Under the origin line, right-aligned with it.
+        c.overlay.labels.push(label(
+            cur.text(),
+            [plot.right() - 6.0, origin_y + 1.4 * theme.small_font_size],
+            anchor(HAlign::Right, VAlign::Top),
+            theme.small_font_size,
+            theme.text,
+        ));
     }
     if let Some(n) = &note {
         c.overlay.labels.push(label(
@@ -228,6 +301,7 @@ pub fn ir_scene(
         strip: strip.rect,
         banners: strip.rows,
         room: None,
+        cursor,
     }
 }
 
@@ -300,7 +374,7 @@ pub fn missing_text(name: &str, why: IrMissing, key: &str) -> String {
 pub fn missing_scene(
     note: String,
     status: &Status,
-    view: &ViewState,
+    axes: &IrAxes,
     theme: &Theme,
     size: Viewport,
 ) -> IrScene {
@@ -308,8 +382,7 @@ pub fn missing_scene(
     let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
     let plot = canvas::plot_area(size, strip.rect.bottom(), MARGINS.right);
-    let trange = view
-        .ir
+    let trange = axes
         .time_ms
         .filter(Range::is_valid)
         .unwrap_or(Range::new(-1.0, 10.0));
@@ -343,6 +416,7 @@ pub fn missing_scene(
         strip: strip.rect,
         banners: strip.rows,
         room: None,
+        cursor: None,
     }
 }
 
@@ -399,6 +473,7 @@ mod tests {
             None,
             &Status::default(),
             &view(IrMode::Linear),
+            &IrAxes::default(),
             &Theme::dark(),
             SIZE,
         );
@@ -425,13 +500,16 @@ mod tests {
     #[test]
     fn log_view_is_re_peak() {
         let f = frame();
-        let (v, r, title) = ir_values(&f, IrMode::Log, 60.0).expect("values");
-        assert_eq!(title, "dB re peak");
+        let v = ir_values(&f, IrMode::Log).expect("values");
+        assert_eq!(title(IrMode::Log), "dB re peak");
         assert!((v[5] - 0.0).abs() < 1e-9);
         assert!((v[9] + 20.0).abs() < 1e-6);
         assert!((v[20] + 6.0206).abs() < 1e-3);
         assert!(v[0].is_nan());
-        assert_eq!(r, Range::new(-60.0, 3.0));
+        assert_eq!(
+            y_range(&f, IrMode::Log, &IrAxes::default()),
+            Range::new(-60.0, 3.0)
+        );
         // Silent samples sit on the floor in the drawing.
         let s = ir_scene(
             &f,
@@ -439,6 +517,7 @@ mod tests {
             None,
             &Status::default(),
             &view(IrMode::Log),
+            &IrAxes::default(),
             &Theme::dark(),
             SIZE,
         );
@@ -456,6 +535,7 @@ mod tests {
             None,
             &Status::default(),
             &view(IrMode::Etc),
+            &IrAxes::default(),
             &Theme::dark(),
             SIZE,
         );
@@ -465,7 +545,7 @@ mod tests {
         );
         assert!(s.scene.layers[1].polylines.is_empty());
         f.etc = Some((0..21).map(|i| -10.0 - i as f32).collect());
-        let (v, _, _) = ir_values(&f, IrMode::Etc, 60.0).expect("etc");
+        let v = ir_values(&f, IrMode::Etc).expect("etc");
         assert_eq!(v[0], 0.0);
         assert_eq!(v[20], -20.0);
     }
@@ -474,13 +554,14 @@ mod tests {
     fn zoomed_time_range_and_stale() {
         let f = frame();
         let mut v = view(IrMode::Linear);
-        v.ir.time_ms = Some(Range::new(-0.2, 0.2));
+        v.ir.axes.time_ms = Some(Range::new(-0.2, 0.2));
         let s = ir_scene(
             &f,
             Color::WHITE,
             Some(Freshness::from_age(2.0)),
             &Status::default(),
             &v,
+            &v.ir.axes,
             &Theme::dark(),
             SIZE,
         );
@@ -504,6 +585,7 @@ mod tests {
             None,
             &Status::default(),
             &view(IrMode::Log),
+            &IrAxes::default(),
             &Theme::dark(),
             SIZE,
         );
@@ -515,6 +597,7 @@ mod tests {
             None,
             &crate::banner::tests::everything(),
             &view(IrMode::Log),
+            &IrAxes::default(),
             &Theme::dark(),
             SIZE,
         );
@@ -538,6 +621,7 @@ mod tests {
                 None,
                 &Status::default(),
                 &view(IrMode::Linear),
+                &IrAxes::default(),
                 &Theme::dark(),
                 size,
             )
@@ -590,7 +674,7 @@ mod tests {
         let s = missing_scene(
             t(IrMissing::NoReference),
             &status,
-            &view(IrMode::Linear),
+            &IrAxes::default(),
             &Theme::dark(),
             SIZE,
         );
@@ -640,6 +724,7 @@ mod tests {
                 Some(fr),
                 &Status::default(),
                 &view(IrMode::Linear),
+                &IrAxes::default(),
                 &theme,
                 SIZE,
             )
@@ -652,5 +737,136 @@ mod tests {
         assert_eq!(out.tag.as_deref(), Some("audio stopped"));
         assert!(alpha(&out) < Color::WHITE.a);
         assert_eq!(draw(Freshness::Fresh { age_s: 0.1 }).tag, None);
+    }
+
+    fn labels(s: &IrScene) -> Vec<String> {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| l.labels.iter().map(|x| x.text.clone()))
+            .collect()
+    }
+
+    /// The cursor reads the sample nearest its time as each view draws it, on the line under
+    /// the origin, with a line at that sample's time.
+    #[test]
+    fn the_cursor_reads_time_and_value_in_every_mode() {
+        let mut f = frame();
+        f.etc = Some((0..21).map(|i| -10.0 - i as f32).collect());
+        let axes = IrAxes {
+            // Between samples 8 and 9: snaps to 9, 0.4 ms.
+            cursor_ms: Some(0.37),
+            ..IrAxes::default()
+        };
+        let draw = |mode| {
+            ir_scene(
+                &f,
+                Color::WHITE,
+                None,
+                &Status::default(),
+                &view(mode),
+                &axes,
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let lin = draw(IrMode::Linear);
+        let cur = lin.cursor.clone().expect("cursor");
+        assert!((cur.t_ms - 0.4).abs() < 1e-9);
+        assert_eq!(cur.text(), "0.4 ms · +0.0500 FS");
+        assert!(labels(&lin).contains(&cur.text()));
+        let x = lin.x_axis.mapping.to_px(0.4);
+        assert!(
+            lin.scene.layers[2]
+                .polylines
+                .iter()
+                .any(|p| (p.points[0][0] - x).abs() < 1e-3),
+            "cursor line at 0.4 ms"
+        );
+        assert_eq!(
+            draw(IrMode::Log).cursor.expect("log").text(),
+            "0.4 ms · −20.0 dB"
+        );
+        // ETC: sample 9 is −19 dB, 9 under the peak at sample 0.
+        assert_eq!(
+            draw(IrMode::Etc).cursor.expect("etc").text(),
+            "0.4 ms · −9.0 dB"
+        );
+        // A silent sample in the log view has no level; beyond the IR the cursor stays on
+        // its last sample.
+        let at = |t: f64, mode| {
+            let a = IrAxes {
+                cursor_ms: Some(t),
+                ..IrAxes::default()
+            };
+            cursor_reading(&f, mode, &a).expect("reading").text()
+        };
+        assert_eq!(at(-0.5, IrMode::Log), "−0.5 ms · —");
+        assert_eq!(at(9.0, IrMode::Linear), "1.5 ms · −0.250 FS");
+        // Off: no reading, no line.
+        let off = ir_scene(
+            &f,
+            Color::WHITE,
+            None,
+            &Status::default(),
+            &view(IrMode::Linear),
+            &IrAxes::default(),
+            &Theme::dark(),
+            SIZE,
+        );
+        assert_eq!(off.cursor, None);
+        assert!(off.scene.layers[2].polylines.is_empty());
+    }
+
+    /// The axes as navigated: a chosen amplitude range (linear) or dB range (log / ETC) and
+    /// time range are drawn and labelled as chosen; the defaults frame the whole IR.
+    #[test]
+    fn navigated_axes_are_drawn_as_chosen() {
+        let f = frame();
+        let axes = IrAxes {
+            time_ms: Some(Range::new(0.0, 1.0)),
+            amplitude: Some(Range::new(-0.1, 0.1)),
+            level_db: Range::new(-30.0, 0.0),
+            cursor_ms: None,
+        };
+        let draw = |mode| {
+            ir_scene(
+                &f,
+                Color::WHITE,
+                None,
+                &Status::default(),
+                &view(mode),
+                &axes,
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let lin = draw(IrMode::Linear);
+        assert_eq!(lin.x_axis.mapping.range, Range::new(0.0, 1.0));
+        assert_eq!(lin.y_axis.mapping.range, Range::new(-0.1, 0.1));
+        assert_eq!(
+            lin.y_axis.labels(),
+            [
+                "−0.10", "−0.08", "−0.06", "−0.04", "−0.02", "0.00", "0.02", "0.04", "0.06",
+                "0.08", "0.10"
+            ]
+        );
+        assert_eq!(lin.x_axis.labels().first(), Some(&"0.0"));
+        let log = draw(IrMode::Log);
+        assert_eq!(log.y_axis.mapping.range, Range::new(-30.0, 0.0));
+        assert!(
+            log.y_axis.labels().contains(&"−30"),
+            "{:?}",
+            log.y_axis.labels()
+        );
+        assert_eq!(
+            time_range(&f, &IrAxes::default()),
+            Range::new(-0.5, 1.5),
+            "the whole IR"
+        );
+        assert_eq!(
+            y_range(&f, IrMode::Linear, &IrAxes::default()),
+            auto_amplitude(&f)
+        );
     }
 }

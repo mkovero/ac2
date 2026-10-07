@@ -5274,6 +5274,9 @@ mod display;
 #[path = "state_overlay_tests.rs"]
 mod overlay;
 
+#[path = "state_ir_tests.rs"]
+mod ir_nav_tests;
+
 #[path = "state_settings_tests.rs"]
 mod settings;
 

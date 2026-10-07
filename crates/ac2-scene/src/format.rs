@@ -299,6 +299,32 @@ pub fn duration(seconds: f64) -> String {
     }
 }
 
+/// Impulse-response amplitude, signed (polarity is what the linear view shows), three
+/// significant digits re full scale: `+0.500 FS`, `−0.0123 FS`, `0 FS`.
+pub fn amplitude_readout(v: f64) -> String {
+    if !v.is_finite() {
+        return NO_VALUE.to_string();
+    }
+    let r = round_sig(v, 3);
+    if r == 0.0 {
+        return "0 FS".to_string();
+    }
+    // Three significant digits whatever the decade, down to a millionth of full scale.
+    let decimals = (2 - r.abs().log10().floor() as i32).clamp(0, 8) as usize;
+    with_unit(signed(r, decimals), " FS")
+}
+
+/// A time on an impulse response, ms with the decimals one sample `dt_ms` apart needs
+/// (at 48 kHz, 0.021 ms: two): `1.25 ms`, `−0.23 ms`; three without a spacing.
+pub fn ir_time(t_ms: f64, dt_ms: f64) -> String {
+    let decimals = if dt_ms > 0.0 && dt_ms.is_finite() {
+        (-(dt_ms.log10()).floor()).clamp(0.0, 6.0) as usize
+    } else {
+        3
+    };
+    ms(t_ms / 1000.0, decimals)
+}
+
 /// Temperature: `20 °C`, `22.5 °C`, `−5 °C`.
 pub fn celsius(t: f64) -> String {
     with_unit(fixed(t, needed_decimals(t, 1)), " °C")
@@ -307,6 +333,21 @@ pub fn celsius(t: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ir_readouts() {
+        assert_eq!(amplitude_readout(0.5), "+0.500 FS");
+        assert_eq!(amplitude_readout(-0.012_34), "−0.0123 FS");
+        assert_eq!(amplitude_readout(12.345), "+12.3 FS");
+        assert_eq!(amplitude_readout(0.0), "0 FS");
+        assert_eq!(amplitude_readout(f64::NAN), "—");
+        // 48 kHz: 0.0208 ms a sample, two decimals; 0.1 ms, one; 1 ms, none.
+        assert_eq!(ir_time(1.25, 1.0 / 48.0), "1.25 ms");
+        assert_eq!(ir_time(-0.229, 1.0 / 48.0), "−0.23 ms");
+        assert_eq!(ir_time(1.26, 0.1), "1.3 ms");
+        assert_eq!(ir_time(120.4, 1.0), "120 ms");
+        assert_eq!(ir_time(1.25, 0.0), "1.250 ms");
+    }
 
     #[test]
     fn minus_and_zero() {
