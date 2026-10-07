@@ -407,6 +407,64 @@ sines at −30 dBFS (`~/rew-dl/jsine.py`, Blackman FFT of 2 s): the Xone path sh
 | 1 kHz | −79 | −79 (−80) | −88 |
 
 ac2 overstates H2 below about 63 Hz (22 dB at 20 Hz, falling about 6 dB per third octave) while
-calling it well above its floor: under investigation. Above 100 Hz ac2 agrees within a few dB
+calling it well above its floor: an onset artefact, see "Low-frequency H2 near the sweep's start" below. Above 100 Hz ac2 agrees within a few dB
 but places the harmonics at its own floor; REW reads 8–15 dB below the steady sines throughout,
 unexplained. At −50 dBFS both are floor-limited.
+
+**Delay, ETC, group delay** (same −30 dBFS runs; REW's IR fetched with the default unit and
+`normalised=false` — `?unit=dBFS` returns log-scaled values).
+
+- Delay: REW 3.69 µs (its IR peak 3.70 µs), the direct cross-spectrum 3.70 µs. ac2's sweep
+  reports `arrival 0.00 ms`: it places the arrival in whole samples (10.4 µs) and the 3.7 µs
+  stays in its phase, which agrees with REW's. Sub-sample arrival:
+  `docs/design/subsample-arrival-group-delay.md`.
+- ETC: ac2's is 5–8 dB wider than REW's within ±2 ms of the peak because ac2 swept to 40 kHz
+  and REW to 48 kHz; REW band-limited to 40 kHz agrees within 1–2 dB. The 5–100 ms tail (the
+  Xone's LF high-pass) agrees within 2 dB; ac2's noise floor is about 6 dB higher (shorter
+  sweep, −98 vs −104 dB).
+- Phase against steady sines (`~/rew-dl/jphase.py`: least-squares sine fit of in 5 / in 2, no
+  window): ac2 within 0.03° from 31.5 Hz up and 0.17° at 16 Hz, magnitude within 0.04 dB; REW
+  0.66° off at 16 Hz.
+- Group delay: steady-sine pairs give 1535 / 1054 / 459 / 187 / 49 / 3.2 µs at 16 / 20 / 31.5 /
+  50 / 100 / 10 k Hz. ac2's displayed group delay (central difference of neighbouring 1/48-oct
+  columns) is off by −31 % at 20 Hz, +17 % at 31.5 Hz, −13 % at 50 Hz: a 0.03° phase ripple
+  (period ≈ 1.1 Hz at 20 Hz) differentiated over 0.6 Hz. The same phase with the slope fitted
+  over ±1/12 oct is within 7 % from 16 Hz; REW's within 5–14 %. Design:
+  `docs/design/subsample-arrival-group-delay.md`.
+
+### Low-frequency H2 near the sweep's start (2026-10-07, −30 dBFS, electrical)
+
+Same Xone path. H2 in dBr; steady sines: −75 at 20 Hz, −71 at 31.5 Hz, −73 at 50 Hz, and
+−87.8 / −84.0 / −87.0 / −77.3 / −73.3 at 11 / 13 / 15 / 18 / 22 Hz.
+
+| run | 22 Hz | 25 | 31.5 | 40 | 50 |
+|---|---|---|---|---|---|
+| ac2, 10 Hz – 40 kHz, 5.5 s (first run) | −53.6 | −55.7 | −59.5 | −63.9 | −69.4 |
+| ac2, same, repeated | −60.6 | −62.5 | −66.1 | −71.3 | −75.5 |
+| ac2, start 3 Hz | −74.6 | −78.6 | −83.8 | −85.0 | −88.8 |
+| ac2, 10 Hz, 11 s | −82.9 | −84.8 | −88.5 | −92.5 | −93.4 |
+| ac2's sweep played with `jplayrec` (outside ac2d), ac2's analysis replicated in numpy, two takes | −57.1 / −59.5 | −58.7 / −60.9 | −61.3 / −63.6 | −66.9 / −68.8 | −74.9 / −76.4 |
+| same, fade-in 300 ms instead of 77 ms | −68.4 | −71.0 | −71.7 | −72.5 | −73.9 |
+| same, fade-in 25 ms | −64.8 | −65.6 | −67.8 | −71.5 | −75.6 |
+
+From 63 Hz up every run reads −74 … −78 dBr, as the sines. So the excess is real in the
+capture (not ac2d's playback), is not distortion of the path (steady sines below 20 Hz are
+cleaner than at 20 Hz), disappears when the first two octaves of the sweep lie below the
+analysed band (3 Hz start) or the sweep is slower, depends on the fade-in without being
+monotonic in it, and varies 3–7 dB between identical runs. Below 30 Hz the clean loopback
+shows the same level as in 5 when demodulated at twice the instantaneous frequency, so a
+direct time-domain view cannot separate it there; at 40–100 Hz the demodulated H2 of in 5 is
+−72 … −77 dBr. Mechanism unproven: a transient of the path near the onset that the LTI
+deconvolution books as harmonics. ac2's sweep now starts two octaves below the asked start at a
+rising level, so the onset lies below the reported band; the harmonic window's rise was also lengthened to a third of the window
+(the lowest columns read about 2 dB low before, numpy replica). Scripts for these runs lived
+in the session scratchpad; `jsine.py` and `jphase.py` stay on pupu in `~/rew-dl`.
+
+**Level convention of the hand scripts (correction).** `jsine.py`, `jphase.py` and the E3 replica
+sweeps scaled a "−30 dBFS" level as a peak of √2·10^(−30/20); in the full-scale-sine convention
+ac2 and REW use (0 dBFS = a full-scale sine) that is −27 dBFS — 3 dB above the −30 allowed for
+the electrical path (Xone only; out 1 was never driven by them) and 3 dB above the ac2 and REW
+sweeps they were compared with. The steady-sine H2 "truth" above is therefore about 3 dB high
+for a second-order term (≈ 1 dB per dB) relative to a true −30 dBFS; the onset excess (13–22 dB)
+and the group-delay and phase comparisons (level-independent) are unaffected. The cross-check
+suite (`tools/crosscheck/`) uses the full-scale-sine convention throughout and asserts it.
