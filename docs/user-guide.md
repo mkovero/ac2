@@ -763,7 +763,8 @@ response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md)
   and back. **N** steps through stored sweeps (selecting each), **Shift+W** hides the pane. A run is also a stored
   trace, drawn in the transfer pane like any capture and listed under its sweep measurement (see *The measurement tree*).
 - **Progress strip:** while a sweep runs (from this app, another client or the CLI), a strip
-  under the top bar — visible whichever pane is maximised — shows its name and level,
+  drawn over the bottom of the panes — visible whichever pane is maximised, and never
+  resizing or moving them (not shown in full screen) — shows its name and level,
   *sweep 1 of 2*, a bar and the time left (about the remaining repeats × (sweep + the
   silence after it), counted from when each repeat began), then *analysing…*. Its
   **Stop (Shift+Esc)** button, like **Shift+Esc** (from anywhere) or **Esc** (with no window

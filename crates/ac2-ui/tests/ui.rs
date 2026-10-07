@@ -1514,7 +1514,8 @@ fn session_dialog() {
 
 /// A set of sweeps running while the transfer pane is maximised: the progress strip shows
 /// which sweep of how many, the bar and the time left, and the sidebar marks the sweep's
-/// inputs; the strip's Stop button stops the stimulus.
+/// inputs; the strip's Stop button stops the stimulus. The strip is drawn over the panes:
+/// the sweep starting moves no pane (its title row stays where it was).
 #[test]
 fn sweep_progress_strip() {
     use ac2_proto::event::Change;
@@ -1526,6 +1527,16 @@ fn sweep_progress_strip() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
+    // The pane's measurement chip, in its title row (the tree has rows of that name too).
+    let title = |h: &Harness<'_, App>| {
+        use egui_kittest::kittest::By;
+        h.query_all(By::new().label("Main L"))
+            .map(|n| n.rect())
+            .filter(|r| r.min.x > 230.0)
+            .fold(egui::Rect::NOTHING, |a, r| a.union(r))
+    };
+    let before = title(&h);
+    assert!(before.is_positive(), "no measurement chip in the pane");
     {
         let mut s = rig.fake.lock();
         let mut g = s.state.generator.clone();
@@ -1555,6 +1566,8 @@ fn sweep_progress_strip() {
     });
     let p = h.state().state.operation().expect("progress");
     assert_eq!(p.step, "sweep 1 of 2");
+    h.step();
+    assert_eq!(title(&h), before, "the strip moved the panes");
     h.key_press(Key::W);
     step_until(&mut h, "maximized", |a| a.state.layout.maximized);
     h.state_mut().state.toasts.clear();

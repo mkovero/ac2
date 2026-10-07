@@ -37,7 +37,7 @@ pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
         overlays::draw(app, ui.ctx(), &ch, top);
         return;
     }
-    let mut top = egui::Panel::top("ac2-top")
+    let top = egui::Panel::top("ac2-top")
         .frame(
             egui::Frame::new()
                 .fill(ch.panel)
@@ -47,20 +47,6 @@ pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
         .response
         .rect
         .bottom();
-    // Outside the panes: visible whichever pane is maximised.
-    if let Some(p) = app.state.operation() {
-        top = egui::Panel::top("ac2-progress")
-            .frame(
-                egui::Frame::new()
-                    .fill(ch.panel)
-                    .stroke(egui::Stroke::new(1.0, ch.armed))
-                    .inner_margin(egui::Margin::symmetric(10, 6)),
-            )
-            .show(ui, |ui| chrome::progress(app, ui, &ch, &p))
-            .response
-            .rect
-            .bottom();
-    }
     egui::Panel::left("ac2-measurements")
         .resizable(false)
         .exact_size(230.0)
@@ -70,12 +56,21 @@ pub(crate) fn draw(app: &mut App, ui: &mut egui::Ui, theme: &Theme) {
                 .inner_margin(egui::Margin::symmetric(10, 8)),
         )
         .show(ui, |ui| chrome::sidebar(app, ui, &ch));
-    egui::CentralPanel::no_frame()
+    let panes = egui::CentralPanel::no_frame()
         .frame(
             egui::Frame::new()
                 .fill(ch.panel)
                 .inner_margin(egui::Margin::same(6)),
         )
-        .show(ui, |ui| panes::panes(app, ui, theme, &ch));
+        .show(ui, |ui| panes::panes(app, ui, theme, &ch))
+        .response
+        .rect;
+    // Over the panes, never beside them: a sweep starting or ending must not resize or
+    // move what the operator is reading. It sits at the bottom of the pane area, over the
+    // focused pane's key hints and the lowest axis labels, clear of the banners, legends
+    // and traces at the top and middle; whichever pane is maximised, it is there.
+    if let Some(p) = app.state.operation() {
+        chrome::progress_overlay(app, ui.ctx(), &ch, &p, panes);
+    }
     overlays::draw(app, ui.ctx(), &ch, top);
 }

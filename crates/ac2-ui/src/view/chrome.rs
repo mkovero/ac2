@@ -469,12 +469,35 @@ fn dim_text(s: String, ch: &Chrome) -> RichText {
 }
 
 /// The running operation: what, which step, a bar, time left, and Stop.
-pub(super) fn progress(
+/// The progress strip drawn over the bottom of the pane area `over`, translucent so the
+/// panes keep their size and place under it.
+pub(super) fn progress_overlay(
     app: &mut App,
-    ui: &mut egui::Ui,
+    ctx: &egui::Context,
     ch: &Chrome,
     p: &ac2_scene::progress::Progress,
+    over: egui::Rect,
 ) {
+    let w = (over.width() - 24.0).clamp(1.0, 1100.0);
+    let fill = Color32::from_rgba_unmultiplied(ch.panel.r(), ch.panel.g(), ch.panel.b(), 242);
+    egui::Area::new(egui::Id::new("ac2-progress"))
+        .order(egui::Order::Middle)
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .fixed_pos(egui::pos2(over.center().x, over.bottom() - 8.0))
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(fill)
+                .stroke(egui::Stroke::new(1.0, ch.armed))
+                .corner_radius(4.0)
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.set_width(w - 20.0);
+                    progress(app, ui, ch, p);
+                });
+        });
+}
+
+fn progress(app: &mut App, ui: &mut egui::Ui, ch: &Chrome, p: &ac2_scene::progress::Progress) {
     let stop_key = STOP_ANYWHERE.label();
     let mut stop = false;
     ui.horizontal(|ui| {

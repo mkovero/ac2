@@ -112,7 +112,9 @@ running transfer measurement, somehow I would expect it"):
   expect even the badge on full screen"): arming, firing, stopping, an arm queued behind a
   stop and a running sweep no longer bring the top bar back in the stage view, so no pane
   resizes; no badge either. Esc / Shift+Esc stop as before; every other layout shows the
-  stimulus in the top bar (PLAN §8.2).
+  stimulus in the top bar (PLAN §8.2). The sweep progress strip outside full screen is
+  drawn over the bottom of the pane area (opaque enough to read, framed in the armed
+  colour) instead of taking a row above it: a sweep never resizes or moves the panes.
 - **The Leq run line only with the history** ("the online since nn:nn and LAeq total and
   offline would only be shown with shift+B history look"): `running … since … · LAeq total
   … · offline …` is drawn only with Shift+B on, in every SPL view; without it the windows
