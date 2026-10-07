@@ -71,9 +71,6 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Flaky tests
 
-- **ac2-cli `cmd::ir::tests::ir_capture_on_the_simulated_rig` on macOS CI**: H3 −48.9 dB
-  (want −50 ± 1) once on the first attempt of 9dc4274's branch run; passed on rerun and 6/6
-  locally.
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30 (no loopback, so the timing job is not involved); passed 4/4 alone.
 
@@ -95,6 +92,12 @@ decision 4). Measured numbers: PLAN §9.0.
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## Done
+
+- **`ir_capture_on_the_simulated_rig` H3 on macOS** was not flaky: the test checked the
+  *maximum* H3 over the sweep, which reads −49.03 dB on Linux every run and −48.92 on macOS
+  against −50 ± 1. H3 sits near the rig's noise, so the maximum of its scattered estimate is
+  biased up; the test now checks the median over 200 Hz–1.5 kHz (−50.04 against the analytic
+  −50.08, ±0.5 dB) and keeps the maximum only as a loose bound.
 
 Math channels (operator, 2026-10-06: "instead of 'some A and B' it would be nice to be able
 choose trace from dropdown, then choose operator and then choose another trace … isn't it

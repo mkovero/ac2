@@ -579,7 +579,10 @@ mod tests {
                 .unwrap_or(f64::NAN)
         };
         assert!((max(2) + 40.0).abs() < 1.0, "H2 {}", max(2));
-        assert!((max(3) + 50.0).abs() < 1.0, "H3 {}", max(3));
+        // H3 sits near the rig's noise (about −76 dBFS against −80 dBFS of noise), so its
+        // per-frequency estimate scatters and the maximum over the sweep is biased up (−49.0
+        // on Linux, −48.9 on macOS); the level itself is checked as the median below.
+        assert!((max(3) + 50.0).abs() < 2.0, "H3 {}", max(3));
         let thd_1k = &done["thd"][1];
         assert_eq!(thd_1k["hz"], 1000.0);
         assert!((thd_1k["db"].as_f64().unwrap_or(f64::NAN) + 39.6).abs() < 1.0);
@@ -590,6 +593,27 @@ mod tests {
             return Err("trace data".into());
         };
         let freqs = ac2_scene::grid::column_frequencies(&*c.grid(data.meta.grid_id).await?);
+        // The rig's H3 is c3·A²/4 re the fundamental (A = 0.1 at −20 dBFS, the fundamental
+        // itself gaining 3/4·c3·A²): −50.08 dB at every frequency. Its median over the band
+        // where H3 lies inside the sweep (3·f ≤ 5 kHz) reads it without the noise's bias.
+        let sweep = data.sweep.as_ref().ok_or("sweep data")?;
+        let h3 = &sweep
+            .harmonics
+            .iter()
+            .find(|h| h.order == 3)
+            .ok_or("H3 curve")?
+            .curve
+            .level_db;
+        let mut band: Vec<f64> = freqs
+            .iter()
+            .zip(h3)
+            .filter(|(f, l)| (200.0..=1500.0).contains(*f) && l.is_finite())
+            .map(|(_, l)| f64::from(*l))
+            .collect();
+        band.sort_by(f64::total_cmp);
+        assert!(band.len() > 20, "{} H3 columns", band.len());
+        let median = band[band.len() / 2];
+        assert!((median + 50.08).abs() < 0.5, "H3 median {median}");
         let mut human = Vec::new();
         print_summary(&mut Out::new(false, &mut human), &data, &freqs);
         let human = String::from_utf8(human)?;
