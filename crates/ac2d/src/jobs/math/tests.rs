@@ -146,7 +146,7 @@ fn power_average_leaves_out_refused_and_stopped_operands() {
             OperandStatus::Stopped,
         ]
     );
-    let m = f.meta.math.as_ref().unwrap();
+    let m = f.meta.math.as_ref().expect("math metadata");
     assert_eq!(m.included(), 2);
     assert_eq!(m.phase, PhaseBasis::SharedTimeBase);
 }
@@ -288,7 +288,7 @@ fn ratio_of_a_live_and_a_stored_operand() {
         assert!(d.abs() < 1e-2, "{hz} Hz: {} off", d);
         assert!((f.coh[k] - 0.5).abs() < 1e-6);
     }
-    let m = f.meta.math.as_ref().unwrap();
+    let m = f.meta.math.as_ref().expect("math metadata");
     assert_eq!(m.phase, PhaseBasis::SharedTimeBase);
 
     let gone = run(&c, &[None; 2], &[Answer::Stopped, stored(-3.0, 0.0, None)]);

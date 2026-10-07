@@ -58,6 +58,9 @@ pub(crate) struct Held {
     pub(crate) mic_curve: bool,
 }
 
+/// A live operand's request in flight (`Ok`), or a stored operand's columns (`Err`).
+type Pending = Result<Option<Receiver<Option<Frame>>>, Arc<Held>>;
+
 /// What one operand gave the math.
 #[derive(Debug)]
 pub(crate) enum Answer {
@@ -147,7 +150,7 @@ impl MathJob {
     /// form their results in parallel and the wait is the slowest one's, not the sum.
     fn ask_operands(&self) -> Vec<Answer> {
         let operands = self.cfg.expr.operands();
-        let pending: Vec<Result<Option<Receiver<Option<Frame>>>, Arc<Held>>> = operands
+        let pending: Vec<Pending> = operands
             .iter()
             .zip(&self.stored)
             .map(|(o, s)| match (o, s) {
@@ -264,12 +267,12 @@ impl MathJob {
 }
 
 /// Why a live operand's answer cannot go in, if it cannot.
-fn usable<'a>(
-    a: &'a Answer,
+fn usable(
+    a: &Answer,
     domain: MathDomain,
     epoch: SessionEpoch,
     grid_id: GridId,
-) -> Result<&'a Frame, OperandStatus> {
+) -> Result<&Frame, OperandStatus> {
     let f = match a {
         Answer::Stopped => return Err(OperandStatus::Stopped),
         Answer::NoResult => return Err(OperandStatus::Settling),
@@ -526,7 +529,7 @@ pub(crate) fn combine(
         }),
         MathDomain::Spectrum => {
             let (window, cal) = match first_frame {
-                Some(FrameData::Spec(s)) => (s.meta.window, s.meta.cal.clone()),
+                Some(FrameData::Spec(s)) => (s.meta.window, s.meta.cal),
                 // A stored spectrum keeps no window; its level is a tone level either way.
                 _ => (Window::Hann, CalStatus::Uncalibrated),
             };
@@ -545,7 +548,7 @@ pub(crate) fn combine(
         }
         MathDomain::Rta => {
             let (fraction, weighting, cal) = match first_frame {
-                Some(FrameData::Rta(r)) => (r.meta.fraction, r.meta.weighting, r.meta.cal.clone()),
+                Some(FrameData::Rta(r)) => (r.meta.fraction, r.meta.weighting, r.meta.cal),
                 _ => (
                     match grid {
                         GridDef::IecBands { fraction, .. } => *fraction,

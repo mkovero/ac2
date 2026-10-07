@@ -22,6 +22,9 @@ use super::{Control, static_grid};
 use crate::jobs::math::{Grids, Held, needs_shared_time_base};
 use crate::util::perr;
 
+/// A stored operand's columns, or `None` for a live one.
+type StoredOperand = Option<Arc<Held>>;
+
 fn invalid(m: impl Into<String>) -> ProtoError {
     perr(ErrorCode::Invalid, m.into())
 }
@@ -298,7 +301,7 @@ impl Control {
         own: MeasId,
         c: &MathConfig,
         fs: u32,
-    ) -> Result<(Grids, Vec<Option<Arc<Held>>>), ProtoError> {
+    ) -> Result<(Grids, Vec<StoredOperand>), ProtoError> {
         let static_grid = self.grid_of(Some(own), &MeasKind::Math { config: c.clone() })?;
         let mut grid: Option<(GridDef, String)> = static_grid.map(|g| (g, String::new()));
         let operands = c.expr.operands();

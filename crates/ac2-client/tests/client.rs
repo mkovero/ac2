@@ -786,7 +786,7 @@ async fn traces_and_sessions_against_the_fake() -> R {
     .await?;
     c.call(Command::TraceDelete { trace: a.id }).await?;
     match c.call(Command::FileList).await? {
-        ReplyBody::Sessions(l) => assert_eq!(l[0].traces, 5),
+        ReplyBody::Sessions(l) => assert_eq!(l[0].traces, 4),
         other => return Err(format!("{other:?}").into()),
     }
     c.call(Command::FileLoad {

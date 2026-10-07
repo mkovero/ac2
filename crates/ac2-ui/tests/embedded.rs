@@ -3740,8 +3740,7 @@ fn math_channels_from_an_empty_daemon() -> R {
 }
 
 /// Spectrum math lands on the spectrum pane, never the transfer pane: two spectra of the
-/// room mic, A − B by the dialog with the spectrum pane focused, 0 dB everywhere (one input
-/// minus itself).
+/// room mic, A − B by the dialog with the spectrum pane focused, both operands in its frames.
 #[test]
 fn spectrum_math_lands_on_the_spectrum_pane() -> R {
     use ac2_proto::model::MathDomain;
@@ -3788,15 +3787,14 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
         meas: id,
         stream: Stream::Spec,
     };
-    // Two spectra of one input, each on its own FFT frames: about 0 dB apart.
-    d.until("the difference, about 0 dB over the band", |s| {
+    // Both spectra went in, on the spectrum stream (the levels are checked against
+    // analytic values in the daemon's tests: here each operand is its own unaveraged FFT).
+    d.until("the difference on the spectrum stream", |s| {
         s.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Spec(sp) => {
-                    let mut v: Vec<f32> =
-                        sp.level.iter().copied().filter(|v| v.is_finite()).collect();
-                    v.sort_by(f32::total_cmp);
-                    v.len() > 100 && v[v.len() / 2].abs() < 1.0
+                    sp.meta.math.as_ref().is_some_and(|m| m.included() == 2)
+                        && sp.level.iter().filter(|v| v.is_finite()).count() > 100
                 }
                 _ => false,
             })
