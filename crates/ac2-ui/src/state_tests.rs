@@ -6435,3 +6435,108 @@ fn the_stimulus_never_changes_the_layout() {
         check(&mut t, "a sweep running");
     }
 }
+
+/// What a measurement delete asked for: its toast text, and whether the stimulus stop went
+/// with it.
+fn meas_delete(r: &[Request]) -> (String, bool) {
+    let what = r
+        .iter()
+        .find_map(|x| match x {
+            Request::Call {
+                cmd: Command::MeasDelete { .. },
+                what,
+            } => Some(what.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no measurement delete: {r:?}"));
+    (what, r.iter().any(|x| matches!(x, Request::StimStop)))
+}
+
+/// Deleting the last running transfer measurement ends its measuring as a stop does: the
+/// stimulus this app holds stops with it, through both delete questions; one that owns
+/// nothing (the plain confirmation) and one that owns traces (keep / delete / cancel).
+#[test]
+fn deleting_the_last_transfer_stops_the_stimulus() {
+    // The plain confirmation: Main L owns nothing.
+    let mut t = T::new();
+    t.st.layout.focus = PaneKind::Transfer;
+    play_noise(&mut t, true);
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("Delete");
+    assert!(
+        matches!(t.st.overlay, Overlay::Delete(_)),
+        "{:?}",
+        t.st.overlay
+    );
+    assert_eq!(
+        meas_delete(&t.key("Enter")),
+        (
+            "Main L deleted · stimulus stopped (no transfer measurement left running)".into(),
+            true
+        )
+    );
+    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_ne!(t.last_toast(), "stimulus stopped");
+
+    // The three-answer question: Main L owns traces.
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.layout.focus = PaneKind::Transfer;
+    play_noise(&mut t, false);
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("Delete");
+    assert!(
+        matches!(t.st.overlay, Overlay::Choose(_)),
+        "{:?}",
+        t.st.overlay
+    );
+    let (what, stopped) = meas_delete(&t.key("Enter"));
+    assert!(stopped, "{what}");
+    assert!(
+        what.ends_with(" · stimulus stopped (no transfer measurement left running)"),
+        "{what}"
+    );
+}
+
+/// A delete keeps the stimulus under the same rule as a stop: another transfer
+/// measurement running, a spectrum, a stopped transfer measurement, another client's lease.
+#[test]
+fn deleting_keeps_the_stimulus_when_a_stop_would() {
+    let delete = |t: &mut T, meas: u32| {
+        t.st.update(Msg::SelectMeas(MeasId(meas)), &t.keys);
+        t.key("Delete");
+        meas_delete(&t.key("Enter"))
+    };
+    // Another transfer measurement still running.
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.push(meas(3, "Main R", transfer()));
+    t.conn(mirror(s));
+    play_noise(&mut t, true);
+    assert_eq!(delete(&mut t, 1), ("Main L deleted".into(), false));
+    // A spectrum.
+    let mut t = T::new();
+    play_noise(&mut t, true);
+    assert_eq!(delete(&mut t, 2), ("Sub deleted".into(), false));
+    // A stopped transfer measurement: it was not measuring.
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements[1].running = false;
+    t.conn(mirror(s));
+    play_noise(&mut t, true);
+    assert_eq!(delete(&mut t, 1), ("Main L deleted".into(), false));
+    // Another client's noise.
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.generator.owner = Some(ClientId("other".into()));
+    s.generator.armed = true;
+    s.generator.firing = true;
+    t.conn(mirror(s));
+    assert_eq!(delete(&mut t, 1), ("Main L deleted".into(), false));
+    // A sweep running.
+    let mut t = T::new();
+    play_noise(&mut t, true);
+    t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
+    assert_eq!(delete(&mut t, 1), ("Main L deleted".into(), false));
+}

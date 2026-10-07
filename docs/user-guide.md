@@ -209,7 +209,8 @@ to that view's. The top bar says what the keys will do: `Space arms: sweep Genel
 `Enter fires: pink −50 dBFS → out 1`. Esc and Shift+Esc stop as always.
 
 **Stopping the last transfer measurement stops the stimulus.** The noise is there to excite
-transfer functions: when **S** (or the palette) stops a transfer measurement and no other
+transfer functions: when **S** (or the palette) stops a transfer measurement, or you delete
+a running one, and no other
 transfer measurement is still running, the app also stops the stimulus it holds, armed or
 playing, faded out and released as Esc does (`Main L stopped · stimulus stopped (no transfer
 measurement left running)`). Another transfer measurement still running keeps it playing;

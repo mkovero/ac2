@@ -573,12 +573,13 @@ impl AppState {
                     _ => return,
                 };
                 self.hidden_meas.remove(&c.label);
-                let what = match traces {
+                let mut what = match traces {
                     OwnedTraces::Keep => {
                         format!("{} deleted; its traces are under Imported", c.label)
                     }
                     OwnedTraces::Delete => format!("{} deleted with its traces", c.label),
                 };
+                self.stimulus_with_deleted(meas, &mut what, out);
                 self.call(out, Command::MeasDelete { meas, traces }, what);
             }
             ChoicePurpose::Move(what) => {
@@ -748,16 +749,28 @@ impl AppState {
                 // A measurement of that name made later starts shown.
                 self.hidden_meas.remove(&label);
                 // It owns nothing (else the three-answer question was asked).
+                let mut what = format!("{label} deleted");
+                self.stimulus_with_deleted(meas, &mut what, out);
                 self.call(
                     out,
                     Command::MeasDelete {
                         meas,
                         traces: OwnedTraces::Keep,
                     },
-                    format!("{label} deleted"),
+                    what,
                 );
             }
             DeleteTarget::Refused => {}
+        }
+    }
+
+    /// A deleted measurement ends its measuring as a stop does: the last running transfer
+    /// measurement takes the stimulus this app holds with it, and the toast `what` says so.
+    fn stimulus_with_deleted(&mut self, meas: MeasId, what: &mut String, out: &mut Vec<Request>) {
+        if let Some(m) = self.meas(meas).cloned()
+            && self.stop_stimulus_with(&m, out)
+        {
+            what.push_str(super::STIMULUS_STOPPED_TOO);
         }
     }
 

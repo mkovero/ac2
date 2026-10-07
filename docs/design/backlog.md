@@ -98,7 +98,8 @@ running transfer measurement, somehow I would expect it"):
 - **Stopping the last running transfer measurement stops the stimulus** this app holds
   (armed or playing), the way Esc does, with one toast for both; another running transfer
   measurement keeps it, a sweep and another client's stimulus are never stopped by it.
-  `ac2 meas stop` is unchanged (no side effects for scripts).
+  `ac2 meas stop` is unchanged (no side effects for scripts). Deleting the last running
+  transfer measurement does the same, under the same rule.
 - **NO REFERENCE reminds of the stimulus keys** ("when you havent start stimulus but you
   have started transfer there could be reminder that press space to arm and enter to
   begin"): the banner detail says `stimulus off: Space arms, Enter starts it` / `stimulus

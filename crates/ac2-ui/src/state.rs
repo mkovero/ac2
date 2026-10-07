@@ -318,6 +318,10 @@ pub struct LiveEdit {
     pub nudge_s: f64,
 }
 
+/// What a measurement stop's or delete's toast adds when the stimulus stopped with it.
+pub(crate) const STIMULUS_STOPPED_TOO: &str =
+    " · stimulus stopped (no transfer measurement left running)";
+
 /// Where the operator's stimulus stands, as far as this client knows. The generator's
 /// truth is the mirrored `Generator`; this tracks requests in flight.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3292,16 +3296,24 @@ impl AppState {
         }
     }
 
-    /// Stopping `stopping` stops the stimulus too when it is the last transfer measurement
-    /// running and this app holds the lease, armed or playing: the noise is there to excite
+    /// Stopping (or deleting) `stopping` stops the stimulus too when it is the last transfer
+    /// measurement running and this app holds the lease, armed or playing: the noise is there to excite
     /// transfer functions, and with none left measuring it only makes the room loud. SPL,
     /// spectrum and RTA read whatever plays and need no stimulus of their own, so they keep
     /// nothing playing; a sweep is its own measurement and is never cut by this. The stop is
     /// the one Esc sends (faded out, disarmed, the lease released); another client's stimulus
     /// is never stopped this way. Says whether it stopped.
-    fn stop_stimulus_with(&mut self, stopping: &Measurement, out: &mut Vec<Request>) -> bool {
+    pub(super) fn stop_stimulus_with(
+        &mut self,
+        stopping: &Measurement,
+        out: &mut Vec<Request>,
+    ) -> bool {
         let transfer = |m: &Measurement| matches!(m.config.kind, MeasKind::Transfer { .. });
-        if !transfer(stopping) || self.sweep.run.is_some() || self.sweep.plan.is_some() {
+        if !transfer(stopping)
+            || !stopping.running
+            || self.sweep.run.is_some()
+            || self.sweep.plan.is_some()
+        {
             return false;
         }
         let other_running = self
@@ -4404,7 +4416,7 @@ impl AppState {
                 if let Some(m) = self.focused_pane_meas() {
                     if m.running {
                         let stim = if self.stop_stimulus_with(&m, out) {
-                            " · stimulus stopped (no transfer measurement left running)"
+                            STIMULUS_STOPPED_TOO
                         } else {
                             ""
                         };
