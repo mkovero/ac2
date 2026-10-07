@@ -45,8 +45,10 @@ step Δ moves it by `e^{+jωΔ}`, exactly as a display nudge `ν = Δ` moves a t
 `.` both lead the phase; Ctrl+, and `,` both lag it — no key is flipped), and since the
 reference is an arrival too, no other curve moves, whichever curve is the reference.
 
-- **Insert / typed value** set a new arrival: `nudged` = 0 (nothing on the view moves).
+- **Insert** sets a new arrival: `nudged` = 0 (nothing on the view moves).
 - **Nudge** adds its step to `nudged` (at most ±10 s).
+- **Typed value** keeps the arrival: `nudged` = typed − arrival, so the live curve alone moves
+  to it, as the same run of steps would.
 - **Tracking** compares the finder's whole-sample estimates with the arrival (not the
   applied delay) and moves the arrival, keeping `nudged`: the operator's offset survives a
   drifting arrival (before, tracking pulled a whole-sample step back within seconds).

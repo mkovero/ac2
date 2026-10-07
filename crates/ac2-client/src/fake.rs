@@ -975,9 +975,16 @@ impl Shared {
             }
             C::DelaySet { meas, delay } => {
                 let mut m = self.meas(meas)?;
+                let arrival = m.delay.as_ref().map(|d| d.applied.0 - d.nudged.0);
                 set_delay(&mut m, delay)?;
-                // An explicit value supersedes the last finding (as the daemon does).
                 if let Some(d) = &mut m.delay {
+                    // A typed value keeps the arrival and moves the live curve alone, as a
+                    // step does (as the daemon does).
+                    if let Some(a) = arrival {
+                        d.nudged = Seconds(delay.0 - a);
+                        d.nudged_samples = d.nudged.0 * 48_000.0;
+                    }
+                    // An explicit value supersedes the last finding (as the daemon does).
                     d.last_finding = None;
                 }
                 self.put_meas(m)
@@ -1391,7 +1398,7 @@ fn finding(kind: FakeFinding, band: FinderBand, now: u64) -> DelayFinding {
 }
 
 /// An operator-set delay (insert or typed), which also resolves an ambiguous finding.
-/// A new arrival (insert, typed value): nothing nudged from it, as the daemon does.
+/// Set as a new arrival (nothing nudged from it); a typed value then restores its arrival.
 fn set_delay(m: &mut Measurement, d: Seconds) -> Result<(), ProtoError> {
     let st = m
         .delay

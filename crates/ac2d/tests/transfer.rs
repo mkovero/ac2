@@ -367,12 +367,33 @@ fn transfer_magnitude_delay_timing_and_ir() {
     let (rev, _) = nudge(&mut c, -3.0);
     run_tf(&mut d, &sub, 1.0, rev);
     assert_eq!(snapshot_delay(&mut c).applied_samples, inserted);
-    // A typed value is a new arrival: nothing nudged from it.
+    // A typed value keeps the arrival and moves the live curve alone, as steps do: nudged
+    // by its distance from the arrival, whatever steps came before it.
     nudge(&mut c, 2.0);
-    let st = delay_state(c.ok(Command::DelaySet {
+    let typed = |c: &mut Client, samples: f64| match c.ok(Command::DelaySet {
         meas: MeasId(1),
-        delay: Seconds(inserted / f64::from(FS)),
-    }));
+        delay: Seconds(samples / f64::from(FS)),
+    }) {
+        ReplyBody::Measurement(m) => (m.config_rev.0, m.delay.unwrap()),
+        other => panic!("{other:?}"),
+    };
+    let (rev, st) = typed(&mut c, inserted + 5.0);
+    assert_eq!(
+        (st.applied_samples, st.nudged_samples),
+        (inserted + 5.0, 5.0)
+    );
+    assert_eq!(st.applied_samples - st.nudged_samples, inserted);
+    assert!((st.nudged.0 - 5.0 / f64::from(FS)).abs() < 1e-15);
+    let f = run_tf(&mut d, &sub, 0.05, rev);
+    let t = tf(&f);
+    assert!((t.meta.delay.0 - (inserted + 5.0) / f64::from(FS)).abs() < 1e-12);
+    assert!((t.meta.nudged.0 - 5.0 / f64::from(FS)).abs() < 1e-15);
+    let (_, st) = typed(&mut c, inserted - 1.5);
+    assert_eq!(
+        (st.applied_samples, st.nudged_samples),
+        (inserted - 1.5, -1.5)
+    );
+    let (_, st) = typed(&mut c, inserted);
     assert_eq!((st.applied_samples, st.nudged_samples), (inserted, 0.0));
     assert_eq!(st.nudged, Seconds(0.0));
 

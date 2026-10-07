@@ -569,9 +569,10 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   measured arrival. A capture taken then is drawn exactly where the live curve was (its
   trace carries the step as its own nudge, which **,** / **.** adjust). The transfer function
   keeps its averages and turns them to the new delay instead of starting over, so you can
-  walk the phase into place by eye. **D** (a typed delay) and **1** (the finder's) set a new
-  arrival: nothing moves and the nudge is gone; tracking (**Y**) follows the arrival and
-  keeps your steps on top of it. A stopped or hidden measurement has no live curve to move:
+  walk the phase into place by eye. **D** (a typed delay) is the same move in one go: the
+  arrival stays, the live curve alone moves to the typed delay and the nudge is its distance
+  from the arrival. **1** (the finder's) sets a new arrival: nothing moves and the nudge is
+  gone; tracking (**Y**) follows the arrival and keeps your steps on top of it. A stopped or hidden measurement has no live curve to move:
   the keys only say so (**S** starts it) and leave the delay alone. Delays are kept to
   fractions of a sample (the finder's estimate is inserted exactly, `600.25samples` can be
   typed), shown in the measurement list to the microsecond.
@@ -580,7 +581,8 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   lower ranges at 48 kHz); only the stages beyond that start over and show *settling*.
 - From the CLI: `ac2 delay find main-l --insert`, or limit the band:
   `ac2 delay find sub --band 40hz-120hz`; `ac2 delay nudge main-l -0.25samples` moves it by
-  a step.
+  a step; `ac2 delay set main-l 600.25samples` moves it to a value as **D** does (the arrival
+  stays).
 
 The inserted delay is also the time origin of the impulse-response pane (**Shift+I** shows or
 hides it). The IR pane follows the transfer measurement and carries its banners (NO

@@ -797,7 +797,8 @@ pub enum DelayCmd {
         #[arg(long, default_value = "first")]
         pick: PickArg,
     },
-    /// Set the delay: `12.5ms`, `600samples` or a distance `4.3m`.
+    /// Set the delay: `12.5ms`, `600samples` or a distance `4.3m`. The arrival stays: the
+    /// live curve alone moves, the value's distance from the arrival is its nudge.
     Set {
         /// Transfer measurement.
         meas: MeasRef,

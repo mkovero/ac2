@@ -306,10 +306,12 @@ impl Control {
     /// is no delay. The operator's insert or value resolves an ambiguous finding, so tracking
     /// resumes (decision 1c); a delay tracking moved changes neither.
     ///
-    /// An insert or a typed value is a new arrival: nothing is nudged from it. A nudge moves
-    /// the applied delay away from the arrival by its step (the view then moves this curve
-    /// alone). Tracking moves the arrival and keeps the operator's offset from it: its
-    /// `delay` already includes that offset.
+    /// An insert is a new arrival: nothing is nudged from it. A nudge or a typed value moves
+    /// the applied delay away from the arrival and keeps the arrival, so the view moves this
+    /// curve alone: a typed value is the operator's refinement of where this measurement
+    /// should sit, the same act as a run of steps, while only the finder knows an arrival.
+    /// Tracking moves the arrival and keeps the operator's offset from it: its `delay`
+    /// already includes that offset.
     pub(super) fn set_delay(
         &mut self,
         meas: MeasId,
@@ -332,8 +334,8 @@ impl Control {
         let samples = delay_samples(delay.0, fs);
         let mut m = self.meas(meas)?.clone();
         let nudged = match (&m.delay, source) {
-            (_, DelaySource::Insert | DelaySource::Typed) | (None, _) => 0.0,
-            (Some(d), DelaySource::Nudge) => {
+            (_, DelaySource::Insert) | (None, _) => 0.0,
+            (Some(d), DelaySource::Nudge | DelaySource::Typed) => {
                 delay_samples((d.nudged_samples + samples - d.applied_samples) / fs, fs)
             }
             (Some(d), DelaySource::Tracking) => d.nudged_samples,

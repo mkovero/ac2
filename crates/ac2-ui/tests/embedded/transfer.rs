@@ -645,3 +645,102 @@ fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
     drop(daemon);
     Ok(())
 }
+
+/// From an empty daemon: a delay typed in the `D` dialog moves the running measurement's
+/// live curve the way the same number of Ctrl+. steps does, and nothing else on the pane.
+/// The arrival stays where it was; the typed value's distance from it is the nudge.
+#[test]
+fn a_typed_delay_moves_only_its_live_curve() -> R {
+    use ac2_scene::trace::TraceKey;
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    let m = d.st.selected_meas().cloned().ok_or("measurement")?;
+    d.send(Msg::Command(CommandId::FocusTransfer));
+    let running = |s: &AppState| {
+        s.daemon()
+            .is_some_and(|x| x.measurements.iter().any(|y| y.id == m.id && y.running))
+    };
+    if !running(&d.st) {
+        d.send(Msg::Command(CommandId::StartStop));
+    }
+    d.until("running", running)?;
+    d.key("Space");
+    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.key("Enter");
+    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.tf_frames(m.id, 240)?;
+    d.send(Msg::Command(CommandId::Slot1));
+    d.until("the capture in slot 1", |s| {
+        s.daemon()
+            .is_some_and(|x| x.traces.iter().any(|t| t.edit.slot == Some(1)))
+    })?;
+    let cap =
+        d.st.daemon()
+            .and_then(|x| x.traces.iter().find(|t| t.edit.slot == Some(1)))
+            .map(|t| t.id)
+            .ok_or("capture")?;
+    d.until("the capture's data", |s| s.traces.contains_key(&cap))?;
+    let live = TraceKey::Live(m.id);
+    let delay = |s: &AppState| {
+        s.daemon()
+            .and_then(|x| x.measurements.iter().find(|y| y.id == m.id))
+            .and_then(|m| m.delay.clone())
+    };
+    let d0 = delay(&d.st).ok_or("delay")?;
+    let arrival = d0.applied_samples - d0.nudged_samples;
+    let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
+    let before = drawn_phase(&d.st, 240);
+    let live_before = drawn_curve(&d.st, live);
+
+    let want = d0.applied_samples + 10.0;
+    d.send(Msg::Command(CommandId::TypeDelay));
+    assert!(
+        matches!(d.st.overlay, Overlay::Prompt(_)),
+        "{:?}",
+        d.st.overlay
+    );
+    while matches!(&d.st.overlay, Overlay::Prompt(p) if !p.text.is_empty()) {
+        d.send(Msg::Backspace);
+    }
+    d.send(Msg::Text(format!("{:.9}", want / rate * 1000.0)));
+    d.key("Enter");
+    let topic = Topic::Data {
+        meas: m.id,
+        stream: Stream::Tf,
+    };
+    d.until("a frame at the typed delay", |s| {
+        s.data.as_ref().is_some_and(|x| {
+            x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
+                FrameData::Tf(tf) => (tf.meta.delay.0 - want / rate).abs() < 1e-9,
+                _ => false,
+            })
+        })
+    })?;
+    let st = delay(&d.st).ok_or("delay")?;
+    assert!(
+        (st.applied_samples - st.nudged_samples - arrival).abs() < 1e-6,
+        "the arrival moved: {arrival} → {st:?}"
+    );
+    assert!(
+        (st.nudged_samples - (d0.nudged_samples + 10.0)).abs() < 1e-6,
+        "{st:?}"
+    );
+    let after = drawn_phase(&d.st, 240);
+    let live_after = drawn_curve(&d.st, live);
+    // Ten samples later the curve leads by 360°·f·10/fs, as ten Ctrl+. steps make it.
+    let off = rotation_residual(&live_before, &live_after, 10.0, rate);
+    assert!(
+        off.abs() < 2.0,
+        "live moved {off:+.1}° off its expected rotation — before {before:?} after {after:?}"
+    );
+    assert_eq!(
+        phase_of(&after, TraceKey::Stored(cap)).to_bits(),
+        phase_of(&before, TraceKey::Stored(cap)).to_bits(),
+        "the capture moved: before {before:?} after {after:?}"
+    );
+    d.stop()?;
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

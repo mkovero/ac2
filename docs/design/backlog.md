@@ -3,12 +3,6 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to
 `backlog-done.md` with the commit when it lands.
 
-## Queued after the module split of state.rs / control.rs (operator, 2026-10-07)
-
-- **A typed delay (`D`) should move the live curve like a Ctrl+. step** (0e04f25 counts it as a
-  new arrival, so nothing moves): operator answered "yes". Rounding a capture's fractional nudge
-  to the 0.1 ms grid with `,` / `.` is fine as is.
-
 ## Timing precision (operator, 2026-10-07, after the REW cross-check)
 
 - **Sub-sample sweep arrival, fractional tracking, A − B arrival readout, and a group delay

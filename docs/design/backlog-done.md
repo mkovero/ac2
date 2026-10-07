@@ -2,6 +2,15 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+Typed delay (operator, 2026-10-07: a typed delay should move the live curve like a Ctrl+.
+step — "yes"):
+- **A typed delay (`D`, `delay.set`) moves the live curve alone**: the arrival stays and the
+  nudge becomes the typed value's distance from it, as a run of Ctrl+. steps would leave it;
+  the stored traces stay put. The finder's insert (`1`, `delay.insert`) is still a new arrival
+  (nudge 0); tracking still moves the arrival and keeps the nudge. A typed value still drops
+  the last finding. Rounding a capture's fractional nudge to the 0.1 ms grid with `,` / `.`
+  stays as it is.
+
 SPL meter stage (operator, 2026-10-07: "SPL meter view does not need to show the grey
 calibration line when in fullscreen"):
 - **No calibration line on the meter's stage**: in full screen the meter alone draws its

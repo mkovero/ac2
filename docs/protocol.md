@@ -523,8 +523,9 @@ value) clears `last_finding`; a delay tracking moves keeps it. `delay.nudge` mov
 applied delay by `by` (either sign, fractions of a sample allowed) and keeps
 `last_finding` (it refines that delay); like `delay.insert` and `delay.set` it resolves
 `awaiting_pick`. The daemon keeps what nudges added apart as `nudged`: the applied delay is
-the *arrival* plus `nudged`. `delay.insert` and `delay.set` set a new arrival (`nudged` 0);
-`delay.nudge` adds its step to `nudged` (refused beyond ±10 s); tracking compares the
+the *arrival* plus `nudged`. `delay.insert` sets a new arrival (`nudged` 0); `delay.set`
+keeps the arrival and sets `nudged` to the value's distance from it, and `delay.nudge` adds
+its step to `nudged` (both refused beyond ±10 s from the arrival); tracking compares the
 finder's estimates with the arrival and moves it, keeping `nudged`. A view's shared time
 base refers the live curve to the arrival, so a nudge moves that curve alone, like a
 trace's `delay_nudge` (`docs/design/delay-no-resettle.md`, "What the keys mean"). A

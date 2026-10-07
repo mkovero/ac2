@@ -824,7 +824,9 @@ async fn trace_commands_json() -> R {
                 "order": 2,
                 "offset": 0.0,
                 "polarity": "normal",
-                "delay_nudge": 0.0,
+                // The typed 10 ms moved the live curve from its arrival (0): the capture
+                // carries that move as its display nudge.
+                "delay_nudge": 0.01,
                 "slot": 1,
                 "smoothing": null,
                 "owner": { "type": "meas", "meas": 1 }
