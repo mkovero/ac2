@@ -1394,7 +1394,7 @@ struct Caption {
     run: Option<(String, [f32; 2], f32)>,
 }
 
-/// Lays the run into the caption: in large type between the meter and the calibration
+/// Lays the run into the caption, only with the history on: in large type between the meter and the calibration
 /// when a wording down to the clock and the total fits there, else on a row of its own
 /// below them in the longest wording that fits (at the caption's type size when nothing
 /// fits large); left out only when not even the clock fits. Large type is a share of the
@@ -1410,7 +1410,9 @@ fn caption(
     let pad = 10.0;
     let gap = theme.font_size;
     let base_h = theme.font_size * 1.6;
-    let Some(run) = &v.run else {
+    // The run belongs to the look back (Shift+B): without the history the windows and the
+    // number are the whole picture, and the row it took is theirs.
+    let Some(run) = v.run.as_ref().filter(|_| v.layout.history) else {
         return Caption {
             height: base_h,
             run: None,

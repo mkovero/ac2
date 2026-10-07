@@ -112,6 +112,10 @@ running transfer measurement, somehow I would expect it"):
   stop and a running sweep no longer bring the top bar back in the stage view, so no pane
   resizes; no badge either. Esc / Shift+Esc stop as before; every other layout shows the
   stimulus in the top bar (PLAN §8.2).
+- **The Leq run line only with the history** ("the online since nn:nn and LAeq total and
+  offline would only be shown with shift+B history look"): `running … since … · LAeq total
+  … · offline …` is drawn only with Shift+B on, in every SPL view; without it the windows
+  and the number get its row. Per-window offline notes and `spl leq watch` unchanged.
 
 A measurement owns its traces (operator, 2026-10-07: "this becomes little bit confusing to
 see 'measurements' and 'traces' at the transfer screen, I would imagine transfer measurement

@@ -241,16 +241,24 @@ fn meter_takes_the_top_third_and_the_windows_the_rest() {
     }
 }
 
-/// One caption for the pane: the meter's name, the run and the calibration once each, the
-/// number's name and unit once under it; none of the meter view's statistics, its heading,
-/// its calibration footer or its own STALE.
+/// One caption for the pane: the meter's name, the run (with the history on) and the
+/// calibration once each, the number's name and unit once under it; none of the meter
+/// view's statistics, its heading, its calibration footer or its own STALE.
 #[test]
 fn one_caption_for_both_parts() {
     let th = Theme::dark();
     let (c, f) = leq();
     for stale in [None, Some(4.0)] {
         let r = readout(stale);
-        let mut v = view(&c, &f, None, LeqLayout::default());
+        let mut v = view(
+            &c,
+            &f,
+            None,
+            LeqLayout {
+                history: true,
+                ..LeqLayout::default()
+            },
+        );
         v.stale = stale.map(|a| format!("STALE {}", crate::format::age(a)));
         for (w, ht) in [(1920.0, 1080.0), (640.0, 400.0), (320.0, 200.0)] {
             let s = meter_leq_scene(&r, &v, &Status::default(), &th, vp(w, ht));
@@ -369,7 +377,12 @@ fn check(s: &MeterLeqScene, r: &SplReadout, w: f32, ht: f32, layout: LeqLayout, 
         .filter(|l| is_caption(l))
         .map(|l| (l.text.as_str(), label_box(l)))
         .collect();
-    assert_eq!(caption.len(), 3, "{at}: {caption:?}");
+    // The run only with the history on.
+    assert_eq!(
+        caption.len(),
+        2 + usize::from(layout.history),
+        "{at}: {caption:?}"
+    );
     for (i, (t, b)) in caption.iter().enumerate() {
         assert!(b.x >= -0.5 && b.right() <= w + 0.5, "{at}: {t:?} {b:?}");
         assert!(

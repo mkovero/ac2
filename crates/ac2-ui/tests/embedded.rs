@@ -1891,18 +1891,26 @@ fn run_clock_and_a_new_log_from_the_app() -> R {
             .iter()
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
     })?;
-    // G: the windows, with the run in the caption.
+    // G: the windows; the run (clock, start, total, offline) only with the history on.
     d.key("Alt+4");
     assert_eq!(d.st.layout.focus, PaneKind::Spl);
     if !d.st.view.spl.mode.shows_leq() {
         d.key("G");
     }
+    assert!(!d.st.view.spl.layout.history);
+    d.key("Shift+B");
+    assert!(d.st.view.spl.layout.history);
     d.until("the run clock past 4 s", |s| {
         run_seconds(s).is_some_and(|t| t >= 4)
     })?;
     let caption = run_caption(&d.st).ok_or("caption")?;
     assert!(caption.contains(" since "), "{caption}");
     assert!(caption.contains("LAeq total "), "{caption}");
+    // Shift+B off: the run goes with the history; on again, it is back.
+    d.key("Shift+B");
+    assert_eq!(run_caption(&d.st), None);
+    d.key("Shift+B");
+    assert!(run_caption(&d.st).is_some());
     let before = run_seconds(&d.st).ok_or("clock")?;
 
     // Shift+R asks first; N keeps the log and its clock.

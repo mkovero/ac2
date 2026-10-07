@@ -1113,15 +1113,17 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   the window's Leq is the average of what was measured, and offline time neither lowers it
   nor spends or earns budget. The note goes away once that time has slid out of the window.
   Narrow columns use the shorter wordings, or leave a line out.
-- The caption above the windows, centred, says how long the meter has been logging and the level of
-  the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s`** — the
+- With the history on (**Shift+B**), the caption above the windows, centred, says how long
+  the meter has been logging and the level of the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s`** — the
   time since the log's first second (it keeps counting when the app or the daemon is
   restarted: the log comes back with the autosave), its start in local time, the energy
   average over everything measured (LCeq and LZeq too when a window uses them; dB SPL when
   calibrated), and the time not measured, if any (the meter stopped, the daemon down, lost
   samples — never counted as silence). It is large in the stage view and shortened in
   narrow panes (`2:14:05 · total 97.8`). After 48 hours the log keeps its last 48 hours and
-  the caption says "last 48 h".
+  the caption says "last 48 h". Without the history it is not shown at all, in any SPL view
+  (meter + Leq, Leq windows, tiles or columns, the stage view): the windows and the number
+  take its room. `ac2 spl leq watch` always prints it.
 - **Shift+R** in the SPL pane (or "Start a new SPL log…" in Ctrl+K) starts a **new log** — for
   the show after a loud soundcheck: the windows, their states, the alarms, the clock and the
   total start over; the windows and limits stay. It asks first, naming the run that ends.

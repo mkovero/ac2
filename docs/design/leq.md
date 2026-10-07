@@ -88,6 +88,12 @@ narrower panes get `2:14:05 since 19:02 · total 97.8 · offline 12 s`, then `2:
 97.8`, and when even that does not fit beside the meter it moves to a row of its own,
 shortened down to the clock. Tested at 320–1920 px in columns and tiles: no overlap.
 
+The run belongs to the look back: it is drawn only with the history on (Shift+B), in every
+SPL view that has the windows (meter + Leq, Leq alone, tiles, columns, the stage view).
+Without the history the windows and the number are the whole picture and take its row
+(operator, 2026-10-07). The per-window "offline for …" notes stay: they explain that
+window's value. The CLI (`spl leq watch`) prints the run regardless.
+
 ## A new log
 
 `spl.log_new` ends the meter's log and starts an empty one: the windows, their states, the

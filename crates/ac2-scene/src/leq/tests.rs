@@ -1125,50 +1125,56 @@ fn columns_fit_two_to_eight_windows_without_overlap() {
                     (1280.0, 720.0),
                     (1920.0, 1080.0),
                 ] {
-                    let s = leq_scene(
-                        &columns_view(&c, &f, None),
-                        &Status::default(),
-                        &th,
-                        size(w, h),
-                    );
-                    let k = cols(&s);
-                    assert_eq!(k.columns.len(), n);
-                    let at = format!("{n} windows ({mixed}, {scale:?}) at {w}×{h}");
-                    for x in &k.columns {
-                        assert!(x.rect.x >= 0.0 && x.rect.right() <= w + 0.01, "{at}");
-                        assert!(x.rect.bottom() <= h + 0.01, "{at}");
-                        assert!(x.track.h >= 20.0, "{at}: track {:?}", x.track);
-                    }
-                    let labels = column_labels(&s);
-                    let boxes: Vec<Rect> = labels
-                        .iter()
-                        .map(|(l, _)| crate::canvas::tests::label_box(l))
-                        .collect();
-                    for (i, (l, col)) in labels.iter().enumerate() {
-                        // Inside its column, or the scale in the gutter.
-                        if col.is_none() {
-                            let g = k.gutter.expect("a label outside the columns is the scale");
-                            assert!(boxes[i].right() <= g.right() + 0.5, "{at}: {:?}", l.text);
+                    for history in [false, true] {
+                        let v = LeqView {
+                            layout: LeqLayout {
+                                style: LeqStyle::Columns,
+                                history,
+                            },
+                            ..columns_view(&c, &f, None)
+                        };
+                        let s = leq_scene(&v, &Status::default(), &th, size(w, h));
+                        let k = cols(&s);
+                        assert_eq!(k.columns.len(), n);
+                        let at = format!(
+                            "{n} windows ({mixed}, {scale:?}, history {history}) at {w}×{h}"
+                        );
+                        for x in &k.columns {
+                            assert!(x.rect.x >= 0.0 && x.rect.right() <= w + 0.01, "{at}");
+                            assert!(x.rect.bottom() <= h + 0.01, "{at}");
+                            assert!(x.track.h >= 20.0, "{at}: track {:?}", x.track);
                         }
-                        for (j, b) in boxes.iter().enumerate().skip(i + 1) {
-                            assert!(
-                                !crate::canvas::tests::intersects(boxes[i], *b),
-                                "{at}: {:?} overlaps {:?}",
-                                l.text,
-                                labels[j].0.text
-                            );
-                        }
-                    }
-                    assert_caption_fits(&s, w, &at);
-                    // Each column keeps its value and its name.
-                    for x in &k.columns {
-                        let inside = labels
+                        let labels = column_labels(&s);
+                        let boxes: Vec<Rect> = labels
                             .iter()
-                            .filter(|(_, col)| {
-                                col.is_some_and(|ci| k.columns[ci].window == x.window)
-                            })
-                            .count();
-                        assert!(inside >= 2, "{at}: {}", x.name);
+                            .map(|(l, _)| crate::canvas::tests::label_box(l))
+                            .collect();
+                        for (i, (l, col)) in labels.iter().enumerate() {
+                            // Inside its column, or the scale in the gutter.
+                            if col.is_none() {
+                                let g = k.gutter.expect("a label outside the columns is the scale");
+                                assert!(boxes[i].right() <= g.right() + 0.5, "{at}: {:?}", l.text);
+                            }
+                            for (j, b) in boxes.iter().enumerate().skip(i + 1) {
+                                assert!(
+                                    !crate::canvas::tests::intersects(boxes[i], *b),
+                                    "{at}: {:?} overlaps {:?}",
+                                    l.text,
+                                    labels[j].0.text
+                                );
+                            }
+                        }
+                        assert_caption_fits(&s, w, history, &at);
+                        // Each column keeps its value and its name.
+                        for x in &k.columns {
+                            let inside = labels
+                                .iter()
+                                .filter(|(_, col)| {
+                                    col.is_some_and(|ci| k.columns[ci].window == x.window)
+                                })
+                                .count();
+                            assert!(inside >= 2, "{at}: {}", x.name);
+                        }
                     }
                 }
             }
@@ -1177,8 +1183,9 @@ fn columns_fit_two_to_eight_windows_without_overlap() {
 }
 
 /// The caption's labels (meter, run, calibration) stay apart, inside the pane and above
-/// the windows, and the run is there at least as its clock.
-fn assert_caption_fits(s: &LeqScene, w: f32, at: &str) {
+/// the windows; with the history on the run is there at least as its clock, without it
+/// the run is not there at all.
+fn assert_caption_fits(s: &LeqScene, w: f32, history: bool, at: &str) {
     let caption: Vec<(&str, Rect)> = s
         .scene
         .layers
@@ -1187,8 +1194,8 @@ fn assert_caption_fits(s: &LeqScene, w: f32, at: &str) {
         .filter(|l| l.pos[1] >= s.caption.y - 0.5 && l.pos[1] < s.caption.bottom())
         .map(|l| (l.text.as_str(), crate::canvas::tests::label_box(l)))
         .collect();
-    assert!(s.run.is_some(), "{at}: no run in the caption");
-    assert_eq!(caption.len(), 3, "{at}: {caption:?}");
+    assert_eq!(s.run.is_some(), history, "{at}: run {:?}", s.run);
+    assert_eq!(caption.len(), 2 + usize::from(history), "{at}: {caption:?}");
     for (i, (t, b)) in caption.iter().enumerate() {
         assert!(b.x >= -0.5 && b.right() <= w + 0.5, "{at}: {t:?} {b:?}");
         assert!(
@@ -1214,6 +1221,10 @@ fn run_stays_centred_beside_a_long_calibration() {
     for (w, h) in [(1920.0, 1080.0), (1280.0, 720.0)] {
         let v = LeqView {
             cal: "MM1 34804 · electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 17 h ago · mic curve: MM1 34804 90°".into(),
+            layout: LeqLayout {
+                style: LeqStyle::Columns,
+                history: true,
+            },
             ..columns_view(&c, &f, None)
         };
         let s = leq_scene(&v, &Status::default(), &th, size(w, h));
@@ -1230,7 +1241,7 @@ fn run_stays_centred_beside_a_long_calibration() {
             (b.x + b.w / 2.0 - w / 2.0).abs() < 0.5,
             "{w}: {run:?} {b:?}"
         );
-        assert_caption_fits(&s, w, &format!("{w}"));
+        assert_caption_fits(&s, w, true, &format!("{w}"));
     }
 }
 
@@ -1255,13 +1266,13 @@ fn caption_run_fits_every_width() {
                 let v = LeqView {
                     layout: LeqLayout {
                         style,
-                        history: false,
+                        history: true,
                     },
                     ..columns_view(&c, &f, None)
                 };
                 let s = leq_scene(&v, &Status::default(), &th, size(w, h));
                 let at = format!("{style:?} ({mixed}) at {w}×{h}");
-                assert_caption_fits(&s, w, &at);
+                assert_caption_fits(&s, w, true, &at);
                 // The windows start under the caption.
                 for r in s.tiles.iter().chain(
                     s.columns
@@ -1307,7 +1318,13 @@ fn caption_run_fits_every_width() {
     // The stage: a full-screen pane writes the run large, on the meter's row.
     let (c, f) = many(5, false, LevelScale::DbSpl);
     let s = leq_scene(
-        &columns_view(&c, &f, None),
+        &LeqView {
+            layout: LeqLayout {
+                style: LeqStyle::Columns,
+                history: true,
+            },
+            ..columns_view(&c, &f, None)
+        },
         &Status::default(),
         &th,
         size(1920.0, 1080.0),
@@ -1323,7 +1340,13 @@ fn caption_run_fits_every_width() {
     assert!((label.pos[1] - s.caption.y).abs() < 0.5);
     // At 320 px it has a row of its own, shortened.
     let narrow = leq_scene(
-        &columns_view(&c, &f, None),
+        &LeqView {
+            layout: LeqLayout {
+                style: LeqStyle::Columns,
+                history: true,
+            },
+            ..columns_view(&c, &f, None)
+        },
         &Status::default(),
         &th,
         size(320.0, 480.0),
@@ -1723,7 +1746,7 @@ fn peak_tiles_and_the_correction() {
                 );
             }
         }
-        assert_caption_fits(&s, w, &at);
+        assert_caption_fits(&s, w, false, &at);
         if w >= 1280.0 {
             let all = texts(&s.scene);
             assert!(
@@ -1788,4 +1811,56 @@ fn alarm_wording() {
             "FOH SPL: LCpeak back within its limit — 133.0 dB (corrected +2.0 dB)".to_owned()
         )
     );
+}
+
+/// The run (clock, start, totals, time offline) belongs to the look back: without the
+/// history it is not drawn in any style, and the row it took goes to the windows; with
+/// the history on it is back.
+#[test]
+fn the_run_shows_only_with_the_history() {
+    let th = Theme::dark();
+    let (c, f) = many(5, true, LevelScale::DbSpl);
+    for style in [LeqStyle::Columns, LeqStyle::Tiles] {
+        for (w, h) in [(640.0, 400.0), (1280.0, 720.0), (1920.0, 1080.0)] {
+            let at = format!("{style:?} at {w}×{h}");
+            let scene = |history| {
+                let v = LeqView {
+                    layout: LeqLayout { style, history },
+                    ..columns_view(&c, &f, None)
+                };
+                leq_scene(&v, &Status::default(), &th, size(w, h))
+            };
+            let (off, on) = (scene(false), scene(true));
+            assert_eq!(off.run, None, "{at}");
+            let all = texts(&off.scene);
+            assert!(
+                all.iter().all(|t| !t.contains("2:14:05")
+                    && !t.contains("since 19:02")
+                    && !t.contains("total")
+                    && !t.contains("offline 12 s")),
+                "{at}: {all:?}"
+            );
+            assert!(
+                on.run.as_deref().is_some_and(|r| r.contains("2:14:05")),
+                "{at}"
+            );
+            // The space it took is the windows'.
+            assert!(off.caption.h <= on.caption.h, "{at}");
+            let top = |s: &LeqScene| {
+                s.tiles
+                    .iter()
+                    .chain(
+                        s.columns
+                            .iter()
+                            .flat_map(|k| k.columns.iter().map(|x| &x.rect)),
+                    )
+                    .map(|r| r.y)
+                    .fold(f32::INFINITY, f32::min)
+            };
+            assert!(top(&off) <= top(&on), "{at}");
+            assert!(top(&off) >= off.caption.bottom() - 0.5, "{at}");
+            assert_caption_fits(&off, w, false, &at);
+            assert_caption_fits(&on, w, true, &at);
+        }
+    }
 }
