@@ -2,6 +2,7 @@
 electrical drop-in last and always removed (with `gen ceiling` read back) in a finally."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
@@ -102,8 +103,21 @@ def _confirm(ctx, text: str):
         raise PolicyError("operator skipped")
 
 
+def _single_run_lock():
+    """Two runs at once share JACK ports, the generator and ac2's one recording slot, so each
+    would corrupt the other's captures: refuse the second."""
+    path = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "crosscheck-run.lock"
+    f = open(path, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(f"another crosscheck run holds {path}; stop it first (pgrep -af 'crosscheck run')")
+    return f
+
+
 def main(a) -> int:
     rig = tomllib.loads(a.rig.read_text())
+    lock = _single_run_lock() if a.cmd == "run" else None  # noqa: F841  held until exit
     want = [s for s in ORDER if s in set(x.strip() for x in getattr(a, "stages", ",".join(ORDER)).split(","))]
     out = a.out or (Path(__file__).resolve().parent.parent / "runs" / time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
     out = Path(os.path.expanduser(str(out)))

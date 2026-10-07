@@ -41,7 +41,8 @@ def read(path) -> tuple[int, np.ndarray]:
     return fs, x[: len(x) // ch * ch].reshape(-1, ch)
 
 
-def write(path, fs: int, x: np.ndarray) -> None:
+def write(path, fs: float, x: np.ndarray) -> None:
+    fs = int(round(fs))  # JACK reports the rate as a float; the header holds an integer
     x = np.ascontiguousarray(np.atleast_2d(x.T).T if x.ndim == 1 else x, dtype="<f4")
     if x.ndim == 1:
         x = x[:, None]

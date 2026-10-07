@@ -48,6 +48,17 @@ class Rew:
     def version(self) -> str:
         return (self.get("/version") or {}).get("message", "?")
 
+    def spl_meters(self) -> list[str]:
+        """Ids of the SPL meters REW has open; the API cannot open more."""
+        ids = []
+        for m in ("1", "2", "3"):
+            try:
+                self.get(f"/spl-meter/{m}/configuration")
+                ids.append(m)
+            except RewError:
+                pass
+        return ids
+
     def snapshot(self) -> dict:
         """Everything the suite may change, to put back afterwards."""
         s = {"input_cal": self.get("/audio/input-cal"), "stimulus": self.get("/import/sweep-recordings/stimulus"),

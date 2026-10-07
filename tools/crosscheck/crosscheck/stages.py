@@ -573,7 +573,13 @@ def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
             for k, src in rig["pipewire"]["ambient_capture"].items():
                 client.connect(src, f"{pwc}:{k}")
             ctx.rew.set_input_cal(cal["rew_dbfs_at_94"], cal.get("full_scale_vrms", 1.0), cal_file or "")
-            for m, w in (("1", "Z"), ("2", "A"), ("3", "C")):
+            # One weighting per open meter, A first: the weighting a PA report quotes.
+            rew_meters = list(zip(ctx.rew.spl_meters(), ("A", "C", "Z")))
+            if len(rew_meters) < 3:
+                ctx.manifest.setdefault("notes", []).append(
+                    f"ambient: REW has {len(rew_meters)} SPL meter(s); compared weightings "
+                    + ",".join(w for _, w in rew_meters))
+            for m, w in rew_meters:
                 ctx.rew.put(f"/spl-meter/{m}/configuration", {"splWeighting": w, "leqWeighting": w, "selWeighting": w,
                                                               "filter": "Slow", "showLeq": True, "rollingLeqActive": False})
             try:
@@ -597,7 +603,7 @@ def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
             procs.append((subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=f, stderr=subprocess.PIPE, text=True), f))
             starts[f"ac2_{w}"] = time.time()
         if rew_ok:
-            for m in ("1", "2", "3"):
+            for m, _ in rew_meters:
                 ctx.rew.command(f"/spl-meter/{m}/command", "Reset")
                 ctx.rew.command(f"/spl-meter/{m}/command", "Start")
             ctx.rew.command("/rta/command", "Start")
@@ -607,10 +613,10 @@ def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
         fs, x = jackio.play_record([], [ctx.in_port(mic_in)], pre_s=secs, post_s=0.0, expect_fs=ctx.fs, max_xruns=ctx.max_xruns)
         wav.write(d / "in1.wav", fs, x)
         if rew_ok:
-            for m, w in (("1", "Z"), ("2", "A"), ("3", "C")):
+            for m, w in rew_meters:
                 _j(d / f"rew_spl_{w}.json", ctx.rew.get(f"/spl-meter/{m}/levels"))
             _j(d / "rew_rta.json", ctx.rew.get("/rta/captured-data?unit=SPL"))
-            for m in ("1", "2", "3"):
+            for m, _ in rew_meters:
                 ctx.rew.command(f"/spl-meter/{m}/command", "Stop")
             ctx.rew.command("/rta/command", "Stop")
         for p, f in procs:
