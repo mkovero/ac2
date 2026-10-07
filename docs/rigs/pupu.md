@@ -6,7 +6,15 @@ what ac2 learned on it.
 
 - **Access:** private (`$AC_HOME/rig-hosts/pupu.access.env`). Never build on the rig; ship
   binaries. Take the rig lock first: `~/src/ac/bin/rig.sh --lock "<who, what>"`.
-- **Audio:** RME Fireface 400, JACK `jack-ac.service`, 96 kHz / 256 frames / 3 periods, `-S`.
+- **Audio:** RME Fireface 400, JACK 96 kHz / 256 frames / 3 periods, `-S`.
+- **Services (systemd user units of mui, lingering; since 2026-10-07):** `jack-ac.service`
+  (jackd; counts as started once `jack_wait` sees the server), `ac2d.service` (`Wants=` and
+  `After=jack-ac`, not `BindsTo=`: ac2d keeps its session through a JACK restart and reopens
+  it), `snd-fireface-ctl.service` (FF400 mixer control). Restart on failure; logs in the user
+  journal (`journalctl --user -u ac2d -u jack-ac`). The old system `jack-ac.service` is
+  disabled. Checked 2026-10-07 (ac2d 1303a63): `systemctl --user restart jack-ac` left ac2d
+  running and the session reopened by itself after 1.1 s without audio. A restarted ac2d
+  brings back its measurements but not the audio session: reopen it (step 5 below).
   JACK port order can move (ADAT block before/after analog): check silently before emitting —
   captures 9–14 read exact digital zero when analog is first.
 - **Wiring:** out 1 (AN1) → Genelec 1083 (two-way: woofer and tweeter); out 2 (AN2) → cable → in 2 (reference
@@ -37,11 +45,12 @@ binaries in `~/ac2-test/bin`, the previous set in `~/ac2-test/bin.prev`. Wrap ev
 1. Build locally: `cargo build --release -p ac2d -p ac2-cli -p ac2-ui` (never on the rig).
 2. Ship: on each host `cd ~/ac2-test && rm -rf bin.prev bin.new && cp -a bin bin.prev && mkdir
    bin.new`, then `scp target/release/{ac2d,ac2,ac2-ui} mui@<host>:ac2-test/bin.new/`.
-3. Swap: on ketunkolo `pkill -x ac2-ui`; on pupu `pkill -TERM -x ac2d` (clean shutdown flushes the
-   autosave and SPL logs), wait for it to exit, `cp -f bin.new/* bin/` on both.
-4. Start the daemon on pupu:
-   `cd ~/ac2-test && setsid nohup bin/ac2d --listen tcp://0.0.0.0 --name pupu --max-level -50 > d-net.log 2>&1 </dev/null &`.
-   Check `d-net.log`: "autosave restored … no audio session opened" is normal.
+3. Swap: on ketunkolo `pkill -x ac2-ui`; on pupu `systemctl --user stop ac2d` (SIGTERM: clean
+   shutdown flushes the autosave and SPL logs), then `cp -f bin.new/* bin/` on both.
+4. Start the daemon on pupu: `systemctl --user start ac2d` (flags in
+   `~/.config/systemd/user/ac2d.service`: `--listen tcp://0.0.0.0 --name pupu --max-level -50`).
+   Check `journalctl --user -u ac2d -n 30`: "autosave restored … no audio session opened" is
+   normal.
    `--max-level -50` is now the **hard bound**: the system max level in force can be lowered
    (or raised again up to −50) from any client — Settings › Inputs & outputs, or
    `bin/ac2 --remote 192.168.9.27 gen ceiling -60dbfs` — and is kept in
@@ -241,10 +250,9 @@ its measurements and the SPL log (with the outage as gap) come back without `ses
 the generator comes back disarmed. Restarting jackd and steps 2–3 stay the operator's:
 1. The FireWire layer re-creates the device, but jackd keeps the old card open: `snd_card_free`
    blocks in the kernel (`hung task … fw_device_shutdown`), jackd stops answering (`jack_lsp`
-   times out) and ac2 gets no audio and no error — the app shows STALE. Stop jackd
-   (`pkill -TERM -x jackd`; it exited cleanly), wait for the bus to settle, start it again with
-   the same command line (`/usr/bin/jackd -R -P 80 -S -n default -t 2000 -d alsa -d
-   hw:Fireface400 -r 96000 -p 256 -n 3`). Before protocol 21 ac2d closed the session after one
+   times out) and ac2 gets no audio and no error — the app shows STALE. A hung jackd is not a
+   failed one, so its unit does not restart it: `systemctl --user restart jack-ac` once the
+   bus has settled (it exited cleanly on SIGTERM). Before protocol 21 ac2d closed the session after one
    failed reopen and `session open` as above was needed; now it reopens by itself once jackd
    answers.
 2. The control service (`snd-fireface-ctl`, user unit) dies with the reset:
