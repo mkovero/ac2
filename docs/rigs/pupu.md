@@ -334,6 +334,19 @@ from ketunkolo. Per-topic traffic over 30 s with a throwaway CURVE subscriber on
 689.7 → 238.2 KiB/s (the two ÷ channels of stored traces 30 → 3.8 msg/s, the spectrum sum
 30 → 17.4 msg/s); ac2d CPU over 60 s 60 → 48 % of a core (the sum's thread 20.8 → 13.0 %).
 
+## Deploy of 6136f8a (2026-10-07, all three hosts)
+
+Protocol 25, session format 12 (a measurement's delay steps kept apart from its measured
+arrival, colour families, toasts sized to their text with a log, no calibration line on the
+SPL stage). Backup in `/work/ac2-scratch/deploy-6136f8a/` (state, SPL logs, 15 traces as
+CSV). The restore is now a script, `restore.sh` there, generated from the state dump: it
+recreates the 13 measurements in id order so ids match, then imports the traces and moves each
+under its owner, slot and visibility, then sets TF 2's delay (44 samples). Run it from
+ketunkolo only after ketunkolo has the new CLI: the old one is refused at the protocol check.
+The PipeWire bridge REW uses (see below) stayed up across the `jack-ac` / `ac2d` restarts.
+The Pi's kiosk must be restarted after its nfsroot update; the old one is refused as
+protocol 24 until then.
+
 ## REW cross-check, electrical (2026-10-07, ac2d a680dcd, REW 5.40 beta 135)
 
 REW runs on pupu itself (`~/REW`, headless on Xvfb `:5`, its API on localhost:4735, the GUI
