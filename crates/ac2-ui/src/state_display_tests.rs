@@ -795,7 +795,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
         ir_and_banner(&t),
         (
             "no reference: nothing is driving the loopback".into(),
-            "reference input below its floor; check the loopback patch".into()
+            "reference silent: check the loopback cable".into()
         )
     );
     t.key("Escape");

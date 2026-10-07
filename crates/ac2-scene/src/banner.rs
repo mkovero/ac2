@@ -856,8 +856,8 @@ pub(crate) mod tests {
         assert_eq!(fit_headline("AUDIO STOPPED", 60.0, 14.0), "AUDIO…");
     }
 
-    /// NO REFERENCE's detail follows this app's stimulus, and every reminder fits beside
-    /// the banner text in a full-width row in every theme.
+    /// NO REFERENCE's detail follows this app's stimulus, and every variant fits beside the
+    /// banner text in a full-width row in every theme.
     #[test]
     fn no_reference_reminds_of_the_stimulus_keys() {
         use crate::stimulus::Drive;
@@ -870,17 +870,15 @@ pub(crate) mod tests {
             let b = banners(&s);
             assert_eq!(b[0].text, "NO REFERENCE");
             let d = b[0].detail.clone().unwrap_or_default();
-            if drive != Drive::Playing {
-                for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
-                    let rows = layout_banners(&b, Rect::new(0.0, 0.0, 800.0, 200.0));
-                    let mut layer = Layer::default();
-                    draw_banners(&mut layer, &rows, &theme);
-                    assert!(
-                        layer.labels.iter().any(|l| l.text == d),
-                        "{d} not drawn at {} px",
-                        theme.font_size
-                    );
-                }
+            for theme in [Theme::dark(), Theme::light(), Theme::high_contrast()] {
+                let rows = layout_banners(&b, Rect::new(0.0, 0.0, 800.0, 200.0));
+                let mut layer = Layer::default();
+                draw_banners(&mut layer, &rows, &theme);
+                assert!(
+                    layer.labels.iter().any(|l| l.text == d),
+                    "{d} not drawn at {} px",
+                    theme.font_size
+                );
             }
             d
         };
@@ -903,7 +901,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             detail(Drive::Playing),
-            "reference input below its floor; check the loopback patch"
+            "reference silent: check the loopback cable"
         );
     }
 

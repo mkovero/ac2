@@ -107,11 +107,12 @@ pub enum Drive {
     SweepView,
 }
 
-/// NO REFERENCE's detail: `stimulus off: Space arms, Enter starts it`. Short enough to sit
-/// beside NO REFERENCE in a banner row in every theme.
+/// NO REFERENCE's detail: `stimulus off: Space arms, Enter starts it`. Every variant is
+/// short enough to sit beside NO REFERENCE in a banner row in every theme (a longer one is
+/// left out of the row, and then the operator reads only the fault).
 pub fn no_reference_detail(d: &Drive) -> String {
     match d {
-        Drive::Playing => "reference input below its floor; check the loopback patch".into(),
+        Drive::Playing => "reference silent: check the loopback cable".into(),
         Drive::Idle { arm, fire } => format!("stimulus off: {arm} arms, {fire} starts it"),
         Drive::Armed { fire } => format!("stimulus armed: {fire} starts it"),
         Drive::SweepView => "stimulus off: arm it from a transfer pane".into(),
@@ -234,7 +235,7 @@ mod tests {
         );
         assert_eq!(
             no_reference_detail(&Drive::Playing),
-            "reference input below its floor; check the loopback patch"
+            "reference silent: check the loopback cable"
         );
         assert_eq!(
             no_reference_note(&idle()),

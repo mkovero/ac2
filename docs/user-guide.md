@@ -166,8 +166,8 @@ ac2 needs that reference: without signal on it, the transfer pane shows **NO REF
 instead of a curve. Its detail says what to do: with this app's stimulus off, `stimulus
 off: Space arms, Enter starts it`; armed and silent, `stimulus armed: Enter starts it`; on
 the sweep view (where Space arms a sweep), `stimulus off: arm it from a transfer pane`;
-with the stimulus playing (or another client's), `reference input below its floor; check
-the loopback patch`. With a loopback that also returns the generator's own output (the
+with the stimulus playing (or another client's), `reference silent: check the loopback
+cable`. With a loopback that also returns the generator's own output (the
 **R** and **S** roles in the session dialog, `session open --loopback-out 1 --loopback-in 1`
 from the CLI), the daemon continuously checks the output → input timing and warns about
 dropped or repeated output samples.
