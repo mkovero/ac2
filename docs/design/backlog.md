@@ -34,7 +34,11 @@ decision 4). Measured numbers: PLAN §9.0.
   about 33 ms on a desktop core, likely 150–250 ms on a Pi; `detect_period` is ~60 % of it.
 - **A weighting could reuse the C filter** (A = C + one more section): two biquads per
   sample saved on the SPL path.
-- **Pi 4 class: built and tested in emulation only** (2026-10-05, c59ef65). A Raspberry Pi
+- **Pi 4 class: a real Pi 4 B runs the kiosk** (2026-10-07; first built and tested in
+  emulation on 2026-10-05, c59ef65). A Pi 4 B netbooted from ai shows pupu's SPL meter
+  (`ac2-ui --remote` under cage, rendering on V3D 4.2 to a USB DisplayLink monitor, ~0 % CPU
+  idle; a touch steps the SPL view). Not yet: a USB interface on it, frame time (§8.3), NEON
+  speed, a measured CPU budget. The emulation notes: a Raspberry Pi
   image (Arch Linux ARM, stock `linux-rpi`; JACK on the first USB interface, `ac2d
   --listen`, `ac2-ui` full screen under the `cage` kiosk compositor, the UI self-paired over
   CURVE) is built outside this repo, for a CM4 on a CM4IO and a Pi 4 B from SD. In
@@ -71,6 +75,11 @@ decision 4). Measured numbers: PLAN §9.0.
 
 ## Flaky tests
 
+- **ac2-ui `measurement_tree_and_delete_choices` on macOS CI**: the `measurement_delete_choices`
+  snapshot (the delete dialog over live transfer measurements) differed by 14 573 px once
+  (a680dcd's run, a change to ac2d only); passed on rerun. The live curves behind the dialog
+  are not pinned.
+
 - **ac2d `remote_stimulus` "timed out waiting for the tone"**: once in a full workspace run
   at load ~30 (no loopback, so the timing job is not involved); passed 4/4 alone.
 
@@ -92,6 +101,15 @@ decision 4). Measured numbers: PLAN §9.0.
   `ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs --duration 6s --repeats 2`.
 
 ## Done
+
+Math channels at the frame cap (pupu, 2026-10-07, measured with a throwaway CURVE subscriber
+counting bytes per topic; a680dcd):
+- **A math channel was re-formed and re-sent on every hand-off**: two ÷ channels of stored
+  traces went out 30 times a second (7.9 kB each, 68 % of the data socket) and a sum of two
+  65536-point spectra was formed 30 times a second (21 % of a core) while its operands had
+  11.7 new results. Jobs now publish a result generation through their probe; a math channel
+  forms a result only when a live operand has a new one (stored-only channels: the 4/s
+  refresh). On pupu: data socket 689.7 → 238.2 KiB/s, ac2d 60 → 48 % of a core.
 
 Stimulus conveniences (operator, 2026-10-07: "it could stop also stop stimulus if you stop
 running transfer measurement, somehow I would expect it"):

@@ -30,7 +30,8 @@ what ac2 learned on it.
   Also `47820/tcp`, `47821/tcp` from 100.100.44.45 (rantu over the VPN; there is a further
   firewall between the VPN and this LAN that must allow those ports too). mDNS does not cross the
   VPN: connect by address. Clients authorized: `ketunkolo` (192.168.9.25), `rantu`
-  (100.100.44.45).
+  (100.100.44.45), `ac2pi` (mui's CLI on the netbooted Pi 4, 192.168.9.249) and `ac2pi-kiosk`
+  (that Pi's kiosk UI, which shows pupu's SPL meter; image and setup in the sys repo, `ac2pi/`).
 - **Operator policy (2026-10-04):** pupu is the ac2 agent's machine to deploy to and restart,
   and the ac2 app on ketunkolo may be (re)started freely. Emission ceilings above still apply;
   anything louder needs the operator's approval for that run. Other changes on ketunkolo
@@ -323,3 +324,12 @@ Protocol 24, session format 11 (measurement tree, sweep as a measurement kind, I
 and cursor). Backup in `/work/ac2-scratch/deploy-1303a63/`; restored as for 360c6b8, plus the
 operator's two math channels on stored traces (`ac2 math new --name … --op div --a "1083 94cm"
 --b "1083 94cm -30" --imported --start`, and `-30 ÷ 50 v2`), which came back with the same ids.
+
+## Deploy of a680dcd (2026-10-07)
+
+ac2d only (protocol 24 and the session format unchanged since 1303a63; the apps stay): math
+channels form a result only when a live operand has one. `bin.prev` is 1ae159c (what ran
+before). Deployed with the user unit (`systemctl --user stop/start ac2d`), session reopened
+from ketunkolo. Per-topic traffic over 30 s with a throwaway CURVE subscriber on the Pi:
+689.7 → 238.2 KiB/s (the two ÷ channels of stored traces 30 → 3.8 msg/s, the spectrum sum
+30 → 17.4 msg/s); ac2d CPU over 60 s 60 → 48 % of a core (the sum's thread 20.8 → 13.0 %).
