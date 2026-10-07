@@ -100,10 +100,16 @@ fn check(ui: &mut egui::Ui, on: bool, ch: &Chrome) -> egui::Response {
 }
 
 fn label_col(ui: &mut egui::Ui, text: &str, focused: bool, ch: &Chrome) -> egui::Response {
-    let marker = if focused { "▸ " } else { "  " };
+    // The marker in the monospace font, as on every other row: the bold proportional face
+    // has no ▸ and drew an empty box.
+    ui.label(
+        RichText::new(if focused { "▸" } else { " " })
+            .color(ch.focus)
+            .monospace(),
+    );
     ui.add(
         egui::Label::new(
-            RichText::new(format!("{marker}{text}"))
+            RichText::new(text)
                 .color(if focused { ch.focus } else { ch.dim })
                 .strong(),
         )
