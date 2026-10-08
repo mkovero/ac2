@@ -3137,10 +3137,10 @@ fn spl_meter_from_an_empty_daemon(h: &mut Harness<'_, App>) -> MeasId {
 /// over in the hour; G goes on from meter + Leq to the bands, which draw the hour's windows
 /// as one row and the quarter's as another, and name the hour's 63 Hz in the headline.
 #[test]
-fn band_leq_from_an_empty_daemon() {
+fn slow_band_leq_from_an_empty_daemon() {
     use ac2_proto::model::{BandLeqPreset, ImpulseCorrection, MeasKind};
     use ac2_ui::leq_dialog::{BandCol, BandFocus, Focus, RangeCol};
-    if !have_gpu("band_leq_from_an_empty_daemon") {
+    if !have_gpu("slow_band_leq_from_an_empty_daemon") {
         return;
     }
     let fake =

@@ -596,7 +596,7 @@ mod tests {
     /// From an empty daemon on the simulated rig: open the session with the CLI, capture a
     /// sweep (Enter plays it), read the summary, export every curve.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn ir_capture_on_the_simulated_rig() -> R {
+    async fn slow_ir_capture_on_the_simulated_rig() -> R {
         use ac2_client::{ClientConfig, Endpoints};
         use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
         let backend = ac2d::backend(BackendChoice::Fake)?;

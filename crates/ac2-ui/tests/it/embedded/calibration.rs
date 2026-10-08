@@ -187,7 +187,7 @@ impl Drop for Tone {
 /// shows (15 mV) while a steady 1 kHz tone plays, Enter. The SPL meter then reads dB SPL,
 /// says the calibration is electrical with its uncertainty, and so does the Leq caption.
 #[test]
-fn electrical_calibration_from_the_app() -> R {
+fn slow_electrical_calibration_from_the_app() -> R {
     use ac2_proto::model::{CalBasis, CalStatus, LevelScale};
     use ac2_ui::cal_view::{CalLine, lines};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
@@ -368,7 +368,7 @@ fn electrical_calibration_from_the_app() -> R {
 /// stores the calibration, names the mic on the input and closes with what to do next; the
 /// SPL meter then reads 94.0 dB SPL with the calibrator named.
 #[test]
-fn acoustic_calibration_from_the_app() -> R {
+fn slow_acoustic_calibration_from_the_app() -> R {
     use ac2_proto::model::CalMethod;
     use ac2_ui::cal_view::{CalLine, lines};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;

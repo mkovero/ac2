@@ -58,7 +58,7 @@ fn document(text: &str) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn leq_set_watch_and_export() {
+async fn slow_leq_set_watch_and_export() {
     let backend = ac2d::backend(BackendChoice::Fake).unwrap();
     let listen = Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),

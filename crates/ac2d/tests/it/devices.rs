@@ -231,7 +231,7 @@ fn preview_is_capture_only_and_silent() {
 }
 
 #[test]
-fn preview_expires_and_closes_when_a_session_opens() {
+fn slow_preview_expires_and_closes_when_a_session_opens() {
     let opened: Opened = Arc::default();
     let rec = Recording {
         inner: named_rig(FakeDrive::Thread(Pace::Realtime), 0.0),
@@ -486,7 +486,7 @@ fn preview_of(s: &Sub, kind: BackendKind) -> Option<ac2_proto::frame::Frame> {
 /// between rounds: every round meters the device asked for, at once and for as long as it
 /// is renewed, and nothing of the previous device keeps arriving.
 #[test]
-fn preview_follows_the_device_through_every_round() {
+fn slow_preview_follows_the_device_through_every_round() {
     init_log();
     let fake: Arc<dyn Backend> = Arc::new(named_rig(FakeDrive::Thread(Pace::Realtime), 1e-3));
     let jack: Arc<dyn Backend> =

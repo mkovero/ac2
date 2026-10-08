@@ -1281,7 +1281,7 @@ mod tests {
     /// decimation): white-noise power gain from the responses, for every fraction and rate,
     /// and unit gain at every mid-band frequency.
     #[test]
-    fn noise_and_sine_gain_match_full_rate() {
+    fn slow_noise_and_sine_gain_match_full_rate() {
         let mut worst = 0.0f64;
         for fs in RATES {
             for fr in FRACTIONS {

@@ -114,7 +114,7 @@ fn stopped(s: &Session) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
+async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
     let backend = realtime_rig();
     let (_h, c, tf, meter) = start(&backend).await;
     c.subscribe(Subscription::Meas(meter)).unwrap();
@@ -222,7 +222,7 @@ async fn a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_vanished_device_is_reopened_with_backoff_until_it_returns() {
+async fn slow_a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     let backend = realtime_rig();
     let dir = tempfile::tempdir().unwrap();
     let (_h, c, _, _) = start_with(&backend, Some(dir.path().to_owned())).await;
@@ -289,7 +289,7 @@ async fn a_vanished_device_is_reopened_with_backoff_until_it_returns() {
 /// probe's second, not at the end of the wait; while it stays away, the attempts keep their
 /// backoff (the probe never starts one of its own).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_device_back_mid_wait_is_reopened_at_once() {
+async fn slow_a_device_back_mid_wait_is_reopened_at_once() {
     let backend = realtime_rig();
     let (_h, c, _, _) = start(&backend).await;
     let epoch = state(&c).session.epoch;

@@ -698,7 +698,7 @@ fn fractional_arrival_error(fs: f64, f2: f64, phi: f64, snr_db: Option<f64>) -> 
 }
 
 #[test]
-fn a_fractional_delay_reads_as_a_fractional_arrival() {
+fn slow_a_fractional_delay_reads_as_a_fractional_arrival() {
     for (fs, f2) in [
         (48_000.0, 20_000.0),
         (96_000.0, 20_000.0),

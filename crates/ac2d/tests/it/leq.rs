@@ -159,7 +159,7 @@ async fn set_level(lease: &StimulusLease, level: f64) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn windows_go_over_and_recover_and_survive() {
+async fn slow_windows_go_over_and_recover_and_survive() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = steady_config(realtime_rig(), local_tcp());
@@ -448,7 +448,7 @@ async fn previous_page(c: &Client) -> Result<SplLogPage, ClientError> {
 /// the ended log stays readable as the previous one, and a saved session carries the new
 /// log.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_new_log_starts_over_and_keeps_the_windows() {
+async fn slow_a_new_log_starts_over_and_keeps_the_windows() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = steady_config(realtime_rig(), local_tcp());
@@ -614,7 +614,7 @@ async fn spl_until(
 /// at once at its settled level (Slow too: it ran all along), over the same interval; the
 /// Leq windows, their states and the per-second log carry on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn weightings_change_in_place_and_keep_the_log() {
+async fn slow_weightings_change_in_place_and_keep_the_log() {
     init_log();
     let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
     let c = connect(&h).await;
@@ -704,7 +704,7 @@ async fn weightings_change_in_place_and_keep_the_log() {
 /// over after 2 s and the 30 s one only after about 13 s (its least level above 90.0 at
 /// 0.1 dB), each an alarm then and not before.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_filling_window_goes_over_when_its_budget_is_spent() {
+async fn slow_a_filling_window_goes_over_when_its_budget_is_spent() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = steady_config(realtime_rig(), local_tcp());
@@ -943,7 +943,7 @@ async fn a_long_log_in_pages_and_its_history() {
 /// and +1 dB (peak) moves every level the meter reports, the LAFmax limit goes over on the
 /// corrected level, and the log keeps what was measured with the correction beside it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn peak_limits_and_the_position_correction() {
+async fn slow_peak_limits_and_the_position_correction() {
     use ac2_proto::model::{AlarmSubject, PeakLimit, PeakLimits, PeakQuantity, PositionCorrection};
     init_log();
     let dir = tempfile::tempdir().unwrap();

@@ -83,7 +83,7 @@ async fn tone(lease: &ac2_client::StimulusLease, hz: f64) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn bands_set_watch_and_transfer() {
+async fn slow_bands_set_watch_and_transfer() {
     let backend = ac2d::backend(BackendChoice::Fake).unwrap();
     let listen = Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),

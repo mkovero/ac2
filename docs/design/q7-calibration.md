@@ -464,11 +464,11 @@ the notes and the phantom reminder.
 
 Tests: `ac2-proto::cal` (the formulas by hand, `f_norm`, `data_sheet`), calstore (round
 trip with a method, version 2 set aside, electrical normalised at 1 kHz), daemon
-`electrical_calibration_end_to_end` (invalid inputs, no tone, too low, a tone at −26.02 dBFS
+`slow_electrical_calibration_end_to_end` (invalid inputs, no tone, too low, a tone at −26.02 dBFS
 with 15 mV and the data sheet's 15 mV/Pa → 120.0 dB and the SPL meter at 93.98 dB SPL with an
 electrical basis, acoustic precedence, persistence), `ac2-scene::cal` wording, CLI (`cal
 electrical` parse and run, `cal list`), UI reducer (the dialog: prefill, refusal, retry,
-success, injected and typed) and the end-to-end UI test `electrical_calibration_from_the_app`
+success, injected and typed) and the end-to-end UI test `slow_electrical_calibration_from_the_app`
 from an empty daemon.
 
 ## 12. Acoustic calibration in the app
@@ -488,6 +488,6 @@ Esc closes it back to the view. Every string is `ac2_scene::cal` (`acoustic_step
 
 Tests: the dialog's reducer (prefill, stepping, a refusal kept, invalid level and missing
 mic focusing their fields), the window-ownership tests (arrows and Esc stay in the dialog;
-Shift+Esc stops), the end-to-end UI test `acoustic_calibration_from_the_app` from an empty
+Shift+Esc stops), the end-to-end UI test `slow_acoustic_calibration_from_the_app` from an empty
 daemon (the simulated rig's tone as the calibrator: stored, the mic named, the SPL meter at
 94.0 dB SPL with `cal 94 dB`) and a GPU snapshot (`acoustic_calibration_dialog`).

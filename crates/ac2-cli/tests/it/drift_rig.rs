@@ -38,7 +38,7 @@ async fn status(ep: &Endpoints) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn status_shows_the_clock_domain_and_the_drift() {
+async fn slow_status_shows_the_clock_domain_and_the_drift() {
     let backend = FakeBackend::new(FakeConfig {
         drive: FakeDrive::Manual,
         paths: vec![FakePath::loopback(0, 0, 2000)],

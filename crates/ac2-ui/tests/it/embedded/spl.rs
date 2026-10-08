@@ -82,7 +82,7 @@ fn columns(s: &AppState) -> Vec<(String, Color, Color)> {
 /// red, the alarms arrive as toasts; the stop brings both back under the limit, and that is
 /// a toast too.
 #[test]
-fn leq_limits_go_over_and_recover_from_the_app() -> R {
+fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
     use ac2_proto::model::LeqJudgement;
     use ac2_scene::leq::TileState;
     use ac2_ui::state::PaneKind;
@@ -267,7 +267,7 @@ fn leq_limits_go_over_and_recover_from_the_app() -> R {
 /// puts LCpeak over (a toast naming LCpeak and the correction); stopped, it stays over for
 /// the 10 s hold, then recovers (a toast).
 #[test]
-fn a_peak_limit_and_the_position_correction_from_the_app() -> R {
+fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
     use ac2_proto::model::{LeqJudgement, PeakQuantity, PositionCorrection};
     use ac2_scene::leq::{TileKind, TileState};
     use ac2_ui::leq_dialog::{Extra, Focus};
@@ -425,7 +425,7 @@ fn leq_columns(s: &AppState) -> Option<ac2_scene::leq::LeqColumns> {
 /// stay amber on course, their bars under the limit line, with the time until their budgets
 /// are spent; the only alarms are the two short windows going over.
 #[test]
-fn filling_windows_go_red_only_when_their_budget_is_spent() -> R {
+fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     use ac2_proto::model::{LeqAlarmKind, LeqJudgement};
     use ac2_scene::leq::TileState;
     use ac2_ui::state::PaneKind;
@@ -618,7 +618,7 @@ fn run_seconds(s: &AppState) -> Option<u64> {
 /// since … · LAeq total …`); Shift+R asks first, naming the run that ends; N keeps it,
 /// Shift+R and Enter start a new log, and the clock starts again from zero.
 #[test]
-fn run_clock_and_a_new_log_from_the_app() -> R {
+fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let ep = daemon.client_config(NAME);
@@ -743,7 +743,7 @@ fn strip_line(s: &AppState) -> Vec<[f32; 2]> {
 /// then a new app on the same daemon. A new log started from that app clears the history
 /// of another app watching the meter too.
 #[test]
-fn a_restarted_app_shows_the_history_from_the_log() -> R {
+fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let ep = daemon.client_config(NAME);
@@ -879,7 +879,7 @@ fn logged(s: &AppState) -> Option<u64> {
 /// preset row, Enter, and the meter has only LAeq 30 min ≤ 99 dB. The log carries on (in
 /// place, not a new log), and the history of the new window is rebuilt from it.
 #[test]
-fn a_preset_replaces_the_windows_from_the_app() -> R {
+fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
     use ac2_proto::model::LeqPreset;
     use ac2_proto::units::DbSpl;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;

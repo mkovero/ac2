@@ -175,7 +175,7 @@ fn by_session_sample(dir: &Path, name: &str) -> (Vec<(u64, Vec<f32>)>, u16) {
 }
 
 #[test]
-fn replayed_recording_reproduces_the_live_analyses() {
+fn slow_replayed_recording_reproduces_the_live_analyses() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let backend = xrun_rig();

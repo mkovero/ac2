@@ -157,7 +157,7 @@ fn setup() -> (
 }
 
 #[test]
-fn sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
+fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let (_h, _b, mut c, sub, ka, mut d, token) = setup();
 
     // A sweep measurement is settings only: creating it plays nothing, and it has no job.

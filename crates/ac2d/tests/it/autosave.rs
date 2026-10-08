@@ -203,7 +203,7 @@ fn traces_survive_a_restart() {
 
 /// A burst of edits is one write, after the edits stop.
 #[test]
-fn a_burst_of_edits_is_one_write() {
+fn slow_a_burst_of_edits_is_one_write() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("autosave-burst", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
@@ -362,7 +362,7 @@ fn spl_file(dir: &Path) -> (String, usize) {
 /// windows and every logged second are back. The log growing is not an autosave write: the
 /// rows are appended to one file, which carries on after the restart.
 #[test]
-fn spl_log_survives_a_restart() {
+fn slow_spl_log_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let (h, backend) = start("autosave-spl", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);

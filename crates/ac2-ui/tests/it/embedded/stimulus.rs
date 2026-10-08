@@ -141,7 +141,7 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
 /// it again with the same settings (a second run under it, no dialog); on the transfer view Space and Enter play pink
 /// noise at the level typed for the sweep, and the transfer measurement sees the rig's path.
 #[test]
-fn the_stimulus_follows_the_view_from_the_app() -> R {
+fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     use ac2_proto::model::{Signal, TraceKind, TraceSource};
     use ac2_ui::forms::FieldId;
     use ac2_ui::state::PaneKind;

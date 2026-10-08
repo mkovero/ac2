@@ -53,7 +53,7 @@ fn num(v: &Value, k: &str) -> f64 {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn spl_watch_reads_its_input_on_a_fresh_meter() {
+async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
     let backend = ac2d::backend(BackendChoice::Fake).unwrap();
     let listen = Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),

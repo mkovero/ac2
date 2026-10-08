@@ -424,7 +424,7 @@ fn phase_of(v: &[(ac2_scene::trace::TraceKey, f64, String)], k: ac2_scene::trace
 /// (both later: phase leads more, e^{+jωΔ}), and neither stored curve moves at all, though
 /// the moved curve is the reference. Stopped, the keys say why they do nothing.
 #[test]
-fn a_measurement_delay_step_moves_only_its_live_curve() -> R {
+fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     use ac2_scene::trace::TraceKey;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;

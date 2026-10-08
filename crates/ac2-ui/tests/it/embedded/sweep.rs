@@ -148,7 +148,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
 /// silence after it, and the sweep's impulse response (Shift+I) carries the octave table
 /// with the hall's reverberation time (0.8 s), every string from `ac2_scene::room`.
 #[test]
-fn room_parameters_of_a_sweep_from_the_app() -> R {
+fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     use ac2_ui::forms::FieldId;
     use ac2_ui::session_dialog::Row;
     use ac2_ui::state::PaneKind;
@@ -402,7 +402,7 @@ fn run_again(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
 /// each in turn and the sweep pane follows; A hides one, V skips it; N on the sweep pane
 /// selects for the transfer pane too.
 #[test]
-fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
+fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
@@ -524,7 +524,7 @@ fn two_sweeps_chosen_between_in_the_transfer_pane() -> R {
 /// nothing until Space and Enter, two runs under it; the transfer measurement deleted with
 /// its traces kept, which then list under Imported.
 #[test]
-fn the_measurement_tree_from_an_empty_daemon() -> R {
+fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
     use ac2_proto::model::{MathOp, Operand, TraceOwner};
     use ac2_scene::meas_list::TreeKey;
     use ac2_ui::forms::FieldId;

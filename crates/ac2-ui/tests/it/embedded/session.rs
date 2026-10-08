@@ -190,7 +190,7 @@ fn the_platform_audio_is_the_only_real_backend() {
 /// from the preview opened by the reopening, however long (within the daemon's 5 s preview
 /// expiry) a loaded machine takes to show them.
 #[test]
-fn session_dialog_meters_return_every_round() -> R {
+fn slow_session_dialog_meters_return_every_round() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.synced()?;

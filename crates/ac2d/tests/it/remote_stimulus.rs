@@ -80,7 +80,7 @@ fn silent(m: &SplMeta) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn remote_client_fires_reroutes_and_recovers_from_expiry() {
+async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let laptop = KeyPair::generate().unwrap();

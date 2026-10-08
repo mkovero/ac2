@@ -191,7 +191,7 @@ async fn fire(lease: &StimulusLease, signal: Signal) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn calibration_mic_curve_and_matching_end_to_end() {
+async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let store = dir.path().join("calibrations.json");
@@ -805,7 +805,7 @@ fn refused(r: Result<ReplyBody, ClientError>, what: &str) -> String {
 /// 2, a "measured" voltage and the data-sheet sensitivity of the mic's curve file; the SPL
 /// meter then reads what the hand calculation says, with the method in its status.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn electrical_calibration_end_to_end() {
+async fn slow_electrical_calibration_end_to_end() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let store = dir.path().join("calibrations.json");

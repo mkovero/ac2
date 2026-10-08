@@ -122,7 +122,7 @@ fn spectrum(name: &str) -> MeasConfig {
 }
 
 #[test]
-fn live_streams_stay_display_sized() {
+fn slow_live_streams_stay_display_sized() {
     let sizes = run(
         &[
             transfer("tf"),

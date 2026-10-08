@@ -234,7 +234,7 @@ fn two_windows() -> BandLeqConfig {
 const A63: f64 = -26.19;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_the_limits() {
+async fn slow_two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_the_limits() {
     // Midday local time: the day limits (night + 5 dB) for the whole test.
     let (h, c, dir) = start(clock_at(12 * 3600)).await;
     // A window that is no whole number of seconds, a band that is none, or the same band,
@@ -546,7 +546,7 @@ async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_t
 /// ones in dBFS without an average, calibrated ones in dB SPL; the span's average is what
 /// `spl.band_transfer` takes from the same span.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
+async fn slow_a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
     let (h, c, _dir) = start(clock_at(12 * 3600)).await;
     c.call(Command::MeasCreate {
         config: meter(Some(bands())),
@@ -668,7 +668,7 @@ async fn a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_night_limits_take_over_at_22() {
+async fn slow_the_night_limits_take_over_at_22() {
     // Local time a few seconds before 22:00.
     let (h, c, dir) = start(clock_at(22 * 3600 - 8)).await;
     c.call(Command::MeasCreate {
@@ -773,7 +773,7 @@ fn recorder_wav(path: &std::path::Path, cal_s: f64, signal_s: f64, background_s:
 /// start + `t` — giving the bedroom and background of a transfer whose FOH levels were
 /// typed (measured on the rig at FOH under the same signal).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
+async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
     use ac2_proto::model::{RecordingRef, ReplayPace};
     let (h, c, dir) = start(clock_at(12 * 3600)).await;
     let (cal_s, signal_s, background_s) = (8.0, 8.0, 6.0);
