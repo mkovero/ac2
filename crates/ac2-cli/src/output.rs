@@ -258,7 +258,13 @@ pub fn devices(backends: &[BackendInfo]) -> String {
         let ch = |x: &Option<ac2_proto::model::DirectionInfo>| {
             x.as_ref().map_or_else(
                 || format::NO_VALUE.to_owned(),
-                |d| d.max_channels.to_string(),
+                |d| {
+                    if d.system_default {
+                        format!("{} (default)", d.max_channels)
+                    } else {
+                        d.max_channels.to_string()
+                    }
+                },
             )
         };
         let rate = dev
@@ -317,12 +323,17 @@ pub fn session(s: &Session) -> String {
                 ac2_scene::recording::clock(r.frames as f64 / f64::from(o.sample_rate_hz.max(1)))
             ),
             None => format!(
-                "session open (epoch {})\n  input  {} ch {}\n  output {} × {}\n  rate   {}  buffer {} samples",
+                "session open (epoch {})\n  input  {} ch {}\n  output {} × {}{}\n  rate   {}  buffer {} samples",
                 s.epoch,
                 o.input_device.0,
                 channels_text(&o.config.input_channels),
                 o.output_device.0,
                 o.config.output_channels,
+                if o.output_device != o.input_device && o.config.output_channels > 0 {
+                    " (another device: the two clocks may drift)"
+                } else {
+                    ""
+                },
                 format::freq_readout(f64::from(o.sample_rate_hz)),
                 o.buffer_frames
             ),

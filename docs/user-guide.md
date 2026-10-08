@@ -105,6 +105,7 @@ one. The CLI does the same from a script, with the same defaults:
 ```sh
 ac2 session open --backend jack --in 1-4                     # Linux: the JACK server
 ac2 session open --backend cpal --device "<name>" --in 1-4 --rate 48khz   # macOS, Windows
+ac2 session open --backend cpal --device "<mic>" --out-device "<speakers>" --in 1   # two devices
 ac2 meas new tf --ref 1 --meas 2 --name main-l
 ac2 meas new tf --ref 1 --meas 3 --name sub
 ac2 meas new rta --input 2 --name rta
@@ -186,7 +187,7 @@ the keys it refused lately (fingerprint, address, how often, when).
 ### Inputs & outputs and Audio
 
 Nothing on these pages is a channel number to type. The Audio page holds the backend and
-the device; the Inputs & outputs page their channels. Enter on either opens (or reopens)
+the devices; the Inputs & outputs page their channels. Enter on either opens (or reopens)
 the session with what both say. From the top:
 
 - **Backend** (**←/→**): every backend the daemon offers, with what it is; one it cannot use
@@ -194,7 +195,16 @@ the session with what both say. From the top:
   install pipewire-jack … or start the daemon with `pw-jack ac2d`*). A daemon on real
   audio offers its platform's backend (JACK on Linux, the system's audio on macOS and
   Windows); the simulated rig only appears on a daemon started on it.
-- **Device** (**←/→**): its name and *N in / M out · rate · buffer*.
+- **Input** (**←/→**): the device captured from, its name and *N in / M out · rate ·
+  buffer*. Devices with no inputs (an output-only endpoint) are not offered here.
+- **Output** (**←/→**): the device the stimulus plays on. It starts as *same device as the
+  input* when that device has outputs (JACK, a Core Audio interface: one device, one
+  clock), else as the system's default output — Windows lists an interface as a capture
+  and a playback endpoint, and a USB mic has no outputs at all. **←/→** step through every
+  device with outputs; the Inputs & outputs page then lists that device's outputs. Two
+  devices may run on different clocks, and Settings says so: the loopback reference keeps
+  the transfer function right, and the loopback monitor measures their drift while a
+  stimulus plays. The choice is remembered with the input device's roles.
 - **Channels**: one row per input and output, named by the backend where it can (JACK port
   names; system audio has none, so *Input 3*), and for inputs a **live meter** (RMS bar,
   peak tick, *CLIP* held for a second). The meters run before the session opens: the daemon

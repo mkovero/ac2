@@ -235,6 +235,27 @@ fn other_commands_parse() {
     assert_eq!(o.backend, BackendArg::Fake);
     assert_eq!(o.inputs, Channels(vec![0, 1, 2, 3]));
     assert_eq!(o.buffer, Some(SampleCount(256)));
+    assert_eq!((o.device, o.out_device), (None, None));
+    let c = ok(&[
+        "session",
+        "open",
+        "--backend",
+        "cpal",
+        "--device",
+        "USB mic",
+        "--out-device",
+        "{0.0.0.00000000}.{out}",
+        "--in",
+        "1",
+    ]);
+    let Cmd::Session {
+        cmd: SessionCmd::Open(o),
+    } = c.cmd
+    else {
+        panic!("not session open");
+    };
+    assert_eq!(o.device.as_deref(), Some("USB mic"));
+    assert_eq!(o.out_device.as_deref(), Some("{0.0.0.00000000}.{out}"));
     ok(&["session", "close"]);
     ok(&[
         "gen", "sine", "--freq", "1khz", "--out", "1", "--level", "-30dbfs", "--force",

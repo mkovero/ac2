@@ -125,6 +125,8 @@ fn direction_caps(
         // no channel names.
         default_buffer: None,
         channel_names: None,
+        // Set by the caller, which knows the host's defaults.
+        system_default: false,
     })
 }
 
@@ -242,9 +244,18 @@ impl Backend for CpalBackend {
         let devices = host
             .devices()
             .map_err(|e| backend_err(Operation::Enumerate, e))?;
+        let default_in = host.default_input_device().map(|d| device_id(&d));
+        let default_out = host.default_output_device().map(|d| device_id(&d));
         let mut out = Vec::new();
         for d in devices {
             let mut notes = Vec::new();
+            let id = device_id(&d);
+            let mark = |caps: Option<DirectionCaps>, default: &Option<DeviceId>| {
+                caps.map(|c| DirectionCaps {
+                    system_default: default.as_ref() == Some(&id),
+                    ..c
+                })
+            };
             let input = if d.supports_input() {
                 direction_caps(
                     d.supported_input_configs().map(Iterator::collect),
@@ -265,10 +276,12 @@ impl Backend for CpalBackend {
             } else {
                 None
             };
+            let input = mark(input, &default_in);
+            let output = mark(output, &default_out);
             out.push(DeviceCaps {
                 backend: BackendKind::Cpal,
                 host: host_name.clone(),
-                id: device_id(&d),
+                id: id.clone(),
                 name: device_name(&d),
                 input,
                 output,

@@ -308,10 +308,10 @@ impl AppState {
         if !plan.roles.stimulus.is_empty() {
             self.prefs
                 .outputs
-                .insert(plan.device_id.clone(), plan.roles.stimulus.clone());
+                .insert(plan.output_device_id.clone(), plan.roles.stimulus.clone());
             if self.stimulus.phase == StimPhase::Idle {
                 self.stimulus.outputs = plan.roles.stimulus.clone();
-                self.stim_device = Some(plan.device_id.clone());
+                self.stim_device = Some(plan.output_device_id.clone());
             }
         }
         self.prefs_dirty = true;

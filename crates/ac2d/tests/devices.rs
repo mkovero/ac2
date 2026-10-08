@@ -298,7 +298,8 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     let detect = |token, level| Command::SessionDetectLoopback {
         lease_token: token,
         backend: BackendKind::Fake,
-        device: fake_dev(),
+        input_device: fake_dev(),
+        output_device: fake_dev(),
         output: 0,
         level,
     };
@@ -316,7 +317,8 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
         .call(Command::SessionDetectLoopback {
             lease_token: token,
             backend: BackendKind::Fake,
-            device: fake_dev(),
+            input_device: fake_dev(),
+            output_device: fake_dev(),
             output: 5,
             level: Some(Dbfs(-30.0)),
         })
@@ -366,6 +368,83 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     });
     let e = c.call(detect(token, Some(Dbfs(-30.0)))).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
+}
+
+/// Input and output listed as two devices (WASAPI endpoints): each says which direction it
+/// has, the loopback is found across them, and a session opens with the output on the other
+/// device, reported as of unknown clock relation.
+#[test]
+fn a_session_plays_on_another_device_than_it_captures_from() {
+    use ac2_audio::FakeEndpoints;
+    use ac2_audio::fake::{FAKE_INPUT_ID, FAKE_OUTPUT_ID};
+    use ac2_proto::model::{ClockRelation, DeviceSelector};
+    let mut cfg = named_rig(FakeDrive::Thread(Pace::Realtime), 0.0)
+        .config()
+        .clone();
+    cfg.endpoints = FakeEndpoints::Split;
+    let h = start(Arc::new(FakeBackend::new(cfg).unwrap()));
+    let (mut c, _s) = connect(&h, &[]);
+    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
+        panic!("backends");
+    };
+    let devs = &b[0].devices;
+    assert_eq!(devs.len(), 2, "{devs:?}");
+    let (input, output) = (&devs[0], &devs[1]);
+    assert_eq!(input.id.0, FAKE_INPUT_ID);
+    assert!(input.input.as_ref().is_some_and(|d| d.system_default));
+    assert!(input.output.is_none());
+    assert_eq!(output.id.0, FAKE_OUTPUT_ID);
+    assert!(output.input.is_none());
+    assert_eq!(output.output.as_ref().map(|d| d.max_channels), Some(2));
+    assert_eq!(input.duplex_clock, ClockRelation::Unknown);
+
+    let (in_id, out_id) = (input.id.clone(), output.id.clone());
+    let token = acquire(&mut c);
+    // The input endpoint has no output to play the burst on.
+    let e = c
+        .call(Command::SessionDetectLoopback {
+            lease_token: token,
+            backend: BackendKind::Fake,
+            input_device: in_id.clone(),
+            output_device: in_id.clone(),
+            output: 0,
+            level: Some(Dbfs(-30.0)),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    let ReplyBody::LoopbackDetection(d) = c.ok(Command::SessionDetectLoopback {
+        lease_token: token,
+        backend: BackendKind::Fake,
+        input_device: in_id.clone(),
+        output_device: out_id.clone(),
+        output: 0,
+        level: Some(Dbfs(-30.0)),
+    }) else {
+        panic!("detection");
+    };
+    assert_eq!(d.loopback, Some(0), "{d:?}");
+    assert_eq!((&d.input_device, &d.output_device), (&in_id, &out_id));
+
+    let mut config = session(true);
+    config.input_device = DeviceSelector::Id { id: in_id.clone() };
+    config.output_device = DeviceSelector::Id { id: in_id.clone() };
+    let e = c
+        .call(Command::SessionOpen {
+            config: config.clone(),
+        })
+        .unwrap_err();
+    assert_eq!(
+        e.code,
+        ErrorCode::NotFound,
+        "no outputs on the input endpoint: {e:?}"
+    );
+    config.output_device = DeviceSelector::Id { id: out_id.clone() };
+    let ReplyBody::Session(s) = c.ok(Command::SessionOpen { config }) else {
+        panic!("session");
+    };
+    let o = s.open.unwrap();
+    assert_eq!((&o.input_device, &o.output_device), (&in_id, &out_id));
+    assert_eq!(o.clock, ClockRelation::Unknown);
 }
 
 /// The fake rig presented as a second backend (JACK), so a test can move the preview

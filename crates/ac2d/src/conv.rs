@@ -185,6 +185,7 @@ fn direction(d: &audio::DirectionCaps) -> pm::DirectionInfo {
         default_rate_hz: d.default_rate,
         default_buffer_frames: d.default_buffer,
         channel_names: d.channel_names.clone(),
+        system_default: d.system_default,
     }
 }
 

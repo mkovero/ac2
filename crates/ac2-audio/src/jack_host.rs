@@ -315,6 +315,8 @@ impl Backend for JackBackend {
             default_rate: Some(rate),
             default_buffer: Some(frames),
             channel_names: Some(names.clone()),
+            // The server is the only device JACK lists.
+            system_default: true,
         };
         Ok(vec![DeviceCaps {
             backend: BackendKind::Jack,

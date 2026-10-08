@@ -465,8 +465,8 @@ impl AppState {
             .filter(|o| o.stimulus && o.channel < d.out_count)
             .map(|o| o.channel)
             .collect();
-        let device = d.device_info().map(|x| x.id.0.clone());
-        let Some(n) = open_outputs.filter(|_| d.is_open_device()) else {
+        let device = d.output_info().map(|x| x.id.0.clone());
+        let Some(n) = open_outputs.filter(|_| d.is_open_output()) else {
             d.notice = Some("the stimulus outputs apply when the session opens (Enter)".into());
             return;
         };

@@ -49,14 +49,17 @@ pub(crate) async fn session(
                 )));
             }
             let of_backend: Vec<&DeviceInfo> = b.devices.iter().collect();
-            let dev = match &o.device {
-                Some(sel) => of_backend
+            let named = |sel: &String| {
+                of_backend
                     .iter()
                     .find(|d| &d.id.0 == sel || &d.name == sel)
                     .copied()
                     .ok_or_else(|| {
                         CliError::Usage(format!("no {want:?} device {sel:?} (see `ac2 devices`)"))
-                    })?,
+                    })
+            };
+            let dev = match &o.device {
+                Some(sel) => named(sel)?,
                 None => match of_backend.as_slice() {
                     [d] => *d,
                     [] => {
@@ -98,11 +101,24 @@ pub(crate) async fn session(
                 }),
                 _ => None,
             };
-            let sel = DeviceSelector::Id { id: dev.id.clone() };
+            let out_dev = match &o.out_device {
+                Some(sel) => named(sel)?,
+                None => default_output(dev, &of_backend).unwrap_or(dev),
+            };
+            let has_outputs = out_dev.output.as_ref().is_some_and(|d| d.max_channels > 0);
+            if o.outputs > 0 && !has_outputs {
+                return Err(CliError::Usage(format!(
+                    "{} has no outputs: choose the playback device with --out-device, or \
+                     --outputs 0 (see `ac2 devices`)",
+                    out_dev.name
+                )));
+            }
             let config = SessionConfig {
                 backend: Some(want),
-                input_device: sel.clone(),
-                output_device: sel,
+                input_device: DeviceSelector::Id { id: dev.id.clone() },
+                output_device: DeviceSelector::Id {
+                    id: out_dev.id.clone(),
+                },
                 input_channels: o.inputs.0.clone(),
                 output_channels: o.outputs,
                 sample_rate_hz: rate,
@@ -774,6 +790,18 @@ pub(crate) async fn state_dump(
             dump(&c, out).await
         }
     }
+}
+
+/// The playback device when none is named: the capture device itself when it has outputs
+/// (one device, one clock where the host allows it), else the system's default output.
+fn default_output<'a>(input: &'a DeviceInfo, devices: &[&'a DeviceInfo]) -> Option<&'a DeviceInfo> {
+    if input.output.is_some() {
+        return Some(input);
+    }
+    devices
+        .iter()
+        .find(|d| d.output.as_ref().is_some_and(|o| o.system_default))
+        .copied()
 }
 
 #[cfg(test)]

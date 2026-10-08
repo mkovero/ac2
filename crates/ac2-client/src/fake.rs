@@ -195,6 +195,7 @@ pub fn fake_backends() -> Vec<BackendInfo> {
         default_rate_hz: Some(48_000),
         default_buffer_frames: Some(256),
         channel_names,
+        system_default: true,
     };
     vec![
         BackendInfo {
@@ -239,7 +240,8 @@ pub fn fake_detection() -> LoopbackDetection {
     };
     LoopbackDetection {
         backend: BackendKind::Fake,
-        device: DeviceId("fake:loop".into()),
+        input_device: DeviceId("fake:loop".into()),
+        output_device: DeviceId("fake:loop".into()),
         output: 0,
         level: Dbfs(-30.0),
         ranked: vec![
@@ -708,7 +710,8 @@ impl Shared {
             C::SessionDetectLoopback {
                 lease_token,
                 backend,
-                device,
+                input_device,
+                output_device,
                 output,
                 level,
             } => {
@@ -723,7 +726,8 @@ impl Shared {
                 self.preview = None;
                 ReplyBody::LoopbackDetection(LoopbackDetection {
                     backend,
-                    device,
+                    input_device,
+                    output_device,
                     output,
                     level,
                     ..self.detection.clone()
