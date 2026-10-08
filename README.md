@@ -113,7 +113,7 @@ The hardware acceptance runs are still open ([status table](PLAN.md#90-status-20
   against REW ([docs/rigs/pupu.md](docs/rigs/pupu.md)); a Raspberry Pi 4 runs the app as a
   touch kiosk client.
 - **Windows**: the MSI installs and the app runs the simulated rig (checked in a VM); WASAPI
-  on a real interface is untested.
+  on a real interface is untested ([testing/windows](testing/windows/README.md)).
 - **macOS**: the universal disk image installs and starts on a tester's Mac; not yet
   measured with an audio interface ([testing/macos](testing/macos/README.md)).
 - Builds are not code-signed, and there are no GitHub Releases: installers are artifacts of

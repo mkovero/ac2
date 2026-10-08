@@ -32,7 +32,7 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `spikes/*` | phase 0 throwaway spikes (`audio-duplex`, `gpu-headless`; the ZMQ spike became `ac2-zmq`); findings in `docs/design/spike-*.md` |
-| `testing/` | per-platform tester guides (`testing/macos/README.md`); release binaries placed beside them are git-ignored |
+| `testing/` | per-platform tester guides (`testing/macos/README.md`, `testing/windows/README.md`); release binaries placed beside them are git-ignored |
 | `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments` |
 
 ## Rules
