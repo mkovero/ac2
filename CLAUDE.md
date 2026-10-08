@@ -7,11 +7,14 @@ Open-source (MIT) live dual-channel analyzer for PA tuning. Clean-slate successo
 ## Build
 ```
 cargo build --workspace
-cargo test --workspace
+cargo nextest run --workspace        # what CI runs (.config/nextest.toml); plain `cargo test --workspace` works too
+cargo test --workspace --doc         # doctests (nextest skips them)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 ```
-Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
+Toolchain pinned in `rust-toolchain.toml`. Edition 2024. Each crate's integration tests are one
+binary, `tests/it/` (a module per area): `cargo test -p ac2d --test it leq::`. A test that needs
+its process to itself (global allocator, process CPU time) stays a separate file in `tests/`.
 
 ## Tests: quick tier and full tier
 Real-time tests (Leq windows, device recovery, drift, band Leq, the CLI rig tests) take
@@ -40,7 +43,7 @@ Real-time tests (Leq windows, device recovery, drift, band Leq, the CLI rig test
 | `ac2-paths` | where files live (platform config / data dirs) and atomic writes; shared by the daemon and the UI |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
-| `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs, can host an embedded daemon; its own code uses no DSP (`tests/no_dsp.rs`) |
+| `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs, can host an embedded daemon; its own code uses no DSP (`tests/it/no_dsp.rs`) |
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `spikes/*` | phase 0 throwaway spikes (`audio-duplex`, `gpu-headless`; the ZMQ spike became `ac2-zmq`); findings in `docs/design/spike-*.md` |
@@ -68,7 +71,7 @@ Every turn re-sends the whole context, so what an agent reads stays paid for unt
 - Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
   through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
   `grep -n '^#'` first, read one section.
-- Iterate with `cargo test -p <crate> <filter>`; the quick tier once before commit, the full
+- Iterate with `cargo nextest run -p <crate> <filter>`; the quick tier once before commit, the full
   tier before pushing to main (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.

@@ -161,8 +161,13 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # Pinned like the toolchain: the test runner decides what a pass is.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.144
+
       - name: build tests
-        run: cargo test --workspace --locked --no-run
+        run: cargo nextest run --workspace --locked --no-run
 
       - name: No VC++ runtime imports
         if: runner.os == 'Windows'
@@ -174,7 +179,11 @@ jobs:
         # multicast on loopback, so a missing answer is a failure here, not a skip.
         env:
           AC2_REQUIRE_MDNS: "1"
-        run: cargo test --workspace --locked
+        run: cargo nextest run --workspace --locked --profile ci
+
+      # nextest does not run doctests.
+      - name: doctests
+        run: cargo test --workspace --locked --doc
 
       - name: Disk headroom
         if: always()

@@ -1,0 +1,55 @@
+# cargo-nextest: every test in its own process, so a test's globals (log subscriber,
+# allocator counters, process CPU time) never leak into another, and the slowest tests
+# overlap the rest instead of holding up their binary. Doctests are not run by nextest:
+# `cargo test --doc --workspace` covers them.
+
+[profile.default]
+# Many tests wait on real time (Leq windows, backoffs, the fake rig's real-time pace) and
+# sleep rather than compute, so more of them than cores run at once: on a 12-core machine
+# 16 threads take the run from about 100 s (one per core) to about 70 s. CI keeps one per
+# core: its runners have 3–4 and run the GPU tests on a software renderer.
+test-threads = 16
+fail-fast = false
+# A test still running after 30 s is reported; after 6 periods (3 min) it is killed: every
+# wait in the suite has a ceiling well below that, so a test that long has hung.
+slow-timeout = { period = "30s", terminate-after = 6 }
+status-level = "slow"
+final-status-level = "slow"
+failure-output = "immediate-final"
+
+# The tests that wait out Leq windows, backoffs and expiries in real time start first, so
+# they sleep beside the CPU-bound tests instead of after them; with them last, a run would
+# end on a tail of one or two of them. Mostly asleep, they cost little of a thread.
+# The longest of them (20–35 s) first of all.
+[[profile.default.overrides]]
+filter = """
+    (binary_id(ac2d::it) & test(/^leq::windows_go_over|^band_leq::a_recorders_wav|^devices::preview_follows/))
+  | (binary_id(ac2-ui::it) & test(/^embedded::spl::(filling_windows|leq_limits_go_over|a_peak_limit)/))
+  | (binary_id(ac2-cli::it) & test(/^(leq_rig|band_rig)::/))
+"""
+priority = 100
+
+[[profile.default.overrides]]
+filter = """
+    (binary_id(ac2d::it) & test(/^(leq|band_leq|recovery|devices|calibration)::/))
+  | (binary_id(ac2-ui::it) & test(/^embedded::spl::/))
+  | (binary_id(ac2-cli::it) & test(/^(leq_rig|band_rig)::/))
+"""
+priority = 50
+
+# The app's end-to-end tests play their stimulus under the daemon's real 1.5 s lease: a
+# test process starved that long by a loaded machine loses the lease and the tone with it,
+# and the flow under test then times out. The daemon must stop the sound on such a stall,
+# so the only remedy in the test is a second try; nextest reports every retried pass as
+# FLAKY, so a test that needs it often still shows.
+[[profile.default.overrides]]
+filter = "binary_id(ac2-ui::it) & test(/^embedded::/)"
+retries = 1
+
+[profile.ci]
+test-threads = "num-cpus"
+# Hosted runners are slower and shared: the same tests may take twice as long.
+slow-timeout = { period = "60s", terminate-after = 5 }
+status-level = "slow"
+final-status-level = "slow"
+failure-output = "immediate-final"
