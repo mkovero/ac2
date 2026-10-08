@@ -451,7 +451,6 @@ commands! {
     SplC => "spl_c", "SPL meter: C weighting", [Global];
     SplZ => "spl_z", "SPL meter: Z weighting (flat)", [Global];
 
-    Freeze => "freeze", "Freeze / unfreeze selected measurement", [Transfer, Spectrum];
     ResetAverage => "reset_average", "Reset averaging of selected measurement", [Transfer, Spectrum, Spl];
     StartStop => "start_stop", "Start / stop selected measurement", [Transfer, Spectrum, Ir, Spl];
 
@@ -568,6 +567,8 @@ pub fn defaults() -> Vec<Binding> {
         // step here, and a letter is on every layout.
         (C::Settings, S::Global, cmd(K::P)),
         (C::Quit, S::Global, cmd(K::Q)),
+        // F is full screen in every pane, so no pane binds plain F; F11 as elsewhere.
+        (C::Fullscreen, S::Global, k(K::F)),
         (C::Fullscreen, S::Global, k(K::F11)),
         (C::StimulusLevel, S::Global, k(K::L)),
         // Plain digits are the slots' (as in `ac`); panes take Alt+digit.
@@ -685,8 +686,6 @@ pub fn defaults() -> Vec<Binding> {
         (C::SmoothCoarser, S::Spectrum, k(K::K)),
         (C::SmoothFiner, S::Spectrum, sh(K::K)),
         (C::GroupDelay, S::Transfer, sh(K::P)),
-        (C::Freeze, S::Transfer, k(K::F)),
-        (C::Freeze, S::Spectrum, k(K::F)),
         (C::ResetAverage, S::Transfer, k(K::R)),
         (C::ResetAverage, S::Spectrum, k(K::R)),
         (C::ResetAverage, S::Spl, k(K::R)),
@@ -710,10 +709,10 @@ pub fn defaults() -> Vec<Binding> {
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
         // confirmation: it discards show data).
         (C::SplNewLog, S::Spl, sh(K::R)),
-        // The meter's weightings: F for the time weighting (Fast → Slow → Impulse; there is
-        // nothing to freeze in this pane), Z for the frequency weighting (A → C → Z). Letters
-        // only: the same keys on every layout.
-        (C::SplTimeWeighting, S::Spl, k(K::F)),
+        // The meter's weightings: Shift+F for the time weighting (Fast → Slow → Impulse;
+        // plain F is full screen everywhere), Z for the frequency weighting (A → C → Z).
+        // Letters only: the same keys on every layout.
+        (C::SplTimeWeighting, S::Spl, sh(K::F)),
         (C::SplWeighting, S::Spl, k(K::Z)),
         // Plain L types the stimulus level; Shift+L is the Leq windows.
         (C::LeqWindows, S::Global, sh(K::L)),
@@ -783,7 +782,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::StartStop, "start/stop", 70),
-                    hint(C::Freeze, "freeze", 80),
                     hint(C::PeakHold, "peak hold", 75),
                     // The RTA's bars / line (B) is in the help and the palette: the line
                     // holds eight.
@@ -1221,13 +1219,20 @@ mod tests {
         );
         assert_eq!(m.lookup(Scope::Global, c("/")), None);
         assert_eq!(m.lookup(Scope::Spl, c("X")), None);
-        // The SPL meter's weightings; F freezes elsewhere, Z loads a target in transfer.
+        // The SPL meter's weightings; Z loads a target in transfer.
         assert_eq!(
-            m.lookup(Scope::Spl, c("F")),
+            m.lookup(Scope::Spl, c("Shift+F")),
             Some(CommandId::SplTimeWeighting)
         );
         assert_eq!(m.lookup(Scope::Spl, c("Z")), Some(CommandId::SplWeighting));
-        assert_eq!(m.lookup(Scope::Spectrum, c("F")), Some(CommandId::Freeze));
+        // F is full screen in every pane.
+        for scope in Scope::ALL {
+            assert_eq!(
+                m.lookup(scope, c("F")),
+                Some(CommandId::Fullscreen),
+                "{scope:?}"
+            );
+        }
     }
 
     /// Offsets, the level axis and Delete: modifiers on the stimulus arrows (which stay the

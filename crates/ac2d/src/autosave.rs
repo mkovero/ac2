@@ -421,7 +421,6 @@ mod tests {
                 },
             },
             running: true,
-            frozen: false,
             delay: None,
         }
     }
@@ -878,7 +877,6 @@ mod tests {
                     },
                 },
                 running: false,
-                frozen: false,
                 delay: None,
             }],
             Vec::new(),

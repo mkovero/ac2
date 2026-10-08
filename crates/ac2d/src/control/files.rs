@@ -94,7 +94,6 @@ impl Control {
                 id: m.id,
                 config: m.config.clone(),
                 running: m.running,
-                frozen: m.frozen,
                 delay: m.delay.as_ref().map(|d| SavedDelay {
                     applied: d.applied,
                     nudged: d.nudged,
@@ -356,7 +355,6 @@ impl Control {
                 config_rev: Rev(self.store.rev().0 + 1),
                 // A sweep measurement never runs on its own: only `sweep.run` plays it.
                 running,
-                frozen: sm.frozen,
                 delay,
                 grid_id,
             };

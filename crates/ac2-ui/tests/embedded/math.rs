@@ -40,7 +40,7 @@ fn running_math(s: &AppState) -> Option<(MeasId, String)> {
 
 /// From an empty daemon: two transfer measurements (two positions of the room mic); the
 /// math channel dialog by name (Shift+M) makes their average, drawn as a transfer curve whose
-/// legend counts its positions; Ctrl+1 freezes it into a stored trace naming the
+/// legend counts its positions; Ctrl+1 captures it into a stored trace naming the
 /// expression; edited into A ÷ B it reads 0 dB (one path over itself); a position stopped
 /// is named in a banner and the ratio says it has no result.
 #[test]
@@ -135,7 +135,7 @@ fn math_channels_from_an_empty_daemon() -> R {
         tf_legend(&d.st, avg)
     );
 
-    // Ctrl+1 freezes it: a stored trace in slot 1 naming the expression and its operands.
+    // Ctrl+1 captures it: a stored trace in slot 1 naming the expression and its operands.
     d.send(Msg::SelectMeas(avg));
     d.key("Ctrl+1");
     d.until("the capture in slot 1", |s| {

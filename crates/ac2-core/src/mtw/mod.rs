@@ -197,8 +197,6 @@ pub struct PushOutcome {
     pub blocks_accumulated: usize,
     /// Blocks dropped because they touched rejected samples.
     pub blocks_rejected: usize,
-    /// Blocks completed while frozen (not accumulated).
-    pub blocks_frozen: usize,
     /// The input did not continue the previous push's sample index, so the ladder restarted.
     pub restarted: bool,
 }
@@ -352,7 +350,6 @@ pub struct Mtw {
     stages: Vec<StageRuntime>,
     aligner: align::Aligner,
     plan: Vec<ColumnSource>,
-    frozen: bool,
     pair_x: Vec<f64>,
     pair_y: Vec<f64>,
     dec_x: Vec<f64>,
@@ -420,7 +417,6 @@ impl Mtw {
             layout,
             stages,
             plan,
-            frozen: false,
             pair_x: Vec::new(),
             pair_y: Vec::new(),
             dec_x: Vec::new(),
@@ -596,17 +592,6 @@ impl Mtw {
         Ok(())
     }
 
-    /// Freeze: completed blocks are not accumulated; the frame keeps showing the held
-    /// averages. The block grid keeps advancing.
-    pub fn set_frozen(&mut self, frozen: bool) {
-        self.frozen = frozen;
-    }
-
-    /// Whether frozen.
-    pub fn is_frozen(&self) -> bool {
-        self.frozen
-    }
-
     /// Clear the averages; alignment, decimators and framing continue.
     pub fn reset_averages(&mut self) {
         for s in &mut self.stages {
@@ -730,7 +715,6 @@ impl Mtw {
                 s.est.reject(lo, hi);
             }
         }
-        let frozen = self.frozen;
         for s in &mut self.stages {
             let (x, y): (&[f64], &[f64]) = match &mut s.decimator {
                 Some(d) => {
@@ -741,10 +725,9 @@ impl Mtw {
                 }
                 None => (&self.pair_x, &self.pair_y),
             };
-            s.est.feed(x, y, frozen, |fate, _| match fate {
+            s.est.feed(x, y, |fate, _| match fate {
                 BlockFate::Accumulated => out.blocks_accumulated += 1,
                 BlockFate::Rejected => out.blocks_rejected += 1,
-                BlockFate::Frozen => out.blocks_frozen += 1,
             });
         }
         out

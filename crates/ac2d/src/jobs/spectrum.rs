@@ -52,9 +52,8 @@ pub(crate) struct Spectrum {
     /// Advances whenever there is something new to show: a spectrum, or a setting.
     generation: u64,
     /// When a `spec` frame goes out: on something new, and repeated while nothing changes
-    /// (frozen, or a long hop) well inside the second after which a client calls it stale.
+    /// (a long hop) well inside the second after which a client calls it stale.
     pace: Pace,
-    frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
     levels: LevelsMeter,
@@ -106,7 +105,6 @@ impl Spectrum {
         sample_rate: u32,
         idx: usize,
         cal: InputCal,
-        frozen: bool,
         config_rev: Rev,
     ) -> Result<Self, String> {
         let n = cfg.fft_len as usize;
@@ -140,7 +138,6 @@ impl Spectrum {
             generation: 0,
             pace: Pace::new(std::time::Duration::ZERO),
             cal: InputCal::none(),
-            frozen,
             config_rev,
             applied_at: None,
             buf: Vec::new(),
@@ -239,11 +236,9 @@ impl Analysis for Spectrum {
         {
             self.analyzer.reset_average();
         }
-        if !self.frozen {
-            channel_f64(b, self.idx, &mut self.buf);
-            if self.analyzer.push(&self.buf) > 0 {
-                self.generation += 1;
-            }
+        channel_f64(b, self.idx, &mut self.buf);
+        if self.analyzer.push(&self.buf) > 0 {
+            self.generation += 1;
         }
         self.levels.push(b);
         self.end = Some(b.end_sample());
@@ -252,10 +247,6 @@ impl Analysis for Spectrum {
 
     fn command(&mut self, c: JobCmd) {
         match c {
-            JobCmd::Freeze(f) => {
-                self.frozen = f;
-                self.generation += 1;
-            }
             JobCmd::Reset => self.analyzer.reset_average(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::Smoothing {

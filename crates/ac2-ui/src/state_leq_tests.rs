@@ -594,7 +594,7 @@ fn spl_keys_cycle_the_weightings() {
     t.key("G");
     assert_eq!(t.st.view.spl.mode, SplMode::Leq);
     let mut seen = Vec::new();
-    for key in ["F", "F", "F", "Z", "Z", "Z"] {
+    for key in ["Shift+F", "Shift+F", "Shift+F", "Z", "Z", "Z"] {
         let (cfg, what) = spl_update(&t.key(key)).expect(key);
         assert_eq!(cfg.input, 1);
         assert_eq!(cfg.leq, LeqConfig::default_windows());
@@ -628,7 +628,7 @@ fn spl_keys_cycle_the_weightings() {
     t.key("G");
     t.key("G");
     assert_eq!(t.st.view.spl.mode, SplMode::Meter);
-    t.key("F");
+    t.key("Shift+F");
     assert_eq!(t.st.view.spl.mode, SplMode::Meter, "the meter stays");
     for (c, want) in [
         (CommandId::SplSlow, "FOH SPL: LAS"),

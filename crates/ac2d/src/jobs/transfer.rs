@@ -141,7 +141,6 @@ pub(crate) struct Transfer {
     delay_samples: f64,
     /// The part of the applied delay the operator's nudges added to the arrival, samples.
     nudged_samples: f64,
-    frozen: bool,
     config_rev: Rev,
     applied_at: u64,
     apply_pending: bool,
@@ -220,7 +219,6 @@ impl Transfer {
         delay_samples: f64,
         delay_s: f64,
         nudged_samples: f64,
-        frozen: bool,
         config_rev: Rev,
         tracking: bool,
         awaiting_pick: bool,
@@ -244,7 +242,6 @@ impl Transfer {
             delay_samples,
         })
         .map_err(|e| e.to_string())?;
-        mtw.set_frozen(frozen);
         let smoother = smoother(grid, cfg.smoothing);
         let grid_id = ac2_proto::grid::GridDef::Log {
             ppo: grid.ppo,
@@ -286,7 +283,6 @@ impl Transfer {
             delay_s,
             delay_samples,
             nudged_samples,
-            frozen,
             config_rev,
             applied_at: 0,
             apply_pending: true,
@@ -416,7 +412,6 @@ impl Transfer {
             meta: TfMeta {
                 delay: Seconds(self.delay_s),
                 nudged: Seconds(self.nudged_samples / self.fs),
-                frozen: self.frozen,
                 smoothing: self.cfg.smoothing,
                 mic_curve: self.corr.is_some(),
                 math: None,
@@ -541,10 +536,6 @@ impl Analysis for Transfer {
             JobCmd::Track { enabled } => {
                 self.finder
                     .track(enabled, held(self.delay_samples, self.nudged_samples));
-            }
-            JobCmd::Freeze(f) => {
-                self.frozen = f;
-                self.mtw.set_frozen(f);
             }
             JobCmd::Reset => self.mtw.reset_averages(),
             JobCmd::Cal(cal) => self.set_correction(cal.correction.as_deref()),

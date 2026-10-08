@@ -35,7 +35,6 @@
     },
     "config_rev": 40,
     "running": true,
-    "frozen": false,
     "delay": {
      "applied": 0.0125,
      "applied_samples": 600.25,
@@ -450,7 +449,6 @@
     },
     "config_rev": 40,
     "running": true,
-    "frozen": false,
     "delay": null,
     "grid_id": null
    }
@@ -507,7 +505,6 @@
     },
     "config_rev": 62,
     "running": true,
-    "frozen": false,
     "delay": null,
     "grid_id": 8785464140711761104
    }
@@ -687,7 +684,6 @@
     },
     "config_rev": 66,
     "running": false,
-    "frozen": false,
     "delay": null,
     "grid_id": null
    }

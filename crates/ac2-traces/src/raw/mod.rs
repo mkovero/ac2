@@ -28,7 +28,7 @@ pub use wav::{WavError, WavInfo, WavReader, WavWriter};
 /// `format` of every sidecar.
 pub const FORMAT: &str = "ac2-raw-capture";
 /// The one sidecar version this build reads and writes.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 /// Sidecar file name suffix.
 pub const SIDECAR_SUFFIX: &str = ".ac2rec.json";
 /// Audio file name suffix.
@@ -178,7 +178,7 @@ pub struct Initial {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum TimelineChange {
-    /// A measurement's new full value (configuration, delay, running, frozen), or its
+    /// A measurement's new full value (configuration, delay, running), or its
     /// deletion.
     Measurement(Box<Patch<Measurement, MeasId>>),
     /// The generator's new state (armed, firing, signal, level).

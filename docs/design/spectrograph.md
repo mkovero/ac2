@@ -48,7 +48,7 @@ of the UI, like peak hold, kept only while the spectrograph is shown.
   slots shows too).
 - **A frame stands for the time since the previous one.** A long FFT updates a few times a
   second; and the link does not deliver a frame that draws the same as the previous one (a
-  frozen spectrum, digital silence). Both leave slots without a frame that are not missing
+  steady spectrum, digital silence). Both leave slots without a frame that are not missing
   data, so they hold the previous frame — the same `Arc`, no copy.
 - **Gaps.** A stream the client marks STALE, or a measurement that is not running, marks a
   break: the slots until the next frame stay empty and draw as the plot background. More than

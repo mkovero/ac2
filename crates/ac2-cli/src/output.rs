@@ -198,14 +198,13 @@ pub fn average_method(m: ac2_proto::model::AverageMethod) -> &'static str {
 
 /// Measurements table.
 pub fn measurements(ms_: &[Measurement]) -> String {
-    let mut t = table(&["id", "name", "kind", "running", "frozen", "delay", "rev"]);
+    let mut t = table(&["id", "name", "kind", "running", "delay", "rev"]);
     for m in ms_ {
         t.add_row(vec![
             m.id.to_string(),
             m.config.name.clone(),
             meas_kind(&m.config.kind),
             yes(m.running),
-            yes(m.frozen),
             m.delay.as_ref().map_or_else(
                 || format::NO_VALUE.to_owned(),
                 |d| format::delay_and_offset(d.applied.0, d.nudged.0),

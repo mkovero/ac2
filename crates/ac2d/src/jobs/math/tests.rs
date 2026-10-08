@@ -52,7 +52,6 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
             meta: TfMeta {
                 delay: Seconds(inserted),
                 nudged: Seconds(0.0),
-                frozen: false,
                 smoothing: None,
                 mic_curve: false,
                 math: None,
@@ -373,7 +372,6 @@ fn job(cfg: MathConfig, stored: Vec<Option<Arc<Held>>>, probes: Arc<Probes>) -> 
         stored,
         EPOCH,
         probes,
-        false,
         Rev(1),
     )
 }
@@ -424,7 +422,7 @@ fn stored_operands_alone_form_no_new_result_from_audio() {
     // Unchanged: the pace refreshes the result for clients, it is not formed anew.
     assert_eq!(j.generation, first);
     // A command still changes it.
-    j.command(JobCmd::Freeze(false));
+    j.command(JobCmd::Reset);
     assert_eq!(j.generation, first + 1);
 }
 

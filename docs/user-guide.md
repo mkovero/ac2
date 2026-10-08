@@ -348,8 +348,8 @@ so low frequencies get long windows and high frequencies stay responsive.
 - **Coherence (γ²)** is how much of the measured energy is explained by the reference. It is
   drawn as the transparency of the traces, as its own curve, or as a mask that blanks the
   traces where γ² is below a chosen threshold (`B` cycles through off, 0.3, 0.5, 0.7, 0.9).
-- **Averaging** accumulates the cross- and auto-spectra; **F** freezes the average, **R**
-  resets it.
+- **Averaging** accumulates the cross- and auto-spectra; **R** resets it. To keep a result,
+  capture it as a stored trace (**Ctrl+1 … 9**) or stop the measurement (**S**).
 - **Smoothing** (1/3 … 1/48 octave) is applied after coherence, so it never makes bad data
   look coherent.
 
@@ -375,7 +375,7 @@ Which measurement the keys act on:
 - **S** (start / stop) and **R** (reset) act on the measurement the focused pane shows,
   never on one of another kind selected elsewhere, and say what to create when the pane
   shows none.
-- **F**, **X** and the delay keys act on the selected measurement and say which kind they
+- **X** and the delay keys act on the selected measurement and say which kind they
   need when it is another.
 
 #### What A and Delete act on: the item selected last
@@ -429,7 +429,7 @@ alone.
   pane resizes. Esc and Shift+Esc stop as always.
 - Outside full screen the top bar shows the stimulus as usual.
 
-**F11** on its own puts the whole window full screen (or back) in whatever layout it is in;
+**F** (or **F11**) on its own puts the whole window full screen (or back) in whatever layout it is in;
 with one pane up, that is the same stage view. Esc stops the stimulus as anywhere else
 (Shift+Esc too, also with a window open).
 
@@ -564,7 +564,7 @@ about 30 times a second.
 
 1. the spectrum;
 2. the spectrum with the **spectrograph** of the pane's measurement under it;
-3. the spectrograph alone (the whole pane; **W** or F11 for the whole screen).
+3. the spectrograph alone (the whole pane; **W** or **F** for the whole screen).
 
 Frequency runs across on the spectrum's own axis (zoom and pan move both), time down with
 the newest frame at the top, level as colour.
@@ -739,7 +739,7 @@ passed off as the result:
 
 An operand cannot be deleted, or moved to another grid, while a math channel names it.
 
-- **F** freezes a math channel; **R** on it resets its live operands' averaging.
+- **R** on a math channel resets its live operands' averaging.
 - **Ctrl+1 … 9** captures it as a stored trace that names the expression and the operands
   that went in.
 
@@ -1565,7 +1565,7 @@ pane: meter + Leq windows"), and the app remembers the choice.
 | **Leq windows** | the windows as columns or tiles ([next section](#leq-windows-and-limits)) |
 | **meter + Leq** (where a new meter starts) | the meter's number centred across the top third of the pane (its name and unit `LAF · dB SPL` under it, the live bar; the same number with the same hold as in the meter view, without its statistics) and the Leq windows below it as columns or tiles (**B**, **Shift+B** as in the Leq view), under one caption for both: the meter's name, the run and the calibration |
 
-- **W** twice (or W, then F11) makes it the stage view: the number and the windows, nothing
+- **W** twice (or W, then **F**) makes it the stage view: the number and the windows, nothing
   else, also while a stimulus is armed or playing.
 - On a short pane the number and its name share one line above the windows; on a very
   short one (under about 170 px) the number gives way: the windows judge the limits, the
@@ -1586,7 +1586,7 @@ bottom:
 These are the meter's figures since its start or the last **R**, not the Leq windows
 (**G**), which keep their own lengths and are never reset by R.
 
-The secondary figures grow with the pane: **W** twice (or W, then F11) makes the meter full
+The secondary figures grow with the pane: **W** twice (or W, then **F**) makes the meter full
 screen, to be read across the room; there the grey calibration line shows only with STALE
 (or STOPPED), otherwise its room goes to the number.
 
@@ -1604,7 +1604,7 @@ frame.
 
 | Key | Steps |
 |---|---|
-| **F** | time weighting Fast → Slow → Impulse |
+| **Shift+F** | time weighting Fast → Slow → Impulse |
 | **Z** | frequency weighting A → C → Z |
 
 The palette has each one by name ("SPL meter: Slow time weighting", "SPL meter: C
@@ -1720,7 +1720,7 @@ over is certain is ac2's choice for the time before.
   app was not running: a restarted (or reconnected, or second) app gets it from the daemon,
   rebuilt from the meter's log as the meter computed it; a new log clears it.
 - The app remembers both.
-- **W** gives the pane the whole window, once more (or **F11**) the whole screen: the
+- **W** gives the pane the whole window, once more (or **F**) the whole screen: the
   **stage view**, nothing but the columns (in meter + Leq, the number above them). The grey
   caption line (the meter's name, its calibration) shows there only with the history on
   (Shift+B, then with the run), or with STALE when the values are; otherwise its room goes to
@@ -2167,7 +2167,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+K` | Command palette | `palette` |
 | `Ctrl+P` | Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
-| `F11` | Window full screen on / off | `fullscreen` |
+| `F` or `F11` | Window full screen on / off | `fullscreen` |
 | `Shift+H` | Key hints on / off | `key_hints` |
 | `Space` | Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator) | `stimulus_arm` |
 | `Enter` | Stimulus: fire what is armed (named in the top bar) | `stimulus_fire` |
@@ -2244,7 +2244,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `F` | Freeze / unfreeze selected measurement | `freeze` |
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
 | `X` | Delay: find and insert first arrival | `insert_delay` |
@@ -2274,7 +2273,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
-| `F` | Freeze / unfreeze selected measurement | `freeze` |
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
 | `J` | Type dB offset of selected trace… | `offset` |
@@ -2303,7 +2301,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | `Shift+B` | SPL Leq windows: history strip on / off | `spl_leq_history` |
 | `Shift+R` | Start a new SPL log… | `spl_new_log` |
-| `F` | SPL meter: time weighting Fast → Slow → Impulse | `spl_time_weighting` |
+| `Shift+F` | SPL meter: time weighting Fast → Slow → Impulse | `spl_time_weighting` |
 | `Z` | SPL meter: frequency weighting A → C → Z | `spl_weighting` |
 
 #### Sweep / distortion
@@ -2379,9 +2377,9 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Pane | Hint line |
 |---|---|
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `Alt+↑` offset · `H` all keys |
-| Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
+| Spectrum / RTA | `S` start/stop · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `C` cursor · `Shift+Home` fit · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
-| SPL | `G` meter/Leq/both/bands · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| SPL | `G` meter/Leq/both/bands · `Shift+F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `C` cursor · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->

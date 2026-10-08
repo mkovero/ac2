@@ -65,7 +65,7 @@ keeps the WAV header shape that most tools already read, and the reserved `JUNK`
 the switch free. Written by a small writer in `ac2-traces::raw::wav` (no codec dependency;
 the reader accepts plain float WAV too and refuses PCM).
 
-**Sidecar** (`format: ac2-raw-capture`, `version: 1`; another version is refused):
+**Sidecar** (`format: ac2-raw-capture`, `version: 2`; another version is refused):
 
 | field | content |
 |---|---|
@@ -76,7 +76,7 @@ the reader accepts plain float WAV too and refuses PCM).
 | `end` | frames, `RecordingEnd` reason; absent while recording |
 | `limits` | duration and size bounds |
 | `initial` | measurements, generator, input setup, the recorded inputs' calibrations |
-| `timeline` | every committed change of a measurement (config, delay, running, frozen, deleted), the generator (arm, fire, level, signal), the input setup or a calibration: `at_sample` (newest captured sample at commit), `frame`, wall time, the new value |
+| `timeline` | every committed change of a measurement (config, delay, running, deleted), the generator (arm, fire, level, signal), the input setup or a calibration: `at_sample` (newest captured sample at commit), `frame`, wall time, the new value |
 | `discontinuities` | `frame` (first file frame after it), `session_sample`, `lost_frames`, `estimated`, `causes` |
 
 Session sample of file frame *f* = `start.session_sample + f + Σ lost_frames` of the

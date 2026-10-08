@@ -128,8 +128,8 @@ impl Emitter {
     }
 }
 
-/// Longest a client goes without a frame of a result that has not changed (frozen, settled,
-/// or gated by protection). A client marks a topic STALE after a second without a new frame
+/// Longest a client goes without a frame of a result that has not changed (settled or
+/// gated by protection). A client marks a topic STALE after a second without a new frame
 /// (`ac2_client::data::STALE_AFTER`): re-sending an unchanged result four times a second
 /// keeps a live but steady measurement fresh with room for a late or dropped frame, while
 /// only a stopped stream (no audio, so no blocks and no frames at all) goes STALE.
@@ -281,8 +281,6 @@ pub(crate) enum JobCmd {
         rev: Rev,
         resume: bool,
     },
-    /// Freeze or unfreeze.
-    Freeze(bool),
     /// Clear averages.
     Reset,
     /// New display smoothing; `rev` is the commit that set it. Averaging goes on.

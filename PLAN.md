@@ -114,7 +114,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 |---|---|---|---|
 | MTW H1 + coherence ladder, 48 ppo grid, complex crossover blend | P0 | ac | 2 |
 | Fixed-FFT mode (time-domain aligned) | P1 | new | 2 |
-| Averaging of Sxx/Syy/Sxy (FIFO / exponential); freeze, reset | P0 | ac + new | 2 |
+| Averaging of Sxx/Syy/Sxy (FIFO / exponential); reset | P0 | ac + new | 2 |
 | Fractional-octave smoothing (1/3 … 1/48), after coherence | P0 | ac | 2 |
 | Coherence display, blanking / alpha on traces | P0 | ac | 4 |
 | Delay finder: selectable band, confidence, explicit "no estimate"; operator inserts / nudges / types | P0 | ac + new | 2 |
@@ -270,7 +270,7 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 - `ac2-plot` paints a `Scene`; it may choose pixel placement, never a value.
 - Animation applies to navigation (zoom, pan, layout) only. Measurement values and
   fault transitions are shown as received; interpolation between data frames is
-  optional, off for frozen/compared traces, and never hides a fault or discontinuity.
+  optional, off for stored/compared traces, and never hides a fault or discontinuity.
 - Renderer tests: headless wgpu on a software adapter (lavapipe / WARP) in CI, so
   rendering tests never need the rig GPU (the reason `ac`'s first GPU UI was abandoned).
 
@@ -422,7 +422,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded 
   Reply `{v, id, result | error{code, msg}}`. Request ids are deduplicated per client
   for a retry window, so a retried command never executes twice.
 - Command groups: `session` (devices, open, close, status), `gen` (acquire, release, arm,
-  fire, set, stop), `meas` (create, update, delete, start, stop, freeze, reset), `delay`
+  fire, set, stop), `meas` (create, update, delete, start, stop, reset), `delay`
   (find, insert, set, track), `trace` (capture, list, get, update, delete, average,
   import, export, mic curve), `cal` (spl, spl electrical, curve import / rename / delete,
   use, list, delete), `spl` (log get, log new, history get), `ir` (capture), `state` (snapshot, since), `grid` (get), `file` (save,
@@ -564,7 +564,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 |---|---|---|---|
 | 0 | Foundations + spikes | workspace, CI (linux/mac/win), lint/fmt, refgen; spikes: cpal multichannel duplex + output→input timing on mac/win, libzmq+CURVE vendored build on 3 OS, wgpu software-adapter test | CI: green on 3 OS incl. spikes; golden-vector harness runs. HW: duplex spike on one rig per OS |
 | 1 | Audio | backend trait + capabilities, sample-indexed blocks, JACK, cpal, fake (explicit), xrun/discontinuity telemetry, duplex timing validation | CI: forced overflow yields a discontinuity marker, never a channel shift. HW: 8 in / 2 out @ 48 kHz, 128-frame buffer (256 on Windows WASAPI), 4 TF jobs, 1 h, zero self-caused xruns, per OS |
-| 2 | Core DSP | MTW ladder + alignment, averaging (freeze/reset), smoothing, protection, delay finder (target, bands, confidence, candidates) + tracking, spectrum, RTA, weighting, generator | CI: §5.6 loopback suites pass against refgen; finder meets §5.2 acceptance numbers on scenario fixtures |
+| 2 | Core DSP | MTW ladder + alignment, averaging (reset), smoothing, protection, delay finder (target, bands, confidence, candidates) + tracking, spectrum, RTA, weighting, generator | CI: §5.6 loopback suites pass against refgen; finder meets §5.2 acceptance numbers on scenario fixtures |
 | 3 | Daemon + protocol + CLI | session + jobs, ROUTER/XPUB, typed proto, state sync with replay/resync, bounded-freshness publishing, stimulus lease, CURVE + pairing, client, CLI `--watch` | CI: two clients stay in sync through dropped events, expired replay, session reopen and daemon restart; stalled subscriber recovers to fresh frames; unauthorized connect refused on both sockets; lease expiry stops output. HW: CLI drives a live TF remotely over CURVE |
 | 4 | Scene + UI | scene layer, wgpu plot, panes, keys, palette, banners, meters, live TF/RTA/IR, traces + metadata + slots + compare cursor, embedded daemon | HW: tune a real speaker end-to-end keyboard-only on Linux, macOS and Windows |
 | 5 | Calibration, SPL, sessions | cal store (sensitivity, mic curve, device/channel/mic binding), SPL meter, trace averaging/math/targets, import/export, sessions | HW: **replaces `ac` for PA work** — mains + sub + delay alignment, cal'd SPL, saved/compared traces, session reload disarmed, on all 3 OS |

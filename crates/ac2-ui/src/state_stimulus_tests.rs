@@ -332,14 +332,6 @@ fn transfer_commands() {
             ..
         }]
     ));
-    let r = t.key("F");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Call {
-            cmd: Command::MeasFreeze { frozen: true, .. },
-            ..
-        }]
-    ));
     // U / J are display edits, not commands.
     assert!(t.key("U").is_empty());
     assert!(t.st.edit(MeasId(1)).inverted);

@@ -977,7 +977,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
                 _ => None,
             })
     };
-    d.key("F");
+    d.key("Shift+F");
     d.until("Slow", |s| {
         config(s).is_some_and(|(_, c)| c.time_weighting == TimeWeighting::Slow)
     })?;

@@ -8,7 +8,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
 ![Transfer function with stored traces, the measurement tree and key hints](crates/ac2-ui/tests/snapshots/traces_list.png)
 
 - **Transfer function** with coherence (multi-time-window FFT ladder, 48 points per octave),
-  averaging, freeze, magnitude and phase smoothing, fault banners that say what is wrong
+  averaging, magnitude and phase smoothing, fault banners that say what is wrong
   instead of drawing a plausible curve.
 - **Delay finder** that targets the first arrival, reports confidence and candidates, and
   says "no estimate" rather than guessing; delay tracking.

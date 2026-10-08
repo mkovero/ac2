@@ -864,7 +864,6 @@ async fn a_long_log_in_pages_and_its_history() {
                 id: M,
                 config: meter(vec![window(60.0, Some(95.0))]),
                 running: false,
-                frozen: false,
                 delay: None,
             }],
             spl_logs: vec![SavedSplLog {

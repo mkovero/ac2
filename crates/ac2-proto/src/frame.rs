@@ -298,8 +298,6 @@ pub struct TfMeta {
     /// ([`crate::model::DelayState::nudged`]) when this frame was made; 0 for a math channel.
     /// A view's shared time base refers the curve to `delay − nudged`.
     pub nudged: Seconds,
-    /// Display frozen.
-    pub frozen: bool,
     /// Live smoothing applied.
     pub smoothing: Option<Smoothing>,
     /// A mic curve was subtracted from `mag` (for a math channel: from every operand).

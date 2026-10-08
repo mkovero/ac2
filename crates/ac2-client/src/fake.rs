@@ -941,7 +941,6 @@ impl Shared {
                     config,
                     config_rev: Rev(self.rev.0 + 1),
                     running: false,
-                    frozen: false,
                     delay,
                     grid_id,
                 };
@@ -1009,11 +1008,6 @@ impl Shared {
             C::MeasStop { meas } => {
                 let mut m = self.meas(meas)?;
                 m.running = false;
-                self.put_meas(m)
-            }
-            C::MeasFreeze { meas, frozen } => {
-                let mut m = self.meas(meas)?;
-                m.frozen = frozen;
                 self.put_meas(m)
             }
             C::MeasReset { meas } => {

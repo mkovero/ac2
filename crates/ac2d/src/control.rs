@@ -679,7 +679,6 @@ impl Control {
                     config,
                     config_rev: Rev(self.store.rev().0 + 1),
                     running: false,
-                    frozen: false,
                     delay,
                     grid_id,
                 };
@@ -782,16 +781,6 @@ impl Control {
                 not_a_sweep(&m)?;
                 self.stop_job(meas);
                 m.running = false;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
-            }
-            Command::MeasFreeze { meas, frozen } => {
-                let mut m = self.meas(meas)?.clone();
-                not_a_sweep(&m)?;
-                m.frozen = frozen;
-                if let Some(j) = self.jobs.get(&meas) {
-                    j.send(JobCmd::Freeze(frozen));
-                }
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }

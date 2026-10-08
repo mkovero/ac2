@@ -600,8 +600,6 @@ pub struct Measurement {
     pub config_rev: Rev,
     /// Job running.
     pub running: bool,
-    /// Display frozen (averaging continues off-screen only if running).
-    pub frozen: bool,
     /// Delay (transfer measurements only).
     pub delay: Option<DelayState>,
     /// Grid of the measurement's main stream.

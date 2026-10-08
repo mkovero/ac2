@@ -27,8 +27,8 @@
 //! The manifest carries `format: "ac2-session"` and `version`. A file of another version is
 //! refused with that version named — there is no migration and no best-effort read.
 //!
-//! What a session holds: measurement configurations (with their applied delay, tracking,
-//! running and frozen flags), each SPL meter's per-second log (so its Leq windows carry on
+//! What a session holds: measurement configurations (with their applied delay, tracking
+//! and running flags), each SPL meter's per-second log (so its Leq windows carry on
 //! after a load or a daemon restart) and stored traces with all metadata, display edits
 //! and slots.
 //! Trace columns are saved unsmoothed and uncorrected; a trace's display smoothing
@@ -55,7 +55,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 14;
+pub const VERSION: u32 = 15;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -74,8 +74,6 @@ pub struct SavedMeasurement {
     pub config: MeasConfig,
     /// Running when saved (restarted on load when a session is open).
     pub running: bool,
-    /// Frozen.
-    pub frozen: bool,
     /// Transfer measurements: the applied delay and whether tracking was on.
     pub delay: Option<SavedDelay>,
 }

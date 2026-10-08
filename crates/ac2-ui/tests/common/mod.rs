@@ -78,7 +78,6 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         meta: TfMeta {
             delay: Seconds(0.0125),
             nudged: Seconds(0.0),
-            frozen: false,
             smoothing: Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,
                 mode: SmoothingMode::MagnitudePhase,
@@ -265,7 +264,6 @@ fn measurement(
         },
         config_rev: Rev(1),
         running: true,
-        frozen: false,
         delay,
         grid_id: grid.map(GridDef::id),
     }

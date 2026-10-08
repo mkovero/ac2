@@ -1026,20 +1026,6 @@ impl AppState {
                 }
             }
 
-            C::Freeze => {
-                if let Some(m) = self.need_meas(
-                    &[MeasKind::publishes_tf, MeasKind::publishes_levels],
-                    "transfer or spectrum",
-                ) {
-                    let frozen = !m.frozen;
-                    let what = if frozen { "frozen" } else { "unfrozen" };
-                    self.call(
-                        out,
-                        Command::MeasFreeze { meas: m.id, frozen },
-                        format!("{} {what}", m.config.name),
-                    );
-                }
-            }
             C::ResetAverage => {
                 let m = self.focused_pane_meas();
                 if let Some(m) = &m

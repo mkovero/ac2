@@ -1057,7 +1057,7 @@ fn session_save_load_round_trip() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
-        text.replace("\"version\": 14", "\"version\": 15"),
+        text.replace("\"version\": 15", "\"version\": 16"),
     )
     .unwrap();
     let e = c
@@ -1071,8 +1071,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 15,
-            supported: 14
+            found: 16,
+            supported: 15
         })
     );
     assert_eq!(traces(c).len(), n);
@@ -1154,8 +1154,8 @@ fn owners_capture_move_and_delete() {
         run(&mut r.d, 0.5);
         c.ok(Command::GenRefresh { lease_token: r.tok });
     }
-    let frozen = cap(c, math.id, "pre ÷ post 21:04");
-    assert_eq!(frozen.edit.owner, main);
+    let captured = cap(c, math.id, "pre ÷ post 21:04");
+    assert_eq!(captured.edit.owner, main);
     let avg = trace(c.ok(Command::TraceAverage {
         traces: vec![pre.id, post.id],
         method: AverageMethod::Power,
