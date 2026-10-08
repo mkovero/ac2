@@ -95,12 +95,12 @@ and the picture cannot disagree.
   after a break, overflow and clock reset, max within a slot, grid / scale change, the scene
   (rect on the axis, same columns after zoom, colour range with offset, stale opacity, axis
   labels, colour-bar labels, caption, cursor readout, empty states).
-- `ac2-plot` (`tests/render.rs`): scroll is a rotation, columns follow identity (replace,
+- `ac2-plot` (`tests/it/render.rs`): scroll is a rotation, columns follow identity (replace,
   empty, fresh renderer equal), NaN transparent and release, time-up is the transpose, a
   pixel shows its highest cell; the golden `heatmap_scroll` is unchanged.
 - `ac2-ui`: `tests/embedded.rs` `spectrograph_from_an_empty_daemon` (session, spectrum
   from the palette, G, the rig's noise fills it, cursor readout, C, Shift+G, stopped caption,
-  G alone, W full size, level keys, G clears); GPU snapshots `tests/ui.rs` `spectrograph`
+  G alone, W full size, level keys, G clears); GPU snapshots `tests/it/ui.rs` `spectrograph`
   and `spectrograph_alone` from a pinned 25 s sweep with a gap.
 
 ## Open

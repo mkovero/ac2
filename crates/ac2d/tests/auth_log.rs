@@ -3,6 +3,7 @@
 //! a global log subscriber that captures what the ZAP thread writes.
 #![allow(clippy::unwrap_used)]
 
+#[path = "it/common/mod.rs"]
 mod common;
 
 use std::io::Write;

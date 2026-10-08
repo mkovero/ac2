@@ -1,8 +1,12 @@
 //! A host that delivers audio in bursts is named in the daemon log, once per minute, with
 //! the backend, device and buffer; a steady stream is not. The fake rig is stepped by hand:
 //! a burst is 400 ms of audio produced at once after 400 ms of nothing.
+//!
+//! Its own binary: it installs the process's global log subscriber to read what the daemon
+//! logs, which only one test of a process can do.
 #![allow(clippy::unwrap_used)]
 
+#[path = "it/common/mod.rs"]
 mod common;
 
 use std::io::Write;

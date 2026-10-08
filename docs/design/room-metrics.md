@@ -92,7 +92,7 @@ Expected values are analytic or from numpy/scipy, never from `ac`.
 | `a_double_slope_decay_shows_curvature` | 0.3 s for 25 dB then 1.5 s | EDT / T20 / T30 vs envelope; curvature (31 %) | 6 % / 4 % / 4 %; ±8 points | passes |
 | `filter_and_schroeder_match_refgen` | golden set `room_schroeder_octaves` (`tools/refgen/sets/room.py`: scipy `butter` + `sosfilt` reversed, `numpy.polyfit`) | Schroeder curve every 1 ms, EDT / T20 / T30, C50 / C80 per octave | 1e-6 dB, 1e-7 rel., 1e-6 dB | passes |
 | `sweep::tests::a_room_keeps_its_parameters_through_the_sweep` | a 0.5 s room through the whole sweep chain (ESS, loopback, deconvolution) vs the room's own IR analysed directly | decay times per octave; broadband; C80 | 0.5 %; 3 %; 0.3 dB | passes |
-| `ac2d/tests/sweep.rs` `a_sweep_in_a_hall_reads_its_reverberation_time` | daemon + fake rig, Schroeder reverberator T60 = 0.8 s (every comb's loop gain set for 60 dB in 0.8 s) | T20 / T30, octaves 250 Hz…4 kHz and broadband | 8 % | 0.75…0.81 s |
+| `ac2d/tests/it/sweep.rs` `a_sweep_in_a_hall_reads_its_reverberation_time` | daemon + fake rig, Schroeder reverberator T60 = 0.8 s (every comb's loop gain set for 60 dB in 0.8 s) | T20 / T30, octaves 250 Hz…4 kHz and broadband | 8 % | 0.75…0.81 s |
 
 Single bands of a single IR scatter (the statistical uncertainty of any IR measurement,
 Lundeby et al. discuss it): at 63–250 Hz one room's T20 is within about ±30 %, its EDT

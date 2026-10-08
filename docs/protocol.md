@@ -1,7 +1,7 @@
 # ac2 protocol
 
 Normative description of the wire protocol between `ac2d` and its clients. The Rust types
-in `crates/ac2-proto` are the implementation; `crates/ac2-proto/tests/doc_parity.rs` fails
+in `crates/ac2-proto` are the implementation; `crates/ac2-proto/tests/it/doc_parity.rs` fails
 when a command, reply body, event kind, error code, frame header field, frame kind, array
 name or unit exists in the code but not here. Background: PLAN.md §6,
 `docs/design/q2-q5-q6-protocol.md`, `docs/design/spike-zmq-curve.md`.

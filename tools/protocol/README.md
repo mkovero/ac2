@@ -11,7 +11,7 @@ written from the document (msgpack via the `msgpack` package).
 python3 -m venv tools/protocol/.venv                      # gitignored
 tools/protocol/.venv/bin/pip install -r tools/protocol/requirements.txt
 tools/protocol/.venv/bin/python tools/protocol/fixtures.py check
-cargo test -p ac2-proto --test fixtures
+cargo test -p ac2-proto --test it fixtures::
 ```
 
 Both must pass; neither is wired into CI yet (that is the command to wire).
@@ -21,14 +21,14 @@ Both must pass; neither is wired into CI yet (that is the command to wire).
   full, the rest structurally; grid ids recomputed in Python), checks that malformed
   frames are refused, and verifies the committed `py_*.bin` / `expected/*.json` are what
   `gen` would write.
-- `cargo test --test fixtures` checks the committed `rust_*.bin` equal this build's
+- `cargo test --test it fixtures::` checks the committed `rust_*.bin` equal this build's
   encoding and decodes every `py_*.bin` to exactly the values in
   `crates/ac2-proto/src/samples.rs`.
 
 ## After a protocol change
 
 ```
-AC2_UPDATE_FIXTURES=1 cargo test -p ac2-proto --test fixtures   # rewrite rust_*.bin
+AC2_UPDATE_FIXTURES=1 cargo test -p ac2-proto --test it fixtures::   # rewrite rust_*.bin
 tools/protocol/.venv/bin/python tools/protocol/fixtures.py gen   # rewrite py_*.bin, expected/
 tools/protocol/.venv/bin/python tools/protocol/fixtures.py check
 cargo test -p ac2-proto

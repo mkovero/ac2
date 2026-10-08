@@ -194,13 +194,13 @@ new avg` and `ac2 trace math`.
 - `ac2d` (`jobs/math/tests.rs`): the spatial-average cases (dropouts, reference left out,
   gaps, weighting); a live ÷ stored ratio (6 dB, relative arrival, lower coherence); a sum
   with a stored operand of another epoch left out as `mismatch`; a capture + live sum is the
-  comb. `tests/math_channels.rs` on the fake rig: the live average of three positions
+  comb. `tests/it/math_channels.rs` on the fake rig: the live average of three positions
   (analytic power average, NO SIGNAL position refused, capture naming two positions,
   invariants, FEW_OPERANDS); Seat 1 ÷ Seat 2 = +6 dB with the later arrival in the phase,
   edited to × = 0 dB, capture kept at +6 dB; capture + live = the two-arrival sum; an
   import refused in a sum, allowed in ÷; spectrum − spectrum = 6 dB on the `spec` stream,
   its capture a spectrum trace, operand FFT length locked.
-- `ac2-cli` (`tests/math_rig.rs`): expressions typed and by `--op`, refusals by message, an
+- `ac2-cli` (`tests/it/math_rig.rs`): expressions typed and by `--op`, refusals by message, an
   edit keeping the name, `meas list`.
 - `ac2-ui`: the dialog (`math_dialog.rs` tests, `state_tests`), `tests/embedded.rs` from an
   empty daemon (dialog by name, the average at −6 dB with its legend, capture with Ctrl+1,

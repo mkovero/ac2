@@ -21,7 +21,7 @@ path = "src/main.rs"
 [features]
 default = ["embedded"]
 # Host the daemon in-process (`ac2-ui --embedded`). Links `ac2d` and through it the DSP and
-# audio crates; the UI code itself never uses them (`tests/no_dsp.rs`).
+# audio crates; the UI code itself never uses them (`tests/it/no_dsp.rs`).
 embedded = ["dep:ac2d"]
 
 [dependencies]
@@ -46,7 +46,7 @@ toml = "0.8"
 [dev-dependencies]
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
 # Test oracle only: the rig publishes curves smoothed as the daemon would. The app itself
-# never links the DSP (tests/no_dsp.rs checks the normal and build edges); the fake
+# never links the DSP (tests/it/no_dsp.rs checks the normal and build edges); the fake
 # daemon's band log rows are ac2-traces'.
 ac2-core = { path = "../ac2-core" }
 ac2-traces = { path = "../ac2-traces" }

@@ -116,9 +116,9 @@ server); a vanish ends running streams through the host and refuses opens as una
 A stream running when an outage began never delivers again, as a client of a reset device.
 Tests, all from an empty daemon on the fake: stall → AUDIO STOPPED within the bound, the
 control thread answering while an attempt hangs, the device back → same measurements, new
-epoch, generator disarmed, SPL log gap (`crates/ac2d/tests/recovery.rs`); vanish → reopen
+epoch, generator disarmed, SPL log gap (`crates/ac2d/tests/it/recovery.rs`); vanish → reopen
 after the device returns; the device back in the middle of a 30 s wait → reopened within
-2.5 s, with no early attempt while it stays away; `ac2 status` (`crates/ac2-cli/tests/recovery_rig.rs`); the app's
+2.5 s, with no early attempt while it stays away; `ac2 status` (`crates/ac2-cli/tests/it/recovery_rig.rs`); the app's
 banner appears and clears without user action (`crates/ac2-ui/tests/embedded.rs`).
 
 ## Open

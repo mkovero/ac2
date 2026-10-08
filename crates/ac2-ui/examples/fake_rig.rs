@@ -6,7 +6,7 @@
 //! cargo run -p ac2-ui --example fake_rig [-- --bench-startup] [-- --theme light]
 //! ```
 
-#[path = "../tests/common/mod.rs"]
+#[path = "../tests/it/common/mod.rs"]
 mod common;
 
 use std::time::Instant;

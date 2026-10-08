@@ -107,7 +107,7 @@ measurements restart on it as on any reopen.
 
 ## Tolerance
 
-What `crates/ac2d/tests/recording.rs` asserts after recording the simulated rig (pink
+What `crates/ac2d/tests/it/recording.rs` asserts after recording the simulated rig (pink
 noise, loopback + acoustic path, an xrun that loses 1000 frames mid-way) with a transfer
 function, a spectrum, an RTA and an SPL meter running, and replaying it `fast`:
 

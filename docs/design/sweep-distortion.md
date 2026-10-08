@@ -165,7 +165,7 @@ The linear IR is windowed from `d − 0.1·L·ln 2` (just after H2's window) to 
 Synthetic systems through the same path the daemon uses (one continuous recording, onsets
 located, repeats cut and averaged), 48 kHz, worst case over the fundamentals 100 Hz …
 f2/k/1.15 (`crates/ac2-core/src/sweep/tests.rs`), and the whole chain on the simulated rig
-(`crates/ac2d/tests/sweep.rs`: generator → fake converters with a distorting acoustic path →
+(`crates/ac2d/tests/it/sweep.rs`: generator → fake converters with a distorting acoustic path →
 recorder → analysis, f32 audio):
 
 | system | quantity | target | achieved |

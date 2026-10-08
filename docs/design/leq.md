@@ -173,7 +173,7 @@ its first second and over after 6 s (shown over from 7 s, when `least` reads abo
 0.1 dB), the 60 min one on course for 6 minutes and over after about 6 min 5 s; the 5, 10
 and 30 min windows in between. Tests: `ac2_core::leq` (this case second by second, quiet
 then loud, gaps, full windows identical to the rolling rule), the daemon's alarm timing
-(`crates/ac2d/tests/leq.rs`), the scene's texts and bar, `ac2 spl leq watch --json`, and the
+(`crates/ac2d/tests/it/leq.rs`), the scene's texts and bar, `ac2 spl leq watch --json`, and the
 app from an empty daemon.
 
 This is ac2's presentation choice, not a regulation's: the regulations judge full windows,
@@ -365,7 +365,7 @@ falls exactly at the start of its span. Tests: the replay against the job second
 over a log with lost seconds, short and long pauses (`ac2_core::leq`); the history bit for
 bit against frames built as the job builds them, from the log's start and part way, and
 across a change of unit (`ac2d` `leq_history`); a log longer than a page, paged and its
-4 h history (`crates/ac2d/tests/leq.rs`); the history joining live frames
+4 h history (`crates/ac2d/tests/it/leq.rs`); the history joining live frames
 (`ac2_scene::leq`); the app's reducer (restart, a new log from elsewhere, changed windows,
 reconnect); and from an empty daemon, a restarted app shows the seconds before it started
 within 0.01 dB of what the first app received, and a new log from one app clears another's.

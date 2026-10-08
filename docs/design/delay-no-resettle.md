@@ -4,8 +4,8 @@ Status: implemented (`ac2_core::mtw` — `Mtw::set_delay`, `KEEP_MIN_WINDOW_CORR
 the aligner's splice; `delay.nudge`; `applied_samples` fractional; the app's Ctrl / Alt +
 `,` `.` keys; `ac2 delay nudge`). Answers PLAN.md §3.3 "Delay change without full ladder
 resettle; sub-sample delay" and the §12 risk "MTW resettle on delay change (~2.4 s)".
-Tests: `crates/ac2-core/tests/mtw_delay.rs` (analytic systems), the aligner's splice test,
-`crates/ac2d/tests/transfer.rs` (daemon), `crates/ac2-ui/src/state_tests.rs` (keys).
+Tests: `crates/ac2-core/tests/it/mtw_delay.rs` (analytic systems), the aligner's splice test,
+`crates/ac2d/tests/it/transfer.rs` (daemon), `crates/ac2-ui/src/state_tests.rs` (keys).
 
 ## What the operator gets
 
@@ -59,7 +59,7 @@ arrival it had at capture, so after its nudge is changed no honest absolute dela
 - **Step** (`delay.nudge`: `,` `.` 0.1 ms, Ctrl a sample, Alt a tenth) adds its step to
   `nudged` (at most ±10 s). At 96 kHz 0.1 ms is 9.6 samples; the 10⁻⁶-sample snap makes
   whole 0.1 ms steps out and back land exactly on the start
-  (`crates/ac2d/tests/transfer.rs`, `tenth_millisecond_steps_at_96_khz_return_exactly`).
+  (`crates/ac2d/tests/it/transfer.rs`, `tenth_millisecond_steps_at_96_khz_return_exactly`).
 - **Typed value** keeps the arrival: `nudged` = typed − arrival, so the live curve alone moves
   to it, as the same run of steps would.
 - **Tracking** moves the arrival to the tracker's result: whole samples while two windows
@@ -83,7 +83,7 @@ arrival it had at capture, so after its nudge is changed no honest absolute dela
 - **TF frame shape** is unchanged (the live spatial average and other consumers see the same
   frames; the curve just stops going back to settling).
 
-## Validation (`crates/ac2-core/tests/mtw_delay.rs`)
+## Validation (`crates/ac2-core/tests/it/mtw_delay.rs`)
 
 Inputs are periodic and band-limited (period 2¹⁹, nothing at Nyquist), built in the
 frequency domain as `Y_k = X_k·H(f_k)·e^{−j2πf_kτ/fs}`: every sample is exactly the
@@ -103,11 +103,11 @@ FIFO 8 (and exponential where marked).
 | two quick 100-sample steps, then one after the average turned over (FIFO, exponential) | reset of the full-rate stage on the second, kept on the third |
 
 Unchanged: `partial_coherence_matches_theory_and_large_delay_does_not_bias_it` (bit for
-bit across ±0.2 s), the golden and loopback suites in `tests/mtw.rs`.
+bit across ±0.2 s), the golden and loopback suites in `tests/it/mtw.rs`.
 
 ## Cost
 
-`crates/ac2-core/tests/mtw_timing.rs` (opt-in, release; this machine was shared with other
+`crates/ac2-core/tests/it/mtw_timing.rs` (opt-in, release; this machine was shared with other
 builds, so runs vary by ±30 %): MTW per second of input at 48 kHz — main 2.7–3.9 ms,
 branch 3.9 ms with a whole-sample delay and 3.9 ms with a fraction; at 96 kHz main 4.5–5.9
 ms, branch 5.9 / 5.4 ms: no difference beyond the noise. One kept delay change (rotating

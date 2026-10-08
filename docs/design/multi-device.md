@@ -220,10 +220,10 @@ open question (§9).
 | | 50 ppm with a −17 jump | one jump, slope 50 ± 1 ppm, one warning |
 | | 80 ppm, 20 s stimulus gap | re-lock without a jump, warning kept |
 | | 1000 ppm | Lost, never a stale Locked |
-| `ac2d/tests/drift.rs` (empty daemon, fake DAC clock) | 0 ppm | drift shown, no warning |
+| `ac2d/tests/it/drift.rs` (empty daemon, fake DAC clock) | 0 ppm | drift shown, no warning |
 | | 50 ppm | warning, 50 ± 0.5 ppm published and committed; reopened session forgets it |
 | | 17 output frames dropped | OUTPUT TIMING JUMP 2000 → 1983, no drift warning |
-| `ac2-cli/tests/drift_rig.rs` | 50 ppm | `ac2 status` clock line with `+50.0 ppm` and the warning |
+| `ac2-cli/tests/it/drift_rig.rs` | 50 ppm | `ac2 status` clock line with `+50.0 ppm` and the warning |
 | `ac2-scene`, `ac2-ui` | banner text, order, detail; from mirrored state; session dialog note | asserted headless |
 
 ## 7. Input-vs-input (designed, not implemented)

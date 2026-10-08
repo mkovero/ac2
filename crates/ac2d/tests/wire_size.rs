@@ -2,8 +2,11 @@
 //! stream of a transfer function, a default spectrum, an RTA and an SPL meter on the fake
 //! rig, and the daemon's CPU time over the run. The spectrum frame must stay display-sized:
 //! a 65 536-point FFT is 32 769 bins, far more than any screen has pixels.
+//!
+//! Its own binary: the CPU time it reports is the whole process's.
 #![allow(clippy::unwrap_used)]
 
+#[path = "it/common/mod.rs"]
 mod common;
 
 use std::collections::BTreeMap;
