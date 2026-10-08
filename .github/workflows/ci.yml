@@ -39,7 +39,7 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # With no arguments rustup installs the toolchain + components pinned in rust-toolchain.toml.
       - name: Install pinned toolchain
         run: rustup toolchain install
@@ -58,7 +58,7 @@ jobs:
         # macOS/Windows run when asked (dispatch with all_os) and before every release.
         os: ${{ fromJSON(inputs.all_os && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install pinned toolchain
         run: rustup toolchain install
@@ -103,7 +103,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(inputs.all_os && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install pinned toolchain
         run: rustup toolchain install
@@ -193,7 +193,7 @@ jobs:
     name: refgen check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -208,7 +208,7 @@ jobs:
     name: protocol fixtures (python)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
