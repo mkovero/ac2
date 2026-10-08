@@ -1294,58 +1294,94 @@ Inputs carry a **mic name** (**N** on the input in Settings › Inputs & outputs
 Calibration, `ac2 session open … --mic 3=M30`, `ac2 session inputs --mic 3=M30`).
 Two things are stored, in the calibration store of the daemon's machine:
 
-- **Sensitivity** (dB SPL of 0 dBFS) — per device, input and mic. It calibrates the whole
-  chain, preamp gain included, so it belongs to that input and that gain: change the gain
-  and calibrate again. There are two ways to get it:
-  - **acoustic**: put a 94 dB (or 114 dB) calibrator on the mic and run
-    `ac2 cal spl --input 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz), or in
-    the app **C** on the input in the Calibrations view: the dialog shows the input's level
-    live, takes the mic name (prefilled when the input has one), the calibrator's level
-    (←/→ 94 / 114 dB) and tone (1 kHz / 250 Hz); Enter reads and stores, and while the
-    level is still settling it says so and Enter tries again. This is the reference method;
-  - **electrical** ([below](#calibrating-without-a-calibrator-electrical)): no calibrator,
-    but a true-RMS voltmeter at the input and the mic's data-sheet sensitivity, with a stated
-    uncertainty (±1 dB). **E** in the Calibrations view, or `ac2 cal electrical`.
+- **Sensitivity** (dB SPL of 0 dBFS): per device, input and mic.
+- **Mic curves** (the **mic library**): per mic, any number, each with a short **label**.
 
-  SPL is then computed from the raw input level with that sensitivity. A calibration made
-  with another mic or on another input is used but shown as such; an acoustic calibration
-  replaces an electrical one, never the other way round unless you say so.
-- **Mic curves** (the **mic library**) — per mic, any number, each with a short **label**: a measurement mic often
-  comes with one file per incidence angle (0° for pointing at the source, 90° for grazing
-  incidence), and using the wrong one is a few dB of error at high frequencies.
-  `ac2 cal curve import 449350_34804_90Grad.txt --input 3` imports a file into the mic
-  library as a curve of input 3's mic (`--mic NAME` instead names the mic directly). The
-  label comes from the file — the angle its header or name states (*90-degree-curve*,
-  `_90Grad`, `0deg` → *90°*, *0°*), else the file name — or from `--label`;
-  `ac2 cal curve rename --mic "MM1 34804" 0° "on axis"` renames it later. A sensitivity the
-  file states (*15.0 mV/Pa = −36.5 dBV*) is shown as the data sheet value; it is used only
-  as the default sensitivity of an electrical calibration. Curves follow the mic name to any input and device.
+#### Sensitivity
 
-**Which curve is in use** is chosen per input, explicitly: `ac2 cal use 3 90°` (or `off`;
-`ac2 session inputs --mic 3=M30 --curve 3=90°` sets names and curves of several inputs at
-once, and `ac2 session inputs` alone lists them); in
-the app **←/→** on the input's row in the session dialog or in the **Calibrations** view
-(palette; *Input setup…* opens it on the selected measurement's input), **Mic curve on input N…** (*3=90°*), or **Mic curve: next curve on the selected
-measurement's input**. Importing a mic's first curve on an input chooses it; with several
-curves and none chosen, none applies and the input says *choose: 0°, 90°* — ac2 never
-guesses. The change applies to the running measurements at once (it is a display correction
-of the magnitude, so averages need no reset). Wherever a corrected readout is shown it says
-which curve is in it — the input's label in the sidebar (*MM1 34804 · 90° · mic (in 1)*), the
-transfer, spectrum, RTA and SPL captions (*mic curve: MM1 34804 90°*), `ac2 cal list` and
-`ac2 status` — or why there is none (*mic curve off*, *no mic curve stored for MM1 34804*,
-*mic curve 90° not stored for MM1 34804* after the curve was deleted). Captured traces keep
-exactly which curve their columns carry (label, file and content hash; the export header
-says it).
+It calibrates the whole chain, preamp gain included, so it belongs to that input and that
+gain: **change the gain and calibrate again**. SPL is then computed from the raw input level
+with that sensitivity. There are two ways to get it:
+
+| Method | How |
+|---|---|
+| **acoustic** (the reference method) | a 94 dB (or 114 dB) calibrator on the mic. CLI: `ac2 cal spl --input 3 --ref 94db` (`--freq` when the calibrator is not 1 kHz). App: **C** on the input in the Calibrations view. |
+| **electrical** ([below](#calibrating-without-a-calibrator-electrical)) | no calibrator, but a true-RMS voltmeter at the input and the mic's data-sheet sensitivity, with a stated uncertainty (±1 dB). **E** in the Calibrations view, or `ac2 cal electrical`. |
+
+The app's acoustic dialog shows the input's level live and takes the mic name (prefilled
+when the input has one), the calibrator's level (←/→ 94 / 114 dB) and tone (1 kHz /
+250 Hz). Enter reads and stores; while the level is still settling it says so and Enter
+tries again.
+
+- A calibration made with another mic or on another input is used but shown as such.
+- An acoustic calibration replaces an electrical one, never the other way round unless you
+  say so.
+
+#### Mic curves
+
+A measurement mic often comes with one file per incidence angle (0° for pointing at the
+source, 90° for grazing incidence), and using the wrong one is a few dB of error at high
+frequencies.
+
+- `ac2 cal curve import 449350_34804_90Grad.txt --input 3` imports a file into the mic
+  library as a curve of input 3's mic (`--mic NAME` instead names the mic directly).
+- The label comes from the file (the angle its header or name states: *90-degree-curve*,
+  `_90Grad`, `0deg` → *90°*, *0°*; else the file name) or from `--label`.
+  `ac2 cal curve rename --mic "MM1 34804" 0° "on axis"` renames it later.
+- A sensitivity the file states (*15.0 mV/Pa = −36.5 dBV*) is shown as the data sheet
+  value; it is used only as the default sensitivity of an electrical calibration.
+- Curves follow the mic name to any input and device.
+
+#### Which curve is in use
+
+It is chosen per input, explicitly:
+
+- **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 session inputs --mic 3=M30 --curve 3=90°`
+  sets names and curves of several inputs at once, and `ac2 session inputs` alone lists
+  them.
+- **App:** **←/→** on the input's row in the session dialog or in the **Calibrations** view
+  (palette; *Input setup…* opens it on the selected measurement's input), **Mic curve on
+  input N…** (*3=90°*), or **Mic curve: next curve on the selected measurement's input**.
+
+ac2 never guesses: importing a mic's first curve on an input chooses it; with several curves
+and none chosen, none applies and the input says *choose: 0°, 90°*.
+
+The change applies to the running measurements at once (it is a display correction of the
+magnitude, so averages need no reset). Wherever a corrected readout is shown it says which
+curve is in it:
+
+- the input's label in the sidebar (*MM1 34804 · 90° · mic (in 1)*);
+- the transfer, spectrum, RTA and SPL captions (*mic curve: MM1 34804 90°*);
+- `ac2 cal list` and `ac2 status`;
+- or why there is none: *mic curve off*, *no mic curve stored for MM1 34804*,
+  *mic curve 90° not stored for MM1 34804* (after the curve was deleted).
+
+Captured traces keep exactly which curve their columns carry (label, file and content hash;
+the export header says it).
 
 ### The Calibrations view
 
 The **Calibration** page of Settings (palette *Calibrations…*; it opens on the selected
-measurement's input) lists what each input uses, every mic with its curves (file, points, range, data
-sheet sensitivity, which inputs use it) and every sensitivity calibration (device, input,
-mic, calibrator level and frequency, reading, age). **↑/↓** move; **←/→** choose an input's
-curve; **N** names the mic on an input; **I** imports a curve file for the focused mic (type
-the path); **R** renames a curve; **C** calibrates an input with a calibrator (above); **E** calibrates an input electrically (below); **Delete** (twice) deletes a curve or a sensitivity
-calibration. On the command line: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`,
+measurement's input) lists:
+
+- what each input uses;
+- every mic with its curves (file, points, range, data sheet sensitivity, which inputs use
+  it);
+- every sensitivity calibration (device, input, mic, calibrator level and frequency,
+  reading, age).
+
+| Key | Does |
+|---|---|
+| **↑/↓** | move |
+| **←/→** | choose an input's curve |
+| **N** | names the mic on an input |
+| **I** | imports a curve file for the focused mic (type the path) |
+| **R** | renames a curve |
+| **C** | calibrates an input with a calibrator ([above](#sensitivity)) |
+| **E** | calibrates an input electrically ([below](#calibrating-without-a-calibrator-electrical)) |
+| **Delete** (twice) | deletes a curve or a sensitivity calibration |
+
+On the command line: `ac2 cal list`, `ac2 cal curve rm --mic NAME LABEL`,
 `ac2 cal rm --input 3` (a sensitivity calibration).
 
 A calibration store written by an older ac2 is set aside (renamed to
@@ -1382,15 +1418,16 @@ sensitivity (mV/Pa, from its data sheet) turns that into dB SPL:
 Example: 15.0 mV read at −40.0 dBFS → 0 dBFS = 1.500 V; with 15.0 mV/Pa that is 100 Pa, so
 0 dBFS = 134.0 dB SPL, and the mic at 1 Pa (94 dB) gives the 15 mV that reads 94.0.
 
-It counts as a calibration everywhere — dB SPL, Leq limits judged — and says what it rests
-on wherever it is shown: *electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago*
-(an acoustic one says *cal 94 dB · 2 h ago*). The ±1 dB is mostly the data sheet's: a
-capsule's sensitivity tolerance is typically ±0.5…1 dB (an individual calibration sheet of
-your mic is better: then state `--uncertainty 0.5db`); the meter adds a little (see its
-accuracy at the range and 1 kHz). An acoustic calibration later replaces it; it never
-replaces an acoustic one unless you say so (`--replace-acoustic`, or Enter twice in the app).
+- It counts as a calibration everywhere (dB SPL, Leq limits judged) and says what it rests
+  on wherever it is shown: *electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago*
+  (an acoustic one says *cal 94 dB · 2 h ago*).
+- The ±1 dB is mostly the data sheet's: a capsule's sensitivity tolerance is typically
+  ±0.5…1 dB (an individual calibration sheet of your mic is better: then state
+  `--uncertainty 0.5db`); the meter adds a little (see its accuracy at the range and 1 kHz).
+- An acoustic calibration later replaces it; it never replaces an acoustic one unless you
+  say so (`--replace-acoustic`, or Enter twice in the app).
 
-**In-line (the usual way: the mic stays connected and powered).**
+#### In-line (the usual way: the mic stays connected and powered)
 
 1. Put an XLR breakout (in-line adapter with test points) between the mic cable and the
    input. Phantom power stays **on**.
@@ -1402,26 +1439,29 @@ replaces an acoustic one unless you say so (`--replace-acoustic`, or Enter twice
    ceiling applies). The mic and the speaker must not move during the reading.
 4. Set the meter to **AC volts** (true RMS; AC-coupled, which also blocks the phantom
    voltage), its lowest range that fits; check its stated accuracy at that range and 1 kHz.
-   Measure **between pins 2 and 3 only**. Phantom power puts +48 V on both pins 2 and 3
-   against pin 1: never measure to pin 1, never short pins together (that is what the
-   breakout is for).
+   Measure **between pins 2 and 3 only**.
+
+   > **Warning:** phantom power puts +48 V on both pins 2 and 3 against pin 1. Never
+   > measure to pin 1, never short pins together (that is what the breakout is for).
 5. Calibrate while the tone plays: in the app, **Calibrations…** (palette), the mic's input,
    **E**; type the voltage the meter shows (*15.03 mV*), check the sensitivity (prefilled
    from the mic's curve file when it states one, else type the data sheet's, e.g. *15.0 mV/Pa*
    or *−36.5 dBV/Pa*), **Enter**. On the command line:
    `ac2 cal electrical --input 2 --volts 15.03mv` (the sensitivity from the data sheet in the
-   mic's curve file, or `--sensitivity 15.0mv/pa`). ac2 refuses while the level is not yet
-   steady (retry after a few seconds), without signal, when the input clipped, above
-   −3 dBFS or below −70 dBFS.
+   mic's curve file, or `--sensitivity 15.0mv/pa`).
+
+   ac2 refuses while the level is not yet steady (retry after a few seconds), without
+   signal, when the input clipped, above −3 dBFS or below −70 dBFS.
 
 In-line includes the mic's real source impedance loading the preamp, which an injected
 signal does not.
 
-**Injected (a generator in place of the mic).** An Analog Discovery 2's waveform generator
-(or any sine source) drives the input directly:
+#### Injected (a generator in place of the mic)
 
-1. **Switch phantom power OFF on that input first.** 48 V on the XLR can damage the
-   generator; ac2 cannot switch phantom power.
+An Analog Discovery 2's waveform generator (or any sine source) drives the input directly:
+
+1. > **Switch phantom power OFF on that input first.** 48 V on the XLR can damage the
+   > generator; ac2 cannot switch phantom power.
 2. Wire the generator between pins 2 (hot) and 3 (cold, also to pin 1 for an unbalanced
    generator), the gain as you will measure with.
 3. Play 1 kHz at a level near what the mic gives (tens of mV), measure the voltage at the
@@ -1429,6 +1469,8 @@ signal does not.
    `ac2 cal electrical --method injected --input 2 --volts 15.0mv` (in the app: ←/→ on
    *Measured* chooses injected).
 4. Disconnect the generator, plug the mic back in and **switch phantom power back on**.
+
+#### Tips
 
 Small voltages are hard to read accurately on a handheld meter. **Divider tip:** set the
 generator to about 1 V, measure that precisely, and feed the input through a precise
