@@ -28,21 +28,14 @@ The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now.
    report; denying it does not affect local use.
 
 Where ac2 keeps its files: settings, calibrations and keys in `%APPDATA%\ac2\config`;
-autosave, saved sessions and recordings in `%APPDATA%\ac2\data`.
+autosave, saved sessions and recordings in `%APPDATA%\ac2\data`; logs in
+`%LOCALAPPDATA%\ac2\logs`.
 
-For the tests below, run the daemon in its own window so its log is kept (an app started
-from the Start menu with no daemon running hosts one inside itself, which writes no log).
-Open a **new** Command Prompt (so the `PATH` from the installer applies) and run:
-
-```bat
-ac2 --version
-set RUST_LOG=info
-ac2d 2> "%USERPROFILE%\ac2-test.log"
-```
-
-`ac2 --version` should name e415ef1. Leave that window open (closing it stops the daemon;
-**Ctrl+C** there, or `ac2 daemon stop` from another window, stops it cleanly). Then start
-**ac2** from the Start menu: it connects to that daemon by itself.
+`ac2 --version` in a **new** Command Prompt (so the `PATH` from the installer applies) should
+name e415ef1. Then start **ac2** from the Start menu. It keeps its log, including the audio
+engine it hosts, in `%LOCALAPPDATA%\ac2\logs\ac2-ui.log` (paste that into Explorer's
+address bar); the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so
+copy the file before starting ac2 again if a run went wrong.
 
 ## 2. Wiring and safety
 
@@ -125,7 +118,7 @@ Also worth a try: close the session (**Ctrl+K → Close audio session**), set bo
 to 96000 Hz in `mmsys.cpl`, reopen, and check the top bar shows 96 kHz. Unplug and replug
 the interface while a session is open (ac2 should say so and recover, not crash). If the
 interface does not open at all, copy the exact message from the app and the last lines of
-`ac2-test.log`, and say which entry from step 2 you picked.
+`ac2-ui.log`, and say which entry from step 2 you picked.
 
 ## 4. Test 2: transfer function over a cable, then the delay finder
 
@@ -191,10 +184,10 @@ crash.
 2. On a laptop, run it on battery if you can; that is the case we care about most.
 3. Leave it for one hour. Don't let the PC sleep: **Settings → System → Power** (*Power &
    battery* on Windows 11), screen and sleep to **Never** for the run.
-4. At the start and the end, note CPU % and memory of **ac2-ui.exe** and **ac2d.exe** in
+4. At the start and the end, note CPU % and memory of **ac2-ui.exe** in
    **Task Manager → Details**, and the battery percentage.
 5. Afterwards, check the log for discontinuities, dropouts or bursts, in PowerShell:
-   `Select-String -Path $HOME\ac2-test.log -Pattern 'discontinu|overflow|underrun|burst|xrun'`.
+   `Select-String -Path $env:LOCALAPPDATA\ac2\logs\ac2-ui.log -Pattern 'discontinu|overflow|underrun|burst|xrun'`.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
 
@@ -229,7 +222,8 @@ useful.
 | Test 4: 1 h run clean? CPU %, memory (both processes) and battery at start and end | |
 | Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
-| CPU % of ac2-ui.exe and ac2d.exe with a session open and nothing playing | |
+| CPU % of ac2-ui.exe with a session open and nothing playing | |
 | Any banner, freeze, crash, firewall prompt or odd behaviour | |
 
-Attach `%USERPROFILE%\ac2-test.log` and screenshots of anything that looked wrong.
+Attach `%LOCALAPPDATA%\ac2\logs\ac2-ui.log` (and `ac2-ui.log.1` if the run in question was
+the one before) and screenshots of anything that looked wrong.

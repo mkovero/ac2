@@ -157,6 +157,10 @@ There are three ways; pick one.
 - **A network daemon** on a stage or FOH machine, used from another computer. See
   [Remote use](#remote-use-foh--stage).
 
+The app and a daemon started by hand keep a log file (`~/.local/state/ac2`,
+`~/Library/Logs/ac2`, `%LOCALAPPDATA%\ac2\logs`); under systemd the log is in the journal
+([user guide](user-guide.md#log-files)).
+
 ## First measurement
 
 A transfer function compares a **measurement** input (the mic) with a **reference** input

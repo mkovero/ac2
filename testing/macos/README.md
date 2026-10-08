@@ -24,11 +24,10 @@ for now.
    `sudo cp /Volumes/ac2*/bin/ac2 /Volumes/ac2*/bin/ac2d /usr/local/bin/` and run
    `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
 
-For the tests below, start the app from Terminal so its log is kept:
-
-```sh
-RUST_LOG=info /Applications/ac2.app/Contents/MacOS/ac2-ui 2> ~/ac2-test.log
-```
+Start the app as usual (Launchpad, Finder or Dock). It keeps its log, including the audio
+engine it hosts, in `~/Library/Logs/ac2/ac2-ui.log` (Console.app lists it under *Log
+Reports*); the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so copy
+the file before starting ac2 again if a run went wrong.
 
 ## 2. Wiring and safety
 
@@ -55,7 +54,7 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 Pass: the interface is listed, its inputs show live levels, and a session opens without
 errors.
 
-1. Start ac2 (Terminal command above). In the connect dialog choose **This computer's
+1. Start ac2. In the connect dialog choose **This computer's
    audio**. Settings opens on its **Audio** page.
 2. **Device** (←/→): pick your interface. Note what it shows (*N in / M out · rate ·
    buffer*).
@@ -139,7 +138,7 @@ crash.
 4. At the start and the end, note ac2's CPU % and memory in **Activity Monitor**, and the
    battery percentage.
 5. Afterwards, check the log for discontinuities, dropouts or bursts:
-   `grep -iE "discontinu|overflow|underrun|burst|xrun" ~/ac2-test.log`.
+   `grep -iE "discontinu|overflow|underrun|burst|xrun" ~/Library/Logs/ac2/ac2-ui.log`.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
 
@@ -176,4 +175,5 @@ useful.
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |
 | Any banner, freeze, crash or odd behaviour | |
 
-Attach `~/ac2-test.log` and screenshots of anything that looked wrong.
+Attach `~/Library/Logs/ac2/ac2-ui.log` (and `ac2-ui.log.1` if the run in question was the
+one before) and screenshots of anything that looked wrong.

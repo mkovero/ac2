@@ -140,6 +140,11 @@ fn embedded_backends() -> Vec<EmbeddedBackend> {
 fn main() -> ExitCode {
     let started = Instant::now();
     let args = Args::parse();
+    // A GUI launch has no terminal, so the file is what a tester can send back; the embedded
+    // daemon logs through the same subscriber.
+    if let Some(path) = ac2_paths::log::init("ac2-ui") {
+        tracing::info!("{NAME}: logging to {}", path.display());
+    }
     let mut notices = Vec::new();
     // Lives until the window closes; dropping it shuts the daemon down.
     let mut embedded = None;
@@ -166,7 +171,7 @@ fn main() -> ExitCode {
         match target(&args, &mut embedded, &mut notices) {
             Ok(t) => Some(t),
             Err(e) => {
-                eprintln!("ac2-ui: {e}");
+                tracing::error!("ac2-ui: {e}");
                 return ExitCode::from(2);
             }
         }
@@ -254,7 +259,7 @@ fn main() -> ExitCode {
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("ac2-ui: {e}");
+            tracing::error!("ac2-ui: {e}");
             ExitCode::FAILURE
         }
     }
