@@ -1483,122 +1483,193 @@ the two — ac2 notes it. The mic curve stays normalised at 1 kHz.
 
 ### SPL meter
 
-The **SPL meter** shows the sound level with Fast, Slow or Impulse time weighting and A, C
-or Z frequency weighting (IEC 61672-1: F and S are exponential averages of the squared
-signal with 125 ms and 1 s; I, from IEC 60651, averages with 35 ms and holds peaks, falling
-with 1.5 s), with Leq, LCpeak, Lmax and Lmin, in the SPL pane or in the terminal. A new
-meter reads **A-weighted, Fast** (`LAF`) unless you choose otherwise, in the app and with
-`ac2 meas new spl` alike.
+The **SPL meter** shows the sound level, in the SPL pane or in the terminal:
 
-- **Three views, G steps them**: the **meter** (below), the **Leq windows** (next section)
-  and **meter + Leq**, where a new meter starts: the meter's number centred across the top
-  third of the pane — its name and unit (`LAF · dB SPL`) under it and the live bar, the same
-  number with the same hold as in the meter view, without its statistics — and the Leq
-  windows below it as columns or tiles (**B**, **Shift+B** as in the Leq view), under one
-  caption for both: the meter's name, the run and the calibration. G goes meter → Leq
-  windows → meter + Leq → meter; the palette has each by name ("SPL pane: meter + Leq
-  windows"), and the app remembers the choice. W twice (or W, then F11) makes it the stage
-  view: the number and the windows, nothing else, also while a stimulus is armed or
-  playing. On a short pane the number and its name share one line above the
-  windows; on a very short one (under about 170 px) the number gives way: the windows judge the
-  limits, the meter view still has it.
-- **The number** is the current time-weighted level, centred and as large as the pane
-  allows; under it the level's name and unit, `LAF · dB SPL` (`dBFS` uncalibrated), then a
-  slim bar with the level live (30 … 130 dB SPL, or −100 … 0 dBFS, 10 dB ticks), then the
-  meter's own statistics under one heading that says since when they run — *meter since
-  4:01 · R resets* (local time; the date too when not today) — `LAeq`, `LCpeak`, `LAFmax`
-  and `LAFmin` in the meter's weightings, and at the bottom the calibration. These are the
-  meter's figures since its start or the last **R**, not the Leq windows (**G**), which
-  keep their own lengths and are never reset by R.
-  The secondary figures grow with the pane: **W** twice (or W, then F11) makes the meter
-  full screen, to be read across the room; there the grey calibration line shows only
-  with STALE (or STOPPED), otherwise its room goes to the number.
-- **Readable, not flickering.** The number takes a new reading twice a second with F and I
-  and once a second with S, as a hand-held meter's display does; the bar moves with every
-  frame. The reading is the time-weighted level at that instant — the time weighting is
-  the averaging, displayed values are never averaged in dB. (I needs no longer hold: its
-  1.5 s fall holds peaks itself.) `spl_hold_ms = 250` in `ui.toml` sets another display
-  period (100 … 10000 ms) for every time weighting.
-- **F** in the SPL pane steps the time weighting Fast → Slow → Impulse, **Z** the frequency
-  weighting A → C → Z; the palette has each one by name ("SPL meter: Slow time
-  weighting", "SPL meter: C weighting"…). The change applies to the running meter at once
-  and is kept with it (sessions, autosave). The pane stays as it is: with the Leq windows
-  showing, a message names the meter's new reading (*FOH SPL: LCS*) and the windows stay —
-  they keep their own weightings. Nothing restarts: the meter measures every
-  combination all the time, so the new one reads its settled level from the first frame
-  (a Slow meter started at the switch would need 5 s), and its Lmax, Lmin, Leq and Lpeak
-  cover the same interval as before — each combination keeps its own, from the meter's
-  start or the last **R**. The Leq windows and the per-second log carry on untouched.
-- `ac2 spl set --weight c --time slow` does the same from the terminal (`--meas` or
-  `--input` when there is more than one meter). `ac2 spl watch --input 3 --weight a` shows
-  a meter in the terminal (add `--json` for one JSON line per update, `--for 10s` to stop on
-  its own). With `--input` the command runs its own meter for as long as it runs, so Leq,
-  Lmax and Lmin cover exactly what it watched; `--meas` shows an existing meter instead.
+- time weighting **Fast**, **Slow** or **Impulse** (IEC 61672-1: F and S are exponential
+  averages of the squared signal with 125 ms and 1 s; I, from IEC 60651, averages with
+  35 ms and holds peaks, falling with 1.5 s);
+- frequency weighting **A**, **C** or **Z**;
+- with Leq, LCpeak, Lmax and Lmin.
+
+A new meter reads **A-weighted, Fast** (`LAF`) unless you choose otherwise, in the app and
+with `ac2 meas new spl` alike.
+
+#### Three views, G steps them
+
+**G** goes meter → Leq windows → meter + Leq → meter; the palette has each by name ("SPL
+pane: meter + Leq windows"), and the app remembers the choice.
+
+| View | Shows |
+|---|---|
+| **meter** | the number and the meter's statistics ([below](#the-number)) |
+| **Leq windows** | the windows as columns or tiles ([next section](#leq-windows-and-limits)) |
+| **meter + Leq** (where a new meter starts) | the meter's number centred across the top third of the pane (its name and unit `LAF · dB SPL` under it, the live bar; the same number with the same hold as in the meter view, without its statistics) and the Leq windows below it as columns or tiles (**B**, **Shift+B** as in the Leq view), under one caption for both: the meter's name, the run and the calibration |
+
+- **W** twice (or W, then F11) makes it the stage view: the number and the windows, nothing
+  else, also while a stimulus is armed or playing.
+- On a short pane the number and its name share one line above the windows; on a very
+  short one (under about 170 px) the number gives way: the windows judge the limits, the
+  meter view still has it.
+
+#### The number
+
+The current time-weighted level, centred and as large as the pane allows. Under it, top to
+bottom:
+
+1. the level's name and unit, `LAF · dB SPL` (`dBFS` uncalibrated);
+2. a slim bar with the level live (30 … 130 dB SPL, or −100 … 0 dBFS, 10 dB ticks);
+3. the meter's own statistics under one heading that says since when they run — *meter
+   since 4:01 · R resets* (local time; the date too when not today) — `LAeq`, `LCpeak`,
+   `LAFmax` and `LAFmin` in the meter's weightings;
+4. the calibration.
+
+These are the meter's figures since its start or the last **R**, not the Leq windows
+(**G**), which keep their own lengths and are never reset by R.
+
+The secondary figures grow with the pane: **W** twice (or W, then F11) makes the meter full
+screen, to be read across the room; there the grey calibration line shows only with STALE
+(or STOPPED), otherwise its room goes to the number.
+
+**Readable, not flickering.** The number takes a new reading twice a second with F and I
+and once a second with S, as a hand-held meter's display does; the bar moves with every
+frame.
+
+- The reading is the time-weighted level at that instant: the time weighting is the
+  averaging, displayed values are never averaged in dB. (I needs no longer hold: its 1.5 s
+  fall holds peaks itself.)
+- `spl_hold_ms = 250` in `ui.toml` sets another display period (100 … 10000 ms) for every
+  time weighting.
+
+#### Changing the weightings
+
+| Key | Steps |
+|---|---|
+| **F** | time weighting Fast → Slow → Impulse |
+| **Z** | frequency weighting A → C → Z |
+
+The palette has each one by name ("SPL meter: Slow time weighting", "SPL meter: C
+weighting"…).
+
+- The change applies to the running meter at once and is kept with it (sessions, autosave).
+- The pane stays as it is: with the Leq windows showing, a message names the meter's new
+  reading (*FOH SPL: LCS*) and the windows stay; they keep their own weightings.
+- **Nothing restarts:** the meter measures every combination all the time, so the new one
+  reads its settled level from the first frame (a Slow meter started at the switch would
+  need 5 s), and its Lmax, Lmin, Leq and Lpeak cover the same interval as before. Each
+  combination keeps its own, from the meter's start or the last **R**.
+- The Leq windows and the per-second log carry on untouched.
+
+#### SPL from the terminal
+
+```sh
+ac2 spl set --weight c --time slow       # --meas or --input when there is more than one meter
+ac2 spl watch --input 3 --weight a       # --json: one JSON line per update; --for 10s stops on its own
+```
+
+With `--input` the command runs its own meter for as long as it runs, so Leq, Lmax and Lmin
+cover exactly what it watched; `--meas` shows an existing meter instead.
 
 ### Leq windows and limits
 
-Every SPL meter also keeps **rolling Leq windows** — by default LAeq over 1, 5, 10, 30 and
-60 min — and a **per-second log** (LAeq, LCeq and LZeq of every second, the last 48 hours).
-Both run as long as the meter runs, whether or not any app or terminal is watching, and carry
-on when the meter is stopped and started, its windows are changed, the session is reopened or
-the daemon restarts (the log is in the autosave and in saved sessions).
+Every SPL meter also keeps:
 
-- **G** in the SPL pane steps meter → windows → meter + windows (above). The windows show as
-  **columns**, made to be read from the stage or across the room: one full-height column per
-  window, the shortest on the left, each a bar that fills from the bottom with the window's
-  Leq, the value in large digits on top with the window's own unit and weighting beside it
-  on the same line, small and dim — **dB(A)**, **dB(C)**, **dB(Z)**, or **dBFS (A)**
-  uncalibrated — and the window's
-  name at the bottom ("LAeq 30 min", shortened to "30 min" or "30m" when the columns are
-  narrow — the caption then says "LAeq"). The unit is never left out: in meter + Leq the
-  meter above may read in another weighting (LCS over LAeq windows), and a column must not be
-  read in the meter's. Tiles show it the same way. The limit is a line across the column; a column turns **amber** within the warn
-  margin (3 dB by default) of its limit and the whole column goes **red** above it, and goes
-  back when the window recovers; each going over and each recovery also shows as a message.
-- A window **still filling** (a new log, a longer window than the meter has run) shows its
-  Leq **so far** ("so far · 12:30 / 30:00") but is judged on its **budget**: the limit allows
-  so much sound energy over the whole window, and the column goes **red** only once that is
-  spent — when the window will end over its limit even if everything is silent from now
-  on. Before that, a Leq so far above the limit turns it **amber, "ON COURSE — over in
-  12 min"**: at the same level the budget runs out in 12 minutes, and turning down now
-  still keeps it under. Its bar shows the budget spent (the level the window would end at
-  if the rest were silent), climbing to the limit line as the budget runs out, and its
-  headroom is the level that would use up exactly what is left by the time the window is
-  full ("stay ≤ 98.2 dB"; the CLI says "until full: …"). For example, 70 dB against 60 dB limits on a fresh log is
-  ten times the limit's power: the 1 min window is red after about 6 s, the 60 min one
-  after about 6 min, amber on course before then. Seconds not measured neither spend nor
-  add to the budget. The regulations define their limits on full windows only; red only
-  when going over is certain is ac2's choice for the time before. All columns share one
-  scale so their bars compare: from 30 dB below the
-  (lowest) limit to 6 dB above the (highest); without limits, or uncalibrated, a 40 dB range
-  that follows the loudest window in 10 dB steps and stays put from second to second.
-- **B** switches between columns and **tiles** (a grid with every figure written out),
-  **Shift+B** shows or hides the **history strip** below them: each window over time against its limit
-  (dashed), red where it was over. It holds the log's last 4 hours even when the app was
-  not running: a restarted (or reconnected, or second) app gets it from the daemon, rebuilt
-  from the meter's log as the meter computed it; a new log clears it. The app remembers
-  both. **W** gives the pane the whole
-  window, once more (or **F11**) the whole screen: the **stage view**, nothing but the
-  columns (in meter + Leq, the number above them). The grey caption line (the meter's name,
-  its calibration) shows there only with the history on (Shift+B, then with the run), or
-  with STALE when the values are; otherwise its room goes to the windows. Arming or
-  playing the stimulus changes nothing there; Esc and Shift+Esc still stop it. W again goes back to the split layout.
-- Each column (and tile) says, large, its **state** (OK, NEAR, OVER, or "over in 47 s" when a
-  filling window is on course to go over) and the **headroom**: the highest steady level for
-  the next minute that keeps the window at or below its limit (**"stay ≤ 101.5 dB"**; while
-  the window fills for longer than that, the level that keeps it under until it is full),
-  or, over and unable to recover within the minute, **"cooling down in 7 min 30 s"**: the
-  time until the window is back under its limit if the level stays at the limit. Its limit
-  is written small under them, and is the line across the bar. The window's **Leq** is a
-  small figure low on its bar that stays put while the bar moves — in white or black,
-  whichever reads on what is behind it — so the meter's own number above the windows stays
-  the one big number; what to do about a window is the headroom. While the window fills, how much of it there is;
-  and **"offline for 1 min 20 s"** when part of it has no audio at all (the meter stopped,
-  the daemon was down, the capture lost samples). Missing audio isn't counted as silence:
-  the window's Leq is the average of what was measured, and offline time neither lowers it
-  nor spends or earns budget. The note goes away once that time has slid out of the window.
-  Narrow columns use the shorter wordings, or leave a line out.
-- With the history on (**Shift+B**), the caption above the windows, centred, says how long
+- **rolling Leq windows**: by default LAeq over 1, 5, 10, 30 and 60 min;
+- a **per-second log**: LAeq, LCeq and LZeq of every second, the last 48 hours.
+
+Both run as long as the meter runs, whether or not any app or terminal is watching, and
+carry on when the meter is stopped and started, its windows are changed, the session is
+reopened or the daemon restarts (the log is in the autosave and in saved sessions).
+
+#### Reading the columns
+
+**G** in the SPL pane steps meter → windows → meter + windows ([above](#three-views-g-steps-them)).
+The windows show as **columns**, made to be read from the stage or across the room: one
+full-height column per window, the shortest on the left. Each column has:
+
+- a bar that fills from the bottom with the window's Leq;
+- the value in large digits on top, with the window's own unit and weighting beside it on
+  the same line, small and dim: **dB(A)**, **dB(C)**, **dB(Z)**,
+  or **dBFS (A)** uncalibrated;
+- at the bottom the window's name ("LAeq 30 min", shortened to "30 min" or "30m" when the
+  columns are narrow; the caption then says "LAeq");
+- the limit as a line across the column.
+
+The unit is never left out: in meter + Leq the meter above may read in another weighting
+(LCS over LAeq windows), and a column must not be read in the meter's. Tiles show it the
+same way.
+
+Colours: a column turns **amber** within the warn margin (3 dB by default) of its limit and
+the whole column goes **red** above it, and goes back when the window recovers; each going
+over and each recovery also shows as a message.
+
+**State and headroom.** Each column (and tile) says, large:
+
+- its **state**: OK, NEAR, OVER, or "over in 47 s" when a filling window is on course to go
+  over;
+- the **headroom**: the highest steady level for the next minute that keeps the window at
+  or below its limit (**"stay ≤ 101.5 dB"**; while the window fills for longer than that,
+  the level that keeps it under until it is full);
+- or, over and unable to recover within the minute, **"cooling down in 7 min 30 s"**: the
+  time until the window is back under its limit if the level stays at the limit.
+
+Smaller:
+
+- its limit, written under them (and the line across the bar);
+- the window's **Leq**, a small figure low on its bar that stays put while the bar moves (in
+  white or black, whichever reads on what is behind it), so the meter's own number above the
+  windows stays the one big number; what to do about a window is the headroom;
+- while the window fills, how much of it there is;
+- **"offline for 1 min 20 s"** when part of it has no audio at all (the meter stopped, the
+  daemon was down, the capture lost samples). Missing audio isn't counted as silence: the
+  window's Leq is the average of what was measured, and offline time neither lowers it nor
+  spends or earns budget. The note goes away once that time has slid out of the window.
+
+Narrow columns use the shorter wordings, or leave a line out.
+
+**One scale.** All columns share one scale so their bars compare: from 30 dB below the
+(lowest) limit to 6 dB above the (highest); without limits, or uncalibrated, a 40 dB range
+that follows the loudest window in 10 dB steps and stays put from second to second.
+
+#### A window still filling: the budget
+
+A window still filling (a new log, a longer window than the meter has run) shows its Leq
+**so far** ("so far · 12:30 / 30:00") but is judged on its **budget**: the limit allows so
+much sound energy over the whole window.
+
+- The column goes **red** only once that is spent: when the window will end over its limit
+  even if everything is silent from now on.
+- Before that, a Leq so far above the limit turns it **amber, "ON COURSE — over in
+  12 min"**: at the same level the budget runs out in 12 minutes, and turning down now still
+  keeps it under.
+- Its bar shows the budget spent (the level the window would end at if the rest were
+  silent), climbing to the limit line as the budget runs out.
+- Its headroom is the level that would use up exactly what is left by the time the window
+  is full ("stay ≤ 98.2 dB"; the CLI says "until full: …").
+- Seconds not measured neither spend nor add to the budget.
+
+For example, 70 dB against 60 dB limits on a fresh log is ten times the limit's power: the
+1 min window is red after about 6 s, the 60 min one after about 6 min, amber on course
+before then. The regulations define their limits on full windows only; red only when going
+over is certain is ac2's choice for the time before.
+
+#### Tiles, history and the stage view
+
+- **B** switches between columns and **tiles** (a grid with every figure written out).
+- **Shift+B** shows or hides the **history strip** below them: each window over time against
+  its limit (dashed), red where it was over. It holds the log's last 4 hours even when the
+  app was not running: a restarted (or reconnected, or second) app gets it from the daemon,
+  rebuilt from the meter's log as the meter computed it; a new log clears it.
+- The app remembers both.
+- **W** gives the pane the whole window, once more (or **F11**) the whole screen: the
+  **stage view**, nothing but the columns (in meter + Leq, the number above them). The grey
+  caption line (the meter's name, its calibration) shows there only with the history on
+  (Shift+B, then with the run), or with STALE when the values are; otherwise its room goes to
+  the windows. Arming or playing the stimulus changes nothing there; Esc and Shift+Esc still
+  stop it. W again goes back to the split layout.
+
+#### The run caption
+
+With the history on (**Shift+B**), the caption above the windows, centred, says how long
   the meter has been logging and the level of the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s`** — the
   time since the log's first second (it keeps counting when the app or the daemon is
   restarted: the log comes back with the autosave), its start in local time, the energy
@@ -1609,37 +1680,63 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   the caption says "last 48 h". Without the history it is not shown at all, in any SPL view
   (meter + Leq, Leq windows, tiles or columns, the stage view): the windows and the number
   take its room. `ac2 spl leq watch` always prints it.
-- **Shift+R** in the SPL pane (or "Start a new SPL log…" in Ctrl+K) starts a **new log** — for
-  the show after a loud soundcheck: the windows, their states, the alarms, the clock and the
-  total start over; the windows and limits stay. It asks first, naming the run that ends.
-  The ended log can still be exported (`ac2 spl leq export --previous`) until the next new
-  log or a daemon restart.
-- **Shift+L** (or "Leq windows and limits…" in Ctrl+K) sets them: the window lengths and
-  weightings picked with ←/→, limits and warn margins typed in dB (empty: no limit), a
-  **preset** row and the headroom horizon; under the windows the **LCpeak** and **LAFmax**
-  limits and the **position correction**. ↑/↓ moves between rows, Tab between cells,
-  **Insert** adds a window, **Delete** removes one, Enter applies.
-- **Peak limits** (LCpeak, LAFmax): over as soon as any second's C-weighted peak (A-weighted
-  Fast level) is above the limit, and held over for 10 s after the last such second, so a
-  single kick drum near the limit does not flicker. They show as columns (tiles) of their
-  own right of the windows, named `LCpeak`, `LAFmax`, with "highest of the last 10 s".
-- **States settle before they drop**: a window or peak goes amber or red at once, but comes
-  back down only when it is 0.3 dB under the line or has been under it 10 s in a row, so a
-  window hovering on its limit does not toggle over / recovered every second.
-- **Position correction**: the difference from your mic to where the limit applies (the
-  loudest audience spot, measured with pink noise at both places beforehand), e.g. *4* dB,
-  and for the peaks when different (DIN 15905-5's K2). Every level of the meter then
-  includes it and says so — *corrected +4.0 dB* in the caption, `dB(A) corr.` on every
-  value, alarms *(corrected +4.0 dB)* — and limits are judged on it. The per-second log
-  keeps what the mic measured, with the correction in force beside each second.
-- A preset **replaces the windows** with exactly the rule's — its windows and limits, and a
-  window it wants shown without a limit — shortest first; windows and limits the rule does
-  not state go, and its peak limits are set too (DIN: LCpeak 135 dB; V-NISSG: LAFmax 125
-  dB). Informational only — not legal advice: each rule also has a measuring position and
-  duties of its own (`docs/design/leq.md` lists them). ←/→ on the
-  preset row shows each preset's windows; back at "none" the windows return as they were;
-  editing a window keeps the preset's. **Insert** adds more windows afterwards. The log
-  carries on: the new windows are rebuilt from it.
+#### A new log (Shift+R)
+
+**Shift+R** in the SPL pane (or "Start a new SPL log…" in Ctrl+K) starts a **new log**, for
+the show after a loud soundcheck: the windows, their states, the alarms, the clock and the
+total start over; the windows and limits stay. It asks first, naming the run that ends. The
+ended log can still be exported (`ac2 spl leq export --previous`) until the next new log or
+a daemon restart.
+
+#### Setting windows and limits (Shift+L)
+
+**Shift+L** (or "Leq windows and limits…" in Ctrl+K) opens the settings:
+
+- the window lengths and weightings, picked with ←/→;
+- limits and warn margins, typed in dB (empty: no limit);
+- a **preset** row and the headroom horizon;
+- under the windows, the **LCpeak** and **LAFmax** limits and the **position correction**.
+
+| Key | Does |
+|---|---|
+| ↑/↓ | move between rows |
+| Tab | move between cells |
+| **Insert** | adds a window |
+| **Delete** | removes one |
+| Enter | applies |
+
+**Peak limits** (LCpeak, LAFmax): over as soon as any second's C-weighted peak (A-weighted
+Fast level) is above the limit, and held over for 10 s after the last such second, so a
+single kick drum near the limit does not flicker. They show as columns (tiles) of their own
+right of the windows, named `LCpeak`, `LAFmax`, with "highest of the last 10 s".
+
+**States settle before they drop:** a window or peak goes amber or red at once, but comes
+back down only when it is 0.3 dB under the line or has been under it 10 s in a row, so a
+window hovering on its limit does not toggle over / recovered every second.
+
+**Position correction:** the difference from your mic to where the limit applies (the
+loudest audience spot, measured with pink noise at both places beforehand), e.g. *4* dB, and
+for the peaks when different (DIN 15905-5's K2).
+
+- Every level of the meter then includes it and says so: *corrected +4.0 dB* in the
+  caption, `dB(A) corr.` on every value, alarms *(corrected +4.0 dB)*. Limits are judged on
+  it.
+- The per-second log keeps what the mic measured, with the correction in force beside each
+  second.
+
+#### Presets
+
+A preset **replaces the windows** with exactly the rule's (its windows and limits, and a
+window it wants shown without a limit), shortest first. Windows and limits the rule does not
+state go, and its peak limits are set too (DIN: LCpeak 135 dB; V-NISSG: LAFmax 125 dB).
+
+- ←/→ on the preset row shows each preset's windows; back at "none" the windows return as
+  they were.
+- Editing a window keeps the preset's. **Insert** adds more windows afterwards.
+- The log carries on: the new windows are rebuilt from it.
+
+> Informational only, not legal advice: each rule also has a measuring position and duties
+> of its own ([leq.md](design/leq.md) lists them).
 
   | preset (`--preset`) | windows and limits |
   |---|---|
@@ -1662,16 +1759,18 @@ the daemon restarts (the log is in the autosave and in saved sessions).
 - Limits are judged only on a calibrated input (dB SPL, see above); an uncalibrated meter
   shows its windows in dBFS, marked "not calibrated".
 
-In the terminal: `ac2 spl leq watch` (big numbers; `--json` for one line per second),
-`ac2 spl leq set --preset france --windows 1min --limit 1min=102db` (the preset's windows
-and an LAeq 1 min of your own; several `--preset` give the windows of all, a shared window
-at the lower limit; without `--preset`, `--windows 1min,5min,c:30s` sets the windows; also
-`--warn 3db`, `--horizon 1min`, `--peak-limit lcpeak=135db`, `--position 4db
-[--position-peak 2db]`), `ac2 spl leq export -o show.csv` (the per-second log as
-CSV, for the record), `ac2 spl leq new --yes --export soundcheck.csv` (a new log, the ended
-one written first; without `--yes` it only says what would end). Each takes `--meas` or
-`--input` when there is more than one meter.
-How it is computed: `docs/design/leq.md`.
+#### Leq from the terminal
+
+Each command takes `--meas` or `--input` when there is more than one meter.
+
+| Command | Does |
+|---|---|
+| `ac2 spl leq watch` | big numbers; `--json` for one line per second |
+| `ac2 spl leq set --preset france --windows 1min --limit 1min=102db` | the preset's windows and an LAeq 1 min of your own. Several `--preset` give the windows of all, a shared window at the lower limit; without `--preset`, `--windows 1min,5min,c:30s` sets the windows. Also `--warn 3db`, `--horizon 1min`, `--peak-limit lcpeak=135db`, `--position 4db [--position-peak 2db]`. |
+| `ac2 spl leq export -o show.csv` | the per-second log as CSV, for the record |
+| `ac2 spl leq new --yes --export soundcheck.csv` | a new log, the ended one written first; without `--yes` it only says what would end |
+
+How it is computed: [leq.md](design/leq.md).
 
 ### Band Leq: low frequencies at a neighbour's
 
@@ -1851,26 +1950,43 @@ It is stored as an estimated transfer, and every place that shows it says
 
 ## Keyboard
 
-Everything in the app is reachable from the keyboard. **H** (or **F1**) shows the bindings,
-**Ctrl+K** opens the command palette, which finds every command by name and shows its key.
-Keys are scoped: the focused pane's keys apply first, then the global ones. The defaults
-avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and other European
-layouts. The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** stop, **↑/↓**
-level (±1 dB, with Shift ±3 dB). With **Alt** the arrows move the selected curve's display
-offset instead, with **Ctrl** they pan the focused pane's level axis.
+Everything in the app is reachable from the keyboard.
+
+- **H** (or **F1**) shows the bindings.
+- **Ctrl+K** opens the command palette, which finds every command by name and shows its key.
+- Keys are scoped: the focused pane's keys apply first, then the global ones.
+- The defaults avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and
+  other European layouts.
+
+The stimulus cluster is fixed:
+
+| Key | Does |
+|---|---|
+| **Space** | arm |
+| **Enter** | fire |
+| **Esc** | stop |
+| **↑/↓** | level ±1 dB (with Shift ±3 dB) |
+| **Alt+↑/↓** | the selected curve's display offset instead |
+| **Ctrl+↑/↓** | pan the focused pane's level axis instead |
 
 **An open window owns the keyboard.** With the help, the palette, a prompt, a dialog or
-Settings open, **↑/↓** move the selection or scroll (**PageUp / PageDown**,
-**Home / End** where a list is long: the help, the palette, the Calibration page, a pane's
-measurement list), **←/→** change a choice, **Enter** confirms and **Esc** closes the
-topmost window only — the electrical calibration dialog closes back to the Calibration
-page, the next Esc closes Settings. **Backspace** in a window erases typed text; it deletes
-nothing behind the window (where nothing is typed — Settings' lists, a delete confirmation —
-it is Delete). None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never
-stops while a window is open, and the mouse wheel scrolls the window rather than zooming the
-plot behind it. The help and the delay candidates leave the other keys working (try a key
-while reading), except the stimulus's. **Shift+Esc** stops the stimulus from anywhere,
-windows included; it is fixed, and cannot be rebound.
+Settings open:
+
+- **↑/↓** move the selection or scroll (**PageUp / PageDown**, **Home / End** where a list
+  is long: the help, the palette, the Calibration page, a pane's measurement list);
+- **←/→** change a choice; **Enter** confirms;
+- **Esc** closes the topmost window only: the electrical calibration dialog closes back to
+  the Calibration page, the next Esc closes Settings;
+- **Backspace** erases typed text; it deletes nothing behind the window (where nothing is
+  typed, such as Settings' lists or a delete confirmation, it is Delete).
+
+None of these keys reaches the stimulus: ↑/↓ never change the level and Esc never stops
+while a window is open, and the mouse wheel scrolls the window rather than zooming the plot
+behind it. The help and the delay candidates leave the other keys working (try a key while
+reading), except the stimulus's.
+
+> **Shift+Esc** stops the stimulus from anywhere, windows included; it is fixed, and cannot
+> be rebound.
 
 In the delay candidate list ↑/↓ and Enter choose a candidate; 1–3 pick one directly.
 
@@ -1885,29 +2001,38 @@ cycle_theme = "Ctrl+T"
 insert_delay = ["X", "Alt+D"]
 ```
 
-A `keys.toml` that cannot be used — a conflict, an unknown key or command, a pane's command
-on **H** (help in every pane), a change to the fixed **Shift+Esc** — is reported at start
-and the default keys are used until it is fixed.
+A `keys.toml` that cannot be used (a conflict, an unknown key or command, a pane's command
+on **H** (help in every pane), a change to the fixed **Shift+Esc**) is reported at start and
+the default keys are used until it is fixed.
 
-**Key hints.** The focused pane shows a slim line under its plot with its most used keys,
-for example in the transfer pane `V select trace · A show/hide · Ctrl+1 capture · X find
-delay · K smoothing · Shift+I IR · W maximise · Alt+↑ offset · H all keys`. The keys are the ones bound now
-(a key changed in `keys.toml` shows its new chord; macOS shows `⌘ ⌥ ⇧`). On a narrow pane the
-least used drop off first; **H all keys** always stays. Hovering over a pane's name (or the
-line) lists the same keys with what each does; hovering over a clickable control (the
-**dB | %** toggle, **Stop**, a trace's colour dot or row, a measurement, a pane's measurement
-chip) names the key that does the same. **Shift+H** (palette: *Key hints on / off*) turns the
-line off and on; the app remembers it in `ui.toml` (`key_hints = false`). The stage view
-never shows it. Every pane's line is listed at the end of the keyboard map below.
+#### Key hints
+
+The focused pane shows a slim line under its plot with its most used keys, for example in
+the transfer pane `V select trace · A show/hide · Ctrl+1 capture · X find delay · K
+smoothing · Shift+I IR · W maximise · Alt+↑ offset · H all keys`.
+
+- The keys are the ones bound now (a key changed in `keys.toml` shows its new chord; macOS
+  shows `⌘ ⌥ ⇧`).
+- On a narrow pane the least used drop off first; **H all keys** always stays.
+- Hovering over a pane's name (or the line) lists the same keys with what each does;
+  hovering over a clickable control (the **dB | %** toggle, **Stop**, a trace's colour dot
+  or row, a measurement, a pane's measurement chip) names the key that does the same.
+- **Shift+H** (palette: *Key hints on / off*) turns the line off and on; the app remembers
+  it in `ui.toml` (`key_hints = false`). The stage view never shows it.
+
+Every pane's line is listed at the end of the [keyboard map](#keyboard-map).
 
 ### Notifications
 
 What a key or a reply did, and what went wrong, shows as a notification in the bottom-right
-corner, just above the focused pane's key hints. A box is as wide as its text, up to about
-45 % of the window; longer text wraps at word boundaries (a long file path breaks after a
-`/`), and the box grows downwards with its lines. A newer notification sits lower and
-pushes the older ones up; those that no longer fit under the top bar are left out (the log
-below has them). The same message again replaces the one already up instead of stacking.
+corner, just above the focused pane's key hints.
+
+- A box is as wide as its text, up to about 45 % of the window; longer text wraps at word
+  boundaries (a long file path breaks after a `/`), and the box grows downwards with its
+  lines.
+- A newer notification sits lower and pushes the older ones up; those that no longer fit
+  under the top bar are left out (the log below has them).
+- The same message again replaces the one already up instead of stacking.
 
 | colour | what | stays |
 |---|---|---|
