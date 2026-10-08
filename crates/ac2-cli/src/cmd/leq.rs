@@ -147,6 +147,7 @@ fn preset(p: PresetArg) -> LeqPreset {
         PresetArg::NlCovenant16To17 => LeqPreset::NetherlandsCovenant16To17,
         PresetArg::NlCovenant14To15 => LeqPreset::NetherlandsCovenant14To15,
         PresetArg::NlCovenantTo13 => LeqPreset::NetherlandsCovenantTo13,
+        PresetArg::Finland545 => LeqPreset::Finland545,
     }
 }
 
@@ -739,6 +740,7 @@ mod tests {
             "nl-covenant-16-17",
             "nl-covenant-14-15",
             "nl-covenant-13",
+            "finland-545",
         ];
         let parsed: Vec<LeqPreset> = names
             .iter()

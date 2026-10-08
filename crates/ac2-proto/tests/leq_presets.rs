@@ -25,6 +25,7 @@ fn table(p: LeqPreset) -> Vec<(u32, Weighting, Option<f64>)> {
         LeqPreset::NetherlandsCovenant16To17 => vec![(15, A, Some(100.0))],
         LeqPreset::NetherlandsCovenant14To15 => vec![(15, A, Some(96.0))],
         LeqPreset::NetherlandsCovenantTo13 => vec![(15, A, Some(91.0))],
+        LeqPreset::Finland545 => vec![(240, A, Some(100.0))],
     }
 }
 
@@ -120,7 +121,8 @@ fn windows_sort_shortest_first() {
 }
 
 /// The peak limits each rule sets: DIN 15905-5 LCpeak 135 dB (§4.3.2), V-NISSG LAFmax 125
-/// dB for every category (art. 19); the others' cited articles limit Leq windows only.
+/// dB for every category (art. 19), STM 545/2015 §12 LCpeak 140 dB and LAFmax 115 dB; the
+/// others' cited articles limit Leq windows only.
 #[test]
 fn presets_carry_their_peak_limits() {
     use ac2_proto::model::PeakQuantity;
@@ -129,6 +131,7 @@ fn presets_carry_their_peak_limits() {
         let want = match p {
             LeqPreset::Din15905 => (Some(135.0), None),
             LeqPreset::Swiss93 | LeqPreset::Swiss96 | LeqPreset::Swiss100 => (None, Some(125.0)),
+            LeqPreset::Finland545 => (Some(140.0), Some(115.0)),
             _ => (None, None),
         };
         let got = (

@@ -452,14 +452,15 @@ table, and back at "none" the windows as they were before the row was first chan
 return; an edit to a window keeps what the preset set. A note under the row says the
 preset replaces the windows. `ac2 spl leq set --preset` replaces them likewise; several
 `--preset` give the windows of all of them, a window two share with the lower of their
-limits (both rules met) and a limit winning over a window only shown — at most five
+limits (both rules met) and a limit winning over a window only shown — at most six
 distinct windows across all presets, within the eight a meter may have. `--windows` with
 `--preset` adds windows (without limits) to the preset's.
 
 Every preset is a starting point for the operator, who owns the rest of the rule:
 ac2 judges only the Leq windows and peak limits below, corrected by what the operator
 measured as the position difference (none unless set), and is not a type-approved
-instrument (see the last section). Retrieved 2026-10-03; the peak limits 2026-10-05.
+instrument (see the last section). Retrieved 2026-10-03; the peak limits 2026-10-05;
+Finland 2026-10-08.
 
 | preset (`--preset`) | windows | source |
 |---|---|---|
@@ -478,6 +479,7 @@ instrument (see the last section). Retrieved 2026-10-03; the peak limits 2026-10
 | NL covenant, ages 16–17 (`nl-covenant-16-17`) | LAeq 15 min ≤ 100 dB | [4] art. 3.1.3 c |
 | NL covenant, ages 14–15 (`nl-covenant-14-15`) | LAeq 15 min ≤ 96 dB | [4] art. 3.1.3 b |
 | NL covenant, ages up to 13 (`nl-covenant-13`) | LAeq 15 min ≤ 91 dB | [4] art. 3.1.3 a |
+| Finland STM 545/2015 (`finland-545`) | LAeq 4 h ≤ 100 dB, LAFmax ≤ 115 dB, LCpeak ≤ 140 dB | [7] §12, to avoid hearing damage |
 
 ac2's windows slide in one-second steps, which is how Brussels defines its windows
 (art. 1 § 1, 4°–7°); the other texts say "over 15 minutes" without fixing the step.
@@ -594,6 +596,18 @@ Not checked by ac2: which category an event falls in, the duty to notify, record
 keeping the levels and the position difference for six months, hearing protection and
 information, the children's events limit (93 dB(A), art. 19 al. 2, the 93 dB preset's
 figure).
+
+**[7] Finland** — Sosiaali- ja terveysministeriön asetus asuinrakennuksen ja muiden
+oleskelutilojen terveydellisistä olosuhteista sekä ulkopuolisten asiantuntijoiden
+pätevyysvaatimuksista (asumisterveysasetus) 545/2015, original text as published:
+<https://www.finlex.fi/api/media/statute/80244/mainPdf/main.pdf>. §12: "Kuulovaurion
+välttämiseksi melun äänitasot eivät saa ylittää LAeq,4h 100 dB, LAFmax 115 dB tai LCpeak
+140 dB." The 4 h window fits the one-day limit on a window and the 48 h log. Not checked
+by ac2: where the exposure is (the limit holds for the people exposed, ac2 measures where
+its mic is); the decree's other limits — the low-frequency band limits and the 25 dB
+night limit on music in rooms for sleeping hold inside the dwelling, not at the venue,
+and are the band meter's (`docs/design/band-leq.md`); the living-space limits of
+Liite 2 Taulukko 1; the §13 corrections.
 
 The other presets' cited articles limit Leq windows only: France R1336-1 II 1°, Brussels
 art. 3–5, the Netherlands covenant art. 3.1.2–3.1.3 and WHO feature 1 state no peak

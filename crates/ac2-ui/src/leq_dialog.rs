@@ -14,8 +14,8 @@ use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
 
 /// Window lengths offered, shortest first (→ longer). A length outside the list (from the
 /// CLI) is kept until changed.
-pub const LENGTHS: [u32; 12] = [
-    5, 10, 30, 60, 300, 600, 900, 1800, 3600, 7200, 28_800, 86_400,
+pub const LENGTHS: [u32; 13] = [
+    5, 10, 30, 60, 300, 600, 900, 1800, 3600, 7200, 14_400, 28_800, 86_400,
 ];
 /// Headroom horizons offered.
 pub const HORIZONS: [u32; 6] = [10, 30, 60, 120, 300, 900];

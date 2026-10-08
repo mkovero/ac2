@@ -219,7 +219,7 @@ impl LeqConfig {
 
 impl LeqPreset {
     /// Every preset, in the order the app offers them.
-    pub const ALL: [LeqPreset; 17] = [
+    pub const ALL: [LeqPreset; 18] = [
         LeqPreset::Din15905,
         LeqPreset::Swiss93,
         LeqPreset::Swiss96,
@@ -237,6 +237,7 @@ impl LeqPreset {
         LeqPreset::NetherlandsCovenant16To17,
         LeqPreset::NetherlandsCovenant14To15,
         LeqPreset::NetherlandsCovenantTo13,
+        LeqPreset::Finland545,
     ];
 
     /// Display name.
@@ -259,6 +260,7 @@ impl LeqPreset {
             LeqPreset::NetherlandsCovenant16To17 => "NL covenant, ages 16–17",
             LeqPreset::NetherlandsCovenant14To15 => "NL covenant, ages 14–15",
             LeqPreset::NetherlandsCovenantTo13 => "NL covenant, ages up to 13",
+            LeqPreset::Finland545 => "Finland STM 545/2015",
         }
     }
 
@@ -306,6 +308,10 @@ impl LeqPreset {
                 "Vierde convenant preventie gehoorschade versterkte muziek (Stcrt. 2024, 3787) \
                  art. 3.1.3, voluntary"
             }
+            LeqPreset::Finland545 => {
+                "Asumisterveysasetus STM 545/2015 §12, to avoid hearing damage, wherever people \
+                 are exposed"
+            }
         }
     }
 
@@ -336,6 +342,7 @@ impl LeqPreset {
             LeqPreset::NetherlandsCovenant16To17 => vec![w(15, A, Some(100.0))],
             LeqPreset::NetherlandsCovenant14To15 => vec![w(15, A, Some(96.0))],
             LeqPreset::NetherlandsCovenantTo13 => vec![w(15, A, Some(91.0))],
+            LeqPreset::Finland545 => vec![w(240, A, Some(100.0))],
         }
     }
 
@@ -355,6 +362,10 @@ impl LeqPreset {
             LeqPreset::Swiss93 | LeqPreset::Swiss96 | LeqPreset::Swiss100 => PeakLimits {
                 lcpeak: None,
                 lafmax: p(125.0),
+            },
+            LeqPreset::Finland545 => PeakLimits {
+                lcpeak: p(140.0),
+                lafmax: p(115.0),
             },
             _ => PeakLimits::default(),
         }
@@ -380,7 +391,7 @@ impl LeqPreset {
     /// (equal lengths A, C, Z), whatever it had before — a rule's limits on windows it does
     /// not define would read as part of it. A window two presets share gets the lower of
     /// their limits, so both rules are met, and a limit wins over a window shown without
-    /// one. At most five distinct windows occur across all presets, well within
+    /// one. At most six distinct windows occur across all presets, well within
     /// [`LeqConfig::MAX_WINDOWS`].
     pub fn windows_of(presets: &[LeqPreset]) -> Vec<LeqWindow> {
         let mut out: Vec<LeqWindow> = Vec::new();

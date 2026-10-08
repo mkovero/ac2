@@ -283,6 +283,9 @@ pub enum LeqPreset {
     NetherlandsCovenant14To15,
     /// Netherlands covenant art. 3.1.3 a, audiences up to 13: LAeq 15 min ≤ 91 dB.
     NetherlandsCovenantTo13,
+    /// Finland, STM 545/2015 §12, against hearing damage: LAeq 4 h ≤ 100 dB, LAFmax ≤ 115
+    /// dB, LCpeak ≤ 140 dB.
+    Finland545,
 }
 
 /// What a measurement computes.

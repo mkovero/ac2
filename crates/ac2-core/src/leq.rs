@@ -108,6 +108,32 @@ impl Second {
     }
 }
 
+/// One second of energy on a few channels, as a rolling window sums it: a [`Second`]'s
+/// weightings, or a band meter's bands (`crate::band_leq`). A gap slot has neither energy
+/// nor measured time.
+pub trait Slot: Copy {
+    /// A second lost to a gap.
+    const GAP: Self;
+    /// Energy of channel `ch` (FS²·s).
+    fn slot_energy(&self, ch: usize) -> f64;
+    /// Time measured within the second (s).
+    fn slot_measured(&self) -> f64;
+}
+
+impl Slot for Second {
+    const GAP: Self = Second::GAP;
+
+    #[inline]
+    fn slot_energy(&self, ch: usize) -> f64 {
+        self.energy[ch]
+    }
+
+    #[inline]
+    fn slot_measured(&self) -> f64 {
+        self.measured
+    }
+}
+
 /// Sums A-, C- and Z-weighted energy into one-second [`Second`]s on a grid of whole seconds
 /// from the first sample. The weighted samples come from the meter's own weighting chain
 /// ([`crate::spl::SplMeter::process`]), so the log and the meter read one filtered signal.
@@ -333,8 +359,10 @@ impl Sum {
 
 #[derive(Debug, Clone)]
 struct Acc {
-    spec: WindowSpec,
-    w: usize,
+    /// Length, s (≥ 1).
+    seconds: u32,
+    /// Channel of the slot summed.
+    ch: usize,
     /// Slots that stay in the window over the horizon: `seconds − horizon`, or 0.
     keep: u32,
     full: Sum,
@@ -342,10 +370,11 @@ struct Acc {
     since_exact: u32,
 }
 
-/// The newest seconds and the rolling windows over them.
+/// The newest seconds and the rolling windows over them, each window on one channel of the
+/// slot (a weighting of a [`Second`], a band of a band second).
 #[derive(Debug, Clone)]
-pub struct RollingLeq {
-    ring: Vec<Second>,
+pub struct RollingLeq<S: Slot = Second> {
+    ring: Vec<S>,
     /// Next slot written.
     head: usize,
     /// Slots pushed since the start (or the last [`Self::clear`]).
@@ -354,138 +383,22 @@ pub struct RollingLeq {
     windows: Vec<Acc>,
 }
 
-impl RollingLeq {
+impl RollingLeq<Second> {
     /// Windows `specs` (lengths clamped to ≥ 1 s) with headroom over `horizon` seconds
     /// (≥ 1); the ring holds the longest window.
     pub fn new(specs: &[WindowSpec], horizon: u32) -> Self {
-        let horizon = horizon.max(1);
-        let cap = specs.iter().map(|s| s.seconds.max(1)).max().unwrap_or(1);
-        Self {
-            ring: vec![Second::GAP; cap as usize],
-            head: 0,
-            pushed: 0,
+        Self::of_channels(
+            specs.iter().map(|s| (s.seconds, w_index(s.weighting))),
             horizon,
-            windows: specs
-                .iter()
-                .map(|s| {
-                    let seconds = s.seconds.max(1);
-                    Acc {
-                        spec: WindowSpec {
-                            seconds,
-                            weighting: s.weighting,
-                        },
-                        w: w_index(s.weighting),
-                        keep: seconds.saturating_sub(horizon),
-                        full: Sum::default(),
-                        kept: Sum::default(),
-                        since_exact: 0,
-                    }
-                })
-                .collect(),
-        }
-    }
-
-    /// Ring length: the longest window, s.
-    pub fn capacity(&self) -> u32 {
-        self.ring.len() as u32
-    }
-
-    /// Headroom horizon, s.
-    pub fn horizon(&self) -> u32 {
-        self.horizon
+        )
     }
 
     /// The windows, in construction order.
     pub fn specs(&self) -> impl Iterator<Item = WindowSpec> + '_ {
-        self.windows.iter().map(|a| a.spec)
-    }
-
-    /// Seconds pushed since the start.
-    pub fn pushed(&self) -> u64 {
-        self.pushed
-    }
-
-    /// Slot `k` seconds back from the newest (`k = 0` is the newest); `None` before the
-    /// start.
-    fn back(&self, k: u32) -> Option<&Second> {
-        if u64::from(k) >= self.pushed || k as usize >= self.ring.len() {
-            return None;
-        }
-        let n = self.ring.len();
-        Some(&self.ring[(self.head + n - 1 - k as usize) % n])
-    }
-
-    /// Exact sums over the newest `len` slots of weighting `w`.
-    fn exact(&self, w: usize, len: u32) -> Sum {
-        let mut s = Sum::default();
-        for k in 0..len {
-            match self.back(k) {
-                Some(x) => s.add(x.energy[w], x.measured),
-                None => break,
-            }
-        }
-        s
-    }
-
-    /// Adds the newest second.
-    pub fn push(&mut self, s: Second) {
-        // The slots leaving each window are read before the new one may overwrite them.
-        for i in 0..self.windows.len() {
-            let (n, keep, w) = {
-                let a = &self.windows[i];
-                (a.spec.seconds, a.keep, a.w)
-            };
-            // A window of n slots loses its oldest, n − 1 back, once it is full.
-            let out_full = self
-                .back(n - 1)
-                .copied()
-                .filter(|_| self.pushed >= u64::from(n));
-            let out_kept = (keep > 0 && self.pushed >= u64::from(keep))
-                .then(|| self.back(keep - 1).copied())
-                .flatten();
-            let a = &mut self.windows[i];
-            a.full.add(s.energy[w], s.measured);
-            if let Some(o) = out_full {
-                a.full.add(-o.energy[w], -o.measured);
-            }
-            if keep > 0 {
-                a.kept.add(s.energy[w], s.measured);
-                if let Some(o) = out_kept {
-                    a.kept.add(-o.energy[w], -o.measured);
-                }
-            }
-        }
-        let n = self.ring.len();
-        self.ring[self.head] = s;
-        self.head = (self.head + 1) % n;
-        self.pushed += 1;
-        // Subtracting what entered long ago leaves rounding behind; an exact sum every
-        // window length bounds it.
-        for i in 0..self.windows.len() {
-            let a = &mut self.windows[i];
-            a.since_exact += 1;
-            if a.since_exact >= a.spec.seconds {
-                let (w, n, keep) = (a.w, a.spec.seconds, a.keep);
-                let full = self.exact(w, n);
-                let kept = self.exact(w, keep);
-                let a = &mut self.windows[i];
-                a.full = full;
-                a.kept = kept;
-                a.since_exact = 0;
-            }
-        }
-    }
-
-    /// Empties every window.
-    pub fn clear(&mut self) {
-        self.ring.iter_mut().for_each(|s| *s = Second::GAP);
-        self.head = 0;
-        self.pushed = 0;
-        for a in &mut self.windows {
-            a.full = Sum::default();
-            a.kept = Sum::default();
-            a.since_exact = 0;
-        }
+        self.windows.iter().map(|a| WindowSpec {
+            seconds: a.seconds,
+            weighting: WEIGHTINGS[a.ch],
+        })
     }
 
     /// Refills the windows with the logged seconds `newest_first` (each with the wall time
@@ -529,6 +442,145 @@ impl RollingLeq {
             self.push(s.unwrap_or(Second::GAP));
         }
     }
+}
+
+impl<S: Slot> RollingLeq<S> {
+    /// Windows of `(seconds, channel)` (lengths clamped to ≥ 1 s) with headroom over
+    /// `horizon` seconds (≥ 1); the ring holds the longest window.
+    pub fn of_channels(windows: impl IntoIterator<Item = (u32, usize)>, horizon: u32) -> Self {
+        let horizon = horizon.max(1);
+        let windows: Vec<Acc> = windows
+            .into_iter()
+            .map(|(seconds, ch)| {
+                let seconds = seconds.max(1);
+                Acc {
+                    seconds,
+                    ch,
+                    keep: seconds.saturating_sub(horizon),
+                    full: Sum::default(),
+                    kept: Sum::default(),
+                    since_exact: 0,
+                }
+            })
+            .collect();
+        let cap = windows.iter().map(|a| a.seconds).max().unwrap_or(1);
+        Self {
+            ring: vec![S::GAP; cap as usize],
+            head: 0,
+            pushed: 0,
+            horizon,
+            windows,
+        }
+    }
+
+    /// Ring length: the longest window, s.
+    pub fn capacity(&self) -> u32 {
+        self.ring.len() as u32
+    }
+
+    /// Headroom horizon, s.
+    pub fn horizon(&self) -> u32 {
+        self.horizon
+    }
+
+    /// Number of windows.
+    pub fn len(&self) -> usize {
+        self.windows.len()
+    }
+
+    /// True without windows.
+    pub fn is_empty(&self) -> bool {
+        self.windows.is_empty()
+    }
+
+    /// Seconds pushed since the start.
+    pub fn pushed(&self) -> u64 {
+        self.pushed
+    }
+
+    /// Slot `k` seconds back from the newest (`k = 0` is the newest); `None` before the
+    /// start.
+    fn back(&self, k: u32) -> Option<&S> {
+        if u64::from(k) >= self.pushed || k as usize >= self.ring.len() {
+            return None;
+        }
+        let n = self.ring.len();
+        Some(&self.ring[(self.head + n - 1 - k as usize) % n])
+    }
+
+    /// Exact sums over the newest `len` slots of weighting `w`.
+    fn exact(&self, w: usize, len: u32) -> Sum {
+        let mut s = Sum::default();
+        for k in 0..len {
+            match self.back(k) {
+                Some(x) => s.add(x.slot_energy(w), x.slot_measured()),
+                None => break,
+            }
+        }
+        s
+    }
+
+    /// Adds the newest second.
+    pub fn push(&mut self, s: S) {
+        // The slots leaving each window are read before the new one may overwrite them.
+        for i in 0..self.windows.len() {
+            let (n, keep, w) = {
+                let a = &self.windows[i];
+                (a.seconds, a.keep, a.ch)
+            };
+            // A window of n slots loses its oldest, n − 1 back, once it is full.
+            let out_full = self
+                .back(n - 1)
+                .copied()
+                .filter(|_| self.pushed >= u64::from(n));
+            let out_kept = (keep > 0 && self.pushed >= u64::from(keep))
+                .then(|| self.back(keep - 1).copied())
+                .flatten();
+            let a = &mut self.windows[i];
+            let (e, m) = (s.slot_energy(w), s.slot_measured());
+            a.full.add(e, m);
+            if let Some(o) = out_full {
+                a.full.add(-o.slot_energy(w), -o.slot_measured());
+            }
+            if keep > 0 {
+                a.kept.add(e, m);
+                if let Some(o) = out_kept {
+                    a.kept.add(-o.slot_energy(w), -o.slot_measured());
+                }
+            }
+        }
+        let n = self.ring.len();
+        self.ring[self.head] = s;
+        self.head = (self.head + 1) % n;
+        self.pushed += 1;
+        // Subtracting what entered long ago leaves rounding behind; an exact sum every
+        // window length bounds it.
+        for i in 0..self.windows.len() {
+            let a = &mut self.windows[i];
+            a.since_exact += 1;
+            if a.since_exact >= a.seconds {
+                let (w, n, keep) = (a.ch, a.seconds, a.keep);
+                let full = self.exact(w, n);
+                let kept = self.exact(w, keep);
+                let a = &mut self.windows[i];
+                a.full = full;
+                a.kept = kept;
+                a.since_exact = 0;
+            }
+        }
+    }
+
+    /// Empties every window.
+    pub fn clear(&mut self) {
+        self.ring.iter_mut().for_each(|s| *s = S::GAP);
+        self.head = 0;
+        self.pushed = 0;
+        for a in &mut self.windows {
+            a.full = Sum::default();
+            a.kept = Sum::default();
+            a.since_exact = 0;
+        }
+    }
 
     /// Counts the windows as elapsed from `keep` slots back at most, as if they had been
     /// refilled from those slots alone. Only for slots older than that which are gaps: their
@@ -548,10 +600,10 @@ impl RollingLeq {
         let e = a.full.energy();
         WindowValue {
             leq_dbfs: if m > 0.0 { power_dbfs(e / m) } else { f64::NAN },
-            elapsed: self.pushed.min(u64::from(a.spec.seconds)) as u32,
+            elapsed: self.pushed.min(u64::from(a.seconds)) as u32,
             measured: m,
             energy: e,
-            seconds: a.spec.seconds,
+            seconds: a.seconds,
         }
     }
 
@@ -568,7 +620,7 @@ impl RollingLeq {
     /// If `i` is not a window index.
     pub fn headroom(&self, i: usize, limit_ms: f64) -> Headroom {
         let a = &self.windows[i];
-        let rem = u64::from(a.spec.seconds).saturating_sub(self.pushed);
+        let rem = u64::from(a.seconds).saturating_sub(self.pushed);
         let x = if rem >= u64::from(self.horizon) {
             let r = rem as f64;
             (limit_ms * (a.full.measured() + r) - a.full.energy()) / r
@@ -585,7 +637,7 @@ impl RollingLeq {
             Headroom::CannotRecover {
                 recover_s: self
                     .recover_time(i, limit_ms, limit_ms)
-                    .unwrap_or(a.spec.seconds),
+                    .unwrap_or(a.seconds),
             }
         }
     }
@@ -599,7 +651,7 @@ impl RollingLeq {
     /// If `i` is not a window index.
     pub fn recover_time(&self, i: usize, limit_ms: f64, level_ms: f64) -> Option<u32> {
         let a = &self.windows[i];
-        let n = a.spec.seconds;
+        let n = a.seconds;
         let h = self.horizon.min(n);
         let mut best: Option<u32> = None;
         let mut e = 0.0;
@@ -612,8 +664,8 @@ impl RollingLeq {
             if j > 0
                 && let Some(x) = self.back(j - 1)
             {
-                neumaier(&mut e, &mut ec, x.energy[a.w]);
-                neumaier(&mut m, &mut mc, x.measured);
+                neumaier(&mut e, &mut ec, x.slot_energy(a.ch));
+                neumaier(&mut m, &mut mc, x.slot_measured());
             }
             let t = f64::from(n - j);
             if (e + ec) + t * level_ms <= limit_ms * ((m + mc) + t) {

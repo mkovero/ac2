@@ -958,6 +958,9 @@ pub enum PresetArg {
     /// Netherlands covenant art. 3.1.3, audiences up to 13: LAeq 15 min ≤ 91 dB.
     #[value(name = "nl-covenant-13")]
     NlCovenantTo13,
+    /// Finland, STM 545/2015 §12: LAeq 4 h ≤ 100 dB, LAFmax ≤ 115 dB, LCpeak ≤ 140 dB.
+    #[value(name = "finland-545")]
+    Finland545,
 }
 
 /// `spl leq set`.

@@ -57,6 +57,10 @@ mod tests {
             summary(LeqPreset::Brussels100),
             "Brussels 100 dB: LAeq 60 min ≤ 100 dB, LCeq 60 min ≤ 115 dB"
         );
+        assert_eq!(
+            summary(LeqPreset::Finland545),
+            "Finland STM 545/2015: LAeq 4 h ≤ 100 dB, LCpeak ≤ 140 dB, LAFmax ≤ 115 dB"
+        );
         for p in LeqPreset::ALL {
             assert!(source(p).ends_with("not legal advice"), "{p:?}");
         }

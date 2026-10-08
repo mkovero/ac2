@@ -1227,6 +1227,7 @@ the daemon restarts (the log is in the autosave and in saved sessions).
   | Brussels (`brussels-100`) | LAeq 60 min ≤ 100 dB, LCeq 60 min ≤ 115 dB |
   | NL covenant, voluntary (`nl-covenant`) | LAeq 15 min ≤ 103 dB |
   | NL covenant, ages 16–17 / 14–15 / up to 13 (`nl-covenant-16-17`, `nl-covenant-14-15`, `nl-covenant-13`) | LAeq 15 min ≤ 100 / 96 / 91 dB |
+  | Finland STM 545/2015 (`finland-545`) | LAeq 4 h ≤ 100 dB, LAFmax ≤ 115 dB, LCpeak ≤ 140 dB |
 
   Wallonia has no preset: its 2018 rule is not in force. A preset leaves the position
   correction as it is: it is your measurement, not the rule's.

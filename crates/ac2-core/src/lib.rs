@@ -7,6 +7,7 @@ pub mod window;
 
 // Filled by phase 2 work; each module owns one concern from PLAN.md §5.
 pub mod average;
+pub mod band_leq;
 pub mod delay;
 pub mod generator;
 pub mod ir_view;
