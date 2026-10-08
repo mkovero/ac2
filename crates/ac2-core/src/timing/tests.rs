@@ -911,3 +911,100 @@ fn drift_beyond_the_followed_range_is_lost_not_locked() {
     );
     assert!(drift_warnings(&rec).is_empty(), "{:?}", events(&rec));
 }
+
+/// Feeds the tracker directly: bursts of windows `len_s` long every `period_s`, silence
+/// between them, each window timed at `offset(x)` (x its centre, capture samples).
+fn bursts(
+    cfg: &TimingConfig,
+    count: usize,
+    len_s: f64,
+    period_s: f64,
+    offset: impl Fn(f64, f64) -> f64,
+) -> (TimingTracker, Vec<TimingEvent>) {
+    let mut t = TimingTracker::new(*cfg);
+    let mut ev = Vec::new();
+    let windows = (period_s * cfg.sample_rate / cfg.hop as f64) as usize;
+    let in_burst = (len_s * cfg.sample_rate / cfg.hop as f64) as usize;
+    for b in 0..count {
+        for k in 0..windows {
+            let start = ((b * windows + k) * cfg.hop) as u64;
+            let x = start as f64 + cfg.window as f64 / 2.0;
+            let outcome = if k < in_burst {
+                let y = offset(x, k as f64 / in_burst as f64);
+                Outcome::Offset(Peak {
+                    offset: y.round() as i64,
+                    fraction: y - y.round(),
+                    psr_db: 40.0,
+                    lobe: 1,
+                })
+            } else {
+                Outcome::NoStimulus
+            };
+            let m = WindowMeasurement {
+                capture_start: start,
+                outcome,
+                loopback_dbfs: -20.0,
+                stimulus_dbfs: if k < in_burst { -20.0 } else { -200.0 },
+            };
+            ev.extend(t.observe(&m).iter().copied());
+        }
+    }
+    (t, ev)
+}
+
+/// A sweep times the loopback at the group delay of the frequency it is at, plus the
+/// estimator's band-dependent bias, so on one clock its offset still rises half a sample
+/// in 2.25 s (2.3 ppm; pupu's FF400 loopback). Extrapolated across the 20 s to the next
+/// sweep that slope predicts 4 samples too much: no sweep may read as a jump, and the
+/// slope of single sweeps may not add up to drift.
+#[test]
+fn the_offset_rising_within_each_sweep_is_neither_jump_nor_drift() {
+    let cfg = TimingConfig::for_rate(96_000.0);
+    let (t, ev) = bursts(&cfg, 6, 2.25, 22.0, |_, u| 1742.6 + 0.5 * u);
+    let jumps: Vec<_> = ev
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                TimingEvent::Jump { .. } | TimingEvent::DriftWarning { .. }
+            )
+        })
+        .collect();
+    assert!(jumps.is_empty(), "{jumps:?}");
+    let d = t.drift().expect("drift");
+    assert!(d.ppm.abs() < 0.5, "{d:?}");
+}
+
+/// The same sweeps on clocks 5 ppm apart: the offset moves 10 samples between sweeps,
+/// which the line follows (no jump) and judges as drift.
+#[test]
+fn drift_between_sweeps_is_followed_and_judged() {
+    let cfg = TimingConfig::for_rate(96_000.0);
+    let (t, ev) = bursts(&cfg, 6, 2.25, 22.0, |x, u| 1742.6 + 0.5 * u + 5e-6 * x);
+    assert!(
+        !ev.iter().any(|e| matches!(e, TimingEvent::Jump { .. })),
+        "{ev:?}"
+    );
+    let d = t.drift().expect("drift");
+    assert!(d.warning && (d.ppm - 5.0).abs() < 1.0, "{d:?}");
+}
+
+/// A step across a gap is still a jump once it exceeds what the slope's uncertainty allows
+/// over that gap.
+#[test]
+fn a_step_between_sweeps_is_a_jump() {
+    let cfg = TimingConfig::for_rate(96_000.0);
+    let step_at = 3.0 * 22.0 * cfg.sample_rate;
+    let (_, ev) = bursts(&cfg, 6, 2.25, 22.0, |x, u| {
+        1742.6 + 0.5 * u + if x > step_at { 12.0 } else { 0.0 }
+    });
+    let jumps: Vec<_> = ev
+        .iter()
+        .filter_map(|e| match e {
+            TimingEvent::Jump { from, to, .. } => Some((*from, *to)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(jumps.len(), 1, "{ev:?}");
+    assert_eq!(jumps[0].1 - jumps[0].0, 12, "{jumps:?}");
+}

@@ -36,7 +36,8 @@ pub struct Prediction {
     /// Expected offset, samples.
     pub offset: f64,
     /// Standard deviation of a new window's offset around it: the scatter of the held
-    /// points widened by how far the line is extrapolated, samples.
+    /// points widened by how far the line is extrapolated, and by the slope's uncertainty
+    /// as the clocks' drift over the distance past the newest point, samples.
     pub sigma: f64,
 }
 
@@ -59,18 +60,22 @@ pub struct DriftLine {
     /// Shortest span judged, samples.
     min_span: f64,
     threshold_ppm: f64,
+    /// Uncertainty of the slope as the clocks' drift, samples per sample.
+    slope_sigma: f64,
     points: VecDeque<(f64, f64)>,
     judged: Option<DriftEstimate>,
 }
 
 impl DriftLine {
     /// A line over `window_s` seconds, judged on spans of at least `min_span_s`, warning
-    /// above `threshold_ppm`; `points_capacity` points are reserved.
+    /// above `threshold_ppm`, its slope taken as the drift to within `slope_sigma_ppm`;
+    /// `points_capacity` points are reserved.
     pub fn new(
         sample_rate: f64,
         window_s: f64,
         min_span_s: f64,
         threshold_ppm: f64,
+        slope_sigma_ppm: f64,
         points_capacity: usize,
     ) -> Self {
         Self {
@@ -78,6 +83,7 @@ impl DriftLine {
             horizon: window_s * sample_rate,
             min_span: min_span_s * sample_rate,
             threshold_ppm,
+            slope_sigma: slope_sigma_ppm * 1e-6,
             points: VecDeque::with_capacity(points_capacity),
             judged: None,
         }
@@ -135,19 +141,20 @@ impl DriftLine {
 
     /// The offset expected at capture index `x`; `None` without points.
     pub fn predict(&self, x: f64) -> Option<Prediction> {
+        let &(x0, y0) = self.points.back()?;
+        let beyond = self.slope_sigma * (x - x0).max(0.0);
         if let Some(f) = self.fit() {
             let scatter = f.resid_rms.max(SIGMA_FLOOR);
             let lever = 1.0 + 1.0 / f.n + (x - f.mx).powi(2) / f.sxx;
             return Some(Prediction {
                 offset: f.my + f.slope * (x - f.mx),
-                sigma: scatter * lever.sqrt(),
+                sigma: (scatter * scatter * lever + beyond * beyond).sqrt(),
             });
         }
-        let &(x0, y0) = self.points.back()?;
         let slope = self.judged.map_or(0.0, |j| j.ppm * 1e-6);
         Some(Prediction {
             offset: y0 + slope * (x - x0),
-            sigma: SIGMA_FLOOR,
+            sigma: SIGMA_FLOOR.hypot(beyond),
         })
     }
 
@@ -225,7 +232,7 @@ mod tests {
     const HOP: f64 = 12_000.0;
 
     fn line() -> DriftLine {
-        DriftLine::new(FS, 30.0, 10.0, 2.0, 128)
+        DriftLine::new(FS, 30.0, 10.0, 2.0, 1.0, 128)
     }
 
     /// Feeds `seconds` of windows of `offset(x)` plus Gaussian-ish noise of RMS `noise`.
@@ -305,7 +312,10 @@ mod tests {
         let gap_end = 80.0 * FS;
         let p = l.predict(gap_end).expect("prediction");
         assert!((p.offset - (10.0 + 80e-6 * gap_end)).abs() < 1e-6, "{p:?}");
-        assert!(p.sigma < 0.1, "{p:?}");
+        // Exact points, so only the slope's uncertainty as drift remains: 1 ppm over the
+        // minute past the newest point.
+        let past = gap_end - 20.0 * FS;
+        assert!((p.sigma - 1e-6 * past).abs() < 0.05, "{p:?}");
         l.clear();
         assert!(l.is_empty() && l.predict(gap_end).is_none());
         let e = l.estimate().expect("judged survives");

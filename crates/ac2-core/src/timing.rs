@@ -118,6 +118,14 @@ pub struct TimingConfig {
     pub drift_min_span_s: f64,
     /// Drift above which input and output are considered on different clocks, ppm.
     pub drift_threshold_ppm: f64,
+    /// Standard uncertainty of the drift line's slope as the clocks' drift, ppm; it widens
+    /// the prediction past the newest window (across a gap in the stimulus). A stimulus
+    /// whose spectrum moves (a sweep) is timed at the group delay of the frequency it is
+    /// at, plus the estimator's band-dependent bias, so on one clock its offset still moves
+    /// within the sweep: half a sample in 2.25 s on an RME FF400 loopback (2.3 ppm). Such a
+    /// slope, carried 20 s to the next sweep, misses by 4 samples. The regression across
+    /// sweeps is not fooled (the same sweep repeats its trend), so the judged drift is.
+    pub slope_sigma_ppm: f64,
 }
 
 impl TimingConfig {
@@ -144,6 +152,7 @@ impl TimingConfig {
             drift_window_s: 30.0,
             drift_min_span_s: 10.0,
             drift_threshold_ppm: 2.0,
+            slope_sigma_ppm: 1.0,
         }
     }
 }
@@ -712,6 +721,7 @@ impl TimingTracker {
                 cfg.drift_window_s,
                 cfg.drift_min_span_s,
                 cfg.drift_threshold_ppm,
+                cfg.slope_sigma_ppm,
                 capacity,
             ),
             drift_warning: false,

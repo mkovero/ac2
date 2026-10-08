@@ -148,7 +148,15 @@ Lost nor changes the state.
   added to the line. σ is the larger of the regression scatter (widened by extrapolation)
   and the correlation smear `W·|ε|/√12`: while a window is captured the stimulus slides by
   `W·ε` samples (3.3 at 100 ppm in a 0.68 s window) and the peak can sit anywhere along
-  that. Outside the threshold a window is a jump candidate, confirmed when its windows lie
+  that. Past the newest held window σ also grows by `slope_sigma_ppm` (1 ppm) times the
+  distance: a sweep is timed at the group delay of the frequency it is at plus the
+  estimator's band-dependent bias, so on pupu's one clock the offset still rose 0.5 sample
+  within each 2.25 s sweep (2.3 ppm). Carried 20 s to the next sweep that slope missed by
+  4–5 samples; every suite sweep after the first logged a JUMP 1748 → 1743, and the shifted
+  points added up to a 2.0–2.3 ppm CLOCK DRIFT. Unshifted, the regression across sweeps
+  sees the same trend repeat and its slope is the clocks' (5 ppm between sweeps is judged
+  as such). Over a 20 s gap a step must exceed about 6 samples to be a jump; within
+  continuous stimulus the term is a hundredth of a sample per hop. Outside the threshold a window is a jump candidate, confirmed when its windows lie
   on one line over at least W (as in Q3). The jump is measured re the drifted offset at the
   newest candidate window (the first may straddle the step).
 - **Steps never enter the slope.** A confirmed jump shifts the held points by the step, so
