@@ -6,7 +6,7 @@
 //! because formatting and file writes allocate and make syscalls.
 
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -48,7 +48,13 @@ pub fn subscriber(
     let file = file.map(|f| fmt::layer().with_ansi(false).with_writer(Arc::new(f)));
     Registry::default()
         .with(filter)
-        .with(fmt::layer().with_writer(io::stderr))
+        // Colour codes only for a terminal: journald and redirected files store them as
+        // literal escape bytes.
+        .with(
+            fmt::layer()
+                .with_ansi(io::stderr().is_terminal())
+                .with_writer(io::stderr),
+        )
         .with(file)
 }
 

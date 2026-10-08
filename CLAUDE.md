@@ -13,6 +13,18 @@ cargo fmt --all --check
 ```
 Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 
+## Tests: quick tier and full tier
+Real-time tests (Leq windows, device recovery, drift, band Leq, the CLI rig tests) take
+20–35 s each. Don't run them on every iteration:
+- **Quick tier**: iteration and an agent's pre-commit run. Skips the lengthy tests:
+  ```
+  cargo nextest run --workspace -E 'not (binary(leq) | binary(recovery) | binary(band_leq) | binary(drift) | binary(leq_rig) | binary(band_rig) | binary(drift_rig) | binary(recovery_rig) | test(/^spl::/))'
+  ```
+  plus `cargo test --workspace --doc` when docs changed.
+- **Full tier**: everything (`cargo nextest run --workspace`, or plain `cargo test --workspace`)
+  — the lead runs it once before pushing to main, and CI runs it on every push.
+- In nextest, `-j` means test threads; build jobs are `--build-jobs N`.
+
 ## Crate map
 | crate | role |
 |---|---|
@@ -56,7 +68,8 @@ Every turn re-sends the whole context, so what an agent reads stays paid for unt
 - Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
   through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
   `grep -n '^#'` first, read one section.
-- Iterate with `cargo test -p <crate> <filter>`; the full workspace run once, before commit.
+- Iterate with `cargo test -p <crate> <filter>`; the quick tier once before commit, the full
+  tier before pushing to main (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
 - Delegation: one task per agent with the files and functions named in the brief; the agent
