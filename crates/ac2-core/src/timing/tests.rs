@@ -629,6 +629,116 @@ fn a_slow_sweep_start_never_reads_as_a_range_edge() {
     );
 }
 
+/// The sweep ac2 emits starts below the asked band and fades in over its first second: at
+/// 96 kHz with 0.68 s windows, everything up to about 1.4 kHz is too narrow to time to a
+/// sample. Those windows still have clear peaks, some at the edge of the searched range and
+/// the rest pulled tens of samples short of the true lag, which read as a lock elsewhere, a
+/// jump back and a tilted drift line. They must give no offset and leave the lock alone:
+/// pink noise locks, then a 20 Hz – 40 kHz, 5.5 s sweep (emitted from 4.3 Hz) follows.
+#[test]
+fn an_extended_sweep_start_neither_jumps_nor_loses_the_lock() {
+    use crate::grid::LogGrid;
+    use crate::sweep::{DEFAULT_MAX_ORDER, SweepSpec, SweepTiming};
+    const FS96: f64 = 96_000.0;
+    const DELAY: usize = 1743;
+    let spec = SweepSpec {
+        ess: crate::generator::EssConfig {
+            start_hz: 20.0,
+            end_hz: 40_000.0,
+            duration_s: 5.5,
+            fade_in_s: 0.08,
+            fade_out_s: 0.02,
+        },
+        level_dbfs: -10.0,
+        sample_rate: FS96,
+        max_order: DEFAULT_MAX_ORDER,
+        gate_s: None,
+        tail_s: None,
+        grid: LogGrid::covering(48, 20.0, 40_000.0),
+    };
+    let t = SweepTiming::new(&spec).expect("timing");
+    assert!(t.emitted.start_hz < 5.0, "{:?}", t.emitted);
+    let n = |s: f64| (s * FS96) as usize;
+    let mut out = vec![0.0f32; n(2.0)];
+    Generator::new(&GeneratorConfig {
+        signal: Signal::Pink,
+        sample_rate: FS96,
+        seed: 3,
+        band: BandLimit::NONE,
+        level_dbfs: -20.0,
+        ceiling_dbfs: -10.0,
+    })
+    .expect("generator")
+    .fill(&mut out);
+    out.extend(std::iter::repeat_n(0.0, n(1.0)));
+    let amp = dbfs_to_rms(spec.level_dbfs) * std::f64::consts::SQRT_2;
+    out.extend((0..t.sweep_samples()).map(|k| (amp * t.plan.sample(k)) as f32));
+    out.extend(std::iter::repeat_n(0.0, n(1.0)));
+    let mut noise = Rng::new(9);
+    let noise_rms = dbfs_to_rms(-110.0);
+    let cap: Vec<f32> = (0..out.len())
+        .map(|i| {
+            let s = i.checked_sub(DELAY).map_or(0.0, |j| out[j]);
+            s + (noise.uniform_unit_rms() * noise_rms) as f32
+        })
+        .collect();
+
+    let cfg = TimingConfig::for_rate(FS96);
+    let mut mon = LoopbackTiming::new(cfg);
+    let mut ev = Vec::new();
+    let mut narrow = 0;
+    let mut start = 0u64;
+    while start as usize + cfg.window <= cap.len() {
+        let range = mon.search_range();
+        let r0 = range.reference_start(start);
+        let len = range.reference_len(cfg.window);
+        let reference: Vec<f32> = (r0..r0 + len as i64)
+            .map(|i| {
+                usize::try_from(i)
+                    .ok()
+                    .and_then(|i| out.get(i).copied())
+                    .unwrap_or(0.0)
+            })
+            .collect();
+        let capture = &cap[start as usize..start as usize + cfg.window];
+        let (m, e) = mon
+            .process_window(start, capture, &reference, range)
+            .expect("window");
+        match m.outcome {
+            Outcome::Offset(p) => assert!(
+                (p.offset - DELAY as i64).abs() <= 1,
+                "window at {:.2} s read offset {} (lobe {})",
+                start as f64 / FS96,
+                p.offset,
+                p.lobe
+            ),
+            Outcome::NoEstimate(NoEstimate::Narrowband) => narrow += 1,
+            _ => {}
+        }
+        ev.extend(e.iter().copied());
+        start += cfg.hop as u64;
+    }
+    assert!(narrow >= 10, "{narrow} narrowband windows");
+    let locks: Vec<_> = ev
+        .iter()
+        .filter(|e| matches!(e, TimingEvent::Locked { .. }))
+        .collect();
+    assert!(
+        locks
+            .iter()
+            .all(|e| matches!(e, TimingEvent::Locked { offset, .. } if *offset == DELAY as i64))
+            && !locks.is_empty(),
+        "{ev:?}"
+    );
+    assert!(
+        !ev.iter().any(|e| matches!(
+            e,
+            TimingEvent::Jump { .. } | TimingEvent::Lost { .. } | TimingEvent::DriftWarning { .. }
+        )),
+        "{ev:?}"
+    );
+}
+
 fn drift_warnings(rec: &[Record]) -> Vec<f64> {
     events(rec)
         .iter()

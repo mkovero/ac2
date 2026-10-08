@@ -124,7 +124,19 @@ ratio) plus integer steps (dropped or repeated frames). The tracker keeps that m
 (`ac2-core::timing::drift::DriftLine`) and judges every window against its *prediction*:
 
 Offsets are fractional (integer peak plus the parabolic fraction), and each window's
-offset belongs to its centre.
+offset belongs to its centre. A window gives an offset only if its correlation's main lobe
+(width at half the peak, about the inverse of the stimulus bandwidth) is at most
+`max_lobe_s` = 0.2 ms. PHAT whitens every bin, and where a narrowband window's band ends the
+leakage of the window's edges pulls the peak off the true lag by a fraction of the lobe.
+On pupu (96 kHz, 1743-sample loopback) the sweep emitted from 4.3 Hz read offset 0 (the edge
+of the searched range) with PSR 21–30 dB from 9 to 230 Hz. With a floor relative to the
+strongest bin it read 1669…1742 up to 1.4 kHz: −74 samples at a 549-lag lobe, −1 at 20–42,
+exact at 14 or less. A bias of tens of samples against a ½-sample jump threshold reads as a
+lock elsewhere, a jump back and a tilted line: every suite sweep logged a false OUTPUT TIMING
+JUMP, and a −3.6 ppm CLOCK DRIFT that refused the internal reference. Such a window is
+`Narrowband`. The lobe is judged before the PSR, since a missing loopback whitens to a narrow
+lobe. A narrowband window says nothing about the loopback, so it neither counts towards
+Lost nor changes the state.
 
 - **Acquisition** chains windows that lie on one line: the second window may differ from
   the first by up to `1 sample + max_drift·Δx` (bound 500 ppm), every later one must lie
