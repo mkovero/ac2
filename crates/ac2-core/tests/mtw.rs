@@ -853,21 +853,13 @@ fn rejected_samples_never_reach_the_averages() {
 }
 
 #[test]
-fn freeze_reset_and_restart() {
+fn reset_and_restart() {
     let sr = 48_000.0;
     let x = Noise(61).vec(200_000, 0.2);
     let y = x.clone();
     let mut m = engine(sr, Averaging::Fifo { blocks: 4 }, 0);
     m.push(0, &x[..100_000], &y[..100_000], SampleGate::Accept)
         .expect("push");
-    let before = m.frame();
-    m.set_frozen(true);
-    let out = m
-        .push(100_000, &x[100_000..], &y[100_000..], SampleGate::Accept)
-        .expect("push");
-    assert!(out.blocks_frozen > 0 && out.blocks_accumulated == 0);
-    assert!(same_frame(&before, &m.frame()));
-    m.set_frozen(false);
     m.reset_averages();
     assert!(m.frame().columns.iter().all(|c| matches!(
         c.validity,

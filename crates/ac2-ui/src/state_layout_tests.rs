@@ -28,7 +28,7 @@ fn key_hints_follow_the_focused_pane() {
     assert!(ir.contains(&"G linear/log/ETC".to_owned()), "{ir:?}");
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
-    assert_eq!(spl[..3], ["G meter/Leq/both", "F F/S/I", "Z A/C/Z"]);
+    assert_eq!(spl[..3], ["G meter/Leq/both", "Shift+F F/S/I", "Z A/C/Z"]);
     // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR,
     // and G its views in each.
     t.key("Alt+5");
@@ -170,7 +170,8 @@ fn pane_caption_shortens_to_the_selected_trace() {
 }
 
 /// W: split → the focused pane alone → full screen (the stage view, on any pane) → split.
-/// F11 alone is the window full screen in whatever layout; with one pane, the stage view.
+/// F (or F11) alone is the window full screen in whatever layout; with one pane, the stage
+/// view.
 /// Full screen stays the pane alone with a stimulus armed.
 #[test]
 fn w_cycles_split_maximised_full_screen() {
@@ -195,7 +196,7 @@ fn w_cycles_split_maximised_full_screen() {
     assert!(t.st.stage_view());
     t.key("F11");
     assert!(t.st.layout.maximized && !t.st.fullscreen && !t.st.stage_view());
-    t.key("F11");
+    t.key("F");
     assert!(t.st.stage_view());
     t.key("W");
     assert!(!t.st.layout.maximized && !t.st.fullscreen);

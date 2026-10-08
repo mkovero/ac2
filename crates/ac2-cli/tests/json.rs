@@ -252,7 +252,6 @@ async fn session_meas_delay_trace_flow() -> R {
             },
             "config_rev": 2,
             "running": false,
-            "frozen": false,
             "delay": null,
             "grid_id": null
         })

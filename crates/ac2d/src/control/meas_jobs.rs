@@ -125,7 +125,6 @@ impl Control {
                     d.applied_samples,
                     d.applied.0,
                     d.nudged_samples,
-                    m.frozen,
                     m.config_rev,
                     d.tracking,
                     d.awaiting_pick,
@@ -145,7 +144,6 @@ impl Control {
                     fs,
                     idx(config.input)?,
                     self.input_cal(rt, config.input),
-                    m.frozen,
                     m.config_rev,
                 )
                 .map_err(inv)?;
@@ -160,7 +158,6 @@ impl Control {
                     fs,
                     idx(config.input)?,
                     self.input_cal(rt, config.input),
-                    m.frozen,
                     m.config_rev,
                 )
                 .map_err(inv)?;
@@ -172,9 +169,8 @@ impl Control {
                 let leq = leq
                     .take()
                     .ok_or_else(|| perr(ErrorCode::Internal, "SPL meter without its log"))?;
-                let a =
-                    jobs::spl::Spl::new(m.id, config, fs, input, cal, m.frozen, m.config_rev, leq)
-                        .map_err(inv)?;
+                let a = jobs::spl::Spl::new(m.id, config, fs, input, cal, m.config_rev, leq)
+                    .map_err(inv)?;
                 (Box::new(a), None)
             }
             MeasKind::Sweep { .. } => return Ok(None),
@@ -192,7 +188,6 @@ impl Control {
                     stored,
                     rt.epoch,
                     Arc::clone(&self.probes),
-                    m.frozen,
                     m.config_rev,
                 );
                 (Box::new(a), Some(shown))

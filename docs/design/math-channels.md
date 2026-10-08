@@ -13,7 +13,7 @@ A math channel is a curve made from other curves by name: **A ÷ B**, **A × B**
 of one kind; the result is a measurement of that kind — drawn where the kind is drawn
 (transfer math on the magnitude / phase / coherence panes, spectrum and RTA math on the
 spectrum pane), updating live while any operand is live, listed by `ac2 meas list`, edited
-afterwards (operands, operator, method, smoothing) and frozen into a stored trace by a
+afterwards (operands, operator, method, smoothing) and kept as a stored trace by a
 capture (Ctrl+1 … 9, `ac2 trace capture`) whose metadata names the expression and the
 operands that went in.
 
@@ -129,7 +129,7 @@ trace), to change a measurement into another kind or onto another grid (transfer
 length, band layout). A stored operand's columns are read when the channel starts; a mic
 curve applied to that trace afterwards restarts the channel with the corrected columns.
 `meas.reset` of a math channel is `invalid` (it holds no averaging; the app's reset resets its
-live operands); freeze holds its last result.
+live operands).
 
 ## Daemon
 
@@ -197,7 +197,7 @@ new avg` and `ac2 trace math`.
   comb. `tests/math_channels.rs` on the fake rig: the live average of three positions
   (analytic power average, NO SIGNAL position refused, capture naming two positions,
   invariants, FEW_OPERANDS); Seat 1 ÷ Seat 2 = +6 dB with the later arrival in the phase,
-  edited to × = 0 dB, capture frozen at +6 dB; capture + live = the two-arrival sum; an
+  edited to × = 0 dB, capture kept at +6 dB; capture + live = the two-arrival sum; an
   import refused in a sum, allowed in ÷; spectrum − spectrum = 6 dB on the `spec` stream,
   its capture a spectrum trace, operand FFT length locked.
 - `ac2-cli` (`tests/math_rig.rs`): expressions typed and by `--op`, refusals by message, an

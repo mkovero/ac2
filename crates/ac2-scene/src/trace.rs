@@ -1085,7 +1085,6 @@ mod tests {
             meta: ac2_proto::frame::TfMeta {
                 delay: Seconds(applied),
                 nudged: Seconds(nudged),
-                frozen: false,
                 smoothing: None,
                 mic_curve: false,
                 math: None,

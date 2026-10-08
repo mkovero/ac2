@@ -46,13 +46,9 @@ pub fn has_live_curve(k: &MeasKind) -> bool {
     )
 }
 
-/// `running`, `stopped`, `frozen`.
+/// `running`, `stopped`.
 pub fn state_word(m: &Measurement) -> &'static str {
-    match (m.running, m.frozen) {
-        (_, true) => "frozen",
-        (true, false) => "running",
-        (false, false) => "stopped",
-    }
+    if m.running { "running" } else { "stopped" }
 }
 
 /// One measurement as the list gets it: the measurement and this app's display of it.
@@ -353,10 +349,10 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
         maths.sort_by_key(|i| i.meas.id);
         for item in maths {
             let m = item.meas;
-            let state = match (m.running, m.frozen) {
-                (_, true) => "math · frozen",
-                (true, false) => "math (live)",
-                (false, false) => "math · stopped",
+            let state = if m.running {
+                "math (live)"
+            } else {
+                "math · stopped"
             };
             let mut long = state.to_owned();
             if item.hidden {
@@ -706,7 +702,6 @@ pub(crate) mod tests {
             },
             config_rev: Rev(1),
             running: true,
-            frozen: false,
             delay: None,
             grid_id: None,
         }

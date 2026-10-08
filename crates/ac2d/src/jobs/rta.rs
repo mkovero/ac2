@@ -64,7 +64,6 @@ pub(crate) struct Rta {
     cal: InputCal,
     /// Mic-curve correction per band (dB subtracted).
     corr: Option<Vec<f64>>,
-    frozen: bool,
     config_rev: Rev,
     applied_at: Option<u64>,
     levels: LevelsMeter,
@@ -86,7 +85,6 @@ impl Rta {
         sample_rate: u32,
         idx: usize,
         cal: InputCal,
-        frozen: bool,
         config_rev: Rev,
     ) -> Result<Self, String> {
         let bank = bank(&cfg, sample_rate)?;
@@ -117,7 +115,6 @@ impl Rta {
             avg,
             cal: InputCal::none(),
             corr: None,
-            frozen,
             config_rev,
             applied_at: None,
             buf: Vec::new(),
@@ -234,7 +231,6 @@ impl Analysis for Rta {
     fn command(&mut self, c: JobCmd) {
         self.generation += 1;
         match c {
-            JobCmd::Freeze(f) => self.frozen = f,
             JobCmd::Reset => self.reset(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::SetDelay { .. }
@@ -252,7 +248,7 @@ impl Analysis for Rta {
         let interval_s = self.bank.samples() as f64 / self.fs;
         // Averaging goes on whether or not anyone receives the result: an interval is one
         // frame of the average.
-        if self.bank.samples() > 0 && !self.frozen {
+        if self.bank.samples() > 0 {
             self.generation += 1;
             self.bank.band_powers(&mut self.powers);
             let p = self.powers.clone();

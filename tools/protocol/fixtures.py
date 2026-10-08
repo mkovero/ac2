@@ -107,7 +107,6 @@ def tf_frame():
         {
             "delay": 0.0125,
             "nudged": 0.0,
-            "frozen": False,
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
             "math": {
@@ -516,7 +515,6 @@ SPL_MEASUREMENT = {
     },
     "config_rev": 40,
     "running": True,
-    "frozen": False,
     "delay": None,
     "grid_id": None,
 }
@@ -622,7 +620,6 @@ def measurement():
         "config": MEAS_CONFIG,
         "config_rev": 40,
         "running": True,
-        "frozen": False,
         "delay": {
             "applied": 0.0125,
             "applied_samples": 600.25,
@@ -661,7 +658,6 @@ MATH_MEASUREMENT = {
     },
     "config_rev": 62,
     "running": True,
-    "frozen": False,
     "delay": None,
     "grid_id": p.grid_id(LOG_GRID),
 }
@@ -689,7 +685,6 @@ SWEEP_MEASUREMENT = {
     },
     "config_rev": 66,
     "running": False,
-    "frozen": False,
     "delay": None,
     "grid_id": None,
 }
@@ -735,14 +730,14 @@ def requests():
         req(9, "gen.stop"),
         req(10, "meas.create", {"config": MEAS_CONFIG}),
         req(
-            17,
+            16,
             "delay.find",
             {"meas": 1, "band": {"type": "sub"}, "observation": 8.0},
             mutation=False,
         ),
-        req(18, "delay.insert", {"meas": 1, "pick": {"type": "ranked", "index": 1}}),
+        req(17, "delay.insert", {"meas": 1, "pick": {"type": "ranked", "index": 1}}),
         req(
-            27,
+            26,
             "trace.import",
             {
                 "file_name": "sub.txt",
@@ -752,7 +747,7 @@ def requests():
             },
         ),
         req(
-            30,
+            29,
             "cal.curve_import",
             {
                 "mic": "M30 #1234",
@@ -763,26 +758,26 @@ def requests():
             },
         ),
         req(
-            32,
+            31,
             "spl.log_get",
             {"meas": 4, "log": "previous", "from": 120, "max": 3600},
             mutation=False,
         ),
         req(
-            33,
+            32,
             "sweep.run",
             {"lease_token": TOKEN, "meas": 7, "name": "1083 sweep"},
         ),
-        req(40, "session.inputs", {"inputs": INPUTS}),
+        req(39, "session.inputs", {"inputs": INPUTS}),
         req(
-            41,
+            40,
             "cal.delete",
             {"key": {"device": "hw:UMC1820", "channel": 1, "mic": "M30 #1234"}},
         ),
-        req(42, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
-        req(43, "session.preview_stop", mutation=False),
+        req(41, "session.preview", {"backend": "jack", "device": "jack"}, mutation=False),
+        req(42, "session.preview_stop", mutation=False),
         req(
-            44,
+            43,
             "session.detect_loopback",
             {
                 "lease_token": TOKEN,
@@ -793,11 +788,11 @@ def requests():
             },
             mutation=False,
         ),
-        req(45, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
-        req(47, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
-        req(48, "spl.log_new", {"meas": 4}),
+        req(44, "trace.mic_curve", {"trace": 8, "curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(46, "cal.curve_delete", {"curve": {"mic": "M30 #1234", "label": "0°"}}),
+        req(47, "spl.log_new", {"meas": 4}),
         req(
-            49,
+            48,
             "cal.spl_electrical",
             {
                 "input": 1,
@@ -810,10 +805,10 @@ def requests():
                 "replace_acoustic": False,
             },
         ),
-        req(50, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
-        req(51, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
+        req(49, "spl.history_get", {"meas": 4, "seconds": 14400}, mutation=False),
+        req(50, "delay.nudge", {"meas": 1, "by": -0.25 / 48000.0}),
         req(
-            52,
+            51,
             "rec.start",
             {
                 "request": {
@@ -824,22 +819,22 @@ def requests():
                 }
             },
         ),
-        req(54, "rec.list", mutation=False),
+        req(53, "rec.list", mutation=False),
         req(
-            55,
+            54,
             "session.replay",
             {"recording": {"type": "name", "name": "soundcheck"}, "pace": "fast"},
         ),
-        req(56, "gen.ceiling", {"ceiling": -40.0, "confirm_raise": True}),
+        req(55, "gen.ceiling", {"ceiling": -40.0, "confirm_raise": True}),
         req(
-            57,
+            56,
             "session.outputs",
             {"outputs": [{"channel": 0, "label": "Main L"}, {"channel": 1, "label": None}]},
         ),
-        req(58, "server.info", mutation=False),
-        req(60, "server.revoke", {"name": "laptop"}),
+        req(57, "server.info", mutation=False),
+        req(59, "server.revoke", {"name": "laptop"}),
         req(
-            61,
+            60,
             "spl.band_transfer",
             {
                 "meas": 4,
@@ -858,7 +853,7 @@ def requests():
             },
         ),
         req(
-            62,
+            61,
             "spl.band_log_get",
             {
                 "meas": 4,

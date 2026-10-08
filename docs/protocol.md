@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 28`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 29`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -89,7 +89,6 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
-| `meas.freeze` | `meas`, `frozen` | `measurement` | |
 | `meas.reset` | `meas` | `ack` | |
 | `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | |
 | `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `measurement` | |
@@ -279,14 +278,13 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
     `traces: delete`) and a `meas.update` that changes its kind,
     grid, FFT length or band layout are `refused`; `trace.delete` of a named trace is
     `refused`; `trace.mic_curve` on it restarts the channel with the corrected columns.
-    `meas.reset` of a math channel is `invalid` (reset its operands); `meas.freeze` holds
-    its last result.
+    `meas.reset` of a math channel is `invalid` (reset its operands).
 
 - **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_input`,
   `outputs` ([u16], the speaker's and the loopback's), `level: Dbfs` (typed, no default),
   `sweep: EssSpec`, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`). Settings
   only: it publishes no stream, `running` stays false, and `meas.start` / `meas.stop` /
-  `meas.freeze` / `meas.reset` of it are `invalid`. `sweep.run` plays it (below); each run is
+  `meas.reset` of it are `invalid`. `sweep.run` plays it (below); each run is
   a stored `sweep` trace it owns. `meas.update` changes the settings for the next run.
   `invalid` at create / update: equal inputs, outputs empty or repeated, repeats outside
   1…8, a non-finite or positive level, a gate ≤ 0, a tail above 20 s, sweep parameters the
@@ -332,13 +330,13 @@ blocks of A-, C- and Z-weighted energy on a grid of whole seconds from its first
 lost samples (a capture discontinuity) move the grid on without energy or measured time.
 Each second is a log row, `SplLogRow` = {`start`: WallNs, `measured`: Seconds (< 1 next to
 a gap), `laeq`, `lceq`, `lzeq`: Dbfs over the measured time, `lcpeak`, `lafmax`: Dbfs, the
-second's highest C-weighted peak and A-weighted Fast level (both kept while the meter is
-frozen), `sensitivity`: Db \| nil (dB SPL of 0 dBFS in force), `position`:
+second's highest C-weighted peak and A-weighted Fast level (both kept through a `meas.reset`),
+`sensitivity`: Db \| nil (dB SPL of 0 dBFS in force), `position`:
 `PositionCorrection` \| nil (the correction in force while calibrated; never included in the
 row's levels, which are what was measured)}. The log belongs to the meter: it survives stopping and starting,
 device reopens, config changes and daemon restarts (session files and the autosave carry
-it, §7.2), keeps the newest 48 h, and is kept while frozen or after `meas.reset` (those
-are display operations). `spl.log_get` returns `SplLogPage` {`meas`, `from`, `total`,
+it, §7.2), keeps the newest 48 h, and is kept after `meas.reset` (a display
+operation). `spl.log_get` returns `SplLogPage` {`meas`, `from`, `total`,
 `rows`}: rows are numbered from the meter's first logged second; `from` says where the
 returned rows start (later than asked when older rows were dropped), `total` is one past
 the newest row, at most 20000 rows per reply. `invalid` for a measurement that is not an
@@ -812,8 +810,8 @@ directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — or 
 (`refused` in network mode). `SessionFile`: `name`, `path`, `saved_at`, `measurements`,
 `traces`.
 
-- `file.save` writes measurement configurations (applied delay, tracking, running,
-  frozen) and every trace with metadata, edits, slots and columns (format §7.2). Never
+- `file.save` writes measurement configurations (applied delay, tracking,
+  running) and every trace with metadata, edits, slots and columns (format §7.2). Never
   generator state; calibrations belong to the calibration store.
 - `file.load` checks the whole session first (a refusal changes nothing), then stops and
   disarms the generator and drops its owner (the old lease is gone), deletes every
@@ -993,7 +991,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
-`measurements` (`id`, `config`, `config_rev`, `running`, `frozen`, `delay`, `grid_id`),
+`measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | average | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`;
@@ -1081,7 +1079,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 A measurement topic is formed and sent only while someone subscribes to it. `tf`, `ir`,
 `spec` and `rta` frames come when the result changes (at most at the daemon's publish rate);
 `spl` at most 20 times a second (Lmax, Lmin, Lpeak and Leq cover the meter's interval, so
-none is lost between frames). An unchanged result (frozen, settled, gated) is re-sent with a
+none is lost between frames). An unchanged result (settled, gated, a long hop) is re-sent with a
 fresh header every 250 ms, so only a stream without audio goes STALE.
 
 `<meas>` is the decimal measurement id without sign or leading zeros; a topic has exactly
@@ -1143,7 +1141,7 @@ layout as code.
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `frozen`, `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
@@ -1212,7 +1210,7 @@ validity) of 1920 B — ≈ 7.8 KB. At 60 fps ≈ 0.47 MB/s per
 measurement locally, half that remote at 30 fps. A default `spec` frame (65 536 points at
 48 kHz: 897 `log_bins` columns of one f32) is ≈ 3.7 KB; it goes out with each new spectrum
 (every hop: `n/8`, ≈ 6 per second at 65 536 points; ≈ 30 per second for short FFTs) and is
-repeated every 0.25 s of audio while nothing changes (frozen), ≈ 22 KB/s.
+repeated every 0.25 s of audio while nothing changes, ≈ 22 KB/s.
 
 ## 6. Grids
 
@@ -1286,8 +1284,8 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 14, saved_at, measurements:
-[{id, config: MeasConfig, running, frozen, delay: {applied, nudged, tracking} | null}], spl_logs:
+`session.json`: `{format: "ac2-session", version: 15, saved_at, measurements:
+[{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace

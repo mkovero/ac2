@@ -83,7 +83,6 @@ fn spl_meas(id: u32, name: &str) -> Measurement {
         config: meas_config(name),
         config_rev: Rev(1),
         running: false,
-        frozen: false,
         delay: None,
         grid_id: None,
     }

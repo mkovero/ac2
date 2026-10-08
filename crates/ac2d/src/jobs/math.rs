@@ -99,9 +99,6 @@ pub(crate) struct MathJob {
     probes: Arc<Probes>,
     /// Every operand, in expression order: `None` for a live one (asked when due).
     stored: Vec<Option<Arc<Held>>>,
-    frozen: bool,
-    /// The result shown while frozen.
-    held: Option<FrameData>,
     config_rev: Rev,
     applied_at: u64,
     apply_pending: bool,
@@ -125,7 +122,6 @@ impl MathJob {
         stored: Vec<Option<Arc<Held>>>,
         epoch: SessionEpoch,
         probes: Arc<Probes>,
-        frozen: bool,
         config_rev: Rev,
     ) -> Self {
         let seen_delay = stored.iter().map(|s| s.as_ref().map(|h| h.delay)).collect();
@@ -139,8 +135,6 @@ impl MathJob {
             epoch,
             probes,
             stored,
-            frozen,
-            held: None,
             config_rev,
             applied_at: 0,
             apply_pending: true,
@@ -203,14 +197,9 @@ impl MathJob {
             .collect()
     }
 
-    /// The current result before display smoothing, on the combining grid: held while
-    /// frozen, else formed from the operands now.
+    /// The current result before display smoothing, on the combining grid, formed from the
+    /// operands now.
     fn current(&mut self) -> FrameData {
-        if self.frozen
-            && let Some(h) = &self.held
-        {
-            return h.clone();
-        }
         let answers = self.ask_operands();
         for (seen, a) in self.seen_delay.iter_mut().zip(&answers) {
             if let Answer::Result(f) = a
@@ -229,15 +218,9 @@ impl MathJob {
             &answers,
         );
         match &mut c {
-            FrameData::Tf(f) => {
-                f.meta.frozen = self.frozen;
-                f.meta.smoothing = self.cfg.smoothing;
-            }
+            FrameData::Tf(f) => f.meta.smoothing = self.cfg.smoothing,
             FrameData::Spec(f) => f.meta.smoothing = self.cfg.smoothing.map(|s| s.fraction),
             _ => {}
-        }
-        if self.frozen {
-            self.held = Some(c.clone());
         }
         c
     }
@@ -543,7 +526,6 @@ pub(crate) fn combine(
             meta: TfMeta {
                 delay: Seconds(delay),
                 nudged: Seconds(0.0),
-                frozen: false,
                 smoothing: None,
                 mic_curve,
                 math: state,
@@ -619,16 +601,13 @@ impl Analysis for MathJob {
             self.applied_at = b.start_sample;
             self.apply_pending = false;
         }
-        if !self.frozen {
-            // The result changes only with a live operand's: a channel of stored traces is
-            // the same until a command changes it (the pace refreshes it for the client),
-            // and one of live operands forms a new result when one of them has, not on
-            // every hand-off.
-            let state = self.operands_state();
-            if self.operands_seen != Some(state) {
-                self.operands_seen = Some(state);
-                self.generation += 1;
-            }
+        // The result changes only with a live operand's: a channel of stored traces is the
+        // same until a command changes it (the pace refreshes it for the client), and one of
+        // live operands forms a new result when one of them has, not on every hand-off.
+        let state = self.operands_state();
+        if self.operands_seen != Some(state) {
+            self.operands_seen = Some(state);
+            self.generation += 1;
         }
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;
@@ -637,12 +616,6 @@ impl Analysis for MathJob {
     fn command(&mut self, c: JobCmd) {
         self.generation += 1;
         match c {
-            JobCmd::Freeze(f) => {
-                self.frozen = f;
-                if !f {
-                    self.held = None;
-                }
-            }
             JobCmd::Smoothing {
                 change: SmoothingChange::Transfer(smoothing),
                 rev,

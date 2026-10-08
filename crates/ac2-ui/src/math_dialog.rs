@@ -622,7 +622,6 @@ mod tests {
             },
             config_rev: Rev(1),
             running: true,
-            frozen: false,
             delay: None,
             grid_id: None,
         }

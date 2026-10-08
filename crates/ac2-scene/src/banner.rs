@@ -663,7 +663,6 @@ pub(crate) mod tests {
             },
             config_rev: Rev(1),
             running: true,
-            frozen: false,
             delay: Some(DelayState {
                 applied: Seconds(0.0),
                 applied_samples: 0.0,

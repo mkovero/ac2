@@ -205,14 +205,6 @@ pub enum Command {
         /// Measurement.
         meas: MeasId,
     },
-    /// Freeze or unfreeze the published result.
-    #[serde(rename = "meas.freeze")]
-    MeasFreeze {
-        /// Measurement.
-        meas: MeasId,
-        /// Frozen.
-        frozen: bool,
-    },
     /// Reset averages.
     #[serde(rename = "meas.reset")]
     MeasReset {
@@ -615,7 +607,6 @@ impl Command {
             Self::MeasDelete { .. } => "meas.delete",
             Self::MeasStart { .. } => "meas.start",
             Self::MeasStop { .. } => "meas.stop",
-            Self::MeasFreeze { .. } => "meas.freeze",
             Self::MeasReset { .. } => "meas.reset",
             Self::DelayFind { .. } => "delay.find",
             Self::DelayInsert { .. } => "delay.insert",

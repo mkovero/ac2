@@ -117,17 +117,23 @@ fn spectrum_config() -> SpectrumConfig {
 }
 
 fn spectrum() -> Spectrum {
-    Spectrum::new(
-        MeasId(1),
-        spectrum_config(),
-        FS,
-        0,
-        InputCal::none(),
-        false,
-        Rev(1),
-    )
-    .expect("spectrum")
+    spectrum_of(spectrum_config())
 }
+
+fn spectrum_of(cfg: SpectrumConfig) -> Spectrum {
+    Spectrum::new(MeasId(1), cfg, FS, 0, InputCal::none(), Rev(1)).expect("spectrum")
+}
+
+/// A spectrum whose 8192-sample hop (32 blocks) leaves stretches of audio without a new
+/// result; the first comes after 65 536 samples (256 blocks).
+fn long_spectrum() -> Spectrum {
+    spectrum_of(SpectrumConfig {
+        fft_len: 65_536,
+        ..spectrum_config()
+    })
+}
+
+const LONG_FIRST: usize = 256;
 
 /// Pushes `n` blocks from `*at`.
 fn feed(a: &mut dyn Analysis, at: &mut u64, n: usize, amp: f32, seed: &mut u64) {
@@ -178,7 +184,6 @@ fn rta() -> Rta {
         FS,
         0,
         InputCal::none(),
-        false,
         Rev(1),
     )
     .expect("rta")
@@ -200,29 +205,32 @@ fn an_unchanged_result_is_only_refreshed() {
     assert_eq!(s.emit(&r.em), Flush::Done);
     assert_eq!(r.count(Stream::Rta), 0);
 
-    // Frozen: the command changes the result once, then nothing changes; it is only
-    // re-sent at the refresh, so a client never sees a frozen view go STALE.
-    s.command(JobCmd::Freeze(true));
-    feed(&mut s, &mut at, 4, 0.1, &mut seed);
-    s.emit(&r.em);
-    let frozen = r.frames();
-    let old = frozen
-        .iter()
-        .find(|f| matches!(f.data, FrameData::Rta(_)))
-        .expect("frozen rta");
+    // Between two results of a long hop nothing changes while audio comes in; the result
+    // is only re-sent at the refresh, so a client never sees a steady view go STALE.
+    let r = Rig::new("unchanged-hop");
+    r.subscribe(SPEC);
+    let mut s = long_spectrum();
+    let (mut at, mut seed) = (0, 12);
+    feed(&mut s, &mut at, LONG_FIRST, 0.1, &mut seed);
+    assert_eq!(s.emit(&r.em), Flush::Done);
+    let old = r
+        .frames()
+        .into_iter()
+        .find(|f| matches!(f.data, FrameData::Spec(_)))
+        .expect("first spectrum");
     for _ in 0..10 {
-        feed(&mut s, &mut at, 4, 0.1, &mut seed);
+        feed(&mut s, &mut at, 1, 0.1, &mut seed);
         // Newer audio: the refresh is pending.
         assert!(matches!(s.emit(&r.em), Flush::Pending(_)));
     }
-    assert_eq!(r.count(Stream::Rta), 0);
+    assert_eq!(r.count(Stream::Spec), 0);
     std::thread::sleep(REFRESH + Duration::from_millis(10));
     feed(&mut s, &mut at, 1, 0.1, &mut seed);
     assert_eq!(s.emit(&r.em), Flush::Done);
     let refreshed: Vec<Frame> = r
         .frames()
         .into_iter()
-        .filter(|f| matches!(f.data, FrameData::Rta(_)))
+        .filter(|f| matches!(f.data, FrameData::Spec(_)))
         .collect();
     assert_eq!(refreshed.len(), 1);
     // Same result, newer stamp.
@@ -234,7 +242,7 @@ fn an_unchanged_result_is_only_refreshed() {
     assert_eq!(s.emit(&r.em), Flush::Done);
     std::thread::sleep(REFRESH + Duration::from_millis(10));
     assert_eq!(s.emit(&r.em), Flush::Done);
-    assert_eq!(r.count(Stream::Rta), 0);
+    assert_eq!(r.count(Stream::Spec), 0);
 }
 
 /// The newest stamp still goes out after the last block, by the refresh at the latest, even
@@ -242,12 +250,11 @@ fn an_unchanged_result_is_only_refreshed() {
 #[test]
 fn the_last_block_is_stamped() {
     let r = Rig::new("last");
-    r.subscribe(RTA);
-    let mut s = rta();
+    r.subscribe(SPEC);
+    let mut s = long_spectrum();
     let (mut at, mut seed) = (0, 13);
-    feed(&mut s, &mut at, 4, 0.1, &mut seed);
+    feed(&mut s, &mut at, LONG_FIRST, 0.1, &mut seed);
     s.emit(&r.em);
-    s.command(JobCmd::Freeze(true));
     feed(&mut s, &mut at, 4, 0.1, &mut seed);
     s.emit(&r.em);
     feed(&mut s, &mut at, 1, 0.1, &mut seed);
@@ -260,7 +267,7 @@ fn the_last_block_is_stamped() {
     let last = r
         .frames()
         .into_iter()
-        .rfind(|f| matches!(f.data, FrameData::Rta(_)))
+        .rfind(|f| matches!(f.data, FrameData::Spec(_)))
         .expect("refresh");
     assert_eq!(last.stamp.audio_sample.0 + 1, at);
 }
@@ -327,7 +334,6 @@ fn spl() -> Spl {
         FS,
         0,
         InputCal::none(),
-        false,
         Rev(1),
         LeqSetup {
             log: Arc::new(Mutex::new(crate::leq_log::LeqLog::default())),

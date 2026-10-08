@@ -385,7 +385,6 @@ impl std::fmt::Debug for StageEstimator {
 pub(crate) enum BlockFate {
     Accumulated,
     Rejected,
-    Frozen,
 }
 
 impl StageEstimator {
@@ -558,13 +557,7 @@ impl StageEstimator {
 
     /// Feed stage-rate samples; `on_block` is told the fate and start of every completed
     /// block.
-    pub fn feed(
-        &mut self,
-        x: &[f64],
-        y: &[f64],
-        frozen: bool,
-        mut on_block: impl FnMut(BlockFate, u64),
-    ) {
+    pub fn feed(&mut self, x: &[f64], y: &[f64], mut on_block: impl FnMut(BlockFate, u64)) {
         let mut i = 0;
         while i < x.len() {
             let take = (self.nfft - self.buf_x.len()).min(x.len() - i);
@@ -577,8 +570,6 @@ impl StageEstimator {
                 let rejected = self.rejected.iter().any(|&(lo, hi)| lo < end && hi > start);
                 let fate = if rejected {
                     BlockFate::Rejected
-                } else if frozen {
-                    BlockFate::Frozen
                 } else {
                     self.accumulate_block();
                     self.last_block_start = Some(start);

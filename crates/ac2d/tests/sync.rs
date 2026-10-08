@@ -205,10 +205,7 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
 
     // Expired replay: more than 8 commits later, since(old) must resync.
     for _ in 0..10 {
-        b.ok(Command::MeasFreeze {
-            meas: MeasId(3),
-            frozen: true,
-        });
+        b.ok(Command::MeasStop { meas: MeasId(3) });
     }
     let e = a.call(Command::StateSince { rev: last }).unwrap_err();
     assert_eq!(e.code, ErrorCode::ResyncRequired);
@@ -252,13 +249,7 @@ fn request_dedup_and_expect_rev() {
     let e = c.call_req(stale).result.unwrap_err();
     assert_eq!(e.code, ErrorCode::Conflict);
     assert_eq!(e.detail, Some(ErrorDetail::Conflict { rev: Rev(1) }));
-    let mut fresh = Request::new(
-        c.next_id(),
-        Command::MeasFreeze {
-            meas: MeasId(1),
-            frozen: true,
-        },
-    );
+    let mut fresh = Request::new(c.next_id(), Command::MeasStop { meas: MeasId(1) });
     fresh.expect_rev = Some(Rev(1));
     assert!(c.call_req(fresh).result.is_ok());
     // Reads ignore expect_rev.

@@ -108,7 +108,7 @@ pub struct LayoutPrefs {
     pub focus: PaneKind,
     /// Only the focused pane (W).
     pub maximized: bool,
-    /// The window fills the screen (F11; with `maximized`, the full-screen pane).
+    /// The window fills the screen (F or F11; with `maximized`, the full-screen pane).
     pub fullscreen: bool,
     /// What the SPL pane shows: the meter, the Leq windows or both.
     pub spl_view: SplMode,

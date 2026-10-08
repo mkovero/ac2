@@ -65,7 +65,7 @@ measurement owns anything.
 
 `MeasKind::Sweep {config: SweepConfig}` holds a sweep's settings: reference and measurement
 inputs, outputs, typed level, `EssSpec`, repeats, gate, silence after. It has no job and
-publishes no stream (`MeasKind::stream()` is `None`): `meas.start/stop/freeze/reset` and
+publishes no stream (`MeasKind::stream()` is `None`): `meas.start/stop/reset` and
 `trace.capture` of it are `invalid`. Creating it plays nothing.
 
 `sweep.run {lease_token, meas, name}` replaces `ir.capture`: the same checks and the same

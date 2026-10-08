@@ -123,7 +123,6 @@ mod tests {
             pc(Scope::Spectrum),
             [
                 "S start/stop",
-                "F freeze",
                 "P peak hold",
                 "G spectrum/both/spectrograph",
                 "K smoothing",
@@ -151,7 +150,7 @@ mod tests {
             pc(Scope::Spl),
             [
                 "G meter/Leq/both/bands",
-                "F F/S/I",
+                "Shift+F F/S/I",
                 "Z A/C/Z",
                 "B columns/tiles",
                 "Shift+B history",

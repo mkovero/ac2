@@ -4,8 +4,8 @@
 //!
 //! Besides the meter, every second goes into the meter's log and its rolling Leq windows
 //! (`docs/design/leq.md`); a window going over its limit or recovering is reported to the
-//! control thread, which keeps the `spl_log` entity. Freeze and reset are display
-//! operations of the meter: the log and the windows carry on through them.
+//! control thread, which keeps the `spl_log` entity. Reset is a display operation of
+//! the meter: the log and the windows carry on through it.
 
 mod bands;
 
@@ -228,7 +228,6 @@ impl Spl {
         sample_rate: u32,
         idx: usize,
         cal: InputCal,
-        frozen: bool,
         config_rev: Rev,
         leq: LeqSetup,
     ) -> Result<Self, String> {
@@ -254,7 +253,6 @@ impl Spl {
         if let Some(c) = &cal.correction {
             meter.set_correction(Some(&c.design_fir(fs)));
         }
-        meter.set_frozen(frozen);
         Ok(Self {
             levels: LevelsMeter::new(vec![idx], vec![cfg.input], sample_rate),
             meas,
@@ -748,10 +746,7 @@ impl Analysis for Spl {
         self.applied_at.get_or_insert(b.start_sample);
         channel_f64(b, self.idx, &mut self.buf);
         self.push_meter(b);
-        // A frozen meter holds its reading: nothing new to send.
-        if !self.meter.frozen() {
-            self.generation += 1;
-        }
+        self.generation += 1;
         self.levels.push(b);
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;
@@ -760,7 +755,6 @@ impl Analysis for Spl {
     fn command(&mut self, c: JobCmd) {
         self.generation += 1;
         match c {
-            JobCmd::Freeze(f) => self.meter.set_frozen(f),
             JobCmd::Reset => self.meter.reset_interval(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
             JobCmd::Spl { config, rev } => {

@@ -33,13 +33,13 @@ silence: it adds neither energy nor measured time.
 
 Every block becomes a **log row**: wall time of its start, `m`, LAeq,1s, LCeq,1s, LZeq,1s
 (dBFS, `10·lg(2·e/m)`, decision 4a), the second's highest LCpeak and LAFmax (dBFS; from
-the meter's C-weighted peak path, uncorrected by the mic curve as Lpeak is, and from an LAF
-detector of the log's own, so freezing the display never holds them), the sensitivity in
+the meter's C-weighted peak path, uncorrected by the mic curve as Lpeak is, and from the
+meter's LAF detector, which a reset of the display leaves running), the sensitivity in
 force (dB SPL of 0 dBFS, if calibrated) and the measuring-position correction in force
 (recorded, never added to the row's levels). The log is the record: it lives with the meter in the daemon (last 48 h), is
 saved with the session and the autosave (one CSV per meter, which the autosave appends to), and is
-exported with `spl.log_get` (`ac2 spl leq export`). Frozen or reset meters keep logging:
-freeze and reset are display operations, a compliance record is not.
+exported with `spl.log_get` (`ac2 spl leq export`). A reset meter keeps logging:
+reset is a display operation, a compliance record is not.
 
 ## Windows
 
@@ -264,8 +264,8 @@ s" where a window shows its progress; they share the windows' scale, which then 
 6 dB above the peak limit. `ac2 spl leq watch` lists them after the windows (`peaks` in
 `--json`), `ac2 spl leq set --peak-limit lcpeak=135db` sets one (`=none` removes it), and
 the CSV log has `lcpeak_1s` and `lafmax_1s`. The meter's own LCpeak / LAFmax (since its
-reset) are unchanged; the peak limits run on the log's seconds, which neither freeze nor
-reset touches.
+reset) are unchanged; the peak limits run on the log's seconds, which a reset does not
+touch.
 
 Not judged: DIN 15905-5 assesses fixed half hours (from :00 and :30), not a sliding one;
 its LCpeak limit holds per assessment period, which a held 10 s maximum covers at any

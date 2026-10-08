@@ -33,7 +33,6 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         },
         config_rev: Rev(1),
         running: true,
-        frozen: false,
         delay,
         grid_id: None,
     }

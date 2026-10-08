@@ -220,10 +220,6 @@ pub fn commands() -> Vec<Command> {
         },
         Command::MeasStart { meas: MeasId(1) },
         Command::MeasStop { meas: MeasId(1) },
-        Command::MeasFreeze {
-            meas: MeasId(1),
-            frozen: true,
-        },
         Command::MeasReset { meas: MeasId(1) },
         Command::DelayFind {
             meas: MeasId(1),
@@ -429,7 +425,6 @@ pub fn sweep_measurement() -> Measurement {
         },
         config_rev: Rev(66),
         running: false,
-        frozen: false,
         delay: None,
         grid_id: None,
     }
@@ -466,7 +461,6 @@ pub fn math_measurement() -> Measurement {
         },
         config_rev: Rev(62),
         running: true,
-        frozen: false,
         delay: None,
         grid_id: Some(log_grid().id()),
     }
@@ -512,7 +506,6 @@ fn measurement() -> Measurement {
         config: meas_config(),
         config_rev: Rev(40),
         running: true,
-        frozen: false,
         delay: Some(DelayState {
             applied: Seconds(0.0125),
             applied_samples: 600.25,
@@ -1155,7 +1148,6 @@ pub fn spl_measurement() -> Measurement {
         },
         config_rev: Rev(40),
         running: true,
-        frozen: false,
         delay: None,
         grid_id: None,
     }
@@ -1634,7 +1626,6 @@ pub fn tf_frame() -> Frame {
             meta: TfMeta {
                 delay: Seconds(0.0125),
                 nudged: Seconds(0.0),
-                frozen: false,
                 smoothing: Some(Smoothing {
                     fraction: SmoothingFraction::Sixth,
                     mode: SmoothingMode::Magnitude,

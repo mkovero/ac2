@@ -252,7 +252,7 @@ pub(super) fn not_a_sweep(m: &Measurement) -> Result<(), ProtoError> {
         Err(perr(
             ErrorCode::Invalid,
             format!(
-                "{} is a sweep measurement: it has no job to start, stop, freeze or reset; \
+                "{} is a sweep measurement: it has no job to start, stop or reset; \
                  sweep.run plays it",
                 m.config.name
             ),

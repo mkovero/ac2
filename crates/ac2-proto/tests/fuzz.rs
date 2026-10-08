@@ -42,9 +42,8 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                     meta: TfMeta {
                         delay: Seconds(0.001),
                         nudged: Seconds(0.0),
-                        frozen: eff,
                         smoothing: None,
-                        mic_curve: false,
+                        mic_curve: eff,
                         math: None,
                     },
                     mag,
@@ -221,7 +220,6 @@ proptest! {
         let cmds = vec![
             Command::DelaySet { meas: m, delay: Seconds(delay) },
             Command::DelayInsert { meas: m, pick: DelayPick::Ranked { index: idx } },
-            Command::MeasFreeze { meas: m, frozen: flag },
             Command::TraceCapture { meas: m, name: name.clone(), slot: None },
             Command::GenRefresh { lease_token: LeaseToken(token) },
             Command::GenAcquire { force: flag },

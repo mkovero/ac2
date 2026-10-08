@@ -585,7 +585,6 @@ impl Shared {
                     id: m.id,
                     config: m.config.clone(),
                     running: m.running,
-                    frozen: m.frozen,
                     delay: m.delay.as_ref().map(|d| SavedDelay {
                         applied: d.applied,
                         nudged: d.nudged,
@@ -696,7 +695,6 @@ impl Shared {
                 config: sm.config,
                 config_rev: Rev(self.rev.0 + 1),
                 running: sm.running,
-                frozen: sm.frozen,
                 delay,
                 grid_id,
             };

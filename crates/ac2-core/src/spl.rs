@@ -400,10 +400,6 @@ fn settle_samples(t: TimeWeighting, fs: f64) -> u64 {
 /// change of weighting therefore reads a settled detector at once (a Slow detector started
 /// at the switch would take 5 s to settle), and Lmax, Lmin, Leq and Lpeak of the newly
 /// chosen weighting cover the same interval as before the change.
-///
-/// [Freezing](SplMeter::set_frozen) holds the displayed values only: the correction and
-/// weighting filters and the per-second integration go on, so the log has no hole and the
-/// detectors resume from a filter that never stopped.
 #[derive(Debug, Clone)]
 pub struct SplMeter {
     cfg: SplMeterConfig,
@@ -425,10 +421,6 @@ pub struct SplMeter {
     correction: Option<PartitionedFir>,
     corrected: Vec<f64>,
     seconds: SecondIntegrator,
-    /// LAF for the per-second LAFmax: its own detector, so freezing the displayed values
-    /// (which holds `detectors`) never holds what the log records.
-    log_af: TimeWeightedDetector,
-    frozen: bool,
 }
 
 impl SplMeter {
@@ -451,8 +443,6 @@ impl SplMeter {
             correction: None,
             corrected: Vec::new(),
             seconds: SecondIntegrator::new(fs),
-            log_af: TimeWeightedDetector::new(TimeWeighting::Fast, fs),
-            frozen: false,
             cfg,
         })
     }
@@ -502,17 +492,6 @@ impl SplMeter {
     /// Configuration: the rate and the weightings reported.
     pub fn config(&self) -> &SplMeterConfig {
         &self.cfg
-    }
-
-    /// Holds (`true`) or releases the detectors, Lmax/Lmin, Leq and Lpeak; the filters and
-    /// the per-second integration keep running.
-    pub fn set_frozen(&mut self, frozen: bool) {
-        self.frozen = frozen;
-    }
-
-    /// Whether the displayed values are held.
-    pub fn frozen(&self) -> bool {
-        self.frozen
     }
 
     /// The per-second integration: where the current second stands.
@@ -573,46 +552,19 @@ impl SplMeter {
                 .min(CHUNK)
                 .min(usize::try_from(self.seconds.room()).unwrap_or(usize::MAX));
             let (r, c) = (&raw[i..], &xc[i..]);
-            let (energy, max) = if self.frozen {
-                self.weigh::<CORR>(&r[..n], &c[..n])
-            } else {
-                if let Some(s) = self.settle_left.iter().copied().filter(|&s| s > 0).min() {
-                    n = n.min(usize::try_from(s).unwrap_or(usize::MAX));
-                }
-                let e = self.detect::<CORR>(&r[..n], &c[..n]);
-                for (l, &ew) in self.leq.iter_mut().zip(&e.0) {
-                    l.push_energy(ew, n as u64);
-                }
-                for s in &mut self.settle_left {
-                    *s = s.saturating_sub(n as u64);
-                }
-                e
-            };
+            if let Some(s) = self.settle_left.iter().copied().filter(|&s| s > 0).min() {
+                n = n.min(usize::try_from(s).unwrap_or(usize::MAX));
+            }
+            let (energy, max) = self.detect::<CORR>(&r[..n], &c[..n]);
+            for (l, &ew) in self.leq.iter_mut().zip(&energy) {
+                l.push_energy(ew, n as u64);
+            }
+            for s in &mut self.settle_left {
+                *s = s.saturating_sub(n as u64);
+            }
             self.seconds.add(energy, max, n as u64, emit);
             i += n;
         }
-    }
-
-    /// Filters a run without detecting (frozen); returns its Σy² per weighting and its
-    /// highest C peak² and LAF mean square (the log's per-second maxima run on).
-    fn weigh<const CORR: bool>(&mut self, raw: &[f64], xc: &[f64]) -> ([f64; 3], [f64; 2]) {
-        let mut e = [0.0; 3];
-        let mut max = [0.0f64; 2];
-        for (&x, &c) in raw.iter().zip(xc) {
-            let ya = self.weight_a.process_sample(c);
-            let yc = self.weight_c.process_sample(c);
-            let pc = if CORR {
-                self.peak_c.process_sample(x)
-            } else {
-                yc
-            };
-            max[0] = max[0].max(pc * pc);
-            max[1] = max[1].max(self.log_af.push_square(ya * ya));
-            e[0] += ya * ya;
-            e[1] += yc * yc;
-            e[2] += c * c;
-        }
-        (e, max)
     }
 
     /// Filters and detects a run within one Lmin settling state; returns its Σy² per
@@ -633,7 +585,6 @@ impl SplMeter {
             pk[0] = pk[0].max(pc.abs());
             pk[1] = pk[1].max(x.abs());
             max[0] = max[0].max(pc * pc);
-            max[1] = max[1].max(self.log_af.push_square(ya * ya));
             let sq = [ya * ya, yc * yc, c * c];
             for (w, &s) in sq.iter().enumerate() {
                 e[w] += s;
@@ -650,6 +601,9 @@ impl SplMeter {
                     }
                 }
             }
+            // The log's LAFmax is the displayed LAF detector's: both see every sample.
+            let laf = &self.detectors[w_index(Weighting::A)][t_index(TimeWeighting::Fast)];
+            max[1] = max[1].max(laf.mean_square());
         }
         self.peak[0].peak = pk[0];
         self.peak[1].peak = pk[1];
@@ -717,7 +671,6 @@ impl SplMeter {
         for d in self.detectors.iter_mut().flatten() {
             d.reset();
         }
-        self.log_af.reset();
         self.reset_interval();
         self.max_ms = [[0.0; 3]; 3];
         self.settle_left = self.settle_samples;
@@ -1513,24 +1466,6 @@ mod tests {
         }
     }
 
-    /// Freezing holds the displayed values only: the per-second LCpeak and LAFmax the log
-    /// records are those of a meter never frozen.
-    #[test]
-    fn frozen_meter_logs_the_same_maxima() {
-        let fs = 48_000.0;
-        let x = stepped_noise(fs, 4.0);
-        let (_, live) = run_meter(&x, fs, None);
-        let mut m = meter(fs, Weighting::A, TimeWeighting::Fast, PeakWeighting::C);
-        m.set_frozen(true);
-        let mut frozen = Vec::new();
-        m.process(&x, |s| frozen.push(s));
-        assert_eq!(frozen.len(), live.len());
-        for (a, b) in frozen.iter().zip(&live) {
-            assert_eq!(a.c_peak_sq.to_bits(), b.c_peak_sq.to_bits());
-            assert_eq!(a.af_max_ms.to_bits(), b.af_max_ms.to_bits());
-        }
-    }
-
     /// With a mic-curve correction the f32 convolution is the only difference from an f64
     /// reference: every level, the Leq and each second's A/C/Z level within 0.001 dB.
     #[test]
@@ -1567,38 +1502,6 @@ mod tests {
         }
         eprintln!("corrected chain vs f64 reference: max |Δ| = {worst:.2e} dB");
         assert!(worst < 1e-3, "{worst}");
-    }
-
-    /// Frozen, the displayed values hold while the per-second energies come out as from a
-    /// meter that never froze; released, the levels follow the input again.
-    #[test]
-    fn freeze_holds_the_display_not_the_log() {
-        let fs = 48_000.0;
-        let x = stepped_noise(fs, 5.0);
-        let (_, want) = run_meter(&x, fs, None);
-        let mut m = meter(fs, Weighting::A, TimeWeighting::Fast, PeakWeighting::C);
-        let mut got = Vec::new();
-        let half = x.len() / 2;
-        m.process(&x[..half / 2], |s| got.push(s));
-        m.set_frozen(true);
-        assert!(m.frozen());
-        let held = m.levels();
-        m.process(&x[half / 2..half], |s| got.push(s));
-        let lv = m.levels();
-        assert_eq!(
-            [lv.level, lv.lmax, lv.leq, lv.lpeak, lv.duration_s].map(f64::to_bits),
-            [held.level, held.lmax, held.leq, held.lpeak, held.duration_s].map(f64::to_bits)
-        );
-        m.set_frozen(false);
-        m.process(&x[half..], |s| got.push(s));
-        assert_eq!(got.len(), want.len());
-        // Frozen runs are cut differently into plain chunk sums: equal to rounding.
-        for (g, w) in got.iter().zip(&want) {
-            for (a, b) in g.energy.iter().zip(&w.energy) {
-                assert!((a / b - 1.0).abs() < 1e-13, "{a} vs {b}");
-            }
-        }
-        assert!(m.levels().duration_s > held.duration_s);
     }
 
     /// The per-second A and C levels of steady sines at the IEC 61672-1 Table 3 frequencies

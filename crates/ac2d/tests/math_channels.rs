@@ -4,7 +4,7 @@
 //! - the live average of three positions reads the analytic power average, the silent
 //!   position is left out and said to be, and its capture names the positions;
 //! - `Seat 1 ÷ Seat 2` reads +6 dB with the second position's later arrival in its phase,
-//!   follows an edit to `×` (0 dB), and freezes into a trace on capture;
+//!   follows an edit to `×` (0 dB), and is captured into a trace;
 //! - a capture of Seat 1 plus live Seat 2 predicts their acoustic sum (the comb of two
 //!   arrivals), and the stored operand cannot be deleted under it;
 //! - `Spectrum 1 − Spectrum 2` reads 6 dB on the spectrum stream;
@@ -385,8 +385,8 @@ fn ratio_edit_capture_and_summation() {
         assert!(off.abs() < 5.0, "{:.0} Hz: {}° off", grid_freq(i), off);
     }
 
-    // Capture freezes it: the trace keeps +6 dB while the channel is edited to ×.
-    let frozen = match c.ok(Command::TraceCapture {
+    // Captured: the trace keeps +6 dB while the channel is edited to ×.
+    let captured = match c.ok(Command::TraceCapture {
         meas: q,
         name: "ratio".into(),
         slot: Some(1),
@@ -394,8 +394,8 @@ fn ratio_edit_capture_and_summation() {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),
     };
-    assert_eq!(frozen.kind, TraceKind::Transfer);
-    match &frozen.source {
+    assert_eq!(captured.kind, TraceKind::Transfer);
+    match &captured.source {
         TraceSource::Math {
             expr: MathExpr::Binary {
                 op: MathOp::Divide, ..
@@ -409,7 +409,7 @@ fn ratio_edit_capture_and_summation() {
         }
         other => panic!("{other:?}"),
     }
-    assert_eq!(frozen.source.shared_epoch(), None, "a ratio is relative");
+    assert_eq!(captured.source.shared_epoch(), None, "a ratio is relative");
     c.ok(Command::MeasUpdate {
         meas: q,
         config: binary(
@@ -426,7 +426,7 @@ fn ratio_edit_capture_and_summation() {
     for &i in &band(t) {
         assert!(t.mag[i].abs() < 0.3, "{} dB", t.mag[i]);
     }
-    let data = match c.ok(Command::TraceGet { trace: frozen.id }) {
+    let data = match c.ok(Command::TraceGet { trace: captured.id }) {
         ReplyBody::TraceData(d) => d,
         other => panic!("{other:?}"),
     };
