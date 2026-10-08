@@ -1515,7 +1515,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
-| `G` | SPL: meter → Leq windows → meter + Leq | `spl_leq_view` |
+| `G` | SPL: meter → Leq windows → meter + Leq → bands | `spl_leq_view` |
 | `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
 | `Shift+B` | SPL Leq windows: history strip on / off | `spl_leq_history` |
 | `Shift+R` | Start a new SPL log… | `spl_new_log` |
@@ -1586,6 +1586,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | SPL pane: the meter | `spl_show_meter` |
 | SPL pane: the Leq windows | `spl_show_leq` |
 | SPL pane: meter + Leq windows | `spl_show_meter_leq` |
+| SPL pane: the band Leq bars (20 … 200 Hz) | `spl_show_bands` |
 
 #### Key hint lines (`Shift+H` on / off)
 
