@@ -7,7 +7,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Phases 0–6 (1.0 scope) pass their CI criteria; phase 7 (post-1.0 extras) is in progress.
   Per-phase table with CI and hardware results: `PLAN.md` §9.0.
 - Hardware verified on Linux only: the `pupu` rig (`docs/rigs/pupu.md`), a Pi 4 kiosk
-  client. macOS: a tester runs the disk image (`testing/macos/`); Windows: MSI in a VM.
+  client. macOS: a tester runs the disk image (`testing/macos/`); Windows: MSI in a VM,
+  tester guide and dev.10 MSI in `testing/windows/`.
 - Open hardware gates: duplex spike and 1 h run on macOS/Windows, keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
 

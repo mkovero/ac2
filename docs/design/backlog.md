@@ -86,7 +86,12 @@ decision 4). Measured numbers: PLAN §9.0.
 ## Windows (2026-10-03, operator's Windows 11 VM, release build of 6c122d5)
 
 - MSI installed cleanly (unsigned: SmartScreen "More info → Run anyway"), Start-menu entry and
-  PATH fine; the app ran the simulated rig. Real audio (WASAPI) on Windows is still untested.
+  PATH fine; the app ran the simulated rig. Real audio (WASAPI) on Windows is still untested;
+  `testing/windows/README.md` (dev.10 MSI) is the tester guide for it.
+- **No stimulus on a WASAPI capture endpoint**: a session opens one device id for both
+  directions, and a WASAPI capture endpoint has no outputs, so the app can measure but not
+  play on a real interface. The tester guide falls back to an external pink-noise player;
+  picking a separate output endpoint (CLI and Settings) would close it.
 - **Sluggish without a GPU** (VM, software adapter). When wgpu reports a CPU / software adapter
   (WARP, llvmpipe, lavapipe), lower the redraw rate and skip costly effects (MSAA, blur), and
   say so once ("software rendering: reduced frame rate"); measure frame time before and after.
