@@ -3,8 +3,62 @@
 ac2 is a live dual-channel FFT analyzer for tuning sound systems: transfer functions with
 coherence, a delay finder, sweep measurements with harmonic distortion, spectrum and RTA, a
 calibrated SPL meter with rolling Leq windows, stored traces, sessions and autosave. This
-guide explains the concepts and the everyday workflow. Installing: [install.md](install.md). Scripting and integrations: [protocol.md](protocol.md), the
-normative description of everything the daemon speaks.
+guide explains the concepts and the everyday workflow.
+
+- Installing: [install.md](install.md).
+- Scripting and integrations: [protocol.md](protocol.md), the normative description of
+  everything the daemon speaks.
+
+## Contents
+
+- [How the pieces fit](#how-the-pieces-fit)
+  - [Audio backends](#audio-backends)
+  - [Settings](#settings)
+  - [Inputs & outputs and Audio](#inputs--outputs-and-audio)
+  - [Input meters](#input-meters)
+- [Reference wiring and loopback](#reference-wiring-and-loopback)
+- [Stimulus](#stimulus)
+- [Transfer measurement](#transfer-measurement)
+  - [Choosing what a pane shows](#choosing-what-a-pane-shows)
+  - [Zoom, pan and the level axis](#zoom-pan-and-the-level-axis)
+  - [Spectrograph](#spectrograph)
+  - [Smoothing](#smoothing)
+  - [Math channels](#math-channels)
+- [Delay finder](#delay-finder)
+- [The measurement tree](#the-measurement-tree)
+- [Traces and slots](#traces-and-slots)
+  - [Export and import](#export-and-import)
+  - [Mic curve on a stored trace](#mic-curve-on-a-stored-trace)
+- [Sweep measurement: response and harmonic distortion](#sweep-measurement-response-and-harmonic-distortion)
+- [Sessions](#sessions)
+  - [Autosave](#autosave)
+- [Calibration and SPL](#calibration-and-spl)
+  - [The Calibrations view](#the-calibrations-view)
+  - [What the calibration labels say](#what-the-calibration-labels-say)
+  - [Calibrating without a calibrator (electrical)](#calibrating-without-a-calibrator-electrical)
+  - [SPL meter](#spl-meter)
+  - [Leq windows and limits](#leq-windows-and-limits)
+  - [Band Leq: low frequencies at a neighbour's](#band-leq-low-frequencies-at-a-neighbours)
+- [Keyboard](#keyboard)
+  - [Notifications](#notifications)
+  - [Keyboard map](#keyboard-map)
+- [Command line](#command-line)
+
+### Find it fast
+
+| I want to… | Go to |
+|---|---|
+| connect the audio interface and open a session | [Inputs & outputs and Audio](#inputs--outputs-and-audio) |
+| wire the loopback so transfer functions work | [Reference wiring and loopback](#reference-wiring-and-loopback) |
+| play pink noise safely, and stop it | [Stimulus](#stimulus) |
+| see magnitude, phase and coherence of a speaker | [Transfer measurement](#transfer-measurement) |
+| time-align a speaker | [Delay finder](#delay-finder) |
+| keep a curve to compare against | [Traces and slots](#traces-and-slots) |
+| measure response and harmonic distortion with a sweep | [Sweep measurement](#sweep-measurement-response-and-harmonic-distortion) |
+| read dB SPL and Leq | [Calibration and SPL](#calibration-and-spl), [SPL meter](#spl-meter), [Leq windows and limits](#leq-windows-and-limits) |
+| save the work, or get it back after a crash | [Sessions](#sessions), [Autosave](#autosave) |
+| look up a key | [Keyboard map](#keyboard-map) |
+| script it | [Command line](#command-line), [protocol.md](protocol.md) |
 
 ## How the pieces fit
 
@@ -21,15 +75,20 @@ across the network it requires pairing ([install.md](install.md#remote-use-foh--
 
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on the session: transfer functions (`tf`), spectrum,
-RTA and SPL meters. In the app every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
-the top bar; [below](#settings)); **Shift+O** opens its Audio page to open a session
-([the session's channels](#inputs--outputs-and-audio)), and the command palette (**Ctrl+K**) has *New transfer
-measurement…*, *New spectrum…*, *New RTA…* and *New SPL meter…* (created, started and
-selected on **Enter**) and *Close audio session*; **Delete** (or **Backspace**) deletes the
-selected measurement after asking. Until there
-is a session, or a measurement, the transfer pane says which of these comes next. This
-works the same against a daemon the app hosts, a per-user daemon and a remote one. The CLI
-does the same from a script, with the same defaults:
+RTA and SPL meters. In the app:
+
+- every setting lives in **Settings** (**Ctrl+P**, the ⚙ in the top bar;
+  [below](#settings));
+- **Shift+O** opens its Audio page to open a session
+  ([the session's channels](#inputs--outputs-and-audio));
+- the command palette (**Ctrl+K**) has *New transfer measurement…*, *New spectrum…*,
+  *New RTA…* and *New SPL meter…* (created, started and selected on **Enter**) and
+  *Close audio session*;
+- **Delete** (or **Backspace**) deletes the selected measurement after asking.
+
+Until there is a session, or a measurement, the transfer pane says which of these comes
+next. This works the same against a daemon the app hosts, a per-user daemon and a remote
+one. The CLI does the same from a script, with the same defaults:
 
 ```sh
 ac2 session open --backend jack --in 1-4                     # Linux: the JACK server
@@ -39,6 +98,8 @@ ac2 meas new tf --ref 1 --meas 3 --name sub
 ac2 meas new rta --input 2 --name rta
 ac2 meas start main-l
 ```
+
+### Audio backends
 
 The backend is always named. Each platform has one real backend: `jack` on Linux (a JACK2
 server, or PipeWire through pipewire-jack; there is no ALSA backend), `cpal` on macOS and
@@ -150,6 +211,8 @@ named mic's row also says which mic curve is in use — its label (*90°*), or w
 **MEAS** mark shows what the running sweep uses, or, with nothing running, the selected
 measurement.
 
+<sub>[↑ Contents](#contents)</sub>
+
 ## Reference wiring and loopback
 
 A transfer function divides what the microphone hears by what you sent. "What you sent" is
@@ -175,6 +238,8 @@ dropped or repeated output samples.
 You can measure any signal, not only ac2's generator: program material from the console,
 fed to the reference input, works the same way (coherence then tells you which frequencies
 the music actually covered).
+
+<sub>[↑ Contents](#contents)</sub>
 
 ## Stimulus
 
@@ -217,6 +282,8 @@ measurement left running)`). Another transfer measurement still running keeps it
 SPL meters, spectra and RTAs do not keep it (they measure whatever plays); a sweep is never
 stopped this way, nor another client's stimulus. `ac2 meas stop` stops only the measurement:
 a script gets no side effect it did not ask for.
+
+<sub>[↑ Contents](#contents)</sub>
 
 ## Transfer measurement
 
@@ -550,6 +617,8 @@ measurement and a trace share a name. Math channels are listed in `ac2 meas list
 captured with `ac2 trace capture`. (`ac2 math` replaces the former `ac2 meas new avg` and
 `ac2 trace math`.)
 
+<sub>[↑ Contents](#contents)</sub>
+
 ## Delay finder
 
 The phase of a transfer function is only readable after the propagation delay from speaker
@@ -610,6 +679,8 @@ L stopped — S starts it` (**S** starts and stops it from the IR pane too), `no
 nothing is playing — Space arms, Enter starts the stimulus` (or `armed — Enter starts the
 stimulus`, or, with the stimulus playing, `nothing is driving the loopback`), `no signal: …`.
 
+<sub>[↑ Contents](#contents)</sub>
+
 ## The measurement tree
 
 Beside the panes, one tree lists every measurement with what it owns under it
@@ -658,6 +729,8 @@ Imported              1 trace
   Delete when a math channel elsewhere uses one of its traces); a math channel elsewhere that
   computes from the measurement itself refuses the delete as before. A measurement that
   owns nothing gets the plain confirmation.
+
+<sub>[↑ Contents](#contents)</sub>
 
 ## Traces and slots
 
@@ -764,6 +837,8 @@ corrected too (each harmonic is picked up at its own frequency). A trace capture
 the curve already applied (`mic … (curve … in the columns)`) refuses a second one — it would
 correct twice. Averages and math channels combine the corrected curves.
 
+<sub>[↑ Contents](#contents)</sub>
+
 ## Sweep measurement: response and harmonic distortion
 
 A sweep measures a speaker's response and its **harmonic distortion** (H2 … H5 and THD vs
@@ -853,6 +928,8 @@ very low start: the extension plays lower still, though below full level.
   elsewhere it reads `< −72.0 dB` (`< 0.0251 %`: the floor). Lower the floor with repeats or
   a longer sweep, not with more level than the speaker should take.
 
+<sub>[↑ Contents](#contents)</sub>
+
 ## Sessions
 
 `ac2 session save <name>` (or **Session: save** in the palette) stores the measurements and
@@ -901,6 +978,8 @@ the top bar say *saving…*. After a power cut a log is back up to its last few 
 a crash of the daemon alone, up to its last 30 s.
 `ac2d --no-restore` starts empty, `--autosave <dir>` puts the autosave elsewhere (one daemon
 per directory), `--no-autosave` keeps everything in memory only.
+
+<sub>[↑ Contents](#contents)</sub>
 
 ## Calibration and SPL
 
@@ -1296,6 +1375,8 @@ bedroom is than FOH — moves the limits to the mic and predicts the bedroom's L
   prediction from FOH is not a measurement in the dwelling. Only a measurement there shows
   compliance. How it is computed and what is claimed: `docs/design/band-leq.md`.
 
+<sub>[↑ Contents](#contents)</sub>
+
 ## Keyboard
 
 Everything in the app is reachable from the keyboard. **H** (or **F1**) shows the bindings,
@@ -1601,6 +1682,8 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `C` cursor · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->
+
+<sub>[↑ Contents](#contents)</sub>
 
 ## Command line
 
