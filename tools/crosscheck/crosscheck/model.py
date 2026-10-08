@@ -11,6 +11,7 @@ Run directory layout (written by `run.py`, read here):
     <path>/rew/rec.wav, play.json, {meas,ref}_{fr,fr_spl,ir,gd,dist,rt60,summary}.json
     <path>/ac2_sweep/<variant>/trace.csv, events.jsonl, rec.wav, rec.json, plan.json
     <path>/ac2_tf/trace.csv, rec.wav, rec.json
+    <path>/dut/dut.json           digital path: the DUT's command, coefficients, truth tables, xruns
 """
 from __future__ import annotations
 
@@ -64,7 +65,7 @@ class RewSet:
 @dataclass
 class PathData:
     name: str
-    kind: str  # electrical | speaker
+    kind: str  # electrical | speaker | digital
     sweeps: dict[str, Sweep] = field(default_factory=dict)
     primary: str | None = None
     tf: formats.Ac2Trace | None = None
@@ -75,6 +76,8 @@ class PathData:
     truth: dict | None = None
     noise: Raw | None = None
     notes: list[str] = field(default_factory=list)
+    mains_hz: float | None = 50.0  # None: a path without mains (the digital DUT)
+    dut: dict | None = None  # <path>/dut/dut.json: what the analytic truth is computed from
 
 
 @dataclass
@@ -154,7 +157,9 @@ def load_run(root: Path) -> RunData:
         d = root / pname
         if not d.exists():
             continue
-        p = PathData(name=pname, kind=pinfo.get("kind", "electrical"))
+        p = PathData(name=pname, kind=pinfo.get("kind", "electrical"),
+                     mains_hz=pinfo["mains_hz"] if "mains_hz" in pinfo else man.get("mains_hz", 50.0))
+        p.dut = _json(d / "dut" / "dut.json")
         sd = d / "ac2_sweep"
         if sd.exists():
             for v in sorted(x for x in sd.iterdir() if (x / "trace.csv").exists()):

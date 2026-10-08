@@ -42,7 +42,8 @@ def main(argv=None) -> int:
                            help="lift ac2d's bound for the electrical stages only, e.g. -30dbfs (systemd "
                                 "runtime drop-in, restored afterwards)")
             p.add_argument("--stages", default="ambient,genelec,xone",
-                           help="comma list from ambient,genelec,xone (order is fixed)")
+                           help="comma list from ambient,genelec,xone,dut (order is fixed; dut: the digital "
+                                "DUT, README)")
             p.add_argument("--skip", default="", help="comma list of sub-stages to skip: sine,rew,ac2_sweep,ac2_tf")
             p.add_argument("--yes", action="store_true", help="don't wait for Enter before audible stages")
 

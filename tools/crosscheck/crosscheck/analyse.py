@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import dsp
+from . import dsp, dut, levels
 from .model import PathData, RunData, Sweep
 
 TOLERANCES = Path(__file__).resolve().parent.parent / "tolerances.toml"
@@ -162,7 +162,10 @@ class Analysis:
         self.notes.extend(f"{p.name}: {n}" for n in p.notes)
         grid = self.sources(p)
         if grid is None:
-            self.notes.append(f"{p.name}: no ac2 sweep to set the comparison grid; path skipped")
+            self.notes.append(f"{p.name}: no ac2 sweep to set the comparison grid; path skipped"
+                              + (" (DUT truth rows still made)" if p.dut else ""))
+            if p.dut:
+                self.dut_harmonics(p)
             return
         self.bands(p)
         self.level_convention(p)
@@ -170,6 +173,8 @@ class Analysis:
         self.etc(p)
         self.group_delay(p)
         self.harmonics(p)
+        if p.dut:
+            self.dut_harmonics(p)
         self.lf_h2_onset(p)
         self.coherence(p)
         if p.kind == "speaker":
@@ -238,7 +243,7 @@ class Analysis:
         # judged for its shape on the same reference as everything else.
         self.rew_put_back = 0.0
         if "REW offline" in src and p.rew.ref_fr is not None and "direct (REW recording)" in src:
-            lo, hi = (1000, 20000) if p.kind == "electrical" else (500, 5000)
+            lo, hi = (1000, 20000) if p.kind != "speaker" else (500, 5000)
             Hd, Hr = src["direct (REW recording)"], src["REW offline"]
             md, mr = np.isfinite(Hd), np.isfinite(Hr)
             self.rew_put_back = dsp.delay_from_phase(f[md], Hd[md], lo, hi) - dsp.delay_from_phase(f[mr], Hr[mr], lo, hi)
@@ -248,9 +253,9 @@ class Analysis:
         # A line's level drifts between the silent recording and the takes, so a line only 6 dB
         # above its neighbourhood in the silence can still stand out in one take's column.
         self.mains_hz = []
-        if p.noise is not None:
+        if p.noise is not None and p.mains_hz:
             self.mains_hz = [x["hz"] for x in dsp.mains_lines(p.noise.meas, p.noise.fs,
-                                                              self.run.manifest.get("mains_hz", 50.0), thr_db=6.0)]
+                                                              p.mains_hz, thr_db=6.0)]
         self.mains_cols = dsp.mains_columns(f, self.mains_hz, 1 / 48, guard_hz=MAINS_GUARD_HZ)
         # Each source's per-column noise (relative error of H) from the SNR of the recording it
         # came from, against the silent recording of the same input. A windowed deconvolution
@@ -277,7 +282,7 @@ class Analysis:
     def bands(self, p: PathData):
         f, S = self.f, self.src
         primary = f"ac2 sweep {p.primary}"
-        elec = p.kind == "electrical"
+        elec = p.kind != "speaker"
         pairs = []
         for direct in [k for k in S if k.startswith("direct")]:
             pass
@@ -574,7 +579,7 @@ class Analysis:
     # ------------------------------------------------------------ delays
     def delays(self, p: PathData):
         f, S = self.f, self.src
-        elec = p.kind == "electrical"
+        elec = p.kind != "speaker"
         lo, hi = (1000, 20000) if elec else (500, 5000)
         tl = _tol(self.tol["delay"]["electrical_us" if elec else "acoustic_us"])
         rows = []
@@ -698,7 +703,7 @@ class Analysis:
         # A loopback's response is flat up to the sweep's top: its ETC away from the peak is the
         # band edge's kernel (skirts ~1/(π·f_top·|t|), −42 dB at 1 ms for 40 kHz), shaped by each
         # tool's own fade-out and regularisation, not by the path. Judged on acoustic paths only.
-        electrical = p.kind == "electrical"
+        electrical = p.kind != "speaker"
         self.add(id=f"{p.name}.etc", group="ETC", path=p.name, title=f"ETC ac2 sweep vs {rs.label}", value=med,
                  unit="dB", tol=None if electrical else tl, status="INFO" if electrical else judge(med, tl),
                  meaning=f"median |Δ| over {m.sum()} cells of {dt*1e3:.3f} ms from −5 to 50 ms where both are within "
@@ -1018,8 +1023,8 @@ class Analysis:
 
     def _mains_flags(self, p: PathData):
         lines = []
-        if p.noise is not None:
-            lines = dsp.mains_lines(p.noise.meas, p.noise.fs, self.run.manifest.get("mains_hz", 50.0))
+        if p.noise is not None and p.mains_hz:
+            lines = dsp.mains_lines(p.noise.meas, p.noise.fs, p.mains_hz)
         if not lines:
             return
         hz = np.array([x["hz"] for x in lines])
@@ -1035,6 +1040,134 @@ class Analysis:
                         rows.append([name, f"{b['freq_hz'][i]:.1f}", f"H{k}", ", ".join(f"{x:g}" for x in hh)])
         self.table(f"{p.name}: sweep columns whose harmonic band holds a mains line", ["sweep", "f Hz", "H", "line Hz"],
                    rows[:200], f"mains lines found in the noise recording: {', '.join(f'{x:g}' for x in hz)} Hz")
+
+    # ------------------------------------------------------------ digital DUT: analytic truth
+    def dut_harmonics(self, p: PathData):
+        """Every harmonic source on the digital path against the DUT's analytic truth, each at
+        its own level and at the exact frequency of the value compared (dut.py)."""
+        d = p.dut
+        coef, fs = d["coefficients"], float(d["fs"])
+        margin = float(self.tol["distortion"]["margin_db"])
+        tc = self.tol.get("dut", {})
+        ts, tw = _tol(tc["sine_db"]), _tol(tc["sweep_db"])
+        ppo = int(tc.get("grid_per_octave", 3))
+        stop = d.get("stop") or {}
+        xr = stop.get("xruns")
+        # an xrun leaves a stale block in dut_out: every take that spans it reads a wrong spectrum
+        self.add(id=f"{p.name}.dut.xruns", group="dut", path=p.name, title="DUT xruns over the path's stages",
+                 value=None if xr is None else float(xr), unit="", tol=None,
+                 status="INFO" if xr == 0 else "WARN",
+                 meaning=("none: the DUT ran every block" if xr == 0 else
+                          f"{xr} xrun(s): JACK left a stale block in dut_out, so the path's results are suspect"
+                          if xr is not None else "the DUT printed no `xruns` line (crashed or killed?): results suspect"),
+                 detail={"stop": stop})
+        rows: list[list] = []
+        t = p.truth or {}
+        if t.get("tones") and t.get("emit_dbfs") is not None:
+            amp = levels.peak_amplitude(float(t["emit_dbfs"]))
+            for tone in t["tones"]:
+                truth = dut.analytic(float(tone["f"]), amp, coef, fs)
+                for k in range(2, 6):
+                    tv = (tone.get("h_dbr") or {}).get(str(k))
+                    if tv is None or k not in truth:
+                        continue
+                    ca = dsp.classify(tv, (tone.get("floor_dbr") or {}).get(str(k), np.nan), margin)
+                    self._cmp_dut(p, "steady sine", float(tone["f"]), float(tone["f"]), k, ca, truth[k], ts, rows,
+                                  coef, fs, sweep=False)
+        tones = [float(x["f"]) for x in t.get("tones", [])] or [float(x["f"]) for x in d.get("tones", [])]
+        curves = []
+        for name, s in p.sweeps.items():
+            b = s.trace.freq
+            if "h2_db" in b and np.isfinite(s.level_dbfs):
+                lo = (s.start_hz or 10.0) * 2 ** (1 / 12)
+                hi = (s.end_hz or fs / 2) * 2 ** (-1 / 12)
+                curves.append((f"ac2 sweep {name}", s.level_dbfs, b["freq_hz"],
+                               {k: (b[f"h{k}_db"], b[f"h{k}_floor_db"]) for k in range(2, 6) if f"h{k}_db" in b},
+                               lo, hi, 1 / 24))
+        if p.rew is not None and p.rew.meas_dist is not None and np.isfinite(p.rew.level_dbfs):
+            r = p.rew.meas_dist
+            nf = r.cols.get("Noise", np.full(len(r.f), np.nan))
+            curves.append((p.rew.label, p.rew.level_dbfs, r.f,
+                           {k: (r.cols[f"H{k}"], nf) for k in range(2, 6) if f"H{k}" in r.cols},
+                           10.0 * 2 ** (1 / 12), 40000.0 * 2 ** (-1 / 12), 1 / 6))
+        for name, lvl, f, hs, lo, hi, near in curves:
+            amp = levels.peak_amplitude(float(lvl))
+            for fc in tones:
+                for k, (hv, hf) in hs.items():
+                    i = _nearest_finite(f, hv, fc, max_oct=near)
+                    if i is None or not lo <= f[i] <= hi:
+                        continue
+                    tr = dut.analytic(float(f[i]), amp, coef, fs).get(k)
+                    if tr is None:
+                        continue
+                    self._cmp_dut(p, name, fc, float(f[i]), k, dsp.classify(hv[i], hf[i], margin), tr, tw, rows,
+                                  coef, fs, sweep=True)
+            # the log grid: one summary row per harmonic, every point in the table
+            grid = dsp.log_centres(max(lo, 10.0), min(hi, fs / 2), ppo)
+            for k, (hv, hf) in hs.items():
+                ds, fails, bounds, seen = [], [], 0, set()
+                for fc in grid:
+                    i = _nearest_finite(f, hv, fc, max_oct=min(near, 1 / (2 * ppo)))
+                    if i is None or i in seen:
+                        continue
+                    seen.add(i)
+                    tr = dut.analytic(float(f[i]), amp, coef, fs).get(k)
+                    if tr is None:
+                        continue
+                    ca = dsp.classify(hv[i], hf[i], margin)
+                    if ca["kind"] == "value":
+                        ds.append((float(f[i]), ca["value"] - tr))
+                    elif ca["kind"] == "bound":
+                        bounds += 1
+                        if tr > ca["bound"] + tw[1]:
+                            fails.append(float(f[i]))
+                    rows.append([f"{f[i]:.1f}", f"H{k}", name + " (grid)", _fmt_h(ca), _fmt(ca.get("floor")),
+                                 f"{tr:.2f}", f"{ca['value'] - tr:+.2f}" if ca["kind"] == "value" else "—",
+                                 _pre_note(coef, fs, float(f[i])) or ""])
+                if not ds and not fails:
+                    if bounds:
+                        self.add(id=f"{p.name}.dut.grid.h{k}.{name}", group="dut", path=p.name,
+                                 title=f"{name} H{k} vs analytic, log grid", value=None, unit="dB", tol=tw,
+                                 status="INCONCLUSIVE", meaning=f"all {bounds} grid columns are bounds")
+                    continue
+                fw, dw = max(ds, key=lambda x: abs(x[1])) if ds else (None, None)
+                st = "FAIL" if fails else judge(dw, tw)
+                self.add(id=f"{p.name}.dut.grid.h{k}.{name}", group="dut", path=p.name,
+                         title=f"{name} H{k} vs analytic, log grid", value=dw, unit="dB", tol=tw, status=st,
+                         meaning=(f"largest |Δ| of {len(ds)} columns {ppo}/octave {grid[0]:.0f} Hz – {grid[-1]:.0f} Hz"
+                                  + (f" at {fw:.1f} Hz" if fw else "")
+                                  + (f"; {bounds} columns are bounds" if bounds else "")
+                                  + (f"; the truth stands above the reading's bound at {', '.join(f'{x:.0f}' for x in fails)} Hz"
+                                     if fails else "")
+                                  + (f" ({_pre_note(coef, fs, fw)})" if fw and _pre_note(coef, fs, fw) else "")),
+                         detail={"columns": [[a, b] for a, b in ds], "bound_fails_hz": fails})
+        self.table(f"{p.name}: harmonics vs the DUT's analytic truth (dBr)",
+                   ["f Hz", "H", "source", "reading", "floor", "truth", "Δ", "pre-filter"], rows,
+                   "Truth: dut.py's analytic Hk at each source's own level and at the column's frequency. "
+                   "Δ = reading − truth, only where the reading is a value (floor + margin).")
+
+    def _cmp_dut(self, p, name, fc, fcol, k, ca, truth, tol, rows, coef, fs, sweep: bool):
+        note = _pre_note(coef, fs, fcol) if sweep else None
+        d = ca["value"] - truth if ca["kind"] == "value" else None
+        rows.append([f"{fcol:.1f}", f"H{k}", name, _fmt_h(ca), _fmt(ca.get("floor")), f"{truth:.2f}",
+                     f"{d:+.2f}" if d is not None else "—", note or ""])
+        if ca["kind"] == "none":
+            return
+        where = f" (column {fcol:.1f} Hz)" if abs(fcol - fc) > 1e-6 else ""
+        base = dict(id=f"{p.name}.dut.h{k}.{name}.{fc:g}", group="dut", path=p.name,
+                    title=f"{name} H{k} at {fc:g} Hz vs analytic", unit="dB", tol=tol)
+        if d is not None:
+            self.add(**base, value=d, status=judge(d, tol),
+                     meaning=f"{name} {ca['value']:.2f} dBr{where}, truth {truth:.2f} dBr"
+                             + (f"; {note}" if note else ""))
+        elif truth > ca["bound"] + tol[1]:
+            self.add(**base, value=None, status="FAIL",
+                     meaning=f"{name} reads below {ca['bound']:.1f} dBr{where}; the truth is {truth:.2f} dBr, above it",
+                     detail={"reading": ca})
+        else:
+            self.add(**base, value=None, status="INCONCLUSIVE",
+                     meaning=f"a bound (shortfall {ca.get('shortfall', 0):.1f} dB below floor + margin){where}; "
+                             f"truth {truth:.2f} dBr", detail={"reading": ca})
 
     # ------------------------------------------------------------ LF H2 onset
     def lf_h2_onset(self, p: PathData):
@@ -1223,6 +1356,15 @@ def _settle_lag_s(s, fc):
     if not (s.start_hz and s.end_hz and s.duration_s) or fc < s.start_hz:
         return None
     return s.duration_s / np.log(s.end_hz / s.start_hz) * np.log(fc / s.start_hz)
+
+
+def _pre_note(coef: dict, fs: float, f: float) -> str | None:
+    """The DUT pre-filter's gain at f where it matters (> 0.1 dB): there a sweep reads the
+    truth only in the instantaneous-frequency approximation (Wiener model)."""
+    g = 20 * np.log10(abs(dut.response(coef.get("pre", []), [f], fs)[0]))
+    if abs(g) <= 0.1:
+        return None
+    return f"pre-filter {g:+.1f} dB here: a sweep sees it only approximately (Wiener model)"
 
 
 def _nearest_finite(f, v, fc, max_oct=1 / 24):

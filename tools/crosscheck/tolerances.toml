@@ -59,6 +59,17 @@ lf_onset_excess_db = { pass = 3.0, warn = 6.0 }
 # 0.1-0.2 s): a sweep reaching 22 Hz sooner than this after full level measures that, not ac2.
 lf_onset_settle_s = 0.3
 
+[dut]
+# Harmonics against the digital DUT's analytic truth (crosscheck/dut.py), dB.
+# The steady sine is the method check: same DSP chain, a steady state, the exact frequency;
+# only its floor (−120 dBFS noise) and the window's lobe sum stand between it and the truth.
+sine_db = { pass = 0.1, warn = 0.3 }
+# Sweeps (ac2, REW's offline import): a starting point. A sweep reads the pre-filter (the
+# Wiener part) only in the instantaneous-frequency approximation, so near its 20 Hz corner a
+# deviation can be the model, not the analyser.
+sweep_db = { pass = 0.5, warn = 1.0 }
+grid_per_octave = 3          # sweep columns compared on this log grid besides the sine tones
+
 [room]
 edt_rel = { pass = 0.05, warn = 0.15 }
 t20_rel = { pass = 0.05, warn = 0.15 }

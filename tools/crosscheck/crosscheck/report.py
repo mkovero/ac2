@@ -24,6 +24,12 @@ HOW_TO_READ = """\
   meas÷ref, floors from a silent recording analysed in the same bins.
 - *direct* rows are numpy cross-spectra of the raw recordings themselves (the same samples
   an app analysed), so a difference there is the app's analysis, not the take.
+- *vs analytic* rows (group **dut**, digital path only) judge harmonics against the software
+  DUT's exact truth (`crosscheck/dut.py`) at the column's own frequency. The steady sine is
+  the method check. A sweep sees the DUT's pre-filter (ahead of its polynomial: a Wiener
+  model) only in the instantaneous-frequency approximation, so near that filter's corner a
+  sweep may differ from the steady-state truth without the analyser being wrong; the rows
+  name the pre-filter's gain there. These rows test the analysers, not the rig.
 """
 
 

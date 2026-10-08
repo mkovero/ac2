@@ -32,6 +32,8 @@ class Ctx:
     yes: bool = False
     skip: set = field(default_factory=set)
     fs: float = 0.0
+    dut: object = None    # dutrun.DutProcess while a digital path's DUT runs
+    patch: object = None  # dutrun.Patch while ac2 is patched onto the DUT
 
     @property
     def max_xruns(self) -> int:
@@ -44,6 +46,22 @@ class Ctx:
     def in_port(self, ch: int) -> str:
         return self.rig["inputs"][str(ch)]["port"]
 
+    def path_ports(self, pname: str) -> dict[str, str]:
+        """The JACK ports the suite's own player and recorder use for a path's four roles:
+        the path's `ports` table where it has one (a software DUT), else the rig's channel
+        tables by the path's channel numbers."""
+        pc = self.rig["paths"][pname]
+        own = pc.get("ports") or {}
+        out = {}
+        for role, table in (("out", self.out_port), ("ref_out", self.out_port), ("meas_in", self.in_port),
+                            ("ref_in", self.in_port)):
+            out[role] = own[role] if role in own else table(int(pc[role]))
+        return out
+
+    def path_mains_hz(self, pname: str) -> float | None:
+        """Mains frequency on a path; None for a path without mains (a digital DUT: `mains_hz = 0`)."""
+        return path_mains_hz(self.rig, pname)
+
     def stage(self, name: str, outcome: str, detail: str = ""):
         self.manifest.setdefault("stages", {})[name] = {"outcome": outcome, "detail": detail}
         self.save()
@@ -51,6 +69,11 @@ class Ctx:
 
     def save(self):
         (self.out / "manifest.json").write_text(json.dumps(self.manifest, indent=1, default=str))
+
+
+def path_mains_hz(rig: dict, pname: str) -> float | None:
+    v = float(rig["paths"][pname].get("mains_hz", rig["rig"].get("mains_hz", 50.0)))
+    return v if v > 0 else None
 
 
 def _j(p: Path, obj):
@@ -167,6 +190,11 @@ def dropin_path(rig: dict) -> Path:
 def install_dropin(ctx: Ctx, level: float):
     """Restarts ac2d with --max-level `level` through a runtime drop-in (gone at reboot)."""
     p = dropin_path(ctx.rig)
+    have = ctx.manifest.get("dropin") or {}
+    if p.exists() and have.get("installed") == str(p) and have.get("level") == level and "removed" not in have:
+        # an earlier electrical path installed it: no second restart (which reopens the session)
+        if abs(float(ceiling(ctx).get("bound", 0)) - level) <= 1e-6:
+            return
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("[Service]\nExecStart=\nExecStart=" + ctx.rig["ac2"]["exec_start"].format(level=f"{level:g}") + "\n")
     _systemctl("daemon-reload")
@@ -221,18 +249,22 @@ def sine_stage(ctx: Ctx, pname: str):
     level = ctx.policy.emit_speaker_dbfs if speaker else ctx.policy.electrical_level()
     level = ctx.policy.check(outs, level, speaker_stage=speaker)
     amp = levels.peak_amplitude(level)
-    ins = [ctx.in_port(int(pc["meas_in"])), ctx.in_port(int(pc["ref_in"]))]
+    ports = ctx.path_ports(pname)
+    out_ports = [ports["out"], ports["ref_out"]]
+    ins = [ports["meas_in"], ports["ref_in"]]
+    if ctx.dut is not None:
+        ctx.dut.check_free()
     d = ctx.out / pname / "sine"
     d.mkdir(parents=True, exist_ok=True)
     fade_s, settle = float(sc["fade_seconds"]), float(sc["settle_seconds"])
     target = float(sc["target_floor_dbr"][pname])
     budget = float(sc["budget_seconds"][pname])
-    mains = float(rig["rig"].get("mains_hz", 50.0))
+    mains = ctx.path_mains_hz(pname)
     probe_s = float(sc["probe_seconds"])
 
     def take(f, seconds):
         sig = jackio.sine(f, amp, seconds + 2 * fade_s + settle, ctx.fs, fade_s)
-        plays = [jackio.Play(ctx.out_port(o), sig, amp) for o in outs]
+        plays = [jackio.Play(port, sig, amp) for port in out_ports]
         fs, x = jackio.play_record(plays, ins, pre_s=0.2, post_s=0.3, fade_s=fade_s, expect_fs=ctx.fs, max_xruns=ctx.max_xruns)
         return fs, x
 
@@ -242,7 +274,7 @@ def sine_stage(ctx: Ctx, pname: str):
     pairs = sc.get("gd_pairs", False) and not speaker
     for f0 in [float(x) for x in sc[f"{pname}_hz"]]:
         seconds0 = max(probe_s, sc["min_periods"] / f0)
-        f = dsp.avoid_mains(f0, seconds0, mains, pair=pairs)
+        f = dsp.avoid_mains(f0, seconds0, mains, pair=pairs) if mains else f0
         fs, x = take(f, seconds0)
         seg = _steady(x[:, 0], fs, 0.2, seconds0 + 2 * fade_s + settle, fade_s, settle)
         if not np.any(seg):
@@ -375,9 +407,12 @@ def rew_stage(ctx: Ctx, pname: str, cal_file: str | None):
     one = np.concatenate([sig * g, np.zeros(gap)])
     train = np.tile(one, reps)
     amp = levels.peak_amplitude(played_peak) * (1 + 1e-9)
-    ins = [ctx.in_port(int(pc["meas_in"])), ctx.in_port(int(pc["ref_in"]))]
+    ports = ctx.path_ports(pname)
+    ins = [ports["meas_in"], ports["ref_in"]]
+    if ctx.dut is not None:
+        ctx.dut.check_free()
     pre = 1.0
-    fs, x = jackio.play_record([jackio.Play(ctx.out_port(o), train, amp) for o in outs], ins, pre_s=pre, post_s=0.5,
+    fs, x = jackio.play_record([jackio.Play(ports[r], train, amp) for r in ("out", "ref_out")], ins, pre_s=pre, post_s=0.5,
                                fade_s=0.0, expect_fs=ctx.fs, max_xruns=ctx.max_xruns)
     p0, L = int(pre * fs), len(one)
     segs = [x[p0 - int(0.5 * fs) + i * L: p0 - int(0.5 * fs) + (i + 1) * L] for i in range(reps)]
@@ -446,6 +481,9 @@ def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration
     tail = float(cfg.get("tail") or 1.0)
     rec_s = lead + repeats * (duration + tail + 2.0) + 15.0
     ins = [int(pc["meas_in"]), int(pc["ref_in"])]
+    if ctx.patch is not None:
+        # a hardware capture summed into a patched input would silently corrupt the sweep
+        ctx.patch.verify_sources()
     rec = ctx.ac2.rec_start(ins, rec_s, f"{name}-{time.strftime('%Y%m%dT%H%M%S')}")
     try:
         time.sleep(lead)  # silence before the sweep: the raw file's noise windows

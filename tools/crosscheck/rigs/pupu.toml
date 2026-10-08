@@ -62,6 +62,34 @@ ref_in = 2
 speaker_min_request_hz = 20.0   # never ask a sweep on the speaker to start lower
 speaker_min_emit_hz = 5.0       # refuse if ac2 says it will emit below this (its LF extension rises from there)
 
+[paths.dut]
+# The digital DUT (README, "Digital DUT path"): a software device with exact harmonics.
+# out/ref_out/meas_in/ref_in are ac2's channel numbers for its stages; ac2d also connects
+# its out 5 and out 2 to the hardware (approved electrical/loopback), so the level policy
+# checks those exactly as on the Xone path. `ports`: what the suite's own player and recorder
+# use for this path, and what ac2 is patched onto for the ac2 stages.
+kind = "digital"
+out = 5
+ref_out = 2
+meas_in = 3
+ref_in = 2
+ports = { out = "ac2-dut:dut_in", ref_out = "ac2-dut:ref_in", meas_in = "ac2-dut:dut_out", ref_in = "ac2-dut:ref_out" }
+forbidden_outputs = [1]
+mains_hz = 0.0                  # no mains in software: the mains exclusions skip this path
+
+[dut]
+binary = "~/ac2-test/bin/ac2-jack-dut"   # copied there by hand (README)
+client = "ac2-dut"
+ac2_client = "ac2"                       # ac2d's JACK client: ports ac2:in_N, ac2:out_N (1-based)
+# poly(u) = Σ c_k u^k. At the suite's -10 dBFS (A = 0.316), 1 kHz: H2 -50.0, H3 -55.1,
+# H4 -63.0, H5 -70.1 dBr; 15 Hz: -61.9, -71.2, -76.3, -87.9 (crosscheck/dut.py; peak
+# output 0.32). All coefficients positive: no harmonic cancels anywhere as the pre-filter
+# lowers the amplitude at LF (a cancelling set would put deep, level-sensitive nulls there).
+poly = [0.0, 1.0, 0.002, 0.008, 0.18, 0.5]
+pre = [{ type = "hp1", hz = 20.0 }]      # a Wiener part: sweeps see it only approximately at LF
+post = [{ type = "lp2", hz = 30000.0, q = 0.7071 }]
+noise_dbfs = -120.0
+
 [ac2]
 # The CLI must reach the rig's daemon from here. Either pair the rig's own CLI once
 # (README, "One-time setup") and use localhost, or run it on another paired host over ssh:
@@ -107,14 +135,17 @@ seconds = 60
 # keeps at least two (tests/test_rig_tones.py); together they cover every harmonic below
 # 100 Hz, and 1040 Hz clears the mains columns of the displayed group delay.
 xone_hz = [15, 26.25, 35, 40.5, 56.2, 60.5, 93.9, 1040, 10000]
+# DUT: H5 of every tone below 40 kHz (and fs/2); the LF ones sit where the 20 Hz pre-filter
+# lowers the polynomial's input amplitude.
+dut_hz = [12, 15, 26.25, 40.5, 93.9, 1040, 5000, 7000]
 genelec_hz = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
 gd_pairs = true            # phase at f·2^(±1/48) for group delay (xone only)
 probe_seconds = 2.0
 min_periods = 40           # an LF tone gets at least this many periods
 max_seconds = 20.0
 noise_seconds = 10.0
-target_floor_dbr = { xone = -95.0, genelec = -80.0 }
-budget_seconds = { xone = 180.0, genelec = 180.0 }
+target_floor_dbr = { xone = -95.0, genelec = -80.0, dut = -100.0 }
+budget_seconds = { xone = 180.0, genelec = 180.0, dut = 120.0 }
 fade_seconds = 0.1
 settle_seconds = 0.5
 
@@ -127,13 +158,19 @@ xone = [
   { name = "10Hz-11s", from = "10hz", to = "40khz", duration = 11.0, repeats = 1, plan = false },
   { name = "dist", from = "20hz", to = "40khz", duration = 5.5, repeats = 1, plan = true },
 ]
+dut = [
+  { name = "10Hz-5.5s", from = "10hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "3Hz-5.5s", from = "3hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "10Hz-11s", from = "10hz", to = "40khz", duration = 11.0, repeats = 1, plan = false },
+  { name = "dist", from = "20hz", to = "40khz", duration = 5.5, repeats = 1, plan = true },
+]
 genelec = [
   { name = "20Hz-5.5s", from = "20hz", to = "20khz", duration = 5.5, repeats = 1, plan = false },
   { name = "dist", from = "20hz", to = "20khz", duration = 5.5, repeats = 1, plan = true },
 ]
-target_floor_dbr = { xone = -95.0, genelec = -80.0 }
-floor_band_hz = { xone = [100, 10000], genelec = [100, 10000] }
-budget_seconds = { xone = 180.0, genelec = 180.0 }
+target_floor_dbr = { xone = -95.0, genelec = -80.0, dut = -100.0 }
+floor_band_hz = { xone = [100, 10000], genelec = [100, 10000], dut = [100, 10000] }
+budget_seconds = { xone = 180.0, genelec = 180.0, dut = 180.0 }
 max_repeats = 8
 max_duration = 30.0
 noise_lead_seconds = 1.0   # raw capture starts this long + one sweep before the sweep (noise windows)

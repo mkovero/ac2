@@ -97,7 +97,7 @@ def stage_level(results: dict, stage: str) -> float | None:
     man = results.get("manifest") or {}
     flags = man.get("flags") or {}
     kind = ((man.get("paths") or {}).get(stage) or {}).get("kind")
-    text = flags.get("emit_speaker") if kind == "speaker" else flags.get("emit") if kind == "electrical" else None
+    text = flags.get("emit_speaker") if kind == "speaker" else flags.get("emit") if kind in ("electrical", "digital") else None
     if not text:
         return None
     m = re.match(r"\s*([-+]?\d+(?:\.\d+)?)\s*dbfs\s*$", str(text), re.I)

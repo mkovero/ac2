@@ -13,7 +13,7 @@ tolerances.toml  PASS / WARN limits for every comparison, compare steps
 baselines/       reviewed results per rig, stage and level (<rig>/<stage>-<level>dbfs.json)
 reference/       documented truth of 2026-10-07 (used when analysing the fixtures)
 rig-run.sh       dev host: copy to the rig, run there, fetch the run, analyse and compare here
-tests/           pytest: dsp, safety policy, JACK dummy server, fixtures smoke test
+tests/           pytest: dsp, safety policy, JACK dummy server, fixtures smoke test, digital DUT
 ```
 
 ## Prerequisites
@@ -136,6 +136,8 @@ reach of Ctrl-C.
 2. **genelec** at −50 dBFS: out 1 → Genelec → mic on in 1; reference out 2 → in 2.
 3. **xone** at `--emit`: out 5 → Xone (L) → in 5; reference out 2 → in 2. With
    `--allow-electrical-level`, the drop-in is installed just before this stage.
+4. **dut** at `--emit` (opt-in: `--stages …,dut`): the digital DUT (below). Same flags and
+   level policy as xone; the drop-in, if any, stays from the xone stage.
 
 Each path stage runs these sub-stages (`--skip` takes their names):
 
@@ -161,6 +163,50 @@ Each path stage runs these sub-stages (`--skip` takes their names):
   daemon also records each variant raw (`rec start`), starting one sweep length plus 1 s
   early so that noise windows exist.
 - **ac2_tf**: pink noise for `settle_seconds`, a captured trace and a raw recording.
+
+### Digital DUT path
+
+`ac2-jack-dut` is a JACK client with exactly known harmonics and no mains:
+`dut_out = post(poly(pre(dut_in))) + noise`, `ref_out = ref_in + noise` (`[dut]` in the rig
+file: polynomial, pre/post filter specs, noise −120 dBFS). The suite designs the biquads
+(`crosscheck/dut.py`), starts the binary for the path's stages, checks its rate and that its
+inputs are unconnected, writes `dut/dut.json` (the exact command, the coefficients, the
+analytic truth for the tones and a 1/12-octave grid) and stops it in a finally (stdin closed,
+then SIGTERM, then kill), keeping its `xruns <n>` line.
+
+- **What it proves:** whether the analysers read a harmonic right. Each "vs analytic" row
+  (group **dut**) compares a reading with the exact truth at the column's own frequency: the
+  steady sine (the method check, 0.1 / 0.3 dB), REW's offline import and each ac2 sweep
+  variant (0.5 / 1.0 dB, per tone and as a log-grid summary; `[dut]` in `tolerances.toml`).
+  The default polynomial gives H2 −50, H3 −55, H4 −63, H5 −70 dBr at −10 dBFS and 1 kHz,
+  falling at LF where the 20 Hz pre-filter lowers its input (15 Hz: −62 … −88). On the Xone
+  those harmonics sit at the converters' floor, so most comparisons there are INCONCLUSIVE.
+- **What it does not prove:** anything about the rig's analogue path. It tests the
+  analysers, not the rig.
+- **Wiener vs Hammerstein:** the pre-filter sits ahead of the polynomial. A steady sine's
+  harmonics are then exactly the analytic truth; a sweep sees the pre-filter only in the
+  instantaneous-frequency approximation. Rows where the pre-filter's gain exceeds 0.1 dB say
+  so: a deviation there can be the model, not the analyser. The post-filter has no such caveat.
+- **Ports:** the suite's own player and recorder use `[paths.dut].ports` (the DUT's ports). For
+  the ac2 stages the suite records what feeds `ac2:in_<meas_in>` and `ac2:in_<ref_in>`
+  (3 and 2), disconnects it, patches `ac2-dut:dut_out → ac2:in_3`, `ac2-dut:ref_out → ac2:in_2`,
+  `ac2:out_5 → ac2-dut:dut_in`, `ac2:out_2 → ac2-dut:ref_in`, and checks before every sweep that
+  each patched input has the DUT as its only source. Afterwards (in a finally) it removes
+  exactly those links and restores the recorded ones. If that fails it prints `!!!` lines
+  naming `ac2 session open …` (the rig's `[ac2].session_open`) and the run exits 4.
+- **Hardware outputs still play.** ac2d connects its outputs to `system:playback_N` itself,
+  so during the ac2 stages outs 5 and 2 also carry ac2's stimulus at `--emit`. Both are
+  approved electrical/loopback outputs, and the level policy checks them as on the Xone path
+  (out 1 is refused).
+- **xruns:** on an xrun JACK leaves a stale block in `dut_out`. A suite take with an xrun is
+  discarded as on every path (`max_xruns`, server-wide notifications). The DUT's own count
+  appears as a "DUT xruns" row, WARN when it is not 0 (the path's results are then suspect).
+- **Deploy:** build `ac2-jack-dut` (crate `tools/jack-dut`) for the rig and copy it to the
+  rig's `~/ac2-test/bin/ac2-jack-dut` (`[dut].binary`). `preflight` warns when it is
+  missing, and `run --stages dut` refuses to start without it. `AC2_JACK_DUT` overrides the path.
+- **Locally:** `CROSSCHECK_JACK_E2E=1 AC2_JACK_DUT=<binary> pytest tests/test_dut_e2e.py` runs
+  the sine stage and the patch against the real binary on a JACK dummy server. There is no
+  ac2 daemon in that test.
 
 ### Calibration (speaker path and ambient)
 

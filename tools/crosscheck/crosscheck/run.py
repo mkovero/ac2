@@ -1,5 +1,6 @@
-"""Preflight and the run: ambient (silent) → speaker path at −50 dBFS → electrical path, the
-electrical drop-in last and always removed (with `gen ceiling` read back) in a finally."""
+"""Preflight and the run: ambient (silent) → speaker path at −50 dBFS → electrical path →
+digital DUT path, the electrical drop-in last and always removed (with `gen ceiling` read
+back) in a finally."""
 from __future__ import annotations
 
 import fcntl
@@ -12,12 +13,12 @@ import time
 import tomllib
 from pathlib import Path
 
-from . import levels, stages
+from . import dutrun, levels, stages
 from .ac2 import Ac2
 from .levels import Output, Policy, PolicyError
 from .rew import Rew, RewError
 
-ORDER = ("ambient", "genelec", "xone")
+ORDER = ("ambient", "genelec", "xone", "dut")
 
 
 def build_policy(rig: dict, emit=None, emit_speaker=None, allow=None, forbidden=()) -> Policy:
@@ -37,7 +38,7 @@ def path_policy(rig: dict, base: Policy, pname: str) -> Policy:
     return replace(base, forbidden=frozenset(int(x) for x in pc.get("forbidden_outputs", [])))
 
 
-def preflight(rig: dict, ac2: Ac2, rew: Rew | None, want: set[str]) -> dict:
+def preflight(rig: dict, ac2: Ac2, rew: Rew | None, want: set[str], strict: bool = True) -> dict:
     """Read-only. Raises on what makes a run unsafe or pointless; returns what it found."""
     import jack
 
@@ -56,6 +57,17 @@ def preflight(rig: dict, ac2: Ac2, rew: Rew | None, want: set[str]) -> dict:
     finally:
         c.close()
     rep["ok"].append(f"JACK {fs:g} Hz, configured ports present")
+    if "dut" in want:
+        b = Path(os.path.expanduser(rig["dut"]["binary"]))
+        if not (b.is_file() and os.access(b, os.X_OK)):
+            if strict:
+                raise RuntimeError(f"the DUT binary {b} is missing or not executable (README: Digital DUT path)")
+            rep["warn"].append(f"the DUT binary {b} is missing or not executable: --stages dut would be refused")
+        client = rig["dut"].get("client", "ac2-dut")
+        for role, port in (rig["paths"]["dut"].get("ports") or {}).items():
+            if not port.startswith(client + ":"):
+                raise RuntimeError(f"paths.dut.ports.{role} = {port} is not a port of the DUT client {client}")
+        rep["ok"].append(f"DUT binary {b}")
     st = ac2.status() or {}
     rep["ac2_build"] = st.get("build_id")
     if not (st.get("session") or {}).get("open"):
@@ -133,13 +145,16 @@ def main(a) -> int:
             pc = rig["paths"]["genelec"]
             path_policy(rig, base, "genelec").check([int(pc["out"]), int(pc["ref_out"])], base.emit_speaker_dbfs,
                                                     speaker_stage=True)
-        if "xone" in want:
+        for s in ("xone", "dut"):
+            if s not in want:
+                continue
             if base.emit_dbfs is None:
-                raise PolicyError("the xone stage needs --emit <level>dbfs; or --stages without it")
-            pc = rig["paths"]["xone"]
-            path_policy(rig, base, "xone").check([int(pc["out"]), int(pc["ref_out"])], base.emit_dbfs,
-                                                 speaker_stage=False)
-    rep = preflight(rig, ac2, rew, set(want))
+                raise PolicyError(f"the {s} stage needs --emit <level>dbfs; or --stages without it")
+            pc = rig["paths"][s]
+            # the dut path's channel numbers are ac2's: its stimulus also reaches those hardware outputs
+            path_policy(rig, base, s).check([int(pc["out"]), int(pc["ref_out"])], base.emit_dbfs,
+                                            speaker_stage=False)
+    rep = preflight(rig, ac2, rew, set(want), strict=a.cmd == "run")
     for x in rep["ok"]:
         print("ok   ", x)
     for x in rep["warn"]:
@@ -198,7 +213,7 @@ def main(a) -> int:
                     ctx.stage("ambient", "done")
                     continue
                 pc = rig["paths"][s]
-                man["paths"][s] = {"kind": pc["kind"]}
+                man["paths"][s] = {"kind": pc["kind"], "mains_hz": stages.path_mains_hz(rig, s)}
                 ctx.policy = path_policy(rig, base, s)
                 if pc["kind"] == "speaker":
                     stages.verify_bound(ctx, levels.SPEAKER_HARD_MAX_DBFS)
@@ -207,7 +222,7 @@ def main(a) -> int:
                                   f"protected, nothing loose near the driver?")
                 elif base.needs_raised_daemon():
                     stages.install_dropin(ctx, base.allow_electrical_dbfs)
-                run_path(ctx, s, cal_file)
+                rc = run_path(ctx, s, cal_file) or rc
                 ctx.stage(s, "done")
             except PolicyError as e:
                 ctx.stage(s, "refused", str(e))
@@ -244,18 +259,76 @@ def main(a) -> int:
     return rc
 
 
-def run_path(ctx: stages.Ctx, pname: str, cal_file: str | None):
-    for sub, fn in (("sine", lambda: stages.sine_stage(ctx, pname)),
-                    ("rew", lambda: stages.rew_stage(ctx, pname, cal_file)),
-                    ("ac2_sweep", lambda: stages.ac2_sweeps(ctx, pname)),
-                    ("ac2_tf", lambda: stages.ac2_tf(ctx, pname))):
-        if sub in ctx.skip:
-            ctx.stage(f"{pname}.{sub}", "skipped", "--skip")
-            continue
-        try:
-            if fn() != "skipped":
-                ctx.stage(f"{pname}.{sub}", "done")
-        except (PolicyError, KeyboardInterrupt):
-            raise
-        except Exception as e:
-            ctx.stage(f"{pname}.{sub}", "failed", f"{type(e).__name__}: {e}")
+AC2_STAGES = ("ac2_sweep", "ac2_tf")
+
+
+def run_path(ctx: stages.Ctx, pname: str, cal_file: str | None) -> int:
+    """The sub-stages of one path. A digital path runs its DUT around them and patches ac2
+    onto it for the ac2 stages only (the suite's own player feeds the DUT in the others, and
+    the two must never overlap). Returns nonzero when ac2's inputs could not be restored."""
+    digital = ctx.rig["paths"][pname]["kind"] == "digital"
+    subs = (("sine", lambda: stages.sine_stage(ctx, pname)),
+            ("rew", lambda: stages.rew_stage(ctx, pname, cal_file)),
+            ("ac2_sweep", lambda: stages.ac2_sweeps(ctx, pname)),
+            ("ac2_tf", lambda: stages.ac2_tf(ctx, pname)))
+    rc = 0
+    patch_error = None
+    if digital:
+        ctx.dut = dutrun.start(ctx, pname)
+    try:
+        for sub, fn in subs:
+            if sub in ctx.skip:
+                ctx.stage(f"{pname}.{sub}", "skipped", "--skip")
+                continue
+            try:
+                if digital and sub in AC2_STAGES:
+                    if patch_error:
+                        raise RuntimeError(f"ac2 not patched onto the DUT: {patch_error}")
+                    if ctx.patch is None:
+                        try:
+                            patch_ac2(ctx, pname)
+                        except Exception as e:
+                            patch_error = f"{type(e).__name__}: {e}"
+                            raise
+                if fn() != "skipped":
+                    ctx.stage(f"{pname}.{sub}", "done")
+            except (PolicyError, KeyboardInterrupt):
+                raise
+            except Exception as e:
+                ctx.stage(f"{pname}.{sub}", "failed", f"{type(e).__name__}: {e}")
+    finally:
+        if ctx.patch is not None:
+            rc = unpatch_ac2(ctx, pname)
+        if ctx.dut is not None:
+            r = dutrun.finish(ctx, pname, ctx.dut)
+            ctx.dut = None
+            print(f"[{pname}] DUT stopped ({r['stopped_by']}, rc {r['rc']}): {r['xruns_line'] or 'no xruns line'}",
+                  flush=True)
+    return rc
+
+
+def patch_ac2(ctx: stages.Ctx, pname: str):
+    pc = ctx.rig["paths"][pname]
+    dc = ctx.rig["dut"]
+    ctx.patch = dutrun.Patch(dc.get("ac2_client", "ac2"), dc.get("client", "ac2-dut"), pc)
+    try:
+        ctx.patch.apply()
+    finally:
+        ctx.manifest["paths"][pname]["patch"] = ctx.patch.record()
+        ctx.save()
+
+
+def unpatch_ac2(ctx: stages.Ctx, pname: str) -> int:
+    errs = ctx.patch.restore()
+    rec = ctx.patch.record()
+    rec["restore_errors"] = errs
+    ctx.manifest["paths"][pname]["patch"] = rec
+    ctx.patch = None
+    ctx.save()
+    if not errs:
+        print(f"[{pname}] ac2's inputs restored: {rec['saved_inputs']}", flush=True)
+        return 0
+    cmd = " ".join(["ac2", *map(str, ctx.rig["ac2"]["session_open"])])
+    print(f"!!! ac2's inputs were NOT restored after the DUT patch: {'; '.join(errs)}.\n"
+          f"!!! Its captures may still come from the DUT. Run `{cmd}` NOW to reconnect them.", flush=True)
+    return 4
