@@ -240,6 +240,14 @@ fn placeholder(pane: PaneKind, app: &App) -> &'static str {
         PaneKind::Spl if app.state.view.spl.mode == SplMode::Leq && scenes::has_spl(&app.state) => {
             "no Leq windows yet: they show once the meter has measured a second"
         }
+        PaneKind::Spl
+            if app.state.view.spl.mode == SplMode::Bands && !scenes::has_band_meter(&app.state) =>
+        {
+            "no band meter: turn it on in the SPL / Leq settings (or `ac2 spl bands set`)"
+        }
+        PaneKind::Spl if app.state.view.spl.mode == SplMode::Bands => {
+            "no band frame yet: the bands show once the meter has measured a second"
+        }
         PaneKind::Spl if scenes::has_spl(&app.state) => "no SPL frame yet",
         PaneKind::Spl => "no SPL meter",
         _ => "",

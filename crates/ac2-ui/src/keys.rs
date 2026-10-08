@@ -499,10 +499,11 @@ commands! {
 
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
 
-    SplLeqView => "spl_leq_view", "SPL: meter → Leq windows → meter + Leq", [Spl];
+    SplLeqView => "spl_leq_view", "SPL: meter → Leq windows → meter + Leq → bands", [Spl];
     SplShowMeter => "spl_show_meter", "SPL pane: the meter", [Spl];
     SplShowLeq => "spl_show_leq", "SPL pane: the Leq windows", [Spl];
     SplShowMeterLeq => "spl_show_meter_leq", "SPL pane: meter + Leq windows", [Spl];
+    SplShowBands => "spl_show_bands", "SPL pane: the band Leq bars (20 … 200 Hz)", [Spl];
     SplLeqStyle => "spl_leq_style", "SPL Leq windows: columns / tiles", [Spl];
     SplLeqHistory => "spl_leq_history", "SPL Leq windows: history strip on / off", [Spl];
     SplNewLog => "spl_new_log", "Start a new SPL log…", [Spl];
@@ -1148,6 +1149,7 @@ mod tests {
             CommandId::SplShowMeter,
             CommandId::SplShowLeq,
             CommandId::SplShowMeterLeq,
+            CommandId::SplShowBands,
             CommandId::Notifications,
         ];
         let m = Keymap::default();

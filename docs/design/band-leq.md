@@ -1,7 +1,8 @@
 # Band Leq: low-frequency limits in a neighbour's bedroom
 
-Status: stages 1 and 2 implemented (`ac2_core::band_leq`; the daemon's band meter,
-`spl.band_transfer`, the `band_leq` frame, the band log); stage 3 below is not.
+Status: stages 1 to 3 implemented (`ac2_core::band_leq`; the daemon's band meter,
+`spl.band_transfer`, the `band_leq` frame, the band log; the band view, the dialog rows and
+`ac2 spl bands`).
 
 ## What the operator and the artist get
 
@@ -221,8 +222,21 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
      capture job: the operator plays the test signal and names the spans. That job, and
      reading the band log back over the protocol (a `spl.band_log_get`), are left for
      stage 3 or later.
-3. **Scene, UI, CLI**: the artist view — eleven bars 20 … 200 Hz with the limit line, the
-   headroom ("stay ≤ …") and "cooling down in …" per band, the worst band named, the day /
-   night set and when it changes next, the predicted bedroom LAeq against 25 dB; `ac2 spl
-   leq set --preset finland-545-lf`, `--transfer <file>`, and the transfer measurement
-   from the CLI and a dialog.
+3. **Scene, UI, CLI** (done): `ac2_scene::band_leq` words and draws the `band_leq` frame —
+   eleven bars 20 … 200 Hz with the limit line, the headroom ("≤ …") and "cooling down in
+   …" per band, the worst band named in a headline with what to do ("63 Hz band Leq 3.2 dB
+   over its limit · cooling down in 6 min 52 s"), the period (and "headroom for the night
+   limits from 22:00" when the set changes within the horizon), the limits' place, the §13
+   correction, the predicted dwelling LAeq against its limit with "at most"; the SPL pane's
+   fourth view (`SplMode::Bands`, G after meter + Leq when the meter has a band meter); the
+   band rows of the Leq dialog (off / preset, window, impulse, narrowband, the transfer per
+   band); `ac2 spl bands set|watch|transfer`. Decided on the way:
+   - The CLI is `spl bands …`, a sibling of `spl leq …`, not more flags on `spl leq set`:
+     the band meter has its own watch (bands, not windows), its own presets and the
+     transfer, and `spl leq set --preset` replaces windows, which a band preset never does.
+   - A transfer source on the CLI is a file of `<Hz> <dB>` lines or `METER@FROM..UNTIL`,
+     times resolved on the CLI's host (local time of day, local or UTC date-time, `-30s`,
+     `now`); the fake client answers typed levels and refuses spans (it keeps no band log).
+   - Not yet: a two-position transfer capture job in the app (the operator names the
+     spans), reading the band log back over the protocol (`spl.band_log_get`), the band
+     history in the view.

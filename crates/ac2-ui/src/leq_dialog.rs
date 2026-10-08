@@ -2,7 +2,8 @@
 //! its length and weighting picked from named choices, its limit and warn margin typed in
 //! dB — a preset row that replaces the windows (and peak limits) with a published rule's,
 //! the headroom horizon, and under the windows the LCpeak and LAFmax limits and the
-//! measuring-position correction, typed.
+//! measuring-position correction, typed; last the band meter ([`bands`]): on with a
+//! rule's limits, its window, the §13 corrections, the measured transfer as it stands.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
 
@@ -11,6 +12,9 @@ use ac2_proto::model::{
     PeakQuantity, PositionCorrection, SplConfig, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
+
+mod bands;
+pub use bands::{BandField, BandLimits, BandSection};
 
 /// Window lengths offered, shortest first (→ longer). A length outside the list (from the
 /// CLI) is kept until changed.
@@ -131,6 +135,8 @@ pub enum Focus {
     Window { row: usize, col: Col },
     /// A setting under the windows.
     Extra(Extra),
+    /// A setting of the band meter, last.
+    Band(BandField),
 }
 
 /// One window being edited.
@@ -224,6 +230,8 @@ pub struct LeqDialog {
     pub preset: Option<usize>,
     /// Typed settings under the windows, in [`Extra::ALL`] order.
     pub extra: [String; 4],
+    /// The band meter.
+    pub bands: BandSection,
     /// The windows and peak limits before the preset row was first changed: back at "none"
     /// they return. Dropped on any edit of a window, which keeps what the preset set.
     before_preset: Option<(Vec<Row>, [String; 2])>,
@@ -272,6 +280,7 @@ impl LeqDialog {
                 position,
                 position_peak,
             ],
+            bands: BandSection::new(config.bands.as_deref()),
             before_preset: None,
             focus: Focus::Preset,
             selected: false,
@@ -307,8 +316,8 @@ impl LeqDialog {
     }
 
     fn rows_count(&self) -> usize {
-        // Preset, horizon, the windows, then the settings under them.
-        2 + self.rows.len() + Extra::ALL.len()
+        // Preset, horizon, the windows, the settings under them, the band meter.
+        2 + self.rows.len() + Extra::ALL.len() + BandField::ALL.len()
     }
 
     fn row_index(&self) -> usize {
@@ -317,6 +326,7 @@ impl LeqDialog {
             Focus::Horizon => 1,
             Focus::Window { row, .. } => 2 + row,
             Focus::Extra(e) => 2 + self.rows.len() + e.index(),
+            Focus::Band(b) => 2 + self.rows.len() + Extra::ALL.len() + b.index(),
         }
     }
 
@@ -330,7 +340,7 @@ impl LeqDialog {
         match self.focus {
             Focus::Window { col, .. } => col.is_text(),
             Focus::Extra(_) => true,
-            Focus::Preset | Focus::Horizon => false,
+            Focus::Preset | Focus::Horizon | Focus::Band(_) => false,
         }
     }
 
@@ -347,7 +357,10 @@ impl LeqDialog {
             0 => Focus::Preset,
             1 => Focus::Horizon,
             r if r < 2 + n => Focus::Window { row: r - 2, col },
-            r => Focus::Extra(Extra::ALL[(r - 2 - n).min(Extra::ALL.len() - 1)]),
+            r if r < 2 + n + Extra::ALL.len() => Focus::Extra(Extra::ALL[r - 2 - n]),
+            r => Focus::Band(
+                BandField::ALL[(r - 2 - n - Extra::ALL.len()).min(BandField::ALL.len() - 1)],
+            ),
         };
         self.selected = self.on_text();
     }
@@ -363,7 +376,8 @@ impl LeqDialog {
     pub fn move_cell(&mut self, d: i32) {
         // Cells in order: preset, horizon, four per window, then the settings under them.
         let w = 4 * self.rows.len() as i32;
-        let cells = 2 + w + Extra::ALL.len() as i32;
+        let x = Extra::ALL.len() as i32;
+        let cells = 2 + w + x + BandField::ALL.len() as i32;
         let at = match self.focus {
             Focus::Preset => 0,
             Focus::Horizon => 1,
@@ -371,6 +385,7 @@ impl LeqDialog {
                 2 + 4 * row as i32 + Col::ALL.iter().position(|c| *c == col).unwrap_or(0) as i32
             }
             Focus::Extra(e) => 2 + w + e.index() as i32,
+            Focus::Band(b) => 2 + w + x + b.index() as i32,
         };
         let next = (at + d).rem_euclid(cells);
         self.focus = match next {
@@ -380,7 +395,8 @@ impl LeqDialog {
                 row: ((k - 2) / 4) as usize,
                 col: Col::ALL[((k - 2) % 4) as usize],
             },
-            k => Focus::Extra(Extra::ALL[(k - 2 - w) as usize]),
+            k if k < 2 + w + x => Focus::Extra(Extra::ALL[(k - 2 - w) as usize]),
+            k => Focus::Band(BandField::ALL[(k - 2 - w - x) as usize]),
         };
         self.selected = self.on_text();
     }
@@ -427,6 +443,7 @@ impl LeqDialog {
                 }
             }
             Focus::Horizon => self.horizon = step(self.horizon, HORIZONS.len()),
+            Focus::Band(b) => self.bands.cycle(b, d),
             Focus::Extra(_) => return,
             Focus::Window { row, col } => {
                 self.before_preset = None;
@@ -662,6 +679,7 @@ impl LeqDialog {
                 config: SplConfig {
                     leq: self.leq_config()?,
                     position: self.position()?,
+                    bands: self.bands.config()?.map(Box::new),
                     ..self.base.clone()
                 },
             },
@@ -884,14 +902,40 @@ mod tests {
         assert!(d.error.as_deref().is_some_and(|e| e.contains("at most 8")));
     }
 
+    /// The band meter's rows come last: Tab reaches them, ←/→ turn it on with a preset and
+    /// set the corrections, Enter sends them with the windows.
+    #[test]
+    fn the_band_meter_rows() {
+        let mut d = LeqDialog::new(&meter(), true).expect("spl");
+        d.move_cell(-4);
+        assert_eq!(d.focus, Focus::Band(BandField::Limits));
+        d.cycle(1);
+        d.move_cell(1);
+        d.move_cell(1);
+        assert_eq!(d.focus, Focus::Band(BandField::Impulse));
+        d.cycle(1);
+        let MeasKind::Spl { config } = d.meas_config().expect("valid").kind else {
+            panic!()
+        };
+        let b = config.bands.expect("on");
+        assert_eq!(b.night[5], Some(DbSpl(42.0)));
+        assert_eq!(b.correction.db(), 5.0);
+        assert_eq!(config.leq, d.leq_config().expect("windows"));
+    }
+
     /// Under the windows: the peak limits and the position correction, reached with ↓ and
     /// Tab, typed; a preset sets its peak limits and back at "none" they return; the
     /// correction is the operator's and no preset touches it.
     #[test]
     fn peak_limits_and_the_position_correction() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
-        // ↑ from the preset row wraps to the last setting: the peaks' correction.
+        // ↑ from the preset row wraps to the band meter's settings, last; above them the
+        // peaks' correction.
         d.move_row(-1);
+        assert_eq!(d.focus, Focus::Band(BandField::Tonal));
+        for _ in 0..BandField::ALL.len() {
+            d.move_row(-1);
+        }
         assert_eq!(d.focus, Focus::Extra(Extra::PositionPeak));
         d.move_row(-1);
         assert_eq!(d.focus, Focus::Extra(Extra::Position));

@@ -26,7 +26,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &LeqCmd, out: &mut Out<'_>) -> Result<()
 }
 
 /// The SPL meter `r` names: `--meas`, the one on `--input`, or the only one.
-fn meter<'s>(s: &'s State, r: &MeterRef) -> Result<Option<&'s Measurement>, CliError> {
+pub(crate) fn meter<'s>(s: &'s State, r: &MeterRef) -> Result<Option<&'s Measurement>, CliError> {
     let is_spl = |m: &&Measurement| matches!(m.config.kind, MeasKind::Spl { .. });
     if let Some(m) = &r.meas {
         let m = find_meas(s, m)?;
@@ -77,7 +77,7 @@ fn names(ms: &[&Measurement]) -> String {
         .join(", ")
 }
 
-fn spl_config(m: &Measurement) -> Result<&SplConfig, CliError> {
+pub(crate) fn spl_config(m: &Measurement) -> Result<&SplConfig, CliError> {
     match &m.config.kind {
         MeasKind::Spl { config } => Ok(config),
         _ => Err(CliError::Usage(format!(

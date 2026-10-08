@@ -262,6 +262,58 @@ fn fake_cal_key(input: u16, mic: &str) -> Result<CalKey, ProtoError> {
     })
 }
 
+/// Band levels of a transfer source: typed levels as the daemon takes them; the fake runs
+/// no band meter, so it has no band log to read a span from.
+fn fake_band_levels(src: &BandLevelSource) -> Result<[f64; BAND_COUNT], ProtoError> {
+    match src {
+        BandLevelSource::Levels { levels } => {
+            if levels.len() != BAND_COUNT {
+                return Err(err(
+                    ErrorCode::Invalid,
+                    format!("band levels are {BAND_COUNT} values, 20 Hz … 10 kHz"),
+                ));
+            }
+            if levels.iter().flatten().any(|l| !l.0.is_finite()) {
+                return Err(err(ErrorCode::Invalid, "a band level must be finite"));
+            }
+            let mut out = [f64::NAN; BAND_COUNT];
+            for (o, l) in out.iter_mut().zip(levels) {
+                if let Some(l) = l {
+                    *o = l.0;
+                }
+            }
+            Ok(out)
+        }
+        BandLevelSource::Log { meas, .. } => Err(err(
+            ErrorCode::Invalid,
+            format!("no band seconds logged by {meas} there (the fake daemon runs no band meter)"),
+        )),
+    }
+}
+
+fn fake_transfer_band(b: ac2_core::band_leq::BandTransfer) -> BandTransferBand {
+    use ac2_core::band_leq::BandTransfer as T;
+    match b {
+        T::Unchecked { attenuation_db } => BandTransferBand::Unchecked {
+            attenuation: Db(attenuation_db),
+        },
+        T::Clean { attenuation_db } => BandTransferBand::Clean {
+            attenuation: Db(attenuation_db),
+        },
+        T::Corrected {
+            attenuation_db,
+            margin_db,
+        } => BandTransferBand::Corrected {
+            attenuation: Db(attenuation_db),
+            margin: Db(margin_db),
+        },
+        T::Unusable { at_least_db } => BandTransferBand::Unusable {
+            at_least: Db(at_least_db),
+        },
+        T::Missing => BandTransferBand::Missing,
+    }
+}
+
 fn err(code: ErrorCode, msg: impl Into<String>) -> ProtoError {
     ProtoError {
         code,
@@ -1286,12 +1338,32 @@ impl Shared {
                 self.spl_log_for(&m);
                 ReplyBody::Ack { rev: self.rev }
             }
-            C::SplBandTransfer { meas, .. } => {
-                self.spl_meter(meas)?;
-                return Err(err(
-                    ErrorCode::Unsupported,
-                    "the fake daemon runs no band meter",
-                ));
+            C::SplBandTransfer {
+                meas,
+                foh,
+                dwelling,
+                background,
+            } => {
+                let mut m = self.spl_meter(meas)?;
+                let MeasKind::Spl { config } = &mut m.config.kind else {
+                    unreachable!("spl_meter checked the kind");
+                };
+                let Some(bands) = &mut config.bands else {
+                    return Err(err(
+                        ErrorCode::Invalid,
+                        format!("SPL meter {meas} has no band meter: enable it first"),
+                    ));
+                };
+                let foh = fake_band_levels(&foh)?;
+                let dwelling = fake_band_levels(&dwelling)?;
+                let background = background.as_ref().map(fake_band_levels).transpose()?;
+                let t = ac2_core::band_leq::Transfer::measure(&foh, &dwelling, background.as_ref());
+                bands.transfer = Some(BandTransferSet {
+                    measured_at: WallNs(self.now_ns()),
+                    bands: t.bands().map(fake_transfer_band),
+                });
+                m.config_rev = Rev(self.rev.0 + 1);
+                self.put_meas(m)
             }
             C::StateSnapshot => ReplyBody::Snapshot(Box::new(StateSnapshot {
                 state: self.state.clone(),

@@ -1298,12 +1298,18 @@ impl AppState {
                     IrMode::Etc => IrMode::Linear,
                 };
             }
-            C::SplLeqView | C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq => {
+            C::SplLeqView
+            | C::SplShowMeter
+            | C::SplShowLeq
+            | C::SplShowMeterLeq
+            | C::SplShowBands => {
+                let bands = crate::scenes::has_band_meter(self);
                 self.view.spl.mode = match c {
                     C::SplShowMeter => SplMode::Meter,
                     C::SplShowLeq => SplMode::Leq,
                     C::SplShowMeterLeq => SplMode::MeterLeq,
-                    _ => self.view.spl.mode.next(),
+                    C::SplShowBands => SplMode::Bands,
+                    _ => self.view.spl.mode.next(bands),
                 };
                 self.focus(PaneKind::Spl);
             }

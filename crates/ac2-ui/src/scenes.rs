@@ -11,6 +11,7 @@ use ac2_proto::frame::ProtectionFlags;
 use ac2_proto::model::{LevelScale, MeasKind, Measurement, PhaseBasis, Polarity, TraceKind};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, WallNs};
+use ac2_scene::band_leq::{BandLeqScene, BandLeqView, band_leq_scene, band_leq_text};
 use ac2_scene::banner::{Status, no_delay_estimate};
 use ac2_scene::distortion::{DistortionScene, SweepView, distortion_scene, sweep_ir_scene};
 use ac2_scene::format;
@@ -770,6 +771,51 @@ pub fn has_spl(st: &AppState) -> bool {
         .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
 }
 
+/// Whether any SPL meter has a band meter.
+pub fn has_band_meter(st: &AppState) -> bool {
+    st.measurements()
+        .iter()
+        .any(|m| matches!(&m.config.kind, MeasKind::Spl { config } if config.bands.is_some()))
+}
+
+/// What the band view shows of meter `m`, with its `band_leq` frame.
+fn band_view<'a>(
+    st: &'a AppState,
+    m: &Measurement,
+    now: Now,
+) -> Option<(BandLeqView, &'a TopicFrame)> {
+    let tf = frame(st, m.id, Stream::BandLeq)?;
+    let FrameData::BandLeq(f) = &tf.frame.data else {
+        return None;
+    };
+    let MeasKind::Spl { config } = &m.config.kind else {
+        return None;
+    };
+    config.bands.as_ref()?;
+    let stale = match freshness(st, tf) {
+        Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),
+        Freshness::Stopped { .. } => Some("STOPPED".into()),
+        Freshness::AudioStopped { .. } => Some("AUDIO STOPPED".into()),
+        Freshness::Fresh { .. } => None,
+    };
+    Some((
+        BandLeqView {
+            meter: m.config.name.clone(),
+            cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
+            text: band_leq_text(&f.meta),
+            stale,
+        },
+        tf,
+    ))
+}
+
+/// The band meter of the SPL meter the pane shows (else the first one with a band frame).
+pub fn band_leq(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> Option<BandLeqScene> {
+    let (v, tf) = spl_meters(st).find_map(|m| band_view(st, m, now))?;
+    let status = status(st, &[tf], None, now);
+    Some(band_leq_scene(&v, &status, theme, size))
+}
+
 /// The SPL meters in the order the pane picks them: the one it shows first.
 fn spl_meters(st: &AppState) -> impl Iterator<Item = &Measurement> {
     pane_order(st, PaneKind::Spl)
@@ -903,6 +949,7 @@ pub fn spl_pane(
     match st.view.spl.mode {
         SplMode::Meter => spl(st, keymap, theme, size, now).map(|s| s.scene),
         SplMode::Leq => leq(st, theme, size, now).map(|s| s.scene),
+        SplMode::Bands => band_leq(st, theme, size, now).map(|s| s.scene),
         SplMode::MeterLeq => meter_leq(st, keymap, theme, size, now)
             .map(|s| s.leq.scene)
             .or_else(|| spl(st, keymap, theme, size, now).map(|s| s.scene))

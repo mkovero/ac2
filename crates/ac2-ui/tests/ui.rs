@@ -2882,3 +2882,277 @@ fn measurement_tree_and_delete_choices() {
     h.key_press(Key::Escape);
     step_until(&mut h, "cancelled", |a| a.state.overlay == Overlay::None);
 }
+
+/// Publishes the given `band_leq` frame on the fake daemon every 200 ms, fresh each time.
+struct BandPublisher {
+    frame: Arc<std::sync::Mutex<Option<ac2_proto::frame::BandLeqFrame>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl BandPublisher {
+    fn start(fake: Arc<ac2_client::fake::FakeDaemon>) -> Self {
+        use ac2_proto::{Frame, FrameData};
+        let frame: Arc<std::sync::Mutex<Option<ac2_proto::frame::BandLeqFrame>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (f, s) = (Arc::clone(&frame), Arc::clone(&stop));
+        let thread = std::thread::spawn(move || {
+            let mut seq = 1;
+            while !s.load(Ordering::Acquire) {
+                let data = f.lock().ok().and_then(|g| g.clone());
+                if let Some(data) = data {
+                    let mut st = fake.lock();
+                    let frame = Frame {
+                        stamp: st.stamp(seq, None),
+                        data: FrameData::BandLeq(Box::new(data)),
+                    };
+                    st.publish(&frame);
+                    seq += 1;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+        Self {
+            frame,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn set(&self, f: ac2_proto::frame::BandLeqFrame) {
+        if let Ok(mut g) = self.frame.lock() {
+            *g = Some(f);
+        }
+    }
+}
+
+impl Drop for BandPublisher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// A night hour of a band meter with a measured transfer: 63 Hz 3.2 dB over its limit at
+/// the mic and cooling down for 6 min 52 s, 50 Hz on course to go over, the predicted
+/// dwelling LAeq near its 25 dB.
+fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFrame {
+    use ac2_proto::frame::{BandLeqFrame, BandLeqMeta};
+    use ac2_proto::model::{
+        BAND_NOMINAL_HZ, BandLeqBand, BandLimitPlace, BandPeriod, CalStatus, LF_BAND_COUNT,
+        LeqJudgement, LevelScale, PredictedLeq,
+    };
+    use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
+    // The bedroom's night limits plus a transfer of 25 … 40 dB: limits at FOH.
+    let night = ac2_proto::model::BandLeqPreset::FINLAND_545_NIGHT_DB;
+    let bands = (0..LF_BAND_COUNT)
+        .map(|i| {
+            let limit = night[i] + 25.0 + i as f64 * 1.5;
+            let (leq, judgement, on_course) = match i {
+                5 => (limit + 3.2, LeqJudgement::Over, false),
+                4 => (limit - 1.4, LeqJudgement::Near, true),
+                0 | 1 => (limit - 18.0, LeqJudgement::Ok, false),
+                _ => (
+                    limit - 7.5 + (i as f64 * 0.7).sin() * 3.0,
+                    LeqJudgement::Ok,
+                    false,
+                ),
+            };
+            BandLeqBand {
+                nominal: Hz(BAND_NOMINAL_HZ[i]),
+                leq,
+                limit: Some(limit),
+                judgement,
+                on_course,
+                allowed: (i != 5).then_some(limit + (limit - leq).max(0.0) * 1.6),
+                recover: (i == 5).then_some(Seconds(412.0)),
+            }
+        })
+        .collect();
+    BandLeqFrame {
+        meas,
+        meta: BandLeqMeta {
+            scale: LevelScale::DbSpl,
+            cal: CalStatus::Verified {
+                calibrated_at: WallNs(calibrated_at),
+                basis: ac2_proto::model::CalBasis::Acoustic {
+                    calibrator_level: DbSpl(94.0),
+                },
+            },
+            mic_curve: false,
+            duration: Seconds(3600.0),
+            horizon: Seconds(60.0),
+            elapsed: Seconds(3600.0),
+            measured: Seconds(3600.0),
+            period: BandPeriod::Night,
+            period_after_horizon: BandPeriod::Night,
+            correction: Db(0.0),
+            limits_from: BandLimitPlace::Transferred,
+            bands,
+            worst: Some(5),
+            predicted: Some(PredictedLeq {
+                estimate: 23.6,
+                at_most: 26.1,
+                limit: Some(DbSpl(25.0)),
+                judgement: LeqJudgement::Near,
+            }),
+        },
+    }
+}
+
+/// From an empty fake daemon, using the app: a session, an SPL meter from the palette, Shift+L
+/// and ↑ to the band meter rows under the Leq windows — → turns it on with the STM 545/2015
+/// bedroom limits, ↓↓ → a +5 dB impulse correction — Enter sends it. The daemon (the test,
+/// through the fake) then reports 63 Hz over; G goes on from meter + Leq to the bands, which
+/// name 63 Hz in the headline and draw it red against its limit line.
+#[test]
+fn band_leq_from_an_empty_daemon() {
+    use ac2_proto::model::{BandLeqPreset, ImpulseCorrection, MeasKind};
+    if !have_gpu("band_leq_from_an_empty_daemon") {
+        return;
+    }
+    let fake =
+        Arc::new(ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon"));
+    let _meters = Meters::start(Arc::clone(&fake));
+    let bands = BandPublisher::start(Arc::clone(&fake));
+    let mut h = harness(options_at(Some(fake.endpoints())));
+    h.state_mut().state.local_zone = SHOW_ZONE;
+    step_until(&mut h, "synced", |a| {
+        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+    });
+    h.key_press_modifiers(Modifiers::SHIFT, Key::O);
+    step_until(&mut h, "the session dialog with its devices", |a| {
+        session_dialog_of(a).is_some_and(|d| d.device_info().is_some())
+            && a.state.input_meters().len() == 4
+    });
+    h.key_press(Key::Enter);
+    step_until(&mut h, "session open", |a| a.state.open_session().is_some());
+    if matches!(h.state().state.overlay, Overlay::Offer(_)) {
+        h.key_press(Key::N);
+    }
+    step_until(&mut h, "no dialog", |a| a.state.overlay == Overlay::None);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    h.event(Event::Text("new spl".into()));
+    step_until(&mut h, "palette typed", |a| {
+        matches!(&a.state.overlay, Overlay::Palette(_))
+    });
+    h.key_press(Key::Enter);
+    step_until(
+        &mut h,
+        "the SPL dialog",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Spl),
+    );
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the meter, running", |a| {
+        a.state
+            .measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    });
+    let meas = h
+        .state()
+        .state
+        .measurements()
+        .iter()
+        .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+        .map(|m| m.id)
+        .expect("meter");
+
+    // Shift+L, ↑ ×4: from the preset row up past the wrap to the band meter's first row.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+    step_until(&mut h, "the Leq dialog", |a| {
+        a.state.overlay.leq().is_some()
+    });
+    for _ in 0..4 {
+        h.key_press(Key::ArrowUp);
+    }
+    h.key_press(Key::ArrowRight);
+    h.key_press(Key::ArrowDown);
+    h.key_press(Key::ArrowDown);
+    h.key_press(Key::ArrowRight);
+    step_until(&mut h, "the band meter on, +5 dB impulse", |a| {
+        a.state.overlay.leq().is_some_and(|d| {
+            d.bands.limits == ac2_ui::leq_dialog::BandLimits::Preset(BandLeqPreset::Finland545Lf)
+                && d.bands.impulse == ImpulseCorrection::Plus5
+        })
+    });
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "leq_dialog_band_meter");
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the band meter set", |a| {
+        a.state.overlay == Overlay::None
+            && a.state.measurements().iter().any(|m| match &m.config.kind {
+                MeasKind::Spl { config } => config
+                    .bands
+                    .as_ref()
+                    .is_some_and(|b| b.correction.impulse == ImpulseCorrection::Plus5),
+                _ => false,
+            })
+    });
+
+    let cal_at = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64))
+    .saturating_sub(3 * 3600 * 1_000_000_000);
+    bands.set(band_frame(meas, cal_at));
+    // G from meter + Leq (the default) on to the bands: the meter has a band meter now.
+    h.key_press(Key::G);
+    step_until(&mut h, "the bands", |a| {
+        a.state.view.spl.mode == ac2_scene::view::SplMode::Bands
+    });
+    h.key_press(Key::W);
+    step_until(&mut h, "maximised", |a| a.state.layout.maximized);
+    let has_frame = move |a: &ac2_ui::App| {
+        a.state.data.as_ref().is_some_and(|d| {
+            d.latest
+                .get(&Topic::Data {
+                    meas,
+                    stream: Stream::BandLeq,
+                })
+                .is_some()
+        })
+    };
+    step_until(&mut h, "the band frame", has_frame);
+    let theme = ac2_scene::Theme::dark();
+    let scene = ac2_ui::scenes::band_leq(
+        &h.state().state,
+        &theme,
+        ac2_scene::Viewport {
+            width: 1200.0,
+            height: 700.0,
+        },
+        ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        },
+    )
+    .expect("the band view");
+    let texts: Vec<&str> = scene
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+        .collect();
+    assert!(
+        texts.contains(&"63 Hz band Leq 3.2 dB over its limit · cooling down in 6 min 52 s"),
+        "{texts:?}"
+    );
+    snapshot_when(
+        &mut h,
+        "band_leq_over",
+        |a| {
+            a.state.toasts.clear();
+        },
+        has_frame,
+    );
+}

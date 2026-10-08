@@ -672,6 +672,7 @@ pub(crate) async fn spl(cli: &Cli, cmd: &SplCmd, out: &mut Out<'_>) -> Result<()
     match cmd {
         SplCmd::Cal(a) => super::cal::cal_spl(cli, a, out).await,
         SplCmd::Leq { cmd } => super::leq::run(cli, cmd, out).await,
+        SplCmd::Bands { cmd } => super::bands::run(cli, cmd, out).await,
         SplCmd::Set(a) => {
             super::leq::set_weightings(
                 cli,

@@ -60,6 +60,10 @@ impl AppState {
                 MeasKind::Spectrum { .. } if spectrum => &[Stream::Spec],
                 MeasKind::Rta { .. } if spectrum => &[Stream::Rta],
                 MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => &[],
+                // The band frames only while the meter has a band meter: none come otherwise.
+                MeasKind::Spl { config } if config.bands.is_some() => {
+                    &[Stream::Spl, Stream::Leq, Stream::BandLeq]
+                }
                 MeasKind::Spl { .. } => &[Stream::Spl, Stream::Leq],
                 MeasKind::Math { config } => match config.domain {
                     MathDomain::Transfer if shows(PaneKind::Transfer) => &[Stream::Tf],

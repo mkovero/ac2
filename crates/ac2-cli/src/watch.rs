@@ -634,6 +634,188 @@ pub async fn leq(
     .await
 }
 
+/// `spl bands watch`: the headline, the period, the prediction and one line per band; piped,
+/// the same each second; `--json`, one line per second.
+pub async fn bands(
+    c: &Client,
+    meas: MeasId,
+    until: Option<Instant>,
+    out: &mut Out<'_>,
+) -> Result<(), CliError> {
+    use ac2_scene::band_leq::band_leq_text;
+    let topic = Topic::Data {
+        meas,
+        stream: Stream::BandLeq,
+    };
+    live_until(
+        c,
+        out,
+        &[Subscription::Topic(topic)],
+        until,
+        |view, latest| {
+            let mut lines = Vec::new();
+            let key = latest
+                .get(&topic)
+                .map_or(vec![0], |t| vec![t.frame.stamp.seq]);
+            if !latest.responding {
+                lines.push(NOT_RESPONDING.to_owned());
+            }
+            let m = view
+                .state
+                .as_ref()
+                .and_then(|s| s.measurements.iter().find(|m| m.id == meas).cloned());
+            let Some(m) = m else {
+                lines.push(format!("measurement {} is gone", meas.0));
+                return View {
+                    lines,
+                    json: json!({ "meas": meas.0, "gone": true }),
+                    key,
+                };
+            };
+            let MeasKind::Spl { config } = &m.config.kind else {
+                return View {
+                    lines,
+                    json: json!(null),
+                    key,
+                };
+            };
+            let Some(tf) = latest.get(&topic) else {
+                lines.push(format!("{}: waiting for the first second …", m.config.name));
+                return View {
+                    lines,
+                    json: json!({ "topic": topic.to_string(), "frame": null }),
+                    key,
+                };
+            };
+            let FrameData::BandLeq(f) = &tf.frame.data else {
+                return View {
+                    lines,
+                    json: json!(null),
+                    key,
+                };
+            };
+            let f = &f.meta;
+            let t = band_leq_text(f);
+            let offset = view.clock_offset_ns.map_or(0, |o| {
+                o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            });
+            let mic = view.state.as_ref().and_then(|s| {
+                s.inputs
+                    .iter()
+                    .find(|i| i.channel == config.input)
+                    .and_then(|i| i.mic.clone())
+            });
+            let cal = output::cal_status(f.cal, f.mic_curve, now_wall(), offset);
+            let cal = match &mic {
+                Some(name) => format!("{name} · {cal}"),
+                None => cal,
+            };
+            lines.push(format!(
+                "{} · {}, {} · {cal} · age {}",
+                m.config.name,
+                t.name,
+                t.unit,
+                age_text(tf.age, tf.stale)
+            ));
+            lines.push(t.headline.clone());
+            let mut info = vec![t.period.clone(), t.limits_from.clone()];
+            info.extend(t.correction.iter().cloned());
+            info.extend(t.filling.iter().cloned());
+            info.extend(t.incomplete.iter().cloned());
+            lines.push(info.join(" · "));
+            if let Some(p) = &t.predicted {
+                lines.push(p.line.clone());
+            }
+            for (i, b) in t.bars.iter().enumerate() {
+                let mark = if t.worst == Some(i) { "▶" } else { " " };
+                let mut l = format!("{mark} {:>5} Hz  {:>6} {}", b.label, b.value, t.unit);
+                if let Some(s) = &b.state_text {
+                    l.push_str(&format!("  {s}"));
+                }
+                let details: Vec<String> = [&b.limit, &b.headroom, &b.recover]
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect();
+                if !details.is_empty() {
+                    l.push_str(&format!("  {}", details.join(" · ")));
+                }
+                lines.push(l);
+            }
+            let num = |v: f64| v.is_finite().then_some(v);
+            let bands: Vec<serde_json::Value> = f
+                .bands
+                .iter()
+                .zip(&t.bars)
+                .map(|(b, x)| {
+                    json!({
+                        "nominal_hz": b.nominal.0,
+                        "leq": num(b.leq),
+                        "limit": b.limit,
+                        "judgement": b.judgement,
+                        "on_course": b.on_course,
+                        "allowed": b.allowed,
+                        "recover_s": b.recover.map(|r| r.0),
+                        "text": {
+                            "name": x.name,
+                            "label": x.label,
+                            "value": x.value,
+                            "state": x.state_text,
+                            "limit": x.limit,
+                            "headroom": x.headroom,
+                            "recover": x.recover,
+                        },
+                    })
+                })
+                .collect();
+            View {
+                lines,
+                json: json!({
+                    "topic": topic.to_string(),
+                    "meas": meas.0,
+                    "name": m.config.name,
+                    "seq": tf.frame.stamp.seq,
+                    "age_s": tf.age,
+                    "stale": tf.stale,
+                    "responding": latest.responding,
+                    "scale": f.scale,
+                    "cal": f.cal,
+                    "cal_text": cal,
+                    "duration_s": f.duration.0,
+                    "horizon_s": f.horizon.0,
+                    "elapsed_s": f.elapsed.0,
+                    "measured_s": f.measured.0,
+                    "period": f.period,
+                    "period_after_horizon": f.period_after_horizon,
+                    "correction_db": f.correction.0,
+                    "limits_from": f.limits_from,
+                    "worst": f.worst,
+                    "worst_hz": t.worst.map(|i| t.bars[i].nominal_hz),
+                    "predicted": f.predicted.map(|p| json!({
+                        "estimate": num(p.estimate),
+                        "at_most": num(p.at_most),
+                        "limit": p.limit,
+                        "judgement": p.judgement,
+                    })),
+                    "bands": bands,
+                    "text": {
+                        "name": t.name,
+                        "headline": t.headline,
+                        "period": t.period,
+                        "limits_from": t.limits_from,
+                        "correction": t.correction,
+                        "filling": t.filling,
+                        "incomplete": t.incomplete,
+                        "predicted": t.predicted.as_ref().map(|p| p.line.clone()),
+                    },
+                }),
+                key,
+            }
+        },
+    )
+    .await
+}
+
 /// `timing --watch`.
 pub async fn timing(c: &Client, out: &mut Out<'_>) -> Result<(), CliError> {
     let topic = Topic::Timing;

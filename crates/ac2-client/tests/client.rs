@@ -821,3 +821,86 @@ async fn traces_and_sessions_against_the_fake() -> R {
     .await?;
     Ok(())
 }
+
+/// `spl.band_transfer` on the fake: typed levels make the transfer and store it in the band
+/// meter (the reply is the updated meter); a meter without a band meter and a band-log span
+/// (the fake keeps no band log) are refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn band_transfer_from_typed_levels() -> R {
+    let f = fake()?;
+    let c = connect(&f).await?;
+    let m = match c
+        .call(Command::MeasCreate {
+            config: meas_config("FOH SPL"),
+        })
+        .await?
+    {
+        ReplyBody::Measurement(m) => m,
+        other => panic!("{other:?}"),
+    };
+    let levels = |db: f64| BandLevelSource::Levels {
+        levels: (0..BAND_COUNT)
+            .map(|i| (i < LF_BAND_COUNT).then_some(DbSpl(db)))
+            .collect(),
+    };
+    let transfer = |background: Option<BandLevelSource>| Command::SplBandTransfer {
+        meas: m.id,
+        foh: levels(80.0),
+        dwelling: levels(50.0),
+        background,
+    };
+    match c.call(transfer(None)).await {
+        Err(ClientError::Daemon(p)) => {
+            assert_eq!(p.code, ErrorCode::Invalid);
+            assert!(p.msg.contains("no band meter"), "{}", p.msg);
+        }
+        other => panic!("{other:?}"),
+    }
+    let MeasKind::Spl { config } = &m.config.kind else {
+        unreachable!()
+    };
+    let with_bands = MeasConfig {
+        name: m.config.name.clone(),
+        kind: MeasKind::Spl {
+            config: SplConfig {
+                bands: Some(Box::new(BandLeqPreset::Finland545Lf.config(None))),
+                ..config.clone()
+            },
+        },
+    };
+    c.call(Command::MeasUpdate {
+        meas: m.id,
+        config: with_bands,
+    })
+    .await?;
+    let ReplyBody::Measurement(m2) = c.call(transfer(Some(levels(45.0)))).await? else {
+        panic!("measurement");
+    };
+    let MeasKind::Spl { config } = &m2.config.kind else {
+        unreachable!()
+    };
+    let t = config
+        .bands
+        .as_ref()
+        .and_then(|b| b.transfer)
+        .expect("stored");
+    // 50 dB over a 45 dB background: 5 dB, its energy subtracted first.
+    assert!(
+        matches!(t.bands[5], BandTransferBand::Corrected { .. }),
+        "{:?}",
+        t.bands[5]
+    );
+    assert_eq!(t.bands[11], BandTransferBand::Missing);
+    let span = Command::SplBandTransfer {
+        meas: m.id,
+        foh: BandLevelSource::Log {
+            meas: m.id,
+            from: WallNs(0),
+            until: WallNs(1),
+        },
+        dwelling: levels(50.0),
+        background: None,
+    };
+    assert!(matches!(c.call(span).await, Err(ClientError::Daemon(_))));
+    Ok(())
+}

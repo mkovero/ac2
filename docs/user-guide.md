@@ -1245,6 +1245,57 @@ one written first; without `--yes` it only says what would end). Each takes `--m
 `--input` when there is more than one meter.
 How it is computed: `docs/design/leq.md`.
 
+### Band Leq: low frequencies at a neighbour's
+
+An SPL meter can also keep a **band meter**: the unweighted Leq of each 1/3-octave band from
+20 to 200 Hz over a rolling window (1 h by default), each against its own limit, for rules
+that limit the bass reaching a neighbour's bedroom — Finland's STM 545/2015 limits the hour's
+Leq per band in rooms for sleeping (night 22–07: 20 Hz 74 dB … 200 Hz 32 dB; day 5 dB higher)
+and music at night to LAeq,1h 25 dB in the bedroom. Those limits hold **in the dwelling**;
+the mic is at FOH. A **transfer** measured once at setup — per band, how much quieter the
+bedroom is than FOH — moves the limits to the mic and predicts the bedroom's LAeq.
+
+- **Turning it on**: Shift+L (the SPL / Leq settings), ↑ from the preset row to the
+  **Band meter** rows under the windows: ←/→ picks off, **Finland STM 545/2015, low
+  frequencies (bedroom)** or **… living room** (no band limits; the predicted LAeq against
+  35 dB by day, 30 dB at night); then the **band window** and the §13 **impulse** (+5 / +10
+  dB) and **narrowband** (+3 / +6 dB) corrections, which you put in force while the
+  character is heard (ac2 does not detect it). Enter applies. A preset keeps a measured
+  transfer. In the terminal: `ac2 spl bands set --preset finland-545-lf [--duration 1h]
+  [--impulse none|5|10] [--tonal none|3|6] [--warn 3db]`, `--off` to turn it off.
+- **Measuring the transfer** (at setup, before the doors): play a steady test signal (pink
+  noise, loud enough to stand well over the bedroom's background in every band) through the
+  system with the band meter running at FOH, and a calibrated mic in the bedroom — the same
+  mic moved there, or a second SPL meter with its own band meter. Note the times. Then,
+  system silent, measure the bedroom's background. Then
+  `ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:00:30" --dwelling
+  "Bedroom@21:00:00..21:00:30" --background "Bedroom@21:02:00..21:02:30"` (a meter by name
+  or id and a span of its band log: local times today, `2026-10-08T21:00:00` local, `…Z`
+  UTC, `-30s` before now, `now`), or files of `<Hz> <dB>` lines from another instrument
+  (`--dwelling bedroom.txt`). Per band the transfer is clean (10 dB or more over the
+  background), background-subtracted (3 … 10 dB over it), a bound (less than 3 dB over it:
+  the bedroom is at least that much quieter) or not measured (no limit at the mic). The
+  settings show it per band. Moved speakers, a changed system EQ, an open window or another
+  room invalidate it: measure again.
+- **What the artist sees**: G in the SPL pane steps on from meter + Leq to the **bands**
+  (only when the meter has a band meter; the palette's "SPL pane: the band Leq bars" goes
+  there directly). Eleven bars, 20 … 200 Hz, each the band's Leq at the mic with its limit
+  line, green under it, amber near it, red over it; the headroom ("≤ 81.2", how loud the band
+  may go over the next minute) or, over, how long until it is back under at its limit. The
+  headline names the worst band and what to do: **"63 Hz band Leq 3.2 dB over its limit ·
+  cooling down in 6 min 52 s"**, or "… 1.5 dB under its limit · next 1 min: stay ≤ 81.2 dB".
+  Under it: night or day limits (and "headroom for the night limits from 22:00" late in the
+  evening), whether the limits are transferred from the dwelling or judged at the mic as
+  they are, a correction in force, and **"predicted dwelling LAeq 23.6 dB · at most 26.1 dB
+  · limit 25.0 dB · NEAR"** ("at most" counts the bound bands at their bound). Uncalibrated,
+  the bands read dBFS and nothing is judged. A band going over or back toasts like a window
+  ("63 Hz band Leq over its limit — …"). `ac2 spl bands watch` (`--json`: one line a
+  second, the bands, the worst band and every text) shows the same in a terminal.
+- **Not legal advice, not type-approved**: the presets are informational; the band filters
+  meet IEC 61260-1 class 1 but the mic, its calibration and the interface are yours; a
+  prediction from FOH is not a measurement in the dwelling. Only a measurement there shows
+  compliance. How it is computed and what is claimed: `docs/design/band-leq.md`.
+
 ## Keyboard
 
 Everything in the app is reachable from the keyboard. **H** (or **F1**) shows the bindings,

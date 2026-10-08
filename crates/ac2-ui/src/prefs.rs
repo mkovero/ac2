@@ -396,6 +396,7 @@ enum SplViewFile {
     Meter,
     Leq,
     MeterLeq,
+    Bands,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -503,6 +504,7 @@ impl LayoutFile {
                 SplViewFile::Meter => SplMode::Meter,
                 SplViewFile::Leq => SplMode::Leq,
                 SplViewFile::MeterLeq => SplMode::MeterLeq,
+                SplViewFile::Bands => SplMode::Bands,
             },
             spectrum_view: match self.spectrum_view {
                 SpectrumViewFile::Spectrum => SpectrumMode::Spectrum,
@@ -538,6 +540,7 @@ impl LayoutFile {
                 SplMode::Meter => SplViewFile::Meter,
                 SplMode::Leq => SplViewFile::Leq,
                 SplMode::MeterLeq => SplViewFile::MeterLeq,
+                SplMode::Bands => SplViewFile::Bands,
             },
             spectrum_view: match l.spectrum_view {
                 SpectrumMode::Spectrum => SpectrumViewFile::Spectrum,
@@ -1002,6 +1005,7 @@ mod tests {
             (SplMode::Meter, "meter"),
             (SplMode::Leq, "leq"),
             (SplMode::MeterLeq, "meter_leq"),
+            (SplMode::Bands, "bands"),
         ] {
             let mut p = UiPrefs::default();
             p.layout.spl_view = mode;

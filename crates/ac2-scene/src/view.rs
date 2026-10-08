@@ -623,15 +623,20 @@ pub enum SplMode {
     /// state on one screen.
     #[default]
     MeterLeq,
+    /// The band meter: eleven bars 20 … 200 Hz against their limits, the worst band named,
+    /// the predicted dwelling LAeq.
+    Bands,
 }
 
 impl SplMode {
-    /// G: meter → Leq windows → meter + Leq → meter.
-    pub fn next(self) -> Self {
+    /// G: meter → Leq windows → meter + Leq → (bands, when the meter has a band meter) →
+    /// meter.
+    pub fn next(self, bands: bool) -> Self {
         match self {
             SplMode::Meter => SplMode::Leq,
             SplMode::Leq => SplMode::MeterLeq,
-            SplMode::MeterLeq => SplMode::Meter,
+            SplMode::MeterLeq if bands => SplMode::Bands,
+            SplMode::MeterLeq | SplMode::Bands => SplMode::Meter,
         }
     }
 
@@ -639,7 +644,7 @@ impl SplMode {
     /// with the windows under it (the meter stays where it was asked for).
     pub fn with_leq(self) -> Self {
         match self {
-            SplMode::Meter => SplMode::MeterLeq,
+            SplMode::Meter | SplMode::Bands => SplMode::MeterLeq,
             m => m,
         }
     }

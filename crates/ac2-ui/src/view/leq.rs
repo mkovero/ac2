@@ -4,11 +4,26 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::leq_dialog::{Col, Extra, Focus, LeqDialog};
+use crate::leq_dialog::{BandField, BandLimits, Col, Extra, Focus, LeqDialog};
 use crate::state::{LeqMsg, Msg, Overlay};
 use crate::theme::Chrome;
 
 use super::overlays::{backdrop, card};
+
+/// Width of a band meter row's title.
+const BAND_TITLE_W: f32 = 110.0;
+
+/// A band meter row's title, left in its column.
+fn band_title(ui: &mut egui::Ui, title: RichText) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(BAND_TITLE_W, 20.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(BAND_TITLE_W);
+            ui.label(title);
+        },
+    );
+}
 
 /// A choice cell: ‹ value › — clicking the value steps forward.
 fn choice(
@@ -206,6 +221,47 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
                 ui.end_row();
             }
         });
+    ui.add_space(10.0);
+    ui.label(RichText::new("Band Leq (low frequencies at a neighbour's)").strong());
+    // Rows, not a grid: the notes under a row wrap to the page's width.
+    let off = d.bands.limits == BandLimits::Off;
+    let note = |ui: &mut egui::Ui, text: String| {
+        ui.horizontal(|ui| {
+            ui.add_space(BAND_TITLE_W + 12.0);
+            ui.add(egui::Label::new(RichText::new(text).small().color(ch.dim)).wrap());
+        });
+    };
+    for b in BandField::ALL {
+        let at = Focus::Band(b);
+        let f = d.focus == at;
+        ui.horizontal(|ui| {
+            let title = RichText::new(b.title()).color(if f { ch.text } else { ch.dim });
+            band_title(ui, title);
+            ui.add_space(12.0);
+            choice(ui, d.bands.text(b), f, at, &mut msg, ch);
+        });
+        if b == BandField::Limits || !off {
+            note(ui, d.bands.note(b));
+        }
+    }
+    if !off {
+        ui.horizontal(|ui| {
+            band_title(ui, RichText::new("Transfer").color(ch.dim));
+            ui.add_space(12.0);
+            ui.label(RichText::new(d.bands.transfer_text()).color(ch.text));
+        });
+        let per_band = d.bands.transfer_bands();
+        if !per_band.is_empty() {
+            note(ui, per_band.join(" · "));
+        }
+        note(
+            ui,
+            "Measure it at setup: a steady test signal at FOH with a mic in the bedroom, then \
+             the bedroom with the system silent; `ac2 spl bands transfer --foh … --dwelling … \
+             --background …`."
+                .into(),
+        );
+    }
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e).color(ch.fault));

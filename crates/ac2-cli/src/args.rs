@@ -7,8 +7,9 @@ use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
-    ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg,
-    LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel, Time, VoltsArg,
+    BandSourceArg, ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg,
+    LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel,
+    Time, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -849,6 +850,113 @@ pub enum SplCmd {
     /// Set a running meter's frequency and time weighting (`--weight c --time slow`): it
     /// carries on, its Leq windows and log untouched.
     Set(SplSet),
+    /// The band meter of an SPL meter: unweighted 1/3-octave band Leq 20 … 200 Hz against
+    /// per-band limits in a neighbour's dwelling, carried to the mic by a measured FOH →
+    /// dwelling transfer, and the predicted dwelling LAeq. Informational, not legal advice.
+    Bands {
+        #[command(subcommand)]
+        cmd: BandsCmd,
+    },
+}
+
+/// `spl bands …`.
+#[derive(Debug, Subcommand)]
+pub enum BandsCmd {
+    /// The bands, the worst band and what to do about it, the predicted dwelling LAeq
+    /// (q/Esc/Ctrl-C quits). With `--json` one line per second.
+    Watch(LeqWatch),
+    /// Turn the band meter on with a preset, change its window or §13 corrections, or
+    /// turn it off; the meter, its log and a measured transfer carry on.
+    Set(BandsSet),
+    /// Measure the FOH → dwelling transfer from band levels at FOH and in the dwelling of
+    /// the same steady test signal, and the dwelling's background with the system silent;
+    /// stored in the meter's band meter.
+    Transfer(BandsTransfer),
+}
+
+/// Band meter presets (not legal advice; `docs/design/band-leq.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BandPresetArg {
+    /// Finland, STM 545/2015 Liite 2 Taulukko 2, rooms for sleeping: band Leq 1 h 20 … 200
+    /// Hz, night 74 … 32 dB, day 5 dB higher; predicted dwelling LAeq at night ≤ 25 dB.
+    #[value(name = "finland-545-lf")]
+    Finland545Lf,
+    /// Finland, STM 545/2015 Liite 2 Taulukko 1, living rooms: predicted dwelling LAeq day
+    /// ≤ 35 dB, night ≤ 30 dB; no band limits.
+    #[value(name = "finland-545-living-room")]
+    Finland545LivingRoom,
+}
+
+/// §13 impulse correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ImpulseArg {
+    None,
+    /// +5 dB.
+    #[value(name = "5")]
+    Plus5,
+    /// +10 dB.
+    #[value(name = "10")]
+    Plus10,
+}
+
+/// §13 narrowband (tonal) correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TonalArg {
+    None,
+    /// +3 dB.
+    #[value(name = "3")]
+    Plus3,
+    /// +6 dB.
+    #[value(name = "6")]
+    Plus6,
+}
+
+/// `spl bands set`.
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("what").required(true).multiple(true)
+    .args(["preset", "duration", "impulse", "tonal", "warn", "off"])))]
+pub struct BandsSet {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// The limits of a rule (a measured transfer is kept). Informational, not legal advice.
+    #[arg(long, value_enum)]
+    pub preset: Option<BandPresetArg>,
+    /// Window length of every band and of the predicted LAeq, e.g. `1h` (the decree's),
+    /// `15min` for a quicker look.
+    #[arg(long, value_name = "WINDOW")]
+    pub duration: Option<LeqWindowArg>,
+    /// §13 impulse correction in force from now: `none`, `5` or `10` dB.
+    #[arg(long, value_enum)]
+    pub impulse: Option<ImpulseArg>,
+    /// §13 narrowband correction in force from now: `none`, `3` or `6` dB.
+    #[arg(long, value_enum)]
+    pub tonal: Option<TonalArg>,
+    /// Warn margin of every band: near when this close below its limit, e.g. `3db`.
+    #[arg(long, value_name = "DB")]
+    pub warn: Option<Gain>,
+    /// Turn the band meter off (its configuration and transfer go).
+    #[arg(long, conflicts_with_all = ["preset", "duration", "impulse", "tonal", "warn"])]
+    pub off: bool,
+}
+
+/// `spl bands transfer`. Each source is a file of `<Hz> <dB>` lines (dB SPL per 1/3-octave
+/// band, from another instrument), or a span of an SPL meter's band log:
+/// `METER@FROM..UNTIL`, the meter by name or id, the times `21:00:30` (local, today),
+/// `2026-10-08T21:00:30` (local), `…Z` (UTC), `-30s` (before now) or `now`.
+#[derive(Debug, Args)]
+pub struct BandsTransfer {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// Band levels at FOH (the meter's mic) with the test signal playing.
+    #[arg(long, value_name = "SOURCE")]
+    pub foh: BandSourceArg,
+    /// Band levels in the dwelling, the same signal over the same time.
+    #[arg(long, value_name = "SOURCE")]
+    pub dwelling: BandSourceArg,
+    /// The dwelling's background with the system silent; without it every band is
+    /// unchecked.
+    #[arg(long, value_name = "SOURCE")]
+    pub background: Option<BandSourceArg>,
 }
 
 /// `spl set`.

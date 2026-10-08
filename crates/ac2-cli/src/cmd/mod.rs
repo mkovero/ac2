@@ -1,6 +1,7 @@
 //! Command implementations.
 
 mod auth;
+mod bands;
 mod basic;
 mod cal;
 mod daemon;

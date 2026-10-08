@@ -293,8 +293,10 @@ fn a_peak_limit_and_the_position_correction_from_the_app() -> R {
     d.key("Shift+L");
     d.send(Msg::Text("L".into()));
     d.until("the Leq dialog", |s| s.overlay.leq().is_some())?;
-    d.key("ArrowUp");
-    d.key("ArrowUp");
+    // Up wraps to the last rows: four band rows, then the Extras.
+    for _ in 0..6 {
+        d.key("ArrowUp");
+    }
     let Some(x) = d.st.overlay.leq() else {
         return Err("the Leq dialog".into());
     };
