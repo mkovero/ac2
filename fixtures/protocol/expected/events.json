@@ -246,88 +246,99 @@
        "bands": {
         "windows": [
          {
-          "bands": {
-           "low": 20.0,
-           "high": 200.0
-          },
+          "band": 20.0,
           "duration": 3600.0,
           "weighting": "z",
-          "limits": {
-           "type": "night_day",
-           "night": [
-            74.0,
-            64.0,
-            56.0,
-            49.0,
-            44.0,
-            42.0,
-            40.0,
-            38.0,
-            36.0,
-            34.0,
-            32.0,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-           ],
-           "day_offset": 5.0
-          },
+          "limit": 74.0,
+          "day_offset": 5.0,
           "warn_margin": 3.0
          },
          {
-          "bands": {
-           "low": 1000.0,
-           "high": 1000.0
-          },
+          "band": 25.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 64.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 31.5,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 56.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 40.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 49.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 50.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 44.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 63.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 42.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 80.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 40.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 100.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 38.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 125.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 36.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 160.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 34.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 200.0,
+          "duration": 3600.0,
+          "weighting": "z",
+          "limit": 32.0,
+          "day_offset": 5.0,
+          "warn_margin": 3.0
+         },
+         {
+          "band": 1000.0,
           "duration": 900.0,
           "weighting": "a",
-          "limits": {
-           "type": "always",
-           "limits": [
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            30.5,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-           ]
-          },
+          "limit": 30.5,
+          "day_offset": null,
           "warn_margin": 2.0
          }
         ],

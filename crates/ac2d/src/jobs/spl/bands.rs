@@ -1,21 +1,20 @@
 //! The band meter of an SPL meter (`docs/design/band-leq.md`): the unweighted, mic-curve
 //! corrected signal through the 1/3-octave bank, one [`BandSecond`] per second of the
 //! meter's own second grid, logged next to its SPL log (every band, unweighted), the band
-//! windows, each on its own bands, length and weighting, judged against the
-//! limits of the period in force, and the level at the transfer's place predicted through
+//! windows, each one band over its own length and weighting, judged against the
+//! limit of the period in force, and the level at the transfer's place predicted through
 //! the transfer.
 
 use ac2_core::band_leq::{
     BANDS, BandIntegrator, BandLimits, BandSecond, BandState, BandWindows, Period, PredictedSecond,
-    Transfer, worst_band,
+    Transfer,
 };
 use ac2_core::leq::{Headroom, Judgement, Latch, RollingLeq, judge_window};
 use ac2_core::spectrum::power_dbfs;
 use ac2_proto::frame::{BandLeqFrame, BandLeqMeta, BandWindowState, LeqFlags};
 use ac2_proto::model::{
-    AlarmSubject, BAND_NOMINAL_HZ, BandLeqConfig, BandLimitPlace, BandLimitSet, BandWindow,
-    CalStatus, LeqAlarm, LeqAlarmKind, LeqJudgement, LevelScale, PredictedLeq, PredictedWindow,
-    TransferOrigin,
+    AlarmSubject, BAND_NOMINAL_HZ, BandLeqConfig, BandLimitPlace, BandWindow, CalStatus, LeqAlarm,
+    LeqAlarmKind, LeqJudgement, LevelScale, PredictedLeq, PredictedWindow, TransferOrigin,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, MeasId, Seconds, WallNs};
 use ac2_traces::band_log::BandLogRow;
@@ -30,16 +29,17 @@ const NS: u64 = 1_000_000_000;
 struct Win {
     spec: BandWindow,
     seconds: u32,
-    /// The window's bands, indices into [`BAND_NOMINAL_HZ`].
-    bands: Vec<usize>,
+    /// The window's band, an index into [`BAND_NOMINAL_HZ`].
+    band: usize,
+    /// The band alone, as the core's windows take a band selection.
     windows: BandWindows,
-    /// The limits judged at the mic: the window's, plus each band's attenuation with a
+    /// The limit judged at the mic: the window's, plus the band's attenuation with a
     /// transfer.
     limits: BandLimits,
-    /// Per shown band.
+    /// The band's state, one of it.
     states: Vec<BandState>,
-    latches: Vec<Latch>,
-    judgements: Vec<LeqJudgement>,
+    latch: Latch,
+    judgement: LeqJudgement,
     at_horizon: Period,
 }
 
@@ -118,10 +118,11 @@ fn alarm_kind(prev: LeqJudgement, j: LeqJudgement) -> Option<LeqAlarmKind> {
     }
 }
 
-/// The core's limits of a window, dB SPL, on its 28 bands.
-fn limits_of(set: &BandLimitSet) -> BandLimits {
-    let night = set.night().map(|l| l.map(|l| l.0));
-    match set.day_offset() {
+/// The core's limits of a window, dB SPL, on the 28 bands: its own band's alone.
+fn limits_of(w: &BandWindow, band: usize) -> BandLimits {
+    let mut night = [None; BANDS];
+    night[band] = w.limit.map(|l| l.0);
+    match w.day_offset {
         Some(o) => BandLimits::night_and_offset_day(night, o.0),
         None => BandLimits::always(night),
     }
@@ -155,11 +156,10 @@ impl BandMeter {
             .iter()
             .filter_map(|spec| {
                 let seconds = spec.seconds()?;
-                let bands: Vec<usize> = spec.bands.indices()?.collect();
-                let n = bands.len();
+                let band = spec.index()?;
                 let windows =
-                    BandWindows::new(seconds, &bands, conv::weighting(spec.weighting), horizon);
-                let own = limits_of(&spec.limits);
+                    BandWindows::new(seconds, &[band], conv::weighting(spec.weighting), horizon);
+                let own = limits_of(spec, band);
                 let empty = BandState {
                     value: windows.windows().value(0),
                     level_db: f64::NAN,
@@ -170,12 +170,12 @@ impl BandMeter {
                 Some(Win {
                     spec: *spec,
                     seconds,
-                    bands,
+                    band,
                     limits: transfer.as_ref().map_or(own, |t| t.foh_limits(&own)),
                     windows,
-                    states: vec![empty; n],
-                    latches: vec![Latch::default(); n],
-                    judgements: vec![LeqJudgement::NoLimit; n],
+                    states: vec![empty],
+                    latch: Latch::default(),
+                    judgement: LeqJudgement::NoLimit,
                     at_horizon: Period::Day,
                 })
             })
@@ -218,7 +218,7 @@ impl BandMeter {
             (
                 c.windows
                     .iter()
-                    .map(|w| (w.bands, w.duration, w.weighting, w.limits))
+                    .map(|w| (w.band, w.duration, w.weighting, w.limit, w.day_offset))
                     .collect::<Vec<_>>(),
                 c.predicted.map(|p| (p.duration, p.day, p.night)),
                 c.transfer.clone(),
@@ -306,8 +306,8 @@ impl BandMeter {
             self.epoch = epoch;
             for w in &mut self.wins {
                 w.windows.clear();
-                w.latches.fill(Latch::default());
-                w.judgements.fill(LeqJudgement::NoLimit);
+                w.latch = Latch::default();
+                w.judgement = LeqJudgement::NoLimit;
             }
             if let Some(p) = &mut self.predicted {
                 p.clear();
@@ -342,13 +342,8 @@ impl BandMeter {
             w.at_horizon = at_horizon;
             w.windows
                 .judge(&w.limits, o, margin, at_horizon, &mut w.states);
-            let bands = w
-                .states
-                .iter_mut()
-                .zip(&mut w.latches)
-                .zip(&mut w.judgements)
-                .zip(&w.bands);
-            for (((st, latch), judgement), &band) in bands {
+            let (latch, judgement, band) = (&mut w.latch, &mut w.judgement, w.band);
+            for st in &mut w.states {
                 let (j, verdict) = match (st.limit_db, sensitivity) {
                     (None, _) => {
                         *latch = Latch::default();
@@ -431,7 +426,7 @@ impl BandMeter {
     ) -> BandLeqFrame {
         let o = sensitivity.unwrap_or(0.0);
         let judged = sensitivity.is_some();
-        let n = self.wins.iter().map(|w| w.bands.len()).sum();
+        let n = self.wins.len();
         let (mut leq, mut limit, mut allowed, mut recover, mut flags) = (
             Vec::with_capacity(n),
             Vec::with_capacity(n),
@@ -441,7 +436,8 @@ impl BandMeter {
         );
         let mut windows = Vec::with_capacity(self.wins.len());
         for w in &self.wins {
-            for (st, &j) in w.states.iter().zip(&w.judgements) {
+            let j = w.judgement;
+            for st in &w.states {
                 let (mut a, mut r) = (f32::NAN, f32::NAN);
                 let mut f = LeqFlags::NONE;
                 if judged {
@@ -479,7 +475,7 @@ impl BandMeter {
             }
             let v = w.windows.windows().value(0);
             windows.push(BandWindowState {
-                bands: w.spec.bands,
+                band: w.spec.band,
                 duration: w.spec.duration,
                 weighting: w.spec.weighting,
                 elapsed: Seconds(f64::from(v.elapsed)),
@@ -488,7 +484,6 @@ impl BandMeter {
                 period_after_horizon: conv::band_period(
                     w.windows.period_after_horizon(w.at_horizon),
                 ),
-                worst: worst_band(&w.states).map(|i| i as u8),
             });
         }
         let predicted = self.predicted.as_ref().map(|p| {

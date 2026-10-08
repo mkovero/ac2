@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 31`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 32`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -410,8 +410,8 @@ The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (
 {`lcpeak`, `lafmax`: `LeqPeakState` {`judgement`, `since`}}, `no_limit` without that limit),
 when the windows change and when the log starts (`started_at`). Going over and recovering
 append a `LeqAlarm` {`at`, `subject`: `AlarmSubject` (`window` {`duration`, `weighting`} \|
-`peak` {`quantity`: `lcpeak` \| `lafmax`} \| `band` {`duration`, `weighting`, `nominal`: Hz, a
-band of a band window} \| `predicted` (the band meter's predicted LAeq at the transfer's
+`peak` {`quantity`: `lcpeak` \| `lafmax`} \| `band` {`duration`, `weighting`, `nominal`: Hz, the
+band window's band} \| `predicted` (the band meter's predicted LAeq at the transfer's
 place)), `kind`: `over` \| `recovered`, `level` (the
 window's Leq or the peak limit's held level, with the correction), `limit`, `position`: Db
 \| nil (the correction included in `level`)} to `alarms` (the newest 100).
@@ -429,18 +429,19 @@ started_at`; it carries on across app and daemon restarts as the log does.
 #### Band meter (`SplConfig.bands`, `spl.band_transfer`, `spl.band_log_get`, `band_leq` frames)
 
 Design: `docs/design/band-leq.md`. `SplConfig.bands`: `BandLeqConfig` \| nil (nil: no band
-meter) = {`windows`: [`BandWindow`] (at most 8, in display order),
+meter) = {`windows`: [`BandWindow`] (at most 64, none twice with the same band, duration
+and weighting),
 `predicted`: `PredictedWindow` \| nil, `correction`: `BandCorrection` {`impulse`: `none` \|
 `plus5` \| `plus10`, `tonal`: `none` \| `plus3` \| `plus6`} (STM 545/2015 §13, summed, applied
 to the seconds from when it is set), `transfer`: `BandTransferSet` \| nil}. `BandWindow` =
-{`bands`: `BandRange` {`low`, `high`: Hz} (nominal centres of the window's lowest and highest
-1/3-octave band 20 Hz … 10 kHz, `low` ≤ `high`, equal for one band: the bands shown, judged
-and alarmed; every band is integrated and logged whatever the windows), `duration`: Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weighting
-at each band's exact mid-band frequency added to its unweighted level), `limits`:
-`BandLimitSet`, `warn_margin`: Db ≥ 0}; `BandLimitSet` (tagged by `type`): `always`
-{`limits`: [DbSpl \| nil; 28]} \| `night_day` {`night`: [DbSpl \| nil; 28] (22:00–07:00
-local time), `day_offset`: Db (07:00–22:00 the night's plus this)}, per band 20 Hz … 10 kHz,
-at the transfer's place with a transfer, else at the mic. `PredictedWindow` = {`duration`:
+{`band`: Hz (the nominal centre of one 1/3-octave band 20 Hz … 10 kHz: the band shown,
+judged and alarmed; every band is integrated and logged whatever the windows), `duration`:
+Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weighting at the
+band's exact mid-band frequency added to its unweighted level), `limit`: DbSpl \| nil,
+`day_offset`: Db \| nil (nil: `limit` holds day and night; else `limit` is the night's,
+22:00–07:00 local time, and 07:00–22:00 it is `limit` plus this), `warn_margin`: Db ≥ 0}; the
+limit is at the transfer's place with a transfer, else at the mic. A range of bands is a
+front-end convenience that adds one window per band; nothing range-shaped is on the wire. `PredictedWindow` = {`duration`:
 Seconds, `day`, `night`: DbSpl \| nil, `warn_margin`: Db} (the A-weighted level predicted at
 the place, judged only with a transfer). `BandTransferSet` = {`place`: str (the operator's
 name of the place the limits are for, 1 … 40 characters, `receiving room` unless named;
@@ -452,10 +453,10 @@ every line naming the place uses it), `measured_at`: WallNs, `origin`: `Transfer
 over the background), `corrected` {`attenuation`, `margin`: Db} (3 … 10 dB over it, the
 background subtracted), `unusable` {`at_least`: Db} (< 3 dB over it: a bound), `missing`. A
 configuration outside these bounds is `invalid` at `meas.create` / `meas.update`. The presets
-(`ac2_proto::model::BandLeqPreset`: STM 545/2015 low frequencies, LZeq 60 min on 20 … 200 Hz,
-night 74 … 32 dB, day 5 dB higher, predicted LAeq 60 min ≤ 25 dB at night; living room,
-LZeq 60 min on 20 … 200 Hz without limits, predicted day 35, night 30 dB) replace the
-windows, the bands and the predicted window and keep the correction and the transfer; they
+(`ac2_proto::model::BandLeqPreset`: STM 545/2015 low frequencies, eleven LZeq 60 min windows
+20 … 200 Hz, night 74 … 32 dB, day 5 dB higher, predicted LAeq 60 min ≤ 25 dB at night; living room,
+the same eleven windows without limits, predicted day 35, night 30 dB) replace the
+windows and the predicted window and keep the correction and the transfer; they
 are filled in by the front ends, the daemon sees the values.
 
 A running SPL meter with a band meter filters its input after the mic curve, unweighted,
@@ -506,18 +507,16 @@ unknown one `not_found`. A replayed recording's meter logs at the replay's wall 
 `realtime` pace file second t is the replay's start + t, so its spans are addressable; at
 `fast` pace they are not.
 
-The `band_leq` frame (§5.4), once a second while subscribed: one column per band of each
-window, window-major (window `w`'s bands, low to high, follow the columns of windows `0 … w−1`;
-n = the windows' bands summed): `leq` (in `scale`, weighted, correction included; NaN before anything was
+The `band_leq` frame (§5.4), once a second while subscribed: one column per window, in
+the configuration's order (n = the windows): `leq` (in `scale`, weighted, correction included; NaN before anything was
 measured), `limit` (at the mic; NaN: none), `allowed` (headroom; NaN: none), `recover`
 (Seconds; NaN: none), `leq_flags` (§5.5, the Leq windows' bits: the judgement and on course).
 Meta: `scale` (`db_spl` once calibrated; limits are judged only then), `cal`, `mic_curve`,
 `horizon`, `correction` (Db in force), `limits_from` (`BandLimitPlace`: `at_mic` (no
 transfer: the limits as typed) \| `transferred` \| `estimated` (an estimated transfer)),
-`windows`: [`BandWindowState` {`bands` (`BandRange`), `duration`, `weighting`, `elapsed`, `measured` (Seconds), `period`,
-`period_after_horizon` (`BandPeriod`: `day` \| `night`), `worst`: u8 \| nil (index into
-the window's bands: the most severe judgement, then the furthest above or least below its limit)}] in
-the configuration's order, `predicted`: `PredictedLeq` {`duration`, `estimate`, `at_most`:
+`windows`: [`BandWindowState` {`band`: Hz, `duration`, `weighting`, `elapsed`, `measured`
+(Seconds), `period`, `period_after_horizon` (`BandPeriod`: `day` \| `night`)}] one per
+column, in the configuration's order (the front end groups and ranks them), `predicted`: `PredictedLeq` {`duration`, `estimate`, `at_most`:
 f64 (dB SPL; NaN uncalibrated), `limit`: DbSpl \| nil, `judgement`} \| nil without a transfer
 or a predicted window.
 
@@ -1096,7 +1095,7 @@ topics). Longest topic: 32 bytes.
 
 ```
 part 0   topic (UTF-8)
-part 1   header (msgpack array, ≤ 1024 bytes)
+part 1   header (msgpack array, ≤ 8192 bytes)
 part 2…  arrays: each exactly n × 4 bytes, little-endian; f32 or u32 per header
 ```
 
@@ -1203,7 +1202,7 @@ not `JUDGED`, else `over`, `near` or `ok`.
 
 ### 5.6 Bounds (checked before decoding)
 
-In order: 2 … 10 parts; total ≤ 2 MiB; topic valid; header ≤ 1024 bytes; then after the
+In order: 2 … 10 parts; total ≤ 2 MiB; topic valid; header ≤ 8192 bytes; then after the
 bounded header parse: `v`, `n` ≤ 65536, array count = parts − 2, every array part exactly
 n × 4 bytes, `kind` = topic = `meta` key, then the per-kind array schema and bitmask bits.
 A malformed frame is dropped and counted by the client; decoders never panic.

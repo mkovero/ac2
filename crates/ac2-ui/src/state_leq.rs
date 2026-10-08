@@ -147,6 +147,9 @@ impl AppState {
                 d.focus = f;
                 d.remove_window();
             }
+            LeqMsg::OpenRange => d.open_range(),
+            LeqMsg::AddRange => d.add_range(),
+            LeqMsg::CloseRange => d.close_range(),
             LeqMsg::Cancel => self.overlay = Overlay::None,
             LeqMsg::Submit => {}
         }

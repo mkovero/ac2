@@ -855,8 +855,8 @@ pub enum SplCmd {
     /// Set a running meter's frequency and time weighting (`--weight c --time slow`): it
     /// carries on, its Leq windows and log untouched.
     Set(SplSet),
-    /// The band meter of an SPL meter: 1/3-octave band Leq over windows of their own length
-    /// and weighting against per-band limits, judged at the mic as typed or moved there from
+    /// The band meter of an SPL meter: 1/3-octave band Leq in windows of one band each,
+    /// their own length and weighting, each against its own limit, judged at the mic as typed or moved there from
     /// a named place by a measured band transfer, and the predicted LAeq at that place.
     /// Informational, not legal advice.
     Bands {
@@ -868,12 +868,12 @@ pub enum SplCmd {
 /// `spl bands …`.
 #[derive(Debug, Subcommand)]
 pub enum BandsCmd {
-    /// Each band window's shown bands, the worst band and what to do about it, the
-    /// predicted LAeq (q/Esc/Ctrl-C quits). With `--json` one line per second, the windows
-    /// in an array.
+    /// The band windows, those of one length and weighting on one row, the band nearest
+    /// its limit and what to do about it, the predicted LAeq (q/Esc/Ctrl-C quits). With
+    /// `--json` one line per second, the windows in an array (each its `band_hz`).
     Watch(LeqWatch),
-    /// Turn the band meter on, set its windows, bands, limits and §13 corrections (a
-    /// preset sets windows, limits and bands at once), or turn it off; the meter, its log
+    /// Turn the band meter on, set its windows, limits and §13 corrections (a preset sets
+    /// windows and limits at once), or turn it off; the meter, its log
     /// and a measured transfer carry on.
     Set(BandsSet),
     /// Measure the band transfer FOH → a place (`--place`, `receiving room` unless named)
@@ -950,25 +950,26 @@ pub enum TonalArg {
 pub struct BandsSet {
     #[command(flatten)]
     pub meter: MeterRef,
-    /// A rule's windows, limits, bands and predicted window (the corrections and a
+    /// A rule's windows, limits and predicted window (the corrections and a
     /// transfer are kept); everything stays settable after. Informational, not legal
     /// advice.
     #[arg(long, value_enum)]
     pub preset: Option<BandPresetArg>,
-    /// The band windows, replacing the meter's, each its length and weighting and its bands
-    /// after `@`: `z:1min@20hz,z:60min@20hz..200hz` (Z unless `a:` or `c:`; any Leq length
-    /// up to 24 h; one band or a range; 20 … 200 Hz without `@`). A window kept (same bands,
-    /// length and weighting) keeps its limits; at most 8.
+    /// The band windows, replacing the meter's, each one band: its length and weighting,
+    /// then its band after `@`: `z:60min@63hz,z:1min@20hz` (Z unless `a:` or `c:`; any Leq
+    /// length up to 24 h). `z:60min@20hz..200hz` is one window per band 20 … 200 Hz. A
+    /// window kept (same band, length and weighting) keeps its limit; the same one twice is
+    /// refused; at most 64.
     #[arg(long, value_delimiter = ',', value_name = "WINDOWS")]
     pub windows: Option<Vec<BandWindowArg>>,
-    /// A band limit of a window, dB SPL where the limits apply: `z:60min:63hz=42db`,
-    /// `z:60min@20hz..200hz:63hz=42db`, a single-band window's `z:1min@20hz=80db` (name the
-    /// window's bands when two windows share length and weighting); `…=none` removes it;
+    /// A band window's limit, dB SPL where the limits apply: `z:60min@63hz=42db`
+    /// (`z:60min@20hz..200hz=…` sets every band's window of the range); `…=none` removes it;
     /// repeatable.
-    #[arg(long = "limit", value_name = "WINDOW:BAND=LIMIT")]
+    #[arg(long = "limit", value_name = "WINDOW=LIMIT")]
     pub limits: Vec<BandLimitArg>,
-    /// `z:60min=5db` (`z:1min@20hz=5db`): the window's limits hold at night (22–07), the
-    /// day's this much higher; `z:60min=none`: one set day and night; repeatable.
+    /// `z:60min@63hz=5db`: the window's limit holds at night (22–07), the day's this much
+    /// higher (a range sets each band's window); `…=none`: one limit day and night;
+    /// repeatable.
     #[arg(long = "day-offset", value_name = "WINDOW=DB")]
     pub day_offsets: Vec<DayOffsetArg>,
     /// §13 impulse correction in force from now: `none`, `5` or `10` dB.

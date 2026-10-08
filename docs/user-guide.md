@@ -1838,6 +1838,7 @@ a daemon restart.
 | ↑/↓ | move between rows |
 | Tab | move between cells |
 | **Insert** | adds a window |
+| **Shift+Insert** | in the band windows: a range line adding one window per band |
 | **Delete** | removes one |
 | Enter | applies |
 
@@ -1911,10 +1912,10 @@ How it is computed: [leq.md](design/leq.md).
 ### Band Leq: band limits at a neighbour's
 
 An SPL meter can also keep a **band meter**: the Leq of each 1/3-octave band over rolling
-**band windows**, each band against its own limit. It is for rules that limit the sound
-reaching a neighbour per band. A band window has its own **bands** (one 1/3-octave band
-of 20 Hz … 10 kHz, or a range of them such as 20 … 200 Hz), length, weighting (Z, A or C),
-limits per band and warn margin, like an Leq window; a meter has up to eight. Finland's STM 545/2015,
+**band windows**, each against its own limit. It is for rules that limit the sound
+reaching a neighbour per band. A band window is one 1/3-octave **band** (20 Hz … 10 kHz)
+with its length, weighting (Z, A or C), limit, day offset and warn margin, like an Leq
+window; a meter has up to 64. A rule over 20 … 200 Hz is eleven windows, one per band. Finland's STM 545/2015,
 for one, limits the hour's unweighted Leq per band 20 … 200 Hz in rooms meant for sleeping
 (night 22–07: 20 Hz 74 dB … 200 Hz 32 dB; day 5 dB higher) and music at night to LAeq,1h
 25 dB there.
@@ -1929,22 +1930,25 @@ bedroom"), and every line about it uses that name ("receiving room" until you do
 **Shift+L** (the SPL / Leq settings), ↑ from the preset row to the **Band meter** rows under
 the windows:
 
-- ←/→ picks off, **on** or a preset: **Finland STM 545/2015, low frequencies** (one LZeq
-  60 min window with the table's limits, the predicted LAeq ≤ 25 dB at night) or **…
-  living room** (20 … 200 Hz without limits; the predicted LAeq against 35 dB by day, 30 dB
+- ←/→ picks off, **on** or a preset: **Finland STM 545/2015, low frequencies** (eleven LZeq
+  60 min windows 20 … 200 Hz with the table's limits, the predicted LAeq ≤ 25 dB at night) or **…
+  living room** (the same eleven windows without limits; the predicted LAeq against 35 dB by day, 30 dB
   at night). A preset replaces the windows and the predicted window and keeps the
   corrections and a measured transfer; change anything after it and the row reads **on**;
-- **Band windows**, one row each, read like the Leq windows: **Band** and **Up to** (←/→:
-  one band, "this band only", or a range up to a higher band), the window (**LZeq 1 min**,
-  ←/→), its weighting (←/→), **Limit (dB)**, **Day +dB** (empty: the same limits day and
-  night; a number: the limits typed are the night's, 22–07, and the day's that much higher)
-  and **Warn within (dB)**. A single band's limit is on its row, as an Leq window's; a
-  range has a cell per band under its row instead (empty: no limit). Only a window's own
-  bands are drawn, judged and alarmed; every band is logged whatever the windows.
+- **Band windows**, one line each, read like the Leq windows: **Band** (←/→), the window
+  (**LZeq 60 min**, ←/→), its weighting (←/→), **Limit (dB)** (empty: no limit), **Day +dB**
+  (empty: the same limit day and night; a number: the limit typed is the night's, 22–07,
+  and the day's that much higher) and **Warn within (dB)**. Only the windows' bands are
+  drawn, judged and alarmed; every band is logged whatever the windows.
   **+** at the **Band windows** (or **Leq windows**) heading adds a window there, turning
-  the band meter on if it is off; **−** on a row removes it. **Insert** and **Delete** do
-  the same for the focused row's section. A 20 Hz LZeq 1 min window with an 80 dB limit:
-  **+**, Tab Tab, ← to 1 min, Tab Tab, type 80;
+  the band meter on if it is off: the focused (or last) window's length, weighting and warn
+  margin on the next band not yet a window of that length and weighting (20 Hz LZeq 60 min
+  on an empty meter). **−** on a row removes it. **Insert** and **Delete** do the same for
+  the focused row's section. A 20 Hz LZeq 1 min window with an 80 dB limit: **+**, Tab, ←
+  to 1 min, Tab Tab, type 80;
+- **+ range…** (**Shift+Insert**) opens a line **from ‹20 Hz› to ‹200 Hz› ‹LZeq 60 min› ‹Z›**;
+  **Add** (or Enter) adds one window per band of the range, skipping bands already a window
+  of that length and weighting, and closes it (× or Delete closes it without adding);
 - and the §13 **impulse** (+5 / +10 dB) and **narrowband** (+3 / +6 dB) corrections, which
   you put in force while the character is heard (ac2 does not detect it).
 
@@ -1953,11 +1957,10 @@ Enter applies. In the terminal, as `spl leq set`:
 | Command | What it does |
 |---|---|
 | `ac2 spl bands set --preset finland-545-lf` | a preset: windows, limits and the predicted window |
-| `ac2 spl bands set --windows z:1min@20hz,z:60min@20hz..200hz` | the windows, each its length and weighting (Z unless `a:` or `c:`) and its bands after `@` (one band, or a range; 20 … 200 Hz without `@`); a window kept (same bands, length and weighting) keeps its limits |
-| `ac2 spl bands set --limit z:60min:63hz=42db` | one band limit of a window (`=none` removes it; repeatable) |
-| `ac2 spl bands set --limit z:1min@20hz=80db` | a single-band window's limit: no band to name |
-| `ac2 spl bands set --limit z:60min@20hz..200hz:63hz=42db` | the window named by its bands too: needed when two windows share length and weighting |
-| `ac2 spl bands set --day-offset z:60min=5db` | the window's limits are the night's, the day's 5 dB higher (`=none`: one set; `z:1min@20hz=5db` names it by its bands) |
+| `ac2 spl bands set --windows z:1min@20hz,z:60min@63hz` | the windows, each its length and weighting (Z unless `a:` or `c:`) and its band after `@`; a window kept (same band, length and weighting) keeps its limit; one twice is refused |
+| `ac2 spl bands set --windows z:60min@20hz..200hz` | a range is shorthand for one window per band (here eleven) |
+| `ac2 spl bands set --limit z:60min@63hz=42db` | a window's limit (`=none` removes it; repeatable; a range sets each band's window) |
+| `ac2 spl bands set --day-offset z:60min@20hz..200hz=5db` | the limits are the night's, the day's 5 dB higher (`=none`: the same day and night) |
 | `ac2 spl bands set --warn 3db --impulse 5 --tonal none` | every window's warn margin; the §13 corrections |
 | `ac2 spl bands set --off` | turns it off |
 
@@ -1972,13 +1975,13 @@ limits as judged. Measuring the transfer: [below](#measuring-the-band-transfer).
 **G** in the SPL pane steps on from meter + Leq to the **bands** (only when the meter has a
 band meter; the palette's "SPL pane: the band Leq bars" goes there directly).
 
-- Each window is a row of bars, one per band of its own, captioned with its name ("20–200
-  Hz LZeq 60 min", "20 Hz LZeq 1 min", and its night or day
-  limits when they differ); each bar is the band's Leq at the mic with its limit line:
-  green under it, amber near it, red over it.
+- Windows of the same length and weighting (and the same day/night scheme) share one row
+  of bars, low band to high, captioned with their name ("LZeq 60 min · night limits
+  (22–07)"); a lone window draws one bar of the usual width. Each bar is its band's Leq at
+  the mic with its own limit line: green under it, amber near it, red over it.
 - Each bar's headroom ("≤ 81.2", how loud the band may go over the next minute) or, over,
   how long until it is back under at its limit.
-- The headline names the worst band of the worst window and what to do: **"63 Hz band LZeq
+- The headline names the worst band window and what to do: **"63 Hz band LZeq
   60 min 3.2 dB over its limit · cooling down in 6 min 52 s"**, or "… 1.5 dB under its
   limit · next 1 min: stay ≤ 81.2 dB".
 - Under it: where the limits come from when a transfer moved them ("limits moved from flat
@@ -1990,7 +1993,7 @@ band meter; the palette's "SPL pane: the band Leq bars" goes there directly).
   …").
 
 `ac2 spl bands watch` (`--json`: one line a second, a `windows` array with each window's
-bands, the worst band and every text) shows the same in a terminal.
+`band_hz`, the `rows` as drawn, the worst window and every text) shows the same in a terminal.
 
 An A or C band window weights each band at its centre frequency: exact for Z, within a few
 tenths of a dB for music; a tone at a band's edge can read up to 3 dB off in an A window at

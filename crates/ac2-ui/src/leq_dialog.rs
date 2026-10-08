@@ -3,8 +3,8 @@
 //! dB — a preset row that replaces the windows (and peak limits) with a published rule's,
 //! the headroom horizon, and under the windows the LCpeak and LAFmax limits and the
 //! measuring-position correction, typed; last the band meter ([`bands`]): off, on or a
-//! rule's preset, the bands shown, its windows (each with a sub-row of per-band limits),
-//! the §13 corrections, the transfer as it stands.
+//! rule's preset, its windows (one band each, a row like a Leq window's; a range row adds
+//! one per band), the §13 corrections, the transfer as it stands.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
 
@@ -16,7 +16,9 @@ use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
 
 mod bands;
 mod transfer;
-pub use bands::{BandCol, BandField, BandFocus, BandMeter, BandRow, BandSection};
+pub use bands::{
+    BandCol, BandField, BandFocus, BandMeter, BandRow, BandSection, RangeCol, RangeRow,
+};
 pub use transfer::{Ask, Sources, Span, TransferStep};
 
 /// Window lengths offered, shortest first (→ longer). A length outside the list (from the
@@ -613,8 +615,47 @@ impl LeqDialog {
         self.error = None;
     }
 
-    /// Delete: removes the focused window.
+    /// Shift+Insert, or "+ range…" at the band windows' heading: the range row opened.
+    pub fn open_range(&mut self) {
+        let at = match self.focus {
+            Focus::Band(b) => b,
+            _ => BandFocus::Field(BandField::Meter),
+        };
+        self.focus = Focus::Band(self.bands.open_range(at));
+        self.selected = false;
+        self.error = None;
+    }
+
+    /// Whether the focus is on the open range row (Enter adds it, Delete closes it).
+    pub fn on_range(&self) -> bool {
+        matches!(self.focus, Focus::Band(BandFocus::Range(_))) && self.bands.range.is_some()
+    }
+
+    /// Add on the range row: one band window per band of it.
+    pub fn add_range(&mut self) {
+        match self.bands.add_range() {
+            Ok(f) => {
+                self.focus = Focus::Band(f);
+                self.selected = false;
+                self.error = None;
+            }
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// The range row closed without adding.
+    pub fn close_range(&mut self) {
+        self.focus = Focus::Band(self.bands.close_range());
+        self.selected = false;
+        self.error = None;
+    }
+
+    /// Delete: removes the focused window (closes the range row).
     pub fn remove_window(&mut self) {
+        if self.on_range() {
+            self.close_range();
+            return;
+        }
         if let Focus::Band(BandFocus::Window { row, col }) = self.focus {
             self.focus = Focus::Band(self.bands.remove_window(row, col));
             self.selected = self.on_text();
@@ -948,8 +989,8 @@ mod tests {
     }
 
     /// The band meter's rows come last: Tab reaches them, ←/→ turn it on with a preset,
-    /// ↓ walks its windows and their limits, Insert adds a band window there, typing sets a
-    /// limit, Enter sends them with the windows.
+    /// ↓ walks its windows, Insert adds a band window there, Shift+Insert's range row adds
+    /// one per band, typing sets a limit, Enter sends them with the windows.
     #[test]
     fn the_band_meter_rows() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
@@ -961,29 +1002,46 @@ mod tests {
             d.bands.meter,
             BandMeter::Preset(ac2_proto::model::BandLeqPreset::Finland545Lf)
         );
-        // The meter; the window row, its limits.
+        assert_eq!(d.bands.rows.len(), 11);
+        // The meter; the 20 Hz window's row.
         d.move_row(1);
-        let w = |col| Focus::Band(BandFocus::Window { row: 0, col });
-        assert_eq!(d.focus, w(BandCol::Band));
-        d.move_cell(3);
+        let w = |row, col| Focus::Band(BandFocus::Window { row, col });
+        assert_eq!(d.focus, w(0, BandCol::Band));
+        d.move_cell(2);
         d.cycle(-2);
         assert_eq!(d.bands.rows[0].cell(BandCol::Length), "LAeq 60 min");
         assert_eq!(d.bands.meter, BandMeter::On, "an edit: the operator's own");
-        d.move_row(1);
-        assert_eq!(d.focus, w(BandCol::Limit(3)), "the limit under the column");
-        d.move_cell(2);
-        assert_eq!(d.focus, w(BandCol::Limit(5)));
+        d.move_cell(1);
+        assert_eq!(d.focus, w(0, BandCol::Limit));
         assert!(d.selected);
         d.type_text("30");
-        d.add_window();
-        assert_eq!(
-            d.focus,
-            Focus::Band(BandFocus::Window {
-                row: 1,
-                col: BandCol::Band
-            })
-        );
+        // ↓ keeps the column: the 25 Hz window's limit.
         d.move_row(1);
+        assert_eq!(d.focus, w(1, BandCol::Limit));
+        d.add_window();
+        assert_eq!(d.focus, w(2, BandCol::Band));
+        // Up from 25 Hz, every band to 200 Hz is an LZeq 60 min window: 250 Hz.
+        assert_eq!(d.bands.rows[2].name(), "250 Hz band LZeq 60 min");
+        // Shift+Insert: the range row under the heading; Enter adds it.
+        d.open_range();
+        assert_eq!(d.focus, Focus::Band(BandFocus::Range(RangeCol::From)));
+        assert!(d.on_range());
+        d.move_cell(2);
+        d.cycle(-2);
+        assert_eq!(
+            d.bands.range.map(|r| r.cell(RangeCol::Length)),
+            Some("LZeq 15 min".into())
+        );
+        d.add_range();
+        assert_eq!(d.bands.rows.len(), 23);
+        assert_eq!(d.focus, w(12, BandCol::Band));
+        assert_eq!(d.bands.rows[22].name(), "200 Hz band LZeq 15 min");
+        // Delete on an open range row closes it.
+        d.open_range();
+        d.remove_window();
+        assert_eq!(d.bands.range, None);
+        assert_eq!(d.bands.rows.len(), 23);
+        d.focus = w(22, BandCol::Margin);
         d.move_row(1);
         assert_eq!(d.focus, Focus::Band(BandFocus::Field(BandField::Impulse)));
         d.cycle(1);
@@ -991,27 +1049,19 @@ mod tests {
             panic!()
         };
         let b = config.bands.expect("on");
-        assert_eq!(b.windows.len(), 2);
+        assert_eq!(b.windows.len(), 23);
         assert_eq!(b.windows[0].weighting, Weighting::A);
-        assert_eq!(b.windows[0].limits.night()[5], Some(DbSpl(30.0)));
-        assert_eq!(b.windows[0].limits.day_offset(), Some(Db(5.0)));
-        assert_eq!(b.windows[1].duration, Seconds(7200.0));
+        assert_eq!(b.windows[0].limit, Some(DbSpl(30.0)));
+        assert_eq!(b.windows[0].day_offset, Some(Db(5.0)));
+        assert_eq!(b.windows[2].duration, Seconds(3600.0));
+        assert_eq!(b.windows[2].limit, None);
         assert_eq!(b.correction.db(), 5.0);
         assert_eq!(config.leq, d.leq_config().expect("windows"));
         // Delete on a band window removes it.
-        d.focus = Focus::Band(BandFocus::Window {
-            row: 1,
-            col: BandCol::Margin,
-        });
+        d.focus = w(1, BandCol::Margin);
         d.remove_window();
-        assert_eq!(d.bands.rows.len(), 1);
-        assert_eq!(
-            d.focus,
-            Focus::Band(BandFocus::Window {
-                row: 0,
-                col: BandCol::Margin
-            })
-        );
+        assert_eq!(d.bands.rows.len(), 22);
+        assert_eq!(d.focus, w(1, BandCol::Margin));
     }
 
     /// Under the windows: the peak limits and the position correction, reached with ↓ and

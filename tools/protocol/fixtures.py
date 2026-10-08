@@ -302,24 +302,31 @@ def frames():
                 "limits_from": "transferred",
                 "windows": [
                     {
-                        "bands": {"low": 50.0, "high": 63.0},
+                        "band": 50.0,
                         "duration": 3600.0,
                         "weighting": "z",
                         "elapsed": 1800.0,
                         "measured": 1790.0,
                         "period": "night",
                         "period_after_horizon": "night",
-                        "worst": 1,
                     },
                     {
-                        "bands": {"low": 1000.0, "high": 1000.0},
+                        "band": 63.0,
+                        "duration": 3600.0,
+                        "weighting": "z",
+                        "elapsed": 1800.0,
+                        "measured": 1790.0,
+                        "period": "night",
+                        "period_after_horizon": "night",
+                    },
+                    {
+                        "band": 1000.0,
                         "duration": 900.0,
                         "weighting": "a",
                         "elapsed": 900.0,
                         "measured": 900.0,
                         "period": "night",
                         "period_after_horizon": "night",
-                        "worst": 0,
                     },
                 ],
                 "predicted": {
@@ -438,31 +445,30 @@ MEAS_CONFIG = {
 }
 
 
+FINLAND_545_BANDS = [20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0]
 FINLAND_545_NIGHT = [74.0, 64.0, 56.0, 49.0, 44.0, 42.0, 40.0, 38.0, 36.0, 34.0, 32.0]
 
 BAND_LEQ_CONFIG = {
     "windows": [
         {
-            "bands": {"low": 20.0, "high": 200.0},
+            "band": hz,
             "duration": 3600.0,
             "weighting": "z",
-            "limits": {
-                "type": "night_day",
-                "night": FINLAND_545_NIGHT + [None] * 17,
-                "day_offset": 5.0,
-            },
+            "limit": night,
+            "day_offset": 5.0,
             "warn_margin": 3.0,
-        },
+        }
+        for hz, night in zip(FINLAND_545_BANDS, FINLAND_545_NIGHT)
+    ]
+    + [
         {
-            "bands": {"low": 1000.0, "high": 1000.0},
+            "band": 1000.0,
             "duration": 900.0,
             "weighting": "a",
-            "limits": {
-                "type": "always",
-                "limits": [30.5 if i == 17 else None for i in range(28)],
-            },
+            "limit": 30.5,
+            "day_offset": None,
             "warn_margin": 2.0,
-        },
+        }
     ],
     "predicted": {"duration": 3600.0, "day": None, "night": 25.0, "warn_margin": 3.0},
     "correction": {"impulse": "plus5", "tonal": "none"},

@@ -2974,9 +2974,10 @@ impl Drop for BandPublisher {
     }
 }
 
-/// A night hour of a band meter judged at the mic (no transfer): the LZeq hour full, 63 Hz
-/// 3.2 dB over its limit and cooling down for 6 min 52 s, 50 Hz on course to go over; the
-/// LAeq quarter half full, its 63 Hz near the 20 dB typed for it.
+/// A night hour of a band meter judged at the mic (no transfer): the LZeq hour windows full,
+/// 63 Hz 3.2 dB over its limit and cooling down for 6 min 52 s, 50 Hz on course to go over;
+/// the LAeq quarter windows of 50, 63 and 80 Hz half full, 63 Hz near the 20 dB typed for
+/// it.
 fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFrame {
     use ac2_proto::frame::{BandLeqFrame, BandLeqMeta, BandWindowState, LeqFlags};
     use ac2_proto::model::{
@@ -3003,6 +3004,8 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
         -50.5, -44.7, -39.4, -34.6, -30.2, -26.2, -22.5, -19.1, -16.1, -13.4, -10.9,
     ];
     let night = ac2_proto::model::BandLeqPreset::FINLAND_545_NIGHT_DB;
+    // The LAeq quarter's bands: 50, 63 and 80 Hz.
+    const A_BANDS: [usize; 3] = [4, 5, 6];
     let mut f = BandLeqFrame {
         meas,
         meta: BandLeqMeta {
@@ -3017,28 +3020,19 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
             horizon: Seconds(60.0),
             correction: Db(0.0),
             limits_from: BandLimitPlace::AtMic,
-            windows: vec![
-                BandWindowState {
-                    bands: ac2_proto::model::BandRange::LF,
-                    duration: Seconds(3600.0),
-                    weighting: Weighting::Z,
-                    elapsed: Seconds(3600.0),
-                    measured: Seconds(3600.0),
+            windows: (0..LF_BAND_COUNT)
+                .map(|i| (i, 3600.0, Weighting::Z, 3600.0))
+                .chain(A_BANDS.map(|i| (i, 900.0, Weighting::A, 450.0)))
+                .map(|(i, d, weighting, e)| BandWindowState {
+                    band: ac2_proto::units::Hz(ac2_proto::model::BAND_NOMINAL_HZ[i]),
+                    duration: Seconds(d),
+                    weighting,
+                    elapsed: Seconds(e),
+                    measured: Seconds(e),
                     period: BandPeriod::Night,
                     period_after_horizon: BandPeriod::Night,
-                    worst: Some(5),
-                },
-                BandWindowState {
-                    bands: ac2_proto::model::BandRange::LF,
-                    duration: Seconds(900.0),
-                    weighting: Weighting::A,
-                    elapsed: Seconds(450.0),
-                    measured: Seconds(450.0),
-                    period: BandPeriod::Night,
-                    period_after_horizon: BandPeriod::Night,
-                    worst: Some(5),
-                },
-            ],
+                })
+                .collect(),
             predicted: None,
         },
         leq: Vec::new(),
@@ -3073,8 +3067,8 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
             leq
         })
         .collect();
-    for (i, l) in z.iter().enumerate() {
-        let a = l + A_DB[i] - 0.4;
+    for i in A_BANDS {
+        let a = z[i] + A_DB[i] - 0.4;
         f.leq.push(a);
         if i == 5 {
             f.limit.push(20.0);
@@ -3136,14 +3130,16 @@ fn spl_meter_from_an_empty_daemon(h: &mut Harness<'_, App>) -> MeasId {
 
 /// From an empty fake daemon, using the app: a session, an SPL meter from the palette, Shift+L
 /// and ↑ to the band meter's row under the Leq windows — →→ turns it on with the STM
-/// 545/2015 low-frequency preset, ↓ to its window, Insert adds a second one, ←/Tab make it
-/// LAeq 15 min, ↓ Tab… type a 20 dB limit for its 63 Hz, ↓ → a +5 dB impulse correction —
-/// Enter sends it. The daemon (the test, through the fake) then reports 63 Hz over in the
-/// hour; G goes on from meter + Leq to the bands, which stack both windows and name the
-/// hour's 63 Hz in the headline.
+/// 545/2015 low-frequency preset (a window per band 20 … 200 Hz), ↓ to its first window,
+/// Shift+Insert opens the range row, → / ← make it 50 … 80 Hz LAeq 15 min, Enter adds a
+/// window per band, ↓ Tab… type a 20 dB limit for the 63 Hz one, ↓ → a +5 dB impulse
+/// correction — Enter sends it. The daemon (the test, through the fake) then reports 63 Hz
+/// over in the hour; G goes on from meter + Leq to the bands, which draw the hour's windows
+/// as one row and the quarter's as another, and name the hour's 63 Hz in the headline.
 #[test]
 fn band_leq_from_an_empty_daemon() {
     use ac2_proto::model::{BandLeqPreset, ImpulseCorrection, MeasKind};
+    use ac2_ui::leq_dialog::{BandCol, BandFocus, Focus, RangeCol};
     if !have_gpu("band_leq_from_an_empty_daemon") {
         return;
     }
@@ -3167,32 +3163,69 @@ fn band_leq_from_an_empty_daemon() {
     step_until(&mut h, "the 545 low-frequency preset", |a| {
         a.state.overlay.leq().is_some_and(|d| {
             d.bands.meter == ac2_ui::leq_dialog::BandMeter::Preset(BandLeqPreset::Finland545Lf)
+                && d.bands.rows.len() == 11
         })
     });
-    // ↓ to the window's band; Insert: a second one after it, Tab Tab to its length.
+    // ↓ to the first window; Shift+Insert: the range row, 20 … 200 Hz LZeq 60 min.
     h.key_press(Key::ArrowDown);
-    h.key_press(Key::Insert);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Insert);
+    step_until(&mut h, "the range row", |a| {
+        a.state.overlay.leq().is_some_and(|d| {
+            d.bands.range.is_some() && d.focus == Focus::Band(BandFocus::Range(RangeCol::From))
+        })
+    });
+    // From 50 Hz, to 80 Hz, LAeq 15 min.
+    for _ in 0..4 {
+        h.key_press(Key::ArrowRight);
+    }
     h.key_press(Key::Tab);
-    h.key_press(Key::Tab);
-    for _ in 0..3 {
+    for _ in 0..4 {
         h.key_press(Key::ArrowLeft);
     }
     h.key_press(Key::Tab);
     h.key_press(Key::ArrowLeft);
     h.key_press(Key::ArrowLeft);
-    // Its limits: ↓ lands under the weighting (40 Hz), Tab ×2 on 63 Hz.
+    h.key_press(Key::Tab);
+    h.key_press(Key::ArrowLeft);
+    h.key_press(Key::ArrowLeft);
+    step_until(&mut h, "50 … 80 Hz LAeq 15 min", |a| {
+        a.state.overlay.leq().is_some_and(|d| {
+            d.bands.range.is_some_and(|r| {
+                RangeCol::ALL.map(|c| r.cell(c)) == ["50 Hz", "80 Hz", "LAeq 15 min", "A"]
+            })
+        })
+    });
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "leq_dialog_band_range");
+    // Enter on the range row adds it: the focus on the first added window, 50 Hz.
+    h.key_press(Key::Enter);
+    step_until(&mut h, "three windows added", |a| {
+        a.state.overlay.leq().is_some_and(|d| {
+            d.bands.range.is_none()
+                && d.bands.rows.len() == 14
+                && d.focus
+                    == Focus::Band(BandFocus::Window {
+                        row: 11,
+                        col: BandCol::Band,
+                    })
+        })
+    });
+    // ↓ to 63 Hz, Tab ×3 to its limit.
     h.key_press(Key::ArrowDown);
-    for _ in 0..2 {
+    for _ in 0..3 {
         h.key_press(Key::Tab);
     }
     h.event(Event::Text("20".into()));
     h.key_press(Key::ArrowDown);
+    h.key_press(Key::ArrowDown);
     h.key_press(Key::ArrowRight);
-    step_until(&mut h, "two band windows, +5 dB impulse", |a| {
+    step_until(&mut h, "fourteen band windows, +5 dB impulse", |a| {
         a.state.overlay.leq().is_some_and(|d| {
-            d.bands.rows.len() == 2
-                && d.bands.rows[1].cell(ac2_ui::leq_dialog::BandCol::Length) == "LAeq 15 min"
-                && d.bands.rows[1].limits[5] == "20"
+            d.bands.rows.len() == 14
+                && d.bands.rows[12].name() == "63 Hz band LAeq 15 min"
+                && d.bands.rows[12].limit == "20"
                 && d.bands.impulse == ImpulseCorrection::Plus5
         })
     });
@@ -3211,8 +3244,9 @@ fn band_leq_from_an_empty_daemon() {
             && a.state.measurements().iter().any(|m| match &m.config.kind {
                 MeasKind::Spl { config } => config.bands.as_ref().is_some_and(|b| {
                     b.correction.impulse == ImpulseCorrection::Plus5
-                        && b.windows.len() == 2
-                        && b.windows[1].limits.night()[5] == Some(ac2_proto::units::DbSpl(20.0))
+                        && b.windows.len() == 14
+                        && b.windows[12].limit == Some(ac2_proto::units::DbSpl(20.0))
+                        && b.windows[12].day_offset.is_none()
                 }),
                 _ => false,
             })
@@ -3278,11 +3312,16 @@ fn band_leq_from_an_empty_daemon() {
         "{texts:?}"
     );
     for want in [
-        "20–200 Hz LZeq 60 min · night limits (22–07)",
-        "20–200 Hz LAeq 15 min · so far · 7:30 / 15:00",
+        "LZeq 60 min · night limits (22–07)",
+        "LAeq 15 min · so far · 7:30 / 15:00",
     ] {
         assert!(texts.contains(&want), "{want:?} not in {texts:?}");
     }
+    // One row per length and weighting: the hour's eleven bars, the quarter's three.
+    assert_eq!(
+        scene.columns.iter().map(Vec::len).collect::<Vec<_>>(),
+        [11, 3]
+    );
     assert!(
         !texts
             .iter()
@@ -3310,18 +3349,18 @@ fn band_leq_from_an_empty_daemon() {
 }
 
 /// From an empty fake daemon, with the mouse and keys: Shift+L, + on the band windows'
-/// heading turns the band meter on with one window (20 Hz alone); Tab to its length, ← to
-/// 1 min, Z as it is, Tab to its limit on the row, 80 typed, Enter. The daemon (the test,
-/// through the fake) reports the window; the band view shows it as one 20 Hz bar. Then −
-/// on its row removes it.
+/// heading turns the band meter on with one window, 20 Hz LZeq 60 min; + again adds the
+/// next band up, 25 Hz; ↑ Tab to the first's length, ← to 1 min, Tab Tab to its limit, 80
+/// typed, Enter. The daemon (the test, through the fake) reports the windows; the band view
+/// shows each as a row of one bar. Then − on a row removes it.
 #[test]
 fn a_single_band_window_with_plus_and_minus() {
     use ac2_proto::frame::{BandLeqFrame, BandLeqMeta, BandWindowState, LeqFlags};
     use ac2_proto::model::{
-        BandLimitPlace, BandPeriod, BandRange, CalStatus, LevelScale, MeasKind, Weighting,
+        BandLimitPlace, BandPeriod, CalStatus, LevelScale, MeasKind, Weighting,
     };
     use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
-    use ac2_ui::leq_dialog::{BandCol, BandMeter};
+    use ac2_ui::leq_dialog::BandMeter;
     if !have_gpu("a_single_band_window_with_plus_and_minus") {
         return;
     }
@@ -3336,17 +3375,25 @@ fn a_single_band_window_with_plus_and_minus() {
     step_until(&mut h, "the Leq dialog", |a| {
         a.state.overlay.leq().is_some()
     });
+    let names = |d: &ac2_ui::leq_dialog::LeqDialog| -> Vec<String> {
+        d.bands.rows.iter().map(|r| r.name()).collect()
+    };
     // The band windows' + is the page's last.
     h.get_all_by_label("+").last().expect("the band +").click();
     step_until(&mut h, "a band window, the meter on", |a| {
         a.state.overlay.leq().is_some_and(|d| {
-            d.bands.meter == BandMeter::On
-                && d.bands.rows.len() == 1
-                && d.bands.rows[0].cell(BandCol::Band) == "20 Hz"
-                && d.bands.rows[0].cell(BandCol::UpTo) == "this band only"
+            d.bands.meter == BandMeter::On && names(d) == ["20 Hz band LZeq 60 min"]
         })
     });
-    h.key_press(Key::Tab);
+    h.get_all_by_label("+").last().expect("the band +").click();
+    step_until(&mut h, "the next band up", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| names(d) == ["20 Hz band LZeq 60 min", "25 Hz band LZeq 60 min"])
+    });
+    // The focus is on the new row's band: ↑ to the first, Tab to its length.
+    h.key_press(Key::ArrowUp);
     h.key_press(Key::Tab);
     for _ in 0..5 {
         h.key_press(Key::ArrowLeft);
@@ -3356,7 +3403,7 @@ fn a_single_band_window_with_plus_and_minus() {
     h.event(Event::Text("80".into()));
     step_until(&mut h, "20 Hz LZeq 1 min, limit 80", |a| {
         a.state.overlay.leq().is_some_and(|d| {
-            d.bands.rows[0].name() == "20 Hz LZeq 1 min" && d.bands.rows[0].limits[0] == "80"
+            d.bands.rows[0].name() == "20 Hz band LZeq 1 min" && d.bands.rows[0].limit == "80"
         })
     });
     h.event(Event::PointerGone);
@@ -3369,16 +3416,18 @@ fn a_single_band_window_with_plus_and_minus() {
         }
     });
     h.key_press(Key::Enter);
-    let single = BandRange::single(Hz(20.0));
-    step_until(&mut h, "the band window set", |a| {
+    step_until(&mut h, "the band windows set", |a| {
         a.state.overlay == Overlay::None
             && a.state.measurements().iter().any(|m| match &m.config.kind {
                 MeasKind::Spl { config } => config.bands.as_ref().is_some_and(|b| {
-                    b.windows.len() == 1
-                        && b.windows[0].bands == single
+                    b.windows.len() == 2
+                        && b.windows[0].band == Hz(20.0)
                         && b.windows[0].duration == Seconds(60.0)
                         && b.windows[0].weighting == Weighting::Z
-                        && b.windows[0].limits.night()[0] == Some(DbSpl(80.0))
+                        && b.windows[0].limit == Some(DbSpl(80.0))
+                        && b.windows[1].band == Hz(25.0)
+                        && b.windows[1].duration == Seconds(3600.0)
+                        && b.windows[1].limit.is_none()
                 }),
                 _ => false,
             })
@@ -3398,23 +3447,33 @@ fn a_single_band_window_with_plus_and_minus() {
             horizon: Seconds(60.0),
             correction: Db(0.0),
             limits_from: BandLimitPlace::AtMic,
-            windows: vec![BandWindowState {
-                bands: single,
-                duration: Seconds(60.0),
-                weighting: Weighting::Z,
-                elapsed: Seconds(60.0),
-                measured: Seconds(60.0),
-                period: BandPeriod::Day,
-                period_after_horizon: BandPeriod::Day,
-                worst: Some(0),
-            }],
+            windows: vec![
+                BandWindowState {
+                    band: Hz(20.0),
+                    duration: Seconds(60.0),
+                    weighting: Weighting::Z,
+                    elapsed: Seconds(60.0),
+                    measured: Seconds(60.0),
+                    period: BandPeriod::Day,
+                    period_after_horizon: BandPeriod::Day,
+                },
+                BandWindowState {
+                    band: Hz(25.0),
+                    duration: Seconds(3600.0),
+                    weighting: Weighting::Z,
+                    elapsed: Seconds(60.0),
+                    measured: Seconds(60.0),
+                    period: BandPeriod::Day,
+                    period_after_horizon: BandPeriod::Day,
+                },
+            ],
             predicted: None,
         },
-        leq: vec![72.0],
-        limit: vec![80.0],
-        allowed: vec![f32::NAN],
-        recover: vec![f32::NAN],
-        flags: vec![judged],
+        leq: vec![72.0, 55.0],
+        limit: vec![80.0, f32::NAN],
+        allowed: vec![f32::NAN, f32::NAN],
+        recover: vec![f32::NAN, f32::NAN],
+        flags: vec![judged, LeqFlags::NONE],
     });
     h.key_press(Key::G);
     step_until(&mut h, "the bands", |a| {
@@ -3443,24 +3502,41 @@ fn a_single_band_window_with_plus_and_minus() {
         },
     )
     .expect("the band view");
-    assert_eq!(scene.columns.len(), 1, "one window");
-    assert_eq!(scene.columns[0].len(), 1, "one bar");
+    // Two lengths: two rows of one bar each.
+    assert_eq!(
+        scene.columns.iter().map(Vec::len).collect::<Vec<_>>(),
+        [1, 1]
+    );
     let texts: Vec<&str> = scene
         .scene
         .layers
         .iter()
         .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
         .collect();
-    for want in ["20 Hz LZeq 1 min", "20", "72.0"] {
+    for want in [
+        "20 Hz band LZeq 1 min 8.0 dB under its limit",
+        "LZeq 1 min",
+        "LZeq 60 min · so far · 1:00 / 1:00:00",
+        "20",
+        "25",
+        "72.0",
+    ] {
         assert!(texts.contains(&want), "{want:?} not in {texts:?}");
     }
-    // − on its row: gone.
+    // − on each row: gone.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog again", |a| {
         a.state
             .overlay
             .leq()
-            .is_some_and(|d| d.bands.rows.len() == 1)
+            .is_some_and(|d| d.bands.rows.len() == 2)
+    });
+    h.get_all_by_label("−").last().expect("the band −").click();
+    step_until(&mut h, "one band window", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| names(d) == ["20 Hz band LZeq 1 min"])
     });
     h.get_all_by_label("−").last().expect("the band −").click();
     step_until(&mut h, "no band window", |a| {

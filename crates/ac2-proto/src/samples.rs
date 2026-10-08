@@ -1112,13 +1112,12 @@ pub fn band_leq_config() -> BandLeqConfig {
     };
     bands[3] = BandTransferBand::Unusable { at_least: Db(35.0) };
     let mut cfg = BandLeqPreset::Finland545Lf.apply(None);
-    let mut limits = [None; BAND_COUNT];
-    limits[17] = Some(DbSpl(30.5));
     cfg.windows.push(BandWindow {
-        bands: BandRange::single(Hz(1000.0)),
+        band: Hz(1000.0),
         duration: Seconds(900.0),
         weighting: Weighting::A,
-        limits: BandLimitSet::Always { limits },
+        limit: Some(DbSpl(30.5)),
+        day_offset: None,
         warn_margin: Db(2.0),
     });
     BandLeqConfig {
@@ -1914,9 +1913,8 @@ pub fn frames() -> Vec<Frame> {
     ]
 }
 
-/// A band meter's frame at night, two windows (LZeq 60 min, LAeq 15 min) on three bands
-/// (50, 63 Hz, 1 kHz): 63 Hz over and cannot recover in the first, 50 Hz on course, 1 kHz
-/// without a limit there.
+/// A band meter's frame at night, three windows (50 and 63 Hz LZeq 60 min, 1 kHz LAeq 15
+/// min): 63 Hz over and cannot recover, 50 Hz on course, 1 kHz under its limit.
 fn band_leq_frame() -> BandLeqFrame {
     let nan = f32::NAN;
     let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
@@ -1934,27 +1932,31 @@ fn band_leq_frame() -> BandLeqFrame {
             limits_from: BandLimitPlace::Transferred,
             windows: vec![
                 BandWindowState {
-                    bands: BandRange {
-                        low: Hz(50.0),
-                        high: Hz(63.0),
-                    },
+                    band: Hz(50.0),
                     duration: Seconds(3600.0),
                     weighting: Weighting::Z,
                     elapsed: Seconds(1800.0),
                     measured: Seconds(1790.0),
                     period: BandPeriod::Night,
                     period_after_horizon: BandPeriod::Night,
-                    worst: Some(1),
                 },
                 BandWindowState {
-                    bands: BandRange::single(Hz(1000.0)),
+                    band: Hz(63.0),
+                    duration: Seconds(3600.0),
+                    weighting: Weighting::Z,
+                    elapsed: Seconds(1800.0),
+                    measured: Seconds(1790.0),
+                    period: BandPeriod::Night,
+                    period_after_horizon: BandPeriod::Night,
+                },
+                BandWindowState {
+                    band: Hz(1000.0),
                     duration: Seconds(900.0),
                     weighting: Weighting::A,
                     elapsed: Seconds(900.0),
                     measured: Seconds(900.0),
                     period: BandPeriod::Night,
                     period_after_horizon: BandPeriod::Night,
-                    worst: Some(0),
                 },
             ],
             predicted: Some(PredictedLeq {

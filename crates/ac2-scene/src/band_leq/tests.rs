@@ -1,6 +1,6 @@
 use ac2_proto::frame::{BandLeqMeta, BandWindowState, LeqFlags};
 use ac2_proto::model::{
-    BAND_COUNT, BandLeqConfig, BandLeqPreset, BandLimitPlace, BandLimitSet, BandPeriod, BandRange,
+    BAND_COUNT, BAND_NOMINAL_HZ, BandLeqConfig, BandLeqPreset, BandLimitPlace, BandPeriod,
     BandTransferBand, BandTransferSet, BandWindow, CalStatus, LF_BAND_COUNT, LeqJudgement,
     LevelScale, PredictedLeq, TransferOrigin, Weighting,
 };
@@ -43,28 +43,50 @@ fn transfer(place: &str) -> BandTransferSet {
     }
 }
 
-/// The 545 low-frequency preset (LZeq 60 min, night and day limits) plus an LAeq 15 min
-/// window with a single set, the limits moved from `flat 4` through a measured transfer.
+/// The 545 low-frequency preset (an LZeq 60 min window per band 20 … 200 Hz, night and
+/// day limits) plus an LAeq 15 min window per band, added high to low, only 63 Hz's with
+/// a limit (one day and night), the limits moved from `flat 4` through a measured transfer.
 fn cfg() -> BandLeqConfig {
     let mut c = BandLeqPreset::Finland545Lf.apply(None);
-    let mut limits = BandLimitSet::default();
-    limits.night_mut()[5] = Some(DbSpl(70.0));
-    c.windows.push(BandWindow {
-        bands: BandRange::LF,
-        duration: Seconds(900.0),
-        weighting: Weighting::A,
-        limits,
-        warn_margin: Db(3.0),
-    });
+    for i in (0..LF_BAND_COUNT).rev() {
+        let mut w = BandWindow::minutes(Hz(BAND_NOMINAL_HZ[i]), 15, Weighting::A);
+        if i == 5 {
+            w.limit = Some(DbSpl(70.0));
+        }
+        c.windows.push(w);
+    }
     c.transfer = Some(transfer("flat 4"));
     c
 }
 
+/// The frame's column of band `i` (into the 11) of row `row` of [`cfg`]: the quarter's
+/// windows were added high to low.
+fn col(row: usize, i: usize) -> usize {
+    if row == 0 {
+        i
+    } else {
+        LF_BAND_COUNT + (LF_BAND_COUNT - 1 - i)
+    }
+}
+
 /// The LZeq hour full at night: 63 Hz 3.2 dB over and cooling down for 412 s, 50 Hz near
 /// and on course, the rest well under, 200 Hz without a limit. The LAeq quarter half full:
-/// 63 Hz under its single limit, the rest without one.
+/// 63 Hz under its limit, the rest without one.
 fn frame() -> BandLeqFrame {
     let n = LF_BAND_COUNT;
+    let state = |i: usize, duration: f64, weighting, elapsed: f64| BandWindowState {
+        band: Hz(BAND_NOMINAL_HZ[i]),
+        duration: Seconds(duration),
+        weighting,
+        elapsed: Seconds(elapsed),
+        measured: Seconds(elapsed),
+        period: BandPeriod::Night,
+        period_after_horizon: BandPeriod::Night,
+    };
+    let mut windows: Vec<BandWindowState> = (0..n)
+        .map(|i| state(i, 3600.0, Weighting::Z, 3600.0))
+        .collect();
+    windows.extend((0..n).rev().map(|i| state(i, 900.0, Weighting::A, 450.0)));
     let mut f = BandLeqFrame {
         meas: MeasId(1),
         meta: BandLeqMeta {
@@ -74,28 +96,7 @@ fn frame() -> BandLeqFrame {
             horizon: Seconds(60.0),
             correction: Db(0.0),
             limits_from: BandLimitPlace::Transferred,
-            windows: vec![
-                BandWindowState {
-                    bands: BandRange::LF,
-                    duration: Seconds(3600.0),
-                    weighting: Weighting::Z,
-                    elapsed: Seconds(3600.0),
-                    measured: Seconds(3600.0),
-                    period: BandPeriod::Night,
-                    period_after_horizon: BandPeriod::Night,
-                    worst: Some(5),
-                },
-                BandWindowState {
-                    bands: BandRange::LF,
-                    duration: Seconds(900.0),
-                    weighting: Weighting::A,
-                    elapsed: Seconds(450.0),
-                    measured: Seconds(450.0),
-                    period: BandPeriod::Night,
-                    period_after_horizon: BandPeriod::Night,
-                    worst: Some(5),
-                },
-            ],
+            windows,
             predicted: Some(PredictedLeq {
                 duration: Seconds(3600.0),
                 estimate: 23.5,
@@ -104,13 +105,14 @@ fn frame() -> BandLeqFrame {
                 judgement: LeqJudgement::Near,
             }),
         },
-        leq: Vec::new(),
-        limit: Vec::new(),
-        allowed: Vec::new(),
-        recover: Vec::new(),
-        flags: Vec::new(),
+        leq: vec![f32::NAN; 2 * n],
+        limit: vec![f32::NAN; 2 * n],
+        allowed: vec![f32::NAN; 2 * n],
+        recover: vec![f32::NAN; 2 * n],
+        flags: vec![LeqFlags::NONE; 2 * n],
     };
     for i in 0..n {
+        let k = col(0, i);
         let limit = (i < 10).then_some(90.0 - i as f32 * 2.0);
         let (leq, j) = match i {
             10 => (55.0, LeqJudgement::NoLimit),
@@ -118,30 +120,32 @@ fn frame() -> BandLeqFrame {
             4 => (82.0 - 1.5, LeqJudgement::Near),
             _ => (60.0, LeqJudgement::Ok),
         };
-        f.leq.push(leq);
-        f.limit.push(limit.unwrap_or(f32::NAN));
-        f.allowed.push(if i < 10 && i != 5 {
-            85.27 - i as f32
-        } else {
-            f32::NAN
-        });
-        f.recover.push(if i == 5 { 412.0 } else { f32::NAN });
-        f.flags.push(flags(j, i == 4));
+        f.leq[k] = leq;
+        f.limit[k] = limit.unwrap_or(f32::NAN);
+        if i < 10 && i != 5 {
+            f.allowed[k] = 85.27 - i as f32;
+        }
+        if i == 5 {
+            f.recover[k] = 412.0;
+        }
+        f.flags[k] = flags(j, i == 4);
     }
     for i in 0..n {
+        let k = col(1, i);
         let judged = i == 5;
-        f.leq.push(if judged { 62.0 } else { 40.0 });
-        f.limit.push(if judged { 90.0 } else { f32::NAN });
-        f.allowed.push(if judged { 95.0 } else { f32::NAN });
-        f.recover.push(f32::NAN);
-        f.flags.push(flags(
+        f.leq[k] = if judged { 62.0 } else { 40.0 };
+        if judged {
+            f.limit[k] = 90.0;
+            f.allowed[k] = 95.0;
+        }
+        f.flags[k] = flags(
             if judged {
                 LeqJudgement::Ok
             } else {
                 LeqJudgement::NoLimit
             },
             false,
-        ));
+        );
     }
     f
 }
@@ -149,8 +153,8 @@ fn frame() -> BandLeqFrame {
 #[test]
 fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
     let t = band_leq_text(&cfg(), &frame());
-    assert_eq!(t.windows.len(), 2);
-    let w = &t.windows[0];
+    assert_eq!(t.rows.len(), 2);
+    let w = &t.rows[0];
     assert_eq!(w.bars.len(), 11);
     let labels: Vec<&str> = w.bars.iter().map(|b| b.label.as_str()).collect();
     assert_eq!(
@@ -172,8 +176,8 @@ fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
     assert_eq!(b.state_text.as_deref(), Some("OVER"));
     assert_eq!(b.headroom, None);
     assert_eq!(b.recover.as_deref(), Some("cooling down in 6 min 52 s"));
-    assert_eq!(w.name, "20–200 Hz LZeq 60 min");
-    assert_eq!(w.caption(), "20–200 Hz LZeq 60 min · night limits (22–07)");
+    assert_eq!(w.name, "LZeq 60 min");
+    assert_eq!(w.caption(), "LZeq 60 min · night limits (22–07)");
     assert_eq!(t.unit, "dB SPL");
     assert_eq!(t.bands, "20–200 Hz");
     assert_eq!(
@@ -190,10 +194,10 @@ fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
 #[test]
 fn a_second_window_has_its_own_weighting_caption_and_judgement() {
     let t = band_leq_text(&cfg(), &frame());
-    let w = &t.windows[1];
-    assert_eq!(w.name, "20–200 Hz LAeq 15 min");
-    // A single set: no period; filling half way.
-    assert_eq!(w.caption(), "20–200 Hz LAeq 15 min · so far · 7:30 / 15:00");
+    let w = &t.rows[1];
+    assert_eq!(w.name, "LAeq 15 min");
+    // One limit day and night: no period; filling half way.
+    assert_eq!(w.caption(), "LAeq 15 min · so far · 7:30 / 15:00");
     assert_eq!(w.bars[5].name, "63 Hz band LAeq 15 min");
     assert_eq!(w.bars[5].state_text.as_deref(), Some("OK"));
     assert_eq!(w.bars[0].state_text, None);
@@ -206,12 +210,11 @@ fn a_second_window_has_its_own_weighting_caption_and_judgement() {
 fn the_headline_follows_the_worst_window() {
     let mut f = frame();
     // The hour's 63 Hz back under, the quarter's over: the quarter heads.
-    let k = f.col(0, 5);
+    let k = col(0, 5);
     f.flags[k] = flags(LeqJudgement::Ok, false);
     f.leq[k] = 70.0;
     f.recover[k] = f32::NAN;
-    f.meta.windows[0].worst = Some(4);
-    let k = f.col(1, 5);
+    let k = col(1, 5);
     f.flags[k] = flags(LeqJudgement::Over, false);
     f.leq[k] = 91.0;
     f.recover[k] = 90.0;
@@ -238,7 +241,7 @@ fn the_headline_follows_the_worst_window() {
 #[test]
 fn near_on_course_ok_and_unlimited_bands() {
     let t = band_leq_text(&cfg(), &frame());
-    let w = &t.windows[0];
+    let w = &t.rows[0];
     let near = &w.bars[4];
     assert_eq!(near.state_text.as_deref(), Some("ON COURSE"));
     // 85.27 − 4 floored to 0.1 dB: a ceiling to stay under.
@@ -266,7 +269,7 @@ fn without_a_transfer_the_limits_are_judged_at_the_mic_and_nothing_asks_for_one(
     assert_eq!(t.limits_from, None);
     assert_eq!(t.predicted, None);
     assert!(t.headline.starts_with("63 Hz band LZeq 60 min 3.2 dB over"));
-    assert!(t.windows[0].bars.iter().any(|b| b.state == TileState::Over));
+    assert!(t.rows[0].bars.iter().any(|b| b.state == TileState::Over));
     f.meta.limits_from = BandLimitPlace::Estimated;
     c.transfer = Some(BandTransferSet {
         origin: TransferOrigin::Estimated,
@@ -284,16 +287,18 @@ fn without_a_transfer_the_limits_are_judged_at_the_mic_and_nothing_asks_for_one(
 #[test]
 fn filling_period_change_correction_and_offline() {
     let mut f = frame();
-    f.meta.windows[0].elapsed = Seconds(1800.0);
-    f.meta.windows[0].measured = Seconds(1790.0);
-    f.meta.windows[0].period = BandPeriod::Day;
-    f.meta.windows[0].period_after_horizon = BandPeriod::Night;
+    for w in &mut f.meta.windows[..LF_BAND_COUNT] {
+        w.elapsed = Seconds(1800.0);
+        w.measured = Seconds(1790.0);
+        w.period = BandPeriod::Day;
+        w.period_after_horizon = BandPeriod::Night;
+    }
     f.meta.correction = Db(8.0);
     let t = band_leq_text(&cfg(), &f);
-    let w = &t.windows[0];
+    let w = &t.rows[0];
     assert_eq!(
         w.caption(),
-        "20–200 Hz LZeq 60 min · day limits (07–22) · headroom for the night limits from 22:00 · so far · \
+        "LZeq 60 min · day limits (07–22) · headroom for the night limits from 22:00 · so far · \
          30:00 / 1:00:00 · offline for 10 s"
     );
     assert_eq!(t.correction.as_deref(), Some("§13 correction +8 dB"));
@@ -301,10 +306,12 @@ fn filling_period_change_correction_and_offline() {
         w.bars[4].headroom.as_deref(),
         Some("until full: stay ≤ 81.2 dB")
     );
-    f.meta.windows[0].period = BandPeriod::Night;
-    f.meta.windows[0].period_after_horizon = BandPeriod::Day;
+    for w in &mut f.meta.windows[..LF_BAND_COUNT] {
+        w.period = BandPeriod::Night;
+        w.period_after_horizon = BandPeriod::Day;
+    }
     assert_eq!(
-        band_leq_text(&cfg(), &f).windows[0].period.as_deref(),
+        band_leq_text(&cfg(), &f).rows[0].period.as_deref(),
         Some("night limits (22–07) · headroom for the day limits")
     );
 }
@@ -320,9 +327,6 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
         f.allowed[k] = f32::NAN;
         f.recover[k] = f32::NAN;
     }
-    for w in &mut f.meta.windows {
-        w.worst = None;
-    }
     f.meta.predicted = Some(PredictedLeq {
         duration: Seconds(3600.0),
         estimate: f64::NAN,
@@ -337,10 +341,10 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
     );
     assert_eq!(t.unit, "dBFS");
     assert_eq!(
-        t.windows[0].bars[5].state_text.as_deref(),
+        t.rows[0].bars[5].state_text.as_deref(),
         Some("not calibrated")
     );
-    assert_eq!(t.windows[0].bars[5].limit_db, None);
+    assert_eq!(t.rows[0].bars[5].limit_db, None);
     assert_eq!(
         t.predicted.expect("predicted").line,
         "predicted LAeq 60 min in flat 4 — · limit 25.0 dB · not calibrated"
@@ -353,15 +357,12 @@ fn nothing_measured_no_band_limits_and_no_windows() {
     f.leq.iter_mut().for_each(|l| *l = f32::NAN);
     let t = band_leq_text(&cfg(), &f);
     assert_eq!(t.headline, "waiting for the first second");
-    assert_eq!(t.windows[0].bars[0].value, "—");
+    assert_eq!(t.rows[0].bars[0].value, "—");
     let mut f = frame();
     f.limit.iter_mut().for_each(|l| *l = f32::NAN);
     f.flags.iter_mut().for_each(|l| *l = LeqFlags::NONE);
     f.allowed.iter_mut().for_each(|l| *l = f32::NAN);
     f.recover.iter_mut().for_each(|l| *l = f32::NAN);
-    for w in &mut f.meta.windows {
-        w.worst = None;
-    }
     f.meta.predicted = Some(PredictedLeq {
         duration: Seconds(3600.0),
         estimate: 24.0,
@@ -377,6 +378,9 @@ fn nothing_measured_no_band_limits_and_no_windows() {
     );
     f.meta.windows.clear();
     f.leq.clear();
+    let t = band_leq_text(&cfg(), &f);
+    assert!(t.rows.is_empty());
+    assert_eq!(t.bands, "no bands");
     assert_eq!(band_leq_text(&cfg(), &f).headline, "no band windows");
 }
 
@@ -485,8 +489,8 @@ fn the_scene_stacks_a_row_of_columns_per_window_under_the_headline() {
         "63 Hz band LZeq 60 min 3.2 dB over its limit · cooling down in 6 min 52 s",
         "FOH SPL · band Leq 20–200 Hz, dB SPL",
         "predicted LAeq 60 min in flat 4 23.5 dB · at most 27.3 dB · limit 25.0 dB · NEAR",
-        "20–200 Hz LZeq 60 min · night limits (22–07)",
-        "20–200 Hz LAeq 15 min · so far · 7:30 / 15:00",
+        "LZeq 60 min · night limits (22–07)",
+        "LAeq 15 min · so far · 7:30 / 15:00",
         "31.5",
         "83.2",
     ] {
@@ -573,9 +577,9 @@ fn allowed_marks(s: &BandLeqScene, theme: &Theme) -> usize {
 fn an_allowed_level_off_the_scale_is_neither_marked_nor_keyed() {
     let theme = Theme::default();
     let mut f = frame();
-    // One window only, to count its marks.
-    f.meta.windows.truncate(1);
-    let n = f.meta.windows[0].bands.len();
+    // One row only, to count its marks.
+    let n = LF_BAND_COUNT;
+    f.meta.windows.truncate(n);
     f.leq.truncate(n);
     f.limit.truncate(n);
     f.allowed.truncate(n);
@@ -600,31 +604,27 @@ fn an_allowed_level_off_the_scale_is_neither_marked_nor_keyed() {
     assert!(t.iter().any(|l| l == "limit"), "{t:?}");
 }
 
+/// A lone band window: a row of one bar, as wide as one of eleven, named by its band.
 #[test]
 fn a_single_band_window_is_one_bar_named_by_its_band() {
     let mut c = BandLeqConfig {
-        windows: vec![BandWindow::minutes(
-            BandRange::single(Hz(20.0)),
-            1,
-            Weighting::Z,
-        )],
+        windows: vec![BandWindow::minutes(Hz(20.0), 1, Weighting::Z)],
         predicted: None,
         correction: Default::default(),
         transfer: None,
     };
-    c.windows[0].limits.night_mut()[0] = Some(DbSpl(80.0));
+    c.windows[0].limit = Some(DbSpl(80.0));
     let mut f = frame();
     f.meta.limits_from = BandLimitPlace::AtMic;
     f.meta.predicted = None;
     f.meta.windows = vec![BandWindowState {
-        bands: BandRange::single(Hz(20.0)),
+        band: Hz(20.0),
         duration: Seconds(60.0),
         weighting: Weighting::Z,
         elapsed: Seconds(60.0),
         measured: Seconds(60.0),
         period: BandPeriod::Day,
         period_after_horizon: BandPeriod::Day,
-        worst: Some(0),
     }];
     f.leq = vec![72.0];
     f.limit = vec![80.0];
@@ -633,18 +633,67 @@ fn a_single_band_window_is_one_bar_named_by_its_band() {
     f.flags = vec![flags(LeqJudgement::Ok, false)];
     let t = band_leq_text(&c, &f);
     assert_eq!(t.bands, "20 Hz");
-    assert_eq!(t.windows.len(), 1);
-    let w = &t.windows[0];
-    assert_eq!(w.caption(), "20 Hz LZeq 1 min");
+    assert_eq!(t.rows.len(), 1);
+    let w = &t.rows[0];
+    assert_eq!(w.caption(), "LZeq 1 min");
     assert_eq!(w.bars.len(), 1);
     assert_eq!(w.bars[0].label, "20");
     assert_eq!(w.bars[0].name, "20 Hz band LZeq 1 min");
     assert_eq!(w.bars[0].limit.as_deref(), Some("limit 80.0 dB"));
+    assert_eq!(t.worst, Some((0, 0)));
+    assert_eq!(t.headline, "20 Hz band LZeq 1 min 8.0 dB under its limit");
     let s = band_leq_scene(&view(&c, &f), &Status::default(), &Theme::default(), SIZE);
     let lines = texts(&s);
-    assert!(lines.iter().any(|l| l == "20 Hz LZeq 1 min"), "{lines:?}");
+    assert!(lines.iter().any(|l| l == "LZeq 1 min"), "{lines:?}");
     assert!(
         lines[0].starts_with("FOH SPL · band Leq 20 Hz,"),
         "{lines:?}"
+    );
+    // A bar, not a slab: no wider than one of the 545 table's eleven.
+    let full = band_leq_scene(
+        &view(&cfg(), &frame()),
+        &Status::default(),
+        &Theme::default(),
+        SIZE,
+    );
+    assert_eq!(s.columns[0].len(), 1);
+    assert!((s.columns[0][0].w - full.columns[0][0].w).abs() < 0.5);
+}
+
+/// Windows of one length and weighting share a row whatever their order; another length,
+/// another weighting or another way of judging day and night is a row of its own.
+#[test]
+fn windows_are_grouped_by_length_and_weighting_low_band_to_high() {
+    let t = band_leq_text(&cfg(), &frame());
+    assert_eq!(t.rows.len(), 2);
+    for r in &t.rows {
+        let hz: Vec<f64> = r.bars.iter().map(|b| b.nominal_hz).collect();
+        assert_eq!(hz, BAND_NOMINAL_HZ[..LF_BAND_COUNT]);
+    }
+    // The quarter's bars point at their own columns, added high to low.
+    assert_eq!(t.rows[1].bars[0].window, 2 * LF_BAND_COUNT - 1);
+    assert_eq!(t.rows[1].bars[5].name, "63 Hz band LAeq 15 min");
+    // 63 Hz LZeq 60 min without a day offset: one limit day and night, its own row.
+    let mut c = cfg();
+    c.windows[5].day_offset = None;
+    let t = band_leq_text(&c, &frame());
+    let names: Vec<String> = t.rows.iter().map(BandRowText::caption).collect();
+    assert_eq!(
+        names,
+        [
+            "LZeq 60 min · night limits (22–07)",
+            "LZeq 60 min",
+            "LAeq 15 min · so far · 7:30 / 15:00"
+        ]
+    );
+    assert_eq!(t.rows[1].bars.len(), 1);
+    assert_eq!(t.worst, Some((1, 0)), "the 63 Hz bar, over, in its own row");
+    assert_eq!(
+        windows_summary(&c.windows),
+        [
+            "20–50 Hz, 80–200 Hz LZeq 60 min, night 74 … 32 dB, day 5 dB higher",
+            "63 Hz LZeq 60 min, 42 dB",
+            "20–200 Hz LAeq 15 min, 70 dB"
+        ]
     );
 }

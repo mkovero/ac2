@@ -2,10 +2,9 @@
 
 use ac2_client::expect_body;
 use ac2_proto::model::{
-    BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandLevelSource, BandLimitSet,
-    BandRange, BandTransferBand, BandTransferSet, BandWindow, ImpulseCorrection, MeasConfig,
-    MeasKind, Measurement, SplBandLog, SplConfig, State, TonalCorrection, TransferOrigin,
-    Weighting,
+    BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandLevelSource,
+    BandTransferBand, BandTransferSet, BandWindow, ImpulseCorrection, MeasConfig, MeasKind,
+    Measurement, SplBandLog, SplConfig, State, TonalCorrection, TransferOrigin, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
 use ac2_proto::{Command, ReplyBody};
@@ -19,7 +18,7 @@ use crate::args::{
     LeqWatch, MeasRef, TonalArg,
 };
 use crate::output::Out;
-use crate::units::{BandRangeArg, BandSourceArg, BandWindowArg, LeqWindowArg};
+use crate::units::{BandSourceArg, BandWindowArg, LeqWindowArg};
 use crate::watch;
 
 pub(crate) async fn run(cli: &Cli, cmd: &BandsCmd, out: &mut Out<'_>) -> Result<(), CliError> {
@@ -55,67 +54,38 @@ fn window_of(w: &LeqWindowArg) -> (Seconds, Weighting) {
     )
 }
 
-/// The bands typed, 20 … 200 Hz when none are.
-fn range_of(b: Option<BandRangeArg>) -> BandRange {
-    b.map_or(BandRange::LF, |r| BandRange::of_indices(r.from, r.to))
-}
-
-/// The index of the window `w` names in `c`: by length and weighting, and by its bands when
-/// typed (they must be when two windows share length and weighting).
-fn find_window(c: &BandLeqConfig, w: &BandWindowArg) -> Result<usize, CliError> {
+/// The windows of `c` that `w` names, one per band of it: each must be there.
+fn find_windows(c: &BandLeqConfig, w: &BandWindowArg) -> Result<Vec<usize>, CliError> {
     let (d, wt) = window_of(&w.window);
-    let bands = w.bands.map(|b| range_of(Some(b)));
-    let found: Vec<usize> = c
-        .windows
-        .iter()
-        .enumerate()
-        .filter(|(_, x)| x.duration == d && x.weighting == wt && bands.is_none_or(|b| x.bands == b))
-        .map(|(i, _)| i)
-        .collect();
-    let named = |x: &BandWindow| band_leq::ranged_window_name(&x.bands, x.duration.0, x.weighting);
-    match found[..] {
-        [i] => Ok(i),
-        [] => {
-            let have: Vec<String> = c.windows.iter().map(named).collect();
-            let typed = match bands {
-                Some(b) => band_leq::ranged_window_name(&b, d.0, wt),
-                None => band_leq::window_name(d.0, wt),
-            };
-            Err(CliError::Usage(format!(
-                "no band window {typed}: the band windows are {}",
-                if have.is_empty() {
-                    "none".to_owned()
-                } else {
-                    have.join(", ")
-                }
-            )))
-        }
-        _ => Err(CliError::Usage(format!(
-            "{} band windows are {}: name the bands too, e.g. {}",
-            found.len(),
-            band_leq::window_name(d.0, wt),
-            found
+    w.bands()
+        .map(|b| {
+            let hz = Hz(BAND_NOMINAL_HZ[b]);
+            c.windows
                 .iter()
-                .map(|&i| arg_of(&c.windows[i]))
-                .collect::<Vec<_>>()
-                .join(" or ")
-        ))),
-    }
+                .position(|x| x.band == hz && x.duration == d && x.weighting == wt)
+                .ok_or_else(|| {
+                    let have: Vec<String> = c.windows.iter().map(arg_of).collect();
+                    CliError::Usage(format!(
+                        "no band window {}: the band windows are {}",
+                        band_leq::band_window_name(hz.0, d.0, wt),
+                        if have.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            have.join(", ")
+                        }
+                    ))
+                })
+        })
+        .collect()
 }
 
-/// A window as `--windows` and `--limit` take it: `z:60min@20hz..200hz`.
+/// A window as `--windows` and `--limit` take it: `z:60min@63hz`.
 fn arg_of(w: &BandWindow) -> String {
-    let hz = |h: Hz| {
-        if h.0 >= 1000.0 {
-            format!("{}khz", h.0 / 1000.0)
-        } else {
-            format!("{}hz", h.0)
-        }
-    };
-    let bands = if w.bands.is_single() {
-        hz(w.bands.low)
+    let h = w.band.0;
+    let band = if h >= 1000.0 {
+        format!("{}khz", h / 1000.0)
     } else {
-        format!("{}..{}", hz(w.bands.low), hz(w.bands.high))
+        format!("{h}hz")
     };
     let s = w.duration.0;
     let len = if s % 3600.0 == 0.0 {
@@ -130,7 +100,7 @@ fn arg_of(w: &BandWindow) -> String {
         Weighting::C => "c",
         Weighting::Z => "z",
     };
-    format!("{wt}:{len}@{bands}")
+    format!("{wt}:{len}@{band}")
 }
 
 /// The band meter configuration `s` asks for, from the meter's `cur` (`None`: off). A
@@ -154,60 +124,49 @@ pub(crate) fn apply(
         },
         (None, None) => {
             return Err(CliError::Usage(
-                "the band meter is off: turn it on with --windows z:60min or --preset \
+                "the band meter is off: turn it on with --windows z:60min@63hz or --preset \
                  finland-545-lf"
                     .into(),
             ));
         }
     };
     if let Some(ws) = &s.windows {
-        // A window kept (same bands, length and weighting) keeps its limits and margin.
-        c.windows = ws
-            .iter()
-            .map(|w| {
-                let (d, wt) = window_of(&w.window);
-                let bands = range_of(w.bands);
-                c.windows
-                    .iter()
-                    .find(|x| x.duration == d && x.weighting == wt && x.bands == bands)
-                    .copied()
-                    .unwrap_or(BandWindow {
-                        duration: d,
-                        ..BandWindow::minutes(bands, 0, wt)
-                    })
-            })
-            .collect();
+        // One window per band; a window kept (same band, length and weighting) keeps its
+        // limit and margin.
+        let mut windows: Vec<BandWindow> = Vec::new();
+        for w in ws {
+            let (d, wt) = window_of(&w.window);
+            for b in w.bands() {
+                let new = BandWindow {
+                    duration: d,
+                    ..BandWindow::minutes(Hz(BAND_NOMINAL_HZ[b]), 0, wt)
+                };
+                if windows.iter().any(|x| x.same_as(&new)) {
+                    return Err(CliError::Usage(format!(
+                        "{} twice in --windows: each band window once",
+                        arg_of(&new)
+                    )));
+                }
+                windows.push(
+                    c.windows
+                        .iter()
+                        .find(|x| x.same_as(&new))
+                        .copied()
+                        .unwrap_or(new),
+                );
+            }
+        }
+        c.windows = windows;
     }
     for o in &s.day_offsets {
-        let i = find_window(&c, &o.window)?;
-        let night = *c.windows[i].limits.night();
-        c.windows[i].limits = match o.offset {
-            Some(day_offset) => BandLimitSet::NightDay { night, day_offset },
-            None => BandLimitSet::Always { limits: night },
-        };
+        for i in find_windows(&c, &o.window)? {
+            c.windows[i].day_offset = o.offset;
+        }
     }
     for l in &s.limits {
-        let i = find_window(&c, &l.window)?;
-        let w = &mut c.windows[i];
-        let name = band_leq::ranged_window_name(&w.bands, w.duration.0, w.weighting);
-        let band = match (l.band, w.bands.indices()) {
-            (None, Some(r)) if r.start() == r.end() => *r.start(),
-            (None, _) => {
-                return Err(CliError::Usage(format!(
-                    "{name} has more than one band: name the band, e.g. {}:{}hz=…",
-                    arg_of(w),
-                    BAND_NOMINAL_HZ[w.bands.indices().map_or(0, |r| *r.start())]
-                )));
-            }
-            (Some(b), Some(r)) if r.contains(&b) => b,
-            (Some(b), _) => {
-                return Err(CliError::Usage(format!(
-                    "{} Hz is not a band of {name}",
-                    band_leq::band_label(BAND_NOMINAL_HZ[b])
-                )));
-            }
-        };
-        w.limits.night_mut()[band] = l.limit;
+        for i in find_windows(&c, &l.window)? {
+            c.windows[i].limit = l.limit;
+        }
     }
     if let Some(w) = s.warn {
         for x in &mut c.windows {
@@ -247,10 +206,15 @@ fn describe(c: Option<&BandLeqConfig>) -> String {
         c.correction.db()
     )];
     for w in &c.windows {
+        let limit = match (w.limit, w.day_offset) {
+            (Some(l), Some(o)) => format!("night {} dB, day {} dB higher", l.0, o.0),
+            (Some(l), None) => format!("{} dB", l.0),
+            (None, _) => "no limit".to_owned(),
+        };
         lines.push(format!(
-            "  {}: {} · warn {} dB",
-            band_leq::ranged_window_name(&w.bands, w.duration.0, w.weighting),
-            band_leq::limits_summary(w),
+            "  {} ({}): {limit} · warn {} dB",
+            band_leq::band_window_name(w.band.0, w.duration.0, w.weighting),
+            arg_of(w),
             w.warn_margin.0
         ));
     }
@@ -665,75 +629,80 @@ mod tests {
             text.contains("band Leq 20–200 Hz · §13 correction 3 dB"),
             "{text}"
         );
-        assert!(text.contains("20–200 Hz LZeq 60 min: no limits"), "{text}");
+        assert!(
+            text.contains("  63 Hz band LZeq 60 min (z:1h@63hz): no limit · warn 3 dB"),
+            "{text}"
+        );
         assert!(text.contains("transfer from "), "{text}");
     }
 
     #[test]
-    fn windows_bands_and_limits_are_set_like_leq_windows() {
+    fn windows_and_limits_are_set_like_leq_windows() {
         let lf = BandLeqPreset::Finland545Lf.apply(None);
-        // Windows typed alone turn the meter on, Z unless weighted, on 20–200 Hz.
-        let c = apply(None, &set_args(&["--windows", "60min,a:15min"]))
+        // Windows typed alone turn the meter on, Z unless weighted, one band each.
+        let c = apply(None, &set_args(&["--windows", "60min@63hz,a:15min@1khz"]))
             .expect("test value")
             .expect("test value");
         assert_eq!(c.windows.len(), 2);
+        assert_eq!(c.windows[0].band, Hz(63.0));
         assert_eq!(c.windows[0].weighting, Weighting::Z);
         assert_eq!(c.windows[0].duration, Seconds(3600.0));
         assert_eq!(c.windows[1].weighting, Weighting::A);
-        assert!(c.windows.iter().all(|w| w.bands == BandRange::LF));
+        assert_eq!(c.windows[1].band, Hz(1000.0));
         assert_eq!(c.predicted, None);
-        // A window kept keeps its limits; a new one starts without.
+        // A range is one window per band; a window kept keeps its limit, a new one starts
+        // without.
         let c = apply(
             Some(&lf),
             &set_args(&[
                 "--windows",
-                "c:5min@50hz..100hz,z:60min",
+                "c:5min@50hz..100hz,z:60min@50hz..63hz",
                 "--limit",
-                "c:5min:63hz=70db",
+                "c:5min@63hz=70db",
                 "--limit",
-                "z:60min:50hz=none",
+                "z:60min@50hz=none",
                 "--day-offset",
-                "c:5min=3db",
+                "c:5min@50hz..100hz=3db",
                 "--warn",
                 "2db",
             ]),
         )
         .expect("test value")
         .expect("test value");
+        let names: Vec<String> = c.windows.iter().map(arg_of).collect();
         assert_eq!(
-            c.windows[1].limits.night()[5],
-            lf.windows[0].limits.night()[5]
+            names,
+            [
+                "c:5min@50hz",
+                "c:5min@63hz",
+                "c:5min@80hz",
+                "c:5min@100hz",
+                "z:1h@50hz",
+                "z:1h@63hz"
+            ]
         );
-        assert_eq!(c.windows[1].limits.night()[4], None);
-        assert_eq!(
-            c.windows[0].limits,
-            BandLimitSet::NightDay {
-                night: {
-                    let mut n = [None; ac2_proto::model::BAND_COUNT];
-                    n[5] = Some(DbSpl(70.0));
-                    n
-                },
-                day_offset: Db(3.0),
-            }
-        );
+        assert_eq!(c.windows[5].limit, lf.windows[5].limit);
+        assert_eq!(c.windows[5].day_offset, Some(Db(5.0)));
+        assert_eq!(c.windows[4].limit, None);
+        assert_eq!(c.windows[1].limit, Some(DbSpl(70.0)));
+        assert_eq!(c.windows[0].limit, None);
+        assert!(c.windows[..4].iter().all(|w| w.day_offset == Some(Db(3.0))));
         assert!(c.windows.iter().all(|w| w.warn_margin == Db(2.0)));
-        assert_eq!(
-            c.windows[0].bands,
-            BandRange {
-                low: Hz(50.0),
-                high: Hz(100.0)
-            }
-        );
-        assert_eq!(c.windows[1].bands, BandRange::LF);
-        // `=none` makes a window's limits hold day and night.
-        let d = apply(Some(&c), &set_args(&["--day-offset", "c:5min=none"]))
+        // `=none` makes a window's limit hold day and night.
+        let d = apply(Some(&c), &set_args(&["--day-offset", "c:5min@63hz=none"]))
             .expect("test value")
             .expect("test value");
-        assert!(matches!(d.windows[0].limits, BandLimitSet::Always { .. }));
-        assert_eq!(d.windows[0].limits.night()[5], Some(DbSpl(70.0)));
+        assert_eq!(d.windows[1].day_offset, None);
+        assert_eq!(d.windows[1].limit, Some(DbSpl(70.0)));
         let text = describe(Some(&d));
         assert!(
-            text.contains("  50–100 Hz LCeq 5 min: 70 dB · warn 2 dB"),
+            text.contains("  63 Hz band LCeq 5 min (c:5min@63hz): 70 dB · warn 2 dB"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "  63 Hz band LZeq 60 min (z:1h@63hz): night 42 dB, day 5 dB higher · warn 2 dB"
+            ),
             "{text}"
         );
         assert!(
@@ -743,73 +712,53 @@ mod tests {
     }
 
     #[test]
-    fn a_single_band_window_takes_its_limit_without_naming_the_band() {
-        let c = apply(
-            None,
-            &set_args(&[
-                "--windows",
-                "z:1min@20hz,z:1min@1khz,z:60min@20hz..200hz",
-                "--limit",
-                "z:1min@20hz=80db",
-                "--limit",
-                "z:60min:63hz=42db",
-            ]),
-        )
-        .expect("test value")
-        .expect("test value");
-        assert_eq!(c.windows[0].bands, BandRange::single(Hz(20.0)));
-        assert_eq!(c.windows[0].limits.night()[0], Some(DbSpl(80.0)));
-        assert_eq!(c.windows[1].limits.night()[0], None);
-        assert_eq!(c.windows[2].limits.night()[5], Some(DbSpl(42.0)));
-        let text = describe(Some(&c));
+    fn set_refuses_what_cannot_run() {
+        let e = apply(None, &set_args(&["--impulse", "5"])).expect_err("refused");
+        assert!(e.to_string().contains("--windows z:60min@63hz"), "{e}");
+        let lf = BandLeqPreset::Finland545Lf.apply(None);
+        let e =
+            apply(Some(&lf), &set_args(&["--limit", "a:60min@63hz=40db"])).expect_err("refused");
         assert!(
-            text.contains("  20 Hz LZeq 1 min: 80 dB · warn 3 dB"),
-            "{text}"
-        );
-        assert!(text.contains("  1000 Hz LZeq 1 min: no limits"), "{text}");
-        // Two windows of one length and weighting: the bands tell them apart.
-        let e = apply(Some(&c), &set_args(&["--limit", "z:1min:20hz=70db"])).expect_err("refused");
-        assert!(
-            e.to_string().contains(
-                "2 band windows are LZeq 1 min: name the bands too, e.g. z:1min@20hz or \
-                 z:1min@1khz"
+            e.to_string().starts_with(
+                "no band window 63 Hz band LAeq 60 min: the band windows are z:1h@20hz, \
+                 z:1h@25hz,"
             ),
             "{e}"
         );
+        // A range reaching past the windows names the missing one.
         let e = apply(
-            Some(&c),
-            &set_args(&["--limit", "z:60min@20hz..200hz=40db"]),
+            Some(&lf),
+            &set_args(&["--limit", "z:60min@160hz..250hz=40db"]),
         )
         .expect_err("refused");
-        assert!(e.to_string().contains("more than one band"), "{e}");
-        let e =
-            apply(Some(&c), &set_args(&["--limit", "z:1min@1khz:20hz=40db"])).expect_err("refused");
         assert!(
             e.to_string()
-                .contains("20 Hz is not a band of 1000 Hz LZeq 1 min"),
+                .starts_with("no band window 250 Hz band LZeq 60 min"),
             "{e}"
         );
-    }
-
-    #[test]
-    fn set_refuses_what_cannot_run() {
-        let e = apply(None, &set_args(&["--impulse", "5"])).expect_err("refused");
-        assert!(e.to_string().contains("--windows z:60min"), "{e}");
-        let lf = BandLeqPreset::Finland545Lf.apply(None);
-        let e =
-            apply(Some(&lf), &set_args(&["--limit", "a:60min:63hz=40db"])).expect_err("refused");
+        let e = apply(
+            None,
+            &set_args(&["--windows", "z:60min@20hz..200hz,z:1h@63hz"]),
+        )
+        .expect_err("refused");
         assert!(
             e.to_string()
-                .contains("no band window LAeq 60 min: the band windows are 20–200 Hz LZeq 60 min"),
+                .contains("z:1h@63hz twice in --windows: each band window once"),
             "{e}"
         );
-        let many = "1min,2min,3min,4min,5min,6min,7min,8min,9min";
-        assert!(apply(Some(&lf), &set_args(&["--windows", many])).is_err());
+        let all = "z:1min@20hz..10khz,z:5min@20hz..10khz,z:10min@20hz..10khz";
+        let e = apply(None, &set_args(&["--windows", all])).expect_err("refused");
+        assert!(e.to_string().contains("at most 64 band windows"), "{e}");
         let argv = ["ac2", "spl", "bands", "set", "--off", "--impulse", "5"];
         assert!(crate::Cli::try_parse_from(argv).is_err());
         assert!(crate::Cli::try_parse_from(["ac2", "spl", "bands", "set"]).is_err());
         assert!(
             crate::Cli::try_parse_from(["ac2", "spl", "bands", "set", "--impulse", "7"]).is_err()
+        );
+        let argv = ["ac2", "spl", "bands", "set", "--windows", "z:60min"];
+        assert!(
+            crate::Cli::try_parse_from(argv).is_err(),
+            "a window names its band"
         );
     }
 

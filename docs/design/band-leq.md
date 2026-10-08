@@ -61,13 +61,14 @@ can be reviewed against the raw record.
 
 ## Windows and judging per band
 
-A **band window** (`BandWindow`) has its **bands** (`BandRange` {`low`, `high`}: one of the
-28 bands, or a run of adjacent ones), a length (1 s … 24 h in whole seconds), a weighting
-(Z, A or C; *Weighting a band*), limits on its own bands (`BandLimitSet::Always`, one set,
-or `NightDay`, night limits and a day offset; *Day and night*) and a warn margin. A meter
-has up to eight, like its Leq windows. Only a window's own bands are drawn, judged and
-alarmed in it; every band is integrated and logged whatever the windows, so a window
-added or moved to other bands is rebuilt from the log. A band of a window is a **rolling window**, one-second steps, built on the same
+A **band window** (`BandWindow`) is one of the 28 **bands** with a length (1 s … 24 h in
+whole seconds), a weighting (Z, A or C; *Weighting a band*), a limit (or none), a day
+offset (none: the limit holds day and night; else the limit is the night's; *Day and
+night*) and a warn margin. A meter has up to 64: a rule over 20 … 200 Hz is eleven
+windows, and the band energies are computed once per second whatever the windows, so a
+window costs only its sums. Only the windows' bands are drawn, judged and alarmed; every
+band is integrated and logged whatever the windows, so a window added is rebuilt from the
+log. A band window is a **rolling window**, one-second steps, built on the same
 ring and sums as the A/C/Z windows (`ac2_core::leq::RollingLeq`, generic over
 the slot: a band second is just another set of channels). Everything in
 `docs/design/leq.md` *Windows*, *Limits*, *Judging a filling window* and the headroom /
@@ -78,7 +79,7 @@ the headroom as the highest steady level for the horizon, and "cooling down in �
 time to recover playing at the limit. Tests compare every band against brute-force sums
 over random sequences with gaps.
 
-**The worst band** is named, per window and across them: the most severe judgement (over,
+**The worst band** is named, per row of the view and across them: the most severe judgement (over,
 on course, near, ok), then the band furthest above (or least below) its limit. That is the
 one the artist acts on — typically one kick or bass note's band — so the stage view leads
 with it, named with its window (`63 Hz band LZeq 60 min 3.2 dB over its limit · cooling
@@ -214,13 +215,15 @@ A preset replaces the windows (with their bands) and the predicted window, and k
 correction and the transfer; everything stays settable after it. Informational, not legal
 advice.
 
-- **`finland-545-lf`** — Liite 2 Taulukko 2: one LZeq 60 min window on 20 … 200 Hz, night
+- **`finland-545-lf`** — Liite 2 Taulukko 2: eleven LZeq 60 min windows 20 … 200 Hz, night
   (22–7) 20 Hz 74, 25 Hz 64, 31.5 Hz 56, 40 Hz 49, 50 Hz 44, 63 Hz 42, 80 Hz 40, 100 Hz 38,
   125 Hz 36, 160 Hz 34, 200 Hz 32 dB, day (7–22) each 5 dB higher; the predicted LAeq 60 min
   ≤ 25 dB at night (§12, music in rooms meant for sleeping). The limits hold at the place;
   the meter moves them to FOH with the transfer.
 - **`finland-545-living-room`** — Liite 2 Taulukko 1: the predicted LAeq 60 min, day 35,
-  night 30 dB; the bands 20 … 200 Hz shown in an LZeq 60 min window without limits.
+  night 30 dB; the eleven LZeq 60 min windows 20 … 200 Hz shown without limits (the same
+  bars as the low-frequency preset, so a room judged on its LAeq still shows where the
+  energy is).
 - **`finland-545`** (the A/C/Z meter, `docs/design/leq.md`) — the hearing-damage limits of
   §12: LAeq,4h 100 dB, LAFmax 115 dB, LCpeak 140 dB, at the audience.
 
@@ -366,3 +369,22 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
    them (`z:60min@20hz..200hz:63hz=42db`), a single band's limit without naming the band
    (`z:1min@20hz=80db`); `--bands` is gone. `bands watch --json` gives each window its
    `bands_hz` [low, high].
+7. **One band per window** (done): a `BandWindow` is one band (`band`: Hz, `limit`,
+   `day_offset`: Db or none), the way an Leq window is one level; `BandRange` and
+   `BandLimitSet` are gone, the cap is 64 and two windows of the same band, length and
+   weighting are refused. The `band_leq` frame has one column per window and a `band` per
+   `BandWindowState`; the worst band is ranked by the front end. `PROTO_VERSION` 32, session
+   format 17 (older ones refused). The view groups windows of the same length, weighting
+   and day/night scheme into one row of bars, low band to high, captioned "LZeq 60 min ·
+   night limits (22–07)"; a lone window draws one bar of the usual width. Dialog: one line
+   per window `‹63 Hz› ‹LZeq 60 min› ‹Z› limit day+dB warn −`; + copies the focused (or last)
+   window's length, weighting and margin onto the next band not yet a window of those;
+   **+ range…** (Shift+Insert) adds one window per band from … to, skipping existing ones.
+   CLI: `--windows z:60min@63hz,z:1min@20hz`, `z:60min@20hz..200hz` expanding to one window
+   per band; `--limit z:60min@63hz=42db`, `--day-offset z:60min@20hz..200hz=5db|none`;
+   `bands watch --json` gives each window its `band_hz` and the `rows` as drawn. Decided on
+   the way:
+   - A range is a front-end convenience only: nothing range-shaped is on the wire, so the
+     daemon, the log and the alarms have one kind of window.
+   - The living-room preset keeps its eleven windows without limits rather than none: the
+     bars are what the operator looks at while the predicted LAeq is what is judged.

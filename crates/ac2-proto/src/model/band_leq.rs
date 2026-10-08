@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{LeqConfig, LeqWindow, Weighting};
+use super::{LeqWindow, Weighting};
 use crate::units::{Db, DbSpl, Hz, MeasId, Seconds, WallNs};
 
 /// Bands integrated: 1/3 octaves 20 Hz … 10 kHz ([`BAND_NOMINAL_HZ`]).
@@ -272,158 +272,40 @@ pub struct PredictedWindow {
     pub warn_margin: Db,
 }
 
-/// A band window's limits, dB SPL per band of [`BAND_NOMINAL_HZ`] (`None`: the band has
-/// none), on the window's weighted band levels.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum BandLimitSet {
-    /// The same limits day and night.
-    Always {
-        /// Per band, low to high.
-        limits: [Option<DbSpl>; BAND_COUNT],
-    },
-    /// Night limits (22:00–07:00, local time) and the day's (07:00–22:00) `day_offset`
-    /// higher; a window holding any night second is judged by the night limits.
-    NightDay {
-        /// Per band, low to high.
-        night: [Option<DbSpl>; BAND_COUNT],
-        /// Day limits are the night's plus this.
-        day_offset: Db,
-    },
-}
-
-impl Default for BandLimitSet {
-    fn default() -> Self {
-        BandLimitSet::Always {
-            limits: [None; BAND_COUNT],
-        }
-    }
-}
-
-impl BandLimitSet {
-    /// The limits 22:00–07:00 (all day for [`Self::Always`]).
-    pub fn night(&self) -> &[Option<DbSpl>; BAND_COUNT] {
-        match self {
-            BandLimitSet::Always { limits } => limits,
-            BandLimitSet::NightDay { night, .. } => night,
-        }
-    }
-
-    /// The limits to change: the night's, or the one set.
-    pub fn night_mut(&mut self) -> &mut [Option<DbSpl>; BAND_COUNT] {
-        match self {
-            BandLimitSet::Always { limits } => limits,
-            BandLimitSet::NightDay { night, .. } => night,
-        }
-    }
-
-    /// The day's offset over the night limits; `None` for one set.
-    pub fn day_offset(&self) -> Option<Db> {
-        match self {
-            BandLimitSet::Always { .. } => None,
-            BandLimitSet::NightDay { day_offset, .. } => Some(*day_offset),
-        }
-    }
-
-    /// The limit of band `band` in `period`.
-    pub fn of(&self, period: BandPeriod, band: usize) -> Option<DbSpl> {
-        let l = self.night().get(band).copied().flatten()?;
-        Some(match (self.day_offset(), period) {
-            (Some(o), BandPeriod::Day) => DbSpl(l.0 + o.0),
-            _ => l,
-        })
-    }
-
-    /// Whether any band has a limit.
-    pub fn any(&self) -> bool {
-        self.night().iter().any(Option::is_some)
-    }
-}
-
-/// A run of adjacent 1/3-octave bands by nominal centre, `low` … `high` inclusive (one band
-/// when they are equal).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BandRange {
-    /// Lowest band's nominal centre, one of [`BAND_NOMINAL_HZ`].
-    pub low: Hz,
-    /// Highest band's nominal centre, one of [`BAND_NOMINAL_HZ`], not below `low`.
-    pub high: Hz,
-}
-
-impl BandRange {
-    /// The 20 … 200 Hz bands of STM 545/2015.
-    pub const LF: BandRange = BandRange {
-        low: Hz(BAND_NOMINAL_HZ[0]),
-        high: Hz(BAND_NOMINAL_HZ[LF_BAND_COUNT - 1]),
-    };
-
-    /// The single band of nominal centre `hz`.
-    pub const fn single(hz: Hz) -> Self {
-        Self { low: hz, high: hz }
-    }
-
-    /// The bands of indices `low ..= high` into [`BAND_NOMINAL_HZ`] (clamped into range).
-    pub fn of_indices(low: usize, high: usize) -> Self {
-        let at = |i: usize| Hz(BAND_NOMINAL_HZ[i.min(BAND_COUNT - 1)]);
-        Self {
-            low: at(low),
-            high: at(high.max(low)),
-        }
-    }
-
-    /// Indices into [`BAND_NOMINAL_HZ`], low to high; `None` when an end is not a band or
-    /// they are reversed.
-    pub fn indices(&self) -> Option<std::ops::RangeInclusive<usize>> {
-        let (l, h) = (band_index(self.low.0)?, band_index(self.high.0)?);
-        (l <= h).then_some(l..=h)
-    }
-
-    /// Bands in the range (0 when it is not one).
-    pub fn len(&self) -> usize {
-        self.indices().map_or(0, |r| r.count())
-    }
-
-    /// Whether it is not a range of bands.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// Whether it is one band.
-    pub fn is_single(&self) -> bool {
-        self.len() == 1
-    }
-}
-
-/// One rolling band window: the Leq of each of its bands over the same length and
-/// weighting, each against its own limit.
+/// One rolling band window: the Leq of one 1/3-octave band over a length and weighting,
+/// against its own limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandWindow {
-    /// The bands shown, judged and alarmed; every band is integrated and logged whatever
-    /// this.
-    pub bands: BandRange,
+    /// The band's nominal centre, one of [`BAND_NOMINAL_HZ`]. Every band is integrated and
+    /// logged whatever the windows.
+    pub band: Hz,
     /// Length: whole seconds, 1 s … [`LeqWindow::MAX_SECONDS`].
     pub duration: Seconds,
-    /// Frequency weighting of the band levels: the weighting at each band's exact mid-band
+    /// Frequency weighting of the band level: the weighting at the band's exact mid-band
     /// frequency added to its unweighted level (`docs/design/band-leq.md`, *Weighting a
     /// band*).
     pub weighting: Weighting,
-    /// Per-band limits, at the transfer's place when there is a transfer, else at the mic.
-    pub limits: BandLimitSet,
-    /// "Near" within this much below a limit (≥ 0).
+    /// The band's limit, at the transfer's place when there is a transfer, else at the
+    /// mic; at night (22:00–07:00, local time) when `day_offset` is set, else day and night.
+    pub limit: Option<DbSpl>,
+    /// The day's limit (07:00–22:00) is `limit` plus this; `None`: the same day and night.
+    /// A window holding any night second is judged by the night limit.
+    pub day_offset: Option<Db>,
+    /// "Near" within this much below the limit (≥ 0).
     pub warn_margin: Db,
 }
 
 impl BandWindow {
-    /// A window of `bands` over `minutes` with `weighting`, no limits, the default warn
-    /// margin.
-    pub fn minutes(bands: BandRange, minutes: u32, weighting: Weighting) -> Self {
+    /// A window of band `band` (nominal Hz) over `minutes` with `weighting`, no limit, the
+    /// default warn margin.
+    pub fn minutes(band: Hz, minutes: u32, weighting: Weighting) -> Self {
         Self {
-            bands,
+            band,
             duration: Seconds(f64::from(minutes) * 60.0),
             weighting,
-            limits: BandLimitSet::default(),
+            limit: None,
+            day_offset: None,
             warn_margin: Db(LeqWindow::DEFAULT_WARN_MARGIN_DB),
         }
     }
@@ -431,6 +313,28 @@ impl BandWindow {
     /// Length in whole seconds, when it is one in range.
     pub fn seconds(&self) -> Option<u32> {
         whole_seconds(self.duration)
+    }
+
+    /// Index of its band into [`BAND_NOMINAL_HZ`], when it is one.
+    pub fn index(&self) -> Option<usize> {
+        band_index(self.band.0)
+    }
+
+    /// The limit in `period`.
+    pub fn limit_in(&self, period: BandPeriod) -> Option<DbSpl> {
+        let l = self.limit?;
+        Some(match (self.day_offset, period) {
+            (Some(o), BandPeriod::Day) => DbSpl(l.0 + o.0),
+            _ => l,
+        })
+    }
+
+    /// Whether `other` is the same band over the same length and weighting: two such
+    /// windows would be one shown twice.
+    pub fn same_as(&self, other: &BandWindow) -> bool {
+        self.band == other.band
+            && self.duration == other.duration
+            && self.weighting == other.weighting
     }
 }
 
@@ -441,13 +345,14 @@ fn whole_seconds(d: Seconds) -> Option<u32> {
 }
 
 /// The band meter of an SPL meter: the 1/3-octave band Leq of the unweighted (mic-curve
-/// corrected) input in rolling band windows of their own bands, length and weighting,
-/// against per-band limits; with a transfer, the limits are moved
+/// corrected) input in rolling band windows, each one band over its own length and
+/// weighting against its own limit; with a transfer, the limits are moved
 /// from its place to the mic and the A-weighted level there is predicted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandLeqConfig {
-    /// Windows, in display order (at most [`LeqConfig::MAX_WINDOWS`]).
+    /// Windows, in display order (at most [`Self::MAX_WINDOWS`]); none: the predicted
+    /// level alone.
     pub windows: Vec<BandWindow>,
     /// The predicted level at the transfer's place; `None`: not predicted.
     pub predicted: Option<PredictedWindow>,
@@ -464,11 +369,11 @@ pub struct BandLeqConfig {
 /// correction and the transfer stay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BandLeqPreset {
-    /// STM 545/2015 §12 and Liite 2 Taulukko 2: LZeq 60 min per band 20 … 200 Hz (night 74
+    /// STM 545/2015 §12 and Liite 2 Taulukko 2: an LZeq 60 min window per band 20 … 200 Hz (night 74
     /// … 32 dB, day 5 dB higher), and the predicted LAeq 60 min ≤ 25 dB at night.
     Finland545Lf,
     /// STM 545/2015 Liite 2 Taulukko 1, living rooms: the predicted LAeq 60 min, day 35,
-    /// night 30 dB; the bands 20 … 200 Hz shown in an LZeq 60 min window without limits.
+    /// night 30 dB; the bands 20 … 200 Hz shown in LZeq 60 min windows without limits.
     Finland545LivingRoom,
 }
 
@@ -504,15 +409,13 @@ pub struct PredictedLeq {
 }
 
 impl BandLeqConfig {
-    /// Every window's bands together, indices into [`BAND_NOMINAL_HZ`], low to high, each
-    /// once.
+    /// Most band windows per meter: every band over a couple of lengths or weightings. The
+    /// band energies are integrated once for all bands, so a window costs only its sum.
+    pub const MAX_WINDOWS: usize = 64;
+
+    /// Every window's band, indices into [`BAND_NOMINAL_HZ`], low to high, each once.
     pub fn shown(&self) -> Vec<usize> {
-        let mut v: Vec<usize> = self
-            .windows
-            .iter()
-            .filter_map(|w| w.bands.indices())
-            .flatten()
-            .collect();
+        let mut v: Vec<usize> = self.windows.iter().filter_map(BandWindow::index).collect();
         v.sort_unstable();
         v.dedup();
         v
@@ -520,41 +423,35 @@ impl BandLeqConfig {
 
     /// Why the configuration cannot run, if it cannot.
     pub fn check(&self) -> Result<(), String> {
-        if self.windows.len() > LeqConfig::MAX_WINDOWS {
+        if self.windows.len() > Self::MAX_WINDOWS {
             return Err(format!(
                 "at most {} band windows per meter",
-                LeqConfig::MAX_WINDOWS
+                Self::MAX_WINDOWS
             ));
         }
         let finite = |l: &Option<DbSpl>| l.is_none_or(|l| l.0.is_finite());
         let margin = |m: Db| m.0.is_finite() && m.0 >= 0.0;
-        for w in &self.windows {
-            if w.bands.is_empty() {
+        for (i, w) in self.windows.iter().enumerate() {
+            if w.index().is_none() {
                 return Err(
-                    "a band window shows one 1/3-octave band 20 Hz … 10 kHz or a range of \
-                     them, low to high"
+                    "a band window is one 1/3-octave band, its nominal centre 20 Hz … 10 kHz"
                         .into(),
                 );
             }
             if w.seconds().is_none() {
                 return Err("a band window is 1 s … 24 h in whole seconds".into());
             }
-            let inside = w.bands.indices().unwrap_or(0..=0);
-            if w.limits
-                .night()
-                .iter()
-                .enumerate()
-                .any(|(b, l)| l.is_some() && !inside.contains(&b))
-            {
-                return Err("a band window has limits on its own bands only".into());
-            }
-            if !w.limits.night().iter().all(finite)
-                || w.limits.day_offset().is_some_and(|o| !o.0.is_finite())
-            {
+            if !finite(&w.limit) || w.day_offset.is_some_and(|o| !o.0.is_finite()) {
                 return Err("a band limit must be finite".into());
             }
             if !margin(w.warn_margin) {
                 return Err("a band window's warn margin is 0 dB or more".into());
+            }
+            if self.windows[..i].iter().any(|o| o.same_as(w)) {
+                return Err(format!(
+                    "two band windows of the {} Hz band over the same length and weighting",
+                    w.band.0
+                ));
             }
         }
         if let Some(p) = &self.predicted {
@@ -629,20 +526,21 @@ impl BandLeqPreset {
         }
     }
 
-    /// The preset's windows.
+    /// The preset's windows: one per band 20 … 200 Hz, LZeq 60 min; the living room's
+    /// without limits, shown for what the predicted level is made of.
     pub fn windows(self) -> Vec<BandWindow> {
-        let mut w = BandWindow::minutes(BandRange::LF, 60, Weighting::Z);
-        if self == BandLeqPreset::Finland545Lf {
-            let mut night = [None; BAND_COUNT];
-            for (n, l) in night.iter_mut().zip(Self::FINLAND_545_NIGHT_DB) {
-                *n = Some(DbSpl(l));
-            }
-            w.limits = BandLimitSet::NightDay {
-                night,
-                day_offset: Db(Self::FINLAND_545_DAY_OFFSET_DB),
-            };
-        }
-        vec![w]
+        BAND_NOMINAL_HZ[..LF_BAND_COUNT]
+            .iter()
+            .zip(Self::FINLAND_545_NIGHT_DB)
+            .map(|(&hz, night)| {
+                let mut w = BandWindow::minutes(Hz(hz), 60, Weighting::Z);
+                if self == BandLeqPreset::Finland545Lf {
+                    w.limit = Some(DbSpl(night));
+                    w.day_offset = Some(Db(Self::FINLAND_545_DAY_OFFSET_DB));
+                }
+                w
+            })
+            .collect()
     }
 
     /// The preset's predicted window.

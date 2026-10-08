@@ -735,13 +735,16 @@ pub async fn bands(
                 lines.push(p.line.clone());
             }
             let num = |v: f32| v.is_finite().then_some(f64::from(v));
-            let mut windows = Vec::new();
-            for (w, (st, wt)) in meta.windows.iter().zip(&t.windows).enumerate() {
-                lines.push(wt.caption());
-                for (i, b) in wt.bars.iter().enumerate() {
-                    let mark = if t.worst == Some((w, i)) {
+            // The windows of one length and weighting on one row, low band to high.
+            let mut rows = Vec::new();
+            let mut row_of = vec![0usize; meta.windows.len()];
+            for (r, rt) in t.rows.iter().enumerate() {
+                lines.push(rt.caption());
+                for (i, b) in rt.bars.iter().enumerate() {
+                    row_of[b.window] = r;
+                    let mark = if t.worst == Some((r, i)) {
                         "▶"
-                    } else if wt.worst == Some(i) {
+                    } else if rt.worst == Some(i) {
                         "▷"
                     } else {
                         " "
@@ -760,70 +763,65 @@ pub async fn bands(
                     }
                     lines.push(l);
                 }
-                let bands: Vec<serde_json::Value> = wt
-                    .bars
-                    .iter()
-                    .enumerate()
-                    .map(|(i, x)| {
-                        let k = f.col(w, i);
-                        let flags = f.flags[k];
-                        json!({
-                            "nominal_hz": x.nominal_hz,
-                            "leq": num(f.leq[k]),
-                            "limit": num(f.limit[k]),
-                            "judgement": flags.judgement(),
-                            "on_course": flags.contains(ac2_proto::frame::LeqFlags::ON_COURSE),
-                            "allowed": num(f.allowed[k]),
-                            "recover_s": num(f.recover[k]),
-                            "text": {
-                                "name": x.name,
-                                "label": x.label,
-                                "value": x.value,
-                                "state": x.state_text,
-                                "limit": x.limit,
-                                "headroom": x.headroom,
-                                "recover": x.recover,
-                            },
-                        })
-                    })
-                    .collect();
-                windows.push(json!({
-                    "bands_hz": [st.bands.low.0, st.bands.high.0],
-                    "duration_s": st.duration.0,
-                    "weighting": st.weighting,
-                    "elapsed_s": st.elapsed.0,
-                    "measured_s": st.measured.0,
-                    "period": st.period,
-                    "period_after_horizon": st.period_after_horizon,
-                    "worst_hz": wt.worst.map(|i| wt.bars[i].nominal_hz),
-                    "bands": bands,
+                rows.push(json!({
+                    "windows": rt.bars.iter().map(|b| b.window).collect::<Vec<_>>(),
+                    "worst_hz": rt.worst.map(|i| rt.bars[i].nominal_hz),
                     "text": {
-                        "name": wt.name,
-                        "caption": wt.caption(),
-                        "period": wt.period,
-                        "filling": wt.filling,
-                        "incomplete": wt.incomplete,
+                        "name": rt.name,
+                        "caption": rt.caption(),
+                        "period": rt.period,
+                        "filling": rt.filling,
+                        "incomplete": rt.incomplete,
                     },
                 }));
             }
-            // Every window's bands together, low to high.
-            let mut shown: Vec<usize> = meta
+            // Per window, in the configuration's order.
+            let bar_of = |k: usize| t.rows.iter().flat_map(|r| &r.bars).find(|b| b.window == k);
+            let windows: Vec<serde_json::Value> = meta
                 .windows
                 .iter()
-                .filter_map(|w| w.bands.indices())
-                .flatten()
+                .enumerate()
+                .map(|(k, st)| {
+                    let flags = f.flags[k];
+                    let x = bar_of(k);
+                    json!({
+                        "band_hz": st.band.0,
+                        "duration_s": st.duration.0,
+                        "weighting": st.weighting,
+                        "row": row_of[k],
+                        "elapsed_s": st.elapsed.0,
+                        "measured_s": st.measured.0,
+                        "period": st.period,
+                        "period_after_horizon": st.period_after_horizon,
+                        "leq": num(f.leq[k]),
+                        "limit": num(f.limit[k]),
+                        "judgement": flags.judgement(),
+                        "on_course": flags.contains(ac2_proto::frame::LeqFlags::ON_COURSE),
+                        "allowed": num(f.allowed[k]),
+                        "recover_s": num(f.recover[k]),
+                        "text": x.map(|x| json!({
+                            "name": x.name,
+                            "label": x.label,
+                            "value": x.value,
+                            "state": x.state_text,
+                            "limit": x.limit,
+                            "headroom": x.headroom,
+                            "recover": x.recover,
+                        })),
+                    })
+                })
                 .collect();
-            shown.sort_unstable();
-            shown.dedup();
-            let bands_hz: Vec<f64> = shown
-                .into_iter()
-                .map(|b| ac2_proto::model::BAND_NOMINAL_HZ[b])
-                .collect();
-            let worst = t.worst.map(|(w, i)| {
+            // Every window's band, low to high, each once.
+            let mut bands_hz: Vec<f64> = meta.windows.iter().map(|w| w.band.0).collect();
+            bands_hz.sort_by(f64::total_cmp);
+            bands_hz.dedup();
+            let worst = t.worst.map(|(r, i)| {
+                let b = &t.rows[r].bars[i];
                 json!({
-                    "window": w,
-                    "nominal_hz": t.windows[w].bars[i].nominal_hz,
-                    "name": t.windows[w].bars[i].name,
+                    "window": b.window,
+                    "row": r,
+                    "band_hz": b.nominal_hz,
+                    "name": b.name,
                 })
             });
             View {
@@ -852,6 +850,7 @@ pub async fn bands(
                         "judgement": p.judgement,
                     })),
                     "windows": windows,
+                    "rows": rows,
                     "text": {
                         "bands": t.bands,
                         "headline": t.headline,

@@ -25,8 +25,9 @@ use crate::units::{
     SessionEpoch, WallNs,
 };
 
-/// Largest header part, bytes.
-pub const MAX_HEADER_BYTES: usize = 1024;
+/// Largest header part, bytes: room for a band meter's state of every one of its
+/// [`crate::model::BandLeqConfig::MAX_WINDOWS`] windows (about 50 bytes each).
+pub const MAX_HEADER_BYTES: usize = 8192;
 /// Largest `n` (columns / points / channels).
 pub const MAX_N: u32 = 1 << 16;
 /// Most array parts in one frame.
@@ -506,24 +507,12 @@ pub struct BandLeqMeta {
     pub predicted: Option<crate::model::PredictedLeq>,
 }
 
-impl BandLeqMeta {
-    /// Columns of the windows before window `w`.
-    pub fn columns_before(&self, w: usize) -> usize {
-        self.windows.iter().take(w).map(|s| s.bands.len()).sum()
-    }
-
-    /// Columns of the frame: every window's bands.
-    pub fn columns(&self) -> usize {
-        self.columns_before(self.windows.len())
-    }
-}
-
 /// One band window of a `band_leq` frame.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandWindowState {
-    /// The window's bands: its columns, low to high.
-    pub bands: crate::model::BandRange,
+    /// The window's band, its nominal centre.
+    pub band: crate::units::Hz,
     /// Window length.
     pub duration: Seconds,
     /// Weighting of its band levels.
@@ -532,14 +521,10 @@ pub struct BandWindowState {
     pub elapsed: Seconds,
     /// Seconds of those measured.
     pub measured: Seconds,
-    /// The limit set the window is judged by: night while it holds a night second.
+    /// The limit the window is judged by: night while it holds a night second.
     pub period: crate::model::BandPeriod,
-    /// The set its headroom figures are computed against (once the horizon has passed).
+    /// The limit its headroom figures are computed against (once the horizon has passed).
     pub period_after_horizon: crate::model::BandPeriod,
-    /// Index into the window's `bands` of its worst band: the most severe
-    /// judgement, then the furthest above (or least below) its limit; `None` when nothing
-    /// is judged.
-    pub worst: Option<u8>,
 }
 
 /// A peak limit's state: the highest second within the hold, judged against the limit.
@@ -864,8 +849,8 @@ pub struct LeqFrame {
     pub flags: Vec<LeqFlags>,
 }
 
-/// An SPL meter's band meter, published once a second: one column per band of each window,
-/// window after window ([`BandLeqMeta`]).
+/// An SPL meter's band meter, published once a second: one column per window
+/// ([`BandLeqMeta`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BandLeqFrame {
     /// Measurement.
@@ -886,13 +871,6 @@ pub struct BandLeqFrame {
     pub recover: Vec<f32>,
     /// State: the judgement, `ON_COURSE` while filling ([`LeqFlags`]).
     pub flags: Vec<LeqFlags>,
-}
-
-impl BandLeqFrame {
-    /// Column of band `i` (into window `w`'s `bands`) of window `w`.
-    pub fn col(&self, w: usize, i: usize) -> usize {
-        self.meta.columns_before(w) + i
-    }
 }
 
 /// Input meters frame.
@@ -1584,9 +1562,14 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
         FrameMeta::BandLeq(meta) => {
-            if meta.windows.iter().any(|w| w.bands.is_empty()) || meta.columns() != h.n as usize {
+            if meta
+                .windows
+                .iter()
+                .any(|w| crate::model::band_index(w.band.0).is_none())
+                || meta.windows.len() != h.n as usize
+            {
                 return Err(DecodeError::Schema(
-                    "band_leq: the windows' bands are not n columns".into(),
+                    "band_leq: not one column per window of one band".into(),
                 ));
             }
             let unit = level_unit(meta.scale);

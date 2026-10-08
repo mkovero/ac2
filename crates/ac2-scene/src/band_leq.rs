@@ -1,6 +1,7 @@
-//! The band meter of an SPL meter (`docs/design/band-leq.md`): per band window a row of
-//! bars, one per shown band, each the band's rolling Leq against its limit line; the worst
-//! band of the window nearest to (or over) its limit named with what to do about it, where
+//! The band meter of an SPL meter (`docs/design/band-leq.md`): the band windows of one
+//! length and weighting drawn as one row of bars ordered by frequency, each bar a window's
+//! rolling band Leq against its own limit line; the band nearest to (or over) its limit
+//! named with what to do about it, where
 //! the limits come from when a transfer moved them, and the predicted level at the
 //! transfer's place. Read from a stage: the headline says which band eats the budget and
 //! for how long to back off; the bars show where in the spectrum.
@@ -11,9 +12,9 @@
 
 use ac2_proto::frame::BandLeqFrame;
 use ac2_proto::model::{
-    BAND_NOMINAL_HZ, BandLeqConfig, BandLeqPreset, BandLimitPlace, BandLimitSet, BandPeriod,
-    BandRange, BandTransferBand, BandTransferSet, BandWindow, LeqJudgement, LevelScale,
-    PredictedLeq, TransferOrigin, Weighting,
+    BAND_NOMINAL_HZ, BandLeqConfig, BandLeqPreset, BandLimitPlace, BandPeriod, BandTransferBand,
+    BandTransferSet, BandWindow, LeqJudgement, LevelScale, PredictedLeq, TransferOrigin, Weighting,
+    band_index,
 };
 
 use crate::banner::{BannerRow, Status};
@@ -72,28 +73,16 @@ pub fn bands_text(bands: &[usize]) -> String {
         .join(", ")
 }
 
-/// A band window's bands in words: `20 Hz`, `20–200 Hz`.
-pub fn range_text(r: &BandRange) -> String {
-    r.indices().map_or_else(
-        || "no bands".to_owned(),
-        |i| bands_text(&i.collect::<Vec<_>>()),
-    )
-}
-
-/// A band window as the dialog, the view and the CLI name it: `20 Hz LZeq 1 min`,
-/// `20–200 Hz LZeq 60 min`.
-pub fn ranged_window_name(r: &BandRange, duration_s: f64, weighting: Weighting) -> String {
-    format!("{} {}", range_text(r), window_name(duration_s, weighting))
-}
-
 /// The place a transfer moves the limits from, as every text names it.
 pub fn place_of(t: Option<&BandTransferSet>) -> &str {
     t.map_or(BandTransferSet::DEFAULT_PLACE, |t| t.place.as_str())
 }
 
-/// Every string and figure of one band's bar.
+/// Every string and figure of one band window's bar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandBar {
+    /// The window: its index in the frame and the configuration.
+    pub window: usize,
     pub nominal_hz: f64,
     /// `63`.
     pub label: String,
@@ -123,7 +112,15 @@ pub struct BandBar {
 }
 
 impl BandBar {
-    /// Severity, as the daemon ranks the worst band: ok, near, on course, over.
+    /// Whether its limit is judged.
+    fn judged(&self) -> bool {
+        matches!(
+            self.state,
+            TileState::Ok | TileState::Near | TileState::Over
+        )
+    }
+
+    /// Severity: ok, near, on course, over.
     fn rank(&self) -> u8 {
         match self.state {
             TileState::Over => 3,
@@ -143,16 +140,19 @@ pub struct PredictedText {
     pub state: TileState,
 }
 
-/// One band window as shown.
+/// The band windows of one length and weighting (and one way of judging day and night),
+/// as one row of bars.
 #[derive(Clone, Debug, PartialEq)]
-pub struct BandWindowText {
-    /// `20–200 Hz LZeq 60 min`.
+pub struct BandRowText {
+    /// `LZeq 60 min`.
     pub name: String,
+    /// One per window, low band to high.
     pub bars: Vec<BandBar>,
-    /// Index of the worst band, as the daemon picked it.
+    /// Index of the worst bar: the most severe judgement, then the furthest above (or
+    /// least below) its limit; none when nothing is judged.
     pub worst: Option<usize>,
     /// `night limits (22–07)`, `day limits (07–22) · headroom for the night limits from
-    /// 22:00`; none for a window whose limits hold day and night.
+    /// 22:00`; none for windows whose limits hold day and night.
     pub period: Option<String>,
     /// `so far · 30:00 / 1:00:00` while the window fills.
     pub filling: Option<String>,
@@ -166,8 +166,8 @@ pub struct BandWindowText {
     pub allowed_key: Option<String>,
 }
 
-impl BandWindowText {
-    /// `20–200 Hz LZeq 60 min · night limits (22–07) · so far · 30:00 / 1:00:00`.
+impl BandRowText {
+    /// `LZeq 60 min · night limits (22–07) · so far · 30:00 / 1:00:00`.
     pub fn caption(&self) -> String {
         let mut parts = vec![self.name.clone()];
         parts.extend(self.period.iter().cloned());
@@ -184,9 +184,10 @@ pub struct BandLeqText {
     pub unit: String,
     /// The bands of every window, `20–200 Hz`, `20 Hz, 63 Hz`.
     pub bands: String,
-    pub windows: Vec<BandWindowText>,
-    /// The window and band the headline is about: the worst band of the window nearest to
-    /// (or over) its limit.
+    /// The windows grouped by length and weighting, in the order of each group's first
+    /// window.
+    pub rows: Vec<BandRowText>,
+    /// The row and bar the headline is about: the band nearest to (or over) its limit.
     pub worst: Option<(usize, usize)>,
     /// `63 Hz band LZeq 60 min 3.2 dB over its limit · cooling down in 6 min 52 s`.
     pub headline: String,
@@ -258,88 +259,136 @@ pub fn limits_from_text(p: BandLimitPlace, place: &str) -> Option<String> {
     }
 }
 
-/// One window's text from its columns of a `band_leq` frame.
-fn window_text(cfg: &BandLeqConfig, f: &BandLeqFrame, w: usize) -> BandWindowText {
+/// The configuration's window `w` when it is the frame's (a frame made under the previous
+/// configuration is read without it).
+fn config_of<'a>(cfg: &'a BandLeqConfig, f: &BandLeqFrame, w: usize) -> Option<&'a BandWindow> {
+    let st = f.meta.windows.get(w)?;
+    cfg.windows
+        .get(w)
+        .filter(|c| c.band == st.band && c.duration == st.duration && c.weighting == st.weighting)
+}
+
+/// Its window's day and night are judged apart.
+fn day_night(c: Option<&BandWindow>) -> bool {
+    c.is_some_and(|c| c.day_offset.is_some())
+}
+
+/// The band windows grouped into rows: one per length, weighting and way of judging day and
+/// night, in the order of each row's first window; each row's windows low band to high.
+pub fn group_rows<K: PartialEq>(keys: &[(f64, K)]) -> Vec<Vec<usize>> {
+    let mut rows: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (w, (_, k)) in keys.iter().enumerate() {
+        match rows.iter_mut().find(|(first, _)| keys[*first].1 == *k) {
+            Some((_, ws)) => ws.push(w),
+            None => rows.push((w, vec![w])),
+        }
+    }
+    rows.into_iter()
+        .map(|(_, mut ws)| {
+            ws.sort_by(|&a, &b| keys[a].0.total_cmp(&keys[b].0));
+            ws
+        })
+        .collect()
+}
+
+/// One window's bar from its column of a `band_leq` frame.
+fn bar(f: &BandLeqFrame, k: usize) -> BandBar {
     let m = &f.meta;
-    let st = m.windows[w];
+    let st = m.windows[k];
+    let duration = st.duration.0;
+    let filling = st.elapsed.0 < duration;
+    // A window filling for at least the horizon has its headroom until it is full.
+    let until_full = filling && duration - st.elapsed.0 >= m.horizon.0;
+    let horizon = length(m.horizon.0);
+    let nominal = st.band.0;
+    let flags = f.flags[k];
+    let judgement = flags.judgement();
+    let is_judged = judged(judgement);
+    let state = TileState::from(judgement);
+    let on_course = is_judged && flags.contains(ac2_proto::frame::LeqFlags::ON_COURSE);
+    // Floored: a ceiling to stay under.
+    let allowed_db = finite(f.allowed[k])
+        .filter(|_| is_judged)
+        .map(|a| (a * 10.0 + 1e-6).floor() / 10.0);
+    let headroom = allowed_db.map(|a| {
+        let a = format::level(a);
+        if until_full {
+            format!("until full: stay ≤ {a} dB")
+        } else {
+            format!("next {horizon}: stay ≤ {a} dB")
+        }
+    });
+    let recover_s = finite(f.recover[k]).filter(|_| is_judged);
+    let cannot = is_judged && allowed_db.is_none() && state == TileState::Over;
+    let recover = match recover_s {
+        Some(r) => Some(format!("cooling down in {}", format::duration(r))),
+        None if cannot => Some("cooling down".to_owned()),
+        None => None,
+    };
+    let leq = f64::from(f.leq[k]);
+    let leq_db = rounded(leq);
+    let limit = finite(f.limit[k]);
+    let limit_db = limit.filter(|_| is_judged);
+    BandBar {
+        window: k,
+        nominal_hz: nominal,
+        label: band_label(nominal),
+        name: band_window_name(nominal, duration, st.weighting),
+        value: format::level(leq),
+        leq_db,
+        limit_db,
+        limit: limit.map(|l| format!("limit {} dB", format::level(l))),
+        state,
+        state_text: state_text(state, on_course),
+        on_course,
+        allowed_db,
+        headroom,
+        recover_s,
+        recover,
+        over_db: limit_db
+            .filter(|_| leq_db.is_finite())
+            .map(|l| rounded(leq_db - l)),
+    }
+}
+
+/// The worse of two judged bars: the more severe, then the further above (or less below)
+/// its limit.
+fn worse(a: &BandBar, b: &BandBar) -> std::cmp::Ordering {
+    let ex = |b: &BandBar| b.over_db.unwrap_or(f64::NEG_INFINITY);
+    a.rank().cmp(&b.rank()).then(ex(a).total_cmp(&ex(b)))
+}
+
+/// One row's text from its windows (frame indices, low band to high).
+fn row_text(cfg: &BandLeqConfig, f: &BandLeqFrame, ws: &[usize]) -> BandRowText {
+    let m = &f.meta;
+    // One length: the windows fill, and miss audio, together.
+    let st = m.windows[ws[0]];
     let duration = st.duration.0;
     let elapsed = st.elapsed.0;
     let filling = elapsed < duration;
-    // A window filling for at least the horizon has its headroom until it is full.
     let until_full = filling && duration - elapsed >= m.horizon.0;
     let horizon = length(m.horizon.0);
-    let bars: Vec<BandBar> = st
-        .bands
-        .indices()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .map(|(i, b)| {
-            let k = f.col(w, i);
-            let nominal = BAND_NOMINAL_HZ[b];
-            let flags = f.flags[k];
-            let judgement = flags.judgement();
-            let is_judged = judged(judgement);
-            let state = TileState::from(judgement);
-            let on_course = is_judged && flags.contains(ac2_proto::frame::LeqFlags::ON_COURSE);
-            // Floored: a ceiling to stay under.
-            let allowed_db = finite(f.allowed[k])
-                .filter(|_| is_judged)
-                .map(|a| (a * 10.0 + 1e-6).floor() / 10.0);
-            let headroom = allowed_db.map(|a| {
-                let a = format::level(a);
-                if until_full {
-                    format!("until full: stay ≤ {a} dB")
-                } else {
-                    format!("next {horizon}: stay ≤ {a} dB")
-                }
-            });
-            let recover_s = finite(f.recover[k]).filter(|_| is_judged);
-            let cannot = is_judged && allowed_db.is_none() && state == TileState::Over;
-            let recover = match recover_s {
-                Some(r) => Some(format!("cooling down in {}", format::duration(r))),
-                None if cannot => Some("cooling down".to_owned()),
-                None => None,
-            };
-            let leq = f64::from(f.leq[k]);
-            let leq_db = rounded(leq);
-            let limit = finite(f.limit[k]);
-            let limit_db = limit.filter(|_| is_judged);
-            BandBar {
-                nominal_hz: nominal,
-                label: band_label(nominal),
-                name: band_window_name(nominal, duration, st.weighting),
-                value: format::level(leq),
-                leq_db,
-                limit_db,
-                limit: limit.map(|l| format!("limit {} dB", format::level(l))),
-                state,
-                state_text: state_text(state, on_course),
-                on_course,
-                allowed_db,
-                headroom,
-                recover_s,
-                recover,
-                over_db: limit_db
-                    .filter(|_| leq_db.is_finite())
-                    .map(|l| rounded(leq_db - l)),
-            }
-        })
-        .collect();
-    // The period matters only to a window whose limits differ by day and night.
-    let day_night = cfg
-        .windows
-        .get(w)
-        .is_some_and(|c| matches!(c.limits, BandLimitSet::NightDay { .. }) && c.limits.any());
+    let bars: Vec<BandBar> = ws.iter().map(|&k| bar(f, k)).collect();
+    // The period matters only to windows whose limits differ by day and night.
+    let day_night = ws.iter().any(|&k| {
+        config_of(cfg, f, k).is_some_and(|c| c.limit.is_some() && c.day_offset.is_some())
+    });
     let incomplete = (elapsed.min(duration) - st.measured.0 >= 1.0).then(|| {
         format!(
             "offline for {}",
             length((elapsed.min(duration) - st.measured.0).round())
         )
     });
-    BandWindowText {
-        name: ranged_window_name(&st.bands, duration, st.weighting),
-        worst: st.worst.map(usize::from).filter(|&i| i < bars.len()),
+    // Ties: the lower band.
+    let worst = bars
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.judged())
+        .max_by(|(i, a), (j, b)| worse(a, b).then(j.cmp(i)))
+        .map(|(i, _)| i);
+    BandRowText {
+        name: window_name(duration, st.weighting),
+        worst,
         period: day_night.then(|| period_text(st.period, st.period_after_horizon)),
         filling: filling.then(|| format!("so far · {} / {}", clock(elapsed), clock(duration))),
         incomplete,
@@ -366,38 +415,44 @@ pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
         LevelScale::DbSpl => "dB SPL",
         LevelScale::Dbfs => "dBFS",
     };
-    let windows: Vec<BandWindowText> = (0..m.windows.len())
-        .map(|w| window_text(cfg, f, w))
+    let keys: Vec<(f64, _)> = (0..m.windows.len())
+        .map(|w| {
+            let st = m.windows[w];
+            (
+                st.band.0,
+                (
+                    st.duration.0.to_bits(),
+                    st.weighting,
+                    day_night(config_of(cfg, f, w)),
+                ),
+            )
+        })
         .collect();
-    // The headline follows the window nearest to (or over) its limit: the most severe
-    // worst band, then the one furthest above (or least below) its limit.
-    let worst = windows
+    let rows: Vec<BandRowText> = group_rows(&keys)
+        .iter()
+        .map(|ws| row_text(cfg, f, ws))
+        .collect();
+    // The headline follows the band nearest to (or over) its limit; equal: the earlier
+    // row, as the operator ordered them, then the lower band.
+    let worst = rows
         .iter()
         .enumerate()
-        .filter_map(|(w, t)| t.worst.map(|i| (w, i, &t.bars[i])))
-        .max_by(|a, b| {
-            let ex = |b: &BandBar| b.over_db.unwrap_or(f64::NEG_INFINITY);
-            a.2.rank()
-                .cmp(&b.2.rank())
-                .then(ex(a.2).total_cmp(&ex(b.2)))
-                // Equal: the earlier window, as the operator ordered them.
-                .then(b.0.cmp(&a.0))
-        })
-        .map(|(w, i, _)| (w, i));
+        .filter_map(|(r, t)| t.worst.map(|i| (r, i, &t.bars[i])))
+        .max_by(|a, b| worse(a.2, b.2).then(b.0.cmp(&a.0)))
+        .map(|(r, i, _)| (r, i));
     let place = place_of(cfg.transfer.as_ref());
-    let (headline, headline_state) = headline(f, &windows, worst);
+    let (headline, headline_state) = headline(f, &rows, worst);
     let mut shown: Vec<usize> = m
         .windows
         .iter()
-        .filter_map(|w| w.bands.indices())
-        .flatten()
+        .filter_map(|w| band_index(w.band.0))
         .collect();
     shown.sort_unstable();
     shown.dedup();
     BandLeqText {
         unit: unit.to_owned(),
         bands: bands_text(&shown),
-        windows,
+        rows,
         worst,
         headline,
         headline_state,
@@ -410,7 +465,7 @@ pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
 
 fn headline(
     f: &BandLeqFrame,
-    windows: &[BandWindowText],
+    windows: &[BandRowText],
     worst: Option<(usize, usize)>,
 ) -> (String, TileState) {
     if f.meta.scale == LevelScale::Dbfs {
@@ -497,14 +552,7 @@ fn with_db(v: f64) -> String {
 /// What a band preset sets, as the dialog and the CLI show it.
 pub fn preset_summary(p: BandLeqPreset) -> String {
     let c = p.apply(None);
-    let mut parts = Vec::new();
-    for w in &c.windows {
-        parts.push(format!(
-            "{}, {}",
-            ranged_window_name(&w.bands, w.duration.0, w.weighting),
-            limits_summary(w)
-        ));
-    }
+    let mut parts = windows_summary(&c.windows);
     if let Some(pr) = c.predicted {
         let mut pred = Vec::new();
         if let Some(d) = pr.day {
@@ -524,21 +572,47 @@ pub fn preset_summary(p: BandLeqPreset) -> String {
     format!("{}: {}", p.name(), parts.join("; "))
 }
 
-/// A window's limits on its bands in words: `night 74 … 32 dB, day 5 dB higher`, `70 … 42
-/// dB`, `no limits`; the first and last of its bands that has one.
-pub fn limits_summary(w: &BandWindow) -> String {
-    let lims: Vec<f64> = w
-        .bands
-        .indices()
-        .into_iter()
-        .flatten()
-        .filter_map(|b| w.limits.night().get(b).copied().flatten().map(|l| l.0))
+/// Band windows in words, a part per row of the view: `20–200 Hz LZeq 60 min, night 74 …
+/// 32 dB, day 5 dB higher`.
+pub fn windows_summary(windows: &[BandWindow]) -> Vec<String> {
+    let keys: Vec<(f64, _)> = windows
+        .iter()
+        .map(|w| {
+            (
+                w.band.0,
+                (
+                    w.duration.0.to_bits(),
+                    w.weighting,
+                    w.day_offset.map(|o| o.0.to_bits()),
+                ),
+            )
+        })
         .collect();
-    match (lims.first(), lims.last(), w.limits.day_offset()) {
-        (Some(a), Some(b), Some(o)) if a == b => {
-            format!("night {a} dB, day {} dB higher", o.0)
-        }
-        (Some(a), Some(b), Some(o)) => format!("night {a} … {b} dB, day {} dB higher", o.0),
+    group_rows(&keys)
+        .iter()
+        .map(|ws| {
+            let first = &windows[ws[0]];
+            let bands: Vec<usize> = ws.iter().filter_map(|&w| windows[w].index()).collect();
+            let limits: Vec<f64> = ws
+                .iter()
+                .filter_map(|&w| windows[w].limit.map(|l| l.0))
+                .collect();
+            format!(
+                "{} {}, {}",
+                bands_text(&bands),
+                window_name(first.duration.0, first.weighting),
+                limits_summary(&limits, first.day_offset.map(|o| o.0))
+            )
+        })
+        .collect()
+}
+
+/// Limits low band to high in words: `night 74 … 32 dB, day 5 dB higher`, `70 … 42 dB`,
+/// `no limits`; the first and the last.
+pub fn limits_summary(limits: &[f64], day_offset: Option<f64>) -> String {
+    match (limits.first(), limits.last(), day_offset) {
+        (Some(a), Some(b), Some(o)) if a == b => format!("night {a} dB, day {o} dB higher"),
+        (Some(a), Some(b), Some(o)) => format!("night {a} … {b} dB, day {o} dB higher"),
         (Some(a), Some(b), None) if a == b => format!("{a} dB"),
         (Some(a), Some(b), None) => format!("{a} … {b} dB"),
         _ => "no limits".to_owned(),
@@ -643,11 +717,11 @@ pub struct BandLeqView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandLeqScene {
     pub scene: Scene,
-    /// Per window, each band's column, low to high.
+    /// Per row, each bar's column, low band to high.
     pub columns: Vec<Vec<Rect>>,
     /// The headline's box.
     pub headline: Rect,
-    /// Per window, the bar scale, dB (bottom, top).
+    /// Per row, the bar scale, dB (bottom, top).
     pub ranges: Vec<(f64, f64)>,
     pub banners: Vec<BannerRow>,
 }
@@ -685,7 +759,8 @@ pub fn bar_range(bars: &[BandBar]) -> (f64, f64) {
 
 /// Lays the band view out in `size`: the meter and calibration on one line, the headline
 /// large, the limits' place and the prediction under it, then one row of columns per
-/// window, stacked in the configuration's order, each under its caption and key.
+/// length and weighting, stacked in the order of their first windows, each under its
+/// caption and key.
 pub fn band_leq_scene(
     v: &BandLeqView,
     status: &Status,
@@ -784,12 +859,12 @@ pub fn band_leq_scene(
         y += pfs * 1.5;
     }
 
-    // The windows, stacked: each its caption and key, then its columns.
-    let n_win = t.windows.len().max(1);
+    // The rows, stacked: each its caption and key, then its columns.
+    let n_win = t.rows.len().max(1);
     let section_h = ((size.height - y - pad) / n_win as f32).max(1.0);
-    let mut columns = Vec::with_capacity(t.windows.len());
-    let mut ranges = Vec::with_capacity(t.windows.len());
-    for (wi, win) in t.windows.iter().enumerate() {
+    let mut columns = Vec::with_capacity(t.rows.len());
+    let mut ranges = Vec::with_capacity(t.rows.len());
+    for (wi, win) in t.rows.iter().enumerate() {
         let top = y + wi as f32 * section_h;
         let range = bar_range(&win.bars);
         let worst = t
@@ -810,11 +885,11 @@ pub fn band_leq_scene(
     }
 }
 
-/// One window's caption, key and columns in the section `(top, height)`; its columns.
+/// One row's caption, key and columns in the section `(top, height)`; its columns.
 #[allow(clippy::too_many_arguments)]
 fn draw_window(
     c: &mut Canvas,
-    t: &BandWindowText,
+    t: &BandRowText,
     worst: Option<usize>,
     range: (f64, f64),
     (top, height): (f32, f32),
@@ -875,9 +950,11 @@ fn draw_window(
     ));
     y += sfs * 1.5;
 
-    // The columns: a y scale left, one column per band, the band labels under them.
+    // The columns: a y scale left, one column per band, the band labels under them; a
+    // column no wider than one of the 11 low-frequency bands, so a lone band reads as a
+    // bar, not a slab.
     let scale_w = fs * 3.0;
-    let label_fs = fs.max(((w - scale_w) / 11.0 * 0.22).min(fs * 1.6));
+    let label_fs = fs.max(((w - scale_w) / WIDEST_OF as f32 * 0.22).min(fs * 1.6));
     let below_h = label_fs * 1.4 + sfs * 1.4;
     let area = Rect::new(
         pad + scale_w,
@@ -909,8 +986,7 @@ fn draw_window(
         ));
         db += step;
     }
-    let n = t.bars.len().max(1);
-    let col_w = area.w / n as f32;
+    let col_w = area.w / t.bars.len().max(WIDEST_OF) as f32;
     let gap = (col_w * 0.12).max(2.0);
     let mut columns = Vec::with_capacity(t.bars.len());
     for (i, b) in t.bars.iter().enumerate() {
@@ -1018,6 +1094,9 @@ fn draw_window(
     ));
     columns
 }
+
+/// A column is at most this many to a row's width.
+const WIDEST_OF: usize = 11;
 
 /// Text smaller than this is left out of a narrow column.
 const READABLE: f32 = 8.0;

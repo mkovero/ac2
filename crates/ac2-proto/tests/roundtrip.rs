@@ -202,6 +202,39 @@ fn tf_frame_size() {
     );
 }
 
+/// A band meter at its window cap: every window's state fits the header, with values that
+/// do not pack small (fractional seconds).
+#[test]
+fn band_leq_frame_with_every_window_fits() {
+    use ac2_proto::model::BandLeqConfig;
+    let mut f = samples::frames()
+        .into_iter()
+        .find(|f| matches!(f.data, FrameData::BandLeq(_)))
+        .expect("a band_leq sample");
+    let FrameData::BandLeq(b) = &mut f.data else {
+        unreachable!()
+    };
+    let w = b.meta.windows[0];
+    let n = BandLeqConfig::MAX_WINDOWS;
+    b.meta.windows = (0..n)
+        .map(|i| frame::BandWindowState {
+            band: units::Hz(model::BAND_NOMINAL_HZ[i % model::BAND_NOMINAL_HZ.len()]),
+            duration: units::Seconds(86_400.0),
+            elapsed: units::Seconds(86_399.5 - i as f64),
+            measured: units::Seconds(86_398.25 - i as f64),
+            ..w
+        })
+        .collect();
+    for col in [&mut b.leq, &mut b.limit, &mut b.allowed, &mut b.recover] {
+        *col = vec![61.5; n];
+    }
+    b.flags = vec![frame::LeqFlags::LIMIT; n];
+    let parts = bytes_of(&f);
+    assert!(parts[1].len() <= MAX_HEADER_BYTES, "{} B", parts[1].len());
+    println!("band_leq {n} windows: header {} B", parts[1].len());
+    assert_eq!(decode_parts(&parts).expect("decodes"), f);
+}
+
 #[test]
 fn nan_and_bit_patterns_survive() {
     let f = samples::tf_frame();

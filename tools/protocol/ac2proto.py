@@ -12,8 +12,8 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 31
-MAX_HEADER_BYTES = 1024
+PROTO_VERSION = 32
+MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
 MAX_FRAME_BYTES = 2 << 20
@@ -165,9 +165,8 @@ META = {
             ("lcpeak", ("opt", _PEAK)), ("lafmax", ("opt", _PEAK)), ("position", ("opt", _POSITION))],
     "band_leq": [("scale", None), ("cal", _CAL), ("mic_curve", None), ("horizon", None),
                  ("correction", None), ("limits_from", None),
-                 ("windows", ("list", [("bands", [("low", None), ("high", None)]), ("duration", None), ("weighting", None), ("elapsed", None),
-                                       ("measured", None), ("period", None), ("period_after_horizon", None),
-                                       ("worst", None)])),
+                 ("windows", ("list", [("band", None), ("duration", None), ("weighting", None), ("elapsed", None),
+                                       ("measured", None), ("period", None), ("period_after_horizon", None)])),
                  ("predicted", ("opt", [("duration", None), ("estimate", None), ("at_most", None),
                                         ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,

@@ -1,7 +1,7 @@
 {
  "topic": "d/4/band_leq",
  "header": {
-  "v": 31,
+  "v": 32,
   "kind": "band_leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -60,30 +60,31 @@
     "limits_from": "transferred",
     "windows": [
      {
-      "bands": {
-       "low": 50.0,
-       "high": 63.0
-      },
+      "band": 50.0,
       "duration": 3600.0,
       "weighting": "z",
       "elapsed": 1800.0,
       "measured": 1790.0,
       "period": "night",
-      "period_after_horizon": "night",
-      "worst": 1
+      "period_after_horizon": "night"
      },
      {
-      "bands": {
-       "low": 1000.0,
-       "high": 1000.0
-      },
+      "band": 63.0,
+      "duration": 3600.0,
+      "weighting": "z",
+      "elapsed": 1800.0,
+      "measured": 1790.0,
+      "period": "night",
+      "period_after_horizon": "night"
+     },
+     {
+      "band": 1000.0,
       "duration": 900.0,
       "weighting": "a",
       "elapsed": 900.0,
       "measured": 900.0,
       "period": "night",
-      "period_after_horizon": "night",
-      "worst": 0
+      "period_after_horizon": "night"
      }
     ],
     "predicted": {

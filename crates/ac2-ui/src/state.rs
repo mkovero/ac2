@@ -976,6 +976,12 @@ pub enum LeqMsg {
     Add(crate::leq_dialog::Focus),
     /// − on a row or Delete: the window of this focus removed.
     Remove(crate::leq_dialog::Focus),
+    /// "+ range…" at the band windows' heading: the range row opened.
+    OpenRange,
+    /// Add on the range row: one band window per band of it.
+    AddRange,
+    /// × on the range row: closed without adding.
+    CloseRange,
     Submit,
     /// Closes the dialog without touching the stimulus.
     Cancel,

@@ -184,6 +184,8 @@ impl AppState {
         let plain = !(chord.command || chord.alt || chord.shift);
         match chord.key {
             Key::T if plain && matches!(d.focus, Focus::Band(_)) => self.open_band_transfer(),
+            // On the range row Enter adds its bands; the dialog is sent from elsewhere.
+            Key::Enter if d.on_range() => d.add_range(),
             Key::Enter => self.submit_leq(out),
             Key::ArrowUp => d.move_row(-1),
             Key::ArrowDown => d.move_row(1),
@@ -191,6 +193,7 @@ impl AppState {
             Key::Tab => d.move_cell(1),
             Key::ArrowLeft => d.cycle(-1),
             Key::ArrowRight => d.cycle(1),
+            Key::Insert if chord.shift => d.open_range(),
             Key::Insert => d.add_window(),
             Key::Delete => d.remove_window(),
             Key::A if chord.command => d.select_all(),
