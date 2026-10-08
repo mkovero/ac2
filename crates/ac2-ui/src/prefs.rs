@@ -1,7 +1,8 @@
 //! UI preferences kept between runs (`ui.toml` in the ac2 config directory): the stimulus
 //! outputs last used on each output device (decision K4), the session dialog's choices
 //! per device — which inputs and outputs were in the session, their roles and the mic
-//! names — the Leq view's layout, whether the panes show their key hints, how long the SPL
+//! names — the Leq view's layout, whether the panes show their key hints, whether the
+//! layout keeps only the panes that draw the selection, how long the SPL
 //! meter's number holds a reading, the theme, the record toggle's time limit, the
 //! spectrograph's history span, the layout and window as last left: the focused
 //! pane, maximised or full screen, what each pane shows, the window's size and position,
@@ -9,6 +10,7 @@
 //!
 //! ```toml
 //! key_hints = false
+//! panes_follow = true
 //! spl_hold_ms = 250
 //! theme = "light"
 //! record_limit_min = 90
@@ -203,6 +205,9 @@ pub struct UiPrefs {
     pub leq: LeqLayout,
     /// The focused pane's line of its most used keys (on until the operator turns it off).
     pub key_hints: bool,
+    /// Only the panes that draw the selected measurement (or trace) are laid out
+    /// ([`crate::state::AppState::visible_panes`]); off by default.
+    pub panes_follow: bool,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
@@ -233,6 +238,7 @@ impl Default for UiPrefs {
             sessions: BTreeMap::new(),
             leq: LeqLayout::default(),
             key_hints: true,
+            panes_follow: false,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
             levels: LevelPrefs::default(),
@@ -250,6 +256,9 @@ struct File {
     /// Written only when off (the default is on). First: plain values precede tables.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     key_hints: Option<bool>,
+    /// Written only when on (the default is off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    panes_follow: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -759,6 +768,7 @@ impl UiPrefs {
             sessions,
             leq,
             key_hints: f.key_hints.unwrap_or(true),
+            panes_follow: f.panes_follow.unwrap_or(false),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             levels: f
@@ -778,6 +788,7 @@ impl UiPrefs {
     pub fn to_toml(&self) -> String {
         let f = File {
             key_hints: (!self.key_hints).then_some(false),
+            panes_follow: self.panes_follow.then_some(true),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
@@ -895,6 +906,19 @@ mod tests {
         assert_eq!(q.leq.style, LeqStyle::Columns);
         assert!(q.leq.history);
         assert!(UiPrefs::from_toml("[leq]\nstyle = \"bars\"\n").is_err());
+    }
+
+    #[test]
+    fn panes_follow_round_trip() {
+        let mut p = UiPrefs::default();
+        assert!(!p.panes_follow);
+        // Off is the default and is not written.
+        assert!(!p.to_toml().contains("panes_follow"));
+        p.panes_follow = true;
+        let text = p.to_toml();
+        assert!(text.contains("panes_follow = true"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+        assert!(UiPrefs::from_toml("panes_follow = 1\n").is_err());
     }
 
     #[test]

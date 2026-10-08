@@ -215,6 +215,15 @@ impl AppState {
         if keep.is_some() {
             self.selected_trace = keep;
         }
+        // Panes following a selection the pane cannot draw (no measurement of its kind):
+        // the focus goes back to a kept pane, so say why the key did not move it.
+        if self.follow_set().is_some() && !self.laid_out_panes().contains(&p) {
+            self.toast(format!(
+                "{}: no {} measurement to select · panes follow selection",
+                p.title(),
+                p.what()
+            ));
+        }
     }
 
     /// Selects the measurement pane `p` shows, if any.
@@ -345,10 +354,7 @@ impl AppState {
     }
 
     pub(super) fn cycle_pane(&mut self, d: i32) {
-        let vis: Vec<PaneKind> = PaneKind::ALL
-            .into_iter()
-            .filter(|p| self.layout.is_shown(*p))
-            .collect();
+        let vis = self.laid_out_panes();
         if vis.is_empty() {
             return;
         }
@@ -506,6 +512,8 @@ impl AppState {
                     self.toast(format!("key hints off · {key} shows them again"));
                 }
             }
+
+            C::PanesFollow => self.toggle_panes_follow(),
 
             C::StimulusArm => self.space(false, keymap, out),
             C::StimulusTakeOver => self.space(true, keymap, out),

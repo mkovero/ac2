@@ -580,7 +580,7 @@ impl ClockTexts {
         }
         // A calibration's age in the SPL readout counts in minutes: ten-second steps keep
         // it within a sixth of its last digit.
-        if st.layout.visible().contains(&PaneKind::Spl) {
+        if st.visible_panes().contains(&PaneKind::Spl) {
             texts.push(format!(
                 "{}",
                 (st.now_s / SLOW_REFRESH.as_secs_f64()).floor()

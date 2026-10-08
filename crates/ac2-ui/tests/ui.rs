@@ -265,6 +265,29 @@ fn no_reference_reminds_of_the_stimulus_keys() {
     snapshot(&mut h, "transfer_no_reference_reminder");
 }
 
+/// Panes following the selection: the transfer measurement selected, only the transfer
+/// and impulse-response panes are laid out, sharing the window.
+#[test]
+fn panes_follow_selection() {
+    if !have_gpu("panes_follow_selection") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::PanesFollow,
+    ));
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::SelectMeas(MeasId(1)));
+    step_until(&mut h, "the transfer and IR panes alone", |a| {
+        a.state.visible_panes() == [PaneKind::Transfer, PaneKind::Ir]
+    });
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "panes_follow");
+}
+
 /// The IR pane of a stopped transfer measurement, maximised: its kept IR tagged `stopped`
 /// after the origin, as its transfer curve is, with no STALE banner; S starts it from here.
 #[test]

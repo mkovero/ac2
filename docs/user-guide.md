@@ -155,7 +155,7 @@ Each page says whose its settings are:
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL pane's meter's Leq windows and limits ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, how long the SPL number holds, spectrograph history, level axes reset | |
+| Display | theme, key hints, panes follow selection, how long the SPL number holds, spectrograph history, level axes reset | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -444,6 +444,26 @@ A stored trace selected while maximised (a click in the Traces list, **V**) does
 transfer capture or target brings up the transfer pane, a spectrum capture the spectrum
 pane, a sweep the sweep pane (unless the transfer pane is up: it draws sweeps too). In the
 split layout every pane is on screen and selecting a trace leaves the focus where it is.
+
+#### Only the panes of the selection (panes follow selection)
+
+**Panes follow selection** (Settings › Display, or the palette: **Ctrl+K** → *Panes follow
+selection on / off*; off by default, kept in `ui.toml` as `panes_follow = true`) lays out
+only the panes that draw what is selected in the list, and they share the freed space:
+
+- a measurement → the panes that can show it (the source chip in their title), and those
+  drawing its math channels and its shown stored traces: a transfer measurement → transfer
+  and impulse response; a spectrum or RTA → spectrum / RTA; an SPL meter → SPL; a sweep →
+  the sweep pane, and with runs the transfer and impulse-response panes that draw them;
+- a stored trace → the panes drawing it and its measurement; an imported one → the panes
+  drawing it;
+- nothing selected, or none of those panes shown (the IR pane or the sweep pane put away) →
+  every shown pane.
+
+The focus moves to a kept pane when the selection hides the focused one; Tab walks the kept
+panes, and **W** maximises within them. A pane key (Alt+1 … Alt+5) to a pane with nothing of
+the selection on it selects that pane's measurement, which brings it up; with none of its
+kind, the focus stays and a toast says why.
 
 #### The layout comes back
 
@@ -2293,6 +2313,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Command | `keys.toml` |
 |---|---|
 | Recent notifications… (the messages that went by in the corner) | `notifications` |
+| Panes follow selection on / off (only the panes that draw the selected measurement) | `panes_follow` |
 | Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |

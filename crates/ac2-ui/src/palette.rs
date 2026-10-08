@@ -228,6 +228,7 @@ mod tests {
             ("new log", CommandId::SplNewLog),
             ("full screen", CommandId::Fullscreen),
             ("key hints", CommandId::KeyHints),
+            ("panes follow", CommandId::PanesFollow),
         ] {
             let r = search(q, &k, Scope::Transfer);
             assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");

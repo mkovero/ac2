@@ -239,6 +239,7 @@ impl CeilingEdit {
 pub enum DisplayRow {
     Theme,
     KeyHints,
+    PanesFollow,
     SplHold,
     SpectrumView,
     Spectrograph,
@@ -247,9 +248,10 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 7] = [
+    pub const ALL: [DisplayRow; 8] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
+        DisplayRow::PanesFollow,
         DisplayRow::SplHold,
         DisplayRow::SpectrumView,
         DisplayRow::Spectrograph,
@@ -261,6 +263,7 @@ impl DisplayRow {
         match self {
             DisplayRow::Theme => "Theme",
             DisplayRow::KeyHints => "Key hints",
+            DisplayRow::PanesFollow => "Panes follow selection",
             DisplayRow::SplHold => "SPL number holds",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SweepView => "Sweep pane shows",
@@ -330,6 +333,7 @@ pub struct PaneViews {
 pub fn display_rows(
     theme: ThemeName,
     key_hints: bool,
+    panes_follow: bool,
     spl_hold_ms: Option<u32>,
     span_s: u32,
     views: PaneViews,
@@ -344,6 +348,13 @@ pub fn display_rows(
                         "shown under the focused pane".into()
                     } else {
                         "hidden".into()
+                    }
+                }
+                DisplayRow::PanesFollow => {
+                    if panes_follow {
+                        "on: only the panes that draw the selected measurement".into()
+                    } else {
+                        "off: every pane".into()
                     }
                 }
                 DisplayRow::SplHold => match spl_hold_ms {
@@ -979,13 +990,14 @@ mod tests {
             spectrum: SpectrumMode::Split,
             sweep: SweepMode::Room,
         };
-        let rows = display_rows(ThemeName::Light, false, Some(500), 30, views);
+        let rows = display_rows(ThemeName::Light, false, false, Some(500), 30, views);
         let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
         assert_eq!(
             texts,
             vec![
                 "light",
                 "hidden",
+                "off: every pane",
                 "0.50 s",
                 "the spectrum over its spectrograph",
                 "last 30 s",

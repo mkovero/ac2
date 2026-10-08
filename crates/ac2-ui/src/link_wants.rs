@@ -37,7 +37,7 @@ impl AppState {
     ///
     /// Per-measurement input levels are never drawn, so never received.
     pub fn wanted_topics(&self) -> HashSet<Topic> {
-        let visible = self.layout.visible();
+        let visible = self.visible_panes();
         let shows = |p: PaneKind| visible.contains(&p);
         let ir_of = shows(PaneKind::Ir)
             .then(|| crate::scenes::focus_tf(self).map(|m| m.id))
@@ -86,7 +86,7 @@ impl AppState {
     /// How often new frames may reach the UI: [`DISPLAY_PERIOD`], or [`SPL_ONLY_PERIOD`]
     /// when the SPL pane is all there is to see.
     pub fn display_period(&self) -> Duration {
-        if self.layout.visible() == [PaneKind::Spl] {
+        if self.visible_panes() == [PaneKind::Spl] {
             SPL_ONLY_PERIOD
         } else {
             DISPLAY_PERIOD
