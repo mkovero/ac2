@@ -1049,6 +1049,7 @@ class Analysis:
         freqs = np.array([16, 20, 22, 25, 31.5, 40, 50, 63, 80, 100])
         tl = _tol(self.tol["harmonics"]["lf_onset_excess_db"])
         margin = float(self.tol["distortion"]["margin_db"])
+        settle_s = float(self.tol["harmonics"]["lf_onset_settle_s"])
         rows = []
         for name, s in p.sweeps.items():
             b = s.trace.freq
@@ -1075,7 +1076,16 @@ class Analysis:
                 else:
                     row.append(f"<{c.get('bound', np.nan):.0f}")
                 if fc == 22:
-                    if c["kind"] == "value":
+                    lag = _settle_lag_s(s, fc)
+                    if c["kind"] == "value" and lag is not None and lag < settle_s:
+                        ex = hv - truth
+                        self.add(id=f"{p.name}.lf_h2.{name}", group="LF H2", path=p.name,
+                                 title=f"ac2 sweep {name}: H2 excess at 22 Hz", value=ex, unit="dB", tol=tl,
+                                 status="INFO",
+                                 meaning=f"ac2 H2 {hv:.1f} dBr against the sine truth {truth:.1f} dBr; not judged: this "
+                                         f"sweep reaches 22 Hz {lag:.2f} s after full level, inside the path's own "
+                                         f"settling ({settle_s:g} s), where a steady sine reads the same rise")
+                    elif c["kind"] == "value":
                         ex = hv - truth
                         self.add(id=f"{p.name}.lf_h2.{name}", group="LF H2", path=p.name,
                                  title=f"ac2 sweep {name}: H2 excess at 22 Hz", value=ex, unit="dB", tol=tl,
@@ -1205,6 +1215,14 @@ class Analysis:
                          status=st, meaning=f"broadband; ac2 {av:.3f}, {other} {ov:.3f}" + why)
         self.table(f"{p.name}: room parameters, broadband", ["metric", "ac2", "REW", "numpy (REW IR)"], rows,
                    "numpy: Schroeder integral after noise subtraction, simple truncation; approximate band filters")
+
+
+def _settle_lag_s(s, fc):
+    """Seconds from a sweep's full level to its pass through `fc`: ac2 fades in below the asked
+    start, so full level is at the asked start and the rate is the exponential sweep's L."""
+    if not (s.start_hz and s.end_hz and s.duration_s) or fc < s.start_hz:
+        return None
+    return s.duration_s / np.log(s.end_hz / s.start_hz) * np.log(fc / s.start_hz)
 
 
 def _nearest_finite(f, v, fc, max_oct=1 / 24):

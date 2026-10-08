@@ -588,3 +588,29 @@ and within the sine truth's interpolation between 15 and 26 Hz. The PASS → INC
 against the previous baseline are the 100 Hz line found this time (its detection at 6 dB over
 the local median varies run to run) and REW's H2 at 35 Hz 0.9 dB short of its floor + margin.
 Baseline `xone-10dbfs.json` re-taken from this run.
+
+### LF H2 right after the sweep's fade-in is the Xone's (2026-10-08, ac2d 35f6ca4, −10 dBFS, balanced wiring)
+
+Run `20261008T174954Z` (Xone on out 5 → in 5, reference out 2 → in 2) warned on the dist sweep's
+H2 at 22 Hz: −94.0 dBr against the net sine truth −97.2 (+3.1 dB; dist-probe +1.9, the 10 Hz
+sweeps +0.4 / +1.1). It is a real, short-lived rise of the Xone's H2, which a sweep starting at
+20 Hz measures and a steady sine or REW's 10 Hz sweep does not:
+
+- Each input against the emitted stimulus (as REW does): the loopback's H2 matches REW within
+  0.3 dB at every column 20–100 Hz; the Xone's matches REW from 30 Hz up and in H3 everywhere,
+  and only its H2 at 20–26 Hz reads high, most on the 20 Hz sweeps (22 Hz: −94.9 vs REW −98.4).
+- A plain numpy deconvolution of the same records (whole record, M/R, Hann windows of 0.1–0.27 s,
+  no high-pass) reads the dist records 2–4 dB above the 10 Hz ones at 20–26 Hz: the excess is in
+  the capture, not ac2's analysis.
+- Steady 22 Hz on the rig (jackio, out 5 + out 2): after a 1 s fade-in, Xone H2 −98.7 dBr from
+  the first 0.25 s window (loopback −97.8). After the dist sweep's own start (exponential chirp
+  from 4.29 Hz, L 0.7 s, 1.08 s fade) gliding into a held 22 Hz: −94.3 / −94.5 dBr in the window
+  50 ms after reaching 22 Hz, −97.6 at 100 ms, −98…−99.5 from 200 ms; the loopback stays at
+  −97…−98. The dist sweep crosses 20–26 Hz within 0.2 s of its fade's end; the 10 Hz sweeps cross
+  it 0.5 s or more after.
+
+The suite reports a sweep that reaches 22 Hz less than `lf_onset_settle_s` (0.3 s) after full
+level as INFO instead of judging it. The 10 Hz sweeps' remaining +0.4 … +1.1 dB is ac2's harmonic
+resolution: at 0.1 s windows the H2 band at column 22 Hz spans 29–59 Hz (three 10 Hz cells), so
+the Xone's H2 rising below 22 Hz is averaged in; at 0.25 s windows they read −97.8 / −98.7. Re-run
+analysis: 261 PASS, 0 WARN, 0 FAIL.

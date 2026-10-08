@@ -69,3 +69,13 @@ def test_a_sweep_divided_by_the_reference_reads_the_meas_harmonic_less_the_refer
     assert abs(dual_channel_harmonic_dbr(tones, half, 3) - (-90 + 20 * np.log10(0.5))) < 1e-9
     # k·f outside the tones: no truth to form
     assert dual_channel_harmonic_dbr(tones, dict(tones[1], h_vec=half["h_vec"]), 3) is None
+
+
+def test_settle_lag_from_full_level_to_the_column():
+    from types import SimpleNamespace
+    from crosscheck.analyse import _settle_lag_s
+    s = SimpleNamespace(start_hz=20.0, end_hz=40000.0, duration_s=5.5)
+    lag = _settle_lag_s(s, 22.0)
+    assert abs(lag - 5.5 / np.log(2000.0) * np.log(1.1)) < 1e-12 and lag < 0.1
+    assert _settle_lag_s(SimpleNamespace(start_hz=10.0, end_hz=40000.0, duration_s=5.5), 22.0) > 0.5
+    assert _settle_lag_s(SimpleNamespace(start_hz=30.0, end_hz=40000.0, duration_s=5.5), 22.0) is None

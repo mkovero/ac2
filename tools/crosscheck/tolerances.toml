@@ -54,6 +54,10 @@ high_abs_us = { pass = 0.5, warn = 2.0 }     # above 1 kHz an absolute limit (GD
 [harmonics]
 vs_truth_db = { pass = 3.0, warn = 6.0 }     # value vs steady-sine value
 lf_onset_excess_db = { pass = 3.0, warn = 6.0 }
+# A path with coupling capacitors (the Xone) shows raised LF H2 for about 0.1-0.2 s after a
+# sweep's fade-in ends (steady 22 Hz after a dist-like chirp: +4.5 dB at 50 ms, steady by
+# 0.1-0.2 s): a sweep reaching 22 Hz sooner than this after full level measures that, not ac2.
+lf_onset_settle_s = 0.3
 
 [room]
 edt_rel = { pass = 0.05, warn = 0.15 }
