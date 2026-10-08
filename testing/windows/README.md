@@ -90,9 +90,10 @@ Know this when reading the results:
   a clock and says so in Settings (*separate endpoints … may run on different clocks*).
   That note is expected; the loopback reference keeps the transfer function correct
   either way.
-- **Playing from ac2.** A session is opened on one device. On Windows the capture endpoint
-  usually has no outputs, in which case ac2 can measure but not play: the Inputs & outputs
-  page then lists no output rows. That is the first thing Test 1 checks.
+- **Playing from ac2.** Windows lists the interface as two endpoints: a capture one (its
+  inputs) and a playback one (its outputs). Settings › Audio has an **Input** and an
+  **Output** device row; with a capture endpoint as the input, the output starts on the
+  system's default output. Test 1 sets it to the interface's playback endpoint.
 
 ## 3. Test 1: the interface opens and its inputs meter
 
@@ -101,25 +102,27 @@ errors.
 
 1. In the app, **Shift+O** (or **Ctrl+K → Open audio session…**) opens Settings on its
    **Audio** page.
-2. **Device** (←/→): step through the list and write down every entry for your interface
+2. **Input** (←/→): step through the list and write down every entry for your interface
    and what each shows (*N in / M out · rate · buffer*). Pick the one with its inputs.
+   **Output** (↓, then ←/→): pick the interface's playback endpoint (*0 in / N out*), not
+   the laptop speakers. Note the clock note shown under the rows.
 3. Go to the **Inputs & outputs** page (**Alt+1**). Tap the mic or play something into an
-   input: its row's meter must move. Check every input you have. **Note whether output
-   rows are listed** and the clock note shown.
+   input: its row's meter must move. Check every input you have. The output rows below
+   are the playback endpoint's outputs.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
-   (cable 2; **N** names it, e.g. "cable"). If output rows are listed: **S** on output 1,
-   and make sure output 2 is in the session too (**Space** on its row); optional: **D**
-   (*Detect loopback…*) at −40 dBFS should mark input 1 as the Reference by itself.
+   (cable 2; **N** names it, e.g. "cable"). **S** on output 1, and make sure output 2 is in
+   the session too (**Space** on its row); optional: **D** (*Detect loopback…*) at −40 dBFS
+   plays on the playback endpoint and should mark input 1 as the Reference by itself.
 5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
 6. Check the top bar: device, rate and buffer are shown. The **Inputs** list on the left
    keeps a meter per input.
 
-**Stimulus for the tests below.** If output rows were listed, ac2 plays its own pink noise
-(as written in Test 2). If not, play pink noise from another program into the interface's
-**Playback** endpoint, on outputs 1 and 2, at a low level: for example Audacity, *Generate →
-Noise → Pink*, amplitude 0.01 (−40 dBFS), looped, with Audacity's output set to the
-interface. Leave ac2's level and **Space / Enter** steps out; the measurement is the same.
-The sweep needs ac2's own output and is skipped then.
+**Stimulus for the tests below.** ac2 plays its own pink noise on the playback endpoint (as
+written in Test 2). If no output rows are listed, the Output row is not on the interface's
+playback endpoint: go back to step 2.
+
+From the CLI the same session is `ac2 session open --backend cpal --device "<capture
+endpoint>" --out-device "<playback endpoint>" --in 1-2` (names as `ac2 devices` lists them).
 
 Also worth a try: close the session (**Ctrl+K → Close audio session**), set both endpoints
 to 96000 Hz in `mmsys.cpl`, reopen, and check the top bar shows 96 kHz. Unplug and replug
@@ -132,19 +135,18 @@ interface does not open at all, copy the exact message from the app and the last
 Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finder reports
 the interface's own latency between the two inputs, about 0 ms.
 
-1. With ac2 playing: make the stimulus play on both outputs: **Ctrl+P**, **Alt+1**
+1. Make the stimulus play on both outputs: **Ctrl+P**, **Alt+1**
    (Settings › Inputs & outputs), **S** on output 2 as well, **Esc**. Output 1 feeds the
    reference over cable 1, output 2 the "measurement" over cable 2, so the measurement is a
    wire and the answer is known.
-2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise (or start the
-   external player). The transfer pane should show magnitude near 0 dB, phase near 0° and
+2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise. The transfer pane should show magnitude near 0 dB, phase near 0° and
    coherence near 1 across 20 Hz–20 kHz.
 3. Press **X** (delay finder). Expect a first arrival close to 0 ms, a high confidence,
    and no "no estimate".
 4. Watch for **banners** over the plots (NO REFERENCE, NO SIGNAL, CLIP, STALE, or a
    loopback timing warning about dropped or repeated output samples or drift). With signal
    playing there should be none; note any that appear.
-5. **Shift+Esc** stops (or stop the external player). Take a screenshot (**Win+Shift+S**,
+5. **Shift+Esc** stops. Take a screenshot (**Win+Shift+S**,
    or **Win+PrtScn**, which saves to *Pictures\Screenshots*) while playing.
 
 With a speaker and mic instead of the second cable: same steps at a quiet level. The delay
@@ -221,8 +223,8 @@ useful.
 | PC model, CPU, GPU, VM or not; Windows version and build (`winver`) | |
 | Interface model, driver (maker's or class driver) and version; Windows format set | |
 | `ac2 --version` output (and the top bar's *build …*) | |
-| Test 1: device list entries for the interface; input meters move; output rows listed? clock note; session opens (rate / buffer shown) | |
-| Stimulus: from ac2, or from another program? | |
+| Test 1: device list entries for the interface; input meters move; Output set to the playback endpoint, its rows listed; clock note; session opens (rate / buffer shown) | |
+| Output device chosen (name as listed); detect loopback found input 1? | |
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence); banners | |
 | Test 2 sweep (if ac2 plays): flat response, distortion level, arrival; finished cleanly? | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |

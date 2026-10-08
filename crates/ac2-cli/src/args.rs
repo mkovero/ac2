@@ -290,9 +290,14 @@ pub struct SessionOpen {
     /// Backend (no default: `fake` only when asked for).
     #[arg(long, value_enum)]
     pub backend: BackendArg,
-    /// Device id or name (default: the backend's only device).
+    /// Capture device id or name (default: the backend's only device).
     #[arg(long)]
     pub device: Option<String>,
+    /// Playback device id or name, when it is another device than the capture one (a USB
+    /// mic, a WASAPI output endpoint). Default: the capture device when it has outputs,
+    /// else the system's default output.
+    #[arg(long, value_name = "ID|NAME")]
+    pub out_device: Option<String>,
     /// Input channels to capture, e.g. `1-4`.
     #[arg(long = "in", value_name = "CHANNELS")]
     pub inputs: Channels,

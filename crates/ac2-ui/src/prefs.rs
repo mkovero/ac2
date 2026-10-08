@@ -99,6 +99,9 @@ pub struct DeviceRoles {
     pub stimulus: Vec<u16>,
     /// Mic name per input.
     pub mic_names: BTreeMap<u16, String>,
+    /// The device the session plays on when it is not the input device (its id); `None`:
+    /// the input device's own outputs, or the system default where it has none.
+    pub output_device: Option<String>,
 }
 
 /// The layout as the operator left it.
@@ -732,6 +735,8 @@ struct RolesFile {
     /// One-based channel (as text: TOML keys are strings) → mic name.
     #[serde(default)]
     mic_names: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    output_device: Option<String>,
 }
 
 /// One-based → zero-based.
@@ -763,6 +768,7 @@ impl RolesFile {
             mics: zeros(&self.mics)?,
             stimulus: zeros(&self.stimulus)?,
             mic_names,
+            output_device: self.output_device.clone(),
         })
     }
 
@@ -778,6 +784,7 @@ impl RolesFile {
                 .iter()
                 .map(|(c, n)| ((u32::from(*c) + 1).to_string(), n.clone()))
                 .collect(),
+            output_device: r.output_device.clone(),
         }
     }
 }
@@ -988,6 +995,7 @@ mod tests {
                 mics: vec![1, 2],
                 stimulus: vec![0],
                 mic_names: [(1, "M30 FOH".to_owned()), (2, "ECM8000".to_owned())].into(),
+                output_device: Some("hw:Out".into()),
             },
         );
         let text = p.to_toml();

@@ -156,6 +156,9 @@ pub struct DirectionCaps {
     /// One name per channel (`max_channels` of them) where the host names its channels
     /// (JACK ports); `None` where it does not (cpal).
     pub channel_names: Option<Vec<String>>,
+    /// The host's default device for this direction: where the system plays or records
+    /// unless told otherwise.
+    pub system_default: bool,
 }
 
 /// Opaque device identifier, stable for as long as the host keeps it stable.

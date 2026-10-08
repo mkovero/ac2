@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 30`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 31`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -72,7 +72,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `session.devices` | — | `backends` | |
 | `session.preview` | `backend: BackendKind`, `device: DeviceId` | `preview` | |
 | `session.preview_stop` | — | `ack` | |
-| `session.detect_loopback` | `lease_token`, `backend`, `device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L |
+| `session.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L |
 | `session.open` | `config: SessionConfig` | `session` | |
 | `session.close` | — | `ack` | |
 | `session.status` | — | `session` | |
@@ -538,7 +538,9 @@ a missing real one).
 `rates_hz` ([{min, max}]), `buffer_frames` ({min, max} \| nil), `default_rate_hz`,
 `default_buffer_frames` (u32 \| nil), `channel_names` ([string], one per channel, \| nil
 where the backend does not name channels: JACK gives the port alias or short name, cpal
-nothing).
+nothing), `system_default` (bool: the host's default device for this direction). A host
+whose devices are single-direction endpoints (WASAPI) lists an interface as an input-only
+and an output-only device, each with `duplex_clock: unknown`.
 
 `SessionConfig`: `backend: BackendKind | nil` (nil = the default backend), `input_device`,
 `output_device` (`DeviceSelector`: `default` \| `id` {`id`}), `input_channels` ([u16],
@@ -547,7 +549,10 @@ zero-based), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
 `replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
 files). `session.open` with `backend: replay` is `invalid`: recordings open with
-`session.replay`.
+`session.replay`. Input and output may be two devices of one backend; an output device
+without outputs (or an `output_device: default` the host has none for) is `not_found`
+when `output_channels > 0`. Two devices open with `clock: unknown`: they may drift, which
+the loopback monitor measures while a stimulus plays (`timing.drift`, §4.1).
 
 While a session is open the daemon meters every captured input on `session/levels` (§5.1)
 whether or not a measurement runs: per-interval sample peak, 300 ms integrated RMS and clip
@@ -566,11 +571,12 @@ stream (`unsupported` / `not_found` with the host's reason).
 **Loopback detection.** `session.detect_loopback` needs the stimulus lease (`lease_required`
 otherwise) and an explicit `level` (`refused` when nil; there is no default level); a level
 above the global ceiling, or a request while the stimulus is armed or firing, is `refused`.
-The daemon closes the preview, opens the device with every input and `output + 1` outputs,
+The daemon closes the preview, opens `input_device` with every input and `output_device`
+with `output + 1` outputs (the same id for one device),
 plays a 0.5 s pink-noise burst band-limited to 100 Hz – 10 kHz at `level` (RMS) on `output`
 only — faded in and out (20 ms), under the global ceiling and the output path's peak limit —
 then closes the stream. Each input's capture is cross-correlated with the burst as emitted
-(over delays 0 … 0.5 s). Reply `LoopbackDetection`: `backend`, `device`, `output`, `level`,
+(over delays 0 … 0.5 s). Reply `LoopbackDetection`: `backend`, `input_device`, `output_device`, `output`, `level`,
 `ranked: [LoopbackCandidate]` (every input, best first: by normalised correlation, the
 earlier arrival first among equally good ones), `loopback: u16 | nil` (the first-ranked
 input when its |correlation| ≥ 0.8, else nil), `clock`. `LoopbackCandidate`: `input`,

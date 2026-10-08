@@ -165,6 +165,7 @@ impl Backend for ReplayBackend {
                 default_rate: Some(c.sample_rate),
                 default_buffer: Some(c.block_frames),
                 channel_names: Some(c.input_names.clone()),
+                system_default: true,
             }),
             output: None,
             duplex_clock: ClockRelation::SingleCallback,

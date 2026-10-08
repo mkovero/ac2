@@ -344,7 +344,7 @@ impl Control {
         client: &ClientId,
         token: LeaseToken,
         kind: ac2_proto::model::BackendKind,
-        device: ac2_proto::model::DeviceId,
+        (input_device, output_device): (ac2_proto::model::DeviceId, ac2_proto::model::DeviceId),
         output: u16,
         level: Option<Dbfs>,
     ) -> Result<u64, ProtoError> {
@@ -388,7 +388,8 @@ impl Control {
         let req = crate::detect::DetectRequest {
             backend,
             kind,
-            device,
+            input_device,
+            output_device,
             output,
             level_dbfs: level.0,
             ceiling_dbfs: self.s.ceiling_dbfs,

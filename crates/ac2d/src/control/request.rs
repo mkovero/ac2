@@ -125,11 +125,19 @@ impl Control {
                 Command::SessionDetectLoopback {
                     lease_token,
                     backend,
-                    device,
+                    input_device,
+                    output_device,
                     output,
                     level,
                 } => {
-                    match self.start_detect(&client, lease_token, backend, device, output, level) {
+                    match self.start_detect(
+                        &client,
+                        lease_token,
+                        backend,
+                        (input_device, output_device),
+                        output,
+                        level,
+                    ) {
                         Ok(token) => {
                             self.detecting = Some((
                                 token,

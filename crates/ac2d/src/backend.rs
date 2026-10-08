@@ -111,6 +111,17 @@ pub fn fake_rig() -> Result<FakeBackend, String> {
     FakeBackend::new(fake_config()).map_err(|e| e.to_string())
 }
 
+/// The simulated rig listed as an input-only and an output-only device, the way WASAPI
+/// lists the two endpoints of one interface: a session plays on it only when its output
+/// device is chosen apart from its input device.
+pub fn fake_rig_endpoints() -> Result<FakeBackend, String> {
+    FakeBackend::new(FakeConfig {
+        endpoints: ac2_audio::FakeEndpoints::Split,
+        ..fake_config()
+    })
+    .map_err(|e| e.to_string())
+}
+
 /// What a backend is, for the operator choosing one.
 pub(crate) fn describe(kind: ac2_audio::BackendKind) -> String {
     match kind {

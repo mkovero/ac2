@@ -71,6 +71,7 @@ pub use config::{
 
 pub use backend::{
     BackendChoice, FAKE_RIG, FAKE_RIG_DISTORTION, FAKE_RIG_HALL, backend, backends, fake_rig,
+    fake_rig_endpoints,
 };
 use control::{Control, ControlMsg, Setup};
 use io::{Interest, IoSockets};

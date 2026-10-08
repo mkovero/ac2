@@ -370,6 +370,7 @@ fn backends(fake_names: bool) -> Vec<BackendInfo> {
         default_rate_hz: Some(48_000),
         default_buffer_frames: Some(256),
         channel_names: names.map(|n| n.into_iter().map(String::from).collect()),
+        system_default: true,
     };
     let dev = |backend, id: &str, names: bool| DeviceInfo {
         backend,

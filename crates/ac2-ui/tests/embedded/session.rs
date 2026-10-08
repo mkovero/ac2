@@ -41,6 +41,44 @@ fn empty_local_daemon_measures_from_the_app() -> R {
     Ok(())
 }
 
+/// From an empty daemon whose rig is listed as an input-only and an output-only device (as
+/// WASAPI lists one interface): the dialog picks the output device by itself, the session
+/// opens with the two, and the stimulus routed to the output device's output 1 reaches the
+/// measurement (the simulated rig only: nothing plays on hardware).
+#[test]
+fn a_session_plays_on_another_device_than_it_captures_from() -> R {
+    use ac2_proto::model::ClockRelation;
+    let dir = tempfile::tempdir()?;
+    let listen = ac2d::Listen::Local {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+    };
+    let audio = std::sync::Arc::new(ac2d::fake_rig_endpoints()?);
+    let mut config = ac2d::DaemonConfig::new(audio, listen, -10.0);
+    config.session_dir = dir.path().join("sessions");
+    let handle = ac2d::Daemon::start(config)?;
+    let ep = Endpoints {
+        ctrl: handle.ctrl_endpoint().to_owned(),
+        data: handle.data_endpoint().to_owned(),
+    };
+    let mut d = Driver::connect(ClientConfig::new(ep, NAME), "local daemon")?;
+    measure_from_empty(&mut d)?;
+    let open = d.st.open_session().cloned().ok_or("session")?;
+    assert_eq!(open.input_device.0, "fake:in");
+    assert_eq!(open.output_device.0, "fake:out");
+    assert_eq!(open.config.output_channels, 2);
+    assert_eq!(open.clock, ClockRelation::Unknown);
+    let gen_outputs =
+        d.st.daemon()
+            .and_then(|s| s.generator.settings.as_ref())
+            .map(|g| g.outputs.clone())
+            .ok_or("generator settings")?;
+    assert_eq!(gen_outputs, vec![0]);
+    drop(d);
+    handle.shutdown();
+    Ok(())
+}
+
 /// A stand-alone daemon on the simulated rig with an autosave directory.
 fn autosaving_daemon(dir: &std::path::Path) -> R<(ac2d::Handle, Endpoints)> {
     let listen = ac2d::Listen::Local {

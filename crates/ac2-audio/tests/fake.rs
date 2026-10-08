@@ -576,3 +576,43 @@ fn a_manual_stream_is_stepped() {
         .expect("open");
     assert_eq!(s.negotiated().delivery, ac2_audio::Delivery::Stepped);
 }
+
+/// Split endpoints list an input-only and an output-only device; a stream opens only with
+/// each direction on its own device, and reports no shared clock.
+#[test]
+fn split_endpoints_open_input_and_output_on_two_devices() {
+    use ac2_audio::fake::{FAKE_INPUT_ID, FAKE_OUTPUT_ID};
+    use ac2_audio::{ClockRelation, FakeEndpoints};
+    let backend = FakeBackend::new(FakeConfig {
+        endpoints: FakeEndpoints::Split,
+        ..FakeConfig::default()
+    })
+    .expect("config");
+    let listed = backend.enumerate().expect("enumerate");
+    let ids: Vec<&str> = listed.iter().map(|d| d.id.0.as_str()).collect();
+    assert_eq!(ids, [FAKE_INPUT_ID, FAKE_OUTPUT_ID]);
+    assert!(listed[0].input.is_some() && listed[0].output.is_none());
+    assert!(listed[1].input.is_none() && listed[1].output.is_some());
+    assert!(
+        listed
+            .iter()
+            .all(|d| d.duplex_clock == ClockRelation::Unknown)
+    );
+
+    let id = |s: &str| DeviceSelector::Id(DeviceId(s.into()));
+    let req = |output: &str| {
+        let mut r = DuplexRequest::new(vec![0, 1], 2, max_level());
+        r.input_device = id(FAKE_INPUT_ID);
+        r.output_device = id(output);
+        r
+    };
+    assert!(matches!(
+        backend.open_manual(req(FAKE_INPUT_ID)),
+        Err(AudioError::DeviceNotFound { .. })
+    ));
+    let (stream, _driver) = backend.open_manual(req(FAKE_OUTPUT_ID)).expect("open");
+    let n = stream.negotiated();
+    assert_eq!(n.input_device.0, FAKE_INPUT_ID);
+    assert_eq!(n.output_device.0, FAKE_OUTPUT_ID);
+    assert_eq!(n.clock, ClockRelation::Unknown);
+}

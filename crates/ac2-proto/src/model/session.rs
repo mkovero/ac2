@@ -74,6 +74,9 @@ pub struct DirectionInfo {
     /// One name per channel (`max_channels` of them) where the backend names its channels
     /// (JACK ports: alias or short name); `None` where it does not (cpal).
     pub channel_names: Option<Vec<String>>,
+    /// The host's default device for this direction (where the system plays or records
+    /// unless told otherwise).
+    pub system_default: bool,
 }
 
 /// A device as listed by `session.devices`.
@@ -304,8 +307,10 @@ pub struct LoopbackCandidate {
 pub struct LoopbackDetection {
     /// Backend.
     pub backend: BackendKind,
-    /// Device.
-    pub device: DeviceId,
+    /// Device the inputs were captured from.
+    pub input_device: DeviceId,
+    /// Device the burst played on.
+    pub output_device: DeviceId,
     /// Output the burst played on (zero-based).
     pub output: u16,
     /// RMS level of the burst.

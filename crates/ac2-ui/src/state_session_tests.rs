@@ -360,6 +360,7 @@ fn roles_are_remembered_per_device() {
             mics: vec![0, 2],
             stimulus: vec![1],
             mic_names: [(0, "M30".to_owned()), (2, "KM184".to_owned())].into(),
+            output_device: None,
         },
     );
     open_dialog(&mut t, backends(true));
@@ -1108,4 +1109,152 @@ fn real_audio_embedded_daemon_opens_the_session_dialog_once() {
     );
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(!t.st.open_session_when_empty);
+}
+
+/// System audio listing each direction as its own endpoint (WASAPI): an output-only device
+/// listed first and the system's default output, an input-only USB mic, and another
+/// output-only device.
+fn endpoint_backends() -> Vec<BackendInfo> {
+    let mut b = backends(false);
+    let base = b[0].devices[0].clone();
+    let endpoint = |id: &str, input: bool, output: Option<bool>| DeviceInfo {
+        backend: BackendKind::Cpal,
+        id: DeviceId(id.into()),
+        name: id.into(),
+        input: base.input.clone().filter(|_| input),
+        output: output.and_then(|default| {
+            base.output.clone().map(|o| DirectionInfo {
+                system_default: default,
+                ..o
+            })
+        }),
+        duplex_clock: ClockRelation::Unknown,
+        ..base.clone()
+    };
+    b.push(BackendInfo {
+        kind: BackendKind::Cpal,
+        description: "System audio".into(),
+        availability: Availability::Available,
+        devices: vec![
+            endpoint("Speakers", false, Some(true)),
+            endpoint("USB mic", true, None),
+            endpoint("Interface out", false, Some(false)),
+        ],
+    });
+    b
+}
+
+/// An input device without outputs plays on the system's default output; ←/→ on the
+/// Output row choose another output device, whose rows the Inputs & outputs page shows;
+/// the session opens with both devices, the loopback detection plays on the output device,
+/// and the choice is remembered for the input device.
+#[test]
+fn an_input_only_device_plays_on_another_output_device() {
+    use crate::session_dialog::OutputDevice;
+    let mut t = T::new();
+    let r = open_dialog(&mut t, endpoint_backends());
+    let d = dialog(&t);
+    // The output-only endpoint is never the input device.
+    assert_eq!(d.device_info().map(|x| x.name.as_str()), Some("USB mic"));
+    assert_eq!(previewed(&r), Some(&DeviceId("USB mic".into())));
+    assert_eq!(d.out_device, OutputDevice::Other(0));
+    assert_eq!(d.output_info().map(|x| x.name.as_str()), Some("Speakers"));
+    assert_eq!(d.output_choices().len(), 2, "no same-as-input choice");
+    assert_eq!(d.outputs.len(), 2);
+    assert!(
+        d.clock_note()
+            .is_some_and(|n| n.starts_with("Output plays on Speakers, another device")),
+        "{:?}",
+        d.clock_note()
+    );
+    // → on the Output row: the other output device; → again stays at the end; the input
+    // device's preview is untouched.
+    focus(&mut t, Row::OutputDevice);
+    let r = t.key("Right");
+    assert_eq!(previewed(&r), None, "{r:?}");
+    assert_eq!(
+        dialog(&t).output_info().map(|x| x.name.as_str()),
+        Some("Interface out")
+    );
+    t.key("Right");
+    assert_eq!(dialog(&t).out_device, OutputDevice::Other(2));
+    t.key("Left");
+    assert_eq!(dialog(&t).out_device, OutputDevice::Other(0));
+    // ← on the input row never lands on an output-only endpoint.
+    focus(&mut t, Row::Device);
+    t.key("Left");
+    assert_eq!(
+        dialog(&t).device_info().map(|x| x.name.as_str()),
+        Some("USB mic")
+    );
+
+    // The stimulus on output 1 of the output device, and a loopback detection over both.
+    focus(&mut t, Row::Output(0));
+    t.key("S");
+    assert!(dialog(&t).outputs[0].stimulus);
+    t.type_key("D", "d");
+    t.text("-30");
+    let r = t.key("Enter");
+    let req = r
+        .iter()
+        .find_map(|x| match x {
+            Request::DetectLoopback(d) => Some(d.clone()),
+            _ => None,
+        })
+        .expect("detect");
+    assert_eq!(req.device, DeviceId("USB mic".into()));
+    assert_eq!(req.output_device, DeviceId("Speakers".into()));
+    let mut det = ac2_client::fake::fake_detection();
+    det.input_device = req.device.clone();
+    det.output_device = req.output_device.clone();
+    t.conn(ConnEvent::LoopbackDetected(Ok(det)));
+    assert_eq!(dialog(&t).inputs[0].role, InputRole::Reference);
+
+    let r = t.key("Enter");
+    let (config, _, _) = opened(&r).expect("session.open");
+    assert_eq!(
+        config.input_device,
+        DeviceSelector::Id {
+            id: DeviceId("USB mic".into())
+        }
+    );
+    assert_eq!(
+        config.output_device,
+        DeviceSelector::Id {
+            id: DeviceId("Speakers".into())
+        }
+    );
+    assert_eq!(config.output_channels, 2);
+    assert_eq!(config.loopback.map(|l| l.output), Some(0));
+    let roles = t.st.prefs.sessions.get("cpal/USB mic").expect("remembered");
+    assert_eq!(roles.output_device.as_deref(), Some("Speakers"));
+    // The stimulus outputs belong to the device that plays them.
+    assert_eq!(t.st.prefs.outputs_for("Speakers"), Some(&[0][..]));
+
+    // Remembered: the next dialog comes back with the same output device.
+    t.key("Escape");
+    open_dialog(&mut t, endpoint_backends());
+    assert_eq!(
+        dialog(&t).output_info().map(|x| x.name.as_str()),
+        Some("Speakers")
+    );
+    assert!(dialog(&t).outputs[0].stimulus);
+}
+
+/// A device with both directions (JACK, the simulated rig) plays on itself: the Output row
+/// offers only that, and the session names the one device both ways.
+#[test]
+fn a_duplex_device_plays_on_itself() {
+    use crate::session_dialog::OutputDevice;
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    assert_eq!(dialog(&t).out_device, OutputDevice::SameAsInput);
+    assert_eq!(dialog(&t).output_choices(), vec![OutputDevice::SameAsInput]);
+    assert_eq!(dialog(&t).clock_note(), None);
+    focus(&mut t, Row::OutputDevice);
+    t.key("Right");
+    assert_eq!(dialog(&t).out_device, OutputDevice::SameAsInput);
+    let r = t.key("Enter");
+    let (config, _, _) = opened(&r).expect("session.open");
+    assert_eq!(config.input_device, config.output_device);
 }

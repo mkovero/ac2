@@ -68,7 +68,8 @@ async fn devices_json() -> R {
             "buffer_frames": { "min": 256, "max": 256 },
             "default_rate_hz": 48000,
             "default_buffer_frames": 256,
-            "channel_names": names
+            "channel_names": names,
+            "system_default": true
         })
     };
     assert_eq!(

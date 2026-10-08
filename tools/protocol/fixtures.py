@@ -776,7 +776,8 @@ def requests():
             {
                 "lease_token": TOKEN,
                 "backend": "jack",
-                "device": "jack",
+                "input_device": "jack",
+                "output_device": "jack",
                 "output": 0,
                 "level": -30.0,
             },

@@ -100,7 +100,7 @@ impl Page {
                  level: type dBFS, Enter · Enter opens the session · Esc closes"
             }
             Page::Audio => {
-                "↑↓ move · ←→ backend / device · type the rate or buffer · Enter opens the \
+                "↑↓ move · ←→ backend / input / output device · type the rate or buffer · Enter opens the \
                  session · Esc closes"
             }
             Page::Calibration => {
@@ -765,7 +765,7 @@ impl Settings {
         use crate::session_dialog::Row;
         let page = match r {
             Row::Input(_) | Row::Output(_) => Page::Io,
-            Row::Backend | Row::Device | Row::Rate | Row::Buffer => Page::Audio,
+            Row::Backend | Row::Device | Row::OutputDevice | Row::Rate | Row::Buffer => Page::Audio,
         };
         if self.page != page {
             self.show(page);

@@ -1,7 +1,12 @@
 //! The audio session model behind two pages of Settings ([`crate::settings`]): **Audio**
-//! (a backend, a device, rate and buffer; Shift+O) and **Inputs & outputs** (one row per
-//! input and output with its name, a live meter and its role). Pure data; the reducer
-//! routes keys here and the view draws it.
+//! (a backend, the input and output devices, rate and buffer; Shift+O) and **Inputs &
+//! outputs** (one row per input and output with its name, a live meter and its role). Pure
+//! data; the reducer routes keys here and the view draws it.
+//!
+//! The output device is the input device itself when it has outputs (one device keeps one
+//! clock where the host allows it), else the system's default output: hosts that list each
+//! direction as its own endpoint (WASAPI), and a USB mic beside an interface, need another
+//! device to play the stimulus on.
 //!
 //! Roles say what a channel is for, so nobody types channel numbers:
 //! - **R — Reference**: the input the stimulus returns on through a loopback cable (one).
@@ -104,7 +109,10 @@ pub enum Part {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Row {
     Backend,
+    /// The input (capture) device.
     Device,
+    /// The output (playback) device.
+    OutputDevice,
     Input(usize),
     Output(usize),
     Rate,
@@ -120,6 +128,15 @@ pub enum Edit {
     OutputLabel(usize),
     /// The level of the loopback detection burst.
     DetectLevel,
+}
+
+/// The device the session plays on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputDevice {
+    /// The input device (one device for both directions).
+    SameAsInput,
+    /// Another device of the backend (an index into its devices).
+    Other(usize),
 }
 
 /// Where the loopback detection stands.
@@ -150,8 +167,10 @@ pub struct SessionPlan {
     pub config: SessionConfig,
     /// Device display name, for the toast.
     pub device_name: String,
-    /// Device id (the stimulus outputs are remembered per output device).
+    /// Input device id (the roles are remembered per input device).
     pub device_id: String,
+    /// Output device id (the stimulus outputs are remembered per output device).
+    pub output_device_id: String,
     /// Remembered for this device.
     pub roles: DeviceRoles,
     /// Mic names of the session's inputs (`session.inputs`).
@@ -165,6 +184,7 @@ pub struct SessionPlan {
 pub struct DetectRequest {
     pub backend: BackendKind,
     pub device: DeviceId,
+    pub output_device: DeviceId,
     pub output: u16,
     pub level: Dbfs,
 }
@@ -175,7 +195,9 @@ pub struct SessionDialog {
     /// `None` while `session.devices` is on its way.
     pub backends: Option<Vec<BackendInfo>>,
     pub backend: usize,
+    /// The input device (an index into the backend's devices).
     pub device: usize,
+    pub out_device: OutputDevice,
     pub inputs: Vec<InputRow>,
     pub outputs: Vec<OutputRow>,
     /// Output channels of the session: outputs `0 .. out_count`.
@@ -236,6 +258,7 @@ impl SessionDialog {
             backends: None,
             backend: 0,
             device: 0,
+            out_device: OutputDevice::SameAsInput,
             inputs: Vec::new(),
             outputs: Vec::new(),
             out_count: 0,
@@ -310,6 +333,7 @@ impl SessionDialog {
                     .iter()
                     .position(|d| d.id == o.input_device)
             })
+            .or_else(|| self.input_choices().first().copied())
             .unwrap_or(0);
         self.load_device(prefs);
         // The rows are new: the focus belongs on one the shown page has.
@@ -323,6 +347,109 @@ impl SessionDialog {
 
     pub fn device_info(&self) -> Option<&DeviceInfo> {
         self.backend_info()?.devices.get(self.device)
+    }
+
+    /// The device the session plays on, if it has outputs.
+    pub fn output_info(&self) -> Option<&DeviceInfo> {
+        let d = match self.out_device {
+            OutputDevice::SameAsInput => self.device_info(),
+            OutputDevice::Other(i) => self.backend_info()?.devices.get(i),
+        }?;
+        d.output.is_some().then_some(d)
+    }
+
+    /// The input device choices: devices with inputs, in listed order (an output-only
+    /// endpoint has nothing to capture).
+    fn input_choices(&self) -> Vec<usize> {
+        self.backend_info().map_or_else(Vec::new, |b| {
+            (0..b.devices.len())
+                .filter(|&i| b.devices[i].input.is_some())
+                .collect()
+        })
+    }
+
+    /// How many input and output device choices there are.
+    pub fn device_counts(&self) -> (usize, usize) {
+        (self.input_choices().len(), self.output_choices().len())
+    }
+
+    /// The chosen input device's place among the input choices.
+    pub fn input_position(&self) -> usize {
+        self.input_choices()
+            .iter()
+            .position(|&i| i == self.device)
+            .unwrap_or(0)
+    }
+
+    /// The chosen output device's place among the output choices.
+    pub fn output_position(&self) -> usize {
+        self.output_choices()
+            .iter()
+            .position(|c| *c == self.out_device)
+            .unwrap_or(0)
+    }
+
+    /// The output device choices: the input device when it has outputs, then every other
+    /// device with outputs.
+    pub fn output_choices(&self) -> Vec<OutputDevice> {
+        let Some(b) = self.backend_info() else {
+            return Vec::new();
+        };
+        let mut v = Vec::new();
+        if self.device_info().is_some_and(|d| d.output.is_some()) {
+            v.push(OutputDevice::SameAsInput);
+        }
+        v.extend(
+            (0..b.devices.len())
+                .filter(|&i| i != self.device && b.devices[i].output.is_some())
+                .map(OutputDevice::Other),
+        );
+        v
+    }
+
+    /// The output device of a device never used before: itself when it has outputs, else
+    /// the system's default output, else the first device with outputs.
+    fn default_output(&self) -> OutputDevice {
+        let Some(b) = self.backend_info() else {
+            return OutputDevice::SameAsInput;
+        };
+        if self.device_info().is_some_and(|d| d.output.is_some()) {
+            return OutputDevice::SameAsInput;
+        }
+        let other = |default: bool| {
+            (0..b.devices.len()).find(|&i| {
+                i != self.device
+                    && b.devices[i]
+                        .output
+                        .as_ref()
+                        .is_some_and(|o| !default || o.system_default)
+            })
+        };
+        other(true)
+            .or_else(|| other(false))
+            .map_or(OutputDevice::SameAsInput, OutputDevice::Other)
+    }
+
+    /// The output device named `id`, when it is listed with outputs.
+    fn output_by_id(&self, id: &DeviceId) -> Option<OutputDevice> {
+        if self.device_info().is_some_and(|d| &d.id == id) {
+            return Some(OutputDevice::SameAsInput);
+        }
+        self.output_choices().into_iter().find(|c| match c {
+            OutputDevice::Other(i) => self
+                .backend_info()
+                .and_then(|b| b.devices.get(*i))
+                .is_some_and(|d| &d.id == id),
+            OutputDevice::SameAsInput => false,
+        })
+    }
+
+    /// The open session plays on the chosen output device.
+    pub fn is_open_output(&self) -> bool {
+        match (&self.open, self.output_info()) {
+            (Some(o), Some(d)) => self.is_open_device() && o.output_device == d.id,
+            _ => false,
+        }
     }
 
     /// The chosen backend kind.
@@ -363,7 +490,16 @@ impl SessionDialog {
             );
         }
         let d = self.device_info()?;
-        (d.duplex_clock == ClockRelation::Unknown).then(|| {
+        if let Some(out) = self.output_info()
+            && out.id != d.id
+        {
+            return Some(format!(
+                "Output plays on {}, another device than the input: the two may run on \
+                 different clocks; {CHECKED}.",
+                out.name
+            ));
+        }
+        (d.duplex_clock == ClockRelation::Unknown && d.output.is_some()).then(|| {
             format!(
                 "Input and output of this device are separate endpoints and may run on \
                  different clocks; {CHECKED}."
@@ -406,7 +542,6 @@ impl SessionDialog {
                 .and_then(|n| n.get(usize::from(ch)).cloned())
         };
         let n_in = d.input.as_ref().map_or(0, |i| i.max_channels);
-        let n_out = d.output.as_ref().map_or(0, |o| o.max_channels);
         self.inputs = (0..n_in)
             .map(|channel| InputRow {
                 channel,
@@ -417,22 +552,21 @@ impl SessionDialog {
                 curve: CurveChoice::NotChosen,
             })
             .collect();
-        self.outputs = (0..n_out)
-            .map(|channel| OutputRow {
-                channel,
-                device_name: names(d.output.as_ref(), channel),
-                rig_label: rig_label(&self.labels, channel),
-                stimulus: false,
-            })
-            .collect();
         let kind = self.backend_kind().unwrap_or(BackendKind::Fake);
         let key = UiPrefs::device_key(kind, &d.id.0);
-        let roles = prefs
+        let remembered = prefs
             .sessions
             .get(&key)
             .cloned()
-            .or_else(|| self.roles_of_open_session())
-            .unwrap_or_else(|| default_roles(kind, n_in, n_out));
+            .or_else(|| self.roles_of_open_session());
+        self.out_device = remembered
+            .as_ref()
+            .and_then(|r| r.output_device.as_ref())
+            .and_then(|id| self.output_by_id(&DeviceId(id.clone())))
+            .unwrap_or_else(|| self.default_output());
+        self.load_outputs();
+        let n_out = self.outputs.len() as u16;
+        let roles = remembered.unwrap_or_else(|| default_roles(kind, n_in, n_out));
         self.apply_roles(&roles);
         if !self.is_open_device() {
             self.rate.clear();
@@ -440,11 +574,58 @@ impl SessionDialog {
         }
     }
 
+    /// The output rows of the chosen output device, none ticked.
+    fn load_outputs(&mut self) {
+        let dir = self.output_info().and_then(|d| d.output.clone());
+        let n_out = dir.as_ref().map_or(0, |o| o.max_channels);
+        self.outputs = (0..n_out)
+            .map(|channel| OutputRow {
+                channel,
+                device_name: dir
+                    .as_ref()
+                    .and_then(|x| x.channel_names.as_ref())
+                    .and_then(|n| n.get(usize::from(channel)).cloned()),
+                rig_label: rig_label(&self.labels, channel),
+                stimulus: false,
+            })
+            .collect();
+    }
+
+    /// Another output device was chosen: its rows, with the stimulus outputs last used on
+    /// it (none on a device never used) and the session's output count clamped to it.
+    fn change_output(&mut self, to: OutputDevice, prefs: &UiPrefs) {
+        self.out_device = to;
+        self.detect = None;
+        self.notice = None;
+        self.error = None;
+        self.load_outputs();
+        let n_out = self.outputs.len() as u16;
+        let stimulus: Vec<u16> = self
+            .output_info()
+            .and_then(|d| prefs.outputs_for(&d.id.0))
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .filter(|c| *c < n_out)
+            .collect();
+        let top_stim = stimulus.iter().map(|s| s + 1).max().unwrap_or(0);
+        let wanted = if self.out_count == 0 {
+            n_out.min(2)
+        } else {
+            self.out_count
+        };
+        self.out_count = wanted.max(top_stim).min(n_out);
+        for o in &mut self.outputs {
+            o.stimulus = stimulus.contains(&o.channel);
+        }
+    }
+
     fn roles_of_open_session(&self) -> Option<DeviceRoles> {
         if !self.is_open_device() {
             return None;
         }
-        let c = &self.open.as_ref()?.config;
+        let open = self.open.as_ref()?;
+        let c = &open.config;
         let mic_names: BTreeMap<u16, String> = self
             .setup
             .iter()
@@ -463,6 +644,8 @@ impl SessionDialog {
                 .collect(),
             stimulus: c.loopback.map(|l| vec![l.output]).unwrap_or_default(),
             mic_names,
+            output_device: (open.output_device != open.input_device)
+                .then(|| open.output_device.0.clone()),
         })
     }
 
@@ -509,10 +692,22 @@ impl SessionDialog {
                 }
             }
             Row::Device => {
-                let n = self.backend_info().map_or(0, |b| b.devices.len());
-                if n > 0 && step(self.device, n) != self.device {
-                    self.device = step(self.device, n);
+                let choices = self.input_choices();
+                let at = self.input_position();
+                if let Some(&next) = choices.get(step(at, choices.len().max(1)))
+                    && next != self.device
+                {
+                    self.device = next;
                     self.load_device(prefs);
+                }
+            }
+            Row::OutputDevice => {
+                let choices = self.output_choices();
+                let at = self.output_position();
+                if let Some(&next) = choices.get(step(at, choices.len().max(1)))
+                    && next != self.out_device
+                {
+                    self.change_output(next, prefs);
                 }
             }
             _ => {}
@@ -524,7 +719,13 @@ impl SessionDialog {
     /// Focus order of the rows [`Self::part`] shows.
     pub fn rows(&self) -> Vec<Row> {
         match self.part {
-            Part::Device => vec![Row::Backend, Row::Device, Row::Rate, Row::Buffer],
+            Part::Device => vec![
+                Row::Backend,
+                Row::Device,
+                Row::OutputDevice,
+                Row::Rate,
+                Row::Buffer,
+            ],
             Part::Channels => {
                 let mut v: Vec<Row> = (0..self.inputs.len()).map(Row::Input).collect();
                 v.extend((0..self.outputs.len()).map(Row::Output));
@@ -917,6 +1118,9 @@ impl SessionDialog {
         if self.inputs.is_empty() {
             return Err("this device has no inputs to listen on".into());
         }
+        if self.output_info().is_none() {
+            return Err("choose an output device first (Audio page)".into());
+        }
         self.detect = Some(DetectPanel {
             output,
             level: typed
@@ -947,6 +1151,7 @@ impl SessionDialog {
     pub fn detect_confirm(&mut self, ceiling: Option<Dbfs>) -> Option<DetectRequest> {
         let backend = self.backend_kind()?;
         let device = self.device_info()?.id.clone();
+        let output_device = self.output_info()?.id.clone();
         let d = self.detect.as_mut()?;
         if d.phase != DetectPhase::Confirm {
             return None;
@@ -983,6 +1188,7 @@ impl SessionDialog {
         Some(DetectRequest {
             backend,
             device,
+            output_device,
             output: d.output,
             level: Dbfs(level),
         })
@@ -991,6 +1197,7 @@ impl SessionDialog {
     /// The daemon's answer: the loopback input becomes the Reference.
     pub fn detect_result(&mut self, r: Result<LoopbackDetection, String>) {
         let device = self.device_info().map(|x| x.id.clone());
+        let output_device = self.output_info().map(|x| x.id.clone());
         let Some(d) = self.detect.as_mut() else {
             return;
         };
@@ -1001,7 +1208,8 @@ impl SessionDialog {
                 self.edit = Some(Edit::DetectLevel);
             }
             Ok(det) => {
-                let same = device.as_ref() == Some(&det.device);
+                let same = device.as_ref() == Some(&det.input_device)
+                    && output_device.as_ref() == Some(&det.output_device);
                 let found = det.loopback.filter(|_| same);
                 d.phase = DetectPhase::Done(Box::new(det.clone()));
                 if let Some(input) = found
@@ -1076,7 +1284,7 @@ impl SessionDialog {
             .and_then(|o| self.outputs.iter().find(|r| r.channel == o));
         match (input, output) {
             (Some(i), Some(o)) => {
-                let now = self.is_open_device()
+                let now = self.is_open_output()
                     && self.open.as_ref().and_then(|s| s.config.loopback)
                         == Some(LoopbackRoute {
                             output: o.channel,
@@ -1205,11 +1413,19 @@ impl SessionDialog {
                 .first()
                 .map(|&output| LoopbackRoute { output, input })
         });
-        let sel = DeviceSelector::Id { id: dev.id.clone() };
+        let out_dev = self.output_info().unwrap_or(dev);
+        if self.out_count > 0 && out_dev.output.is_none() {
+            return Err(format!(
+                "{} has no outputs: choose the output device on the Audio page.",
+                out_dev.name
+            ));
+        }
         let config = SessionConfig {
             backend: Some(b.kind),
-            input_device: sel.clone(),
-            output_device: sel,
+            input_device: DeviceSelector::Id { id: dev.id.clone() },
+            output_device: DeviceSelector::Id {
+                id: out_dev.id.clone(),
+            },
             input_channels: inputs.clone(),
             output_channels: self.out_count,
             sample_rate_hz: rate,
@@ -1247,11 +1463,17 @@ impl SessionDialog {
                 .filter(|r| !r.mic.is_empty())
                 .map(|r| (r.channel, r.mic.clone()))
                 .collect(),
+            output_device: (out_dev.id != dev.id).then(|| out_dev.id.0.clone()),
         };
         Ok(SessionPlan {
             config,
-            device_name: dev.name.clone(),
+            device_name: if out_dev.id == dev.id {
+                dev.name.clone()
+            } else {
+                format!("{} (output {})", dev.name, out_dev.name)
+            },
             device_id: dev.id.0.clone(),
+            output_device_id: out_dev.id.0.clone(),
             roles,
             inputs: setup,
             transfers,
@@ -1279,6 +1501,7 @@ fn default_roles(kind: BackendKind, n_in: u16, n_out: u16) -> DeviceRoles {
             mics: vec![1],
             stimulus: vec![0],
             mic_names: BTreeMap::new(),
+            output_device: None,
         };
     }
     DeviceRoles {

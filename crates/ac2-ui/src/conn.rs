@@ -1579,7 +1579,8 @@ async fn detect(
         .call(Command::SessionDetectLoopback {
             lease_token: token,
             backend: d.backend,
-            device: d.device,
+            input_device: d.device,
+            output_device: d.output_device,
             output: d.output,
             level: Some(d.level),
         })

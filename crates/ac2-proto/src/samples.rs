@@ -317,7 +317,8 @@ pub fn commands() -> Vec<Command> {
         Command::SessionDetectLoopback {
             lease_token: token(),
             backend: BackendKind::Jack,
-            device: DeviceId("jack".into()),
+            input_device: DeviceId("jack".into()),
+            output_device: DeviceId("jack".into()),
             output: 0,
             level: Some(Dbfs(-30.0)),
         },
@@ -1423,6 +1424,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                         default_rate_hz: Some(48_000),
                         default_buffer_frames: Some(256),
                         channel_names: Some(vec!["capture_1".into(), "capture_2".into()]),
+                        system_default: true,
                     }),
                     output: None,
                     duplex_clock: ClockRelation::SingleCallback,
@@ -1448,7 +1450,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         })),
         Ok(ReplyBody::LoopbackDetection(LoopbackDetection {
             backend: BackendKind::Jack,
-            device: DeviceId("jack".into()),
+            input_device: DeviceId("jack".into()),
+            output_device: DeviceId("jack".into()),
             output: 0,
             level: Dbfs(-30.0),
             ranked: vec![

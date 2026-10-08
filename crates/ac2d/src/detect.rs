@@ -1,5 +1,5 @@
-//! Loopback detection: a short noise burst on one output of a device, then which input it
-//! came back on.
+//! Loopback detection: a short noise burst on one output of a device, then which input of
+//! the same or another device it came back on.
 //!
 //! Audio safety: the burst is built in full before the stream opens — a band-limited pink
 //! noise of [`BURST_S`] at the operator's typed level, refused above the global ceiling,
@@ -53,7 +53,8 @@ const STOP_TIMEOUT: Duration = Duration::from_millis(300);
 pub(crate) struct DetectRequest {
     pub(crate) backend: Arc<dyn Backend>,
     pub(crate) kind: BackendKind,
-    pub(crate) device: DeviceId,
+    pub(crate) input_device: DeviceId,
+    pub(crate) output_device: DeviceId,
     pub(crate) output: u16,
     pub(crate) level_dbfs: f64,
     pub(crate) ceiling_dbfs: f64,
@@ -158,28 +159,27 @@ impl Capture {
 
 /// Runs one detection; blocks for about a second.
 pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
-    let caps = r
-        .backend
-        .enumerate()
-        .map_err(audio_err)?
-        .into_iter()
-        .find(|d| d.id.0 == r.device.0)
-        .ok_or_else(|| {
+    let listed = r.backend.enumerate().map_err(audio_err)?;
+    let find = |id: &DeviceId| {
+        listed.iter().find(|d| d.id.0 == id.0).ok_or_else(|| {
             perr(
                 ErrorCode::NotFound,
-                format!("no {:?} device {:?}", r.kind, r.device.0),
+                format!("no {:?} device {:?}", r.kind, id.0),
             )
-        })?;
-    let inputs = caps
+        })
+    };
+    let in_caps = find(&r.input_device)?;
+    let out_caps = find(&r.output_device)?;
+    let inputs = in_caps
         .input
         .as_ref()
         .map_or(0, |i| i.max_channels)
         .min(MAX_INPUTS);
-    let outputs = caps.output.as_ref().map_or(0, |o| o.max_channels);
+    let outputs = out_caps.output.as_ref().map_or(0, |o| o.max_channels);
     if inputs == 0 {
         return Err(perr(
             ErrorCode::Invalid,
-            format!("{} has no inputs to listen on", caps.name),
+            format!("{} has no inputs to listen on", in_caps.name),
         ));
     }
     if r.output >= outputs {
@@ -188,16 +188,16 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
             format!(
                 "output {} does not exist: {} has {outputs} outputs",
                 r.output + 1,
-                caps.name
+                out_caps.name
             ),
         ));
     }
     let (mut handle, port) =
         generator(vec![r.output]).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
-    let sel = DeviceSelector::Id(ac2_audio::DeviceId(r.device.0.clone()));
+    let selector = |id: &DeviceId| DeviceSelector::Id(ac2_audio::DeviceId(id.0.clone()));
     let mut req = DuplexRequest::new((0..inputs).collect(), r.output + 1, r.max_level);
-    req.input_device = sel.clone();
-    req.output_device = sel;
+    req.input_device = selector(&r.input_device);
+    req.output_device = selector(&r.output_device);
     req.output = OutputSource::Generator(port);
     req.history = Some(HistoryRequest::channel(r.output));
     let mut stream = r.backend.open(req).map_err(audio_err)?;
@@ -254,7 +254,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
             r.level_dbfs,
             r.output + 1,
             r.kind,
-            r.device.0
+            r.output_device.0
         );
         // The first emitted sample, found in the history of what was actually rendered.
         let mut first: Option<u64> = None;
@@ -311,7 +311,8 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
             .map(|c| c.input);
         Ok(LoopbackDetection {
             backend: r.kind,
-            device: r.device.clone(),
+            input_device: r.input_device.clone(),
+            output_device: r.output_device.clone(),
             output: r.output,
             level: Dbfs(r.level_dbfs),
             ranked,

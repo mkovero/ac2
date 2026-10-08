@@ -46,8 +46,35 @@ use crate::output::{OutputRenderer, OutputStamp};
 use crate::rng::Rng;
 use crate::stream::{DuplexStream, Plumbing, StreamParts};
 
-/// Device id the fake lists.
+/// Device id the fake lists ([`FakeEndpoints::Duplex`]).
 pub const FAKE_DEVICE_ID: &str = "fake";
+/// Capture device id of [`FakeEndpoints::Split`].
+pub const FAKE_INPUT_ID: &str = "fake:in";
+/// Playback device id of [`FakeEndpoints::Split`].
+pub const FAKE_OUTPUT_ID: &str = "fake:out";
+
+/// How the fake lists its inputs and outputs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FakeEndpoints {
+    /// One device with both directions, like a JACK server or a Core Audio interface.
+    #[default]
+    Duplex,
+    /// An input-only device ([`FAKE_INPUT_ID`]) and an output-only one
+    /// ([`FAKE_OUTPUT_ID`]), like the two WASAPI endpoints of one interface: a session must
+    /// name a different output device than its input device to play anything.
+    Split,
+}
+
+impl FakeEndpoints {
+    /// The id of the device carrying `direction`.
+    fn id(self, direction: Direction) -> &'static str {
+        match (self, direction) {
+            (Self::Duplex, _) => FAKE_DEVICE_ID,
+            (Self::Split, Direction::Input) => FAKE_INPUT_ID,
+            (Self::Split, Direction::Output) => FAKE_OUTPUT_ID,
+        }
+    }
+}
 
 /// How the simulated callback is driven.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +269,8 @@ pub struct FakeConfig {
     pub input_names: Option<Vec<String>>,
     /// Names of the output channels as listed (one per output).
     pub output_names: Option<Vec<String>>,
+    /// One device or one per direction.
+    pub endpoints: FakeEndpoints,
 }
 
 impl Default for FakeConfig {
@@ -263,6 +292,7 @@ impl Default for FakeConfig {
             drift_horizon_seconds: 1800.0,
             input_names: None,
             output_names: None,
+            endpoints: FakeEndpoints::Duplex,
         }
     }
 }
@@ -610,8 +640,11 @@ impl FakeBackend {
             (&request.input_device, Direction::Input),
             (&request.output_device, Direction::Output),
         ] {
-            if let DeviceSelector::Id(id) = selector
-                && id.0 != FAKE_DEVICE_ID
+            // A capture-only stream opens no output device, whatever it names (as cpal).
+            let used = direction == Direction::Input || request.output_channels > 0;
+            if used
+                && let DeviceSelector::Id(id) = selector
+                && id.0 != c.endpoints.id(direction)
             {
                 return Err(AudioError::DeviceNotFound {
                     direction,
@@ -651,8 +684,8 @@ impl FakeBackend {
         let plumbing = Plumbing::new(&mut request, c.sample_rate, c.block_frames as usize);
         let negotiated = Negotiated {
             backend: BackendKind::Fake,
-            input_device: DeviceId(FAKE_DEVICE_ID.into()),
-            output_device: DeviceId(FAKE_DEVICE_ID.into()),
+            input_device: DeviceId(c.endpoints.id(Direction::Input).into()),
+            output_device: DeviceId(c.endpoints.id(Direction::Output).into()),
             sample_rate: c.sample_rate,
             input_channels: request.input_map.len() as u16,
             device_input_channels: c.inputs,
@@ -661,7 +694,12 @@ impl FakeBackend {
             buffer_frames: Some(c.block_frames),
             input_format: SampleFormat::F32,
             output_format: Some(SampleFormat::F32),
-            clock: ClockRelation::SingleCallback,
+            // The simulation runs one callback either way; two devices are reported as a
+            // host reports them, with no proof they share a clock.
+            clock: match c.endpoints {
+                FakeEndpoints::Duplex => ClockRelation::SingleCallback,
+                FakeEndpoints::Split => ClockRelation::Unknown,
+            },
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
             delivery: Delivery::Stepped,
@@ -694,7 +732,9 @@ impl Backend for FakeBackend {
 
     fn probe(&self, device: &DeviceSelector) -> Presence {
         match device {
-            DeviceSelector::Id(id) if id.0 != FAKE_DEVICE_ID => Presence::Absent,
+            DeviceSelector::Id(id) if id.0 != self.config.endpoints.id(Direction::Input) => {
+                Presence::Absent
+            }
             _ => self.outage.presence(),
         }
     }
@@ -715,19 +755,47 @@ impl Backend for FakeBackend {
             default_rate: Some(c.sample_rate),
             default_buffer: Some(c.block_frames),
             channel_names: names.clone(),
+            system_default: true,
         };
-        Ok(vec![DeviceCaps {
+        let input = Some(dir(c.inputs, &c.input_names));
+        let output = (c.outputs > 0).then(|| dir(c.outputs, &c.output_names));
+        let device = |id: &str, name: &str, input, output, duplex_clock| DeviceCaps {
             backend: BackendKind::Fake,
             host: "fake".into(),
-            id: DeviceId(FAKE_DEVICE_ID.into()),
-            name: "simulated duplex device".into(),
-            input: Some(dir(c.inputs, &c.input_names)),
-            output: (c.outputs > 0).then(|| dir(c.outputs, &c.output_names)),
-            duplex_clock: ClockRelation::SingleCallback,
+            id: DeviceId(id.into()),
+            name: name.into(),
+            input,
+            output,
+            duplex_clock,
             index: IndexExactness::Exact,
             latency: StaticLatency::Unknown,
             notes: Vec::new(),
-        }])
+        };
+        Ok(match c.endpoints {
+            FakeEndpoints::Duplex => vec![device(
+                FAKE_DEVICE_ID,
+                "simulated duplex device",
+                input,
+                output,
+                ClockRelation::SingleCallback,
+            )],
+            FakeEndpoints::Split => vec![
+                device(
+                    FAKE_INPUT_ID,
+                    "simulated input endpoint",
+                    input,
+                    None,
+                    ClockRelation::Unknown,
+                ),
+                device(
+                    FAKE_OUTPUT_ID,
+                    "simulated output endpoint",
+                    None,
+                    output,
+                    ClockRelation::Unknown,
+                ),
+            ],
+        })
     }
 
     fn open(&self, request: DuplexRequest) -> Result<DuplexStream, AudioError> {

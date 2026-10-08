@@ -8,7 +8,8 @@ use ac2_scene::meter::{MeterReading, MeterState};
 
 use crate::app::App;
 use crate::session_dialog::{
-    DetectPhase, Edit, InputRole, RoleKey, Row, SessionDialog, backend_name, device_summary,
+    DetectPhase, Edit, InputRole, OutputDevice, RoleKey, Row, SessionDialog, backend_name,
+    device_summary,
 };
 use crate::state::{Msg, Overlay, SessionMsg};
 use crate::theme::Chrome;
@@ -175,14 +176,21 @@ pub(super) fn channels_page(
         return;
     }
     if let Some(dev) = d.device_info() {
-        ui.label(
-            RichText::new(format!(
+        let text = match d.output_info() {
+            Some(out) if out.id != dev.id => format!(
+                "Input {} · {} — output {} · {} (devices are chosen on the Audio page)",
+                dev.name,
+                device_summary(dev),
+                out.name,
+                device_summary(out)
+            ),
+            _ => format!(
                 "{} · {} (the device is chosen on the Audio page)",
                 dev.name,
                 device_summary(dev)
-            ))
-            .color(ch.dim),
-        );
+            ),
+        };
+        ui.label(RichText::new(text).color(ch.dim));
         ui.add_space(4.0);
     }
     let (meters, cal) = channel_data(app, d);
@@ -262,43 +270,84 @@ fn backend_rows(ui: &mut egui::Ui, d: &SessionDialog, ch: &Chrome, msg: &mut Opt
             ui.label(text);
         });
     }
-    ui.horizontal(|ui| {
-        if label_col(ui, "Device  ", d.focus == Row::Device, ch).clicked() {
-            *msg = Some(SessionMsg::Focus(Row::Device));
+    let (inputs, outputs) = d.device_counts();
+    device_row(
+        ui,
+        "Input   ",
+        Row::Device,
+        d.device_info()
+            .map(|dev| (dev.name.clone(), device_summary(dev))),
+        d.input_position(),
+        inputs,
+        d.focus == Row::Device,
+        ch,
+        msg,
+    );
+    let out = match (d.out_device, d.output_info()) {
+        (_, None) => None,
+        (OutputDevice::SameAsInput, Some(_)) => {
+            Some(("same device as the input".to_owned(), String::new()))
         }
-        let n = d.backend_info().map_or(0, |b| b.devices.len());
-        match d.device_info() {
-            None => {
-                ui.label(RichText::new("no device").color(ch.dim));
-            }
-            Some(dev) => {
-                if n > 1 && ui.small_button("‹").clicked() {
-                    *msg = Some(SessionMsg::Cycle(Row::Device, -1));
-                }
-                let t = RichText::new(&dev.name).color(ch.text).strong();
-                if ui
-                    .add(egui::Button::selectable(d.focus == Row::Device, t))
-                    .clicked()
-                {
-                    *msg = Some(SessionMsg::Cycle(Row::Device, 1));
-                }
-                if n > 1 && ui.small_button("›").clicked() {
-                    *msg = Some(SessionMsg::Cycle(Row::Device, 1));
-                }
-                ui.label(RichText::new(device_summary(dev)).color(ch.dim));
-                if n > 1 {
-                    ui.label(
-                        RichText::new(format!("({} of {n})", d.device + 1))
-                            .small()
-                            .color(ch.dim),
-                    );
-                }
-            }
-        }
-    });
+        (OutputDevice::Other(_), Some(dev)) => Some((dev.name.clone(), device_summary(dev))),
+    };
+    device_row(
+        ui,
+        "Output  ",
+        Row::OutputDevice,
+        out,
+        d.output_position(),
+        outputs,
+        d.focus == Row::OutputDevice,
+        ch,
+        msg,
+    );
     if let Some(note) = d.clock_note() {
         ui.label(RichText::new(note).small().color(ch.dim));
     }
+}
+
+/// One device stepper: the name (a click steps on), ‹ › and its place among the choices.
+#[allow(clippy::too_many_arguments)]
+fn device_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    row: Row,
+    shown: Option<(String, String)>,
+    at: usize,
+    n: usize,
+    focused: bool,
+    ch: &Chrome,
+    msg: &mut Option<SessionMsg>,
+) {
+    ui.horizontal(|ui| {
+        if label_col(ui, label, focused, ch).clicked() {
+            *msg = Some(SessionMsg::Focus(row));
+        }
+        let Some((name, summary)) = shown else {
+            ui.label(RichText::new("no device").color(ch.dim));
+            return;
+        };
+        if n > 1 && ui.small_button("‹").clicked() {
+            *msg = Some(SessionMsg::Cycle(row, -1));
+        }
+        let t = RichText::new(name).color(ch.text).strong();
+        if ui.add(egui::Button::selectable(focused, t)).clicked() {
+            *msg = Some(SessionMsg::Cycle(row, 1));
+        }
+        if n > 1 && ui.small_button("›").clicked() {
+            *msg = Some(SessionMsg::Cycle(row, 1));
+        }
+        if !summary.is_empty() {
+            ui.label(RichText::new(summary).color(ch.dim));
+        }
+        if n > 1 {
+            ui.label(
+                RichText::new(format!("({} of {n})", at + 1))
+                    .small()
+                    .color(ch.dim),
+            );
+        }
+    });
 }
 
 fn channel_grid(

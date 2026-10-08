@@ -83,17 +83,20 @@ pub enum Command {
     /// Close the preview.
     #[serde(rename = "session.preview_stop")]
     SessionPreviewStop,
-    /// Play a short band-limited noise burst at `level` on `output` of a device and find
-    /// the input it returns on. Needs the stimulus lease and an explicit level; refused while
-    /// the stimulus is firing.
+    /// Play a short band-limited noise burst at `level` on `output` of `output_device` and
+    /// find the input of `input_device` it returns on (the same device, or two of one
+    /// backend). Needs the stimulus lease and an explicit level; refused while the stimulus
+    /// is firing.
     #[serde(rename = "session.detect_loopback")]
     SessionDetectLoopback {
         /// Lease.
         lease_token: LeaseToken,
         /// Backend.
         backend: BackendKind,
-        /// Device.
-        device: DeviceId,
+        /// Device listened on.
+        input_device: DeviceId,
+        /// Device the burst plays on.
+        output_device: DeviceId,
         /// Output to play the burst on (zero-based).
         output: u16,
         /// RMS level of the burst; refused when absent (there is no default level).
