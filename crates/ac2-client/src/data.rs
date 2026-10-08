@@ -26,18 +26,23 @@ use crate::mirror::MirrorView;
 
 /// No new frame on a topic for this long, or a frame older than this: STALE.
 pub const STALE_AFTER: Duration = Duration::from_secs(1);
-/// The same for `leq` frames, which come once a second by design: three missed.
+/// The same for the streams that come once a second by design
+/// ([`ac2_proto::Stream::once_a_second`]: `leq`, `band_leq`): three missed.
 pub const STALE_AFTER_LEQ: Duration = Duration::from_secs(3);
 
 /// When a topic's newest frame counts as stale.
 pub fn stale_after(t: &Topic) -> Duration {
     match t {
-        Topic::Data {
-            stream: ac2_proto::Stream::Leq,
-            ..
-        } => STALE_AFTER_LEQ,
+        Topic::Data { stream, .. } if stream.once_a_second() => STALE_AFTER_LEQ,
         _ => STALE_AFTER,
     }
+}
+
+/// Whether a topic's newest frame is STALE: the daemon not responding, or no new frame or a
+/// frame age past the topic's threshold ([`stale_after`]).
+pub fn is_stale(t: &Topic, responding: bool, since_new: Duration, age: Option<f64>) -> bool {
+    let after = stale_after(t);
+    !responding || since_new > after || age.is_some_and(|a| a > after.as_secs_f64())
 }
 
 /// Most messages read by one drain; bounds the time spent when the publisher outpaces us.
@@ -79,8 +84,8 @@ pub struct TopicFrame {
     /// Frame age, `now_local + offset − capture_wall_ns`, seconds; `None` until a keepalive
     /// gave a clock offset.
     pub age: Option<f64>,
-    /// STALE (Q2): no new frame for 1 s, age above 1 s (3 s for `leq`), or the daemon not
-    /// responding.
+    /// STALE (Q2): no new frame for 1 s, age above 1 s (3 s for the once-a-second `leq` and
+    /// `band_leq`, [`stale_after`]), or the daemon not responding.
     pub stale: bool,
 }
 
@@ -278,9 +283,7 @@ impl DataState {
         for (topic, k) in &self.kept {
             let since_new = now.saturating_duration_since(k.received);
             let age = frame_age(&k.frame, now_wall_ns, view.clock_offset_ns);
-            let after = stale_after(topic);
-            let stale =
-                !responding || since_new > after || age.is_some_and(|a| a > after.as_secs_f64());
+            let stale = is_stale(topic, responding, since_new, age);
             let tf = TopicFrame {
                 topic: *topic,
                 frame: k.frame.clone(),
@@ -306,4 +309,33 @@ impl DataState {
 
 fn subscribed(prefixes: &BTreeMap<Vec<u8>, usize>, topic: &[u8]) -> bool {
     prefixes.keys().any(|p| topic.starts_with(p))
+}
+
+#[cfg(test)]
+mod stale_tests {
+    use super::*;
+    use ac2_proto::Stream;
+    use ac2_proto::units::MeasId;
+
+    fn topic(stream: Stream) -> Topic {
+        Topic::Data {
+            meas: MeasId(1),
+            stream,
+        }
+    }
+
+    /// A once-a-second frame arriving a little after its second is not stale; one at the
+    /// display rate is.
+    #[test]
+    fn once_a_second_streams_wait_three_seconds() {
+        let late = Duration::from_millis(1500);
+        for s in [Stream::Leq, Stream::BandLeq] {
+            assert!(!is_stale(&topic(s), true, late, Some(1.5)), "{s:?}");
+            assert!(is_stale(&topic(s), true, late, Some(3.1)), "{s:?}");
+            assert!(is_stale(&topic(s), false, late, Some(0.1)), "{s:?}");
+        }
+        for s in Stream::ALL.into_iter().filter(|s| !s.once_a_second()) {
+            assert!(is_stale(&topic(s), true, late, Some(1.5)), "{s:?}");
+        }
+    }
 }

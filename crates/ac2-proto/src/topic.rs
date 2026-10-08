@@ -51,6 +51,16 @@ impl Stream {
         Self::Levels,
     ];
 
+    /// Whether the daemon publishes the stream once a second by design (its values are
+    /// per-second windows), rather than at the display rate: a reader judging a frame late
+    /// waits longer for these.
+    pub fn once_a_second(self) -> bool {
+        match self {
+            Self::Leq | Self::BandLeq => true,
+            Self::Tf | Self::Ir | Self::Rta | Self::Spec | Self::Spl | Self::Levels => false,
+        }
+    }
+
     /// Topic segment.
     pub fn as_str(self) -> &'static str {
         match self {

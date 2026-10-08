@@ -119,6 +119,7 @@ fn status() -> Status {
         daemon_silence_s: 0.0,
         protection: ac2_proto::frame::ProtectionFlags::NONE,
         frame_age_s: None,
+        stale_after_s: None,
         timing: None,
         clock_drift_ppm: None,
         audio_stopped: None,

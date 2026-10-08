@@ -47,8 +47,8 @@ pub fn frame(st: &AppState, meas: MeasId, stream: Stream) -> Option<&TopicFrame>
 }
 
 /// Freshness of a received frame: its age, or STALE when the client says so (no new frame
-/// within the stream's threshold — 3 s for Leq, 1 s otherwise — or the daemon not
-/// responding), or stopped when its measurement no longer runs (no frame is due).
+/// within the stream's threshold — 3 s for the once-a-second Leq and band streams, 1 s
+/// otherwise — or the daemon not responding), or stopped when its measurement no longer runs (no frame is due).
 pub fn freshness(st: &AppState, tf: &TopicFrame) -> Freshness {
     let since = tf.since_new.as_secs_f64();
     let age = tf.age.unwrap_or(since);
@@ -63,7 +63,7 @@ pub fn freshness(st: &AppState, tf: &TopicFrame) -> Freshness {
             age_s: age.max(since),
         };
     }
-    // The client's flag already applies each stream's own threshold (a once-a-second Leq frame
+    // The client's flag already applies each stream's own threshold (a once-a-second frame
     // is 3 s, the rest 1 s); judging the age again here with the general 1 s would dim a Leq
     // view for a moment whenever a frame arrived a little after its second.
     if tf.stale {
@@ -101,14 +101,21 @@ pub fn status(
     let protection = live.iter().fold(ProtectionFlags::NONE, |a, f| {
         a.with(f.frame.stamp.protection)
     });
-    let frame_age_s = live
+    // The newest frame and its own stream's threshold: a once-a-second band or Leq frame is
+    // not late at 1.5 s, and judging it on the general 1 s would flash STALE between frames.
+    let newest = live
         .iter()
-        .map(|f| freshness(st, f).age_s())
-        .min_by(f64::total_cmp);
+        .map(|f| {
+            let after = ac2_client::data::stale_after(&f.topic).as_secs_f64();
+            (freshness(st, f).age_s(), after)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    let frame_age_s = newest.map(|n| n.0);
     Status {
         daemon_silence_s,
         protection,
         frame_age_s,
+        stale_after_s: newest.map(|n| n.1),
         timing: st.mirror.as_ref().and_then(|m| m.timing),
         clock_drift_ppm: st
             .daemon()

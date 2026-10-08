@@ -116,6 +116,9 @@ pub struct Status {
     pub protection: ProtectionFlags,
     /// Age of the newest live frame shown; `None` when nothing live is shown.
     pub frame_age_s: Option<f64>,
+    /// The STALE threshold of that frame's stream, s (a once-a-second stream waits 3 s);
+    /// `None`: [`STALE_AFTER_S`].
+    pub stale_after_s: Option<f64>,
     pub timing: Option<TimingState>,
     /// Output-vs-input clock drift, ppm, when the daemon judged it a warning
     /// (`TimingStatus.drift`).
@@ -234,7 +237,7 @@ pub fn banners(s: &Status) -> Vec<Banner> {
         out.push(banner(kind, text, Some(detail)));
     }
     if let Some(age) = s.frame_age_s
-        && age > STALE_AFTER_S
+        && age > s.stale_after_s.unwrap_or(STALE_AFTER_S)
         && s.audio_stopped.is_none()
     {
         out.push(banner(
@@ -462,6 +465,7 @@ pub(crate) mod tests {
                 .with(ProtectionFlags::CHECK_ROUTING)
                 .with(ProtectionFlags::NO_SIGNAL),
             frame_age_s: Some(4.25),
+            stale_after_s: None,
             timing: Some(TimingState::Jumped {
                 from: Samples(480),
                 to: Samples(-512),
@@ -728,6 +732,16 @@ pub(crate) mod tests {
         assert!(at(1.0).is_empty());
         assert_eq!(at(1.04), ["STALE · 1.0 s"]);
         assert_eq!(at(75.0), ["STALE · 1 min"]);
+        // A once-a-second stream's frame 1.5 s old is between frames, not stale.
+        let once = |age| {
+            banners(&Status {
+                frame_age_s: Some(age),
+                stale_after_s: Some(3.0),
+                ..Status::default()
+            })
+        };
+        assert!(once(1.5).is_empty());
+        assert_eq!(texts(&once(3.5)), ["STALE · 3.5 s"]);
     }
 
     #[test]
