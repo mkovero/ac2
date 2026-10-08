@@ -772,48 +772,77 @@ to mic is compensated. The delay finder estimates it from the impulse response a
   usual case). **1** inserts the peak's delay; for the first arrival, run the finder in a
   band without the crossover (palette: *Delay finder: mid / sub band* or a custom band, CLI
   `--band`) and compare.
-- A measurement has one delay, the daemon's. **D** types it (`12.5ms`, `600samples`, or a
-  distance such as `4.3m`, converted with the speed of sound at the set temperature);
-  **,** and **.** step it by 0.1 ms, **Ctrl+,** and **Ctrl+.** by one sample, **Alt+,** and
-  **Alt+.** by a tenth of a sample; **Y** tracks it continuously. Its live curve moves at
-  once, and only it, whichever curve is the phase reference — the stored traces stay where
-  they are, also when the live curve is the reference; **,** / **.** on a selected stored
-  trace move that trace the same way. The measurement list says the delay and how far it is
-  from the measured arrival, `delay 12.60 ms (+0.10 ms from arrival)` (no bracket at the
-  arrival), the legend tags the live curve `+0.10 ms from arrival`, and the toast names the
-  step and where it lands: `Main L: delay +0.1 ms → 12.60 ms (+0.10 ms from arrival)`,
-  `Main L: delay +1 sample → 12.521 ms (+0.021 ms from arrival)`. The reference line and the
-  distance keep the measured arrival. A capture taken then is drawn exactly where the live
-  curve was (its trace starts with the same offset from the arrival, which **,** / **.**
-  adjust). The transfer function keeps its averages and turns them to the new delay instead
-  of starting over, so you can walk the phase into place by eye. **D** is the same move in
-  one go: the arrival stays and the live curve alone moves to the typed delay
-  (`Main L: delay 12.00 ms (−0.50 ms from arrival)`). **1** (the finder's) sets a new
-  arrival: nothing moves and the offset is gone; tracking (**Y**) follows the arrival and
-  keeps your offset on top of it. A stopped or hidden measurement has no live curve to move:
-  the keys only say so (**S** starts it) and leave the delay alone. Steps of 0.1 ms are
-  fractional samples at most rates (9.6 samples at 96 kHz): the daemon keeps the fraction and
-  holds the delay to a millionth of a sample, so stepping out and back lands exactly where
-  you started. Delays are kept to fractions of a sample (the finder's estimate is inserted
-  exactly, `600.25samples` can be
-  typed), shown in the measurement list to the microsecond. Tracking moves to a fractional
-  arrival too once two windows agree within a tenth of a sample, and leaves the delay alone
-  while the arrival stays within 0.05 sample of it.
-- A larger change keeps what it can: a stage of the analysis keeps its averages while the
-  change is small next to its window (about 2.4 ms at full rate, 9 ms and 28 ms for the
-  lower ranges at 48 kHz); only the stages beyond that start over and show *settling*.
-- From the CLI: `ac2 delay find main-l --insert`, or limit the band:
-  `ac2 delay find sub --band 40hz-120hz`; `ac2 delay nudge main-l -0.25samples` moves it by
-  a step; `ac2 delay set main-l 600.25samples` moves it to a value as **D** does (the arrival
-  stays).
+#### Setting the delay by hand
+
+A measurement has one delay, the daemon's.
+
+| Key | Does |
+|---|---|
+| **D** | types it: `12.5ms`, `600samples`, or a distance such as `4.3m` (converted with the speed of sound at the set temperature) |
+| **,** / **.** | step it by 0.1 ms |
+| **Ctrl+,** / **Ctrl+.** | step it by one sample |
+| **Alt+,** / **Alt+.** | step it by a tenth of a sample |
+| **Y** | tracks it continuously |
+
+**The arrival stays; the live curve moves.** Its live curve moves at once, and only it,
+whichever curve is the phase reference: the stored traces stay where they are, also when the
+live curve is the reference. **,** / **.** on a selected stored trace move that trace the
+same way.
+
+- The measurement list says the delay and how far it is from the measured arrival:
+  `delay 12.60 ms (+0.10 ms from arrival)` (no bracket at the arrival).
+- The legend tags the live curve `+0.10 ms from arrival`.
+- The toast names the step and where it lands:
+  `Main L: delay +0.1 ms → 12.60 ms (+0.10 ms from arrival)`,
+  `Main L: delay +1 sample → 12.521 ms (+0.021 ms from arrival)`.
+- The reference line and the distance keep the measured arrival.
+- A capture taken then is drawn exactly where the live curve was: its trace starts with the
+  same offset from the arrival, which **,** / **.** adjust.
+- The transfer function keeps its averages and turns them to the new delay instead of
+  starting over, so you can walk the phase into place by eye.
+
+How the keys relate:
+
+- **D** is the same move in one go: the arrival stays and the live curve alone moves to the
+  typed delay (`Main L: delay 12.00 ms (−0.50 ms from arrival)`).
+- **1** (the finder's) sets a new arrival: nothing moves and the offset is gone.
+- Tracking (**Y**) follows the arrival and keeps your offset on top of it.
+- A stopped or hidden measurement has no live curve to move: the keys only say so (**S**
+  starts it) and leave the delay alone.
+
+**Fractions of a sample.** Steps of 0.1 ms are fractional samples at most rates (9.6
+samples at 96 kHz): the daemon keeps the fraction and holds the delay to a millionth of a
+sample, so stepping out and back lands exactly where you started. The finder's estimate is
+inserted exactly, `600.25samples` can be typed, and the measurement list shows delays to the
+microsecond. Tracking moves to a fractional arrival too once two windows agree within a
+tenth of a sample, and leaves the delay alone while the arrival stays within 0.05 sample of
+it.
+
+**A larger change keeps what it can:** a stage of the analysis keeps its averages while the
+change is small next to its window (about 2.4 ms at full rate, 9 ms and 28 ms for the lower
+ranges at 48 kHz); only the stages beyond that start over and show *settling*.
+
+#### From the CLI
+
+```sh
+ac2 delay find main-l --insert
+ac2 delay find sub --band 40hz-120hz        # limit the band
+ac2 delay nudge main-l -0.25samples         # move it by a step
+ac2 delay set main-l 600.25samples          # move it to a value as D does (the arrival stays)
+```
+
+#### The impulse-response pane
 
 The inserted delay is also the time origin of the impulse-response pane (**Shift+I** shows or
 hides it). The IR pane follows the transfer measurement and carries its banners (NO
 REFERENCE, NO SIGNAL, AUDIO STOPPED, DAEMON NOT RESPONDING); a kept IR is tagged and dimmed as
-its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it says why: `Main
-L stopped — S starts it` (**S** starts and stops it from the IR pane too), `no reference:
-nothing is playing — Space arms, Enter starts the stimulus` (or `armed — Enter starts the
-stimulus`, or, with the stimulus playing, `nothing is driving the loopback`), `no signal: …`.
+its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it says why:
+
+- `Main L stopped — S starts it` (**S** starts and stops it from the IR pane too);
+- `no reference: nothing is playing — Space arms, Enter starts the stimulus` (or
+  `armed — Enter starts the stimulus`, or, with the stimulus playing,
+  `nothing is driving the loopback`);
+- `no signal: …`.
 
 <sub>[↑ Contents](#contents)</sub>
 
@@ -836,11 +865,18 @@ Imported              1 trace
   └ 1083 94cm         imported
 ```
 
-- A **capture** (Ctrl+1 … 9) is filed under the measurement it came from, a **math
-  channel** under the measurement selected when it was made (Shift+M), its captures under
-  the same measurement, a **sweep run** under its sweep measurement, an **average** (M) with
-  its inputs when they share one, and **imports** (and session traces of no measurement)
-  under **Imported**, listed last when it holds something.
+Where things are filed:
+
+| Item | Filed under |
+|---|---|
+| **capture** (Ctrl+1 … 9) | the measurement it came from |
+| **math channel** (Shift+M) | the measurement selected when it was made; its captures under the same measurement |
+| **sweep run** | its sweep measurement |
+| **average** (M) | with its inputs, when they share one |
+| **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
+
+Working with the tree:
+
 - The arrow before a measurement **folds** it (its rows are not listed; the header says how
   many are folded); **Fold / unfold the selected measurement** in the palette does the same.
 - A row's dot is its curve's colour (a ring when hidden): a click shows or hides that curve
@@ -858,13 +894,18 @@ Imported              1 trace
   moved to another measurement takes that measurement's colours. Colours follow the
   measurement, not its place in the list: deleting one measurement leaves the others'
   colours alone.
-- **Deleting a measurement that owns traces asks every time**: *Keep them (move to Imported)*,
-  *Delete them too*, or *Cancel* — **←/→** choose, **Enter** takes it (Keep is the default),
-  **Esc** cancels. An answer that would leave a math channel without an operand says so and
-  cannot be taken (Keep with a math channel under it that computes from the measurement;
-  Delete when a math channel elsewhere uses one of its traces); a math channel elsewhere that
-  computes from the measurement itself refuses the delete as before. A measurement that
-  owns nothing gets the plain confirmation.
+
+#### Deleting a measurement that owns traces
+
+It asks every time: *Keep them (move to Imported)*, *Delete them too*, or *Cancel*.
+**←/→** choose, **Enter** takes it (Keep is the default), **Esc** cancels.
+
+- An answer that would leave a math channel without an operand says so and cannot be taken:
+  Keep with a math channel under it that computes from the measurement; Delete when a math
+  channel elsewhere uses one of its traces.
+- A math channel elsewhere that computes from the measurement itself refuses the delete as
+  before.
+- A measurement that owns nothing gets the plain confirmation.
 
 <sub>[↑ Contents](#contents)</sub>
 
@@ -875,6 +916,8 @@ interpret it later: delay, polarity, offset, smoothing, calibration state, mic a
 Its curve is stored unsmoothed; the smoothing is a display setting you can change later
 (see *Smoothing* above).
 
+#### Capturing and selecting
+
 - **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
   there); **1 … 9** show and hide a slot.
 - The tree lists every stored trace under its owner, slotted or not: its name, what it is
@@ -882,36 +925,59 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   when it is, and a dot in its curve's colour (a ring when hidden). Within a measurement
   slotted traces come first by slot, then the rest oldest first. A click on a row selects
   the trace (again: deselects); a click on its dot shows or hides it.
-- **V** / **Shift+V** select the next / previous **shown** trace in the tree's order — sweep
-  results and imports included — with the live measurement as the stop between the last and
-  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too. **Esc** (with no window
-  open) goes back to the live measurement — it also stops the stimulus, as always — and
-  *Deselect the stored trace* in the palette does the same without touching the stimulus. **A** shows or hides the selected trace. **Move the selected
-  trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the trace holding that slot
-  gives it up; `none` frees its slot), so the digit keys reach it.
-- The trace keys act on the selected trace when its curve is on the transfer pane (else on
-  the live measurement): **U** inverts it, **,** / **.** move its delay by 0.1 ms, said as
-  a measurement's is (`Sweep 2: delay +0.1 ms → +0.30 ms from arrival`, its row says
-  `delay +0.30 ms from arrival` and its legend `+0.30 ms from arrival`; a stored trace keeps
-  only its offset from the arrival it was measured at — for an imported or averaged trace,
-  its own alignment — so no absolute delay is shown), **E** makes it the phase
-  reference, **K** / **Shift+K** smooth it, and **Mic curve on the selected trace…** corrects
-  it. The offset keys (**J**, **Alt+↑/↓**, below) act on a selected trace of any kind. A
-  target curve takes an offset only (it has no phase); a
-  locked trace refuses. The pane's title names the selected trace (`Sweep 2: smoothing
-  off`), and the plot marks it: a bar and a thicker swatch on its legend row, its line
-  twice as wide (transfer and spectrum panes).
-- **Spreading curves apart (display offset).** **Alt+↑** / **Alt+↓** move the selected
-  curve up / down by 1 dB, **Alt+Shift+↑** / **Alt+Shift+↓** by 3 dB, **Alt+Home** puts it
-  back at 0 dB; **J** types a value. The selected curve is the selected stored trace (any
-  kind: transfer, target, spectrum / RTA capture, sweep), else the live measurement of the
-  focused pane (the spectrum pane's when it has the focus, else the transfer pane's). A
-  stored trace's offset is part of its record (shown in `ac2 trace list`, kept in sessions
-  and exports); a live measurement's is this app's display only. The toast names the curve
-  and its new offset, and the plot says it next to the curve — the transfer legend row
-  (`Main L S2 · Δt 0.00 ms · +3.0 dB`), its row in the spectrum legend (`Main L S2 ·
-  offset +3.0 dB`), the spectrum cursor values — so a spread is never read as a level
-  difference. A locked trace keeps its offset.
+- **V** / **Shift+V** select the next / previous **shown** trace in the tree's order (sweep
+  results and imports included), with the live measurement as the stop between the last and
+  the first; **Alt+V** / **Alt+Shift+V** step through the hidden ones too.
+- **Esc** (with no window open) goes back to the live measurement; it also stops the
+  stimulus, as always. *Deselect the stored trace* in the palette does the same without
+  touching the stimulus.
+- **A** shows or hides the selected trace.
+- **Move the selected trace to slot…** in the palette (`Ctrl+K`) puts it in slot 1–9 (the
+  trace holding that slot gives it up; `none` frees its slot), so the digit keys reach it.
+
+#### Trace keys
+
+They act on the selected trace when its curve is on the transfer pane (else on the live
+measurement):
+
+| Key | Does |
+|---|---|
+| **U** | inverts it |
+| **,** / **.** | move its delay by 0.1 ms, said as a measurement's is (`Sweep 2: delay +0.1 ms → +0.30 ms from arrival`; its row says `delay +0.30 ms from arrival`, its legend `+0.30 ms from arrival`) |
+| **E** | makes it the phase reference |
+| **K** / **Shift+K** | smooth it |
+| palette *Mic curve on the selected trace…* | corrects it ([below](#mic-curve-on-a-stored-trace)) |
+
+- A stored trace keeps only its offset from the arrival it was measured at (for an imported
+  or averaged trace, its own alignment), so no absolute delay is shown.
+- The offset keys (**J**, **Alt+↑/↓**, below) act on a selected trace of any kind.
+- A target curve takes an offset only (it has no phase); a locked trace refuses.
+- The pane's title names the selected trace (`Sweep 2: smoothing off`), and the plot marks
+  it: a bar and a thicker swatch on its legend row, its line twice as wide (transfer and
+  spectrum panes).
+
+#### Spreading curves apart (display offset)
+
+| Key | Moves the selected curve |
+|---|---|
+| **Alt+↑** / **Alt+↓** | up / down by 1 dB |
+| **Alt+Shift+↑** / **Alt+Shift+↓** | up / down by 3 dB |
+| **Alt+Home** | back to 0 dB |
+| **J** | to a typed value |
+
+- The selected curve is the selected stored trace (any kind: transfer, target, spectrum /
+  RTA capture, sweep), else the live measurement of the focused pane (the spectrum pane's
+  when it has the focus, else the transfer pane's).
+- A stored trace's offset is part of its record (shown in `ac2 trace list`, kept in
+  sessions and exports); a live measurement's is this app's display only.
+- The toast names the curve and its new offset, and the plot says it next to the curve: the
+  transfer legend row (`Main L S2 · Δt 0.00 ms · +3.0 dB`), its row in the spectrum legend
+  (`Main L S2 · offset +3.0 dB`), the spectrum cursor values. A spread is never read as a
+  level difference.
+- A locked trace keeps its offset.
+
+#### Rename, export, delete
+
 - **F2** (or **Rename the selected trace…** in the palette) renames the selected stored
   trace; a double click on a trace in the list selects it and asks for its name in one go.
   `ac2 trace rename <trace> <name>` does the same from the command line.
@@ -927,6 +993,9 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
   live measurement). A locked trace is not deleted. With a measurement selected after the
   trace, the same keys are about the measurement ([above](#choosing-what-a-pane-shows)). The
   palette has **Delete selected measurement or trace…** too.
+
+#### Comparing traces
+
 - **One selection for the sweeps:** a sweep selected in the list or with V is the one the
   **Sweep / distortion** pane shows, and **N** / **Shift+N** on that pane select the sweep they
   step to, for the transfer pane and the trace keys too. A finished sweep is selected.
@@ -947,31 +1016,43 @@ Its curve is stored unsmoothed; the smoothing is a display setting you can chang
 ### Export and import
 
 `ac2 trace export <trace> --csv out.csv` (`-` for stdout) writes the ac2 CSV: a `#` header
-with every metadata field, then one row per column. The columns are always **as measured**:
-offset, polarity, nudge, smoothing and a mic curve put on afterwards are listed in the header
-but not applied, so an export re-imports exactly. `ac2 trace import out.csv` brings it back
-with its name, kind and **delay** (the delay the phase is referred to, `# delay_ms:`); the
-other display settings start fresh. A **sweep** export also holds the sweep's analysis facts
-and its impulse response, and imports as a sweep again — the Sweep / distortion pane and the
-IR view draw it as they drew the original. A sweep exported by an older ac2 (no
-`# sweep_info:` line) imports as its transfer function with the delay; the distortion is
-dropped and the import says why (`note:` in the CLI output, and in `ac2 trace show`).
+with every metadata field, then one row per column.
+
+- The columns are always **as measured**: offset, polarity, nudge, smoothing and a mic curve
+  put on afterwards are listed in the header but not applied, so an export re-imports
+  exactly.
+- `ac2 trace import out.csv` brings it back with its name, kind and **delay** (the delay the
+  phase is referred to, `# delay_ms:`); the other display settings start fresh.
+- A **sweep** export also holds the sweep's analysis facts and its impulse response, and
+  imports as a sweep again: the Sweep / distortion pane and the IR view draw it as they drew
+  the original.
+- A sweep exported by an older ac2 (no `# sweep_info:` line) imports as its transfer
+  function with the delay; the distortion is dropped and the import says why (`note:` in the
+  CLI output, and in `ac2 trace show`).
 
 ### Mic curve on a stored trace
 
-A trace captured before the mic had a curve — or with no mic name, or with the input's
-mic curve off — can be corrected afterwards: `ac2 trace mic <trace> "MM1 34804" --label 90°`
-applies that curve of the mic library (the label may be left out when the mic has one
-curve), and `ac2 trace mic <trace> none` takes it off again. In the app: select the trace
-(Traces list or V), then **Mic curve on the selected trace…** in the palette (`Ctrl+K`), prefilled with the
-trace's mic; type the curve's label after it (*MM1 34804 90°*). Like smoothing it is a
-display setting: the stored curve stays as measured, the correction (0 dB at the calibrator
-frequency, else 1 kHz) is applied when the trace is shown, and `ac2 trace show` reads `mic
-MM1 34804 (curve 90° applied after capture, 0 dB at 1000 Hz, file …)`. The curve's points are kept with the trace, so deleting or
-replacing the curve in the store later does not change the trace. A sweep's distortion is
-corrected too (each harmonic is picked up at its own frequency). A trace captured **with**
-the curve already applied (`mic … (curve … in the columns)`) refuses a second one — it would
-correct twice. Averages and math channels combine the corrected curves.
+A trace captured before the mic had a curve (or with no mic name, or with the input's mic
+curve off) can be corrected afterwards.
+
+- **CLI:** `ac2 trace mic <trace> "MM1 34804" --label 90°` applies that curve of the mic
+  library (the label may be left out when the mic has one curve);
+  `ac2 trace mic <trace> none` takes it off again.
+- **App:** select the trace (Traces list or V), then **Mic curve on the selected trace…** in
+  the palette (`Ctrl+K`), prefilled with the trace's mic; type the curve's label after it
+  (*MM1 34804 90°*).
+
+Like smoothing it is a display setting:
+
+- the stored curve stays as measured; the correction (0 dB at the calibrator frequency, else
+  1 kHz) is applied when the trace is shown, and `ac2 trace show` reads
+  `mic MM1 34804 (curve 90° applied after capture, 0 dB at 1000 Hz, file …)`;
+- the curve's points are kept with the trace, so deleting or replacing the curve in the
+  store later does not change the trace;
+- a sweep's distortion is corrected too (each harmonic is picked up at its own frequency);
+- a trace captured **with** the curve already applied (`mic … (curve … in the columns)`)
+  refuses a second one: it would correct twice;
+- averages and math channels combine the corrected curves.
 
 <sub>[↑ Contents](#contents)</sub>
 
