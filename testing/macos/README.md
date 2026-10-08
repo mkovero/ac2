@@ -56,11 +56,11 @@ Pass: the interface is listed, its inputs show live levels, and a session opens 
 errors.
 
 1. Start ac2 (Terminal command above). In the connect dialog choose **This computer's
-   audio**. The session dialog opens.
+   audio**. Settings opens on its **Audio** page.
 2. **Device** (←/→): pick your interface. Note what it shows (*N in / M out · rate ·
    buffer*).
-3. Tap the mic or play something into an input: its row's meter must move. Check every
-   input you have.
+3. Go to the **Inputs & outputs** page (**Alt+1**). Tap the mic or play something into an
+   input: its row's meter must move. Check every input you have.
 4. Roles: **↑/↓** to a row, then **R** on input 1 (the loopback), **M** on input 2
    (cable 2; **N** names it, e.g. "cable"), **S** on output 1, and make sure output 2 is in
    the session too (**Space** on its row). Optional: **D** (*Detect loopback…*) at −40 dBFS
@@ -78,9 +78,10 @@ is open (ac2 should say so and recover, not crash).
 Pass: an electrical loop reads flat (0 dB, 0°, coherence 1) and the delay finder reports
 the interface's own latency between the two inputs, about 0 ms.
 
-1. Make the stimulus play on both outputs: **Ctrl+K → Stimulus: type output channels…**,
-   type `1, 2`, **Enter**. Output 1 feeds the reference over cable 1, output 2 the
-   "measurement" over cable 2, so the measurement is a wire and the answer is known.
+1. Make the stimulus play on both outputs: **Ctrl+P**, **Alt+1** (Settings › Inputs &
+   outputs), **S** on output 2 as well, **Esc**. Output 1 feeds the reference over cable 1,
+   output 2 the "measurement" over cable 2, so the measurement is a wire and the answer is
+   known.
 2. **L**, type `-40`, **Enter**; **Space** arms, **Enter** plays pink noise. The transfer
    pane should show magnitude near 0 dB, phase near 0° and coherence near 1 across
    20 Hz–20 kHz.
@@ -108,10 +109,10 @@ plausible levels.
    −40 dBFS on cable 2 it should read close to −40 with Z weighting (**Z** in the SPL pane
    cycles A / C / Z; A reads lower on pink noise) and follow the level when you change it
    with ↑/↓. A mic on a spare input works too.
-3. Optional, if a calibrator is at hand: calibrate the mic input (**Ctrl+K → Input
-   setup…**, 94 or 114 dB) and check the meter then reads dB SPL.
-4. Maximise the SPL pane (**W**) and switch to the Leq view (**G**). The 1/5/10/30/60 min
-   windows should start filling.
+3. Optional, if a calibrator is at hand: calibrate the mic input (Settings › Calibration,
+   **C** on the input, 94 or 114 dB) and check the meter then reads dB SPL.
+4. Maximise the SPL pane (**W**); a new meter shows its Leq windows below the number
+   (**G** steps the views). The 1/5/10/30/60 min windows should start filling.
 
 ## 6. Test 4: one-hour run, unattended
 

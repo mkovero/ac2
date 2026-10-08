@@ -67,10 +67,11 @@ connected, connections the daemon did not make (a recorder, a patch to another p
 are left alone, and changing the generator's outputs never reopens the stream, so they
 stay.
 
-When JACK cannot be used, `ac2 devices`, the session dialog and the daemon log say why and
-what to do: *PipeWire is running but its JACK library isn't in use: install pipewire-jack …
-or start the daemon with `pw-jack ac2d`*, or *No JACK server: start JACK (e.g.
-`jackd -d alsa`) or use PipeWire*. libjack is loaded at run time, so ac2 starts either way.
+When JACK cannot be used, `ac2 devices`, the app's Settings › Audio and the daemon log say
+why and what to do: *PipeWire is running but its JACK library isn't in use: install
+pipewire-jack … or start the daemon with `pw-jack ac2d`*, or *No JACK server: start JACK
+(e.g. `jackd -d alsa`) or use PipeWire*. libjack is loaded at run time, so ac2 starts either
+way.
 
 **AppImage** (the desktop app only, with its embedded daemon):
 
@@ -132,8 +133,9 @@ not yet verified.
 Uninstall from **Settings → Apps** like any other program.
 
 On Windows the local daemon listens on `tcp://127.0.0.1:47820` and `:47821` (loopback only).
-WASAPI needs a buffer of 256 frames or more for reliable duplex; set it per session with
-`--buffer 256samples`. So far the MSI install and the simulated rig are verified on Windows;
+WASAPI needs a buffer of 256 frames or more for reliable duplex; the default (about 20 ms,
+1024 frames at 48 kHz) is above that, and `--buffer` (e.g. `--buffer 256samples`) sets it per
+session. So far the MSI install and the simulated rig are verified on Windows;
 WASAPI with a real interface is not yet.
 
 ## Starting a daemon
@@ -141,10 +143,11 @@ WASAPI with a real interface is not yet.
 There are three ways; pick one.
 
 - **The app hosts it.** Start **ac2**. If no daemon is running, the connect dialog opens:
-  choose *This computer's audio* (the session dialog opens next, to pick the interface and
-  channels) or *Simulated rig* to try ac2 without hardware (it starts with its session open
-  and a transfer measurement "demo" running). That daemon lives inside the app and stops
-  with it. The command-line client cannot reach it; everything it would do is in the app.
+  choose *This computer's audio* (Settings opens next on its Audio page, to pick the
+  interface and channels) or *Simulated rig* to try ac2 without hardware (it starts with its
+  session open and a transfer measurement "demo" running). That daemon lives inside the app
+  and stops with it. The command-line client cannot reach it; everything it would do is in
+  the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
   (Linux), or `ac2 daemon start` on any OS (`ac2 daemon stop` stops it). The app connects to
   it automatically. It autosaves measurements and traces and restores them, disarmed, when it
@@ -167,13 +170,14 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
 **In the app** (any daemon: hosted by the app, per-user, or remote; no terminal needed):
 
 1. Until there is an audio session the transfer pane says *No audio session — press
-   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens the session dialog.
-   The top rows pick the **backend** (JACK on Linux, system audio on macOS and Windows; one
-   that cannot be used says why and what to do, e.g. *No JACK server: start JACK (e.g.
-   `jackd -d alsa`) or use PipeWire*) and the **device** (*8 in / 8 out · 48 kHz*) with
-   **←/→**. Below them is one row per input and output with its name and, for inputs, a
-   live level meter — tap the mic or play something and you see which input it is on,
-   before anything is opened (the dialog only listens; it never plays).
+   Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio session…*) opens Settings on its
+   **Audio** page. Its rows pick the **backend** (JACK on Linux, system audio on macOS and
+   Windows; one that cannot be used says why and what to do, e.g. *No JACK server: start
+   JACK (e.g. `jackd -d alsa`) or use PipeWire*) and the **device** (*8 in / 8 out ·
+   48 kHz*) with **←/→**. The **Inputs & outputs** page (**Alt+1**, or **Ctrl+PgUp**) has
+   one row per input and output with its name and, for inputs, a live level meter — tap the
+   mic or play something and you see which input it is on, before anything is opened
+   (Settings only listens; it never plays).
 2. Mark what each channel is for, with **↑/↓** to the row and one key:
    - **R** on the input the loopback cable returns on: the **Reference**;
    - **M** on each input with a measurement mic; **N** types its name (`M30 FOH`), which
@@ -183,16 +187,17 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
    **Space** adds or removes a row from the session. Not sure which input the loopback
    is on? **D** (*Detect loopback…*) plays a 0.5 s noise burst on the stimulus output at a
    level you type (there is no default level; **Enter** plays) and marks the input it
-   comes back on as the Reference. The dialog says in words what is missing (*Pick a
+   comes back on as the Reference. Settings says in words what is missing (*Pick a
    reference input: the loopback from your stimulus output*); rate and buffer stay at the
    device's defaults unless you type them. The roles and names are remembered per device.
-3. **Enter** opens the session. With a reference and at least one mic, and no measurements
-   yet, the app offers *Reference → M30 FOH* — one transfer measurement per mic; **Enter**
-   creates and starts them. Later, **Ctrl+K** → *New transfer measurement…* (or *New
-   spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
-   (**←/→**); *Delete selected measurement* and *Close audio session* are in the palette
-   too. While the session is open, the **Inputs** list on the left keeps a named meter per
-   input with its role (*reference*, *mic*), so levels stay in sight while you measure.
+3. **Enter** (on either page) opens the session. With a reference and at least one mic, and
+   no measurements yet, the app offers *Reference → M30 FOH* — one transfer measurement per
+   mic; **Enter** creates and starts them. Later, **Ctrl+K** → *New transfer measurement…*
+   (or *New spectrum…*, *New RTA…*, *New SPL meter…*) picks inputs by name with their meters
+   (**←/→**); *Delete selected measurement or trace…* and *Close audio session* are in the
+   palette too. While the session is open, the **Inputs** list on the left keeps a named
+   meter per input with its role (*reference*, *mic*), so levels stay in sight while you
+   measure.
 
 **Or from a terminal**, with a per-user daemon running (see above):
 
@@ -302,7 +307,9 @@ refused client key fingerprint 1a2b-3c4d-5e6f-7a8b-9c0d from 10.0.0.31: not in �
 ```
 
 If that fingerprint matches what the client shows, add the key from that line to
-`authorized_clients` and restart the daemon.
+`authorized_clients` and restart the daemon. An app already connected to the rig does it
+without a restart: Settings › Connection lists the refused keys, and **A** on one authorizes
+it ([user guide](user-guide.md#connection)).
 
 Where the keys live (the ac2 config directory, shared by every ac2 program on a machine):
 

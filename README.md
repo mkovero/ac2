@@ -42,7 +42,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   one (a voltmeter across the mic's pins 2–3 and its data-sheet sensitivity, ±1 dB); a **mic
   library** with labelled curves per mic (0°, 90° …) and an explicitly chosen curve per
   input; a Calibrations view; every readout names what its dB SPL rests on.
-- **Named, metered inputs**: the session dialog and an always-on meter strip show every
+- **Named, metered inputs**: Settings › Inputs & outputs and an always-on meter strip show every
   input by name with its role (reference, mic) and level, before and during measuring.
 - **Measurement tree and traces**: every capture, sweep run, math result and import filed
   under the measurement it came from, each measurement in its own colour family; rename,

@@ -124,7 +124,7 @@ The backend is always named. Each platform has one real backend:
 Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio
 arrives in bursts on …*) with the device and buffer to change.
 
-The session dialog preselects a real interface whenever the daemon lists one. In the app's
+Settings › Audio preselects a real interface whenever the daemon lists one. In the app's
 connect dialog:
 
 - *Simulated rig* starts ready to measure (session open, a transfer measurement "demo"
@@ -277,7 +277,7 @@ instead of a curve. Its detail says what to do:
 | stimulus playing (this app's or another client's) | `reference silent: check the loopback cable` |
 
 With a loopback that also returns the generator's own output (the **R** and **S** roles in
-the session dialog, `session open --loopback-out 1 --loopback-in 1` from the CLI), the
+Settings › Inputs & outputs, `session open --loopback-out 1 --loopback-in 1` from the CLI), the
 daemon continuously checks the output → input timing and warns about dropped or repeated
 output samples.
 
@@ -1399,7 +1399,7 @@ It is chosen per input, explicitly:
 - **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 session inputs --mic 3=M30 --curve 3=90°`
   sets names and curves of several inputs at once, and `ac2 session inputs` alone lists
   them.
-- **App:** **←/→** on the input's row in the session dialog or in the **Calibrations** view
+- **App:** **←/→** on the input's row on Settings › Inputs & outputs or in the **Calibrations** view
   (palette; *Input setup…* opens it on the selected measurement's input), **Mic curve on
   input N…** (*3=90°*), or **Mic curve: next curve on the selected measurement's input**.
 
@@ -1457,7 +1457,7 @@ caption, the spectrum / RTA captions, the Calibrations view, `ac2 cal list` and
 | label | meaning |
 |---|---|
 | `cal 94 dB · 3 h ago` | acoustic: a 94 dB calibrator on this mic on this input, 3 h ago |
-| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, session dialog) |
+| `verified · 94.0 dB SPL at 1.00 kHz · 3 h ago` | the same, written out (Calibrations view, Settings › Inputs & outputs) |
 | `electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago` | electrical, a voltmeter across the connected, powered mic's pins 2–3; the sensitivity taken from the mic's curve file (`data sheet`) or typed (`typed`); ±1 dB the stated uncertainty |
 | `electrical cal (injected, 10.0 mV/Pa) ±0.5 dB` | electrical, a generator in place of the mic, phantom off |
 | `cal from other mic / input`, `from M30 on in 2 · …` | a calibration made with another mic or on another input: used, but it may not hold here |
