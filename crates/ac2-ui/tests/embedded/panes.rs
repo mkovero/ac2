@@ -960,3 +960,69 @@ fn record_and_replay_from_the_app() -> R {
     handle.shutdown();
     Ok(())
 }
+
+/// From an empty daemon: a transfer measurement, a spectrum and an SPL meter made from the
+/// app; Tab / Shift+Tab select them in the tree's order, wrapping, and the focus follows to
+/// a pane that draws each; Ctrl+Tab still steps the panes.
+#[test]
+fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
+    use ac2_ui::state::PaneKind::{Spectrum, Spl, Transfer};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
+    for (words, kind, is) in [
+        (
+            "new spectrum",
+            FormKind::Spectrum,
+            (|k: &MeasKind| matches!(k, MeasKind::Spectrum { .. })) as fn(&MeasKind) -> bool,
+        ),
+        ("new spl", FormKind::Spl, |k| {
+            matches!(k, MeasKind::Spl { .. })
+        }),
+    ] {
+        d.key("Ctrl+K");
+        d.send(Msg::Text(words.into()));
+        d.key("Enter");
+        d.until(
+            words,
+            |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == kind),
+        )?;
+        d.key("Enter");
+        d.until("the new measurement", |s| {
+            s.measurements().iter().any(|m| is(&m.config.kind))
+        })?;
+    }
+    let id_of = |s: &AppState, is: fn(&MeasKind) -> bool| {
+        s.measurements()
+            .iter()
+            .find(|m| is(&m.config.kind))
+            .map(|m| m.id)
+            .ok_or("measurement")
+    };
+    let tf = id_of(&d.st, |k| matches!(k, MeasKind::Transfer { .. }))?;
+    let sp = id_of(&d.st, |k| matches!(k, MeasKind::Spectrum { .. }))?;
+    let spl = id_of(&d.st, |k| matches!(k, MeasKind::Spl { .. }))?;
+    // The tree lists the measurements in the order they were made.
+    let order = [(tf, Transfer), (sp, Spectrum), (spl, Spl)];
+    assert_eq!(d.st.tree_meas_order(), [tf, sp, spl]);
+
+    d.send(Msg::SelectMeas(tf));
+    for i in 1..=4 {
+        d.key("Tab");
+        let (id, pane) = order[i % 3];
+        assert_eq!(d.st.selected, Some(id), "Tab {i}");
+        assert_eq!(d.st.selected_trace, None);
+        assert_eq!(d.st.layout.focus, pane, "Tab {i}");
+    }
+    // On the spectrum now; back round once, by the SPL meter.
+    for want in [tf, spl, sp] {
+        d.key("Shift+Tab");
+        assert_eq!(d.st.selected, Some(want));
+    }
+    assert_eq!(d.st.layout.focus, Spectrum);
+    d.key("Ctrl+Tab");
+    assert_ne!(d.st.layout.focus, Spectrum);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}

@@ -242,6 +242,44 @@ impl AppState {
         }
     }
 
+    /// A measurement's row in the tree chosen (click or key): selected, and a pane that draws
+    /// it has the focus.
+    pub(super) fn select_meas_row(&mut self, id: MeasId) {
+        self.select(id);
+        self.reveal_meas(id);
+        self.follow_selection_toast();
+    }
+
+    /// Tab / Shift+Tab: the next / previous measurement in the tree, from the selected one
+    /// (a selected trace's owner), wrapping.
+    pub(super) fn cycle_tree_meas(&mut self, d: i32) {
+        let ids = self.tree_meas_order();
+        if ids.is_empty() {
+            self.warn("no measurements to step through");
+            return;
+        }
+        let anchor = match self.selected_trace_meta() {
+            Some(t) => match ac2_scene::meas_list::group_of(t, &self.measurements()) {
+                ac2_proto::model::TraceOwner::Meas { meas } => Some(meas),
+                ac2_proto::model::TraceOwner::Imported => None,
+            },
+            None => self.selected,
+        };
+        // Without a measurement to start from (an imported trace, whose group is the tree's
+        // last), Tab starts at the first and Shift+Tab at the last.
+        let i = anchor
+            .and_then(|a| ids.iter().position(|x| *x == a))
+            .map_or(if d > 0 { -1 } else { ids.len() as i32 }, |i| i as i32);
+        let id = ids[((i + d).rem_euclid(ids.len() as i32)) as usize];
+        // A math channel's row is under its owner: a folded owner would hide the selection.
+        if let Some(MeasKind::Math { config }) = self.meas(id).map(|m| &m.config.kind) {
+            let owner = config.owner;
+            self.collapsed.remove(&owner);
+        }
+        self.select_meas_row(id);
+        self.tree_reveal = true;
+    }
+
     /// Pane `p` shows `id`; it gets the focus and `id` is selected.
     pub(super) fn pane_show(&mut self, p: PaneKind, id: MeasId) {
         if matches!(self.overlay, Overlay::PaneMenu(_)) {
@@ -596,6 +634,8 @@ impl AppState {
             C::NextPane => self.cycle_pane(1),
             C::PrevPane => self.cycle_pane(-1),
             C::MaximizePane => self.cycle_layout(),
+            C::NextMeasurementInTree => self.cycle_tree_meas(1),
+            C::PrevMeasurementInTree => self.cycle_tree_meas(-1),
             C::NextMeasurement if self.layout.focus == PaneKind::Distortion => {
                 self.cycle_sweep(1);
             }

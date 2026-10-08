@@ -2,7 +2,7 @@
 //! keeps only the panes that draw the selected measurement — its live curve, its math
 //! channels or its shown stored traces — or, for a selected stored trace, the panes that
 //! draw it and its measurement. Nothing selected, or no pane on screen drawing it, keeps
-//! every shown pane: the screen is never empty. W and Tab act on the panes it keeps.
+//! every shown pane: the screen is never empty. W and Ctrl+Tab act on the panes it keeps.
 
 use ac2_proto::model::TraceOwner;
 

@@ -271,11 +271,32 @@ impl AppState {
 
     /// The measurement tree beside the panes.
     pub fn tree_rows(&self) -> Vec<ac2_scene::meas_list::TreeRow> {
+        self.tree_rows_folded(&self.collapsed)
+    }
+
+    /// Every measurement and math channel in the tree's order, folded groups included:
+    /// folding hides a group's rows, not the measurements in it. The imported group's
+    /// header is no measurement and is left out.
+    pub fn tree_meas_order(&self) -> Vec<MeasId> {
+        use ac2_scene::meas_list::TreeKey;
+        self.tree_rows_folded(&std::collections::BTreeSet::new())
+            .into_iter()
+            .filter_map(|r| match r.key {
+                TreeKey::Meas(id) | TreeKey::Math(id) => Some(id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn tree_rows_folded(
+        &self,
+        collapsed: &std::collections::BTreeSet<ac2_proto::model::TraceOwner>,
+    ) -> Vec<ac2_scene::meas_list::TreeRow> {
         let colours = self.curve_colours(&ac2_scene::theme::Theme::by_name(self.theme));
         ac2_scene::meas_list::tree_rows(&ac2_scene::meas_list::TreeInput {
             meas: self.meas_items(&colours),
             traces: self.trace_items(&colours),
-            collapsed: &self.collapsed,
+            collapsed,
             selected: self.selected,
             selected_trace: self.selected_trace,
             keys_on_trace: self.keys_on_trace(),

@@ -791,3 +791,90 @@ fn a_new_math_channel_lives_under_the_selected_measurement() {
     assert!(matches!(&c.kind, MeasKind::Math { config }
         if config.owner == TraceOwner::Meas { meas: MeasId(1) }));
 }
+
+fn tab(t: &mut T, key: &str) -> Option<u32> {
+    t.key(key);
+    assert_eq!(
+        t.st.selected_trace, None,
+        "{key} lands on the measurement, not a trace"
+    );
+    t.st.selected.map(|m| m.0)
+}
+
+/// Tab / Shift+Tab walk the measurements in the tree's order (math channels included, the
+/// traces and the Imported header skipped), wrapping; Ctrl+Tab steps the panes.
+#[test]
+fn tab_steps_through_the_trees_measurements() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.selected = None;
+    // Main L, its math channel pre ÷ post, Sub; then round again.
+    let fwd: Vec<_> = (0..4).map(|_| tab(&mut t, "Tab")).collect();
+    assert_eq!(fwd, [Some(1), Some(6), Some(2), Some(1)]);
+    let back: Vec<_> = (0..4).map(|_| tab(&mut t, "Shift+Tab")).collect();
+    assert_eq!(back, [Some(2), Some(6), Some(1), Some(2)]);
+    assert!(t.st.tree_reveal, "the tree scrolls to the row");
+
+    // Nothing selected: Shift+Tab starts at the last.
+    t.st.selected = None;
+    assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
+
+    // The focus goes to a pane that draws the selection, as a click on its row.
+    assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
+    assert_eq!(tab(&mut t, "Tab"), Some(1));
+    assert_eq!(t.st.layout.focus, PaneKind::Transfer);
+
+    // The panes moved to Ctrl+Tab.
+    let before = t.st.layout.focus;
+    t.key("Ctrl+Tab");
+    assert_ne!(t.st.layout.focus, before);
+    t.key("Ctrl+Shift+Tab");
+    assert_eq!(t.st.layout.focus, before);
+}
+
+/// From a selected trace, Tab goes on from the measurement that owns it; from an imported
+/// trace (the tree's last group) it starts over.
+#[test]
+fn tab_from_a_trace_goes_on_from_its_measurement() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    assert_eq!(tab(&mut t, "Tab"), Some(6));
+    t.st.update(Msg::SelectTrace(TraceId(3)), &t.keys);
+    assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
+    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    assert_eq!(tab(&mut t, "Tab"), Some(1));
+    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
+}
+
+/// A folded group's measurements are still stepped through; a math channel's folded group
+/// opens to show it, a header stays folded (its row is on screen).
+#[test]
+fn tab_reaches_measurements_in_folded_groups() {
+    let mut t = T::new();
+    t.conn(mirror(tree_state()));
+    let main = TraceOwner::Meas { meas: MeasId(1) };
+    let sub = TraceOwner::Meas { meas: MeasId(2) };
+    t.st.collapsed.insert(main);
+    t.st.collapsed.insert(sub);
+    t.st.selected = Some(MeasId(1));
+    assert_eq!(tab(&mut t, "Tab"), Some(6));
+    assert!(!t.st.collapsed.contains(&main));
+    assert!(tree_names(&t).contains(&"pre ÷ post".to_owned()));
+    assert_eq!(tab(&mut t, "Tab"), Some(2));
+    assert!(t.st.collapsed.contains(&sub));
+}
+
+/// No measurements: a toast says so and nothing is selected.
+#[test]
+fn tab_without_measurements_says_so() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.clear();
+    t.conn(mirror(s));
+    t.st.selected = None;
+    t.key("Tab");
+    assert_eq!(t.st.selected, None);
+    assert_eq!(t.last_toast(), "no measurements to step through");
+}

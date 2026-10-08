@@ -589,9 +589,11 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let tips = RowTips {
         meas: format!(
-            "Click selects it · the arrow folds it · {} / {} step through the focused pane's \
-             measurements · {} shows / hides its curve, {} everything under it · {} deletes it \
-             (asks first)",
+            "Click selects it · the arrow folds it · {} / {} step through the measurements, \
+             {} / {} through the focused pane's · {} shows / hides its curve, {} everything \
+             under it · {} deletes it (asks first)",
+            key_hint(app, CommandId::NextMeasurementInTree),
+            key_hint(app, CommandId::PrevMeasurementInTree),
             key_hint(app, CommandId::NextMeasurement),
             key_hint(app, CommandId::PrevMeasurement),
             key_hint(app, CommandId::ToggleSelected),
@@ -609,6 +611,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     };
     inputs(app, ui, ch);
     let mut msg = None;
+    let reveal = std::mem::take(&mut app.state.tree_reveal);
     {
         let st = &app.state;
         ui.horizontal_wrapped(|ui| {
@@ -641,7 +644,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             ui.label(RichText::new("none").color(ch.dim));
         }
         for row in &rows {
-            if let Some(m) = tree_row(ui, row, &tips, ch) {
+            let reveal = reveal
+                && row.mark == Mark::Active
+                && matches!(row.key, TreeKey::Meas(_) | TreeKey::Math(_));
+            if let Some(m) = tree_row(ui, row, &tips, ch, reveal) {
                 msg = Some(m);
             }
         }
@@ -676,8 +682,14 @@ const INDENT: f32 = 14.0;
 
 /// One row of the measurement tree: a header (its fold arrow, its tag and name over its
 /// state) or a row under it (its tree line, its dot when it has a curve to show or hide,
-/// its name over what it is).
-fn tree_row(ui: &mut egui::Ui, row: &TreeRow, tips: &RowTips, ch: &Chrome) -> Option<Msg> {
+/// its name over what it is). `reveal`: the tree scrolls the row into view.
+fn tree_row(
+    ui: &mut egui::Ui,
+    row: &TreeRow,
+    tips: &RowTips,
+    ch: &Chrome,
+    reveal: bool,
+) -> Option<Msg> {
     let mut click = None;
     let group = match row.key {
         TreeKey::Meas(meas) => Some(TraceOwner::Meas { meas }),
@@ -800,6 +812,9 @@ fn tree_row(ui: &mut egui::Ui, row: &TreeRow, tips: &RowTips, ch: &Chrome) -> Op
         let r = ui
             .add(b.wrap_mode(egui::TextWrapMode::Wrap))
             .on_hover_text(tip);
+        if reveal {
+            r.scroll_to_me(None);
+        }
         // A double click's second click also reads as a click: check it first, or it would
         // deselect the row the first click selected.
         if let TreeKey::Trace(id) = row.key

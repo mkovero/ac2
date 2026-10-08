@@ -162,7 +162,9 @@ impl Chord {
     pub fn from_event(key: Key, m: Modifiers) -> Self {
         Self {
             key,
-            command: m.command,
+            // ⌘Tab is the macOS app switcher and never reaches the app, so there Control
+            // stands in for ⌘ on Tab (elsewhere Ctrl is the command key anyway).
+            command: m.command || (key == Key::Tab && m.ctrl),
             alt: m.alt,
             shift: m.shift && !is_symbol(key),
         }
@@ -174,7 +176,8 @@ impl Chord {
         // macOS labels (`⌘⇧P`) parse too, so every label reads back as its chord.
         let mut rest = s.trim();
         loop {
-            if let Some(r) = rest.strip_prefix('⌘') {
+            // `⌃` too: the macOS label of Ctrl+Tab, as `Ctrl` always parses as the command key.
+            if let Some(r) = rest.strip_prefix('⌘').or_else(|| rest.strip_prefix('⌃')) {
                 c.command = true;
                 rest = r;
             } else if let Some(r) = rest.strip_prefix('⌥') {
@@ -246,7 +249,12 @@ impl Chord {
         let mac = style == LabelStyle::Mac;
         let mut s = String::new();
         if self.command {
-            s.push_str(if mac { "⌘" } else { "Ctrl+" });
+            // On macOS the chord is pressed with Control on Tab ([`Chord::from_event`]).
+            s.push_str(match (mac, self.key) {
+                (true, Key::Tab) => "⌃",
+                (true, _) => "⌘",
+                (false, _) => "Ctrl+",
+            });
         }
         if self.alt {
             s.push_str(if mac { "⌥" } else { "Alt+" });
@@ -370,6 +378,8 @@ commands! {
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
     NextMeasurement => "next_measurement", "Select next measurement of the focused pane", [Global];
     PrevMeasurement => "prev_measurement", "Select previous measurement of the focused pane", [Global];
+    NextMeasurementInTree => "next_measurement_in_tree", "Select next measurement in the list", [Global];
+    PrevMeasurementInTree => "prev_measurement_in_tree", "Select previous measurement in the list", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
     ZoomIn => "zoom_in", "Zoom frequency in (IR: time)", [Global];
@@ -558,6 +568,10 @@ pub fn defaults() -> Vec<Binding> {
     let sh = Chord::shift;
     let cmd = Chord::command;
     let alt = Chord::alt;
+    let cmd_sh = |key| Chord {
+        shift: true,
+        ..Chord::command(key)
+    };
     let alt_sh = |key| Chord {
         shift: true,
         ..Chord::alt(key)
@@ -586,8 +600,12 @@ pub fn defaults() -> Vec<Binding> {
         (C::SweepNew, S::Global, sh(K::S)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
-        (C::NextPane, S::Global, k(K::Tab)),
-        (C::PrevPane, S::Global, sh(K::Tab)),
+        // Tab walks the measurement list, the way it walks a form's fields; the panes step
+        // with Ctrl as a browser's tabs do.
+        (C::NextMeasurementInTree, S::Global, k(K::Tab)),
+        (C::PrevMeasurementInTree, S::Global, sh(K::Tab)),
+        (C::NextPane, S::Global, cmd(K::Tab)),
+        (C::PrevPane, S::Global, cmd_sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
         (C::NextMeasurement, S::Global, k(K::N)),
         (C::PrevMeasurement, S::Global, sh(K::N)),
@@ -1311,6 +1329,37 @@ mod tests {
         assert!(Chord::from_event(Key::P, shifted).shift);
     }
 
+    /// ⌘Tab is the macOS app switcher: there Control+Tab arrives as the command chord and
+    /// is labelled `⌃Tab`; on PC keyboards Ctrl is the command key anyway.
+    #[test]
+    fn control_tab_is_the_command_chord() {
+        let mac_ctrl = Modifiers {
+            ctrl: true,
+            ..Modifiers::NONE
+        };
+        let pc_ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        let ctrl_tab = Chord::parse("Ctrl+Tab").expect("valid");
+        assert_eq!(Chord::from_event(Key::Tab, mac_ctrl), ctrl_tab);
+        assert_eq!(Chord::from_event(Key::Tab, pc_ctrl), ctrl_tab);
+        // Elsewhere macOS Control is no command key.
+        assert!(!Chord::from_event(Key::K, mac_ctrl).command);
+        let m = Keymap::default();
+        assert_eq!(m.lookup(Scope::Global, ctrl_tab), Some(CommandId::NextPane));
+        let tab = Chord::key(Key::Tab);
+        assert_eq!(
+            m.lookup(Scope::Global, tab),
+            Some(CommandId::NextMeasurementInTree)
+        );
+        let back = Chord::parse("Ctrl+Shift+Tab").expect("valid");
+        assert_eq!(back.label_in(LabelStyle::Mac), "⌃⇧Tab");
+        assert_eq!(back.label_in(LabelStyle::Pc), "Ctrl+Shift+Tab");
+        assert_eq!(Chord::parse("⌃⇧Tab"), Ok(back));
+    }
+
     #[test]
     fn parse_and_label() {
         for (s, label) in [
@@ -1324,6 +1373,7 @@ mod tests {
             ("F1", "F1"),
             ("Alt+Left", "Alt+←"),
             ("Home", "Home"),
+            ("Ctrl+Tab", "Ctrl+Tab"),
         ] {
             let c = Chord::parse(s).expect(s);
             assert_eq!(c.label_in(LabelStyle::Pc), label, "{s}");

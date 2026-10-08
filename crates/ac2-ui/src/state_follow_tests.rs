@@ -62,10 +62,10 @@ fn panes_follow_the_selected_measurement() {
     select(&mut t, 1);
     assert_eq!(t.st.visible_panes(), [Transfer, Ir]);
     assert_eq!(t.st.layout.focus, Transfer);
-    // Tab walks the panes kept.
-    t.key("Tab");
+    // Ctrl+Tab walks the panes kept.
+    t.key("Ctrl+Tab");
     assert_eq!(t.st.layout.focus, Ir);
-    t.key("Tab");
+    t.key("Ctrl+Tab");
     assert_eq!(t.st.layout.focus, Transfer);
 
     // W: the focused pane alone; another selection maximises one of its own panes.

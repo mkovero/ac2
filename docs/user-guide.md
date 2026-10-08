@@ -389,7 +389,7 @@ every transfer measurement, with that one first in the legend; the IR pane follo
 transfer pane's choice). To pick another:
 
 - click the chip for the list of measurements the pane can show;
-- or focus the pane (click it, **Tab**, **Alt+1 … Alt+4**) and press **N** / **Shift+N**:
+- or focus the pane (click it, **Ctrl+Tab**, **Alt+1 … Alt+4**) and press **N** / **Shift+N**:
   they step through that pane's kind only (transfer measurements in the transfer pane,
   spectra and RTAs in the spectrum pane);
 - or use **Choose the measurement the focused pane shows…** in the palette (**↑/↓**,
@@ -489,8 +489,8 @@ only the panes that draw what is selected in the list, and they share the freed 
 - nothing selected, or none of those panes shown (the IR pane or the sweep pane put away) →
   every shown pane.
 
-The focus moves to a kept pane when the selection hides the focused one; Tab walks the kept
-panes, and **W** maximises within them. A pane key (Alt+1 … Alt+5) to a pane with nothing of
+The focus moves to a kept pane when the selection hides the focused one; Ctrl+Tab walks the
+kept panes, and **W** maximises within them. A pane key (Alt+1 … Alt+5) to a pane with nothing of
 the selection on it selects that pane's measurement, which brings it up; with none of its
 kind, the focus stays and a toast says why.
 
@@ -960,6 +960,13 @@ Working with the tree:
 - A row's dot is its curve's colour (a ring when hidden): a click shows or hides that curve
   (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it; a double click on a trace renames it.
+- **Tab** / **Shift+Tab** select the next / previous measurement in the tree's order, math
+  channels included, wrapping at the ends; stored traces and the Imported header are
+  skipped. They start from the selected measurement, or from the selected trace's
+  measurement. A measurement in a folded group is reached too (a math channel's group
+  unfolds to show it); the tree scrolls to it and the focus goes to a pane that draws it,
+  as a click on the row does. (**N** / **Shift+N** step only through the focused pane's
+  kind; **Ctrl+Tab** / **Ctrl+Shift+Tab** step through the panes.)
 - **Move to measurement…** (**Shift+F2**, beside F2 rename, or the palette) files the
   selected stored trace — or the selected math channel — under another measurement or
   under Imported: **↑/↓** choose, **Enter** moves it, **Esc** cancels. Only where it is
@@ -2258,11 +2265,13 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+3` | Focus impulse-response pane | `focus_ir` |
 | `Alt+4` | Focus SPL pane | `focus_spl` |
 | `Alt+5` | Focus (and show) the sweep / distortion pane | `focus_distortion` |
-| `Tab` | Focus next pane | `next_pane` |
-| `Shift+Tab` | Focus previous pane | `prev_pane` |
+| `Ctrl+Tab` | Focus next pane | `next_pane` |
+| `Ctrl+Shift+Tab` | Focus previous pane | `prev_pane` |
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
 | `N` | Select next measurement of the focused pane | `next_measurement` |
 | `Shift+N` | Select previous measurement of the focused pane | `prev_measurement` |
+| `Tab` | Select next measurement in the list | `next_measurement_in_tree` |
+| `Shift+Tab` | Select previous measurement in the list | `prev_measurement_in_tree` |
 | `T` | Theme: dark → light → high contrast | `cycle_theme` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |

@@ -293,10 +293,10 @@ fn keys_follow_the_focused_pane() {
     assert!(t.st.layout.is_shown(PaneKind::Ir));
     // X means nothing there.
     assert!(t.key("X").is_empty());
-    // Tab cycles panes; W maximizes.
-    t.key("Tab");
+    // Ctrl+Tab cycles panes; W maximizes.
+    t.key("Ctrl+Tab");
     assert_eq!(t.st.layout.focus, PaneKind::Ir);
-    t.key("Shift+Tab");
+    t.key("Ctrl+Shift+Tab");
     assert_eq!(t.st.layout.focus, PaneKind::Spectrum);
     t.key("W");
     assert_eq!(t.st.layout.visible(), vec![PaneKind::Spectrum]);

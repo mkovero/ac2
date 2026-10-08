@@ -1154,6 +1154,8 @@ pub struct AppState {
     pub client_key: Option<crate::settings::ClientKey>,
     /// The operator asked for the connect dialog (the app opens it).
     pub want_connect_dialog: bool,
+    /// The selection moved by key: the tree brings its row into view (the view takes it).
+    pub tree_reveal: bool,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
     /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
@@ -1237,6 +1239,7 @@ impl AppState {
             spectrum_fit: BTreeMap::new(),
             client_key: None,
             want_connect_dialog: false,
+            tree_reveal: false,
             settings_page_last: Page::Io,
         }
     }
@@ -1303,11 +1306,7 @@ impl AppState {
                 // What moved under the pointer is not what it rested on.
                 self.toasts_held = false;
             }
-            Msg::SelectMeas(id) => {
-                self.select(id);
-                self.reveal_meas(id);
-                self.follow_selection_toast();
-            }
+            Msg::SelectMeas(id) => self.select_meas_row(id),
             Msg::SelectTrace(id) => {
                 let id = (self.selected_trace != Some(id)).then_some(id);
                 self.select_trace(id);
