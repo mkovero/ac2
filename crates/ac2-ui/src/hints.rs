@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(
             pc(Scope::Spl),
             [
-                "G meter/Leq/both",
+                "G meter/Leq/both/bands",
                 "F F/S/I",
                 "Z A/C/Z",
                 "B columns/tiles",

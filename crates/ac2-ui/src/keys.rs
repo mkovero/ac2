@@ -747,6 +747,9 @@ pub struct Hint {
     pub priority: u8,
 }
 
+/// The G hint's name where no meter has a band meter, so the cycle stops at both.
+pub const SPL_VIEWS_NO_BANDS: &str = "meter/Leq/both";
+
 const fn hint(command: CommandId, name: &'static str, priority: u8) -> Hint {
     Hint {
         command,
@@ -809,7 +812,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Spl => {
             const {
                 &[
-                    hint(C::SplLeqView, "meter/Leq/both", 90),
+                    hint(C::SplLeqView, "meter/Leq/both/bands", 90),
                     hint(C::SplTimeWeighting, "F/S/I", 88),
                     hint(C::SplWeighting, "A/C/Z", 86),
                     hint(C::SplLeqStyle, "columns/tiles", 70),

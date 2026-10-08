@@ -1814,7 +1814,7 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 | Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `Alt+↑` offset · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `F` freeze · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Impulse response | `G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `C` cursor · `Shift+Home` fit · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
-| SPL | `G` meter/Leq/both · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| SPL | `G` meter/Leq/both/bands · `F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `C` cursor · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->

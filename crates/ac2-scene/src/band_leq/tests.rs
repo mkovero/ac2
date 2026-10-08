@@ -106,6 +106,9 @@ fn near_on_course_ok_and_unlimited_bands() {
     assert_eq!(free.state_text, None);
     assert_eq!(free.limit, None);
     assert_eq!(free.limit_db, None);
+    // The key to the column marks reads as the band's own limit and headroom.
+    assert_eq!(t.limit_key.as_deref(), Some("limit"));
+    assert_eq!(t.allowed_key.as_deref(), Some("next 1 min: stay ≤"));
 }
 
 #[test]
@@ -145,6 +148,7 @@ fn filling_period_change_correction_and_offline() {
         t.bars[4].headroom.as_deref(),
         Some("until full: stay ≤ 81.2 dB")
     );
+    assert_eq!(t.allowed_key.as_deref(), Some("until full: stay ≤"));
     assert_eq!(t.predicted, None);
     m.period = BandPeriod::Night;
     m.period_after_horizon = BandPeriod::Day;
@@ -296,6 +300,8 @@ fn the_scene_draws_eleven_columns_and_the_headline() {
         "83.2",
         "6 min",
         "≤ 81.2",
+        "limit",
+        "next 1 min: stay ≤",
     ] {
         assert!(texts.contains(&want), "{want:?} not in {texts:?}");
     }
@@ -304,4 +310,58 @@ fn the_scene_draws_eleven_columns_and_the_headline() {
         assert!(c.y >= s.headline.bottom());
         assert!(c.bottom() <= size.height && c.right() <= size.width);
     }
+}
+
+/// The thin marks of a scene: two-point polylines in the allowed mark's stroke.
+fn allowed_marks(s: &BandLeqScene, theme: &Theme) -> usize {
+    s.scene
+        .layers
+        .iter()
+        .flat_map(|l| l.polylines.iter())
+        .filter(|p| p.stroke == Stroke::solid(theme.text_dim, 2.0))
+        .count()
+}
+
+#[test]
+fn an_allowed_level_off_the_scale_is_neither_marked_nor_keyed() {
+    let theme = Theme::default();
+    let size = Viewport {
+        width: 1200.0,
+        height: 700.0,
+    };
+    let scene = |m: &BandLeqMeta| {
+        let v = BandLeqView {
+            meter: "FOH SPL".into(),
+            cal: "M30 · calibrated".into(),
+            text: band_leq_text(m),
+            stale: None,
+        };
+        band_leq_scene(&v, &Status::default(), &theme, size)
+    };
+    let texts = |s: &BandLeqScene| -> Vec<String> {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| l.labels.iter().map(|l| l.text.clone()))
+            .collect()
+    };
+    // Nine bands with an allowed level on the scale (50 … 100 dB): nine marks and a key
+    // (one more polyline in the key).
+    let s = scene(&meta());
+    assert_eq!(allowed_marks(&s, &theme), 10);
+    // Above the top and below the bottom of the scale: no mark on an edge, no key, though
+    // the figure under the band still says it.
+    let mut m = meta();
+    for (i, b) in m.bands.iter_mut().enumerate() {
+        if let Some(a) = b.allowed.as_mut() {
+            *a = if i % 2 == 0 { 127.8 } else { 31.0 };
+        }
+    }
+    let s = scene(&m);
+    assert_eq!(s.range, (50.0, 100.0));
+    assert_eq!(allowed_marks(&s, &theme), 0);
+    let t = texts(&s);
+    assert!(!t.iter().any(|l| l.contains("stay ≤")), "{t:?}");
+    assert!(t.iter().any(|l| l == "≤ 127.8"), "{t:?}");
+    assert!(t.iter().any(|l| l == "limit"), "{t:?}");
 }

@@ -704,14 +704,24 @@ impl AppState {
         style: crate::keys::LabelStyle,
     ) -> Vec<crate::hints::KeyHint> {
         let mode = self.view.distortion.mode;
-        crate::hints::line(keymap, pane.scope(), style, |c| {
+        let mut line = crate::hints::line(keymap, pane.scope(), style, |c| {
             pane == PaneKind::Distortion
                 && match c {
                     CommandId::DistortionUnit => mode != SweepMode::Response,
                     CommandId::IrMode => mode != SweepMode::Ir,
                     _ => false,
                 }
-        })
+        });
+        // G reaches the band view only when a meter has a band meter (`SplMode::next`).
+        if !crate::scenes::has_band_meter(self) {
+            for h in line
+                .iter_mut()
+                .filter(|h| h.command == CommandId::SplLeqView)
+            {
+                h.name = crate::keys::SPL_VIEWS_NO_BANDS;
+            }
+        }
+        line
     }
 
     /// The multi-step operation running on the daemon (a set of sweeps), as the progress

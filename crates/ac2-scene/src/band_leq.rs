@@ -101,6 +101,13 @@ pub struct BandLeqText {
     /// `offline for 10 s`: time in the windows with no audio.
     pub incomplete: Option<String>,
     pub predicted: Option<PredictedText>,
+    /// The key to the thick mark across a column: `limit`, as the band's `limit 42.0 dB`;
+    /// none when no band has a judged limit.
+    pub limit_key: Option<String>,
+    /// The key to the thin mark under it: `next 1 min: stay ≤` (`until full: stay ≤`), the
+    /// band's headroom without its figure, which is the `≤ 81.2` under the band; none when
+    /// no band has one.
+    pub allowed_key: Option<String>,
 }
 
 fn state_text(state: TileState, on_course: bool) -> Option<String> {
@@ -231,6 +238,17 @@ pub fn band_leq_text(m: &BandLeqMeta) -> BandLeqText {
             length((elapsed.min(duration) - m.measured.0).round())
         )
     });
+    let limit_key = bars
+        .iter()
+        .any(|b| b.limit_db.is_some())
+        .then(|| "limit".to_owned());
+    let allowed_key = bars.iter().any(|b| b.allowed_db.is_some()).then(|| {
+        if until_full {
+            "until full: stay ≤".to_owned()
+        } else {
+            format!("next {horizon}: stay ≤")
+        }
+    });
     BandLeqText {
         name: meter_name(duration),
         unit: unit.to_owned(),
@@ -244,6 +262,8 @@ pub fn band_leq_text(m: &BandLeqMeta) -> BandLeqText {
         filling: filling.then(|| format!("so far · {} / {}", clock(elapsed), clock(duration))),
         incomplete,
         predicted: m.predicted.map(|p| predicted_text(&p, m.period)),
+        limit_key,
+        allowed_key,
     }
 }
 
@@ -539,8 +559,49 @@ pub fn band_leq_scene(
     info.extend(t.filling.iter().cloned());
     info.extend(t.incomplete.iter().cloned());
     let sfs = theme.small_font_size.max(fs * 0.85);
+    // The key to the two marks across the columns, right of the small lines: a mark is
+    // keyed only where one is drawn, so an allowed level off every column's scale has none.
+    let range = bar_range(&t.bars);
+    let limit_stroke = Stroke::solid(theme.text, 3.0);
+    let allowed_stroke = Stroke::solid(theme.text_dim, 2.0);
+    let allowed_drawn = |b: &BandBar| b.allowed_db.filter(|a| (range.0..=range.1).contains(a));
+    let mut keys: Vec<(&str, Stroke)> = Vec::new();
+    if let Some(k) = &t.limit_key {
+        keys.push((k, limit_stroke));
+    }
+    if let Some(k) = t
+        .allowed_key
+        .as_ref()
+        .filter(|_| t.bars.iter().any(|b| allowed_drawn(b).is_some()))
+    {
+        keys.push((k, allowed_stroke));
+    }
+    // Each mark left of its word, the word placed from the mark: an estimated text width
+    // then widens only the gap to the next pair, never the one inside a pair.
+    let mark_w = sfs * 1.6;
+    let pair_w = |text: &str| mark_w + sfs * 0.4 + canvas::text_width(text, sfs);
+    let keys_w: f32 = keys.iter().map(|(t, _)| pair_w(t) + sfs * 1.5).sum();
+    let key_x = size.width - pad - keys_w + sfs * 1.5;
+    let mut x = key_x;
+    for (text, stroke) in &keys {
+        let mark_y = y + sfs * 0.6;
+        c.overlay.polylines.push(Polyline {
+            points: vec![[x, mark_y], [x + mark_w, mark_y]],
+            alpha: Vec::new(),
+            stroke: *stroke,
+            clip: None,
+        });
+        c.overlay.labels.push(label(
+            *text,
+            [x + mark_w + sfs * 0.4, y],
+            anchor(HAlign::Left, VAlign::Top),
+            sfs,
+            theme.text_dim,
+        ));
+        x += pair_w(text) + sfs * 1.5;
+    }
     c.overlay.labels.push(label(
-        crate::spl::cut(&info.join(" · "), w, sfs),
+        crate::spl::cut(&info.join(" · "), (key_x - sfs - pad).max(1.0), sfs),
         [pad, y],
         anchor(HAlign::Left, VAlign::Top),
         sfs,
@@ -566,7 +627,6 @@ pub fn band_leq_scene(
     }
 
     // The columns: a y scale left, eleven columns, the band labels under them.
-    let range = bar_range(&t.bars);
     let scale_w = fs * 3.0;
     let label_fs = fs.max(((w - scale_w) / 11.0 * 0.22).min(fs * 1.6));
     let below_h = label_fs * 1.4 + sfs * 1.4;
@@ -622,13 +682,13 @@ pub fn band_leq_scene(
             });
         }
         // The headroom: how loud the band may go, a thin line under the limit.
-        // Off the scale it would sit on the top edge, reading as a level it is not.
-        if let Some(a) = b.allowed_db.filter(|&a| a <= range.1) {
+        // Off the scale it would sit on the top or bottom edge, reading as a level it is not.
+        if let Some(a) = allowed_drawn(b) {
             let ay = to_y(a);
             c.overlay.polylines.push(Polyline {
                 points: vec![[x + cw * 0.2, ay], [x + cw * 0.8, ay]],
                 alpha: Vec::new(),
-                stroke: Stroke::solid(theme.text_dim, 2.0),
+                stroke: allowed_stroke,
                 clip: None,
             });
         }
@@ -637,7 +697,7 @@ pub fn band_leq_scene(
             c.overlay.polylines.push(Polyline {
                 points: vec![[x - gap * 0.3, ly], [x + cw + gap * 0.3, ly]],
                 alpha: Vec::new(),
-                stroke: Stroke::solid(theme.text, 3.0),
+                stroke: limit_stroke,
                 clip: None,
             });
         }

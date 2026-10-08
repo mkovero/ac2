@@ -1892,6 +1892,20 @@ fn leq_frame(
 /// their columns turn red and the alarms toast; maximised, the columns fill the screen. B and
 /// H switch to tiles with the history strip below. Then they recover, and back on columns,
 /// F11 is the stage view.
+/// ↑ in the open Leq dialog until `to` has the focus: the rows between are counted by the
+/// dialog, not by the test.
+fn arrow_up_to(h: &mut Harness<'_, App>, to: ac2_ui::leq_dialog::Focus) {
+    let at = |h: &Harness<'_, App>| h.state().state.overlay.leq().map(|d| d.focus);
+    for _ in 0..32 {
+        if at(h) == Some(to) {
+            return;
+        }
+        h.key_press(Key::ArrowUp);
+        h.step();
+    }
+    panic!("↑ never reached {to:?}: focus {:?}", at(h));
+}
+
 #[test]
 fn leq_tiles_from_an_empty_daemon() {
     use ac2_proto::frame::LeqFlags;
@@ -1988,7 +2002,7 @@ fn leq_tiles_from_an_empty_daemon() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "settings_leq");
-    // ↑ ×5 to the preset row, → to the French preset for children (its two windows, the
+    // ↑ to the preset row, → to the French preset for children (its two windows, the
     // longest name and source), then ← back to "none": the windows as typed.
     let typed = h
         .state()
@@ -2002,9 +2016,7 @@ fn leq_tiles_from_an_empty_daemon() {
         .iter()
         .position(|p| *p == ac2_proto::model::LeqPreset::FranceChildren)
         .expect("listed");
-    for _ in 0..5 {
-        h.key_press(Key::ArrowUp);
-    }
+    arrow_up_to(&mut h, ac2_ui::leq_dialog::Focus::Preset);
     for _ in 0..=to {
         h.key_press(Key::ArrowRight);
     }
@@ -2250,14 +2262,17 @@ fn leq_tiles_from_an_empty_daemon() {
     });
     snapshot_when(&mut h, "spl_meter_leq", pin, held);
 
-    // Shift+L again: ↑↑ from the preset row to the position correction, 4 dB; Shift+Tab ×2
-    // to the LCpeak limit, 135; the dialog with its settings under the windows.
+    // Shift+L again: ↑ from the preset row past the band meter's rows to the position
+    // correction, 4 dB; Shift+Tab ×2 to the LCpeak limit, 135; the dialog with its
+    // settings under the windows.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog again", |a| {
         a.state.overlay.leq().is_some()
     });
-    h.key_press(Key::ArrowUp);
-    h.key_press(Key::ArrowUp);
+    arrow_up_to(
+        &mut h,
+        ac2_ui::leq_dialog::Focus::Extra(ac2_ui::leq_dialog::Extra::Position),
+    );
     h.event(Event::Text("4".into()));
     h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
     h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
@@ -3110,6 +3125,17 @@ fn band_leq_from_an_empty_daemon() {
     step_until(&mut h, "the bands", |a| {
         a.state.view.spl.mode == ac2_scene::view::SplMode::Bands
     });
+    // With a band meter the G hint names the band view too.
+    let hints = h
+        .state()
+        .state
+        .key_hint_line(
+            &h.state().keymap,
+            PaneKind::Spl,
+            ac2_ui::keys::LabelStyle::Pc,
+        )
+        .expect("the SPL pane focused");
+    assert_eq!(hints[0].text(), "G meter/Leq/both/bands");
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     let has_frame = move |a: &ac2_ui::App| {
@@ -3145,6 +3171,14 @@ fn band_leq_from_an_empty_daemon() {
         .collect();
     assert!(
         texts.contains(&"63 Hz band Leq 3.2 dB over its limit · cooling down in 6 min 52 s"),
+        "{texts:?}"
+    );
+    // The key to the two marks across the columns.
+    assert!(texts.contains(&"limit"), "{texts:?}");
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.starts_with("next ") && t.ends_with(": stay ≤")),
         "{texts:?}"
     );
     snapshot_when(
