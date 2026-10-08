@@ -4,7 +4,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
-use crate::leq_dialog::{BandField, BandLimits, Col, Extra, Focus, LeqDialog};
+use crate::leq_dialog::{BandCol, BandField, BandFocus, Col, Extra, Focus, LeqDialog};
 use crate::state::{LeqMsg, Msg, Overlay};
 use crate::theme::Chrome;
 
@@ -38,7 +38,12 @@ fn choice(
         *msg = Some(LeqMsg::Cycle(at, -1));
     }
     let t = RichText::new(text).color(ch.text);
-    if ui.add(egui::Button::selectable(focused, t)).clicked() {
+    let r = ui.add(egui::Button::selectable(focused, t));
+    if focused {
+        // The keys move the focus: the page follows it.
+        r.scroll_to_me(None);
+    }
+    if r.clicked() {
         *msg = Some(LeqMsg::Cycle(at, 1));
     }
     if ui.small_button("›").clicked() {
@@ -50,6 +55,22 @@ fn choice(
 #[allow(clippy::too_many_arguments)]
 fn text_cell(
     ui: &mut egui::Ui,
+    text: &str,
+    focused: bool,
+    selected: bool,
+    empty: &str,
+    at: Focus,
+    msg: &mut Option<LeqMsg>,
+    ch: &Chrome,
+) {
+    sized_text_cell(ui, 90.0, text, focused, selected, empty, at, msg, ch);
+}
+
+/// [`text_cell`] `width` wide.
+#[allow(clippy::too_many_arguments)]
+fn sized_text_cell(
+    ui: &mut egui::Ui,
+    width: f32,
     text: &str,
     focused: bool,
     selected: bool,
@@ -76,10 +97,11 @@ fn text_cell(
     } else {
         t.color(ch.text)
     };
-    if ui
-        .add_sized([90.0, 20.0], egui::Button::selectable(focused, t))
-        .clicked()
-    {
+    let r = ui.add_sized([width, 20.0], egui::Button::selectable(focused, t));
+    if focused {
+        r.scroll_to_me(None);
+    }
+    if r.clicked() {
         *msg = Some(LeqMsg::Focus(at));
     }
 }
@@ -222,40 +244,8 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
             }
         });
     ui.add_space(10.0);
-    ui.label(RichText::new("Band Leq (low frequencies at a neighbour's)").strong());
-    // Rows, not a grid: the notes under a row wrap to the page's width.
-    let off = d.bands.limits == BandLimits::Off;
-    let note = |ui: &mut egui::Ui, text: String| {
-        ui.horizontal(|ui| {
-            ui.add_space(BAND_TITLE_W + 12.0);
-            ui.add(egui::Label::new(RichText::new(text).small().color(ch.dim)).wrap());
-        });
-    };
-    for b in BandField::ALL {
-        let at = Focus::Band(b);
-        let f = d.focus == at;
-        ui.horizontal(|ui| {
-            let title = RichText::new(b.title()).color(if f { ch.text } else { ch.dim });
-            band_title(ui, title);
-            ui.add_space(12.0);
-            choice(ui, d.bands.text(b), f, at, &mut msg, ch);
-        });
-        if b == BandField::Limits || !off {
-            note(ui, d.bands.note(b));
-        }
-    }
-    if !off {
-        ui.horizontal(|ui| {
-            band_title(ui, RichText::new("Transfer").color(ch.dim));
-            ui.add_space(12.0);
-            ui.label(RichText::new(d.bands.transfer_text()).color(ch.text));
-        });
-        let per_band = d.bands.transfer_bands();
-        if !per_band.is_empty() {
-            note(ui, per_band.join(" · "));
-        }
-        note(ui, d.bands.transfer_hint().into());
-    }
+    ui.label(RichText::new("Band Leq (1/3-octave bands against per-band limits)").strong());
+    band_section(ui, d, &mut msg, ch);
     if let Some(e) = &d.error {
         ui.add_space(4.0);
         ui.label(RichText::new(e).color(ch.fault));
@@ -265,7 +255,7 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
         if ui.button("Apply").clicked() {
             msg = Some(LeqMsg::Submit);
         }
-        if ui.button("Add a window").clicked() {
+        if ui.button("Add a window here").clicked() {
             msg = Some(LeqMsg::Add);
         }
         if ui.button("Remove this window").clicked() {
@@ -276,6 +266,139 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
         }
     });
     msg
+}
+
+/// The band meter's rows: the meter and its bands, then its windows each with a sub-row of
+/// the shown bands' limits, then the corrections and the transfer.
+fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &Chrome) {
+    let b = &d.bands;
+    // Rows, not a grid: the notes under a row wrap to the page's width.
+    let note = |ui: &mut egui::Ui, text: String| {
+        ui.horizontal(|ui| {
+            ui.add_space(BAND_TITLE_W + 12.0);
+            ui.add(egui::Label::new(RichText::new(text).small().color(ch.dim)).wrap());
+        });
+    };
+    let field = |ui: &mut egui::Ui, f: BandField, msg: &mut Option<LeqMsg>| {
+        let at = Focus::Band(BandFocus::Field(f));
+        let focused = d.focus == at;
+        ui.horizontal(|ui| {
+            let title = RichText::new(f.title()).color(if focused { ch.text } else { ch.dim });
+            band_title(ui, title);
+            ui.add_space(12.0);
+            if f == BandField::Also {
+                text_cell(ui, &b.text(f), focused, d.selected, "none", at, msg, ch);
+            } else {
+                choice(ui, b.text(f), focused, at, msg, ch);
+            }
+        });
+    };
+    field(ui, BandField::Meter, msg);
+    note(ui, b.note(BandField::Meter));
+    if !b.is_on() {
+        return;
+    }
+    field(ui, BandField::From, msg);
+    field(ui, BandField::To, msg);
+    note(ui, b.note(BandField::From));
+    field(ui, BandField::Also, msg);
+    note(ui, b.note(BandField::Also));
+    ui.add_space(4.0);
+    let shown = b.shown();
+    // Not a grid: each window's limits wrap on a sub-row under it, the full width.
+    const WIDTHS: [f32; 4] = [200.0, 110.0, 100.0, 120.0];
+    let cell = |ui: &mut egui::Ui, w: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(w, 20.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(w);
+                add(ui);
+            },
+        );
+    };
+    ui.horizontal(|ui| {
+        for (c, w) in BandCol::ROW.into_iter().zip(WIDTHS) {
+            cell(ui, w, &mut |ui| {
+                ui.label(RichText::new(c.title()).small().color(ch.dim));
+            });
+        }
+    });
+    for (row, r) in b.rows.iter().enumerate() {
+        let at = |col| Focus::Band(BandFocus::Window { row, col });
+        let fo = |col| d.focus == at(col);
+        ui.horizontal(|ui| {
+            for (col, w) in BandCol::ROW.into_iter().zip(WIDTHS) {
+                cell(ui, w, &mut |ui| match col {
+                    BandCol::Length | BandCol::Weighting => {
+                        choice(ui, r.cell(col), fo(col), at(col), msg, ch);
+                    }
+                    _ => text_cell(
+                        ui,
+                        &r.cell(col),
+                        fo(col),
+                        d.selected,
+                        if col == BandCol::DayOffset {
+                            "day = night"
+                        } else {
+                            "0"
+                        },
+                        at(col),
+                        msg,
+                        ch,
+                    ),
+                });
+            }
+        });
+        // The limits sub-row: one small cell per shown band, its band above it.
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new(if r.day_offset.trim().is_empty() {
+                    "limits (dB)"
+                } else {
+                    "night limits (dB)"
+                })
+                .small()
+                .color(ch.dim),
+            );
+            for &band in &shown {
+                let col = BandCol::Limit(band);
+                let centred = egui::Layout::top_down(egui::Align::Center);
+                ui.allocate_ui_with_layout(egui::vec2(44.0, 40.0), centred, |ui| {
+                    ui.label(RichText::new(col.title()).small().color(ch.dim));
+                    sized_text_cell(
+                        ui,
+                        44.0,
+                        &r.limits[band],
+                        fo(col),
+                        d.selected,
+                        "—",
+                        at(col),
+                        msg,
+                        ch,
+                    );
+                });
+            }
+        });
+        ui.add_space(4.0);
+    }
+    if b.rows.is_empty() {
+        note(ui, "No band windows: Insert adds one.".into());
+    }
+    field(ui, BandField::Impulse, msg);
+    field(ui, BandField::Tonal, msg);
+    note(ui, b.note(BandField::Impulse));
+    ui.horizontal(|ui| {
+        band_title(ui, RichText::new("Transfer").color(ch.dim));
+        ui.add_space(12.0);
+        ui.label(RichText::new(b.transfer_text()).color(ch.text));
+    });
+    let per_band = b.transfer_bands();
+    if !per_band.is_empty() {
+        note(ui, per_band.join(" · "));
+    }
+    note(ui, b.transfer_hint().into());
 }
 
 /// The confirmation before a new SPL log: what ends, what starts over, what is kept.

@@ -449,14 +449,12 @@ impl Spl {
 
     fn band_frame(&self) -> Option<BandLeqFrame> {
         let bm = self.band.as_ref()?;
-        Some(BandLeqFrame {
-            meas: self.meas,
-            meta: bm.meta(
-                self.cal.sensitivity,
-                self.cal.status,
-                self.meter.has_correction(),
-            ),
-        })
+        Some(bm.frame(
+            self.meas,
+            self.cal.sensitivity,
+            self.cal.status,
+            self.meter.has_correction(),
+        ))
     }
 
     /// The measuring-position correction in force: the configured one while calibrated (a

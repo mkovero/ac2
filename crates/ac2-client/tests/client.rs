@@ -846,8 +846,9 @@ async fn band_transfer_from_typed_levels() -> R {
     let transfer = |background: Option<BandLevelSource>| Command::SplBandTransfer {
         meas: m.id,
         foh: levels(80.0),
-        dwelling: levels(50.0),
+        at_place: levels(50.0),
         background,
+        place: "flat 4".into(),
     };
     match c.call(transfer(None)).await {
         Err(ClientError::Daemon(p)) => {
@@ -863,7 +864,7 @@ async fn band_transfer_from_typed_levels() -> R {
         name: m.config.name.clone(),
         kind: MeasKind::Spl {
             config: SplConfig {
-                bands: Some(Box::new(BandLeqPreset::Finland545Lf.config(None))),
+                bands: Some(Box::new(BandLeqPreset::Finland545Lf.apply(None))),
                 ..config.clone()
             },
         },
@@ -882,8 +883,9 @@ async fn band_transfer_from_typed_levels() -> R {
     let t = config
         .bands
         .as_ref()
-        .and_then(|b| b.transfer)
+        .and_then(|b| b.transfer.clone())
         .expect("stored");
+    assert_eq!(t.place, "flat 4");
     // 50 dB over a 45 dB background: 5 dB, its energy subtracted first.
     assert!(
         matches!(t.bands[5], BandTransferBand::Corrected { .. }),
@@ -898,8 +900,9 @@ async fn band_transfer_from_typed_levels() -> R {
             from: WallNs(0),
             until: WallNs(1),
         },
-        dwelling: levels(50.0),
+        at_place: levels(50.0),
         background: None,
+        place: "flat 4".into(),
     };
     assert!(matches!(c.call(span).await, Err(ClientError::Daemon(_))));
     Ok(())

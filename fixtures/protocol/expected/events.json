@@ -245,44 +245,111 @@
         "peak": 1.5
        },
        "bands": {
-        "duration": 3600.0,
-        "day": [
-         79.0,
-         69.0,
-         61.0,
-         54.0,
-         49.0,
-         47.0,
-         45.0,
-         43.0,
-         41.0,
-         39.0,
-         37.0
+        "windows": [
+         {
+          "duration": 3600.0,
+          "weighting": "z",
+          "limits": {
+           "type": "night_day",
+           "night": [
+            74.0,
+            64.0,
+            56.0,
+            49.0,
+            44.0,
+            42.0,
+            40.0,
+            38.0,
+            36.0,
+            34.0,
+            32.0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ],
+           "day_offset": 5.0
+          },
+          "warn_margin": 3.0
+         },
+         {
+          "duration": 900.0,
+          "weighting": "a",
+          "limits": {
+           "type": "always",
+           "limits": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            48.0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            30.5,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+           ]
+          },
+          "warn_margin": 2.0
+         }
         ],
-        "night": [
-         74.0,
-         64.0,
-         56.0,
-         49.0,
-         44.0,
-         42.0,
+        "bands": [
+         20.0,
+         25.0,
+         31.5,
          40.0,
-         38.0,
-         36.0,
-         34.0,
-         32.0
+         50.0,
+         63.0,
+         80.0,
+         100.0,
+         125.0,
+         160.0,
+         200.0,
+         1000.0
         ],
-        "warn_margin": 3.0,
         "predicted": {
+         "duration": 3600.0,
          "day": null,
-         "night": 25.0
+         "night": 25.0,
+         "warn_margin": 3.0
         },
         "correction": {
          "impulse": "plus5",
          "tonal": "none"
         },
-        "mic": "foh",
         "transfer": {
+         "place": "flat 4 bedroom",
          "measured_at": 1789500000000000000,
          "origin": "measured",
          "bands": [
@@ -506,6 +573,8 @@
       "at": 1790000620000000000,
       "subject": {
        "type": "band",
+       "duration": 3600.0,
+       "weighting": "z",
        "nominal": 63.0
       },
       "kind": "over",

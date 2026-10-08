@@ -7,9 +7,9 @@ use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
-    BandSourceArg, ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg,
-    LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel,
-    Time, TimeRef, VoltsArg,
+    BandLimitArg, BandRangeArg, BandSourceArg, ByteSize, Celsius, Channel, Channels, DayOffsetArg,
+    DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg,
+    PositionArg, SampleCount, SplLevel, Time, TimeRef, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -850,9 +850,10 @@ pub enum SplCmd {
     /// Set a running meter's frequency and time weighting (`--weight c --time slow`): it
     /// carries on, its Leq windows and log untouched.
     Set(SplSet),
-    /// The band meter of an SPL meter: unweighted 1/3-octave band Leq 20 … 200 Hz against
-    /// per-band limits in a neighbour's dwelling, carried to the mic by a measured FOH →
-    /// dwelling transfer, and the predicted dwelling LAeq. Informational, not legal advice.
+    /// The band meter of an SPL meter: 1/3-octave band Leq over windows of their own length
+    /// and weighting against per-band limits, judged at the mic as typed or moved there from
+    /// a named place by a measured band transfer, and the predicted LAeq at that place.
+    /// Informational, not legal advice.
     Bands {
         #[command(subcommand)]
         cmd: BandsCmd,
@@ -862,22 +863,24 @@ pub enum SplCmd {
 /// `spl bands …`.
 #[derive(Debug, Subcommand)]
 pub enum BandsCmd {
-    /// The bands, the worst band and what to do about it, the predicted dwelling LAeq
-    /// (q/Esc/Ctrl-C quits). With `--json` one line per second.
+    /// Each band window's shown bands, the worst band and what to do about it, the
+    /// predicted LAeq (q/Esc/Ctrl-C quits). With `--json` one line per second, the windows
+    /// in an array.
     Watch(LeqWatch),
-    /// Turn the band meter on with a preset, change its window or §13 corrections, or
-    /// turn it off; the meter, its log and a measured transfer carry on.
+    /// Turn the band meter on, set its windows, bands, limits and §13 corrections (a
+    /// preset sets windows, limits and bands at once), or turn it off; the meter, its log
+    /// and a measured transfer carry on.
     Set(BandsSet),
-    /// Measure the FOH → dwelling transfer from band levels at FOH and in the dwelling of
-    /// the same steady test signal, and the dwelling's background with the system silent;
-    /// stored in the meter's band meter.
+    /// Measure the band transfer FOH → a place (`--place`, `receiving room` unless named)
+    /// from band levels at FOH and at the place of the same steady test signal, and the
+    /// place's background with the system silent; stored in the meter's band meter.
     Transfer(BandsTransfer),
     /// A span of the meter's band log: the energy average per band (as `transfer` takes
     /// it from `METER@FROM..UNTIL`) and how much of the span was logged; `--step` adds the
     /// logged seconds. `--levels-out` writes the averages as a `<Hz> <dB>` file that
-    /// `transfer --dwelling FILE` (or `--foh`, `--background`) reads on another rig.
+    /// `transfer --place-levels FILE` (or `--foh`, `--background`) reads on another rig.
     Log(BandsLog),
-    /// Store an estimated transfer where the bedroom cannot be reached: per-band
+    /// Store an estimated transfer where the place cannot be reached: per-band
     /// attenuation typed from a `<Hz> <dB>` file, marked estimated everywhere it shows.
     Estimate(BandsEstimate),
 }
@@ -887,21 +890,25 @@ pub enum BandsCmd {
 pub struct BandsEstimate {
     #[command(flatten)]
     pub meter: MeterRef,
-    /// `<Hz> <dB>` lines: each band's estimated attenuation FOH → bedroom (dB, ≥ 0); a
+    /// `<Hz> <dB>` lines: each band's estimated attenuation FOH → the place (dB, ≥ 0); a
     /// band not in the file has no limit at FOH.
     #[arg(long, value_name = "FILE")]
     pub attenuation: std::path::PathBuf,
+    /// The place the limits are for, as every line naming it says: `flat 4 bedroom`.
+    #[arg(long, value_name = "NAME", default_value = ac2_proto::model::BandTransferSet::DEFAULT_PLACE)]
+    pub place: String,
 }
 
 /// Band meter presets (not legal advice; `docs/design/band-leq.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum BandPresetArg {
-    /// Finland, STM 545/2015 Liite 2 Taulukko 2, rooms for sleeping: band Leq 1 h 20 … 200
-    /// Hz, night 74 … 32 dB, day 5 dB higher; predicted dwelling LAeq at night ≤ 25 dB.
+    /// Finland, STM 545/2015 Liite 2 Taulukko 2, rooms meant for sleeping: LZeq 60 min,
+    /// 20 … 200 Hz, night 74 … 32 dB, day 5 dB higher; predicted LAeq 60 min at night
+    /// ≤ 25 dB.
     #[value(name = "finland-545-lf")]
     Finland545Lf,
-    /// Finland, STM 545/2015 Liite 2 Taulukko 1, living rooms: predicted dwelling LAeq day
-    /// ≤ 35 dB, night ≤ 30 dB; no band limits.
+    /// Finland, STM 545/2015 Liite 2 Taulukko 1, living rooms: LZeq 60 min, 20 … 200 Hz
+    /// without band limits; predicted LAeq 60 min day ≤ 35 dB, night ≤ 30 dB.
     #[value(name = "finland-545-living-room")]
     Finland545LivingRoom,
 }
@@ -933,42 +940,44 @@ pub enum TonalArg {
 /// `spl bands set`.
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("what").required(true).multiple(true)
-    .args(["preset", "duration", "impulse", "tonal", "warn", "mic", "off"])))]
+    .args(["preset", "windows", "bands", "limits", "day_offsets", "impulse", "tonal", "warn",
+        "off"])))]
 pub struct BandsSet {
     #[command(flatten)]
     pub meter: MeterRef,
-    /// The limits of a rule (a measured transfer is kept). Informational, not legal advice.
+    /// A rule's windows, limits, bands and predicted window (the corrections and a
+    /// transfer are kept); everything stays settable after. Informational, not legal
+    /// advice.
     #[arg(long, value_enum)]
     pub preset: Option<BandPresetArg>,
-    /// Window length of every band and of the predicted LAeq, e.g. `1h` (the decree's),
-    /// `15min` for a quicker look.
-    #[arg(long, value_name = "WINDOW")]
-    pub duration: Option<LeqWindowArg>,
+    /// The band windows, replacing the meter's: `z:60min,a:15min` (Z unless `a:` or `c:`;
+    /// any Leq length up to 24 h). A window kept keeps its limits; at most 8.
+    #[arg(long, value_delimiter = ',', value_name = "WINDOWS")]
+    pub windows: Option<Vec<LeqWindowArg>>,
+    /// The bands shown, judged and alarmed: `20hz..200hz`, `20hz..200hz,1khz`.
+    #[arg(long, value_delimiter = ',', value_name = "BANDS")]
+    pub bands: Option<Vec<BandRangeArg>>,
+    /// A band limit of a window, dB SPL where the limits apply: `z:60min:63hz=42db`;
+    /// `…=none` removes it; repeatable.
+    #[arg(long = "limit", value_name = "WINDOW:BAND=LIMIT")]
+    pub limits: Vec<BandLimitArg>,
+    /// `z:60min=5db`: the window's limits hold at night (22–07), the day's this much
+    /// higher; `z:60min=none`: one set day and night; repeatable.
+    #[arg(long = "day-offset", value_name = "WINDOW=DB")]
+    pub day_offsets: Vec<DayOffsetArg>,
     /// §13 impulse correction in force from now: `none`, `5` or `10` dB.
     #[arg(long, value_enum)]
     pub impulse: Option<ImpulseArg>,
     /// §13 narrowband correction in force from now: `none`, `3` or `6` dB.
     #[arg(long, value_enum)]
     pub tonal: Option<TonalArg>,
-    /// Warn margin of every band: near when this close below its limit, e.g. `3db`.
+    /// Warn margin of every band window: near when this close below a limit, e.g. `3db`.
     #[arg(long, value_name = "DB")]
     pub warn: Option<Gain>,
-    /// Where the mic is: `foh` (the limits apply through the band transfer; without one
-    /// they are not judged) or `bedroom` (a bedroom monitor: the limits apply as they are).
-    #[arg(long, value_enum)]
-    pub mic: Option<BandMicArg>,
     /// Turn the band meter off (its configuration and transfer go).
-    #[arg(long, conflicts_with_all = ["preset", "duration", "impulse", "tonal", "warn", "mic"])]
+    #[arg(long, conflicts_with_all = ["preset", "windows", "bands", "limits", "day_offsets",
+        "impulse", "tonal", "warn"])]
     pub off: bool,
-}
-
-/// Where a band meter's mic is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum BandMicArg {
-    /// At FOH.
-    Foh,
-    /// In the bedroom (the dwelling).
-    Bedroom,
 }
 
 /// `spl bands transfer`. Each source is a file of `<Hz> <dB>` lines (dB SPL per 1/3-octave
@@ -982,13 +991,16 @@ pub struct BandsTransfer {
     /// Band levels at FOH (the meter's mic) with the test signal playing.
     #[arg(long, value_name = "SOURCE")]
     pub foh: BandSourceArg,
-    /// Band levels in the dwelling, the same signal over the same time.
-    #[arg(long, value_name = "SOURCE")]
-    pub dwelling: BandSourceArg,
-    /// The dwelling's background with the system silent; without it every band is
+    /// Band levels at the place, the same signal at the same level.
+    #[arg(long = "place-levels", value_name = "SOURCE")]
+    pub at_place: BandSourceArg,
+    /// The place's background with the system silent; without it every band is
     /// unchecked.
     #[arg(long, value_name = "SOURCE")]
     pub background: Option<BandSourceArg>,
+    /// The place the limits are for, as every line naming it says: `flat 4 bedroom`.
+    #[arg(long, value_name = "NAME", default_value = ac2_proto::model::BandTransferSet::DEFAULT_PLACE)]
+    pub place: String,
 }
 
 /// `spl bands log`. Times: `21:00:30` (local, today), `2026-10-08T21:00:30` (local),

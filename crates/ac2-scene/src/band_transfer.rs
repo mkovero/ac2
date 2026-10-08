@@ -1,9 +1,10 @@
 //! The band transfer step (`docs/design/band-leq.md`, *The transfer*): three spans of band
-//! logs named while the meters run — the test signal at FOH, the same signal with the mic in
-//! the bedroom, the bedroom with the system silent — their averages, and what to do next.
-//! The app's step and `ac2 spl bands log` say it the same way.
+//! logs named while the meters run — the test signal at FOH, the same signal with the mic at
+//! the place the limits are for (named by the operator, `receiving room` by default), the
+//! place with the system silent — their averages, and what to do next. The app's step and
+//! `ac2 spl bands log` say it the same way.
 
-use ac2_proto::model::{BAND_NOMINAL_HZ, BandLogAverage, LF_BAND_COUNT};
+use ac2_proto::model::{BAND_NOMINAL_HZ, BandLogAverage};
 use ac2_proto::units::WallNs;
 
 use crate::band_leq::band_label;
@@ -15,41 +16,50 @@ use crate::leq::clock;
 pub enum SpanRole {
     /// The test signal, the mic at FOH.
     Foh,
-    /// The same test signal at the same level, the mic in the bedroom.
-    Bedroom,
-    /// The bedroom with the system silent.
+    /// The same test signal at the same level, the mic at the place.
+    Place,
+    /// The place with the system silent.
     Background,
 }
 
 impl SpanRole {
     /// In the order they are measured.
-    pub const ALL: [SpanRole; 3] = [SpanRole::Foh, SpanRole::Bedroom, SpanRole::Background];
+    pub const ALL: [SpanRole; 3] = [SpanRole::Foh, SpanRole::Place, SpanRole::Background];
 
     /// Position in [`Self::ALL`].
     pub fn index(self) -> usize {
         match self {
             SpanRole::Foh => 0,
-            SpanRole::Bedroom => 1,
+            SpanRole::Place => 1,
             SpanRole::Background => 2,
         }
     }
 
-    /// `FOH span`.
-    pub fn title(self) -> &'static str {
+    /// `FOH span`, `Flat 4 bedroom span` (the place's).
+    pub fn title(self, place: &str) -> String {
         match self {
-            SpanRole::Foh => "FOH span",
-            SpanRole::Bedroom => "Bedroom span",
-            SpanRole::Background => "Background span",
+            SpanRole::Foh => "FOH span".into(),
+            SpanRole::Place => format!("{} span", capitalized(place)),
+            SpanRole::Background => "Background span".into(),
         }
     }
 
     /// What is measured over it.
-    pub fn what(self) -> &'static str {
+    pub fn what(self, place: &str) -> String {
         match self {
-            SpanRole::Foh => "test signal, mic at FOH",
-            SpanRole::Bedroom => "same test signal and level, mic in the bedroom",
-            SpanRole::Background => "system silent, mic in the bedroom",
+            SpanRole::Foh => "test signal, mic at FOH".into(),
+            SpanRole::Place => format!("same test signal and level, mic in {place}"),
+            SpanRole::Background => format!("system silent, mic in {place}"),
         }
+    }
+}
+
+/// `place` with its first letter upper case, to begin a title.
+fn capitalized(place: &str) -> String {
+    let mut c = place.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
     }
 }
 
@@ -131,14 +141,14 @@ pub fn average_text(nominal_hz: f64, level: Option<f64>) -> String {
     }
 }
 
-/// The averages of the limited bands 20 … 200 Hz in a line, dB SPL; `None` without a dB
-/// SPL average.
-pub fn lf_averages_text(a: &BandLogAverage) -> Option<String> {
+/// The averages of the shown bands (indices, low to high) in a line, dB SPL; `None`
+/// without a dB SPL average.
+pub fn averages_text(a: &BandLogAverage, shown: &[usize]) -> Option<String> {
     let levels = a.levels?;
-    let parts: Vec<String> = levels[..LF_BAND_COUNT]
+    let parts: Vec<String> = shown
         .iter()
-        .zip(BAND_NOMINAL_HZ)
-        .map(|(l, hz)| average_text(hz, l.map(|l| l.0)))
+        .filter(|&&b| b < levels.len())
+        .map(|&b| average_text(BAND_NOMINAL_HZ[b], levels[b].map(|l| l.0)))
         .collect();
     Some(format!("{} SPL", parts.join(" · ")))
 }
@@ -162,52 +172,54 @@ impl From<SpanState> for Phase {
 }
 
 /// What to do next, from the spans in [`SpanRole::ALL`] order, whether a transfer was
-/// stored by this step, and the meter that takes it.
-pub fn next_step(spans: [Phase; 3], stored: bool, meter: &str) -> String {
+/// stored by this step, the meter that takes it and the place's name.
+pub fn next_step(spans: [Phase; 3], stored: bool, meter: &str, place: &str) -> String {
     if stored {
         return format!(
-            "Band transfer stored in {meter}: its band limits now apply at FOH with each band's \
-             attenuation. Esc goes back to the Leq settings."
+            "Band transfer stored in {meter}: the band limits of {place} now apply at FOH with \
+             each band's attenuation. Esc goes back to the Leq settings."
         );
     }
     if let Some(i) = spans.iter().position(|p| *p == Phase::Marking) {
         return match SpanRole::ALL[i] {
-            SpanRole::Foh => "Marking the FOH span: keep the test signal steady. Space stops it.",
-            SpanRole::Bedroom => {
-                "Marking the bedroom span: the same test-signal level, the mic in the bedroom. \
+            SpanRole::Foh => {
+                "Marking the FOH span: keep the test signal steady. Space stops it.".into()
+            }
+            SpanRole::Place => format!(
+                "Marking the {place} span: the same test-signal level, the mic in {place}. \
                  Space stops it."
-            }
-            SpanRole::Background => {
-                "Marking the background span: the system silent, the mic in the bedroom. Space \
+            ),
+            SpanRole::Background => format!(
+                "Marking the background span: the system silent, the mic in {place}. Space \
                  stops it."
-            }
-        }
-        .into();
+            ),
+        };
     }
     match spans {
         [Phase::Unmarked, ..] => "Play a steady test signal (pink noise) through the PA with the \
              mic at FOH. Space starts the FOH span and Space again stops it; or 1–9 takes the \
              last 1–9 minutes."
             .into(),
-        [_, Phase::Unmarked, _] => "Move the mic to the bedroom and keep the same test-signal \
-             level. Space starts the bedroom span and Space again stops it."
-            .into(),
-        [_, _, Phase::Unmarked] => "Silence the system, the mic still in the bedroom. Space \
-             starts the background span; or Enter stores the band transfer without a \
-             background (every band unchecked)."
-            .into(),
+        [_, Phase::Unmarked, _] => format!(
+            "Move the mic to {place} and keep the same test-signal level. Space starts the \
+             {place} span and Space again stops it."
+        ),
+        [_, _, Phase::Unmarked] => format!(
+            "Silence the system, the mic still in {place}. Space starts the background span; \
+             or Enter stores the band transfer without a background (every band unchecked)."
+        ),
         _ => format!("Enter computes the band transfer and stores it in {meter}."),
     }
 }
 
 /// The step's keys, for its footer.
-pub const KEYS: &str = "↑/↓ span · Space start / stop · 1–9 the last minutes · ←/→ meter · \
-                        Delete clears · Enter stores the band transfer · Esc back";
+pub const KEYS: &str = "↑/↓ place, span · Space start / stop · 1–9 the last minutes · \
+                        ←/→ meter · Delete clears · Enter stores the band transfer · Esc back";
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac2_proto::model::BAND_COUNT;
+    use ac2_proto::model::{BAND_COUNT, LF_BAND_COUNT};
     use ac2_proto::units::{DbSpl, Seconds};
 
     const S: u64 = 1_000_000_000;
@@ -271,32 +283,48 @@ mod tests {
             coverage_text(&average(3, 3.0, 0), from, WallNs(2_400_000_000)),
             "3 of 3 s logged"
         );
-        let t = lf_averages_text(&average(118, 118.0, 0)).unwrap_or_default();
+        let lf: Vec<usize> = (0..LF_BAND_COUNT).collect();
+        let t = averages_text(&average(118, 118.0, 0), &lf).unwrap_or_default();
         assert!(t.starts_with("20 Hz 80.0 dB · 25 Hz 79.0 dB · 31.5 Hz 78.0 dB · 40 Hz — ·"));
         assert!(t.ends_with("200 Hz 70.0 dB SPL"), "{t}");
-        assert_eq!(lf_averages_text(&average(118, 118.0, 3)), None);
+        assert_eq!(
+            averages_text(&average(118, 118.0, 0), &[5, 17]).as_deref(),
+            Some("63 Hz 75.0 dB · 1000 Hz — SPL")
+        );
+        assert_eq!(averages_text(&average(118, 118.0, 3), &lf), None);
     }
 
     #[test]
     fn the_next_step_follows_the_spans() {
         use Phase::*;
         let m = "FOH SPL";
-        assert!(next_step([Unmarked; 3], false, m).starts_with("Play a steady test signal"));
-        assert!(next_step([Marking, Unmarked, Unmarked], false, m).starts_with("Marking the FOH"));
-        assert_eq!(
-            next_step([Marked, Unmarked, Unmarked], false, m),
-            "Move the mic to the bedroom and keep the same test-signal level. Space starts the \
-             bedroom span and Space again stops it."
-        );
-        assert!(next_step([Marked, Marking, Unmarked], false, m).contains("same test-signal"));
+        let p = "flat 4 bedroom";
+        assert!(next_step([Unmarked; 3], false, m, p).starts_with("Play a steady test signal"));
         assert!(
-            next_step([Marked, Marked, Unmarked], false, m)
+            next_step([Marking, Unmarked, Unmarked], false, m, p).starts_with("Marking the FOH")
+        );
+        assert_eq!(
+            next_step([Marked, Unmarked, Unmarked], false, m, p),
+            "Move the mic to flat 4 bedroom and keep the same test-signal level. Space starts \
+             the flat 4 bedroom span and Space again stops it."
+        );
+        assert!(next_step([Marked, Marking, Unmarked], false, m, p).contains("same test-signal"));
+        assert!(
+            next_step([Marked, Marked, Unmarked], false, m, p)
                 .contains("without a background (every band unchecked)")
         );
         assert_eq!(
-            next_step([Marked; 3], false, m),
+            next_step([Marked; 3], false, m, p),
             "Enter computes the band transfer and stores it in FOH SPL."
         );
-        assert!(next_step([Marked; 3], true, m).starts_with("Band transfer stored in FOH SPL"));
+        assert!(next_step([Marked; 3], true, m, p).starts_with("Band transfer stored in FOH SPL"));
+        assert_eq!(
+            SpanRole::Place.title("receiving room"),
+            "Receiving room span"
+        );
+        assert_eq!(
+            SpanRole::Background.what("receiving room"),
+            "system silent, mic in receiving room"
+        );
     }
 }

@@ -1382,9 +1382,11 @@ impl Shared {
             C::SplBandTransfer {
                 meas,
                 foh,
-                dwelling,
+                at_place,
                 background,
+                place,
             } => {
+                BandTransferSet::check_place(&place).map_err(|e| err(ErrorCode::Invalid, e))?;
                 let mut m = self.spl_meter(meas)?;
                 let MeasKind::Spl { config } = &mut m.config.kind else {
                     unreachable!("spl_meter checked the kind");
@@ -1397,8 +1399,9 @@ impl Shared {
                 };
                 if let Some(e) = ac2_proto::model::overlapping_spans(
                     &foh,
-                    &dwelling,
+                    &at_place,
                     background.as_ref(),
+                    &place,
                     |id| {
                         self.meas(id)
                             .map_or_else(|_| format!("SPL meter {id}"), |m| m.config.name)
@@ -1407,13 +1410,14 @@ impl Shared {
                     return Err(err(ErrorCode::Invalid, e));
                 }
                 let foh = fake_band_levels(&foh, &self.band_rows)?;
-                let dwelling = fake_band_levels(&dwelling, &self.band_rows)?;
+                let at_place = fake_band_levels(&at_place, &self.band_rows)?;
                 let background = background
                     .as_ref()
                     .map(|b| fake_band_levels(b, &self.band_rows))
                     .transpose()?;
-                let t = ac2_core::band_leq::Transfer::measure(&foh, &dwelling, background.as_ref());
+                let t = ac2_core::band_leq::Transfer::measure(&foh, &at_place, background.as_ref());
                 bands.transfer = Some(BandTransferSet {
+                    place,
                     measured_at: WallNs(self.now_ns()),
                     origin: ac2_proto::model::TransferOrigin::Measured,
                     bands: t.bands().map(fake_transfer_band),

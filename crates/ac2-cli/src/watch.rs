@@ -634,8 +634,9 @@ pub async fn leq(
     .await
 }
 
-/// `spl bands watch`: the headline, the period, the prediction and one line per band; piped,
-/// the same each second; `--json`, one line per second.
+/// `spl bands watch`: the headline, where the limits come from, the prediction, then per
+/// window its caption and one line per shown band; piped, the same each second; `--json`,
+/// one line per second with the windows in an array.
 pub async fn bands(
     c: &Client,
     meas: MeasId,
@@ -694,8 +695,16 @@ pub async fn bands(
                     key,
                 };
             };
-            let f = &f.meta;
-            let t = band_leq_text(f);
+            let Some(cfg) = config.bands.as_deref() else {
+                lines.push(format!("{}: the band meter is off", m.config.name));
+                return View {
+                    lines,
+                    json: json!({ "meas": meas.0, "bands": null }),
+                    key,
+                };
+            };
+            let t = band_leq_text(cfg, f);
+            let meta = &f.meta;
             let offset = view.clock_offset_ns.map_or(0, |o| {
                 o.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
             });
@@ -705,69 +714,104 @@ pub async fn bands(
                     .find(|i| i.channel == config.input)
                     .and_then(|i| i.mic.clone())
             });
-            let cal = output::cal_status(f.cal, f.mic_curve, now_wall(), offset);
+            let cal = output::cal_status(meta.cal, meta.mic_curve, now_wall(), offset);
             let cal = match &mic {
                 Some(name) => format!("{name} · {cal}"),
                 None => cal,
             };
             lines.push(format!(
-                "{} · {}, {} · {cal} · age {}",
+                "{} · band Leq {}, {} · {cal} · age {}",
                 m.config.name,
-                t.name,
+                t.bands,
                 t.unit,
                 age_text(tf.age, tf.stale)
             ));
             lines.push(t.headline.clone());
-            let mut info = vec![t.period.clone(), t.limits_from.clone()];
-            info.extend(t.correction.iter().cloned());
-            info.extend(t.filling.iter().cloned());
-            info.extend(t.incomplete.iter().cloned());
-            lines.push(info.join(" · "));
+            let info: Vec<String> = t.limits_from.iter().chain(&t.correction).cloned().collect();
+            if !info.is_empty() {
+                lines.push(info.join(" · "));
+            }
             if let Some(p) = &t.predicted {
                 lines.push(p.line.clone());
             }
-            for (i, b) in t.bars.iter().enumerate() {
-                let mark = if t.worst == Some(i) { "▶" } else { " " };
-                let mut l = format!("{mark} {:>5} Hz  {:>6} {}", b.label, b.value, t.unit);
-                if let Some(s) = &b.state_text {
-                    l.push_str(&format!("  {s}"));
+            let num = |v: f32| v.is_finite().then_some(f64::from(v));
+            let mut windows = Vec::new();
+            for (w, (st, wt)) in meta.windows.iter().zip(&t.windows).enumerate() {
+                lines.push(wt.caption());
+                for (i, b) in wt.bars.iter().enumerate() {
+                    let mark = if t.worst == Some((w, i)) {
+                        "▶"
+                    } else if wt.worst == Some(i) {
+                        "▷"
+                    } else {
+                        " "
+                    };
+                    let mut l = format!("{mark} {:>5} Hz  {:>6} {}", b.label, b.value, t.unit);
+                    if let Some(s) = &b.state_text {
+                        l.push_str(&format!("  {s}"));
+                    }
+                    let details: Vec<String> = [&b.limit, &b.headroom, &b.recover]
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                        .collect();
+                    if !details.is_empty() {
+                        l.push_str(&format!("  {}", details.join(" · ")));
+                    }
+                    lines.push(l);
                 }
-                let details: Vec<String> = [&b.limit, &b.headroom, &b.recover]
-                    .into_iter()
-                    .flatten()
-                    .cloned()
-                    .collect();
-                if !details.is_empty() {
-                    l.push_str(&format!("  {}", details.join(" · ")));
-                }
-                lines.push(l);
-            }
-            let num = |v: f64| v.is_finite().then_some(v);
-            let bands: Vec<serde_json::Value> = f
-                .bands
-                .iter()
-                .zip(&t.bars)
-                .map(|(b, x)| {
-                    json!({
-                        "nominal_hz": b.nominal.0,
-                        "leq": num(b.leq),
-                        "limit": b.limit,
-                        "judgement": b.judgement,
-                        "on_course": b.on_course,
-                        "allowed": b.allowed,
-                        "recover_s": b.recover.map(|r| r.0),
-                        "text": {
-                            "name": x.name,
-                            "label": x.label,
-                            "value": x.value,
-                            "state": x.state_text,
-                            "limit": x.limit,
-                            "headroom": x.headroom,
-                            "recover": x.recover,
-                        },
+                let bands: Vec<serde_json::Value> = wt
+                    .bars
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| {
+                        let k = f.col(w, i);
+                        let flags = f.flags[k];
+                        json!({
+                            "nominal_hz": x.nominal_hz,
+                            "leq": num(f.leq[k]),
+                            "limit": num(f.limit[k]),
+                            "judgement": flags.judgement(),
+                            "on_course": flags.contains(ac2_proto::frame::LeqFlags::ON_COURSE),
+                            "allowed": num(f.allowed[k]),
+                            "recover_s": num(f.recover[k]),
+                            "text": {
+                                "name": x.name,
+                                "label": x.label,
+                                "value": x.value,
+                                "state": x.state_text,
+                                "limit": x.limit,
+                                "headroom": x.headroom,
+                                "recover": x.recover,
+                            },
+                        })
                     })
+                    .collect();
+                windows.push(json!({
+                    "duration_s": st.duration.0,
+                    "weighting": st.weighting,
+                    "elapsed_s": st.elapsed.0,
+                    "measured_s": st.measured.0,
+                    "period": st.period,
+                    "period_after_horizon": st.period_after_horizon,
+                    "worst_hz": wt.worst.map(|i| wt.bars[i].nominal_hz),
+                    "bands": bands,
+                    "text": {
+                        "name": wt.name,
+                        "caption": wt.caption(),
+                        "period": wt.period,
+                        "filling": wt.filling,
+                        "incomplete": wt.incomplete,
+                    },
+                }));
+            }
+            let worst = t.worst.map(|(w, i)| {
+                json!({
+                    "window": w,
+                    "nominal_hz": t.windows[w].bars[i].nominal_hz,
+                    "name": t.windows[w].bars[i].name,
                 })
-                .collect();
+            });
             View {
                 lines,
                 json: json!({
@@ -778,34 +822,31 @@ pub async fn bands(
                     "age_s": tf.age,
                     "stale": tf.stale,
                     "responding": latest.responding,
-                    "scale": f.scale,
-                    "cal": f.cal,
+                    "scale": meta.scale,
+                    "cal": meta.cal,
                     "cal_text": cal,
-                    "duration_s": f.duration.0,
-                    "horizon_s": f.horizon.0,
-                    "elapsed_s": f.elapsed.0,
-                    "measured_s": f.measured.0,
-                    "period": f.period,
-                    "period_after_horizon": f.period_after_horizon,
-                    "correction_db": f.correction.0,
-                    "limits_from": f.limits_from,
-                    "worst": f.worst,
-                    "worst_hz": t.worst.map(|i| t.bars[i].nominal_hz),
-                    "predicted": f.predicted.map(|p| json!({
-                        "estimate": num(p.estimate),
-                        "at_most": num(p.at_most),
+                    "horizon_s": meta.horizon.0,
+                    "correction_db": meta.correction.0,
+                    "limits_from": meta.limits_from,
+                    "bands_hz": meta
+                        .bands
+                        .iter()
+                        .map(|&b| ac2_proto::model::BAND_NOMINAL_HZ[usize::from(b)])
+                        .collect::<Vec<_>>(),
+                    "worst": worst,
+                    "predicted": meta.predicted.map(|p| json!({
+                        "duration_s": p.duration.0,
+                        "estimate": p.estimate.is_finite().then_some(p.estimate),
+                        "at_most": p.at_most.is_finite().then_some(p.at_most),
                         "limit": p.limit,
                         "judgement": p.judgement,
                     })),
-                    "bands": bands,
+                    "windows": windows,
                     "text": {
-                        "name": t.name,
+                        "bands": t.bands,
                         "headline": t.headline,
-                        "period": t.period,
                         "limits_from": t.limits_from,
                         "correction": t.correction,
-                        "filling": t.filling,
-                        "incomplete": t.incomplete,
                         "predicted": t.predicted.as_ref().map(|p| p.line.clone()),
                     },
                 }),

@@ -525,11 +525,12 @@ impl AppState {
             Page::Io | Page::Audio => s.session.type_text(t),
             Page::Calibration => s.cal.type_text(t),
             Page::Leq => {
-                // The band transfer step takes keys, not text.
-                if let Some(d) = &mut s.leq
-                    && d.transfer.is_none()
-                {
-                    d.type_text(t);
+                // The band transfer step takes keys, not text, but for the place's name.
+                if let Some(d) = &mut s.leq {
+                    match &mut d.transfer {
+                        Some(step) => step.type_place(t),
+                        None => d.type_text(t),
+                    }
                 }
             }
             Page::Recording => {
@@ -555,7 +556,10 @@ impl AppState {
             Page::Calibration if s.cal.typing() => s.cal.backspace(),
             Page::Calibration => self.cal_view_key(Chord::key(Key::Delete), None, out),
             Page::Leq if s.leq.as_ref().is_some_and(|d| d.transfer.is_some()) => {
-                self.band_transfer_key(Chord::key(Key::Delete), out);
+                match s.leq.as_mut().and_then(|d| d.transfer.as_mut()) {
+                    Some(step) if step.on_place => step.backspace_place(),
+                    _ => self.band_transfer_key(Chord::key(Key::Delete), out),
+                }
             }
             Page::Leq => {
                 if let Some(d) = &mut s.leq {

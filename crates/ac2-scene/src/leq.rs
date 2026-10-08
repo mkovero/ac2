@@ -31,7 +31,7 @@ pub use columns::{
 };
 pub use run::{LeqRunText, NewLogConfirm, new_log_confirm, run_text};
 
-fn w_letter(w: Weighting) -> &'static str {
+pub(crate) fn w_letter(w: Weighting) -> &'static str {
     match w {
         Weighting::A => "A",
         Weighting::C => "C",
@@ -108,8 +108,12 @@ pub fn alarm_text(meter: &str, a: &LeqAlarm) -> (bool, String) {
             warn_margin: ac2_proto::units::Db(0.0),
         }),
         AlarmSubject::Peak { quantity } => peak_name(quantity).to_owned(),
-        AlarmSubject::Band { nominal } => format!("{} Hz band Leq", nominal.0),
-        AlarmSubject::Predicted => "predicted dwelling LAeq".to_owned(),
+        AlarmSubject::Band {
+            duration,
+            weighting,
+            nominal,
+        } => crate::band_leq::band_window_name(nominal.0, duration.0, weighting),
+        AlarmSubject::Predicted => "predicted LAeq at the transfer's place".to_owned(),
     };
     let corrected = match a.position {
         Some(p) => format!(" (corrected {:+.1} dB)", p.0),

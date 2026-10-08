@@ -1,4 +1,5 @@
-//! The band transfer step over the Leq settings: what to do next, the three spans with
+//! The band transfer step over the Leq settings: what to do next, the place's name, the
+//! three spans with
 //! their times, coverage and band averages, and the transfer it stored. Every text comes
 //! from `ac2_scene::band_transfer` and `ac2_scene::band_leq`.
 
@@ -28,9 +29,41 @@ pub(super) fn dialog(app: &App, ctx: &egui::Context, ch: &Chrome, t: &TransferSt
                 ui.add_space(4.0);
                 ui.add(egui::Label::new(RichText::new(t.next_step()).color(ch.text)).wrap());
                 ui.add_space(6.0);
+                let place = t.place_name();
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(if t.on_place { "▸" } else { " " })
+                            .color(ch.focus)
+                            .monospace(),
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(130.0, 20.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_min_width(130.0);
+                            ui.label(RichText::new("Limits are for").color(if t.on_place {
+                                ch.focus
+                            } else {
+                                ch.text
+                            }));
+                        },
+                    );
+                    let shown = if t.on_place {
+                        format!("{}▏", t.place)
+                    } else {
+                        place.to_owned()
+                    };
+                    ui.label(RichText::new(shown).monospace().color(ch.text));
+                    ui.label(
+                        RichText::new("the place's name: ↑ here and type")
+                            .small()
+                            .color(ch.dim),
+                    );
+                });
+                ui.add_space(2.0);
                 for r in SpanRole::ALL {
                     let s = t.span(r);
-                    let focused = t.focus == r;
+                    let focused = !t.on_place && t.focus == r;
                     let now = st.meter_now(s.meas).unwrap_or(match s.state {
                         SpanState::Marking { from } | SpanState::Marked { from, .. } => from,
                         SpanState::Unmarked => ac2_proto::units::WallNs(0),
@@ -51,7 +84,7 @@ pub(super) fn dialog(app: &App, ctx: &egui::Context, ch: &Chrome, t: &TransferSt
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 ui.set_min_width(130.0);
-                                ui.label(RichText::new(r.title()).color(if focused {
+                                ui.label(RichText::new(r.title(place)).color(if focused {
                                     ch.focus
                                 } else {
                                     ch.text
@@ -73,10 +106,10 @@ pub(super) fn dialog(app: &App, ctx: &egui::Context, ch: &Chrome, t: &TransferSt
                             );
                         });
                     };
-                    note(ui, r.what().into(), ch.dim);
+                    note(ui, r.what(place), ch.dim);
                     if let (SpanState::Marked { from, until }, Some(a)) = (s.state, &s.average) {
                         note(ui, bt::coverage_text(a, from, until), ch.dim);
-                        if let Some(l) = bt::lf_averages_text(a) {
+                        if let Some(l) = bt::averages_text(a, &t.shown) {
                             note(ui, l, ch.text);
                         }
                     }

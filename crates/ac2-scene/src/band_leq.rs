@@ -1,30 +1,41 @@
-//! The band meter of an SPL meter (`docs/design/band-leq.md`): eleven bars, 20 … 200 Hz,
-//! each the band's rolling Leq against its limit line, the worst band named with what to do
-//! about it, the limit set in force and where the limits come from, and the predicted
-//! dwelling LAeq. Read from a stage: the headline says which band eats the neighbour's
-//! budget and for how long to back off; the bars show where in the spectrum.
+//! The band meter of an SPL meter (`docs/design/band-leq.md`): per band window a row of
+//! bars, one per shown band, each the band's rolling Leq against its limit line; the worst
+//! band of the window nearest to (or over) its limit named with what to do about it, where
+//! the limits come from when a transfer moved them, and the predicted level at the
+//! transfer's place. Read from a stage: the headline says which band eats the budget and
+//! for how long to back off; the bars show where in the spectrum.
 //!
 //! Display truth only: the daemon judges (the `band_leq` frame carries every judgement and
-//! figure), this module words and colours it, with the Leq windows' vocabulary
-//! (`stay ≤ …`, `cooling down in …`) and the alarms' names (`63 Hz band Leq`,
-//! `predicted dwelling LAeq`).
+//! figure), this module words and colours it, with the Leq windows' vocabulary (`LZeq 60
+//! min`, `stay ≤ …`, `cooling down in …`) and the alarms' names (`63 Hz band LZeq 60 min`).
 
-use ac2_proto::frame::BandLeqMeta;
+use ac2_proto::frame::BandLeqFrame;
 use ac2_proto::model::{
-    BandLeqPreset, BandLimitPlace, BandMicPlace, BandPeriod, BandTransferBand, BandTransferSet,
-    LF_BAND_COUNT, LeqJudgement, LevelScale, TransferOrigin,
+    BAND_NOMINAL_HZ, BandLeqConfig, BandLeqPreset, BandLimitPlace, BandLimitSet, BandPeriod,
+    BandTransferBand, BandTransferSet, BandWindow, LeqJudgement, LevelScale, PredictedLeq,
+    TransferOrigin, Weighting,
 };
 
 use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, anchor, label};
 use crate::format;
-use crate::leq::{TileState, clock, column_colors, length, tile_colors};
+use crate::leq::{TileState, clock, column_colors, length, tile_colors, w_letter};
 use crate::primitives::{Color, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
 use crate::theme::Theme;
 
-/// A band's name as the alarms, the CLI and the app say it: `63 Hz band Leq`.
-pub fn band_name(nominal_hz: f64) -> String {
-    format!("{} Hz band Leq", band_label(nominal_hz))
+/// A band window's name, as a Leq window's: `LZeq 60 min`.
+pub fn window_name(duration_s: f64, weighting: Weighting) -> String {
+    format!("L{}eq {}", w_letter(weighting), length(duration_s))
+}
+
+/// A band of a band window as the alarms, the CLI and the app say it: `63 Hz band LZeq 60
+/// min`.
+pub fn band_window_name(nominal_hz: f64, duration_s: f64, weighting: Weighting) -> String {
+    format!(
+        "{} Hz band {}",
+        band_label(nominal_hz),
+        window_name(duration_s, weighting)
+    )
 }
 
 /// A band's nominal centre as its bar is labelled: `20`, `31.5`, `200`.
@@ -32,9 +43,38 @@ pub fn band_label(nominal_hz: f64) -> String {
     format!("{nominal_hz}")
 }
 
-/// What the bands are: `band Leq 60 min, unweighted`.
-pub fn meter_name(duration_s: f64) -> String {
-    format!("band Leq {}, unweighted", length(duration_s))
+/// A run of bands in words: `20–200 Hz`, `63 Hz`, `40–80 Hz, 1000 Hz` (indices into
+/// [`BAND_NOMINAL_HZ`], low to high).
+pub fn bands_text(bands: &[usize]) -> String {
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for &b in bands {
+        match runs.last_mut() {
+            Some((_, hi)) if *hi + 1 == b => *hi = b,
+            _ => runs.push((b, b)),
+        }
+    }
+    if runs.is_empty() {
+        return "no bands".to_owned();
+    }
+    runs.iter()
+        .map(|&(lo, hi)| {
+            let (a, b) = (
+                band_label(BAND_NOMINAL_HZ[lo]),
+                band_label(BAND_NOMINAL_HZ[hi]),
+            );
+            if lo == hi {
+                format!("{a} Hz")
+            } else {
+                format!("{a}–{b} Hz")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The place a transfer moves the limits from, as every text names it.
+pub fn place_of(t: Option<&BandTransferSet>) -> &str {
+    t.map_or(BandTransferSet::DEFAULT_PLACE, |t| t.place.as_str())
 }
 
 /// Every string and figure of one band's bar.
@@ -43,7 +83,7 @@ pub struct BandBar {
     pub nominal_hz: f64,
     /// `63`.
     pub label: String,
-    /// `63 Hz band Leq`.
+    /// `63 Hz band LZeq 60 min`.
     pub name: String,
     /// `45.2`, `—` before anything was measured.
     pub value: String,
@@ -68,46 +108,81 @@ pub struct BandBar {
     pub over_db: Option<f64>,
 }
 
-/// The predicted dwelling LAeq as shown.
+impl BandBar {
+    /// Severity, as the daemon ranks the worst band: ok, near, on course, over.
+    fn rank(&self) -> u8 {
+        match self.state {
+            TileState::Over => 3,
+            TileState::Near if self.on_course => 2,
+            TileState::Near => 1,
+            _ => 0,
+        }
+    }
+}
+
+/// The predicted level at the transfer's place as shown.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PredictedText {
-    /// `predicted dwelling LAeq 23.5 dB · at most 27.3 dB · limit 25.0 dB · NEAR`.
+    /// `predicted LAeq 60 min in flat 4 bedroom 23.5 dB · at most 27.3 dB · limit 25.0 dB ·
+    /// NEAR`.
     pub line: String,
     pub state: TileState,
+}
+
+/// One band window as shown.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BandWindowText {
+    /// `LZeq 60 min`.
+    pub name: String,
+    pub bars: Vec<BandBar>,
+    /// Index of the worst band, as the daemon picked it.
+    pub worst: Option<usize>,
+    /// `night limits (22–07)`, `day limits (07–22) · headroom for the night limits from
+    /// 22:00`; none for a window whose limits hold day and night.
+    pub period: Option<String>,
+    /// `so far · 30:00 / 1:00:00` while the window fills.
+    pub filling: Option<String>,
+    /// `offline for 10 s`: time in the window with no audio.
+    pub incomplete: Option<String>,
+    /// The key to the thick mark across a column: `limit`; none when no band has a judged
+    /// limit.
+    pub limit_key: Option<String>,
+    /// The key to the thin mark under it: `next 1 min: stay ≤` (`until full: stay ≤`); none
+    /// when no band has one.
+    pub allowed_key: Option<String>,
+}
+
+impl BandWindowText {
+    /// `LZeq 60 min · night limits (22–07) · so far · 30:00 / 1:00:00`.
+    pub fn caption(&self) -> String {
+        let mut parts = vec![self.name.clone()];
+        parts.extend(self.period.iter().cloned());
+        parts.extend(self.filling.iter().cloned());
+        parts.extend(self.incomplete.iter().cloned());
+        parts.join(" · ")
+    }
 }
 
 /// Everything the band view says.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandLeqText {
-    /// `band Leq 60 min, unweighted`.
-    pub name: String,
     /// `dB SPL` or `dBFS`.
     pub unit: String,
-    pub bars: Vec<BandBar>,
-    /// Index of the worst band, as the daemon picked it.
-    pub worst: Option<usize>,
-    /// `63 Hz band Leq 3.2 dB over its limit · cooling down in 6 min 52 s`.
+    /// The bands shown, `20–200 Hz`.
+    pub bands: String,
+    pub windows: Vec<BandWindowText>,
+    /// The window and band the headline is about: the worst band of the window nearest to
+    /// (or over) its limit.
+    pub worst: Option<(usize, usize)>,
+    /// `63 Hz band LZeq 60 min 3.2 dB over its limit · cooling down in 6 min 52 s`.
     pub headline: String,
     pub headline_state: TileState,
-    /// `night limits (22–07)`, `day limits (07–22) · headroom for the night limits from
-    /// 22:00`.
-    pub period: String,
-    /// `limits transferred from the dwelling`, `no band transfer: the limits are the bedroom's, …`.
-    pub limits_from: String,
+    /// `limits moved from flat 4 bedroom through the band transfer`; none without a
+    /// transfer (the limits are judged at the mic as typed).
+    pub limits_from: Option<String>,
     /// `§13 correction +5 dB`.
     pub correction: Option<String>,
-    /// `so far · 30:00 / 1:00:00` while the windows fill.
-    pub filling: Option<String>,
-    /// `offline for 10 s`: time in the windows with no audio.
-    pub incomplete: Option<String>,
     pub predicted: Option<PredictedText>,
-    /// The key to the thick mark across a column: `limit`, as the band's `limit 42.0 dB`;
-    /// none when no band has a judged limit.
-    pub limit_key: Option<String>,
-    /// The key to the thin mark under it: `next 1 min: stay ≤` (`until full: stay ≤`), the
-    /// band's headroom without its figure, which is the `≤ 81.2` under the band; none when
-    /// no band has one.
-    pub allowed_key: Option<String>,
 }
 
 fn state_text(state: TileState, on_course: bool) -> Option<String> {
@@ -136,7 +211,11 @@ fn rounded(v: f64) -> f64 {
     }
 }
 
-/// The period line: the set the windows are judged by and, when the headroom is computed
+fn finite(v: f32) -> Option<f64> {
+    v.is_finite().then_some(f64::from(v))
+}
+
+/// The period line: the set the window is judged by and, when the headroom is computed
 /// against the other set, which.
 pub fn period_text(period: BandPeriod, after_horizon: BandPeriod) -> String {
     let now = match period {
@@ -152,69 +231,44 @@ pub fn period_text(period: BandPeriod, after_horizon: BandPeriod) -> String {
     }
 }
 
-/// Where a band meter's mic is, as its setting reads.
-pub fn mic_place_text(p: BandMicPlace) -> &'static str {
+/// Where the limits judged at the mic come from, when a transfer moved them.
+pub fn limits_from_text(p: BandLimitPlace, place: &str) -> Option<String> {
     match p {
-        BandMicPlace::Foh => "at FOH",
-        BandMicPlace::Dwelling => "in the bedroom",
+        BandLimitPlace::AtMic => None,
+        BandLimitPlace::Transferred => Some(format!(
+            "limits moved from {place} through the band transfer"
+        )),
+        BandLimitPlace::Estimated => Some(format!(
+            "limits moved from {place} through an estimated band transfer (typed, not measured)"
+        )),
     }
 }
 
-/// What the mic's place means for the limits.
-pub fn mic_place_note(p: BandMicPlace) -> &'static str {
-    match p {
-        BandMicPlace::Foh => {
-            "the bedroom's limits apply at FOH through the band transfer; without one they \
-             are shown, not judged"
-        }
-        BandMicPlace::Dwelling => "a bedroom monitor: the limits apply at the mic as they are",
-    }
-}
-
-/// Where the limits judged at the mic come from.
-pub fn limits_from_text(p: BandLimitPlace) -> &'static str {
-    match p {
-        BandLimitPlace::AtMic => "limits at the mic: the mic is in the bedroom",
-        BandLimitPlace::NoTransfer => {
-            "no band transfer: the limits are the bedroom's, not judged at the mic"
-        }
-        BandLimitPlace::Transferred => "limits transferred from the dwelling",
-        BandLimitPlace::Estimated => {
-            "limits transferred with an estimated attenuation (typed, not measured)"
-        }
-    }
-}
-
-/// The band view's text from a `band_leq` frame.
-pub fn band_leq_text(m: &BandLeqMeta) -> BandLeqText {
-    let unit = match m.scale {
-        LevelScale::DbSpl => "dB SPL",
-        LevelScale::Dbfs => "dBFS",
-    };
-    let duration = m.duration.0;
-    let elapsed = m.elapsed.0;
+/// One window's text from its columns of a `band_leq` frame.
+fn window_text(cfg: &BandLeqConfig, f: &BandLeqFrame, w: usize) -> BandWindowText {
+    let m = &f.meta;
+    let st = m.windows[w];
+    let duration = st.duration.0;
+    let elapsed = st.elapsed.0;
     let filling = elapsed < duration;
     // A window filling for at least the horizon has its headroom until it is full.
     let until_full = filling && duration - elapsed >= m.horizon.0;
     let horizon = length(m.horizon.0);
-    // Without a transfer the limits are the bedroom's: a level at the mic over them says
-    // nothing about the bedroom, so no band is judged.
-    let at_mic = m.limits_from == BandLimitPlace::NoTransfer;
     let bars: Vec<BandBar> = m
         .bands
         .iter()
-        .map(|b| {
-            let is_judged = judged(b.judgement) && !at_mic;
-            let state = if at_mic && judged(b.judgement) {
-                TileState::NoLimit
-            } else {
-                TileState::from(b.judgement)
-            };
-            let on_course = is_judged && b.on_course;
+        .enumerate()
+        .map(|(i, &b)| {
+            let k = f.col(w, i);
+            let nominal = BAND_NOMINAL_HZ[usize::from(b)];
+            let flags = f.flags[k];
+            let judgement = flags.judgement();
+            let is_judged = judged(judgement);
+            let state = TileState::from(judgement);
+            let on_course = is_judged && flags.contains(ac2_proto::frame::LeqFlags::ON_COURSE);
             // Floored: a ceiling to stay under.
-            let allowed_db = b
-                .allowed
-                .filter(|a| is_judged && a.is_finite())
+            let allowed_db = finite(f.allowed[k])
+                .filter(|_| is_judged)
                 .map(|a| (a * 10.0 + 1e-6).floor() / 10.0);
             let headroom = allowed_db.map(|a| {
                 let a = format::level(a);
@@ -224,29 +278,25 @@ pub fn band_leq_text(m: &BandLeqMeta) -> BandLeqText {
                     format!("next {horizon}: stay ≤ {a} dB")
                 }
             });
-            let recover_s = b
-                .recover
-                .map(|r| r.0)
-                .filter(|r| is_judged && r.is_finite());
+            let recover_s = finite(f.recover[k]).filter(|_| is_judged);
             let cannot = is_judged && allowed_db.is_none() && state == TileState::Over;
             let recover = match recover_s {
                 Some(r) => Some(format!("cooling down in {}", format::duration(r))),
                 None if cannot => Some("cooling down".to_owned()),
                 None => None,
             };
-            let leq_db = rounded(b.leq);
-            let limit_db = b.limit.filter(|l| is_judged && l.is_finite());
+            let leq = f64::from(f.leq[k]);
+            let leq_db = rounded(leq);
+            let limit = finite(f.limit[k]);
+            let limit_db = limit.filter(|_| is_judged);
             BandBar {
-                nominal_hz: b.nominal.0,
-                label: band_label(b.nominal.0),
-                name: band_name(b.nominal.0),
-                value: format::level(b.leq),
+                nominal_hz: nominal,
+                label: band_label(nominal),
+                name: band_window_name(nominal, duration, st.weighting),
+                value: format::level(leq),
                 leq_db,
                 limit_db,
-                limit: b
-                    .limit
-                    .filter(|l| l.is_finite())
-                    .map(|l| format!("limit {} dB", format::level(l))),
+                limit: limit.map(|l| format!("limit {} dB", format::level(l))),
                 state,
                 state_text: state_text(state, on_course),
                 on_course,
@@ -260,66 +310,112 @@ pub fn band_leq_text(m: &BandLeqMeta) -> BandLeqText {
             }
         })
         .collect();
-    let worst = m.worst.map(usize::from).filter(|&i| i < bars.len());
-    let (headline, headline_state) = headline(m, &bars, worst);
-    let correction = (m.correction.0 != 0.0)
-        .then(|| format!("§13 correction {} dB", format::signed(m.correction.0, 0)));
-    let incomplete = (elapsed.min(duration) - m.measured.0 >= 1.0).then(|| {
+    // The period matters only to a window whose limits differ by day and night.
+    let day_night = cfg
+        .windows
+        .get(w)
+        .is_some_and(|c| matches!(c.limits, BandLimitSet::NightDay { .. }) && c.limits.any());
+    let incomplete = (elapsed.min(duration) - st.measured.0 >= 1.0).then(|| {
         format!(
             "offline for {}",
-            length((elapsed.min(duration) - m.measured.0).round())
+            length((elapsed.min(duration) - st.measured.0).round())
         )
     });
-    let limit_key = bars
-        .iter()
-        .any(|b| b.limit_db.is_some())
-        .then(|| "limit".to_owned());
-    let allowed_key = bars.iter().any(|b| b.allowed_db.is_some()).then(|| {
-        if until_full {
-            "until full: stay ≤".to_owned()
-        } else {
-            format!("next {horizon}: stay ≤")
-        }
-    });
-    BandLeqText {
-        name: meter_name(duration),
-        unit: unit.to_owned(),
-        bars,
-        worst,
-        headline,
-        headline_state,
-        period: period_text(m.period, m.period_after_horizon),
-        limits_from: limits_from_text(m.limits_from).to_owned(),
-        correction,
+    BandWindowText {
+        name: window_name(duration, st.weighting),
+        worst: st.worst.map(usize::from).filter(|&i| i < bars.len()),
+        period: day_night.then(|| period_text(st.period, st.period_after_horizon)),
         filling: filling.then(|| format!("so far · {} / {}", clock(elapsed), clock(duration))),
         incomplete,
-        predicted: m.predicted.map(|p| predicted_text(&p, m.period)),
-        limit_key,
-        allowed_key,
+        limit_key: bars
+            .iter()
+            .any(|b| b.limit_db.is_some())
+            .then(|| "limit".to_owned()),
+        allowed_key: bars.iter().any(|b| b.allowed_db.is_some()).then(|| {
+            if until_full {
+                "until full: stay ≤".to_owned()
+            } else {
+                format!("next {horizon}: stay ≤")
+            }
+        }),
+        bars,
     }
 }
 
-fn headline(m: &BandLeqMeta, bars: &[BandBar], worst: Option<usize>) -> (String, TileState) {
-    if m.scale == LevelScale::Dbfs {
+/// The band view's text from a `band_leq` frame and the configuration it was made under
+/// (its windows' limits and the transfer's place).
+pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
+    let m = &f.meta;
+    let unit = match m.scale {
+        LevelScale::DbSpl => "dB SPL",
+        LevelScale::Dbfs => "dBFS",
+    };
+    let windows: Vec<BandWindowText> = (0..m.windows.len())
+        .map(|w| window_text(cfg, f, w))
+        .collect();
+    // The headline follows the window nearest to (or over) its limit: the most severe
+    // worst band, then the one furthest above (or least below) its limit.
+    let worst = windows
+        .iter()
+        .enumerate()
+        .filter_map(|(w, t)| t.worst.map(|i| (w, i, &t.bars[i])))
+        .max_by(|a, b| {
+            let ex = |b: &BandBar| b.over_db.unwrap_or(f64::NEG_INFINITY);
+            a.2.rank()
+                .cmp(&b.2.rank())
+                .then(ex(a.2).total_cmp(&ex(b.2)))
+                // Equal: the earlier window, as the operator ordered them.
+                .then(b.0.cmp(&a.0))
+        })
+        .map(|(w, i, _)| (w, i));
+    let place = place_of(cfg.transfer.as_ref());
+    let (headline, headline_state) = headline(f, &windows, worst);
+    let shown: Vec<usize> = m.bands.iter().map(|&b| usize::from(b)).collect();
+    BandLeqText {
+        unit: unit.to_owned(),
+        bands: bands_text(&shown),
+        windows,
+        worst,
+        headline,
+        headline_state,
+        limits_from: limits_from_text(m.limits_from, place),
+        correction: (m.correction.0 != 0.0)
+            .then(|| format!("§13 correction {} dB", format::signed(m.correction.0, 0))),
+        predicted: m.predicted.map(|p| predicted_text(&p, place)),
+    }
+}
+
+fn headline(
+    f: &BandLeqFrame,
+    windows: &[BandWindowText],
+    worst: Option<(usize, usize)>,
+) -> (String, TileState) {
+    if f.meta.scale == LevelScale::Dbfs {
         return (
             "not calibrated: band levels in dBFS, limits not judged".to_owned(),
             TileState::NotCalibrated,
         );
     }
-    if m.limits_from == BandLimitPlace::NoTransfer && m.scale == LevelScale::DbSpl {
-        return (
-            "no band transfer — limits are for the bedroom, measure the transfer".to_owned(),
-            TileState::NoLimit,
-        );
+    if windows.is_empty() {
+        let state = f
+            .meta
+            .predicted
+            .map_or(TileState::NoLimit, |p| p.judgement.into());
+        return ("no band windows".to_owned(), state);
     }
-    if bars.iter().all(|b| !b.leq_db.is_finite()) {
+    if windows
+        .iter()
+        .flat_map(|w| &w.bars)
+        .all(|b| !b.leq_db.is_finite())
+    {
         return (
             "waiting for the first second".to_owned(),
             TileState::NoLimit,
         );
     }
-    let Some(b) = worst.and_then(|i| bars.get(i)) else {
-        let state = m
+    let Some(b) = worst.map(|(w, i)| &windows[w].bars[i]) else {
+        let state = f
+            .meta
             .predicted
             .map_or(TileState::NoLimit, |p| p.judgement.into());
         return ("no band limits".to_owned(), state);
@@ -342,19 +438,20 @@ fn headline(m: &BandLeqMeta, bars: &[BandBar], worst: Option<usize>) -> (String,
     (line, b.state)
 }
 
-/// The predicted dwelling LAeq line.
-pub fn predicted_text(p: &ac2_proto::model::PredictedLeq, period: BandPeriod) -> PredictedText {
-    let mut parts = vec![format!("predicted dwelling LAeq {}", with_db(p.estimate))];
+/// The predicted level at the transfer's place.
+pub fn predicted_text(p: &PredictedLeq, place: &str) -> PredictedText {
+    let mut parts = vec![format!(
+        "predicted LAeq {} in {place} {}",
+        length(p.duration.0),
+        with_db(p.estimate)
+    )];
     // The unusable bands at their bound can only raise it: shown when they do.
     if p.at_most.is_finite() && (!p.estimate.is_finite() || p.at_most - p.estimate >= 0.05) {
         parts.push(format!("at most {} dB", format::level(p.at_most)));
     }
     match p.limit {
         Some(l) => parts.push(format!("limit {} dB", format::level(l.0))),
-        None => parts.push(match period {
-            BandPeriod::Night => "no night limit".to_owned(),
-            BandPeriod::Day => "no day limit".to_owned(),
-        }),
+        None => parts.push("no limit now".to_owned()),
     }
     let state = TileState::from(p.judgement);
     if let Some(s) = state_text(state, false) {
@@ -376,37 +473,59 @@ fn with_db(v: f64) -> String {
 
 /// What a band preset sets, as the dialog and the CLI show it.
 pub fn preset_summary(p: BandLeqPreset) -> String {
-    let c = p.config(None);
+    let c = p.apply(None);
+    let shown: Vec<usize> = c.band_indices().unwrap_or_default();
     let mut parts = Vec::new();
-    let first = c.night.first().copied().flatten();
-    let last = c.night.last().copied().flatten();
-    if let (Some(a), Some(b)) = (first, last) {
+    for w in &c.windows {
         parts.push(format!(
-            "{} 20 … 200 Hz, night {} … {} dB, day {} dB higher",
-            meter_name(c.duration.0),
-            a.0,
-            b.0,
-            BandLeqPreset::FINLAND_545_DAY_OFFSET_DB
+            "{}, {}, {}",
+            window_name(w.duration.0, w.weighting),
+            bands_text(&shown),
+            limits_summary(w, &shown)
         ));
     }
-    let mut pred = Vec::new();
-    if let Some(d) = c.predicted.day {
-        pred.push(format!("day ≤ {} dB", d.0));
-    }
-    if let Some(n) = c.predicted.night {
-        pred.push(format!("night ≤ {} dB", n.0));
-    }
-    if !pred.is_empty() {
-        parts.push(format!("predicted dwelling LAeq {}", pred.join(", ")));
+    if let Some(pr) = c.predicted {
+        let mut pred = Vec::new();
+        if let Some(d) = pr.day {
+            pred.push(format!("day ≤ {} dB", d.0));
+        }
+        if let Some(n) = pr.night {
+            pred.push(format!("night ≤ {} dB", n.0));
+        }
+        if !pred.is_empty() {
+            parts.push(format!(
+                "predicted LAeq {} {}",
+                length(pr.duration.0),
+                pred.join(", ")
+            ));
+        }
     }
     format!("{}: {}", p.name(), parts.join("; "))
+}
+
+/// A window's limits on the shown bands (indices) in words: `night 74 … 32 dB, day 5 dB
+/// higher`, `70 … 42 dB`, `no limits`; the first and last shown band that has one.
+pub fn limits_summary(w: &BandWindow, shown: &[usize]) -> String {
+    let lims: Vec<f64> = shown
+        .iter()
+        .filter_map(|&b| w.limits.night().get(b).copied().flatten().map(|l| l.0))
+        .collect();
+    match (lims.first(), lims.last(), w.limits.day_offset()) {
+        (Some(a), Some(b), Some(o)) if a == b => {
+            format!("night {a} dB, day {} dB higher", o.0)
+        }
+        (Some(a), Some(b), Some(o)) => format!("night {a} … {b} dB, day {} dB higher", o.0),
+        (Some(a), Some(b), None) if a == b => format!("{a} dB"),
+        (Some(a), Some(b), None) => format!("{a} … {b} dB"),
+        _ => "no limits".to_owned(),
+    }
 }
 
 /// Where a band preset's figures come from, with the caveats it carries.
 pub fn preset_source(p: BandLeqPreset) -> String {
     format!(
         "{} — informational, not legal advice; a prediction from FOH is not a measurement \
-         in the dwelling",
+         where the limits apply",
         p.source()
     )
 }
@@ -437,24 +556,27 @@ pub fn transfer_band_text(nominal_hz: f64, b: &BandTransferBand) -> String {
     }
 }
 
-/// The transfer of the limited bands in a line: `transfer 20–200 Hz: 8 clean, 1 corrected,
-/// 1 bound, 1 not measured`; `no transfer: limits judged at the mic`.
-pub fn transfer_summary(t: Option<&BandTransferSet>) -> String {
+/// The transfer of the shown bands (indices, low to high) in a line: `transfer from flat 4
+/// bedroom, 20–200 Hz: 8 clean, 1 corrected, 1 bound, 1 not measured`; `no band transfer:
+/// limits judged at the mic as typed`.
+pub fn transfer_summary(t: Option<&BandTransferSet>, shown: &[usize]) -> String {
     let Some(t) = t else {
-        return "no band transfer: the bedroom's limits are not judged at the mic".to_owned();
+        return "no band transfer: limits judged at the mic as typed".to_owned();
     };
+    let place = &t.place;
+    let bands = bands_text(shown);
+    let of_shown = || shown.iter().filter_map(|&b| t.bands.get(b));
     if t.origin == TransferOrigin::Estimated {
-        let typed = t.bands[..LF_BAND_COUNT]
-            .iter()
+        let typed = of_shown()
             .filter(|b| !matches!(b, BandTransferBand::Missing))
             .count();
         return format!(
-            "estimated transfer 20–200 Hz: {typed} bands typed, not measured (measure it when \
-             the bedroom can be reached)"
+            "estimated transfer from {place}, {bands}: {typed} bands typed, not measured \
+             (measure it when you can reach {place})"
         );
     }
     let mut n = [0usize; 5];
-    for b in &t.bands[..LF_BAND_COUNT] {
+    for b in of_shown() {
         n[match b {
             BandTransferBand::Clean { .. } => 0,
             BandTransferBand::Corrected { .. } => 1,
@@ -475,7 +597,7 @@ pub fn transfer_summary(t: Option<&BandTransferSet>) -> String {
     .filter(|(_, k)| *k > 0)
     .map(|(w, k)| format!("{k} {w}"))
     .collect();
-    format!("transfer 20–200 Hz: {}", parts.join(", "))
+    format!("transfer from {place}, {bands}: {}", parts.join(", "))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -497,12 +619,12 @@ pub struct BandLeqView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandLeqScene {
     pub scene: Scene,
-    /// Each band's column, low to high.
-    pub columns: Vec<Rect>,
+    /// Per window, each band's column, low to high.
+    pub columns: Vec<Vec<Rect>>,
     /// The headline's box.
     pub headline: Rect,
-    /// The bar scale, dB (bottom, top).
-    pub range: (f64, f64),
+    /// Per window, the bar scale, dB (bottom, top).
+    pub ranges: Vec<(f64, f64)>,
     pub banners: Vec<BannerRow>,
 }
 
@@ -538,7 +660,8 @@ pub fn bar_range(bars: &[BandBar]) -> (f64, f64) {
 }
 
 /// Lays the band view out in `size`: the meter and calibration on one line, the headline
-/// large, the period, the limits' place and the prediction under it, then eleven columns.
+/// large, the limits' place and the prediction under it, then one row of columns per
+/// window, stacked in the configuration's order, each under its caption and key.
 pub fn band_leq_scene(
     v: &BandLeqView,
     status: &Status,
@@ -553,8 +676,8 @@ pub fn band_leq_scene(
     let w = (size.width - 2.0 * pad).max(1.0);
     let mut y = strip.rect.bottom() + pad;
 
-    // Caption: the meter and what the bars are, the calibration (and STALE) right.
-    let left = format!("{} · {}, {}", v.meter, t.name, t.unit);
+    // Caption: the meter and the bands, the calibration (and STALE) right.
+    let left = format!("{} · band Leq {}, {}", v.meter, t.bands, t.unit);
     let right = match &v.stale {
         Some(s) => format!("{s} · {}", v.cal),
         None => v.cal.clone(),
@@ -601,15 +724,85 @@ pub fn band_leq_scene(
     ));
     y += head_h + pad * 0.6;
 
-    // The small lines: period, limits' place, correction, filling; then the prediction.
-    let mut info = vec![t.period.clone(), t.limits_from.clone()];
-    info.extend(t.correction.iter().cloned());
-    info.extend(t.filling.iter().cloned());
-    info.extend(t.incomplete.iter().cloned());
+    // The meter's small lines: the limits' place and the correction; then the prediction.
     let sfs = theme.small_font_size.max(fs * 0.85);
-    // The key to the two marks across the columns, right of the small lines: a mark is
-    // keyed only where one is drawn, so an allowed level off every column's scale has none.
-    let range = bar_range(&t.bars);
+    let info: Vec<String> = t
+        .limits_from
+        .iter()
+        .chain(t.correction.iter())
+        .cloned()
+        .collect();
+    if !info.is_empty() {
+        c.overlay.labels.push(label(
+            crate::spl::cut(&info.join(" · "), w, sfs),
+            [pad, y],
+            anchor(HAlign::Left, VAlign::Top),
+            sfs,
+            theme.text_dim,
+        ));
+        y += sfs * 1.5;
+    }
+    if let Some(p) = &t.predicted {
+        let pfs = (big * 0.7).max(fs);
+        let pfs = fit(&p.line, w, pfs, sfs);
+        let ink = match p.state {
+            TileState::Over => theme.banner_fault.background,
+            TileState::Near => theme.banner_warning.background,
+            _ => theme.text,
+        };
+        c.overlay.labels.push(label(
+            p.line.clone(),
+            [pad, y],
+            anchor(HAlign::Left, VAlign::Top),
+            pfs,
+            ink,
+        ));
+        y += pfs * 1.5;
+    }
+
+    // The windows, stacked: each its caption and key, then its columns.
+    let n_win = t.windows.len().max(1);
+    let section_h = ((size.height - y - pad) / n_win as f32).max(1.0);
+    let mut columns = Vec::with_capacity(t.windows.len());
+    let mut ranges = Vec::with_capacity(t.windows.len());
+    for (wi, win) in t.windows.iter().enumerate() {
+        let top = y + wi as f32 * section_h;
+        let range = bar_range(&win.bars);
+        let worst = t
+            .worst
+            .filter(|&(w, _)| w == wi)
+            .map(|(_, i)| i)
+            .or(win.worst);
+        let cols = draw_window(&mut c, win, worst, range, (top, section_h), pad, w, theme);
+        columns.push(cols);
+        ranges.push(range);
+    }
+    BandLeqScene {
+        scene: c.into_scene(size),
+        columns,
+        headline,
+        ranges,
+        banners: strip.rows,
+    }
+}
+
+/// One window's caption, key and columns in the section `(top, height)`; its columns.
+#[allow(clippy::too_many_arguments)]
+fn draw_window(
+    c: &mut Canvas,
+    t: &BandWindowText,
+    worst: Option<usize>,
+    range: (f64, f64),
+    (top, height): (f32, f32),
+    pad: f32,
+    w: f32,
+    theme: &Theme,
+) -> Vec<Rect> {
+    let fs = theme.font_size;
+    let sfs = theme.small_font_size.max(fs * 0.85);
+    let mut y = top;
+    // The key to the two marks across the columns, right of the caption: a mark is keyed
+    // only where one is drawn, so an allowed level off every column's scale has none.
     let limit_stroke = Stroke::solid(theme.text, 3.0);
     let allowed_stroke = Stroke::solid(theme.text_dim, 2.0);
     let allowed_drawn = |b: &BandBar| b.allowed_db.filter(|a| (range.0..=range.1).contains(a));
@@ -629,7 +822,8 @@ pub fn band_leq_scene(
     let mark_w = sfs * 1.6;
     let pair_w = |text: &str| mark_w + sfs * 0.4 + canvas::text_width(text, sfs);
     let keys_w: f32 = keys.iter().map(|(t, _)| pair_w(t) + sfs * 1.5).sum();
-    let key_x = size.width - pad - keys_w + sfs * 1.5;
+    let right = pad + w;
+    let key_x = right - keys_w + sfs * 1.5;
     let mut x = key_x;
     for (text, stroke) in &keys {
         let mark_y = y + sfs * 0.6;
@@ -649,32 +843,15 @@ pub fn band_leq_scene(
         x += pair_w(text) + sfs * 1.5;
     }
     c.overlay.labels.push(label(
-        crate::spl::cut(&info.join(" · "), (key_x - sfs - pad).max(1.0), sfs),
+        crate::spl::cut(&t.caption(), (key_x - sfs - pad).max(1.0), sfs),
         [pad, y],
         anchor(HAlign::Left, VAlign::Top),
         sfs,
-        theme.text_dim,
+        theme.text,
     ));
     y += sfs * 1.5;
-    if let Some(p) = &t.predicted {
-        let pfs = (big * 0.7).max(fs);
-        let pfs = fit(&p.line, w, pfs, sfs);
-        let ink = match p.state {
-            TileState::Over => theme.banner_fault.background,
-            TileState::Near => theme.banner_warning.background,
-            _ => theme.text,
-        };
-        c.overlay.labels.push(label(
-            p.line.clone(),
-            [pad, y],
-            anchor(HAlign::Left, VAlign::Top),
-            pfs,
-            ink,
-        ));
-        y += pfs * 1.5;
-    }
 
-    // The columns: a y scale left, eleven columns, the band labels under them.
+    // The columns: a y scale left, one column per band, the band labels under them.
     let scale_w = fs * 3.0;
     let label_fs = fs.max(((w - scale_w) / 11.0 * 0.22).min(fs * 1.6));
     let below_h = label_fs * 1.4 + sfs * 1.4;
@@ -682,12 +859,14 @@ pub fn band_leq_scene(
         pad + scale_w,
         y + pad * 0.5,
         (w - scale_w).max(1.0),
-        (size.height - y - pad * 1.5 - below_h).max(1.0),
+        (top + height - y - pad * 1.5 - below_h).max(1.0),
     );
     let to_y = |db: f64| -> f32 {
         let k = ((db - range.0) / (range.1 - range.0)).clamp(0.0, 1.0);
         area.bottom() - (k as f32) * area.h
     };
+    // Grid lines every 10 dB, fewer when the section is short.
+    let step = if area.h < sfs * 8.0 { 20.0 } else { 10.0 };
     let mut db = range.0;
     while db <= range.1 + 1e-9 {
         let gy = to_y(db);
@@ -704,7 +883,7 @@ pub fn band_leq_scene(
             sfs,
             theme.axis_text,
         ));
-        db += 10.0;
+        db += step;
     }
     let n = t.bars.len().max(1);
     let col_w = area.w / n as f32;
@@ -763,7 +942,7 @@ pub fn band_leq_scene(
             vfs,
             value_ink,
         ));
-        let worst = t.worst == Some(i);
+        let worst = worst == Some(i);
         c.overlay.labels.push(label(
             b.label.clone(),
             [x + cw / 2.0, area.bottom() + 4.0],
@@ -813,13 +992,7 @@ pub fn band_leq_scene(
         sfs,
         theme.axis_text,
     ));
-    BandLeqScene {
-        scene: c.into_scene(size),
-        columns,
-        headline,
-        range,
-        banners: strip.rows,
-    }
+    columns
 }
 
 /// Text smaller than this is left out of a narrow column.

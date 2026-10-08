@@ -249,6 +249,8 @@ pub enum Request {
     BandTransfer {
         meas: MeasId,
         sources: Box<crate::leq_dialog::Sources>,
+        /// The place the limits are for.
+        place: String,
     },
     /// The measurement streams to receive: what the visible panes draw and what the
     /// reducer folds (an IR nobody shows is never computed, since the daemon derives it
@@ -1264,16 +1266,21 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                 o.send(ConnEvent::BandLog { ask, result });
             });
         }
-        Request::BandTransfer { meas, sources } => {
+        Request::BandTransfer {
+            meas,
+            sources,
+            place,
+        } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                let (foh, dwelling, background) = *sources;
+                let (foh, at_place, background) = *sources;
                 let result = c
                     .call(Command::SplBandTransfer {
                         meas,
                         foh,
-                        dwelling,
+                        at_place,
                         background,
+                        place,
                     })
                     .await
                     .and_then(

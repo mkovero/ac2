@@ -1057,7 +1057,7 @@ fn session_save_load_round_trip() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
-        text.replace("\"version\": 13", "\"version\": 14"),
+        text.replace("\"version\": 14", "\"version\": 15"),
     )
     .unwrap();
     let e = c
@@ -1071,8 +1071,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 14,
-            supported: 13
+            found: 15,
+            supported: 14
         })
     );
     assert_eq!(traces(c).len(), n);

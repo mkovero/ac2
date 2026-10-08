@@ -926,16 +926,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 13", "\"version\": 12")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 14", "\"version\": 13")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 12
+            found: 13
         }
     );
-    assert!(e.to_string().contains("reads version 13 only"), "{e}");
+    assert!(e.to_string().contains("reads version 14 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

@@ -4,9 +4,9 @@
 //! [`BandIntegrator`] filters the unweighted signal through the IEC 61260-1 1/3-octave bank
 //! of [`crate::rta`] and sums each band's energy into one-second [`BandSecond`]s, a capture
 //! gap adding neither energy nor measured time. [`BandWindows`] keeps one rolling window per
-//! limited band on [`RollingLeq`] (the same sums, headroom and recovery as the A/C/Z
-//! windows) and judges each band with [`judge_window`] against the limit set in force
-//! ([`Period`]). [`Transfer`] turns a setup measurement (band levels at FOH and in the
+//! selected band on [`RollingLeq`] (the same sums, headroom and recovery as the A/C/Z
+//! windows), weights each band at its mid-band frequency ([`weighting_db`]) and judges it
+//! with [`judge_window`] against the limit set in force ([`Period`]). [`Transfer`] turns a setup measurement (band levels at FOH and in the
 //! dwelling, with the dwelling's background) into a per-band attenuation, FOH limits and a
 //! predicted dwelling LAeq per second ([`PredictedSecond`]).
 //!
@@ -25,8 +25,8 @@ use crate::weighting::Weighting;
 /// Bands integrated: 1/3 octaves from 20 Hz to 10 kHz (nominal).
 pub const BANDS: usize = 28;
 
-/// The bands with low-frequency limits, 20 … 200 Hz (STM 545/2015 Liite 2 Taulukko 2): the
-/// first this many of [`NOMINAL_HZ`].
+/// The bands of the low-frequency limit table of STM 545/2015 Liite 2 Taulukko 2, 20 … 200
+/// Hz: the first this many of [`NOMINAL_HZ`].
 pub const LF_BANDS: usize = 11;
 
 /// Nominal mid-band frequencies of the bands, Hz (IEC 61260-1 Annex E).
@@ -258,6 +258,14 @@ pub struct BandLimits {
 }
 
 impl BandLimits {
+    /// The same limits day and night.
+    pub fn always(limits: [Option<f64>; BANDS]) -> Self {
+        Self {
+            day: limits,
+            night: limits,
+        }
+    }
+
     /// Night limits as given; day limits `day_offset_db` higher.
     pub fn night_and_offset_day(night: [Option<f64>; BANDS], day_offset_db: f64) -> Self {
         Self {
@@ -317,24 +325,43 @@ pub fn worst_band(states: &[BandState]) -> Option<usize> {
         .map(|(i, _, _)| i)
 }
 
-/// Rolling windows of one length on the first `bands` bands, with the period each second
-/// was in.
+/// The weighting of band `band` as a level offset, dB: `w` at the band's exact mid-band
+/// frequency ([`centre_hz`]). A band level is weighted by adding it to the unweighted band
+/// level (`docs/design/band-leq.md`, *Weighting a band*).
+pub fn weighting_db(w: Weighting, band: usize) -> f64 {
+    w.analytic_db(centre_hz(band))
+}
+
+/// Rolling windows of one length and one weighting on a selection of bands, with the
+/// period each second was in.
 #[derive(Debug, Clone)]
 pub struct BandWindows {
     ring: RollingLeq<BandSecond>,
+    /// The bands, one window each, in the ring's order.
+    bands: Vec<usize>,
+    /// [`weighting_db`] of each band of `bands`.
+    weighting_db: Vec<f64>,
     /// Seconds pushed when the newest night second was pushed (1-based: the count after it).
     last_night: Option<u64>,
 }
 
 impl BandWindows {
-    /// Windows of `seconds` (≥ 1) on bands `0..bands` (at most [`BANDS`]), headroom over
-    /// `horizon` s.
-    pub fn new(seconds: u32, bands: usize, horizon: u32) -> Self {
-        let bands = bands.min(BANDS);
+    /// Windows of `seconds` (≥ 1) on `bands` (indices into [`NOMINAL_HZ`]; those out of
+    /// range are left out), each band weighted by `weighting` at its mid-band frequency,
+    /// headroom over `horizon` s.
+    pub fn new(seconds: u32, bands: &[usize], weighting: Weighting, horizon: u32) -> Self {
+        let bands: Vec<usize> = bands.iter().copied().filter(|&b| b < BANDS).collect();
         Self {
-            ring: RollingLeq::of_channels((0..bands).map(|b| (seconds, b)), horizon),
+            ring: RollingLeq::of_channels(bands.iter().map(|&b| (seconds, b)), horizon),
+            weighting_db: bands.iter().map(|&b| weighting_db(weighting, b)).collect(),
+            bands,
             last_night: None,
         }
+    }
+
+    /// The bands, in the order of the windows and of [`Self::judge`]'s states.
+    pub fn bands(&self) -> &[usize] {
+        &self.bands
     }
 
     /// Adds the newest second (a gap is [`BandSecond::GAP`]) and the period its start was
@@ -395,10 +422,12 @@ impl BandWindows {
         }
     }
 
-    /// Judges every window against `limits` (dB SPL) with the levels raised by `offset_db`
-    /// (the sensitivity) and a warn `margin_db`: the verdict against the set in force for
-    /// the window now, the headroom against the set in force after the horizon (`at_horizon`
-    /// as [`Self::period_after_horizon`]). `out` holds one state per window.
+    /// Judges every window against `limits` (dB SPL, per band of [`NOMINAL_HZ`]) with the
+    /// levels raised by `offset_db` (the sensitivity) and each band's weighting, and a warn
+    /// `margin_db`: the verdict against the set in force for the window now, the headroom
+    /// against the set in force after the horizon (`at_horizon` as
+    /// [`Self::period_after_horizon`]). `out` holds one state per window; the levels, limits
+    /// and headroom in it are weighted.
     ///
     /// # Panics
     /// If `out.len()` is not the number of windows.
@@ -414,13 +443,24 @@ impl BandWindows {
         let now = limits.of(self.period());
         let ahead = limits.of(self.period_after_horizon(at_horizon));
         for (i, o) in out.iter_mut().enumerate() {
+            let b = self.bands[i];
+            // A weighting is a constant gain on the band's energy, so it moves the level, the
+            // judgement and the allowed level alike and leaves every time figure as it is.
+            let w = self.weighting_db[i];
+            let off = offset_db + w;
             let value = self.ring.value(i);
+            let headroom = ahead[b].map(|l| match self.ring.headroom(i, mean_square(l - off)) {
+                Headroom::Allowed { ms } => Headroom::Allowed {
+                    ms: ms * 10f64.powf(w / 10.0),
+                },
+                h => h,
+            });
             *o = BandState {
                 value,
-                level_db: value.leq_dbfs + offset_db,
-                limit_db: now[i],
-                verdict: now[i].and_then(|l| judge_window(&value, offset_db, l, margin_db)),
-                headroom: ahead[i].map(|l| self.ring.headroom(i, mean_square(l - offset_db))),
+                level_db: value.leq_dbfs + off,
+                limit_db: now[b],
+                verdict: now[b].and_then(|l| judge_window(&value, off, l, margin_db)),
+                headroom,
             };
         }
     }

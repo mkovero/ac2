@@ -33,9 +33,10 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   is never counted as silence), a history strip that survives an app restart, a new log at show
   start; informational presets that replace the windows with a rule's (DIN 15905-5,
   Switzerland, WHO, France, Flanders, Brussels, the Dutch covenant, Finland).
-- **Band Leq for the neighbours**: 1/3-octave Leq 20 … 200 Hz against per-band limits
-  (Finland STM 545/2015), moved from the bedroom to the FOH mic by a measured band transfer,
-  with the predicted LAeq in the dwelling.
+- **Band Leq for the neighbours**: 1/3-octave band Leq in up to eight windows of their own
+  length and Z/A/C weighting against per-band limits (preset: Finland STM 545/2015), on the
+  bands you keep, moved from a named receiving place to the FOH mic by a measured band
+  transfer, with the predicted LAeq there.
 - **Raw recording and replay**: record every input to f32 WAV / RF64, replay a recording
   (or a recorder's WAV) as a capture-only session and measure it again.
 - **Calibration**: per input against an acoustic calibrator, or **electrically** without
@@ -63,7 +64,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
 |---|---|
 | ![Meter + Leq windows in the stage view](crates/ac2-ui/tests/snapshots/spl_meter_leq_stage.png) | ![Leq windows as columns, full screen](crates/ac2-ui/tests/snapshots/leq_columns_fullscreen.png) |
 | ![Sweep distortion in percent](crates/ac2-ui/tests/snapshots/sweep_distortion_percent.png) | ![Room parameters from a sweep](crates/ac2-ui/tests/snapshots/sweep_room.png) |
-| ![Spectrum with its spectrograph](crates/ac2-ui/tests/snapshots/spectrograph.png) | ![Band Leq bars against the bedroom limits](crates/ac2-ui/tests/snapshots/band_leq_over.png) |
+| ![Spectrum with its spectrograph](crates/ac2-ui/tests/snapshots/spectrograph.png) | ![Band Leq bars against the band limits](crates/ac2-ui/tests/snapshots/band_leq_over.png) |
 | ![Settings: named inputs with meters and roles](crates/ac2-ui/tests/snapshots/settings_inputs_outputs.png) | ![Settings: mic library, active curves, sensitivity calibrations](crates/ac2-ui/tests/snapshots/settings_calibration.png) |
 
 ## Get it

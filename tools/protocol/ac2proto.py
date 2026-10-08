@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 27
+PROTO_VERSION = 28
 MAX_HEADER_BYTES = 1024
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -163,14 +163,13 @@ META = {
             ("run", ("opt", [("started_at", None), ("until", None), ("measured", None), ("gaps", None),
                              ("trimmed", None), ("laeq", None), ("lceq", None), ("lzeq", None)])),
             ("lcpeak", ("opt", _PEAK)), ("lafmax", ("opt", _PEAK)), ("position", ("opt", _POSITION))],
-    "band_leq": [("scale", None), ("cal", _CAL), ("mic_curve", None), ("duration", None), ("horizon", None),
-                 ("elapsed", None), ("measured", None), ("period", None), ("period_after_horizon", None),
-                 ("correction", None), ("limits_from", None),
-                 ("bands", ("list", [("nominal", None), ("leq", None), ("limit", None), ("judgement", None),
-                                     ("on_course", None), ("allowed", None), ("recover", None)])),
-                 ("worst", None),
-                 ("predicted", ("opt", [("estimate", None), ("at_most", None), ("limit", None),
-                                        ("judgement", None)]))],
+    "band_leq": [("scale", None), ("cal", _CAL), ("mic_curve", None), ("horizon", None),
+                 ("correction", None), ("limits_from", None), ("bands", None),
+                 ("windows", ("list", [("duration", None), ("weighting", None), ("elapsed", None),
+                                       ("measured", None), ("period", None), ("period_after_horizon", None),
+                                       ("worst", None)])),
+                 ("predicted", ("opt", [("duration", None), ("estimate", None), ("at_most", None),
+                                        ("limit", None), ("judgement", None)]))],
     "levels": _LEVELS,
     "session_levels": _LEVELS,
     "preview_levels": [("backend", None), ("device", None), ("channels", None)],

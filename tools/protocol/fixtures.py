@@ -298,35 +298,55 @@ def frames():
                     },
                 },
                 "mic_curve": True,
-                "duration": 3600.0,
                 "horizon": 60.0,
-                "elapsed": 1800.0,
-                "measured": 1790.0,
-                "period": "night",
-                "period_after_horizon": "night",
                 "correction": 5.0,
                 "limits_from": "transferred",
-                "bands": [
+                "bands": [4, 5, 17],
+                "windows": [
                     {
-                        "nominal": BAND_NOMINAL_HZ[i],
-                        "leq": 40.0 + i * 4.5,
-                        "limit": 90.0 - i * 2.0 if i < 10 else None,
-                        "judgement": {10: "no_limit", 5: "over", 4: "near"}.get(i, "ok"),
-                        "on_course": i == 4,
-                        "allowed": 85.25 - i if i < 10 and i != 5 else None,
-                        "recover": 412.0 if i == 5 else None,
-                    }
-                    for i in range(11)
+                        "duration": 3600.0,
+                        "weighting": "z",
+                        "elapsed": 1800.0,
+                        "measured": 1790.0,
+                        "period": "night",
+                        "period_after_horizon": "night",
+                        "worst": 1,
+                    },
+                    {
+                        "duration": 900.0,
+                        "weighting": "a",
+                        "elapsed": 900.0,
+                        "measured": 900.0,
+                        "period": "night",
+                        "period_after_horizon": "night",
+                        "worst": 1,
+                    },
                 ],
-                "worst": 5,
                 "predicted": {
+                    "duration": 3600.0,
                     "estimate": 23.5,
                     "at_most": 27.25,
                     "limit": 25.0,
                     "judgement": "near",
                 },
             },
-            [],
+            [
+                (arr("leq", "db_spl"), [58.0, 62.5, 41.0, 31.5, 36.25, 40.0]),
+                (arr("limit", "db_spl"), [60.0, 58.0, NAN, NAN, 74.0, 46.5]),
+                (arr("allowed", "db_spl"), [59.5, NAN, NAN, NAN, 80.0, 49.0]),
+                (arr("recover", "seconds"), [NAN, 412.0, NAN, NAN, NAN, NAN]),
+                (
+                    arr("leq_flags", "bitmask", "u32"),
+                    [
+                        LIMIT | JUDGED | NEAR | ON_COURSE,
+                        LIMIT | JUDGED | OVER | CANNOT_RECOVER,
+                        0,
+                        0,
+                        LIMIT | JUDGED,
+                        LIMIT | JUDGED,
+                    ],
+                ),
+            ],
         ),
         "levels": frame(
             "d/1/levels",
@@ -429,14 +449,32 @@ BAND_NOMINAL_HZ = [
 FINLAND_545_NIGHT = [74.0, 64.0, 56.0, 49.0, 44.0, 42.0, 40.0, 38.0, 36.0, 34.0, 32.0]
 
 BAND_LEQ_CONFIG = {
-    "duration": 3600.0,
-    "day": [l + 5.0 for l in FINLAND_545_NIGHT],
-    "night": FINLAND_545_NIGHT,
-    "warn_margin": 3.0,
-    "predicted": {"day": None, "night": 25.0},
+    "windows": [
+        {
+            "duration": 3600.0,
+            "weighting": "z",
+            "limits": {
+                "type": "night_day",
+                "night": FINLAND_545_NIGHT + [None] * 17,
+                "day_offset": 5.0,
+            },
+            "warn_margin": 3.0,
+        },
+        {
+            "duration": 900.0,
+            "weighting": "a",
+            "limits": {
+                "type": "always",
+                "limits": [48.0 if i == 5 else 30.5 if i == 17 else None for i in range(28)],
+            },
+            "warn_margin": 2.0,
+        },
+    ],
+    "bands": BAND_NOMINAL_HZ[:11] + [1000.0],
+    "predicted": {"duration": 3600.0, "day": None, "night": 25.0, "warn_margin": 3.0},
     "correction": {"impulse": "plus5", "tonal": "none"},
-    "mic": "foh",
     "transfer": {
+        "place": "flat 4 bedroom",
         "measured_at": 1789500000000000000,
         "origin": "measured",
         "bands": [
@@ -523,7 +561,7 @@ SPL_LOG = {
         },
         {
             "at": 1790000620000000000,
-            "subject": {"type": "band", "nominal": 63.0},
+            "subject": {"type": "band", "duration": 3600.0, "weighting": "z", "nominal": 63.0},
             "kind": "over",
             "level": 82.5,
             "limit": 80.0,
@@ -811,11 +849,12 @@ def requests():
                     "from": 1789500000000000000,
                     "until": 1789500030000000000,
                 },
-                "dwelling": {
+                "at_place": {
                     "type": "levels",
                     "levels": [50.0, 49.0, 48.0] + [None] * 25,
                 },
                 "background": None,
+                "place": "flat 4 bedroom",
             },
         ),
         req(

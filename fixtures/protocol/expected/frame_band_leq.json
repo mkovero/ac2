@@ -1,7 +1,7 @@
 {
  "topic": "d/4/band_leq",
  "header": {
-  "v": 27,
+  "v": 28,
   "kind": "band_leq",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -12,8 +12,34 @@
   "capture_wall_ns": 1790000000123456789,
   "grid_id": null,
   "protection": 8,
-  "n": 0,
-  "arrays": [],
+  "n": 6,
+  "arrays": [
+   {
+    "name": "leq",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "limit",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "allowed",
+    "unit": "db_spl",
+    "elem": "f32"
+   },
+   {
+    "name": "recover",
+    "unit": "seconds",
+    "elem": "f32"
+   },
+   {
+    "name": "leq_flags",
+    "unit": "bitmask",
+    "elem": "u32"
+   }
+  ],
   "meta": {
    "band_leq": {
     "scale": "db_spl",
@@ -29,117 +55,36 @@
      }
     },
     "mic_curve": true,
-    "duration": 3600.0,
     "horizon": 60.0,
-    "elapsed": 1800.0,
-    "measured": 1790.0,
-    "period": "night",
-    "period_after_horizon": "night",
     "correction": 5.0,
     "limits_from": "transferred",
     "bands": [
+     4,
+     5,
+     17
+    ],
+    "windows": [
      {
-      "nominal": 20.0,
-      "leq": 40.0,
-      "limit": 90.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 85.25,
-      "recover": null
+      "duration": 3600.0,
+      "weighting": "z",
+      "elapsed": 1800.0,
+      "measured": 1790.0,
+      "period": "night",
+      "period_after_horizon": "night",
+      "worst": 1
      },
      {
-      "nominal": 25.0,
-      "leq": 44.5,
-      "limit": 88.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 84.25,
-      "recover": null
-     },
-     {
-      "nominal": 31.5,
-      "leq": 49.0,
-      "limit": 86.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 83.25,
-      "recover": null
-     },
-     {
-      "nominal": 40.0,
-      "leq": 53.5,
-      "limit": 84.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 82.25,
-      "recover": null
-     },
-     {
-      "nominal": 50.0,
-      "leq": 58.0,
-      "limit": 82.0,
-      "judgement": "near",
-      "on_course": true,
-      "allowed": 81.25,
-      "recover": null
-     },
-     {
-      "nominal": 63.0,
-      "leq": 62.5,
-      "limit": 80.0,
-      "judgement": "over",
-      "on_course": false,
-      "allowed": null,
-      "recover": 412.0
-     },
-     {
-      "nominal": 80.0,
-      "leq": 67.0,
-      "limit": 78.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 79.25,
-      "recover": null
-     },
-     {
-      "nominal": 100.0,
-      "leq": 71.5,
-      "limit": 76.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 78.25,
-      "recover": null
-     },
-     {
-      "nominal": 125.0,
-      "leq": 76.0,
-      "limit": 74.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 77.25,
-      "recover": null
-     },
-     {
-      "nominal": 160.0,
-      "leq": 80.5,
-      "limit": 72.0,
-      "judgement": "ok",
-      "on_course": false,
-      "allowed": 76.25,
-      "recover": null
-     },
-     {
-      "nominal": 200.0,
-      "leq": 85.0,
-      "limit": null,
-      "judgement": "no_limit",
-      "on_course": false,
-      "allowed": null,
-      "recover": null
+      "duration": 900.0,
+      "weighting": "a",
+      "elapsed": 900.0,
+      "measured": 900.0,
+      "period": "night",
+      "period_after_horizon": "night",
+      "worst": 1
      }
     ],
-    "worst": 5,
     "predicted": {
+     "duration": 3600.0,
      "estimate": 23.5,
      "at_most": 27.25,
      "limit": 25.0,
@@ -148,5 +93,46 @@
    }
   }
  },
- "arrays": {}
+ "arrays": {
+  "leq": [
+   58.0,
+   62.5,
+   41.0,
+   31.5,
+   36.25,
+   40.0
+  ],
+  "limit": [
+   60.0,
+   58.0,
+   NaN,
+   NaN,
+   74.0,
+   46.5
+  ],
+  "allowed": [
+   59.5,
+   NaN,
+   NaN,
+   NaN,
+   80.0,
+   49.0
+  ],
+  "recover": [
+   NaN,
+   412.0,
+   NaN,
+   NaN,
+   NaN,
+   NaN
+  ],
+  "leq_flags": [
+   71,
+   27,
+   0,
+   0,
+   3,
+   3
+  ]
+ }
 }

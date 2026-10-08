@@ -2,8 +2,9 @@
 //! its length and weighting picked from named choices, its limit and warn margin typed in
 //! dB — a preset row that replaces the windows (and peak limits) with a published rule's,
 //! the headroom horizon, and under the windows the LCpeak and LAFmax limits and the
-//! measuring-position correction, typed; last the band meter ([`bands`]): on with a
-//! rule's limits, its window, the §13 corrections, the measured transfer as it stands.
+//! measuring-position correction, typed; last the band meter ([`bands`]): off, on or a
+//! rule's preset, the bands shown, its windows (each with a sub-row of per-band limits),
+//! the §13 corrections, the transfer as it stands.
 //! Pure data; the reducer routes keys here and the view draws it. Enter sends the meter's
 //! configuration with the new windows (`meas.update`, applied in place by the daemon).
 
@@ -15,7 +16,7 @@ use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
 
 mod bands;
 mod transfer;
-pub use bands::{BandField, BandLimits, BandSection};
+pub use bands::{BandCol, BandField, BandFocus, BandMeter, BandRow, BandSection};
 pub use transfer::{Ask, Sources, Span, TransferStep};
 
 /// Window lengths offered, shortest first (→ longer). A length outside the list (from the
@@ -137,8 +138,8 @@ pub enum Focus {
     Window { row: usize, col: Col },
     /// A setting under the windows.
     Extra(Extra),
-    /// A setting of the band meter, last.
-    Band(BandField),
+    /// A cell of the band meter's section, last.
+    Band(BandFocus),
 }
 
 /// One window being edited.
@@ -322,7 +323,17 @@ impl LeqDialog {
 
     fn rows_count(&self) -> usize {
         // Preset, horizon, the windows, the settings under them, the band meter.
-        2 + self.rows.len() + Extra::ALL.len() + BandField::ALL.len()
+        2 + self.rows.len() + Extra::ALL.len() + self.bands.grid().len()
+    }
+
+    /// The band section's row and cell of `b`.
+    fn band_at(&self, b: BandFocus) -> (usize, usize) {
+        self.bands
+            .grid()
+            .iter()
+            .enumerate()
+            .find_map(|(r, cells)| cells.iter().position(|c| *c == b).map(|i| (r, i)))
+            .unwrap_or((0, 0))
     }
 
     fn row_index(&self) -> usize {
@@ -331,7 +342,7 @@ impl LeqDialog {
             Focus::Horizon => 1,
             Focus::Window { row, .. } => 2 + row,
             Focus::Extra(e) => 2 + self.rows.len() + e.index(),
-            Focus::Band(b) => 2 + self.rows.len() + Extra::ALL.len() + b.index(),
+            Focus::Band(b) => 2 + self.rows.len() + Extra::ALL.len() + self.band_at(b).0,
         }
     }
 
@@ -345,7 +356,8 @@ impl LeqDialog {
         match self.focus {
             Focus::Window { col, .. } => col.is_text(),
             Focus::Extra(_) => true,
-            Focus::Preset | Focus::Horizon | Focus::Band(_) => false,
+            Focus::Band(b) => b.is_text(),
+            Focus::Preset | Focus::Horizon => false,
         }
     }
 
@@ -356,16 +368,19 @@ impl LeqDialog {
         }
     }
 
-    fn set_row(&mut self, i: usize, col: Col) {
+    /// Row `i`: a window row in column `col`, a band row in its cell `cell` (or its last).
+    fn set_row(&mut self, i: usize, col: Col, cell: usize) {
         let n = self.rows.len();
         self.focus = match i {
             0 => Focus::Preset,
             1 => Focus::Horizon,
             r if r < 2 + n => Focus::Window { row: r - 2, col },
             r if r < 2 + n + Extra::ALL.len() => Focus::Extra(Extra::ALL[r - 2 - n]),
-            r => Focus::Band(
-                BandField::ALL[(r - 2 - n - Extra::ALL.len()).min(BandField::ALL.len() - 1)],
-            ),
+            r => {
+                let g = self.bands.grid();
+                let cells = &g[(r - 2 - n - Extra::ALL.len()).min(g.len() - 1)];
+                Focus::Band(cells[cell.min(cells.len() - 1)])
+            }
         };
         self.selected = self.on_text();
     }
@@ -374,7 +389,12 @@ impl LeqDialog {
     pub fn move_row(&mut self, d: i32) {
         let n = self.rows_count() as i32;
         let i = (self.row_index() as i32 + d).rem_euclid(n) as usize;
-        self.set_row(i, self.col());
+        let cell = match self.focus {
+            Focus::Band(b) => self.band_at(b).1,
+            Focus::Window { col, .. } => Col::ALL.iter().position(|c| *c == col).unwrap_or(0),
+            _ => 0,
+        };
+        self.set_row(i, self.col(), cell);
     }
 
     /// Tab / Shift+Tab: the next or previous cell, row by row; wraps.
@@ -382,7 +402,8 @@ impl LeqDialog {
         // Cells in order: preset, horizon, four per window, then the settings under them.
         let w = 4 * self.rows.len() as i32;
         let x = Extra::ALL.len() as i32;
-        let cells = 2 + w + x + BandField::ALL.len() as i32;
+        let band: Vec<BandFocus> = self.bands.grid().into_iter().flatten().collect();
+        let cells = 2 + w + x + band.len() as i32;
         let at = match self.focus {
             Focus::Preset => 0,
             Focus::Horizon => 1,
@@ -390,7 +411,7 @@ impl LeqDialog {
                 2 + 4 * row as i32 + Col::ALL.iter().position(|c| *c == col).unwrap_or(0) as i32
             }
             Focus::Extra(e) => 2 + w + e.index() as i32,
-            Focus::Band(b) => 2 + w + x + b.index() as i32,
+            Focus::Band(b) => 2 + w + x + band.iter().position(|c| *c == b).unwrap_or(0) as i32,
         };
         let next = (at + d).rem_euclid(cells);
         self.focus = match next {
@@ -401,7 +422,7 @@ impl LeqDialog {
                 col: Col::ALL[((k - 2) % 4) as usize],
             },
             k if k < 2 + w + x => Focus::Extra(Extra::ALL[(k - 2 - w) as usize]),
-            k => Focus::Band(BandField::ALL[(k - 2 - w - x) as usize]),
+            k => Focus::Band(band[(k - 2 - w - x) as usize]),
         };
         self.selected = self.on_text();
     }
@@ -409,7 +430,7 @@ impl LeqDialog {
     /// Focuses window `row`, column `col` (the mouse).
     pub fn focus_cell(&mut self, row: usize, col: Col) {
         if row < self.rows.len() {
-            self.set_row(row + 2, col);
+            self.set_row(row + 2, col, 0);
         }
     }
 
@@ -487,6 +508,9 @@ impl LeqDialog {
     }
 
     fn text_mut(&mut self) -> Option<&mut String> {
+        if let Focus::Band(b) = self.focus {
+            return self.bands.text_mut(b);
+        }
         if let Focus::Extra(e) = self.focus {
             if e.quantity().is_some() {
                 self.before_preset = None;
@@ -535,8 +559,20 @@ impl LeqDialog {
         self.selected = self.on_text();
     }
 
-    /// Insert: a new window after the focused one (or at the end), one length longer.
+    /// Insert: a new window after the focused one (or at the end), one length longer; in
+    /// the band section a band window.
     pub fn add_window(&mut self) {
+        if let Focus::Band(b) = self.focus {
+            match self.bands.add_window(b) {
+                Ok(f) => {
+                    self.focus = Focus::Band(f);
+                    self.selected = false;
+                    self.error = None;
+                }
+                Err(e) => self.error = Some(e),
+            }
+            return;
+        }
         self.before_preset = None;
         if self.rows.len() >= LeqConfig::MAX_WINDOWS {
             self.error = Some(format!(
@@ -580,6 +616,12 @@ impl LeqDialog {
 
     /// Delete: removes the focused window.
     pub fn remove_window(&mut self) {
+        if let Focus::Band(BandFocus::Window { row, col }) = self.focus {
+            self.focus = Focus::Band(self.bands.remove_window(row, col));
+            self.selected = self.on_text();
+            self.error = None;
+            return;
+        }
         let Focus::Window { row, col } = self.focus else {
             return;
         };
@@ -907,31 +949,73 @@ mod tests {
         assert!(d.error.as_deref().is_some_and(|e| e.contains("at most 8")));
     }
 
-    /// The band meter's rows come last: Tab reaches them, ←/→ turn it on with a preset and
-    /// set the corrections, Enter sends them with the windows.
+    /// The band meter's rows come last: Tab reaches them, ←/→ turn it on with a preset,
+    /// ↓ walks its windows and their limits, Insert adds a band window there, typing sets a
+    /// limit, Enter sends them with the windows.
     #[test]
     fn the_band_meter_rows() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
-        d.move_cell(-(BandField::ALL.len() as i32));
-        assert_eq!(d.focus, Focus::Band(BandField::Limits));
-        d.cycle(1);
+        d.move_cell(-1);
+        let meter_row = Focus::Band(BandFocus::Field(BandField::Meter));
+        assert_eq!(d.focus, meter_row);
+        d.cycle(2);
+        assert_eq!(
+            d.bands.meter,
+            BandMeter::Preset(ac2_proto::model::BandLeqPreset::Finland545Lf)
+        );
+        // Meter, from, to, also; the window row, its limits.
+        for _ in 0..4 {
+            d.move_row(1);
+        }
+        let w = |col| Focus::Band(BandFocus::Window { row: 0, col });
+        assert_eq!(d.focus, w(BandCol::Length));
         d.move_cell(1);
-        assert_eq!(d.focus, Focus::Band(BandField::Mic));
-        assert_eq!(d.bands.text(BandField::Mic), "at FOH");
-        d.cycle(1);
-        assert_eq!(d.bands.text(BandField::Mic), "in the bedroom");
-        d.move_cell(1);
-        d.move_cell(1);
-        assert_eq!(d.focus, Focus::Band(BandField::Impulse));
+        d.cycle(-2);
+        assert_eq!(d.bands.rows[0].cell(BandCol::Length), "LAeq 60 min");
+        assert_eq!(d.bands.meter, BandMeter::On, "an edit: the operator's own");
+        d.move_row(1);
+        assert_eq!(d.focus, w(BandCol::Limit(1)), "the limit under the column");
+        d.move_cell(4);
+        assert_eq!(d.focus, w(BandCol::Limit(5)));
+        assert!(d.selected);
+        d.type_text("30");
+        d.add_window();
+        assert_eq!(
+            d.focus,
+            Focus::Band(BandFocus::Window {
+                row: 1,
+                col: BandCol::Length
+            })
+        );
+        d.move_row(1);
+        d.move_row(1);
+        assert_eq!(d.focus, Focus::Band(BandFocus::Field(BandField::Impulse)));
         d.cycle(1);
         let MeasKind::Spl { config } = d.meas_config().expect("valid").kind else {
             panic!()
         };
         let b = config.bands.expect("on");
-        assert_eq!(b.night[5], Some(DbSpl(42.0)));
+        assert_eq!(b.windows.len(), 2);
+        assert_eq!(b.windows[0].weighting, Weighting::A);
+        assert_eq!(b.windows[0].limits.night()[5], Some(DbSpl(30.0)));
+        assert_eq!(b.windows[0].limits.day_offset(), Some(Db(5.0)));
+        assert_eq!(b.windows[1].duration, Seconds(7200.0));
         assert_eq!(b.correction.db(), 5.0);
-        assert_eq!(b.mic, ac2_proto::model::BandMicPlace::Dwelling);
         assert_eq!(config.leq, d.leq_config().expect("windows"));
+        // Delete on a band window removes it.
+        d.focus = Focus::Band(BandFocus::Window {
+            row: 1,
+            col: BandCol::Margin,
+        });
+        d.remove_window();
+        assert_eq!(d.bands.rows.len(), 1);
+        assert_eq!(
+            d.focus,
+            Focus::Band(BandFocus::Window {
+                row: 0,
+                col: BandCol::Margin
+            })
+        );
     }
 
     /// Under the windows: the peak limits and the position correction, reached with ↓ and
@@ -940,13 +1024,11 @@ mod tests {
     #[test]
     fn peak_limits_and_the_position_correction() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
-        // ↑ from the preset row wraps to the band meter's settings, last; above them the
-        // peaks' correction.
+        // ↑ from the preset row wraps to the band meter, last (off: its one row); above it
+        // the peaks' correction.
         d.move_row(-1);
-        assert_eq!(d.focus, Focus::Band(BandField::Tonal));
-        for _ in 0..BandField::ALL.len() {
-            d.move_row(-1);
-        }
+        assert_eq!(d.focus, Focus::Band(BandFocus::Field(BandField::Meter)));
+        d.move_row(-1);
         assert_eq!(d.focus, Focus::Extra(Extra::PositionPeak));
         d.move_row(-1);
         assert_eq!(d.focus, Focus::Extra(Extra::Position));

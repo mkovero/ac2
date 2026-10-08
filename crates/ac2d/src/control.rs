@@ -931,9 +931,10 @@ impl Control {
             Command::SplBandTransfer {
                 meas,
                 foh,
-                dwelling,
+                at_place,
                 background,
-            } => self.spl_band_transfer(client, meas, &foh, &dwelling, background.as_ref()),
+                place,
+            } => self.spl_band_transfer(client, meas, &foh, &at_place, background.as_ref(), &place),
             Command::SplHistoryGet { meas, seconds } => self.spl_history_get(meas, seconds),
             Command::SplBandLogGet {
                 meas,

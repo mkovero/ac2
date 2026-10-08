@@ -2,6 +2,9 @@ use super::*;
 use crate::leq::Headroom;
 use std::f64::consts::TAU;
 
+/// The bands of the decree's low-frequency table.
+const LF: [usize; LF_BANDS] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
 /// Deterministic xorshift for test sequences.
 struct Rng(u64);
 
@@ -63,7 +66,7 @@ fn band_windows_match_brute_force_with_gaps() {
     let bands = 5;
     for horizon in [5, 60] {
         let mut rng = Rng(0x2545_f491_4f6c_dd1d ^ u64::from(horizon));
-        let mut w = BandWindows::new(n, bands, horizon);
+        let mut w = BandWindows::new(n, &(0..bands).collect::<Vec<_>>(), Weighting::Z, horizon);
         assert_eq!(w.windows().len(), bands);
         let mut hist = Vec::new();
         for step in 0..700 {
@@ -156,7 +159,7 @@ fn period_boundaries() {
 #[test]
 fn a_window_holding_any_night_second_is_judged_at_night() {
     let n = 3600u32;
-    let mut w = BandWindows::new(n, LF_BANDS, 60);
+    let mut w = BandWindows::new(n, &LF, Weighting::Z, 60);
     let start = 21 * 3600; // 21:00
     let s = BandSecond::from_levels(&[50.0 - 120.0; BANDS], 1.0);
     for k in 0..3600 {
@@ -172,7 +175,7 @@ fn a_window_holding_any_night_second_is_judged_at_night() {
     assert_eq!(w.period(), Period::Night, "22:00:00 is in the window");
 
     // Morning: night until 07:00, then an hour until the last night second has left.
-    let mut w = BandWindows::new(n, LF_BANDS, 60);
+    let mut w = BandWindows::new(n, &LF, Weighting::Z, 60);
     let six = 6 * 3600;
     for k in 0..3600 {
         w.push(s, Period::at(six + k));
@@ -195,7 +198,7 @@ fn a_window_holding_any_night_second_is_judged_at_night() {
 /// nor lengthens it: the window is the newest 3600 seconds as measured.
 #[test]
 fn a_clock_change_moves_no_window() {
-    let mut w = BandWindows::new(3600, 1, 60);
+    let mut w = BandWindows::new(3600, &[0], Weighting::Z, 60);
     let mut local = 3 * 3600 + 30 * 60; // 03:30
     for k in 0..7200u32 {
         if k == 1800 {
@@ -212,7 +215,7 @@ fn a_clock_change_moves_no_window() {
 
 #[test]
 fn judged_per_band_against_the_set_in_force_and_the_worst_named() {
-    let mut w = BandWindows::new(60, LF_BANDS, 10);
+    let mut w = BandWindows::new(60, &LF, Weighting::Z, 10);
     let limits = decree();
     // Sensitivity 120 dB SPL at 0 dBFS; 63 Hz (band 5) at 47 dB SPL: over the night 42, under
     // the day 47 + margin; 100 Hz (band 7) at 37: near the night 38.
@@ -254,7 +257,7 @@ fn judged_per_band_against_the_set_in_force_and_the_worst_named() {
         Some(Headroom::CannotRecover { .. })
     ));
     // By day the 63 Hz band is near (47 against 47), the 100 Hz one ok (37 against 43).
-    let mut day = BandWindows::new(60, LF_BANDS, 10);
+    let mut day = BandWindows::new(60, &LF, Weighting::Z, 10);
     for k in 0..60 {
         day.push(
             BandSecond::from_levels(&levels, 1.0),
@@ -278,7 +281,7 @@ fn judged_per_band_against_the_set_in_force_and_the_worst_named() {
 /// window's level is the energy average of L + K.
 #[test]
 fn correction_applies_for_the_seconds_it_is_in_force() {
-    let mut w = BandWindows::new(100, 1, 10);
+    let mut w = BandWindows::new(100, &[0], Weighting::Z, 10);
     let mut levels = [f64::NEG_INFINITY; BANDS];
     levels[0] = -40.0;
     let s = BandSecond::from_levels(&levels, 1.0);
@@ -538,7 +541,7 @@ fn logged_seconds_refill_by_wall_time_with_gaps_in_their_period() {
     assert_eq!(got[1], (BandSecond::GAP, Period::Night));
     assert_eq!(got[2], (lv(-20.0), Period::Day));
 
-    let mut w = BandWindows::new(3, LF_BANDS, 1);
+    let mut w = BandWindows::new(3, &LF, Weighting::Z, 1);
     w.refill(placed.seconds(night_at_102));
     // The gap second was a night second: the window is judged at night.
     assert_eq!(w.period(), Period::Night);
@@ -550,4 +553,158 @@ fn logged_seconds_refill_by_wall_time_with_gaps_in_their_period() {
     // Nothing in the span: nothing pushed.
     let empty = Placed::new([(10 * NS, lv(0.0), Period::Day)], 104 * NS, 3);
     assert_eq!(empty.seconds(|_| Period::Day).count(), 0);
+}
+
+/// A weighted band window reads the unweighted band level plus the IEC 61672-1 weighting at
+/// the band's exact mid-band frequency; its limit, judgement and allowed level are on that
+/// weighted level.
+#[test]
+fn weighting_adds_the_analytic_weighting_at_the_mid_band() {
+    let bands = [0, 5, 17, 27];
+    let level = -40.0;
+    let s = BandSecond::from_levels(&[level; BANDS], 1.0);
+    for w in [Weighting::A, Weighting::C, Weighting::Z] {
+        let mut win = BandWindows::new(30, &bands, w, 10);
+        for _ in 0..30 {
+            win.push(s, Period::Day);
+        }
+        let offset = 100.0;
+        // Each band 1 dB under a limit put on its weighted level, margin 3 dB: near.
+        let mut lim = [None; BANDS];
+        for &b in &bands {
+            lim[b] = Some(level + offset + w.analytic_db(centre_hz(b)) + 1.0);
+        }
+        let mut out = vec![
+            BandState {
+                value: win.windows().value(0),
+                level_db: f64::NAN,
+                limit_db: None,
+                verdict: None,
+                headroom: None,
+            };
+            bands.len()
+        ];
+        win.judge(&BandLimits::always(lim), offset, 3.0, Period::Day, &mut out);
+        for (o, &b) in out.iter().zip(&bands) {
+            let want = level + offset + w.analytic_db(centre_hz(b));
+            assert!(close_db(o.level_db, want, 1e-9), "{w:?} band {b}");
+            assert_eq!(o.verdict.map(|v| v.judgement), Some(Judgement::Near));
+            // Full and steady 1 dB under the limit: the next 10 s may play at the level
+            // that brings the 30 s window to the limit exactly.
+            let Some(Headroom::Allowed { ms }) = o.headroom else {
+                panic!("{:?}", o.headroom)
+            };
+            let lim_ms = mean_square(want + 1.0 - offset);
+            let steady = mean_square(want - offset);
+            let allowed = (30.0 * lim_ms - 20.0 * steady) / 10.0;
+            assert!(
+                close_db(power_dbfs(ms), power_dbfs(allowed), 1e-6),
+                "{w:?} {b}"
+            );
+        }
+    }
+    assert!(close_db(weighting_db(Weighting::A, 17), 0.0, 1e-9));
+    assert!(close_db(weighting_db(Weighting::A, 0), -50.45, 0.01));
+    assert_eq!(weighting_db(Weighting::Z, 0), 0.0);
+}
+
+/// Only the bands selected have windows, in the order given, judged against their own
+/// band's limit.
+#[test]
+fn a_selection_of_bands_is_windowed_and_judged() {
+    let sel = [3, 9, 20];
+    let mut w = BandWindows::new(10, &[3, 9, 20, BANDS], Weighting::Z, 5);
+    assert_eq!(w.bands(), &sel);
+    assert_eq!(w.windows().len(), 3);
+    let mut levels = [f64::NEG_INFINITY; BANDS];
+    for (k, &b) in sel.iter().enumerate() {
+        levels[b] = -50.0 + 10.0 * k as f64;
+    }
+    for _ in 0..10 {
+        w.push(BandSecond::from_levels(&levels, 1.0), Period::Day);
+    }
+    let mut lim = [None; BANDS];
+    lim[9] = Some(35.0);
+    let mut out = [BandState {
+        value: w.windows().value(0),
+        level_db: f64::NAN,
+        limit_db: None,
+        verdict: None,
+        headroom: None,
+    }; 3];
+    w.judge(&BandLimits::always(lim), 80.0, 3.0, Period::Day, &mut out);
+    for (k, o) in out.iter().enumerate() {
+        assert!(close_db(o.level_db, 30.0 + 10.0 * k as f64, 1e-9));
+    }
+    assert_eq!(out[0].verdict, None);
+    assert_eq!(out[1].limit_db, Some(35.0));
+    assert_eq!(out[1].verdict.map(|v| v.judgement), Some(Judgement::Over));
+    assert_eq!(out[2].verdict, None);
+    assert_eq!(worst_band(&out), Some(1));
+}
+
+/// Two windows of different lengths and weightings over the same random seconds with gaps:
+/// each band of each equals the brute-force sums over its own length, weighted.
+#[test]
+fn several_windows_match_brute_force() {
+    let bands = [0, 3, 17];
+    let specs = [(30u32, Weighting::A), (90, Weighting::C)];
+    let mut wins: Vec<BandWindows> = specs
+        .iter()
+        .map(|&(n, w)| BandWindows::new(n, &bands, w, 10))
+        .collect();
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let mut hist = Vec::new();
+    for step in 0..400 {
+        let s = if rng.next() < 0.05 {
+            BandSecond::GAP
+        } else {
+            let mut levels = [f64::NEG_INFINITY; BANDS];
+            for &b in &bands {
+                levels[b] = -60.0 + 40.0 * rng.next();
+            }
+            BandSecond::from_levels(&levels, 1.0)
+        };
+        hist.push(s);
+        for win in &mut wins {
+            win.push(s, Period::Day);
+        }
+        let lim = BandLimits::always([Some(70.0); BANDS]);
+        for (win, &(n, wt)) in wins.iter().zip(&specs) {
+            let mut out = vec![
+                BandState {
+                    value: win.windows().value(0),
+                    level_db: f64::NAN,
+                    limit_db: None,
+                    verdict: None,
+                    headroom: None,
+                };
+                bands.len()
+            ];
+            win.judge(&lim, 100.0, 3.0, Period::Day, &mut out);
+            for (o, &b) in out.iter().zip(&bands) {
+                let (e, m) = sums(&hist, b, n as usize);
+                let g = wt.analytic_db(centre_hz(b));
+                let want = if m > 0.0 {
+                    power_dbfs(e / m) + 100.0 + g
+                } else {
+                    f64::NAN
+                };
+                assert!(
+                    close_db(o.level_db, want, 1e-6),
+                    "step {step} {n} s band {b}: {} vs {want}",
+                    o.level_db
+                );
+                let brute = brute_allowed(&hist, b, n, 10, mean_square(70.0 - 100.0 - g));
+                match (o.headroom, brute) {
+                    (Some(Headroom::Allowed { ms }), Some(a)) => assert!(
+                        close_db(power_dbfs(ms), power_dbfs(a) + g, 1e-6),
+                        "step {step} {n} s band {b}"
+                    ),
+                    (Some(Headroom::CannotRecover { .. }), None) => {}
+                    (got, want) => panic!("step {step} {n} s band {b}: {got:?} vs {want:?}"),
+                }
+            }
+        }
+    }
 }

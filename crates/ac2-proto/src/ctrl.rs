@@ -457,9 +457,10 @@ pub enum Command {
         /// SPL measurement.
         meas: MeasId,
     },
-    /// Computes a FOH → dwelling transfer per band (`docs/design/band-leq.md`, *The
-    /// transfer*) from the band levels of a steady test signal at FOH and in the dwelling,
-    /// and the dwelling's background with the system silent, and stores it in the band
+    /// Computes a transfer per band from the meter's mic to the place the band limits are
+    /// for (`docs/design/band-leq.md`, *The transfer*) from the band levels of a steady test
+    /// signal at FOH and at the place (`at_place`), and the place's background with the
+    /// system silent, and stores it in the band
     /// meter of `meas` (which must have one); the reply is the updated measurement. The
     /// levels come from band logs over a span or as typed values.
     #[serde(rename = "spl.band_transfer")]
@@ -468,10 +469,12 @@ pub enum Command {
         meas: MeasId,
         /// Band levels at FOH (the meter's own mic position).
         foh: crate::model::BandLevelSource,
-        /// Band levels in the dwelling, the same signal.
-        dwelling: crate::model::BandLevelSource,
-        /// The dwelling's background, the system silent; `None`: every band unchecked.
+        /// Band levels at the place the limits are for, the same signal.
+        at_place: crate::model::BandLevelSource,
+        /// The place's background, the system silent; `None`: every band unchecked.
         background: Option<crate::model::BandLevelSource>,
+        /// The operator's name of the place ([`crate::model::BandTransferSet::place`]).
+        place: String,
     },
 
     /// A span of an SPL meter's band log (its current log): the energy average over

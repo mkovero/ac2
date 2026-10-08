@@ -48,8 +48,18 @@ fn subject_name(s: &AlarmSubject) -> String {
         AlarmSubject::Peak {
             quantity: PeakQuantity::LafMax,
         } => "LAFmax".into(),
-        AlarmSubject::Band { nominal } => format!("{} Hz band Leq", nominal.0),
-        AlarmSubject::Predicted => "predicted dwelling LAeq".into(),
+        AlarmSubject::Band {
+            duration,
+            weighting,
+            nominal,
+        } => {
+            let window = subject_name(&AlarmSubject::Window {
+                duration: *duration,
+                weighting: *weighting,
+            });
+            format!("{} Hz band {window}", nominal.0)
+        }
+        AlarmSubject::Predicted => "predicted LAeq at the transfer's place".into(),
     }
 }
 
@@ -526,9 +536,11 @@ impl Control {
         client: &ClientId,
         meas: MeasId,
         foh: &BandLevelSource,
-        dwelling: &BandLevelSource,
+        at_place: &BandLevelSource,
         background: Option<&BandLevelSource>,
+        place: &str,
     ) -> Result<ReplyBody, ProtoError> {
+        BandTransferSet::check_place(place).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let m = self.spl_meter(meas)?.clone();
         let MeasKind::Spl { config } = &m.config.kind else {
             return Err(perr(
@@ -546,31 +558,34 @@ impl Control {
             self.spl_meter(id)
                 .map_or_else(|_| format!("SPL meter {id}"), |m| m.config.name.clone())
         };
-        if let Some(e) = ac2_proto::model::overlapping_spans(foh, dwelling, background, name) {
+        if let Some(e) = ac2_proto::model::overlapping_spans(foh, at_place, background, place, name)
+        {
             return Err(perr(ErrorCode::Invalid, e));
         }
         let foh = self.band_levels(foh)?;
-        let dwelling = self.band_levels(dwelling)?;
+        let at_place = self.band_levels(at_place)?;
         let background = background.map(|b| self.band_levels(b)).transpose()?;
-        let t = ac2_core::band_leq::Transfer::measure(&foh, &dwelling, background.as_ref());
+        let t = ac2_core::band_leq::Transfer::measure(&foh, &at_place, background.as_ref());
         let set = BandTransferSet {
+            place: place.to_owned(),
             measured_at: WallNs(wall_ns()),
             origin: ac2_proto::model::TransferOrigin::Measured,
             bands: t.bands().map(crate::conv::band_transfer_band),
         };
+        tracing::info!(
+            "SPL meter {meas}: band transfer from {place} stored ({} of {BAND_COUNT} bands \
+             measured)",
+            set.bands
+                .iter()
+                .filter(|b| !matches!(b, ac2_proto::model::BandTransferBand::Missing))
+                .count()
+        );
         let mut config = m.config.clone();
         if let MeasKind::Spl { config: c } = &mut config.kind
             && let Some(b) = &mut c.bands
         {
             b.transfer = Some(set);
         }
-        tracing::info!(
-            "SPL meter {meas}: FOH → dwelling transfer stored ({} of {BAND_COUNT} bands measured)",
-            set.bands
-                .iter()
-                .filter(|b| !matches!(b, ac2_proto::model::BandTransferBand::Missing))
-                .count()
-        );
         self.execute(client, ac2_proto::Command::MeasUpdate { meas, config })
     }
 }

@@ -2,11 +2,11 @@
 
 use ac2_client::expect_body;
 use ac2_proto::model::{
-    BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandLevelSource, BandMicPlace,
-    BandTransferBand, BandTransferSet, ImpulseCorrection, MeasConfig, MeasKind, Measurement,
-    SplBandLog, SplConfig, State, TonalCorrection, TransferOrigin,
+    BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandLevelSource, BandLimitSet,
+    BandTransferBand, BandTransferSet, BandWindow, ImpulseCorrection, MeasConfig, MeasKind,
+    Measurement, SplBandLog, SplConfig, State, TonalCorrection, TransferOrigin, Weighting,
 };
-use ac2_proto::units::{Db, DbSpl, Seconds, WallNs};
+use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
 use ac2_proto::{Command, ReplyBody};
 use ac2_scene::band_leq;
 
@@ -14,11 +14,11 @@ use super::leq::{meter, spl_config};
 use super::{connect, find_meas, state};
 use crate::CliError;
 use crate::args::{
-    BandMicArg, BandPresetArg, BandsCmd, BandsEstimate, BandsLog, BandsSet, BandsTransfer, Cli,
-    ImpulseArg, LeqWatch, MeasRef, TonalArg,
+    BandPresetArg, BandsCmd, BandsEstimate, BandsLog, BandsSet, BandsTransfer, Cli, ImpulseArg,
+    LeqWatch, MeasRef, TonalArg,
 };
 use crate::output::Out;
-use crate::units::BandSourceArg;
+use crate::units::{BandSourceArg, LeqWindowArg};
 use crate::watch;
 
 pub(crate) async fn run(cli: &Cli, cmd: &BandsCmd, out: &mut Out<'_>) -> Result<(), CliError> {
@@ -45,8 +45,42 @@ fn the_meter<'s>(st: &'s State, r: &crate::args::MeterRef) -> Result<&'s Measure
     })
 }
 
+/// A band window's length and weighting as typed: Z unless `a:` or `c:`, since a band
+/// limit is a level of the band itself.
+fn window_of(w: &LeqWindowArg) -> (Seconds, Weighting) {
+    (
+        Seconds(f64::from(w.seconds)),
+        w.weighting.unwrap_or(Weighting::Z),
+    )
+}
+
+/// The index of the window `w` names in `c`.
+fn find_window(c: &BandLeqConfig, w: &LeqWindowArg) -> Result<usize, CliError> {
+    let (d, wt) = window_of(w);
+    c.windows
+        .iter()
+        .position(|x| x.duration == d && x.weighting == wt)
+        .ok_or_else(|| {
+            let have: Vec<String> = c
+                .windows
+                .iter()
+                .map(|x| band_leq::window_name(x.duration.0, x.weighting))
+                .collect();
+            CliError::Usage(format!(
+                "no band window {}: the band windows are {}",
+                band_leq::window_name(d.0, wt),
+                if have.is_empty() {
+                    "none".to_owned()
+                } else {
+                    have.join(", ")
+                }
+            ))
+        })
+}
+
 /// The band meter configuration `s` asks for, from the meter's `cur` (`None`: off). A
-/// preset keeps a measured transfer; turning on needs a preset.
+/// preset keeps the corrections and a measured transfer; turning on needs a preset or
+/// windows.
 pub(crate) fn apply(
     cur: Option<&BandLeqConfig>,
     s: &BandsSet,
@@ -55,23 +89,62 @@ pub(crate) fn apply(
         return Ok(None);
     }
     let mut c = match (s.preset, cur) {
-        (Some(p), cur) => preset(p).config(cur.and_then(|c| c.transfer)),
+        (Some(p), cur) => preset(p).apply(cur),
         (None, Some(c)) => c.clone(),
+        (None, None) if s.windows.is_some() => BandLeqConfig {
+            windows: Vec::new(),
+            bands: BandLeqPreset::Finland545Lf.bands(),
+            predicted: None,
+            correction: BandCorrection::default(),
+            transfer: None,
+        },
         (None, None) => {
             return Err(CliError::Usage(
-                "the band meter is off: turn it on with --preset finland-545-lf (or \
-                 finland-545-living-room)"
+                "the band meter is off: turn it on with --windows z:60min or --preset \
+                 finland-545-lf"
                     .into(),
             ));
         }
     };
-    if let Some(d) = s.duration {
-        if d.weighting.is_some() {
-            return Err(CliError::Usage(
-                "the bands are unweighted: give the length alone, e.g. --duration 1h".into(),
-            ));
+    if let Some(ws) = &s.windows {
+        // A window kept (same length and weighting) keeps its limits and margin.
+        c.windows = ws
+            .iter()
+            .map(|w| {
+                let (d, wt) = window_of(w);
+                c.windows
+                    .iter()
+                    .find(|x| x.duration == d && x.weighting == wt)
+                    .copied()
+                    .unwrap_or(BandWindow {
+                        duration: d,
+                        ..BandWindow::minutes(0, wt)
+                    })
+            })
+            .collect();
+    }
+    if let Some(rs) = &s.bands {
+        let mut idx: Vec<usize> = rs.iter().flat_map(|r| r.from..=r.to).collect();
+        idx.sort_unstable();
+        idx.dedup();
+        c.bands = idx.into_iter().map(|i| Hz(BAND_NOMINAL_HZ[i])).collect();
+    }
+    for o in &s.day_offsets {
+        let i = find_window(&c, &o.window)?;
+        let night = *c.windows[i].limits.night();
+        c.windows[i].limits = match o.offset {
+            Some(day_offset) => BandLimitSet::NightDay { night, day_offset },
+            None => BandLimitSet::Always { limits: night },
+        };
+    }
+    for l in &s.limits {
+        let i = find_window(&c, &l.window)?;
+        c.windows[i].limits.night_mut()[l.band] = l.limit;
+    }
+    if let Some(w) = s.warn {
+        for x in &mut c.windows {
+            x.warn_margin = Db(w.0.0);
         }
-        c.duration = Seconds(f64::from(d.seconds));
     }
     // A preset sets no correction: one typed now stays, else the meter's carries on.
     let keep = cur.map(|c| c.correction).unwrap_or_default();
@@ -89,43 +162,42 @@ pub(crate) fn apply(
             None => keep.tonal,
         },
     };
-    if let Some(w) = s.warn {
-        c.warn_margin = Db(w.0.0);
-    }
-    // A preset puts the mic at FOH: the place the meter had stays unless given.
-    c.mic = match s.mic {
-        Some(BandMicArg::Foh) => BandMicPlace::Foh,
-        Some(BandMicArg::Bedroom) => BandMicPlace::Dwelling,
-        None => cur.map_or(BandMicPlace::Foh, |c| c.mic),
-    };
     c.check().map_err(CliError::Usage)?;
     Ok(Some(c))
 }
 
-/// The band meter in words: preset-like summary of its limits, window, correction, transfer.
+/// The band meter in words: its bands and correction, each window with its limits, the
+/// preset it matches, the transfer.
 fn describe(c: Option<&BandLeqConfig>) -> String {
     let Some(c) = c else {
         return "band meter off".to_owned();
     };
-    let preset = BandLeqPreset::ALL.into_iter().find(|p| {
-        let pc = p.config(c.transfer);
-        pc.day == c.day && pc.night == c.night && pc.predicted == c.predicted
-    });
+    let shown = c.band_indices().unwrap_or_default();
     let mut lines = vec![format!(
-        "{} · warn {} dB · §13 correction {} dB · mic {}",
-        band_leq::meter_name(c.duration.0),
-        c.warn_margin.0,
-        c.correction.db(),
-        band_leq::mic_place_text(c.mic)
+        "band Leq {} · §13 correction {} dB",
+        band_leq::bands_text(&shown),
+        c.correction.db()
     )];
+    for w in &c.windows {
+        lines.push(format!(
+            "  {}: {} · warn {} dB",
+            band_leq::window_name(w.duration.0, w.weighting),
+            band_leq::limits_summary(w, &shown),
+            w.warn_margin.0
+        ));
+    }
+    if c.windows.is_empty() {
+        lines.push("  no band windows".to_owned());
+    }
+    let preset = BandLeqPreset::ALL.into_iter().find(|p| {
+        let pc = p.apply(Some(c));
+        pc.windows == c.windows && pc.bands == c.bands && pc.predicted == c.predicted
+    });
     if let Some(p) = preset {
         lines.push(band_leq::preset_summary(p));
         lines.push(band_leq::preset_source(p));
     }
-    lines.push(match c.mic {
-        BandMicPlace::Foh => band_leq::transfer_summary(c.transfer.as_ref()),
-        BandMicPlace::Dwelling => band_leq::mic_place_note(c.mic).to_owned(),
-    });
+    lines.push(band_leq::transfer_summary(c.transfer.as_ref(), &shown));
     lines.join("\n")
 }
 
@@ -228,7 +300,7 @@ async fn transfer(cli: &Cli, t: &BandsTransfer, out: &mut Out<'_>) -> Result<(),
     }
     let now = watch::now_wall().0;
     let foh = source(&st, &t.foh, now)?;
-    let dwelling = source(&st, &t.dwelling, now)?;
+    let at_place = source(&st, &t.at_place, now)?;
     let background = t
         .background
         .as_ref()
@@ -238,32 +310,19 @@ async fn transfer(cli: &Cli, t: &BandsTransfer, out: &mut Out<'_>) -> Result<(),
         .call(Command::SplBandTransfer {
             meas: m.id,
             foh,
-            dwelling,
+            at_place,
             background,
+            place: t.place.clone(),
         })
         .await?;
     let m = expect_body!("spl.band_transfer", r, ReplyBody::Measurement(m) => m)?;
-    let set = match &m.config.kind {
-        MeasKind::Spl { config } => config.bands.as_ref().and_then(|b| b.transfer),
-        _ => None,
+    let (set, shown) = match &m.config.kind {
+        MeasKind::Spl {
+            config: SplConfig { bands: Some(b), .. },
+        } => (b.transfer.clone(), b.band_indices().unwrap_or_default()),
+        _ => (None, Vec::new()),
     };
-    out.emit(&m, || {
-        let mut text = format!(
-            "{}: {}",
-            m.config.name,
-            band_leq::transfer_summary(set.as_ref())
-        );
-        if let Some(set) = &set {
-            for (i, b) in set.bands[..ac2_proto::model::LF_BAND_COUNT]
-                .iter()
-                .enumerate()
-            {
-                text.push_str("\n  ");
-                text.push_str(&band_leq::transfer_band_text(BAND_NOMINAL_HZ[i], b));
-            }
-        }
-        text
-    })?;
+    out.emit(&m, || transfer_text(&m.config.name, set.as_ref(), &shown))?;
     Ok(())
 }
 
@@ -392,7 +451,7 @@ async fn estimate(cli: &Cli, e: &BandsEstimate, out: &mut Out<'_>) -> Result<(),
         .map_err(|err| CliError::Usage(format!("{}: {err}", e.attenuation.display())))?;
     let typed = ac2_traces::band_levels::parse(&text)
         .map_err(|err| CliError::Usage(format!("{}: {err}", e.attenuation.display())))?;
-    let set = estimated_set(&typed, watch::now_wall())
+    let set = estimated_set(&typed, watch::now_wall(), &e.place)
         .map_err(|err| CliError::Usage(format!("{}: {err}", e.attenuation.display())))?;
     let c = connect(cli, false).await?;
     let st = state(&c).await?;
@@ -405,7 +464,7 @@ async fn estimate(cli: &Cli, e: &BandsEstimate, out: &mut Out<'_>) -> Result<(),
         )));
     };
     let bands = BandLeqConfig {
-        transfer: Some(set),
+        transfer: Some(set.clone()),
         ..bands.clone()
     };
     let r = c
@@ -423,22 +482,24 @@ async fn estimate(cli: &Cli, e: &BandsEstimate, out: &mut Out<'_>) -> Result<(),
         })
         .await?;
     let m = expect_body!("meas.update", r, ReplyBody::Measurement(m) => m)?;
-    out.emit(&m, || {
-        let mut text = format!(
-            "{}: {}",
-            m.config.name,
-            band_leq::transfer_summary(Some(&set))
-        );
-        for (i, b) in set.bands[..ac2_proto::model::LF_BAND_COUNT]
-            .iter()
-            .enumerate()
-        {
-            text.push_str("\n  ");
-            text.push_str(&band_leq::transfer_band_text(BAND_NOMINAL_HZ[i], b));
-        }
-        text
-    })?;
+    let shown = bands.band_indices().unwrap_or_default();
+    out.emit(&m, || transfer_text(&m.config.name, Some(&set), &shown))?;
     Ok(())
+}
+
+/// A meter's transfer: its summary, then each shown band.
+fn transfer_text(name: &str, set: Option<&BandTransferSet>, shown: &[usize]) -> String {
+    let mut text = format!("{name}: {}", band_leq::transfer_summary(set, shown));
+    if let Some(set) = set {
+        for &i in shown {
+            text.push_str("\n  ");
+            text.push_str(&band_leq::transfer_band_text(
+                BAND_NOMINAL_HZ[i],
+                &set.bands[i],
+            ));
+        }
+    }
+    text
 }
 
 /// Typed attenuations as an estimated transfer: each band unchecked at its attenuation, a
@@ -446,18 +507,21 @@ async fn estimate(cli: &Cli, e: &BandsEstimate, out: &mut Out<'_>) -> Result<(),
 pub(crate) fn estimated_set(
     typed: &[Option<f64>; ac2_proto::model::BAND_COUNT],
     now: WallNs,
+    place: &str,
 ) -> Result<BandTransferSet, String> {
+    BandTransferSet::check_place(place)?;
     if let Some((i, a)) = typed
         .iter()
         .enumerate()
         .find_map(|(i, a)| a.filter(|a| *a < 0.0).map(|a| (i, a)))
     {
         return Err(format!(
-            "{} Hz: attenuation {a} dB; the bedroom is not louder than FOH (≥ 0 dB)",
+            "{} Hz: attenuation {a} dB; {place} is not louder than FOH (≥ 0 dB)",
             band_leq::band_label(BAND_NOMINAL_HZ[i])
         ));
     }
     Ok(BandTransferSet {
+        place: place.to_owned(),
         measured_at: now,
         origin: TransferOrigin::Estimated,
         bands: typed.map(|a| match a {
@@ -500,15 +564,13 @@ mod tests {
         let c = apply(None, &set_args(&["--preset", "finland-545-lf"]))
             .expect("test value")
             .expect("test value");
-        assert_eq!(c, BandLeqPreset::Finland545Lf.config(None));
+        assert_eq!(c, BandLeqPreset::Finland545Lf.apply(None));
         let measured = ac2_proto::samples::band_leq_config();
         let c = apply(
             Some(&measured),
             &set_args(&[
                 "--preset",
                 "finland-545-living-room",
-                "--duration",
-                "15min",
                 "--impulse",
                 "10",
                 "--tonal",
@@ -518,31 +580,107 @@ mod tests {
         .expect("test value")
         .expect("test value");
         assert_eq!(c.transfer, measured.transfer);
-        assert_eq!(c.predicted.night, Some(DbSpl(30.0)));
-        assert_eq!(c.duration, Seconds(900.0));
+        assert_eq!(c.predicted.and_then(|p| p.night), Some(DbSpl(30.0)));
         assert_eq!(c.correction.db(), 13.0);
         // The correction alone: the rest carries on.
         let d = apply(Some(&c), &set_args(&["--impulse", "none"]))
             .expect("test value")
             .expect("test value");
         assert_eq!(d.correction.db(), 3.0);
-        assert_eq!(d.duration, Seconds(900.0));
+        assert_eq!(d.windows, c.windows);
         assert_eq!(
             apply(Some(&c), &set_args(&["--off"])).expect("test value"),
             None
+        );
+        let text = describe(Some(&d));
+        assert!(
+            text.contains("band Leq 20–200 Hz · §13 correction 3 dB"),
+            "{text}"
+        );
+        assert!(text.contains("LZeq 60 min: no limits"), "{text}");
+        assert!(text.contains("transfer from "), "{text}");
+    }
+
+    #[test]
+    fn windows_bands_and_limits_are_set_like_leq_windows() {
+        let lf = BandLeqPreset::Finland545Lf.apply(None);
+        // Windows typed alone turn the meter on, Z unless weighted, on 20–200 Hz.
+        let c = apply(None, &set_args(&["--windows", "60min,a:15min"]))
+            .expect("test value")
+            .expect("test value");
+        assert_eq!(c.windows.len(), 2);
+        assert_eq!(c.windows[0].weighting, Weighting::Z);
+        assert_eq!(c.windows[0].duration, Seconds(3600.0));
+        assert_eq!(c.windows[1].weighting, Weighting::A);
+        assert_eq!(c.bands, lf.bands);
+        assert_eq!(c.predicted, None);
+        // A window kept keeps its limits; a new one starts without.
+        let c = apply(
+            Some(&lf),
+            &set_args(&[
+                "--windows",
+                "c:5min,z:60min",
+                "--bands",
+                "50hz..100hz,1khz",
+                "--limit",
+                "c:5min:63hz=70db",
+                "--limit",
+                "z:60min:50hz=none",
+                "--day-offset",
+                "c:5min=3db",
+                "--warn",
+                "2db",
+            ]),
+        )
+        .expect("test value")
+        .expect("test value");
+        assert_eq!(
+            c.windows[1].limits.night()[5],
+            lf.windows[0].limits.night()[5]
+        );
+        assert_eq!(c.windows[1].limits.night()[4], None);
+        assert_eq!(
+            c.windows[0].limits,
+            BandLimitSet::NightDay {
+                night: {
+                    let mut n = [None; ac2_proto::model::BAND_COUNT];
+                    n[5] = Some(DbSpl(70.0));
+                    n
+                },
+                day_offset: Db(3.0),
+            }
+        );
+        assert!(c.windows.iter().all(|w| w.warn_margin == Db(2.0)));
+        let hz: Vec<f64> = c.bands.iter().map(|h| h.0).collect();
+        assert_eq!(hz, vec![50.0, 63.0, 80.0, 100.0, 1000.0]);
+        // `=none` makes a window's limits hold day and night.
+        let d = apply(Some(&c), &set_args(&["--day-offset", "c:5min=none"]))
+            .expect("test value")
+            .expect("test value");
+        assert!(matches!(d.windows[0].limits, BandLimitSet::Always { .. }));
+        assert_eq!(d.windows[0].limits.night()[5], Some(DbSpl(70.0)));
+        let text = describe(Some(&d));
+        assert!(text.contains("  LCeq 5 min: 70 dB · warn 2 dB"), "{text}");
+        assert!(
+            !text.contains("bedroom") && !text.contains("dwelling"),
+            "{text}"
         );
     }
 
     #[test]
     fn set_refuses_what_cannot_run() {
         let e = apply(None, &set_args(&["--impulse", "5"])).expect_err("refused");
-        assert!(e.to_string().contains("--preset finland-545-lf"), "{e}");
-        let e = apply(
-            None,
-            &set_args(&["--preset", "finland-545-lf", "--duration", "c:1h"]),
-        )
-        .expect_err("refused");
-        assert!(e.to_string().contains("unweighted"), "{e}");
+        assert!(e.to_string().contains("--windows z:60min"), "{e}");
+        let lf = BandLeqPreset::Finland545Lf.apply(None);
+        let e =
+            apply(Some(&lf), &set_args(&["--limit", "a:60min:63hz=40db"])).expect_err("refused");
+        assert!(
+            e.to_string()
+                .contains("no band window LAeq 60 min: the band windows are LZeq 60 min"),
+            "{e}"
+        );
+        let many = "1min,2min,3min,4min,5min,6min,7min,8min,9min";
+        assert!(apply(Some(&lf), &set_args(&["--windows", many])).is_err());
         let argv = ["ac2", "spl", "bands", "set", "--off", "--impulse", "5"];
         assert!(crate::Cli::try_parse_from(argv).is_err());
         assert!(crate::Cli::try_parse_from(["ac2", "spl", "bands", "set"]).is_err());
@@ -557,8 +695,10 @@ mod tests {
             "transfer",
             "--foh",
             "FOH SPL@21:00..21:00:30",
-            "--dwelling",
-            "bedroom.txt",
+            "--place-levels",
+            "flat4.txt",
+            "--place",
+            "flat 4",
             "--background",
             "Bedroom@-2min..now",
         ]) else {
@@ -578,7 +718,8 @@ mod tests {
                 },
             }
         );
-        assert_eq!(t.dwelling, BandSourceArg::File("bedroom.txt".into()));
+        assert_eq!(t.at_place, BandSourceArg::File("flat4.txt".into()));
+        assert_eq!(t.place, "flat 4");
         assert_eq!(
             t.background,
             Some(BandSourceArg::Span {
@@ -685,9 +826,11 @@ mod tests {
             panic!("estimate");
         };
         assert_eq!(e.attenuation, std::path::PathBuf::from("guess.txt"));
+        assert_eq!(e.place, BandTransferSet::DEFAULT_PLACE);
         let mut typed = [None; ac2_proto::model::BAND_COUNT];
         typed[5] = Some(25.0);
-        let set = estimated_set(&typed, WallNs(1)).expect("set");
+        let set = estimated_set(&typed, WallNs(1), "flat 4").expect("set");
+        assert_eq!(set.place, "flat 4");
         assert_eq!(set.origin, TransferOrigin::Estimated);
         assert_eq!(
             set.bands[5],
@@ -697,15 +840,19 @@ mod tests {
         );
         assert_eq!(set.bands[0], BandTransferBand::Missing);
         typed[6] = Some(-3.0);
-        let e = estimated_set(&typed, WallNs(1)).expect_err("negative");
-        assert!(e.starts_with("80 Hz: attenuation -3 dB"), "{e}");
+        let e = estimated_set(&typed, WallNs(1), "flat 4").expect_err("negative");
+        assert!(
+            e.starts_with("80 Hz: attenuation -3 dB; flat 4 is not louder"),
+            "{e}"
+        );
+        assert!(estimated_set(&typed, WallNs(1), "").is_err());
     }
 
     #[test]
     fn a_levels_file_becomes_typed_levels() {
         let dir = tempfile::tempdir().expect("test value");
-        let p = dir.path().join("dwelling.txt");
-        std::fs::write(&p, "# bedroom\n63 41.5\n100 38\n").expect("test value");
+        let p = dir.path().join("place.txt");
+        std::fs::write(&p, "# flat 4\n63 41.5\n100 38\n").expect("test value");
         let BandLevelSource::Levels { levels } = levels_file(&p).expect("test value") else {
             panic!("levels");
         };

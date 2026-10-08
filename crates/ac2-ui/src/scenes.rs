@@ -798,7 +798,7 @@ fn band_view<'a>(
     let MeasKind::Spl { config } = &m.config.kind else {
         return None;
     };
-    config.bands.as_ref()?;
+    let bands = config.bands.as_deref()?;
     let stale = match freshness(st, tf) {
         Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),
         Freshness::Stopped { .. } => Some("STOPPED".into()),
@@ -809,7 +809,7 @@ fn band_view<'a>(
         BandLeqView {
             meter: m.config.name.clone(),
             cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
-            text: band_leq_text(&f.meta),
+            text: band_leq_text(bands, f),
             stale,
         },
         tf,

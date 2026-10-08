@@ -43,7 +43,7 @@ impl AppState {
         let mut meters = vec![own];
         meters.extend(band_meters.into_iter().filter(|(id, _)| *id != d.meas));
         d.error = None;
-        d.transfer = TransferStep::new(meters);
+        d.transfer = TransferStep::new(meters, d.bands.place(), d.bands.shown());
     }
 
     /// A key on the band transfer step.
@@ -78,7 +78,15 @@ impl AppState {
                 span.meter
             )
         };
+        // On the place's name the keys that type are its text (`settings_text`).
+        let typing = t.on_place
+            && (minutes.is_some()
+                || matches!(
+                    chord.key,
+                    Key::Space | Key::Delete | Key::ArrowLeft | Key::ArrowRight
+                ));
         let asked = match (chord.key, minutes) {
+            _ if typing => None,
             (Key::ArrowUp, _) => {
                 t.move_focus(-1);
                 None
@@ -124,6 +132,7 @@ impl AppState {
                         out.push(Request::BandTransfer {
                             meas: t.meas,
                             sources: Box::new(sources),
+                            place: t.place_name().to_owned(),
                         });
                     }
                     Err(e) => t.error = Some(e),
@@ -154,22 +163,32 @@ impl AppState {
         match result {
             Ok(m) => {
                 let set = match &m.config.kind {
-                    MeasKind::Spl { config } => config.bands.as_ref().and_then(|b| b.transfer),
+                    MeasKind::Spl { config } => {
+                        config.bands.as_ref().and_then(|b| b.transfer.clone())
+                    }
                     _ => None,
+                };
+                let shown = match &m.config.kind {
+                    MeasKind::Spl { config } => config
+                        .bands
+                        .as_ref()
+                        .and_then(|b| b.band_indices())
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
                 };
                 if let Some(d) = self.overlay.leq_mut()
                     && d.meas == m.id
                 {
-                    d.bands.set_transfer(set);
+                    d.bands.set_transfer(set.clone());
                     if let Some(t) = &mut d.transfer {
                         t.storing = false;
-                        t.stored = set;
+                        t.stored = set.clone();
                     }
                 }
                 self.toast(format!(
                     "{}: band transfer stored · {}",
                     m.config.name,
-                    ac2_scene::band_leq::transfer_summary(set.as_ref())
+                    ac2_scene::band_leq::transfer_summary(set.as_ref(), &shown)
                 ));
             }
             Err(e) => {

@@ -236,6 +236,8 @@ pub enum ArrayName {
     Least,
     /// Seconds until a filling window on course spends its budget (NaN otherwise).
     OverIn,
+    /// A band window's limit in force (NaN: none).
+    Limit,
 }
 
 /// Array unit.
@@ -479,9 +481,11 @@ pub struct LeqMeta {
     pub position: Option<PositionCorrection>,
 }
 
-/// An SPL meter's band meter once a second (`docs/design/band-leq.md`): every limited band's
-/// window judged, the worst band, the period, the predicted dwelling LAeq. No arrays: eleven
-/// bands fit the header.
+/// An SPL meter's band meter once a second (`docs/design/band-leq.md`): the shown bands of
+/// every band window judged, window by window in the configuration's order (`config_rev` in
+/// the header says which), the predicted level at the transfer's place. The arrays hold one
+/// column per window and shown band, window-major: column `w · bands.len() + i` is band
+/// `bands[i]` of window `w`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandLeqMeta {
@@ -491,29 +495,41 @@ pub struct BandLeqMeta {
     pub cal: CalStatus,
     /// The mic-curve correction filter ran before the band filters.
     pub mic_curve: bool,
-    /// Window length.
-    pub duration: Seconds,
     /// Headroom horizon (the meter's Leq horizon).
     pub horizon: Seconds,
-    /// Seconds of the window elapsed (less than `duration` while it fills).
-    pub elapsed: Seconds,
-    /// Seconds of those measured.
-    pub measured: Seconds,
-    /// The limit set the windows are judged by: night while they hold a night second.
-    pub period: crate::model::BandPeriod,
-    /// The set the headroom figures are computed against (once the horizon has passed).
-    pub period_after_horizon: crate::model::BandPeriod,
     /// The §13 correction in force, dB (included in the newest seconds' levels).
     pub correction: Db,
     /// Where the limits at the mic come from.
     pub limits_from: crate::model::BandLimitPlace,
-    /// The bands 20 … 200 Hz, low to high.
-    pub bands: Vec<crate::model::BandLeqBand>,
-    /// Index into `bands` of the worst band: the most severe judgement, then the furthest
-    /// above (or least below) its limit; `None` when nothing is judged.
-    pub worst: Option<u8>,
-    /// The predicted dwelling LAeq window; `None` without a transfer.
+    /// The shown bands, indices into [`crate::model::BAND_NOMINAL_HZ`], low to high.
+    pub bands: Vec<u8>,
+    /// The windows, in the configuration's order.
+    pub windows: Vec<BandWindowState>,
+    /// The predicted level at the transfer's place; `None` without a transfer or a
+    /// predicted window.
     pub predicted: Option<crate::model::PredictedLeq>,
+}
+
+/// One band window of a `band_leq` frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BandWindowState {
+    /// Window length.
+    pub duration: Seconds,
+    /// Weighting of its band levels.
+    pub weighting: Weighting,
+    /// Seconds of the window elapsed (less than `duration` while it fills).
+    pub elapsed: Seconds,
+    /// Seconds of those measured.
+    pub measured: Seconds,
+    /// The limit set the window is judged by: night while it holds a night second.
+    pub period: crate::model::BandPeriod,
+    /// The set its headroom figures are computed against (once the horizon has passed).
+    pub period_after_horizon: crate::model::BandPeriod,
+    /// Index into the frame's `bands` of the window's worst band: the most severe
+    /// judgement, then the furthest above (or least below) its limit; `None` when nothing
+    /// is judged.
+    pub worst: Option<u8>,
 }
 
 /// A peak limit's state: the highest second within the hold, judged against the limit.
@@ -838,13 +854,35 @@ pub struct LeqFrame {
     pub flags: Vec<LeqFlags>,
 }
 
-/// An SPL meter's band meter, published once a second.
+/// An SPL meter's band meter, published once a second: one column per window and shown
+/// band ([`BandLeqMeta`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BandLeqFrame {
     /// Measurement.
     pub meas: MeasId,
-    /// The bands, the period, the prediction.
+    /// The windows, the bands, the prediction.
     pub meta: BandLeqMeta,
+    /// Weighted band Leq of the window at the mic, §13 correction included; NaN before
+    /// anything was measured.
+    pub leq: Vec<f32>,
+    /// The limit in force at the mic (the place's plus the attenuation with a transfer);
+    /// NaN without one.
+    pub limit: Vec<f32>,
+    /// Steady level allowed over the horizon to stay at the limit in force once the
+    /// horizon has passed; NaN without a judged limit or when it cannot recover.
+    pub allowed: Vec<f32>,
+    /// Seconds to recover playing at the limit, when it cannot within the horizon; else
+    /// NaN.
+    pub recover: Vec<f32>,
+    /// State: the judgement, `ON_COURSE` while filling ([`LeqFlags`]).
+    pub flags: Vec<LeqFlags>,
+}
+
+impl BandLeqFrame {
+    /// Column of band `i` (into `meta.bands`) of window `w`.
+    pub fn col(&self, w: usize, i: usize) -> usize {
+        w * self.meta.bands.len() + i
+    }
 }
 
 /// Input meters frame.
@@ -1190,7 +1228,18 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             FrameMeta::Spec(f.meta.clone())
         }
         FrameData::Spl(f) => FrameMeta::Spl(f.meta),
-        FrameData::BandLeq(f) => FrameMeta::BandLeq(f.meta.clone()),
+        FrameData::BandLeq(f) => {
+            let unit = level_unit(f.meta.scale);
+            cols.push((desc(ArrayName::Leq, unit), Col::F(&f.leq)));
+            cols.push((desc(ArrayName::Limit, unit), Col::F(&f.limit)));
+            cols.push((desc(ArrayName::Allowed, unit), Col::F(&f.allowed)));
+            cols.push((desc(ArrayName::Recover, Unit::Seconds), Col::F(&f.recover)));
+            cols.push((
+                desc(ArrayName::LeqFlags, Unit::Bitmask),
+                Col::U(mask_slice(&f.flags)),
+            ));
+            FrameMeta::BandLeq(f.meta.clone())
+        }
         FrameData::Leq(f) => {
             let unit = level_unit(f.meta.scale);
             cols.push((desc(ArrayName::Leq, unit), Col::F(&f.leq)));
@@ -1524,7 +1573,23 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             meta,
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
-        FrameMeta::BandLeq(meta) => FrameData::BandLeq(Box::new(BandLeqFrame { meas, meta })),
+        FrameMeta::BandLeq(meta) => {
+            if meta.windows.len() * meta.bands.len() != h.n as usize {
+                return Err(DecodeError::Schema(
+                    "band_leq: windows.len() × bands.len() != n".into(),
+                ));
+            }
+            let unit = level_unit(meta.scale);
+            FrameData::BandLeq(Box::new(BandLeqFrame {
+                meas,
+                leq: a.f32(ArrayName::Leq, unit)?,
+                limit: a.f32(ArrayName::Limit, unit)?,
+                allowed: a.f32(ArrayName::Allowed, unit)?,
+                recover: a.f32(ArrayName::Recover, Unit::Seconds)?,
+                flags: a.mask(ArrayName::LeqFlags)?,
+                meta,
+            }))
+        }
         FrameMeta::Leq(meta) => {
             let unit = level_unit(meta.scale);
             FrameData::Leq(Box::new(LeqFrame {

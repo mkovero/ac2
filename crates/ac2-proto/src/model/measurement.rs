@@ -108,8 +108,8 @@ pub struct SplConfig {
     /// calibrated (the log keeps what was measured, with the correction in force). Not
     /// applied to the band meter, whose transfer is measured from the mic's own position.
     pub position: Option<PositionCorrection>,
-    /// 1/3-octave band Leq against dwelling limits (`docs/design/band-leq.md`); `None`:
-    /// off.
+    /// 1/3-octave band windows against per-band limits (`docs/design/band-leq.md`);
+    /// `None`: off.
     pub bands: Option<Box<super::BandLeqConfig>>,
 }
 

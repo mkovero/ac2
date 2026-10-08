@@ -1,12 +1,13 @@
 //! `spl bands` against a real daemon on the simulated rig, from an empty daemon: a 63 Hz
 //! tone reaches input 2 at about 94 dB SPL once calibrated at 1 kHz. `spl bands set
-//! --preset finland-545-lf --duration 5s` turns the band meter on; `spl bands watch --json`
-//! with the mic in the bedroom shows eleven bands with 63 Hz the worst, far over its limit, and the headline naming it;
+//! --preset finland-545-lf --windows z:5s,a:5s --limit …` turns the band meter on with two
+//! short windows; `spl bands watch --json` shows eleven bands per window, the A window's 63
+//! Hz band 26 dB under the Z one, 63 Hz the worst and the headline naming its window;
 //! `spl bands log` reads the tone's seconds back with their average and writes them as a
-//! `<Hz> <dB>` file that `spl bands transfer` reads back; at FOH without a transfer nothing
-//! is judged; overlapping spans of one meter are refused; `spl bands estimate` stores a
-//! typed transfer; `spl bands transfer` with typed levels moves the limits to the mic and
-//! predicts the dwelling's LAeq.
+//! `<Hz> <dB>` file that `spl bands transfer` reads back; `--bands` keeps only some bands;
+//! overlapping spans of one meter are refused; `spl bands estimate` stores a typed
+//! transfer; `spl bands transfer` with typed levels moves the limits of a named place to
+//! the mic and predicts the place's LAeq.
 #![allow(clippy::unwrap_used)]
 
 use std::time::{Duration, Instant};
@@ -59,7 +60,7 @@ async fn watch_last(ep: &Endpoints, secs: &str) -> Value {
     assert_eq!(code, 0, "{text}");
     text.lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .rfind(|v| v["bands"].is_array())
+        .rfind(|v| v["windows"].is_array())
         .unwrap_or_else(|| panic!("no band line: {text}"))
 }
 
@@ -177,34 +178,43 @@ async fn bands_set_watch_and_transfer() {
             "set",
             "--preset",
             "finland-545-lf",
-            "--duration",
-            "5s",
+            "--windows",
+            "z:5s,a:5s",
+            "--limit",
+            "z:5s:63hz=42db",
+            "--day-offset",
+            "z:5s=5db",
+            "--limit",
+            "a:5s:63hz=30db",
             "--tonal",
             "3",
-            "--mic",
-            "bedroom",
         ],
     )
     .await;
     assert_eq!(code, 0, "{text}");
     let set = document(&text);
     let bands = &set["config"]["kind"]["config"]["bands"];
-    assert_eq!(bands["duration"], 5.0);
-    assert_eq!(bands["night"][5], 42.0);
-    assert_eq!(bands["day"][5], 47.0);
+    let z = &bands["windows"][0];
+    assert_eq!(z["duration"], 5.0);
+    assert_eq!(z["weighting"], "z");
+    assert_eq!(z["limits"]["type"], "night_day");
+    assert_eq!(z["limits"]["night"][5], 42.0);
+    assert_eq!(z["limits"]["day_offset"], 5.0);
+    assert_eq!(bands["windows"][1]["limits"]["type"], "always");
     assert_eq!(bands["predicted"]["night"], 25.0);
     assert_eq!(bands["correction"]["tonal"], "plus3");
-    assert_eq!(bands["mic"], "dwelling");
 
-    // A bedroom monitor: the window fills with the tone; 63 Hz is the worst band, tens of
-    // dB over.
+    // Without a transfer the limits are judged at the mic as typed: the windows fill with
+    // the tone; 63 Hz is the worst band, tens of dB over, in the Z window.
     tokio::time::sleep(Duration::from_secs(6)).await;
     let last = watch_last(&ep, "2.5s").await;
     assert_eq!(last["name"], "FOH SPL");
     assert_eq!(last["scale"], "db_spl");
-    assert_eq!(last["limits_from"], "at_mic", "the mic is in the bedroom");
+    assert_eq!(last["limits_from"], "at_mic");
     assert_eq!(last["correction_db"], 3.0);
-    let bs = last["bands"].as_array().unwrap();
+    let ws = last["windows"].as_array().unwrap();
+    assert_eq!(ws.len(), 2, "{last}");
+    let bs = ws[0]["bands"].as_array().unwrap();
     assert_eq!(bs.len(), 11, "{last}");
     let hz: Vec<f64> = bs
         .iter()
@@ -212,26 +222,33 @@ async fn bands_set_watch_and_transfer() {
         .collect();
     assert_eq!(hz.first(), Some(&20.0));
     assert_eq!(hz.last(), Some(&200.0));
-    assert_eq!(last["worst"], 5, "{last}");
-    assert_eq!(last["worst_hz"], 63.0);
+    assert_eq!(last["worst"]["window"], 0, "{last}");
+    assert_eq!(last["worst"]["nominal_hz"], 63.0);
+    assert_eq!(ws[0]["worst_hz"], 63.0);
     let b63 = &bs[5];
     assert_eq!(b63["judgement"], "over", "{b63}");
     // About 94 dB of tone plus the +3 dB correction.
     assert!((b63["leq"].as_f64().unwrap() - 97.0).abs() < 1.5, "{b63}");
-    assert_eq!(b63["text"]["name"], "63 Hz band Leq");
+    assert_eq!(b63["text"]["name"], "63 Hz band LZeq 5 s");
     assert_eq!(b63["text"]["state"], "OVER");
+    // A-weighting at 63 Hz is −26.2 dB.
+    let a63 = &ws[1]["bands"][5];
+    assert_eq!(ws[1]["weighting"], "a");
+    assert!((a63["leq"].as_f64().unwrap() - 70.8).abs() < 1.5, "{a63}");
+    assert_eq!(a63["text"]["name"], "63 Hz band LAeq 5 s");
     let headline = last["text"]["headline"].as_str().unwrap();
     assert!(
-        headline.starts_with("63 Hz band Leq ") && headline.contains(" dB over its limit · "),
+        headline.starts_with("63 Hz band LZeq 5 s ") && headline.contains(" dB over its limit · "),
         "{headline}"
     );
     assert!(
-        last["text"]["period"]
+        ws[0]["text"]["period"]
             .as_str()
             .unwrap()
             .contains("limits ("),
         "{last}"
     );
+    assert!(ws[1]["text"]["period"].is_null(), "one set day and night");
     assert!(last["predicted"].is_null(), "no transfer, no prediction");
 
     // The band log over three seconds of the tone: about 94 dB SPL at 63 Hz (the log
@@ -263,7 +280,7 @@ async fn bands_set_watch_and_transfer() {
     assert_eq!(code, 1, "{text}");
 
     // The span's averages as a `<Hz> <dB>` file, read back as typed levels: what a rig in
-    // the bedroom hands to the one at FOH.
+    // the place hands to the one at FOH.
     let span_file = dir.path().join("span.txt");
     let (code, text) = run(
         &ep,
@@ -293,19 +310,19 @@ async fn bands_set_watch_and_transfer() {
         }
     }
 
-    // At FOH without a transfer the bedroom's limits are not judged.
-    let (code, text) = run(&ep, &["spl", "bands", "set", "--mic", "foh"]).await;
+    // Only some bands shown: every window shows those, the log keeps them all.
+    let (code, text) = run(&ep, &["spl", "bands", "set", "--bands", "50hz..80hz,1khz"]).await;
     assert_eq!(code, 0, "{text}");
     tokio::time::sleep(Duration::from_secs(1)).await;
     let last = watch_last(&ep, "1.5s").await;
-    assert_eq!(last["limits_from"], "no_transfer");
     assert_eq!(
-        last["text"]["headline"],
-        "no band transfer — limits are for the bedroom, measure the transfer"
+        last["bands_hz"],
+        serde_json::json!([50.0, 63.0, 80.0, 1000.0])
     );
-    assert!(last["worst"].is_null(), "{last}");
+    assert_eq!(last["windows"][1]["bands"].as_array().unwrap().len(), 4);
+    assert_eq!(last["worst"]["nominal_hz"], 63.0);
 
-    // The span file as the dwelling, 0 dB attenuation everywhere from FOH's own span.
+    // The span file as the place, 0 dB attenuation everywhere from FOH's own span.
     let (code, text) = run(
         &ep,
         &[
@@ -314,7 +331,7 @@ async fn bands_set_watch_and_transfer() {
             "transfer",
             "--foh",
             span_file.to_str().unwrap(),
-            "--dwelling",
+            "--place-levels",
             span_file.to_str().unwrap(),
         ],
     )
@@ -323,7 +340,7 @@ async fn bands_set_watch_and_transfer() {
     let t = &document(&text)["config"]["kind"]["config"]["bands"]["transfer"];
     assert_eq!(t["origin"], "measured");
     assert_eq!(t["bands"][5]["attenuation"], 0.0);
-    // One mic cannot be at FOH and in the bedroom over the same seconds.
+    // One mic cannot be at FOH and at the place over the same seconds.
     let (code, text) = run(
         &ep,
         &[
@@ -332,7 +349,7 @@ async fn bands_set_watch_and_transfer() {
             "transfer",
             "--foh",
             "FOH SPL@-10s..-5s",
-            "--dwelling",
+            "--place-levels",
             "FOH SPL@-6s..-1s",
         ],
     )
@@ -340,7 +357,7 @@ async fn bands_set_watch_and_transfer() {
     assert_eq!(code, 1, "{text}");
     assert!(text.contains("spans overlap on FOH SPL"), "{text}");
 
-    // An estimated transfer, typed where the bedroom cannot be reached.
+    // An estimated transfer, typed where the place cannot be reached.
     let guess = dir.path().join("guess.txt");
     std::fs::write(&guess, "63 25\n125 30\n").unwrap();
     let (code, text) = run(
@@ -364,15 +381,15 @@ async fn bands_set_watch_and_transfer() {
     let last = watch_last(&ep, "1.5s").await;
     assert_eq!(last["limits_from"], "estimated");
 
-    // A transfer from typed levels: 30 dB quieter in the dwelling in every limited band.
+    // A transfer from typed levels: 30 dB quieter at the place in every limited band.
     let foh = dir.path().join("foh.txt");
-    let dwelling = dir.path().join("bedroom.txt");
+    let at_place = dir.path().join("flat4.txt");
     let lf = [
         20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0,
     ];
     let lines = |db: f64| lf.iter().map(|f| format!("{f} {db}\n")).collect::<String>();
     std::fs::write(&foh, lines(80.0)).unwrap();
-    std::fs::write(&dwelling, lines(50.0)).unwrap();
+    std::fs::write(&at_place, lines(50.0)).unwrap();
     let (code, text) = run(
         &ep,
         &[
@@ -381,8 +398,10 @@ async fn bands_set_watch_and_transfer() {
             "transfer",
             "--foh",
             foh.to_str().unwrap(),
-            "--dwelling",
-            dwelling.to_str().unwrap(),
+            "--place-levels",
+            at_place.to_str().unwrap(),
+            "--place",
+            "flat 4",
         ],
     )
     .await;
@@ -400,8 +419,8 @@ async fn bands_set_watch_and_transfer() {
             "transfer",
             "--foh",
             "FOH SPL@2020-01-01T00:00:00Z..2020-01-01T00:00:30Z",
-            "--dwelling",
-            dwelling.to_str().unwrap(),
+            "--place-levels",
+            at_place.to_str().unwrap(),
         ],
     )
     .await;
@@ -410,15 +429,18 @@ async fn bands_set_watch_and_transfer() {
     tokio::time::sleep(Duration::from_secs(2)).await;
     let last = watch_last(&ep, "1.5s").await;
     assert_eq!(last["limits_from"], "transferred");
-    assert_eq!(last["worst"], 5);
+    assert_eq!(last["worst"]["nominal_hz"], 63.0);
     assert_eq!(
         last["text"]["limits_from"],
-        "limits transferred from the dwelling"
+        "limits moved from flat 4 through the band transfer"
     );
     let p = &last["predicted"];
     assert!(p.is_object(), "{last}");
     let line = last["text"]["predicted"].as_str().unwrap();
-    assert!(line.starts_with("predicted dwelling LAeq "), "{line}");
+    assert!(
+        line.starts_with("predicted LAeq 60 min in flat 4 "),
+        "{line}"
+    );
 
     // Off: the band meter goes, the SPL meter carries on.
     let (code, text) = run(&ep, &["spl", "bands", "set", "--off"]).await;

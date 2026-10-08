@@ -1,9 +1,9 @@
 //! The band meter end to end on the fake rig (`docs/design/band-leq.md`), from an empty
-//! daemon: the STM 545/2015 low-frequency preset judged on a calibrated 63 Hz tone by a
-//! bedroom monitor and not judged at FOH without a transfer, the day/night flip at 22:00
-//! local time on an injected clock, the band log kept through a stopped meter and a saved
-//! session, a FOH → dwelling transfer from typed levels and from a span of the log, and the
-//! bedroom spans from a recorder's WAV replayed.
+//! daemon: two band windows of different weightings on a band selection judged at the mic
+//! without a transfer on a calibrated 63 Hz tone, a window added later rebuilt from the
+//! band log, the day/night flip at 22:00 local time on an injected clock, the band log kept
+//! through a stopped meter and a saved session, a named transfer from typed levels and from
+//! a span of the log, and the receiving room's spans from a recorder's WAV replayed.
 #![allow(clippy::unwrap_used)]
 
 mod common;
@@ -11,14 +11,14 @@ mod common;
 use std::time::{Duration, Instant};
 
 use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
-use ac2_proto::frame::{BandLeqMeta, FrameData};
+use ac2_proto::frame::{BandLeqFrame, FrameData};
 use ac2_proto::model::{
     AlarmSubject, BAND_COUNT, BandLeqConfig, BandLeqPreset, BandLevelSource, BandLimitPlace,
-    BandMicPlace, BandPeriod, BandTransferBand, BandTransferSet, GeneratorDesired,
+    BandLimitSet, BandPeriod, BandTransferBand, BandTransferSet, BandWindow, GeneratorDesired,
     GeneratorSettings, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, MeasConfig, MeasKind,
     PeakWeighting, SessionRef, Signal, SplConfig, SplLog, TimeWeighting, Weighting,
 };
-use ac2_proto::units::{DbSpl, Dbfs, Hz, MeasId, Seconds, WallNs};
+use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds, WallNs};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};
 use ac2d::{Daemon, Handle, LocalClock};
 use common::*;
@@ -62,12 +62,27 @@ fn tone(freq: f64, level: f64) -> GeneratorDesired {
     }
 }
 
-/// The STM 545/2015 low-frequency preset on 5 s windows.
+/// The STM 545/2015 low-frequency preset on a 5 s window.
 fn bands() -> BandLeqConfig {
-    BandLeqConfig {
-        duration: Seconds(5.0),
-        ..BandLeqPreset::Finland545Lf.config(None)
-    }
+    let mut c = BandLeqPreset::Finland545Lf.apply(None);
+    c.windows[0].duration = Seconds(5.0);
+    c
+}
+
+/// Window `w`'s band `i` (into the frame's bands): Leq, limit, judgement.
+fn cell(f: &BandLeqFrame, w: usize, i: usize) -> (f64, Option<f64>, LeqJudgement) {
+    let k = f.col(w, i);
+    let limit = f64::from(f.limit[k]);
+    (
+        f64::from(f.leq[k]),
+        limit.is_finite().then_some(limit),
+        f.flags[k].judgement(),
+    )
+}
+
+/// Window 0's 63 Hz band (index [`B63`] of the preset's 20 … 200 Hz).
+fn b63(f: &BandLeqFrame) -> (f64, Option<f64>, LeqJudgement) {
+    cell(f, 0, B63)
 }
 
 fn meter(bands: Option<BandLeqConfig>) -> MeasConfig {
@@ -111,7 +126,7 @@ async fn start(clock: LocalClock) -> (Handle, Client, tempfile::TempDir) {
 }
 
 /// The newest `band_leq` frame once `ok` holds.
-async fn band_until(c: &Client, what: &str, ok: impl Fn(&BandLeqMeta) -> bool) -> BandLeqMeta {
+async fn band_until(c: &Client, what: &str, ok: impl Fn(&BandLeqFrame) -> bool) -> BandLeqFrame {
     let topic = Topic::Data {
         meas: M,
         stream: Stream::BandLeq,
@@ -120,9 +135,9 @@ async fn band_until(c: &Client, what: &str, ok: impl Fn(&BandLeqMeta) -> bool) -
     loop {
         if let Some(f) = c.latest().unwrap().get(&topic)
             && let FrameData::BandLeq(b) = &f.frame.data
-            && ok(&b.meta)
+            && ok(b)
         {
-            return b.meta.clone();
+            return (**b).clone();
         }
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -178,7 +193,7 @@ async fn transfer_until(
         let s = c.view().state.clone().unwrap();
         let m = s.measurements.iter().find(|m| m.id == M).unwrap();
         if let MeasKind::Spl { config } = &m.config.kind
-            && let Some(t) = config.bands.as_ref().and_then(|b| b.transfer)
+            && let Some(t) = config.bands.as_ref().and_then(|b| b.transfer.clone())
             && ok(&t.bands[B63])
         {
             return t;
@@ -192,95 +207,164 @@ async fn transfer_until(
 /// at −26.02 dBFS reads 94 dB: dB SPL = `level` + 113.96.
 const TO_SPL: f64 = 113.96;
 
+/// The bands of the two-window meter: 40 … 80 Hz and 1 kHz.
+const SEL: [f64; 5] = [40.0, 50.0, 63.0, 80.0, 1000.0];
+/// Index of 63 Hz in [`SEL`].
+const S63: usize = 2;
+
+/// Two windows on [`SEL`]: LZeq 5 s with the decree's table (day +5 dB), LAeq 3 s with
+/// 63 Hz limited to 20 dB all day.
+fn two_windows() -> BandLeqConfig {
+    let mut c = bands();
+    c.bands = SEL.map(Hz).to_vec();
+    let mut limits = [None; BAND_COUNT];
+    limits[B63] = Some(DbSpl(20.0));
+    c.windows.push(BandWindow {
+        duration: Seconds(3.0),
+        weighting: Weighting::A,
+        limits: BandLimitSet::Always { limits },
+        warn_margin: Db(3.0),
+    });
+    c
+}
+
+/// A-weighting at the 63 Hz band's exact mid-band frequency (63.1 Hz), IEC 61672-1.
+const A63: f64 = -26.19;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
+async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_the_limits() {
     // Midday local time: the day limits (night + 5 dB) for the whole test.
     let (h, c, dir) = start(clock_at(12 * 3600)).await;
-    // A window that is no whole number of seconds is refused.
-    let e = c
-        .call(Command::MeasCreate {
-            config: meter(Some(BandLeqConfig {
-                duration: Seconds(2.5),
-                ..bands()
-            })),
-        })
-        .await
-        .unwrap_err();
-    assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
-    // First a bedroom monitor: the mic in the dwelling, its limits judged as they are.
+    // A window that is no whole number of seconds, or a band that is none, is refused.
+    let mut bad = two_windows();
+    bad.windows[1].duration = Seconds(2.5);
+    let mut bad_band = two_windows();
+    bad_band.bands.push(Hz(1100.0));
+    for cfg in [bad, bad_band] {
+        let e = c
+            .call(Command::MeasCreate {
+                config: meter(Some(cfg)),
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
+    }
     c.call(Command::MeasCreate {
-        config: meter(Some(BandLeqConfig {
-            mic: BandMicPlace::Dwelling,
-            ..bands()
-        })),
+        config: meter(Some(two_windows())),
     })
     .await
     .unwrap();
     c.call(Command::MeasStart { meas: M }).await.unwrap();
     c.subscribe(Subscription::Meas(M)).unwrap();
 
-    // Uncalibrated: dBFS, the limits shown but not judged.
-    let f = band_until(&c, "uncalibrated frame", |f| f.elapsed.0 >= 1.0).await;
-    assert_eq!(f.scale, LevelScale::Dbfs);
-    assert_eq!(f.bands.len(), 11);
-    assert_eq!(f.period, BandPeriod::Day);
+    // Uncalibrated: dBFS, the limits shown but not judged; only the bands kept.
+    let f = band_until(&c, "uncalibrated frame", |f| {
+        f.meta.windows[0].elapsed.0 >= 1.0
+    })
+    .await;
+    assert_eq!(f.meta.scale, LevelScale::Dbfs);
+    assert_eq!(f.meta.bands, [3, 4, 5, 6, 17]);
+    assert_eq!(f.meta.windows.len(), 2);
+    assert_eq!(f.leq.len(), 10);
+    assert_eq!(f.meta.windows[0].period, BandPeriod::Day);
+    assert_eq!(f.meta.windows[1].weighting, Weighting::A);
+    // No transfer: the limits apply at the mic as typed.
+    assert_eq!(f.meta.limits_from, BandLimitPlace::AtMic);
+    assert_eq!(cell(&f, 0, S63).1, Some(47.0));
+    assert_eq!(cell(&f, 0, S63).2, LeqJudgement::NotCalibrated);
+    assert_eq!(cell(&f, 1, S63).1, Some(20.0));
     assert_eq!(
-        f.limits_from,
-        BandLimitPlace::AtMic,
-        "the mic is in the dwelling"
+        cell(&f, 0, 4).1,
+        None,
+        "1 kHz has no limit in the decree's table"
     );
-    assert_eq!(f.bands[B63].nominal, Hz(63.0));
-    assert_eq!(f.bands[B63].limit, Some(47.0));
-    assert_eq!(f.bands[B63].judgement, LeqJudgement::NotCalibrated);
-    assert!(f.predicted.is_none());
+    assert!(f.meta.predicted.is_none());
 
     let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
     calibrate(&c, &lease).await;
-    // 63 Hz at 52 dB SPL: 5 dB over the day limit of its band, under its neighbours'.
+    // 63 Hz at 52 dB SPL: 5 dB over the day limit of its band at the mic, under its
+    // neighbours'; A-weighted 25.8 dB, over 20.
     let level = 52.0;
     let tone_from = WallNs(wall_now_ns());
     lease.set(tone(63.0, level - TO_SPL)).await.unwrap();
-    let f = band_until(&c, "63 Hz over", |f| {
-        f.bands[B63].judgement == LeqJudgement::Over && (f.bands[B63].leq - level).abs() < 0.5
+    let f = band_until(&c, "63 Hz over in both windows", |f| {
+        let (z, _, zj) = cell(f, 0, S63);
+        let (_, _, aj) = cell(f, 1, S63);
+        zj == LeqJudgement::Over && aj == LeqJudgement::Over && (z - level).abs() < 0.5
     })
     .await;
-    assert_eq!(f.scale, LevelScale::DbSpl);
-    assert!((f.bands[B63].leq - level).abs() < 0.5, "{:?}", f.bands[B63]);
-    for (i, b) in f.bands.iter().enumerate() {
-        if i != B63 {
-            assert_ne!(b.judgement, LeqJudgement::Over, "band {i}: {b:?}");
+    assert_eq!(f.meta.scale, LevelScale::DbSpl);
+    let (a, ..) = cell(&f, 1, S63);
+    assert!(
+        (a - (level + A63)).abs() < 0.5,
+        "LAeq of the 63 Hz band {a}"
+    );
+    for w in 0..2 {
+        for i in [0, 1, 3, 4] {
+            assert_ne!(cell(&f, w, i).2, LeqJudgement::Over, "window {w} band {i}");
         }
+        assert_eq!(f.meta.windows[w].worst, Some(S63 as u8));
     }
-    assert_eq!(f.worst, Some(B63 as u8));
-    let l = log_until(&c, "63 Hz alarm", |l| !l.alarms.is_empty()).await;
-    let a = l.alarms.last().unwrap();
-    assert_eq!(a.subject, AlarmSubject::Band { nominal: Hz(63.0) });
-    assert_eq!(a.kind, LeqAlarmKind::Over);
-    assert_eq!(a.limit, DbSpl(47.0));
+    let l = log_until(&c, "63 Hz alarms", |l| l.alarms.len() >= 2).await;
+    let z63 = AlarmSubject::Band {
+        duration: Seconds(5.0),
+        weighting: Weighting::Z,
+        nominal: Hz(63.0),
+    };
+    let a63 = AlarmSubject::Band {
+        duration: Seconds(3.0),
+        weighting: Weighting::A,
+        nominal: Hz(63.0),
+    };
+    for subject in [z63, a63] {
+        let a = l.alarms.iter().find(|a| a.subject == subject).unwrap();
+        assert_eq!(a.kind, LeqAlarmKind::Over);
+    }
     assert!(
         l.alarms
             .iter()
-            .all(|a| a.subject == AlarmSubject::Band { nominal: Hz(63.0) }),
+            .all(|a| a.subject == z63 || a.subject == a63),
         "{:?}",
         l.alarms
     );
-    // A few seconds more of the tone; the meter stops, the tone ends, the meter starts
-    // again: the windows come back from the band log with the tone seconds and the gap in
-    // them (a window started afresh would hold silence only).
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // A window added while the tone plays is filled from the band log at once: a C-weighted
+    // 60 s window holds the seconds logged before it existed.
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let mut three = two_windows();
+    three.windows.push(BandWindow::minutes(1, Weighting::C));
+    c.call(Command::MeasUpdate {
+        meas: M,
+        config: meter(Some(three)),
+    })
+    .await
+    .unwrap();
+    let f = band_until(&c, "the added window", |f| f.meta.windows.len() == 3).await;
+    assert!(
+        f.meta.windows[2].elapsed.0 >= 5.0,
+        "rebuilt from the log: {:?}",
+        f.meta.windows[2]
+    );
+    let (cz, ..) = cell(&f, 2, S63);
+    assert!(cz > level - 2.0 - 10.0, "LCeq of the 63 Hz band {cz}");
+
+    // The meter stops, the tone ends, the meter starts again: the windows come back from
+    // the band log with the tone seconds and the gap in them (a window started afresh
+    // would hold silence only).
     let tone_until = WallNs(wall_now_ns() - 1_000_000_000);
     c.call(Command::MeasStop { meas: M }).await.unwrap();
     lease.end().await.unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
     c.call(Command::MeasStart { meas: M }).await.unwrap();
     let f = band_until(&c, "rebuilt windows", |f| {
-        f.measured.0 < f.elapsed.0 - 0.5 && f.bands[B63].leq > 45.0
+        let w = f.meta.windows[0];
+        w.measured.0 < w.elapsed.0 - 0.5 && cell(f, 0, S63).0 > 45.0
     })
     .await;
-    assert_eq!(f.elapsed.0, 5.0);
-    assert_eq!(f.bands[B63].judgement, LeqJudgement::Over);
+    assert_eq!(f.meta.windows[0].elapsed.0, 5.0);
+    assert_eq!(cell(&f, 0, S63).2, LeqJudgement::Over);
 
-    // Saved: the band log is written next to the SPL log and reads back in dB SPL.
+    // Saved: the band log is written next to the SPL log and reads back in dB SPL, every
+    // band whatever the selection.
     let path = dir.path().join("show");
     c.call(Command::FileSave {
         session: SessionRef::Path {
@@ -303,32 +387,25 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
         "logged 63 Hz levels {toned:?}"
     );
     assert!(rows.iter().all(|r| r.period == BandPeriod::Day));
+    assert!(rows.iter().all(|r| r.levels.len() == BAND_COUNT));
 
-    // The mic at FOH without a transfer: the bedroom's limits shown, not judged.
+    // The preset again: one LZeq window on 20 … 200 Hz, judged at the mic.
     c.call(Command::MeasUpdate {
         meas: M,
         config: meter(Some(bands())),
     })
     .await
     .unwrap();
-    let f = band_until(&c, "limits not judged at FOH", |f| {
-        f.limits_from == BandLimitPlace::NoTransfer
-    })
-    .await;
-    assert_eq!(f.bands[B63].limit, Some(47.0));
-    assert!(
-        f.bands.iter().all(|b| b.judgement == LeqJudgement::NoLimit),
-        "{:?}",
-        f.bands
-    );
-    assert_eq!(f.worst, None);
+    let f = band_until(&c, "the preset's bands", |f| f.meta.bands.len() == 11).await;
+    assert_eq!(f.meta.limits_from, BandLimitPlace::AtMic);
+    assert_eq!(b63(&f).1, Some(47.0));
 
     // The transfer from typed levels, as read from a text file: FOH 100 dB in every band,
-    // the dwelling 60 dB at 63 Hz over a 40 dB background, nothing else measured.
+    // the place 60 dB at 63 Hz over a 40 dB background, nothing else measured.
     let foh = [Some(100.0); BAND_COUNT];
-    let mut dwelling = [None; BAND_COUNT];
+    let mut at_place = [None; BAND_COUNT];
     let mut background = [None; BAND_COUNT];
-    dwelling[B63] = Some(60.0);
+    at_place[B63] = Some(60.0);
     background[B63] = Some(40.0);
     let read = |l: &[Option<f64>; BAND_COUNT]| {
         let text = ac2_traces::band_levels::format("test", l);
@@ -338,11 +415,24 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
             levels: back.iter().map(|v| v.map(DbSpl)).collect(),
         }
     };
+    // A place must be named.
+    let e = c
+        .call(Command::SplBandTransfer {
+            meas: M,
+            foh: read(&foh),
+            at_place: read(&at_place),
+            background: None,
+            place: " ".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
     c.call(Command::SplBandTransfer {
         meas: M,
         foh: read(&foh),
-        dwelling: read(&dwelling),
+        at_place: read(&at_place),
         background: Some(read(&background)),
+        place: "flat 4 bedroom".into(),
     })
     .await
     .unwrap();
@@ -350,21 +440,22 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
         matches!(b, BandTransferBand::Clean { attenuation } if (attenuation.0 - 40.0).abs() < 1e-9)
     })
     .await;
+    assert_eq!(t.place, "flat 4 bedroom");
     assert_eq!(t.bands[0], BandTransferBand::Missing);
-    // Judged at FOH now: the dwelling's 47 dB plus 40 dB attenuation, so the window that
-    // held the tone is well under, and the dwelling LAeq is predicted.
+    // Judged at FOH now: the place's 47 dB plus 40 dB attenuation, so the window that held
+    // the tone is well under, and the place's LAeq is predicted.
     let f = band_until(&c, "transferred limits", |f| {
-        f.limits_from == BandLimitPlace::Transferred
+        f.meta.limits_from == BandLimitPlace::Transferred
     })
     .await;
-    assert_eq!(f.bands[B63].limit, Some(87.0));
-    assert_eq!(f.bands[0].limit, None);
-    assert_ne!(f.bands[B63].judgement, LeqJudgement::Over);
-    assert!(f.predicted.is_some());
+    assert_eq!(b63(&f).1, Some(87.0));
+    assert_eq!(cell(&f, 0, 0).1, None);
+    assert_ne!(b63(&f).2, LeqJudgement::Over);
+    assert_eq!(f.meta.predicted.unwrap().duration, Seconds(3600.0));
 
-    // From a span of the band log: the tone's seconds as FOH, the dwelling 32 dB at 63 Hz.
-    let mut dwelling = [None; BAND_COUNT];
-    dwelling[B63] = Some(DbSpl(32.0));
+    // From a span of the band log: the tone's seconds as FOH, the place 32 dB at 63 Hz.
+    let mut at_place = [None; BAND_COUNT];
+    at_place[B63] = Some(DbSpl(32.0));
     c.call(Command::SplBandTransfer {
         meas: M,
         foh: BandLevelSource::Log {
@@ -372,17 +463,19 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
             from: WallNs(tone_from.0 + 2_000_000_000),
             until: tone_until,
         },
-        dwelling: BandLevelSource::Levels {
-            levels: dwelling.to_vec(),
+        at_place: BandLevelSource::Levels {
+            levels: at_place.to_vec(),
         },
         background: None,
+        place: BandTransferSet::DEFAULT_PLACE.into(),
     })
     .await
     .unwrap();
-    transfer_until(&c, "the transfer from the log", |b| {
+    let t = transfer_until(&c, "the transfer from the log", |b| {
         matches!(b, BandTransferBand::Unchecked { attenuation } if (attenuation.0 - (level - 32.0)).abs() < 0.5)
     })
     .await;
+    assert_eq!(t.place, "receiving room");
 
     // Refusals: levels of the wrong length, a span with nothing logged, no band meter.
     let e = c
@@ -391,10 +484,11 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
             foh: BandLevelSource::Levels {
                 levels: vec![Some(DbSpl(90.0))],
             },
-            dwelling: BandLevelSource::Levels {
-                levels: dwelling.to_vec(),
+            at_place: BandLevelSource::Levels {
+                levels: at_place.to_vec(),
             },
             background: None,
+            place: "flat 4".into(),
         })
         .await
         .unwrap_err();
@@ -407,10 +501,11 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
                 from: WallNs(1_000_000_000),
                 until: WallNs(2_000_000_000),
             },
-            dwelling: BandLevelSource::Levels {
-                levels: dwelling.to_vec(),
+            at_place: BandLevelSource::Levels {
+                levels: at_place.to_vec(),
             },
             background: None,
+            place: "flat 4".into(),
         })
         .await
         .unwrap_err();
@@ -425,12 +520,13 @@ async fn a_63_hz_tone_fails_only_its_band_and_the_log_and_transfer_carry_on() {
         .call(Command::SplBandTransfer {
             meas: M,
             foh: BandLevelSource::Levels {
-                levels: dwelling.to_vec(),
+                levels: at_place.to_vec(),
             },
-            dwelling: BandLevelSource::Levels {
-                levels: dwelling.to_vec(),
+            at_place: BandLevelSource::Levels {
+                levels: at_place.to_vec(),
             },
             background: None,
+            place: "flat 4".into(),
         })
         .await
         .unwrap_err();
@@ -454,7 +550,7 @@ async fn a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
     let t0 = WallNs(wall_now_ns());
     c.call(Command::MeasStart { meas: M }).await.unwrap();
     c.subscribe(Subscription::Meas(M)).unwrap();
-    band_until(&c, "two seconds", |f| f.elapsed.0 >= 2.0).await;
+    band_until(&c, "two seconds", |f| f.meta.windows[0].elapsed.0 >= 2.0).await;
     let get = |from: WallNs, until: WallNs, step: Option<u32>| {
         let c = &c;
         async move {
@@ -489,7 +585,7 @@ async fn a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
     let level = 70.0;
     lease.set(tone(63.0, level - TO_SPL)).await.unwrap();
     band_until(&c, "the tone in its band", |f| {
-        f.scale == LevelScale::DbSpl && (f.bands[B63].leq - level).abs() < 0.5
+        f.meta.scale == LevelScale::DbSpl && (b63(f).0 - level).abs() < 0.5
     })
     .await;
     let from = WallNs(wall_now_ns());
@@ -511,7 +607,7 @@ async fn a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
     assert!(alone.rows.is_empty());
     assert_eq!(alone.average, l.average);
 
-    // The transfer over the same span against a dwelling of 30 dB in every band: each
+    // The transfer over the same span against a at_place of 30 dB in every band: each
     // attenuation is the span's average less 30.
     lease.end().await.unwrap();
     c.call(Command::SplBandTransfer {
@@ -521,10 +617,11 @@ async fn a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
             from,
             until,
         },
-        dwelling: BandLevelSource::Levels {
+        at_place: BandLevelSource::Levels {
             levels: vec![Some(DbSpl(30.0)); BAND_COUNT],
         },
         background: None,
+        place: "flat 4".into(),
     })
     .await
     .unwrap();
@@ -575,18 +672,21 @@ async fn the_night_limits_take_over_at_22() {
     .unwrap();
     c.call(Command::MeasStart { meas: M }).await.unwrap();
     c.subscribe(Subscription::Meas(M)).unwrap();
-    let f = band_until(&c, "a day frame", |f| f.elapsed.0 >= 1.0).await;
-    assert_eq!(f.period, BandPeriod::Day);
-    assert_eq!(f.bands[B63].limit, Some(47.0));
+    let f = band_until(&c, "a day frame", |f| f.meta.windows[0].elapsed.0 >= 1.0).await;
+    assert_eq!(f.meta.windows[0].period, BandPeriod::Day);
+    assert_eq!(b63(&f).1, Some(47.0));
     // The headroom looks past the horizon (2 s) before the windows turn.
     let f = band_until(&c, "night ahead", |f| {
-        f.period_after_horizon == BandPeriod::Night
+        f.meta.windows[0].period_after_horizon == BandPeriod::Night
     })
     .await;
-    assert_eq!(f.period, BandPeriod::Day);
-    let f = band_until(&c, "night", |f| f.period == BandPeriod::Night).await;
-    assert_eq!(f.bands[B63].limit, Some(42.0));
-    assert_eq!(f.bands[0].limit, Some(74.0));
+    assert_eq!(f.meta.windows[0].period, BandPeriod::Day);
+    let f = band_until(&c, "night", |f| {
+        f.meta.windows[0].period == BandPeriod::Night
+    })
+    .await;
+    assert_eq!(b63(&f).1, Some(42.0));
+    assert_eq!(cell(&f, 0, 0).1, Some(74.0));
     // The log holds the seconds of both periods.
     let path = dir.path().join("late");
     c.call(Command::FileSave {
@@ -766,8 +866,9 @@ async fn a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
         .call(Command::SplBandTransfer {
             meas: M,
             foh,
-            dwelling: span(bedroom),
+            at_place: span(bedroom),
             background: Some(span(background)),
+            place: "bedroom".into(),
         })
         .await
         .unwrap();
@@ -777,7 +878,7 @@ async fn a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
     let MeasKind::Spl { config } = &m.config.kind else {
         panic!("{m:?}");
     };
-    let set = config.bands.as_ref().unwrap().transfer.unwrap();
+    let set = config.bands.as_ref().unwrap().transfer.clone().unwrap();
     for (i, b) in set.bands[..ac2_proto::model::LF_BAND_COUNT]
         .iter()
         .enumerate()
@@ -797,8 +898,9 @@ async fn a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
             foh: BandLevelSource::Levels {
                 levels: vec![Some(DbSpl(100.0)); BAND_COUNT],
             },
-            dwelling: span(bedroom),
+            at_place: span(bedroom),
             background: Some(span((bedroom.0, background.1))),
+            place: "bedroom".into(),
         })
         .await
         .unwrap_err();

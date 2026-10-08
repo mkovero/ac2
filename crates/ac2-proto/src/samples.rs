@@ -9,11 +9,11 @@ use crate::ctrl::{
 };
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
-    BandLeqFrame, BandLeqMeta, ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame,
-    IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta,
-    MathState, OperandState, OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags,
-    RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta,
-    TimingMeta, TimingWindow, ValidityMask,
+    BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, Frame, FrameData, FrameStamp,
+    GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame,
+    LevelsMeta, MathState, OperandState, OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta,
+    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta,
+    TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -400,12 +400,13 @@ pub fn commands() -> Vec<Command> {
                 from: WallNs(1_789_500_000_000_000_000),
                 until: WallNs(1_789_500_030_000_000_000),
             },
-            dwelling: BandLevelSource::Levels {
+            at_place: BandLevelSource::Levels {
                 levels: (0..BAND_COUNT)
                     .map(|i| (i < 3).then_some(DbSpl(50.0 - i as f64)))
                     .collect(),
             },
             background: None,
+            place: "flat 4 bedroom".into(),
         },
         Command::SplBandLogGet {
             meas: MeasId(4),
@@ -1116,16 +1117,29 @@ pub fn band_leq_config() -> BandLeqConfig {
         margin: Db(5.5),
     };
     bands[3] = BandTransferBand::Unusable { at_least: Db(35.0) };
+    let mut cfg = BandLeqPreset::Finland545Lf.apply(None);
+    let mut limits = [None; BAND_COUNT];
+    limits[5] = Some(DbSpl(48.0));
+    limits[17] = Some(DbSpl(30.5));
+    cfg.windows.push(BandWindow {
+        duration: Seconds(900.0),
+        weighting: Weighting::A,
+        limits: BandLimitSet::Always { limits },
+        warn_margin: Db(2.0),
+    });
+    cfg.bands.push(Hz(1000.0));
     BandLeqConfig {
         correction: BandCorrection {
             impulse: ImpulseCorrection::Plus5,
             tonal: TonalCorrection::None,
         },
-        ..BandLeqPreset::Finland545Lf.config(Some(BandTransferSet {
+        transfer: Some(BandTransferSet {
+            place: "flat 4 bedroom".into(),
             measured_at: WallNs(1_789_500_000_000_000_000),
             origin: TransferOrigin::Measured,
             bands,
-        }))
+        }),
+        ..cfg
     }
 }
 
@@ -1199,7 +1213,11 @@ fn spl_log() -> SplLog {
             },
             LeqAlarm {
                 at: WallNs(1_790_000_620_000_000_000),
-                subject: AlarmSubject::Band { nominal: Hz(63.0) },
+                subject: AlarmSubject::Band {
+                    duration: Seconds(3600.0),
+                    weighting: Weighting::Z,
+                    nominal: Hz(63.0),
+                },
                 kind: LeqAlarmKind::Over,
                 level: DbSpl(82.5),
                 limit: DbSpl(80.0),
@@ -1824,10 +1842,7 @@ pub fn frames() -> Vec<Frame> {
         },
         Frame {
             stamp: stamp(None),
-            data: FrameData::BandLeq(Box::new(BandLeqFrame {
-                meas: MeasId(4),
-                meta: band_leq_meta(),
-            })),
+            data: FrameData::BandLeq(Box::new(band_leq_frame())),
         },
         Frame {
             stamp: stamp(None),
@@ -1906,50 +1921,64 @@ pub fn frames() -> Vec<Frame> {
     ]
 }
 
-/// A band meter's frame at night: band 5 (63 Hz) over and cannot recover within the horizon,
-/// band 4 (50 Hz) on course, 200 Hz without a limit.
-fn band_leq_meta() -> BandLeqMeta {
-    let bands = (0..LF_BAND_COUNT)
-        .map(|i| {
-            let judgement = match i {
-                10 => LeqJudgement::NoLimit,
-                5 => LeqJudgement::Over,
-                4 => LeqJudgement::Near,
-                _ => LeqJudgement::Ok,
-            };
-            BandLeqBand {
-                nominal: Hz(BAND_NOMINAL_HZ[i]),
-                leq: 40.0 + i as f64 * 4.5,
-                limit: (i < 10).then_some(90.0 - i as f64 * 2.0),
-                judgement,
-                on_course: i == 4,
-                allowed: (i < 10 && i != 5).then_some(85.25 - i as f64),
-                recover: (i == 5).then_some(Seconds(412.0)),
-            }
-        })
-        .collect();
-    BandLeqMeta {
-        scale: LevelScale::DbSpl,
-        cal: CalStatus::Verified {
-            calibrated_at: WallNs(1_789_000_000_000_000_000),
-            basis: electrical_basis(),
+/// A band meter's frame at night, two windows (LZeq 60 min, LAeq 15 min) on three bands
+/// (50, 63 Hz, 1 kHz): 63 Hz over and cannot recover in the first, 50 Hz on course, 1 kHz
+/// without a limit there.
+fn band_leq_frame() -> BandLeqFrame {
+    let nan = f32::NAN;
+    let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
+    BandLeqFrame {
+        meas: MeasId(4),
+        meta: BandLeqMeta {
+            scale: LevelScale::DbSpl,
+            cal: CalStatus::Verified {
+                calibrated_at: WallNs(1_789_000_000_000_000_000),
+                basis: electrical_basis(),
+            },
+            mic_curve: true,
+            horizon: Seconds(60.0),
+            correction: Db(5.0),
+            limits_from: BandLimitPlace::Transferred,
+            bands: vec![4, 5, 17],
+            windows: vec![
+                BandWindowState {
+                    duration: Seconds(3600.0),
+                    weighting: Weighting::Z,
+                    elapsed: Seconds(1800.0),
+                    measured: Seconds(1790.0),
+                    period: BandPeriod::Night,
+                    period_after_horizon: BandPeriod::Night,
+                    worst: Some(1),
+                },
+                BandWindowState {
+                    duration: Seconds(900.0),
+                    weighting: Weighting::A,
+                    elapsed: Seconds(900.0),
+                    measured: Seconds(900.0),
+                    period: BandPeriod::Night,
+                    period_after_horizon: BandPeriod::Night,
+                    worst: Some(1),
+                },
+            ],
+            predicted: Some(PredictedLeq {
+                duration: Seconds(3600.0),
+                estimate: 23.5,
+                at_most: 27.25,
+                limit: Some(DbSpl(25.0)),
+                judgement: LeqJudgement::Near,
+            }),
         },
-        mic_curve: true,
-        duration: Seconds(3600.0),
-        horizon: Seconds(60.0),
-        elapsed: Seconds(1800.0),
-        measured: Seconds(1790.0),
-        period: BandPeriod::Night,
-        period_after_horizon: BandPeriod::Night,
-        correction: Db(5.0),
-        limits_from: BandLimitPlace::Transferred,
-        bands,
-        worst: Some(5),
-        predicted: Some(PredictedLeq {
-            estimate: 23.5,
-            at_most: 27.25,
-            limit: Some(DbSpl(25.0)),
-            judgement: LeqJudgement::Near,
-        }),
+        leq: vec![58.0, 62.5, 41.0, 31.5, 36.25, 40.0],
+        limit: vec![60.0, 58.0, nan, nan, 74.0, 46.5],
+        allowed: vec![59.5, nan, nan, nan, 80.0, 49.0],
+        recover: vec![nan, 412.0, nan, nan, nan, nan],
+        flags: vec![
+            judged.with(LeqFlags::NEAR).with(LeqFlags::ON_COURSE),
+            judged.with(LeqFlags::OVER).with(LeqFlags::CANNOT_RECOVER),
+            LeqFlags::NONE,
+            LeqFlags::NONE,
+            judged,
+            judged,
+        ],
     }
 }

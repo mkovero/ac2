@@ -442,18 +442,3 @@ pub(crate) fn band_transfer(t: &pm::BandTransferSet) -> core::band_leq::Transfer
         P::Missing => T::Missing,
     }))
 }
-
-/// The dwelling limits of a band meter, dB SPL, on the core's 28 bands.
-pub(crate) fn band_limits(c: &pm::BandLeqConfig) -> core::band_leq::BandLimits {
-    let widen = |l: &[Option<ac2_proto::units::DbSpl>; pm::LF_BAND_COUNT]| {
-        let mut out = [None; core::band_leq::BANDS];
-        for (o, l) in out.iter_mut().zip(l) {
-            *o = l.map(|l| l.0);
-        }
-        out
-    };
-    core::band_leq::BandLimits {
-        day: widen(&c.day),
-        night: widen(&c.night),
-    }
-}

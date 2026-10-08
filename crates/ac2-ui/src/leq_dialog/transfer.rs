@@ -1,13 +1,14 @@
 //! The band transfer step of the Leq dialog (`docs/design/band-leq.md`, *The transfer*):
+//! the place the limits are for, named by the operator (`receiving room` unless named), and
 //! three spans of band logs named while the meters run — the test signal at FOH, the same
-//! signal with the mic in the bedroom, the bedroom with the system silent — each by a start
+//! signal with the mic at the place, the place with the system silent — each by a start
 //! and a stop key or as the last minutes, read back with `spl.band_log_get`, then
 //! `spl.band_transfer` from them into the dialog's meter. Times are the meter's clock (its
 //! newest frame), so a span lines up with its log on a daemon elsewhere. Pure data: the
 //! reducer gives it the times and the answers.
 
 use ac2_proto::model::{
-    BandLevelSource, BandLogAverage, BandTransferSet, LF_BAND_COUNT, SplBandLog,
+    BAND_NOMINAL_HZ, BandLevelSource, BandLogAverage, BandTransferSet, SplBandLog,
 };
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::band_transfer::{Phase, SpanRole, SpanState};
@@ -58,7 +59,7 @@ pub struct Ask {
     pub until: WallNs,
 }
 
-/// The transfer to compute: FOH, bedroom (`dwelling`), background.
+/// The transfer to compute: FOH, the place, background.
 pub type Sources = (BandLevelSource, BandLevelSource, Option<BandLevelSource>);
 
 /// The open step.
@@ -69,6 +70,12 @@ pub struct TransferStep {
     pub meter: String,
     /// SPL meters with a band meter, the dialog's first: what a span can read.
     pub meters: Vec<(MeasId, String)>,
+    /// The place the limits are for, typed.
+    pub place: String,
+    /// The focus is on the place's name (above the spans): typing edits it.
+    pub on_place: bool,
+    /// The bands the meter shows (indices into [`BAND_NOMINAL_HZ`]): the result lists them.
+    pub shown: Vec<usize>,
     pub focus: SpanRole,
     /// In [`SpanRole::ALL`] order.
     pub spans: [Span; 3],
@@ -82,14 +89,17 @@ pub struct TransferStep {
 
 impl TransferStep {
     /// `meters` lists the SPL meters with a band meter; the dialog's meter is first and
-    /// every span starts on it (one mic moved).
-    pub fn new(meters: Vec<(MeasId, String)>) -> Option<Self> {
+    /// every span starts on it (one mic moved). `place` is the place's name as last given.
+    pub fn new(meters: Vec<(MeasId, String)>, place: &str, shown: Vec<usize>) -> Option<Self> {
         let first = meters.first()?.clone();
         let span = Span::new(&first);
         Some(Self {
             meas: first.0,
             meter: first.1,
             meters,
+            place: place.to_owned(),
+            on_place: false,
+            shown,
             focus: SpanRole::Foh,
             spans: [span.clone(), span.clone(), span],
             error: None,
@@ -108,11 +118,44 @@ impl TransferStep {
             .find(|r| matches!(self.span(*r).state, SpanState::Marking { .. }))
     }
 
-    /// ↑/↓.
+    /// ↑/↓: the place's name, then the spans.
     pub fn move_focus(&mut self, d: i32) {
-        let i = (self.focus.index() as i32 + d).clamp(0, 2) as usize;
-        self.focus = SpanRole::ALL[i];
+        let at = if self.on_place {
+            0
+        } else {
+            self.focus.index() as i32 + 1
+        };
+        let i = (at + d).clamp(0, 3);
+        self.on_place = i == 0;
+        if i > 0 {
+            self.focus = SpanRole::ALL[i as usize - 1];
+        }
         self.error = None;
+    }
+
+    /// The place's name as typed, trimmed; [`BandTransferSet::DEFAULT_PLACE`] when empty.
+    pub fn place_name(&self) -> &str {
+        match self.place.trim() {
+            "" => BandTransferSet::DEFAULT_PLACE,
+            p => p,
+        }
+    }
+
+    /// Typed text on the place's name.
+    pub fn type_place(&mut self, t: &str) {
+        if self.on_place {
+            self.place.push_str(t);
+            self.stored = None;
+            self.error = None;
+        }
+    }
+
+    /// Backspace on the place's name.
+    pub fn backspace_place(&mut self) {
+        if self.on_place {
+            self.place.pop();
+            self.error = None;
+        }
     }
 
     /// ←/→: the meter whose log the focused span reads (another mic, another rig). The FOH
@@ -177,7 +220,7 @@ impl TransferStep {
                 if let Some(r) = self.marking() {
                     return Err(format!(
                         "the {} is still running: stop it first",
-                        r.title().to_lowercase()
+                        r.title(self.place_name()).to_lowercase()
                     ));
                 }
                 let s = &mut self.spans[self.focus.index()];
@@ -198,7 +241,7 @@ impl TransferStep {
         {
             return Err(format!(
                 "the {} is still running: stop it first",
-                r.title().to_lowercase()
+                r.title(self.place_name()).to_lowercase()
             ));
         }
         let from = WallNs(now.0.saturating_sub(u64::from(minutes) * 60 * NS));
@@ -248,15 +291,21 @@ impl TransferStep {
         if let Some(r) = self.marking() {
             return Err(format!(
                 "the {} is still running: Space stops it",
-                r.title().to_lowercase()
+                r.title(self.place_name()).to_lowercase()
             ));
         }
+        let place = self.place_name();
+        BandTransferSet::check_place(place)?;
         let need = |r: SpanRole| {
             self.span(r).source().ok_or_else(|| {
-                format!("mark the {} first ({})", r.title().to_lowercase(), r.what())
+                format!(
+                    "mark the {} first ({})",
+                    r.title(place).to_lowercase(),
+                    r.what(place)
+                )
             })
         };
-        let (foh, bedroom) = (need(SpanRole::Foh)?, need(SpanRole::Bedroom)?);
+        let (foh, at_place) = (need(SpanRole::Foh)?, need(SpanRole::Place)?);
         let background = self.span(SpanRole::Background).source();
         let name = |id: MeasId| {
             self.meters
@@ -265,31 +314,35 @@ impl TransferStep {
                 .map_or_else(|| format!("SPL meter {id}"), |(_, n)| n.clone())
         };
         if let Some(e) =
-            ac2_proto::model::overlapping_spans(&foh, &bedroom, background.as_ref(), name)
+            ac2_proto::model::overlapping_spans(&foh, &at_place, background.as_ref(), place, name)
         {
             return Err(e);
         }
-        Ok((foh, bedroom, background))
+        Ok((foh, at_place, background))
     }
 
     /// What to do next.
     pub fn next_step(&self) -> String {
-        ac2_scene::band_transfer::next_step(self.phases(), self.stored.is_some(), &self.meter)
+        ac2_scene::band_transfer::next_step(
+            self.phases(),
+            self.stored.is_some(),
+            &self.meter,
+            self.place_name(),
+        )
     }
 
-    /// The stored transfer: a summary, then the limited bands with their status and
+    /// The stored transfer: a summary, then the shown bands with their status and
     /// attenuation.
     pub fn result_lines(&self) -> Vec<String> {
         let Some(t) = &self.stored else {
             return Vec::new();
         };
-        let mut out = vec![ac2_scene::band_leq::transfer_summary(Some(t))];
-        out.extend(
-            t.bands[..LF_BAND_COUNT]
-                .iter()
-                .zip(ac2_proto::model::BAND_NOMINAL_HZ)
-                .map(|(b, hz)| ac2_scene::band_leq::transfer_band_text(hz, b)),
-        );
+        let mut out = vec![ac2_scene::band_leq::transfer_summary(Some(t), &self.shown)];
+        out.extend(self.shown.iter().filter_map(|&b| {
+            t.bands
+                .get(b)
+                .map(|x| ac2_scene::band_leq::transfer_band_text(BAND_NOMINAL_HZ[b], x))
+        }));
         out
     }
 }
@@ -304,10 +357,14 @@ mod tests {
     }
 
     fn step() -> TransferStep {
-        TransferStep::new(vec![
-            (MeasId(1), "FOH SPL".into()),
-            (MeasId(2), "Bedroom SPL".into()),
-        ])
+        TransferStep::new(
+            vec![
+                (MeasId(1), "FOH SPL".into()),
+                (MeasId(2), "Flat 4 SPL".into()),
+            ],
+            "receiving room",
+            (0..ac2_proto::model::LF_BAND_COUNT).collect(),
+        )
         .expect("a meter")
     }
 
@@ -327,14 +384,29 @@ mod tests {
                 until: t(60)
             }
         );
-        assert_eq!(s.focus, SpanRole::Bedroom, "on to the bedroom");
-        assert!(s.next_step().starts_with("Move the mic to the bedroom"));
-        // The bedroom from the last two minutes; Enter still wants the bedroom first.
-        assert!(s.sources().is_err());
+        assert_eq!(s.focus, SpanRole::Place, "on to the place");
+        assert!(s.next_step().starts_with("Move the mic to receiving room"));
+        // The place named: every line says it.
+        s.move_focus(-1);
+        s.move_focus(-1);
+        assert!(s.on_place);
+        s.type_place("x");
+        assert_eq!(s.place, "receiving roomx");
+        s.place.clear();
+        s.type_place("flat 4");
+        s.move_focus(1);
+        s.move_focus(1);
+        assert_eq!(s.focus, SpanRole::Place);
+        assert!(s.next_step().starts_with("Move the mic to flat 4 and"));
+        // The place from the last two minutes; Enter still wants the place first.
+        assert_eq!(
+            s.sources(),
+            Err("mark the flat 4 span first (same test signal and level, mic in flat 4)".into())
+        );
         let b = s.last_minutes(2, t(300)).expect("marked");
         assert_eq!((b.from, b.until), (t(180), t(300)));
         assert_eq!(s.focus, SpanRole::Background);
-        let (foh, dwelling, background) = s.sources().expect("sources");
+        let (foh, at_place, background) = s.sources().expect("sources");
         assert_eq!(
             foh,
             BandLevelSource::Log {
@@ -343,11 +415,11 @@ mod tests {
                 until: t(60)
             }
         );
-        assert!(matches!(dwelling, BandLevelSource::Log { from, .. } if from == t(180)));
+        assert!(matches!(at_place, BandLevelSource::Log { from, .. } if from == t(180)));
         assert_eq!(background, None);
         // The background on the second meter.
         s.cycle_meter(1);
-        assert_eq!(s.span(SpanRole::Background).meter, "Bedroom SPL");
+        assert_eq!(s.span(SpanRole::Background).meter, "Flat 4 SPL");
         s.toggle(t(400)).expect("starts");
         assert!(s.sources().is_err(), "still running");
         s.move_focus(-2);

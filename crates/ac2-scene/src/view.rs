@@ -624,7 +624,7 @@ pub enum SplMode {
     #[default]
     MeterLeq,
     /// The band meter: eleven bars 20 … 200 Hz against their limits, the worst band named,
-    /// the predicted dwelling LAeq.
+    /// the predicted LAeq at the place.
     Bands,
 }
 

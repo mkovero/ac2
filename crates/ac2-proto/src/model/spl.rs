@@ -106,12 +106,16 @@ pub enum AlarmSubject {
         /// LCpeak or LAFmax.
         quantity: PeakQuantity,
     },
-    /// A 1/3-octave band window of the band meter (its limit at the mic).
+    /// A 1/3-octave band of a band window of the band meter (its limit at the mic).
     Band {
+        /// Window length.
+        duration: Seconds,
+        /// Window weighting.
+        weighting: Weighting,
         /// Nominal centre.
         nominal: Hz,
     },
-    /// The band meter's predicted dwelling LAeq window.
+    /// The band meter's predicted LAeq window at the transfer's place.
     Predicted,
 }
 
