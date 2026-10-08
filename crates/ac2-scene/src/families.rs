@@ -6,9 +6,21 @@
 //! channels' results take the family's shades in tree order. A shade keeps the base's
 //! OKLCH hue and chroma and moves only its lightness, in steps big enough to tell apart
 //! side by side, alternating lighter and darker so the first shades are the nearest
-//! distinct ones. Traces under no measurement (imports, those of a deleted measurement
-//! kept) are the neutral grey family. A measurement without a live curve (a sweep) gives
-//! its first run the base colour.
+//! distinct ones. A measurement without a live curve (a sweep) gives its first run the
+//! base colour.
+//!
+//! Traces under no measurement (imports, those of a deleted measurement kept) and math
+//! channels listed with them belong to no one family: each takes a colour of its own, so
+//! imported curves overlaid on a pane stay as distinct from each other and from the
+//! measurements as the palette allows. They walk the import palette ([`import_palette`])
+//! in tree order: first the bases of families no measurement holds (whole new hues), then
+//! those free families' shades, then the shades of the measurements' families (farthest
+//! shade first, since a measurement's own traces take the nearest ones first), and the
+//! neutral grey family only last; past its end the palette repeats. The colour goes by
+//! position in the imported group, so deleting one import shifts those listed after it one
+//! step along the palette; the colours keep running down the list in the same order, and
+//! no stored per-trace colour is needed. Adding or deleting a measurement changes which
+//! families are free and so repaints the imports.
 //!
 //! Hue assignment follows the measurement id, not list position, so deleting one
 //! measurement does not repaint the others: measurement `id` prefers family
@@ -137,6 +149,32 @@ pub fn family_indices(meas: &[&Measurement]) -> BTreeMap<MeasId, usize> {
     out
 }
 
+/// The colours imported traces take in turn, given the measurements' family indices
+/// (see the module docs for the order). Never empty: the neutral base ends it.
+pub fn import_palette(theme: &Theme, hues: &BTreeMap<MeasId, usize>) -> Vec<Color> {
+    let mut taken = [false; FAMILIES];
+    for i in hues.values() {
+        taken[*i] = true;
+    }
+    let fams: Vec<Family> = theme
+        .families
+        .iter()
+        .map(|b| Family::of(theme, *b))
+        .collect();
+    let (free, held): (Vec<usize>, Vec<usize>) = (0..FAMILIES).partition(|i| !taken[*i]);
+    let mut out: Vec<Color> = free.iter().map(|i| fams[*i].base).collect();
+    for j in 0..MAX_SHADES {
+        out.extend(free.iter().filter_map(|i| fams[*i].shades.get(j)));
+    }
+    for j in (0..MAX_SHADES).rev() {
+        out.extend(held.iter().filter_map(|i| fams[*i].shades.get(j)));
+    }
+    let neutral = Family::of(theme, theme.neutral);
+    out.push(neutral.base);
+    out.extend(neutral.shades);
+    out
+}
+
 /// Every curve's colour for `meas` (math channels included) and `traces` in `theme`.
 pub fn curve_colours(theme: &Theme, meas: &[&Measurement], traces: &[&TraceMeta]) -> CurveColours {
     let hues = family_indices(meas);
@@ -156,13 +194,16 @@ pub fn curve_colours(theme: &Theme, meas: &[&Measurement], traces: &[&TraceMeta]
                 TraceOwner::Imported => theme.neutral,
             },
         );
+        let imports = matches!(g, TraceOwner::Imported).then(|| import_palette(theme, &hues));
         // Without a live curve the base colour would go unused: the first member takes it.
         let base_free = owner.is_none_or(|m| !has_live_curve(&m.config.kind));
         if let Some(m) = owner.filter(|m| has_live_curve(&m.config.kind)) {
             out.meas.insert(m.id, family.base);
         }
         let colour = |k: usize| {
-            if base_free {
+            if let Some(p) = &imports {
+                p[k % p.len()]
+            } else if base_free {
                 if k == 0 {
                     family.base
                 } else {
