@@ -86,7 +86,7 @@ jobs:
         run: |
           tools/release/first-measurement.sh "dist/ac2-$VERSION-linux-x86_64.tar.gz"
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/ac2-ui-$VERSION-x86_64.AppImage" --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-linux
           path: dist/*
@@ -154,7 +154,7 @@ jobs:
           "$d/bin/ac2" meas list
           "$d/bin/ac2" daemon stop
           hdiutil verify "dist/ac2-$VERSION-macos-universal.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-macos
           path: dist/*
@@ -250,7 +250,7 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /l*v msi-uninstall.log" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content msi-uninstall.log -Tail 50; exit 1 }
           if (Test-Path "$dir\ac2.exe") { throw 'uninstall left ac2.exe behind' }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-windows
           path: dist/*
@@ -276,7 +276,7 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
           ls -l
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: release-${{ env.VERSION }}
           path: dist/*
