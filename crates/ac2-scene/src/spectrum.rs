@@ -12,7 +12,9 @@ use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis};
 use crate::banner::{BannerRow, Status};
-use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label, text_width, visible_columns};
+use crate::canvas::{
+    self, Canvas, MARGINS, anchor, cut_to, gapped, label, text_width, visible_columns,
+};
 use crate::format;
 use crate::grid::nearest_column;
 use crate::primitives::{
@@ -532,18 +534,6 @@ fn entry_width(text: &str, font: f32) -> f32 {
     SWATCH_W + SWATCH_GAP + text_width(text, font)
 }
 
-/// `text` cut to `width` with an ellipsis (no font metrics: [`text_width`]'s generous
-/// advance per character).
-fn cut_to(text: &str, width: f32, font: f32) -> String {
-    if text_width(text, font) <= width {
-        return text.to_string();
-    }
-    let n = (width / text_width("x", font)).floor() as usize;
-    let mut s: String = text.chars().take(n.saturating_sub(1)).collect();
-    s.push('…');
-    s
-}
-
 /// Flows `texts` into rows `width` wide; each item's row and x offset. An item wider than
 /// a row is cut to fit it.
 fn flow(texts: &[String], width: f32, font: f32) -> Vec<(usize, f32, String)> {
@@ -662,7 +652,16 @@ pub(crate) fn spectrum_scene_in(
             Some((t, e)) => {
                 let a = if e.stale { theme.stale_alpha } else { 1.0 };
                 let color = t.color.with_alpha(a);
-                crate::tf::legend_swatch(&mut c, x, y, SWATCH_W, color, e.selected, None, theme);
+                crate::tf::legend_swatch(
+                    &mut c.overlay,
+                    x,
+                    y,
+                    SWATCH_W,
+                    color,
+                    e.selected,
+                    None,
+                    theme,
+                );
                 (
                     x + SWATCH_W + SWATCH_GAP,
                     if e.stale { theme.text_dim } else { theme.text },

@@ -489,6 +489,25 @@ after that stays until the next sweep):
   on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
+#### The transfer legend
+
+The magnitude pane's legend lists every curve (name, colour, tags) on a plate in the plot's
+colour with a thin border, so it reads over any number of curves; the cursor values sit on a
+plate of their own, each on its curve's legend row, on the side away from the legend (under
+it in a narrow pane). With the mouse:
+
+- **drag** the plate to put it anywhere in the pane; **drag its bottom-right corner** (the
+  three dots) to set how wide and tall it may grow. Longer rows are cut with `…`.
+- At most 70 % of the pane tall by default: more rows than fit **scroll with the wheel** over
+  the legend, and its last line counts the rest (`3 above · 9 below`). Scrolling keeps
+  every curve reachable by name, where a `+N more` would hide which curves those are.
+  Ctrl/Shift+wheel over it still zoom and pan the level axis.
+- The plate turns opaque with a lighter border while the pointer is on it.
+
+From **Ctrl+K**: *Legend: top-left / top-right / bottom-left / bottom-right corner* snaps it,
+*Legend: hide / show* hides it (the cursor values then name their curves). Where it sits, its
+size and whether it is hidden are kept in `ui.toml` (`[legend.transfer]`).
+
 #### Impulse-response pictures
 
 The IR pane (**Alt+3**) and the sweep pane's IR view (**G**) take the same keys and mouse on
@@ -2360,6 +2379,11 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Delay finder: sub band (20–120 Hz) | `finder_sub` |
 | Delay finder: custom band (Hz)… | `finder_custom` |
 | Delay finder: observation length (s)… | `finder_observation` |
+| Legend: top-left corner (drag it anywhere; its corner grip resizes) | `legend_top_left` |
+| Legend: top-right corner | `legend_top_right` |
+| Legend: bottom-left corner | `legend_bottom_left` |
+| Legend: bottom-right corner | `legend_bottom_right` |
+| Legend: hide / show | `legend_hide` |
 | Average shown stored traces (complex) | `average_complex` |
 | Average shown stored traces (coherence-weighted) | `average_coherence` |
 | Smoothing: off | `smooth_off` |

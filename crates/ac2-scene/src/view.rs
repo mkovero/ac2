@@ -2,6 +2,7 @@
 //! Builders read it; the UI owns and edits it (zoom, pan, toggles).
 
 use crate::axis::Range;
+use crate::legend::LegendView;
 use crate::trace::TraceKey;
 
 /// Lowest frequency the view can zoom out to.
@@ -337,6 +338,8 @@ pub struct TfView {
     /// Trace whose measured delay is the phase reference (decision 8b). `None`: the first
     /// trace with a shared time base.
     pub phase_reference: Option<TraceKey>,
+    /// Where the legend sits over the magnitude pane, how large it may be.
+    pub legend: LegendView,
 }
 
 impl Default for TfView {
@@ -350,6 +353,7 @@ impl Default for TfView {
             coherence: CoherenceStyle::default(),
             coherence_placement: CoherencePlacement::Pane,
             phase_reference: None,
+            legend: LegendView::default(),
         }
     }
 }

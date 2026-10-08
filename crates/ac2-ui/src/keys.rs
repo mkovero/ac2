@@ -478,6 +478,11 @@ commands! {
     ToggleIr => "toggle_ir", "Show / hide IR pane", [Transfer, Ir];
     CoherenceMask => "coherence_mask", "Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9", [Transfer];
     CoherencePlacement => "coherence_placement", "Coherence: own pane / over magnitude", [Transfer];
+    LegendTopLeft => "legend_top_left", "Legend: top-left corner (drag it anywhere; its corner grip resizes)", [Transfer];
+    LegendTopRight => "legend_top_right", "Legend: top-right corner", [Transfer];
+    LegendBottomLeft => "legend_bottom_left", "Legend: bottom-left corner", [Transfer];
+    LegendBottomRight => "legend_bottom_right", "Legend: bottom-right corner", [Transfer];
+    LegendHide => "legend_hide", "Legend: hide / show", [Transfer];
     Average => "average", "Average shown stored traces (power)", [Transfer];
     AverageComplex => "average_complex", "Average shown stored traces (complex)", [Transfer];
     AverageCoherence => "average_coherence", "Average shown stored traces (coherence-weighted)", [Transfer];
@@ -1115,6 +1120,11 @@ mod tests {
             CommandId::ToggleGroup,
             CommandId::AverageComplex,
             CommandId::AverageCoherence,
+            CommandId::LegendTopLeft,
+            CommandId::LegendTopRight,
+            CommandId::LegendBottomLeft,
+            CommandId::LegendBottomRight,
+            CommandId::LegendHide,
             CommandId::ImportTrace,
             CommandId::SessionSave,
             CommandId::SessionLoad,

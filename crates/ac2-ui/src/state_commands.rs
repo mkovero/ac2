@@ -469,6 +469,7 @@ impl AppState {
 
     pub(super) fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
+        use ac2_scene::legend::LegendCorner;
         match c {
             C::Help => {
                 self.overlay = if self.overlay == Overlay::Help {
@@ -1239,6 +1240,19 @@ impl AppState {
                     CoherencePlacement::Pane => CoherencePlacement::OverlayOnMagnitude,
                     CoherencePlacement::OverlayOnMagnitude => CoherencePlacement::Pane,
                 };
+            }
+            C::LegendTopLeft => self.view.tf.legend.snap(LegendCorner::TopLeft),
+            C::LegendTopRight => self.view.tf.legend.snap(LegendCorner::TopRight),
+            C::LegendBottomLeft => self.view.tf.legend.snap(LegendCorner::BottomLeft),
+            C::LegendBottomRight => self.view.tf.legend.snap(LegendCorner::BottomRight),
+            C::LegendHide => {
+                let hidden = !self.view.tf.legend.hidden;
+                self.view.tf.legend.hidden = hidden;
+                self.toast(if hidden {
+                    "legend hidden (Legend: hide / show brings it back)"
+                } else {
+                    "legend shown"
+                });
             }
             C::PhaseUnwrap => {
                 self.view.tf.phase = match self.view.tf.phase {

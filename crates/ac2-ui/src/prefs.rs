@@ -5,7 +5,8 @@
 //! meter's number holds a reading, the theme, the record toggle's time limit, the
 //! spectrograph's history span, the layout and window as last left: the focused
 //! pane, maximised or full screen, what each pane shows, the window's size and position,
-//! and each pane's level axis range (a fit made for one show is a fair start for the next).
+//! and each pane's level axis range (a fit made for one show is a fair start for the next),
+//! and where the transfer pane's legend sat and how large it may be.
 //!
 //! ```toml
 //! key_hints = false
@@ -52,6 +53,11 @@
 //! ir = [-80.0, 3.0]
 //! sweep_ir = [-90.0, 0.0]
 //!
+//! [legend.transfer]
+//! x = 1.0
+//! y = 0.0
+//! max_height = 0.3
+//!
 //! [window]
 //! width = 1600
 //! height = 900
@@ -68,6 +74,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use ac2_scene::axis::Range;
+use ac2_scene::legend::LegendView;
 use ac2_scene::view::{
     DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SplMode, SweepMode, ViewState, level,
 };
@@ -220,6 +227,8 @@ pub struct UiPrefs {
     /// The spectrograph's history span, s (one of
     /// [`ac2_scene::view::SPECTROGRAPH_SPANS_S`]; `None`: its default).
     pub spectrograph_span_s: Option<u32>,
+    /// The transfer pane's legend as last left.
+    pub legend: LegendPrefs,
 }
 
 /// Bounds of the record toggle's limit, minutes: a whole day of every input of a large
@@ -240,7 +249,44 @@ impl Default for UiPrefs {
             theme: None,
             record_limit_min: None,
             spectrograph_span_s: None,
+            legend: LegendPrefs::default(),
         }
+    }
+}
+
+/// A legend as last left: hidden or not, where it sat, how large it may be (the scroll and
+/// the pointer are not kept).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LegendPrefs {
+    pub hidden: bool,
+    pub x: f32,
+    pub y: f32,
+    pub max_width: f32,
+    pub max_height: f32,
+}
+
+impl LegendPrefs {
+    pub fn of(v: &LegendView) -> Self {
+        Self {
+            hidden: v.hidden,
+            x: v.x,
+            y: v.y,
+            max_width: v.max_width,
+            max_height: v.max_height,
+        }
+    }
+
+    /// Puts the choices on `v`.
+    pub fn apply(&self, v: &mut LegendView) {
+        v.hidden = self.hidden;
+        v.move_to(self.x, self.y);
+        v.resize(self.max_width, self.max_height);
+    }
+}
+
+impl Default for LegendPrefs {
+    fn default() -> Self {
+        Self::of(&LegendView::default())
     }
 }
 
@@ -271,7 +317,71 @@ struct File {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     levels: Option<LevelsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    legend: Option<LegendsFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     window: Option<WindowFile>,
+}
+
+/// Legends per pane; only the transfer pane's moves.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegendsFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transfer: Option<LegendFile>,
+}
+
+/// A legend's choices; one left out is the default.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegendFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hidden: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_height: Option<f64>,
+}
+
+impl LegendFile {
+    fn parse(&self) -> Result<LegendPrefs, String> {
+        let d = LegendPrefs::default();
+        let limits = ac2_scene::legend::SIZE_LIMITS;
+        let (lo, hi) = (f64::from(*limits.start()), f64::from(*limits.end()));
+        let num = |name: &str, v: Option<f64>, default: f32, lo: f64, hi: f64| match v {
+            None => Ok(default),
+            Some(v) if (lo..=hi).contains(&v) => Ok(v as f32),
+            Some(_) => Err(format!(
+                "ui.toml: legend.transfer.{name} must be {lo} … {hi}"
+            )),
+        };
+        Ok(LegendPrefs {
+            hidden: self.hidden.unwrap_or(d.hidden),
+            x: num("x", self.x, d.x, 0.0, 1.0)?,
+            y: num("y", self.y, d.y, 0.0, 1.0)?,
+            max_width: num("max_width", self.max_width, d.max_width, lo, hi)?,
+            max_height: num("max_height", self.max_height, d.max_height, lo, hi)?,
+        })
+    }
+
+    /// Only the choices moved off their defaults, to three decimals (a drag's fraction
+    /// has no meaningful digits beyond a pixel).
+    fn from_prefs(l: &LegendPrefs) -> Option<LegendsFile> {
+        let d = LegendPrefs::default();
+        let v =
+            |x: f32, default: f32| (x != default).then(|| (f64::from(x) * 1000.0).round() / 1000.0);
+        let f = Self {
+            hidden: l.hidden.then_some(true),
+            x: v(l.x, d.x),
+            y: v(l.y, d.y),
+            max_width: v(l.max_width, d.max_width),
+            max_height: v(l.max_height, d.max_height),
+        };
+        (*l != d).then_some(LegendsFile { transfer: Some(f) })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -771,6 +881,13 @@ impl UiPrefs {
             theme: f.theme.map(ThemeFile::name),
             record_limit_min: f.record_limit_min,
             spectrograph_span_s: f.spectrograph_span_s,
+            legend: f
+                .legend
+                .as_ref()
+                .and_then(|l| l.transfer.as_ref())
+                .map(LegendFile::parse)
+                .transpose()?
+                .unwrap_or_default(),
         })
     }
 
@@ -785,6 +902,7 @@ impl UiPrefs {
             layout: (self.layout != LayoutPrefs::default())
                 .then(|| LayoutFile::from_prefs(&self.layout)),
             levels: LevelsFile::from_prefs(&self.levels),
+            legend: LegendFile::from_prefs(&self.legend),
             window: self.window.map(|w| WindowFile {
                 width: w.width,
                 height: w.height,
@@ -1079,6 +1197,30 @@ mod tests {
         assert_eq!(UiPrefs::from_toml(&text), Ok(p));
         let far = UiPrefs::from_toml("[levels]\ndistortion = [-900.0, -800.0]\n").expect("parse");
         assert_eq!(far.levels.distortion, Range::new(-300.0, -200.0));
+    }
+
+    /// A legend moved or resized is written, its defaults left out; out of bounds is an
+    /// error.
+    #[test]
+    fn legend_round_trip() {
+        assert!(!UiPrefs::default().to_toml().contains("legend"));
+        let mut p = UiPrefs::default();
+        p.legend.x = 1.0;
+        p.legend.max_height = 0.3;
+        let text = p.to_toml();
+        assert!(
+            text.contains("[legend.transfer]\nx = 1.0\nmax_height = 0.3\n"),
+            "{text}"
+        );
+        let back = UiPrefs::from_toml(&text).expect("parse");
+        assert_eq!(back.legend.x, 1.0);
+        assert_eq!(back.legend.max_height, 0.3);
+        assert_eq!(back.legend.y, 0.0);
+        assert!(UiPrefs::from_toml("[legend.transfer]\nx = 2.0\n").is_err());
+        assert!(UiPrefs::from_toml("[legend.transfer]\nmax_width = 0.01\n").is_err());
+        assert!(UiPrefs::from_toml("[legend.spectrum]\nx = 0.5\n").is_err());
+        let hidden = UiPrefs::from_toml("[legend.transfer]\nhidden = true\n").expect("parse");
+        assert!(hidden.legend.hidden);
     }
 
     #[test]

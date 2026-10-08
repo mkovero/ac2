@@ -854,6 +854,20 @@ pub const CAL_PAGE: i32 = 10;
 /// Lowest stimulus level the arrows go to.
 pub const LEVEL_FLOOR: f64 = -90.0;
 
+/// The mouse on the transfer pane's legend; places and limits as the scene's
+/// [`ac2_scene::legend::LegendBox`] computed them from the pointer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LegendMsg {
+    /// The pointer came onto the plate or its grip, or left it.
+    Hover(Option<ac2_scene::legend::LegendHover>),
+    /// Dragged: its place, [`ac2_scene::legend::LegendView::x`] and `y`.
+    Move { x: f32, y: f32 },
+    /// Its grip dragged: its size limits.
+    Resize { max_width: f32, max_height: f32 },
+    /// The wheel over it: the first row shown.
+    Scroll { first: usize },
+}
+
 /// Messages into the reducer.
 #[derive(Clone, Debug)]
 pub enum Msg {
@@ -911,6 +925,8 @@ pub enum Msg {
     CursorAt(Option<f64>),
     /// The dB | % toggle of the distortion pane.
     DistortionUnit(DistortionUnit),
+    /// The mouse on the transfer pane's legend.
+    Legend(LegendMsg),
     /// Mouse on an open dialog.
     Form(FormMsg),
     /// Mouse on the session dialog.
@@ -1338,6 +1354,18 @@ impl AppState {
                 self.view.spectrum.spectrograph.cursor_s = Some(before_s);
             }
             Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
+            Msg::Legend(m) => {
+                let l = &mut self.view.tf.legend;
+                match m {
+                    LegendMsg::Hover(h) => l.hover = h,
+                    LegendMsg::Move { x, y } => l.move_to(x, y),
+                    LegendMsg::Resize {
+                        max_width,
+                        max_height,
+                    } => l.resize(max_width, max_height),
+                    LegendMsg::Scroll { first } => l.first = first,
+                }
+            }
         }
     }
 
