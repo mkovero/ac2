@@ -143,6 +143,21 @@ fn snapshot_when(
     pin: impl Fn(&mut App),
     drawn: impl Fn(&App) -> bool,
 ) {
+    settled_snapshot(h, name, pin, drawn, &snapshot_options());
+}
+
+/// [`snapshot`] of a plot dense with thin curves, compared with [`dense_snapshot_options`].
+fn dense_snapshot(h: &mut Harness<'_, App>, name: &str) {
+    settled_snapshot(h, name, |_| {}, |_| true, &dense_snapshot_options());
+}
+
+fn settled_snapshot(
+    h: &mut Harness<'_, App>,
+    name: &str,
+    pin: impl Fn(&mut App),
+    drawn: impl Fn(&App) -> bool,
+    options: &SnapshotOptions,
+) {
     let t0 = Instant::now();
     loop {
         pin(h.state_mut());
@@ -155,7 +170,7 @@ fn snapshot_when(
         assert!(t0.elapsed() < WAIT, "{name}: the link never settled");
         std::thread::sleep(Duration::from_millis(10));
     }
-    h.snapshot_options(name, &snapshot_options());
+    h.snapshot_options(name, options);
 }
 
 fn live(app: &App) -> bool {
@@ -198,6 +213,15 @@ fn snapshot_options() -> SnapshotOptions {
     SnapshotOptions::new()
         .threshold(1.0)
         .max_failed_pixels(egui_kittest::OsThreshold::new(0).macos(16).windows(16))
+}
+
+/// [`snapshot_options`] for a plot of many thin anti-aliased curves: every curve crossing
+/// adds edge pixels where another rasterizer's coverage differs, so Metal and WARP differ
+/// in proportionally more pixels than on a plot of a few traces. Linux stays bit-exact.
+fn dense_snapshot_options() -> SnapshotOptions {
+    SnapshotOptions::new()
+        .threshold(1.0)
+        .max_failed_pixels(egui_kittest::OsThreshold::new(0).macos(64).windows(64))
 }
 
 #[test]
@@ -3812,7 +3836,7 @@ fn transfer_legend_many_curves() {
     h.state_mut().state.toasts.clear();
     settle(&mut h, 3);
     assert_eq!(legend(&h).hover, None);
-    snapshot(&mut h, "transfer_legend_many_curves");
+    dense_snapshot(&mut h, "transfer_legend_many_curves");
 
     // Dragged right and down: off its corner, the cursor not placed by the click.
     drag(
@@ -3846,7 +3870,7 @@ fn transfer_legend_many_curves() {
     h.event(Event::PointerMoved(egui::pos2(900.0, 120.0)));
     h.state_mut().state.toasts.clear();
     settle(&mut h, 3);
-    snapshot(&mut h, "transfer_legend_many_curves_light");
+    dense_snapshot(&mut h, "transfer_legend_many_curves_light");
 
     // Hidden, and kept so.
     palette(&mut h, "legend: hide");

@@ -597,6 +597,24 @@ async fn slow_a_band_log_span_reads_back_and_averages_as_the_transfer_does() {
     let from = WallNs(wall_now_ns());
     tokio::time::sleep(Duration::from_secs(3)).await;
     let until = WallNs(wall_now_ns() - 1_000_000_000);
+    // The log writes a second once it has ended and the control loop has got to it: on a
+    // loaded machine the span's last second may not be written yet, and the transfer below
+    // would then average one second more than this read. Seconds are written in order, so a
+    // row starting at or after `until` means every second of the span is in.
+    let t1 = Instant::now();
+    while !get(from, WallNs(wall_now_ns()), Some(1))
+        .await
+        .unwrap()
+        .rows
+        .iter()
+        .any(|r| r.start >= until)
+    {
+        assert!(
+            t1.elapsed() < Duration::from_secs(30),
+            "the span never logged"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let l = get(from, until, Some(1)).await.unwrap();
     assert!(l.average.seconds >= 1, "{l:?}");
     assert_eq!(l.average.uncalibrated, 0);
