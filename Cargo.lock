@@ -77,6 +77,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac2-jack-dut"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "ctrlc",
+ "jack",
+]
+
+[[package]]
 name = "ac2-paths"
 version = "0.0.0"
 dependencies = [
