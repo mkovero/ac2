@@ -23,8 +23,10 @@
 //!
 //! # Distortion and validity
 //!
-//! Power is averaged over 1/24 octave ([`DISTORTION_BAND_OCT`]). Harmonic `k` at fundamental
-//! `f` is `P_k(k·f) / P_1(f)`; THD is the power sum of the orders in band over `P_1(f)`. The
+//! Power is averaged over 1/24 octave ([`DISTORTION_BAND_OCT`]), widened to a few of the
+//! window's resolution cells at low frequencies. Harmonic `k` at fundamental `f` is
+//! `P_k(k·f) / P_1(f)`, `P_1` averaged over the fundamentals whose harmonic lies in `P_k`'s
+//! band (`1/k` of its width in hertz); THD is the sum of those ratios over the orders in band. The
 //! noise floor is the same window cut from the deconvolved silence after the response; a
 //! point counts when it is [`FLOOR_MARGIN_DB`] above that floor ([`is_valid`]).
 //!
@@ -553,6 +555,12 @@ fn mid_band_gain_db(
 /// Mean power of `s` (bins of an FFT with `bin_hz` spacing) over `octaves` around `f`, but
 /// over at least `min_hz`; the interpolated bin power where the band holds no bin.
 fn band_power(s: &[f64], bin_hz: f64, f: f64, octaves: f64, min_hz: f64) -> f64 {
+    let (lo_hz, hi_hz) = band(f, octaves, min_hz);
+    mean_power(s, bin_hz, lo_hz, hi_hz, f)
+}
+
+/// The band `octaves` wide around `f`, widened to `min_hz` if narrower, Hz.
+fn band(f: f64, octaves: f64, min_hz: f64) -> (f64, f64) {
     let half = 2f64.powf(octaves / 2.0);
     let (mut lo_hz, mut hi_hz) = (f / half, f * half);
     if hi_hz - lo_hz < min_hz {
@@ -560,6 +568,11 @@ fn band_power(s: &[f64], bin_hz: f64, f: f64, octaves: f64, min_hz: f64) -> f64 
         lo_hz = (c - 0.5 * min_hz).max(0.0);
         hi_hz = c + 0.5 * min_hz;
     }
+    (lo_hz, hi_hz)
+}
+
+/// Mean of `s` over the bins in `lo_hz..=hi_hz`; with none there, `s` interpolated at `f`.
+fn mean_power(s: &[f64], bin_hz: f64, lo_hz: f64, hi_hz: f64, f: f64) -> f64 {
     let lo = (lo_hz / bin_hz).ceil() as usize;
     let hi = ((hi_hz / bin_hz).floor() as usize).min(s.len().saturating_sub(1));
     if lo <= hi {
@@ -776,33 +789,34 @@ pub fn analyse_recording(
         if f < f_lo {
             continue;
         }
-        let p1 = band_power(&spectra[0], bin_w, f, DISTORTION_BAND_OCT, min_hz);
-        if p1.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
-            continue;
-        }
         let (mut sum, mut floor_sum, mut any) = (0.0, 0.0, false);
         for hc in &mut harmonics {
-            let kf = f64::from(hc.order) * f;
+            let k = f64::from(hc.order);
+            let kf = k * f;
             if kf > f_top {
                 continue;
             }
-            let pk = band_power(
-                &spectra[usize::from(hc.order) - 1],
-                bin_w,
-                kf,
-                DISTORTION_BAND_OCT,
-                min_hz,
-            );
+            let (lo, hi) = band(kf, DISTORTION_BAND_OCT, min_hz);
+            let pk = mean_power(&spectra[usize::from(hc.order) - 1], bin_w, lo, hi, kf);
+            // The fundamentals whose harmonic falls in that band: the window's resolution
+            // widens a low harmonic's band to `min_hz`, which spans k times fewer hertz of
+            // fundamental. Under a roll-off the fundamental's power slopes steeply there
+            // (6 dB over 10–40 Hz at 25 Hz behind a 20 Hz high-pass), so averaged over a
+            // band of its own it would not be the gain those harmonics were driven with.
+            let p1 = mean_power(&spectra[0], bin_w, lo / k, hi / k, f);
+            if p1.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                continue;
+            }
             let nk = band_power(&noise, bin_w, kf, FLOOR_BAND_OCT, 2.0 * min_hz);
             hc.level_db[i] = db10(pk / p1);
             hc.floor_db[i] = db10(nk / p1);
-            sum += pk;
-            floor_sum += nk;
+            sum += pk / p1;
+            floor_sum += nk / p1;
             any = true;
         }
         if any {
-            thd_db[i] = db10(sum / p1);
-            thd_floor_db[i] = db10(floor_sum / p1);
+            thd_db[i] = db10(sum);
+            thd_floor_db[i] = db10(floor_sum);
         }
     }
 

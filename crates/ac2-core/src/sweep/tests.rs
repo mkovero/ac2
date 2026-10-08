@@ -911,3 +911,59 @@ fn a_linear_path_with_its_own_low_frequency_roll_off_reads_no_h2_at_the_lowest_c
     eprintln!("linear path, 20–40 Hz: H2 at most {worst:.1} dBr");
     assert!(worst <= -115.0, "{worst}");
 }
+
+/// |H| of [`dc_blocked`] at `f`.
+fn dc_blocked_gain(fc: f64, f: f64) -> f64 {
+    let a = 1.0 / (1.0 + TAU * fc / FS);
+    let z = Complex64::from_polar(1.0, -TAU * f / FS);
+    (a * (1.0 - z) / (1.0 - a * z)).norm()
+}
+
+#[test]
+fn harmonics_under_a_low_frequency_roll_off_read_the_fundamentals_own_gain() {
+    // A polynomial followed by a 20 Hz high-pass (a coupling capacitor after the stage that
+    // distorts): exact for a sweep, so what the analysis adds is all the error. At 25 Hz the
+    // fundamental's power changes 6 dB over 10–40 Hz; read over a wider band of the
+    // fundamental than its harmonics are, the ratio comes out high.
+    // The sweep starts an octave below the checked band: nearer its start the fade-in drives
+    // the harmonics below full level.
+    let (a2, a3) = (0.2, 1.265);
+    let fc = 20.0;
+    let s = SweepSpec {
+        grid: LogGrid::covering(48, 20.0, 20_000.0),
+        ..spec(ess(10.0, 20_000.0, 5.5))
+    };
+    let (reference, mic) = record(&s, 1, |x| dc_blocked(&poly(x, a2, a3), fc), 1e-7, 21);
+    let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+    let (_, h2, h3) = analytic(amp(), a2, a3);
+    let want = |h: f64, k: f64| {
+        move |f: f64| 20.0 * (h * dc_blocked_gain(fc, k * f) / dc_blocked_gain(fc, f)).log10()
+    };
+    // Read over a band of the fundamental k times wider than the harmonic's, the ratio came
+    // out 0.2–0.4 dB high throughout 20–40 Hz. What remains is ripple, not a bias.
+    let bias = |c: &HarmonicCurve, want: &dyn Fn(f64) -> f64| {
+        let d: Vec<f64> = r
+            .frequencies
+            .iter()
+            .zip(&c.level_db)
+            .filter(|(f, _)| (20.0..=40.0).contains(*f))
+            .map(|(&f, &l)| l - want(f))
+            .collect();
+        d.iter().sum::<f64>() / d.len() as f64
+    };
+    let (b2, b3) = (
+        bias(&r.harmonics[0], &want(h2, 2.0)),
+        bias(&r.harmonics[1], &want(h3, 3.0)),
+    );
+    let e2 = max_err(&r, &r.harmonics[0], 20.0, 80.0, want(h2, 2.0));
+    let e3 = max_err(&r, &r.harmonics[1], 20.0, 80.0, want(h3, 3.0));
+    eprintln!(
+        "20 Hz roll-off, 20–80 Hz: H2 max error {e2:.3} dB, H3 {e3:.3}; 20–40 Hz mean \
+         H2 {b2:+.3} dB, H3 {b3:+.3}"
+    );
+    assert!(
+        b2.abs() <= 0.03 && b3.abs() <= 0.03,
+        "bias H2 {b2:.3} dB, H3 {b3:.3}"
+    );
+    assert!(e2 <= 0.2 && e3 <= 0.2, "H2 {e2:.3} dB, H3 {e3:.3} dB");
+}
