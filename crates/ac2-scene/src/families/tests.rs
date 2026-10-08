@@ -182,9 +182,8 @@ fn a_measurements_curves_share_its_hue_and_differ_from_each_other() {
         let sub_trace = c.trace(TraceId(6));
         assert!(hue_gap(sub_trace, theme.families[1]) <= SAME_HUE_DEG);
         assert_ne!(sub_trace, c.meas(MeasId(2)));
-        // Imported: the neutral family's first shade (the base is no live curve's, so the
-        // first member takes it).
-        assert_eq!(c.trace(TraceId(7)), theme.neutral);
+        // Imported: the first family no measurement holds.
+        assert_eq!(c.trace(TraceId(7)), theme.families[2]);
 
         // Moved under Sub, a capture takes Sub's family.
         let mut moved = traces.clone();
@@ -195,7 +194,7 @@ fn a_measurements_curves_share_its_hue_and_differ_from_each_other() {
         assert!(hue_gap(post, theme.families[1]) <= SAME_HUE_DEG, "{post:?}");
         assert_ne!(post, m.trace(TraceId(6)));
         assert_ne!(post, m.meas(MeasId(2)));
-        // An import moved under Main L leaves the neutral family.
+        // An import moved under Main L joins its family.
         let mut adopted = traces.clone();
         adopted[3].edit.owner = main;
         let arefs: Vec<&TraceMeta> = adopted.iter().collect();
@@ -228,4 +227,81 @@ fn a_sweeps_first_run_takes_the_base() {
         c.trace(TraceId(11)),
         Family::of(&theme, theme.families[1]).shades[0]
     );
+}
+
+#[test]
+fn each_import_takes_a_hue_of_its_own_before_any_shade_or_grey() {
+    let ms = [tf(1, "Main L"), tf(2, "Sub")];
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    let traces: Vec<TraceMeta> = (0..6)
+        .map(|i| {
+            trace(
+                10 + i,
+                &format!("import {i}"),
+                TraceOwner::Imported,
+                captured(),
+            )
+        })
+        .collect();
+    let trefs: Vec<&TraceMeta> = traces.iter().collect();
+    for theme in all() {
+        let c = curve_colours(&theme, &refs, &trefs);
+        let got: Vec<Color> = (0..6).map(|i| c.trace(TraceId(10 + i))).collect();
+        assert_eq!(got, theme.families[2..8].to_vec(), "{:?}", theme.name);
+    }
+}
+
+#[test]
+fn many_imports_stay_distinct_and_grey_comes_last() {
+    // The field case: every family held by a measurement, many imports on top.
+    let ms: Vec<Measurement> = (1..=15).map(|i| tf(i, &format!("m{i}"))).collect();
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    for theme in all() {
+        let palette = import_palette(&theme, &family_indices(&refs));
+        let neutral = palette
+            .iter()
+            .position(|c| *c == theme.neutral)
+            .expect("grey ends the palette");
+        for (i, c) in palette[..neutral].iter().enumerate() {
+            assert!(
+                oklch(*c).1 > GREY_CHROMA,
+                "{:?} {i} {c:?} is grey",
+                theme.name
+            );
+            assert!(!theme.families.contains(c), "a measurement's live colour");
+        }
+        assert!(neutral >= 2 * FAMILIES, "{:?}: {neutral}", theme.name);
+        // No two neighbouring imports in the list share a colour.
+        for w in palette.windows(2) {
+            assert_ne!(w[0], w[1]);
+        }
+    }
+}
+
+#[test]
+fn deleting_an_import_repaints_only_those_after_it() {
+    let ms = [tf(1, "Main L")];
+    let refs: Vec<&Measurement> = ms.iter().collect();
+    let traces: Vec<TraceMeta> = (0..5)
+        .map(|i| {
+            trace(
+                10 + i,
+                &format!("import {i}"),
+                TraceOwner::Imported,
+                captured(),
+            )
+        })
+        .collect();
+    let all_refs: Vec<&TraceMeta> = traces.iter().collect();
+    let without: Vec<&TraceMeta> = traces.iter().filter(|t| t.id != TraceId(12)).collect();
+    let theme = Theme::dark();
+    let (a, b) = (
+        curve_colours(&theme, &refs, &all_refs),
+        curve_colours(&theme, &refs, &without),
+    );
+    for id in [10, 11] {
+        assert_eq!(a.trace(TraceId(id)), b.trace(TraceId(id)));
+    }
+    assert_eq!(b.trace(TraceId(13)), a.trace(TraceId(12)));
+    assert_eq!(b.trace(TraceId(14)), a.trace(TraceId(13)));
 }

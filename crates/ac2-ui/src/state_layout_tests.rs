@@ -535,8 +535,8 @@ fn tree_dots_have_the_colours_of_their_curves() {
         .collect();
     assert_eq!(colours.len(), 6, "each curve its own colour");
     // Each measurement its own colour family: Main L's live curve, captures and math result
-    // share its hue, Sub has another, the import is grey, and the daemon's per-trace colour
-    // is not what is drawn.
+    // share its hue, Sub has another, the import takes a hue no measurement holds, and the
+    // daemon's per-trace colour is not what is drawn.
     let hue = |c: Color| ac2_scene::families::oklch(c).2.to_degrees();
     let gap = |a: Color, b: Color| {
         let d = (hue(a) - hue(b)).rem_euclid(360.0);
@@ -548,7 +548,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
     for n in ["pre-EQ", "post-EQ", "pre ÷ post"] {
         assert!(gap(curve(n), main) < 8.0, "{n} in Main L's family");
     }
-    assert_eq!(curve("1083 94cm"), theme.neutral);
+    assert_eq!(curve("1083 94cm"), theme.families[2]);
     for m in &metas {
         let c = m.edit.color;
         assert_ne!(curve(&m.edit.name), Color::from_rgba8([c.r, c.g, c.b, 255]));

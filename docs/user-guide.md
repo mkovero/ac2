@@ -900,10 +900,11 @@ Working with the tree:
   channels together, group by group.
 - **Each measurement has its own colour family**: its live curve in the family's colour,
   its captures, sweep runs and math results in lighter and darker shades of the same hue, so
-  the curves of one measurement read as a group in every pane. Imports are grey; a trace
-  moved to another measurement takes that measurement's colours. Colours follow the
-  measurement, not its place in the list: deleting one measurement leaves the others'
-  colours alone.
+  the curves of one measurement read as a group in every pane. Each import takes a colour
+  of its own, in list order: first the hues no measurement uses, then shades of the
+  measurements' hues, grey only when those run out; a trace moved to another measurement
+  takes that measurement's colours. Measurement colours follow the measurement, not its
+  place in the list: deleting one measurement leaves the others' colours alone.
 
 #### Deleting a measurement that owns traces
 
