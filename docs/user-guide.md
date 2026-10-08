@@ -18,6 +18,8 @@ guide explains the concepts and the everyday workflow.
   - [Input meters](#input-meters)
 - [Reference wiring and loopback](#reference-wiring-and-loopback)
 - [Stimulus](#stimulus)
+  - [What Space and Enter start](#what-space-and-enter-start)
+  - [Stopping the last transfer measurement stops the stimulus](#stopping-the-last-transfer-measurement-stops-the-stimulus)
 - [Transfer measurement](#transfer-measurement)
   - [Choosing what a pane shows](#choosing-what-a-pane-shows)
   - [Zoom, pan and the level axis](#zoom-pan-and-the-level-axis)
@@ -101,29 +103,40 @@ ac2 meas start main-l
 
 ### Audio backends
 
-The backend is always named. Each platform has one real backend: `jack` on Linux (a JACK2
-server, or PipeWire through pipewire-jack; there is no ALSA backend), `cpal` on macOS and
-Windows (Core Audio, WASAPI). On JACK the rate and buffer are the server's; on cpal, with
-no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 48 kHz,
-within what the device allows) rather than the host's default, which can be large enough
-to deliver audio in lumps. Should a host still deliver in lumps, the daemon log says so
-once a minute (*audio arrives in bursts on …*) with the device and buffer to change.
-`fake` is a simulated rig for trying things out and is never chosen for you: the session
-dialog preselects a real interface whenever the daemon lists one. Choosing
-*Simulated rig* in the app's connect dialog starts it ready to measure (session open, a
-transfer measurement "demo" running); *This computer's audio* starts with no session and
-opens Settings on its Audio page.
+The backend is always named. Each platform has one real backend:
+
+| Platform | Backend | Notes |
+|---|---|---|
+| Linux | `jack` | a JACK2 server, or PipeWire through pipewire-jack; there is no ALSA backend. Rate and buffer are the server's. |
+| macOS, Windows | `cpal` | Core Audio, WASAPI. With no `--buffer`, ac2 asks for a short fixed buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows) rather than the host's default, which can be large enough to deliver audio in lumps. |
+| any | `fake` | a simulated rig for trying things out; never chosen for you |
+
+Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio
+arrives in bursts on …*) with the device and buffer to change.
+
+The session dialog preselects a real interface whenever the daemon lists one. In the app's
+connect dialog:
+
+- *Simulated rig* starts ready to measure (session open, a transfer measurement "demo"
+  running);
+- *This computer's audio* starts with no session and opens Settings on its Audio page.
 
 ### Settings
 
 **Ctrl+P** (palette *Settings…*, or the ⚙ at the right of the top bar) opens every setting
 in one view over the window, below the top bar — what drives the speakers stays in sight.
-The pages are in a sidebar: **Ctrl+PgUp / Ctrl+PgDn** (or **Ctrl+Tab**) step through them,
-**Alt+1 … Alt+7** jump to one, a click picks one. Ctrl+P opens the page last shown; Esc
-closes the view (a dialog or confirmation over a page first); **Shift+Esc** still stops
-the stimulus. Each page says whose its settings are: **this app** (kept in `ui.toml` on
-this computer) or **the rig — all clients** (kept by the daemon; every connected app sees a
-change at once).
+The pages are in a sidebar:
+
+- **Ctrl+PgUp / Ctrl+PgDn** (or **Ctrl+Tab**) step through them, **Alt+1 … Alt+7** jump to
+  one, a click picks one;
+- Ctrl+P opens the page last shown;
+- Esc closes the view (a dialog or confirmation over a page first); **Shift+Esc** still
+  stops the stimulus.
+
+Each page says whose its settings are:
+
+- **this app**: kept in `ui.toml` on this computer;
+- **the rig — all clients**: kept by the daemon; every connected app sees a change at once.
 
 | Page | What | Opened also by |
 |---|---|---|
@@ -135,20 +148,30 @@ change at once).
 | Display | theme, key hints, how long the SPL number holds, spectrograph history, level axes reset | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
-**System max level.** The generator never plays above the rig's maximum (dBFS RMS): the
-top of the Inputs & outputs page shows it with its bound
-(`−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`) and who changed it last. Type a level
-on its row and **Enter**: a lower one applies at once for every client — a stimulus armed
-or playing above it is stopped. A higher one asks you to type **raise** first, is refused
-while anything is armed or playing, and can never pass the bound the daemon was started
-with (`ac2d --max-level`, default −10 dBFS). The daemon keeps the level across restarts. On
-the command line: `ac2 gen ceiling`, `ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
+#### System max level
 
-**Connection.** In network mode the page lists the clients the rig accepts (name and key
-fingerprint) and the keys it refused lately (fingerprint, address, how often, when): **A**
-on a refused key and a name authorizes it — the client connects on its next retry —,
-*Authorize a client by its key…* takes a name and the key `ac2 auth show` prints, **Delete**
-twice revokes a client (its requests are refused at once; you cannot revoke your own).
+The generator never plays above the rig's maximum (dBFS RMS). The top of the Inputs &
+outputs page shows it with its bound and who changed it last:
+`−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`. Type a level on its row and **Enter**:
+
+- a **lower** level applies at once for every client; a stimulus armed or playing above it
+  is stopped;
+- a **higher** level asks you to type **raise** first, is refused while anything is armed or
+  playing, and can never pass the bound the daemon was started with (`ac2d --max-level`,
+  default −10 dBFS).
+
+The daemon keeps the level across restarts. On the command line: `ac2 gen ceiling`,
+`ac2 gen ceiling -40dbfs`, `ac2 gen ceiling -30dbfs --yes`.
+
+#### Connection
+
+In network mode the page lists the clients the rig accepts (name and key fingerprint) and
+the keys it refused lately (fingerprint, address, how often, when).
+
+- **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
+- *Authorize a client by its key…* takes a name and the key `ac2 auth show` prints.
+- **Delete** twice revokes a client: its requests are refused at once. You cannot revoke
+  your own.
 
 ### Inputs & outputs and Audio
 
@@ -196,18 +219,26 @@ The measurement dialogs pick inputs the same way: by name, with their meters, **
 ### Input meters
 
 While a session is open, the top of the left-hand list shows **Inputs**: one live meter per
-input the session captures — RMS as the bar, the sample peak as a tick, the RMS in dBFS
-beside it, and *CLIP* in red, held for a second after the input clipped. The meters run
-whether or not anything measures, and keep running during sweeps and other operations, so
-the mic and the reference stay in sight while you set levels.
+input the session captures.
 
-Each row is named, not numbered: the mic's name, else the backend's channel name (the JACK
-port), else *Input N*; then its role — *reference* (the loopback input, or the reference of
-a transfer measurement) or *mic* (a named mic, or the measured input of a transfer
-measurement) — and the input number when the name does not already say it:
-*MM1 34804 · 90° · mic (in 1)*, *loopback · reference (in 2)*, *capture_4 (in 4)*. A
-named mic's row also says which mic curve is in use — its label (*90°*), or why none is:
-*curve off*, *curve not chosen*, *no curve stored*, *90° not stored*. A **REF** /
+- the bar is the RMS, the tick the sample peak, the number the RMS in dBFS;
+- *CLIP* shows in red, held for a second after the input clipped.
+
+The meters run whether or not anything measures, and keep running during sweeps and other
+operations, so the mic and the reference stay in sight while you set levels.
+
+Each row is named, not numbered:
+
+1. the mic's name, else the backend's channel name (the JACK port), else *Input N*;
+2. its role: *reference* (the loopback input, or the reference of a transfer measurement)
+   or *mic* (a named mic, or the measured input of a transfer measurement);
+3. the input number, when the name does not already say it.
+
+Examples: *MM1 34804 · 90° · mic (in 1)*, *loopback · reference (in 2)*,
+*capture_4 (in 4)*.
+
+A named mic's row also says which mic curve is in use: its label (*90°*), or why none is
+(*curve off*, *curve not chosen*, *no curve stored*, *90° not stored*). A **REF** /
 **MEAS** mark shows what the running sweep uses, or, with nothing running, the selected
 measurement.
 
@@ -226,14 +257,19 @@ out 1 ──┬──► processor / amp / speaker ··· mic ──► in 2   (
 ```
 
 ac2 needs that reference: without signal on it, the transfer pane shows **NO REFERENCE**
-instead of a curve. Its detail says what to do: with this app's stimulus off, `stimulus
-off: Space arms, Enter starts it`; armed and silent, `stimulus armed: Enter starts it`; on
-the sweep view (where Space arms a sweep), `stimulus off: arm it from a transfer pane`;
-with the stimulus playing (or another client's), `reference silent: check the loopback
-cable`. With a loopback that also returns the generator's own output (the
-**R** and **S** roles in the session dialog, `session open --loopback-out 1 --loopback-in 1`
-from the CLI), the daemon continuously checks the output → input timing and warns about
-dropped or repeated output samples.
+instead of a curve. Its detail says what to do:
+
+| Situation | Detail shown |
+|---|---|
+| this app's stimulus off | `stimulus off: Space arms, Enter starts it` |
+| armed and silent | `stimulus armed: Enter starts it` |
+| on the sweep view (where Space arms a sweep) | `stimulus off: arm it from a transfer pane` |
+| stimulus playing (this app's or another client's) | `reference silent: check the loopback cable` |
+
+With a loopback that also returns the generator's own output (the **R** and **S** roles in
+the session dialog, `session open --loopback-out 1 --loopback-in 1` from the CLI), the
+daemon continuously checks the output → input timing and warns about dropped or repeated
+output samples.
 
 You can measure any signal, not only ac2's generator: program material from the console,
 fed to the reference input, works the same way (coherence then tells you which frequencies
@@ -260,28 +296,36 @@ make it play by accident:
   never above the daemon's bound (`ac2d --max-level`, default −10 dBFS RMS);
 - loading a session or restarting the daemon always comes up disarmed.
 
-**What Space and Enter start depends on the focused view.** On the transfer, spectrum /
-RTA (spectrograph included), IR and SPL views they drive the generator for live measuring:
-Space arms pink noise (or the chosen signal) at the operator's level on the stimulus outputs,
-Enter plays it. On the sweep view (the **Sweep / distortion** pane focused, maximised or
-not) Space arms a **run of the selected sweep measurement** with its settings — outputs,
-level, length, range, repeats, silence after, reference — and Enter plays it (with no sweep
-measurement yet, Space opens the dialog that makes one). A level or outputs changed while
-armed become the measurement's settings for this run and the next. Enter fires what is
-armed; armed and still silent, Space on a view of the other kind re-sets the armed stimulus
-to that view's. The top bar says what the keys will do: `Space arms: sweep Genelec 1 m · 3 s
-−50 dBFS`,
-`Enter fires: pink −50 dBFS → out 1`. Esc and Shift+Esc stop as always.
+### What Space and Enter start
 
-**Stopping the last transfer measurement stops the stimulus.** The noise is there to excite
-transfer functions: when **S** (or the palette) stops a transfer measurement, or you delete
-a running one, and no other
-transfer measurement is still running, the app also stops the stimulus it holds, armed or
-playing, faded out and released as Esc does (`Main L stopped · stimulus stopped (no transfer
-measurement left running)`). Another transfer measurement still running keeps it playing;
-SPL meters, spectra and RTAs do not keep it (they measure whatever plays); a sweep is never
-stopped this way, nor another client's stimulus. `ac2 meas stop` stops only the measurement:
-a script gets no side effect it did not ask for.
+It depends on the focused view:
+
+| Focused view | Space | Enter |
+|---|---|---|
+| transfer, spectrum / RTA (spectrograph included), IR, SPL | arms pink noise (or the chosen signal) at the operator's level on the stimulus outputs | plays it |
+| sweep (the **Sweep / distortion** pane focused, maximised or not) | arms a **run of the selected sweep measurement** with its settings: outputs, level, length, range, repeats, silence after, reference. With no sweep measurement yet, opens the dialog that makes one. | plays it |
+
+- A level or outputs changed while armed become the sweep measurement's settings for this
+  run and the next.
+- Enter fires what is armed. Armed and still silent, Space on a view of the other kind
+  re-sets the armed stimulus to that view's.
+- The top bar says what the keys will do: `Space arms: sweep Genelec 1 m · 3 s −50 dBFS`,
+  `Enter fires: pink −50 dBFS → out 1`.
+- Esc and Shift+Esc stop as always.
+
+### Stopping the last transfer measurement stops the stimulus
+
+The noise is there to excite transfer functions. When **S** (or the palette) stops a
+transfer measurement, or you delete a running one, and no other transfer measurement is
+still running, the app also stops the stimulus it holds, armed or playing, faded out and
+released as Esc does: `Main L stopped · stimulus stopped (no transfer measurement left
+running)`.
+
+- Another transfer measurement still running keeps it playing.
+- SPL meters, spectra and RTAs do not keep it: they measure whatever plays.
+- A sweep is never stopped this way, nor another client's stimulus.
+- `ac2 meas stop` stops only the measurement: a script gets no side effect it did not ask
+  for.
 
 <sub>[↑ Contents](#contents)</sub>
 
