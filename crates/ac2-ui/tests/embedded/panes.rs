@@ -97,6 +97,84 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     Ok(())
 }
 
+/// From an empty daemon: a transfer measurement and a spectrum; with panes following the
+/// selection (the palette turns it on), selecting each lays out only the panes drawing it,
+/// the focus on one of them; off again, every pane.
+#[test]
+fn panes_follow_the_selection_from_an_empty_daemon() -> R {
+    use ac2_ui::state::PaneKind::{Ir, Spectrum, Spl, Transfer};
+    let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    d.synced()?;
+    d.key("Shift+O");
+    d.send(Msg::Text("O".into()));
+    d.until("the device list", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.session.device_info().is_some())
+    })?;
+    d.key("Enter");
+    d.until("the measurement offer", |s| {
+        matches!(s.overlay, Overlay::Offer(_))
+    })?;
+    d.key("Enter");
+    d.until("the measurement", |s| s.selected_meas().is_some())?;
+    let tf = d.st.selected_meas().map(|m| m.id).ok_or("transfer")?;
+    d.key("Ctrl+K");
+    d.send(Msg::Text("new spectrum".into()));
+    d.key("Enter");
+    d.until(
+        "the spectrum dialog",
+        |s| matches!(&s.overlay, Overlay::Form(f) if f.kind == FormKind::Spectrum),
+    )?;
+    d.key("Enter");
+    d.until("the spectrum measurement", |s| {
+        s.measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+    })?;
+    let sp =
+        d.st.measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            .map(|m| m.id)
+            .ok_or("spectrum")?;
+    d.send(Msg::SelectMeas(tf));
+    assert_eq!(d.st.visible_panes(), [Transfer, Spectrum, Ir, Spl]);
+
+    d.key("Ctrl+K");
+    d.send(Msg::Text("panes follow".into()));
+    d.key("Enter");
+    assert!(d.st.prefs.panes_follow);
+    assert_eq!(d.st.visible_panes(), [Transfer, Ir]);
+    d.send(Msg::SelectMeas(sp));
+    assert_eq!(d.st.visible_panes(), [Spectrum]);
+    assert_eq!(d.st.layout.focus, Spectrum);
+    // Only the spectrum pane drawn: the transfer stream is not received.
+    assert!(!d.st.wanted_topics().contains(&Topic::Data {
+        meas: tf,
+        stream: Stream::Tf
+    }));
+    d.send(Msg::SelectMeas(tf));
+    assert_eq!(d.st.visible_panes(), [Transfer, Ir]);
+    assert_eq!(d.st.layout.focus, Transfer);
+    // W maximises within the kept panes.
+    d.key("W");
+    assert_eq!(d.st.visible_panes(), [Transfer]);
+    d.send(Msg::SelectMeas(sp));
+    assert_eq!(d.st.visible_panes(), [Spectrum]);
+    d.send(Msg::Command(CommandId::MaximizePane));
+    d.send(Msg::Command(CommandId::MaximizePane));
+    assert!(!d.st.layout.maximized);
+
+    d.send(Msg::Command(CommandId::PanesFollow));
+    assert!(!d.st.prefs.panes_follow);
+    assert_eq!(d.st.visible_panes(), [Transfer, Spectrum, Ir, Spl]);
+    drop(d);
+    drop(daemon);
+    Ok(())
+}
+
 /// From an empty daemon: two captures, one spread by +3 dB with the keys (its legend says
 /// so and its curve moves, the other stays), a spectrum whose level axis goes down to its
 /// low levels with the keys, a capture deleted with Delete and a confirmation, and a

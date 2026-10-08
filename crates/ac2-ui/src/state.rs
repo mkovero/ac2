@@ -53,6 +53,9 @@ pub use display::{
 #[path = "state_settings.rs"]
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
+#[path = "state_follow.rs"]
+mod follow;
+pub use follow::panes_drawing;
 #[path = "state_ir.rs"]
 mod ir_nav;
 pub use ir_nav::IrNavMsg;
@@ -1250,6 +1253,7 @@ impl AppState {
         self.sync_meters(before, tick, &mut out);
         self.sync_session_watch(&mut out);
         if !tick {
+            self.fit_focus();
             self.restore_pane_meas();
             self.remember_layout();
         }
@@ -1301,11 +1305,13 @@ impl AppState {
             Msg::SelectMeas(id) => {
                 self.select(id);
                 self.reveal_meas(id);
+                self.follow_selection_toast();
             }
             Msg::SelectTrace(id) => {
                 let id = (self.selected_trace != Some(id)).then_some(id);
                 self.select_trace(id);
                 self.reveal_trace();
+                self.follow_selection_toast();
             }
             Msg::ToggleShown(id) => self.toggle_shown(id, out),
             Msg::ToggleGroup(g) => {

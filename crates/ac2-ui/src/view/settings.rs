@@ -294,6 +294,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
     let rows = display_rows(
         st.theme,
         st.prefs.key_hints,
+        st.prefs.panes_follow,
         st.prefs.spl_hold_ms,
         st.view.spectrum.spectrograph.span_s,
         crate::settings::PaneViews {
