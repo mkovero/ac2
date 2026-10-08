@@ -554,7 +554,7 @@ impl AppState {
         }
     }
 
-    /// Saves the layout and the level axes with the preferences when they changed.
+    /// Saves the layout, the level axes and the legend with the preferences when they changed.
     pub(super) fn remember_layout(&mut self) {
         let now = self.layout_prefs();
         if now != self.prefs.layout {
@@ -564,6 +564,11 @@ impl AppState {
         let levels = crate::prefs::LevelPrefs::of(&self.view);
         if levels != self.prefs.levels {
             self.prefs.levels = levels;
+            self.prefs_dirty = true;
+        }
+        let legend = crate::prefs::LegendPrefs::of(&self.view.tf.legend);
+        if legend != self.prefs.legend {
+            self.prefs.legend = legend;
             self.prefs_dirty = true;
         }
     }
@@ -643,6 +648,7 @@ impl AppState {
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.levels.apply(&mut self.view);
+        prefs.legend.apply(&mut self.view.tf.legend);
         if let Some(s) = prefs.spectrograph_span_s {
             self.view.spectrum.spectrograph.span_s = s;
         }

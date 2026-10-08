@@ -23,8 +23,14 @@ pick sensible fixes and record them in the scene tests.
 - Narrowband spectrum in bar style lost single-bin tones (sub-pixel bars) → tone traces always
   draw as the max-per-pixel line; bars are for RTA band power (`tone_traces_ignore_bar_style`).
 
+- Transfer legend unreadable over many curves (18 on a rig) and over the 0 dB region in
+  overlay mode → rows on a plate of the plot background at 88 % (opaque under the pointer)
+  with a border, at most 70 % of the pane tall, scrolled by the wheel with `N above · M below`;
+  movable, resizable, corner-snapped or hidden from the palette (`legend.rs`,
+  `many_curves_scroll_on_a_plate`, `legend_corners_and_hidden`). Cursor values on their own
+  plate on the legend rows, the cursor line under both.
+
 ## Open
 
-- Overlay mode in a short magnitude pane: with the text block below the band, the legend now
-  sits over the 0 dB region where traces usually are. A translucent legend backing (plot
-  background at ~70 %) would keep both readable; needs a design call on legend chrome.
+
+Nothing open.

@@ -10,12 +10,12 @@ use eframe::egui;
 
 use ac2_scene::view::{DistortionUnit, IrPane, SplMode};
 
-use crate::app::{App, CachedScene};
+use crate::app::{App, CachedScene, LegendDrag};
 use crate::hints::{self, KeyHint};
 use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
-use crate::state::{HintPlace, IrNavMsg, Msg, Overlay, PaneKind};
+use crate::state::{HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneKind};
 use crate::theme::Chrome;
 use ac2_proto::units::MeasId;
 
@@ -129,9 +129,11 @@ fn scene_for(
     let now = super::now();
     let st = &app.state;
     let mut unit_tip = None;
+    let mut legend = None;
     let (scene, axes) = match pane {
         PaneKind::Transfer => {
             let s = scenes::transfer(st, theme, vp, now);
+            legend = s.legend_box;
             let y = s
                 .panes
                 .iter()
@@ -229,6 +231,7 @@ fn scene_for(
             time_axis: axes.time,
             ir_axes: axes.ir,
             unit_tip,
+            legend,
         },
     );
     Some((scene, axes))
@@ -308,7 +311,8 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             }
             // Full screen keeps the mouse: wheel zooms frequency, Ctrl/Shift+wheel the level
             // axis, as in the split layout.
-            navigate(app, ui, &resp, pane, rect, axes);
+            let took = legend_mouse(app, ui, &resp, pane, rect);
+            navigate(app, ui, &resp, pane, rect, axes, took);
             continue;
         }
         let focused = app.state.layout.focus == pane;
@@ -432,6 +436,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 HintPlace::Title => title_hint(ui, title, caption_end + 16.0, &hint.text, ch),
             }
         }
+        let took = legend_mouse(app, ui, &resp, pane, plot_rect);
         navigate(
             app,
             ui,
@@ -439,6 +444,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             pane,
             plot_rect,
             built.map(|b| b.1).unwrap_or_default(),
+            took,
         );
     }
     ui.allocate_rect(area, egui::Sense::hover());
@@ -853,6 +859,141 @@ fn title_hint(ui: &egui::Ui, title: egui::Rect, left: f32, hint: &str, ch: &Chro
 /// Click focuses (and on a frequency axis places the cursor); wheel zooms the frequency
 /// axis about the pointer, Ctrl+wheel the level axis, Shift+wheel pans the level axis; drag
 /// pans the frequency axis. Navigation only: values stay as received.
+/// What the legend took of the mouse this pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LegendTook {
+    Nothing,
+    /// Clicks and drags: the pointer is on the plate, or dragging it.
+    Pointer,
+    /// The wheel too: its rows scroll.
+    PointerAndWheel,
+}
+
+/// The mouse on the transfer pane's legend: a drag on the plate moves it, a drag on its
+/// bottom-right grip resizes it, the wheel scrolls rows that do not all fit. Places and
+/// sizes come from the scene's box, so the reducer only stores them.
+fn legend_mouse(
+    app: &mut App,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    pane: PaneKind,
+    plot_rect: egui::Rect,
+) -> LegendTook {
+    use ac2_scene::legend::{LegendHover, ROW};
+    if pane != PaneKind::Transfer {
+        return LegendTook::Nothing;
+    }
+    let b = app.scenes.get(&pane).and_then(|c| c.legend.clone());
+    let hover_now = app.state.view.tf.legend.hover;
+    let origin = plot_rect.min.to_vec2();
+    let screen = |r: ac2_scene::primitives::Rect| {
+        egui::Rect::from_min_size(egui::pos2(r.x, r.y) + origin, egui::vec2(r.w, r.h))
+    };
+    app.legend_screen = b.as_ref().map(|b| (screen(b.rect), screen(b.grip)));
+    let Some(b) = b.filter(|_| !app.state.window_over_panes()) else {
+        app.legend_drag = None;
+        if hover_now.is_some() {
+            app.dispatch(Msg::Legend(LegendMsg::Hover(None)));
+        }
+        return LegendTook::Nothing;
+    };
+    let inside = |r: ac2_scene::primitives::Rect, p: egui::Pos2| {
+        (r.x..=r.right()).contains(&p.x) && (r.y..=r.bottom()).contains(&p.y)
+    };
+    let over_at = |p: egui::Pos2| {
+        let p = p - origin;
+        if inside(b.grip, p) {
+            Some(LegendHover::Grip)
+        } else if inside(b.rect, p) {
+            Some(LegendHover::Plate)
+        } else {
+            None
+        }
+    };
+    if resp.drag_started()
+        && let Some(p) = ui.input(|i| i.pointer.press_origin())
+    {
+        let at = p - origin;
+        app.legend_drag = match over_at(p) {
+            Some(LegendHover::Plate) => Some(LegendDrag::Move {
+                grab: at - egui::pos2(b.rect.x, b.rect.y),
+            }),
+            Some(LegendHover::Grip) => Some(LegendDrag::Resize {
+                grab: at - egui::pos2(b.rect.right(), b.rect.bottom()),
+            }),
+            None => None,
+        };
+    }
+    if let Some(d) = app.legend_drag {
+        if !resp.dragged() {
+            app.legend_drag = None;
+        } else if let Some(p) = resp.interact_pointer_pos() {
+            let p = p - origin;
+            let (msg, icon, kind) = match d {
+                LegendDrag::Move { grab } => {
+                    let [x, y] = b.position_for(p.x - grab.x, p.y - grab.y);
+                    (
+                        LegendMsg::Move { x, y },
+                        egui::CursorIcon::Grabbing,
+                        LegendHover::Plate,
+                    )
+                }
+                LegendDrag::Resize { grab } => {
+                    let [w, h] = b.limits_for(p.x - grab.x, p.y - grab.y);
+                    (
+                        LegendMsg::Resize {
+                            max_width: w,
+                            max_height: h,
+                        },
+                        egui::CursorIcon::ResizeNwSe,
+                        LegendHover::Grip,
+                    )
+                }
+            };
+            ui.ctx().set_cursor_icon(icon);
+            if hover_now != Some(kind) {
+                app.dispatch(Msg::Legend(LegendMsg::Hover(Some(kind))));
+            }
+            app.dispatch(Msg::Legend(msg));
+            return LegendTook::Pointer;
+        }
+    }
+    let over = resp.hover_pos().and_then(over_at);
+    if over != hover_now {
+        app.dispatch(Msg::Legend(LegendMsg::Hover(over)));
+    }
+    let Some(over) = over else {
+        app.legend_wheel = 0.0;
+        return LegendTook::Nothing;
+    };
+    ui.ctx().set_cursor_icon(match over {
+        LegendHover::Plate => egui::CursorIcon::Grab,
+        LegendHover::Grip => egui::CursorIcon::ResizeNwSe,
+    });
+    // Ctrl / Shift + wheel still zoom and pan the level axis.
+    let (dy, plain) = ui.input(|i| {
+        (
+            i.smooth_scroll_delta.y,
+            !i.modifiers.command && !i.modifiers.shift,
+        )
+    });
+    if !b.scrolls() || !plain {
+        return LegendTook::Pointer;
+    }
+    // Wheel down (negative delta) shows later rows, a row per row height of travel.
+    app.legend_wheel -= dy / ROW;
+    let rows = app.legend_wheel.trunc();
+    if rows != 0.0 {
+        app.legend_wheel -= rows;
+        let first = b.scrolled(rows as i32);
+        if first != app.state.view.tf.legend.first {
+            app.dispatch(Msg::Legend(LegendMsg::Scroll { first }));
+        }
+    }
+    LegendTook::PointerAndWheel
+}
+
+#[allow(clippy::too_many_arguments)]
 fn navigate(
     app: &mut App,
     ui: &egui::Ui,
@@ -860,6 +1001,7 @@ fn navigate(
     pane: PaneKind,
     plot_rect: egui::Rect,
     axes: Axes,
+    legend: LegendTook,
 ) {
     // A window over the panes owns the mouse: its wheel scrolls the window, never zooms a
     // plot behind it.
@@ -869,6 +1011,12 @@ fn navigate(
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(pane));
     }
+    // A click on the legend is not a cursor placed behind it, a drag on it not a pan; when
+    // its rows scroll, the wheel over it is theirs.
+    if legend == LegendTook::PointerAndWheel {
+        return;
+    }
+    let free = legend == LegendTook::Nothing;
     if let Some((which, x, y)) = axes.ir {
         navigate_ir(app, ui, resp, plot_rect, which, x, y);
         return;
@@ -937,7 +1085,8 @@ fn navigate(
         return;
     };
     let hz_at = |pos: egui::Pos2| m.from_px(pos.x - plot_rect.min.x);
-    if resp.clicked()
+    if free
+        && resp.clicked()
         && let Some(p) = resp.interact_pointer_pos()
     {
         let y = p.y - plot_rect.min.y;
@@ -954,7 +1103,7 @@ fn navigate(
             None => app.dispatch(Msg::CursorAt(Some(hz_at(p)))),
         }
     }
-    if resp.dragged() {
+    if free && resp.dragged() {
         let dx = resp.drag_delta().x;
         let px_per_oct = m.len_px() / (m.range.hi / m.range.lo).log2() as f32;
         if dx != 0.0 && px_per_oct > 0.0 {

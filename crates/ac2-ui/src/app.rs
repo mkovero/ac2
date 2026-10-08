@@ -109,6 +109,18 @@ pub(crate) struct CachedScene {
     )>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
+    /// Where the scene put its legend, for moving, resizing and scrolling it.
+    pub legend: Option<ac2_scene::legend::LegendBox>,
+}
+
+/// A drag on the legend: where on the plate (or its grip) the pointer took it, so the
+/// plate keeps that point under the pointer.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum LegendDrag {
+    /// From its top-left corner.
+    Move { grab: egui::Vec2 },
+    /// From its bottom-right corner.
+    Resize { grab: egui::Vec2 },
 }
 
 pub struct App {
@@ -132,6 +144,11 @@ pub struct App {
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
     pub(crate) scenes: HashMap<PaneKind, CachedScene>,
+    pub(crate) legend_drag: Option<LegendDrag>,
+    /// Where the transfer legend's plate and grip were last drawn, on screen.
+    pub(crate) legend_screen: Option<(egui::Rect, egui::Rect)>,
+    /// Wheel travel over the legend not yet a whole row.
+    pub(crate) legend_wheel: f32,
     pub(crate) plots: bool,
     passes: u64,
     /// The connect dialog, while open: the app has no link until the operator picks one.
@@ -204,6 +221,9 @@ impl App {
             pane_generations: HashMap::new(),
             clock: ClockTexts::default(),
             scenes: HashMap::new(),
+            legend_drag: None,
+            legend_screen: None,
+            legend_wheel: 0.0,
             plots,
             passes: 0,
             connect: None,
@@ -326,6 +346,12 @@ impl App {
         self.pane_generations.get(&p).copied().unwrap_or(0)
     }
 
+    /// Where the transfer legend's plate and its resize grip were last drawn, on screen
+    /// (what a test points the mouse at).
+    pub fn legend_rects(&self) -> Option<(egui::Rect, egui::Rect)> {
+        self.legend_screen
+    }
+
     /// Marks `panes` as changed: their scenes are rebuilt on the next pass.
     fn touch(&mut self, panes: &[PaneKind]) {
         if panes.is_empty() {
@@ -357,6 +383,7 @@ impl App {
                 _ => PaneKind::ALL.to_vec(),
             },
             Touches::Spl => vec![PaneKind::Spl],
+            Touches::Legend => vec![PaneKind::Transfer],
             Touches::All => PaneKind::ALL.to_vec(),
         };
         self.touch(&panes);
@@ -472,6 +499,8 @@ enum Touches {
     Spl,
     /// The toasts' hover and dismissal: no pane.
     Toasts,
+    /// The mouse on the legend: the transfer pane only, rebuilt on every step of a drag.
+    Legend,
     /// Keys, commands, replies: anything may change.
     All,
 }
@@ -482,6 +511,7 @@ impl Touches {
         match msg {
             Msg::Tick { .. } => Self::Tick,
             Msg::ToastsHeld(_) | Msg::DismissToast(_) => Self::Toasts,
+            Msg::Legend(_) => Self::Legend,
             Msg::Conn(e) => match **e {
                 ConnEvent::Data(_) => Self::Data,
                 ConnEvent::Mirror(_) => Self::Mirror,

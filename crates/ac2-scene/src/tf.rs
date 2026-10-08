@@ -9,7 +9,10 @@ use crate::canvas::{
     self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, text_width, visible_columns,
 };
 use crate::format;
-use crate::primitives::{Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport};
+use crate::legend::{INSET, LegendBox, PAD_X, PAD_Y, ROW, RowStyle};
+use crate::primitives::{
+    Color, Dash, FillRect, HAlign, Layer, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
+};
 use crate::readout::{self, CursorReadout};
 use crate::theme::Theme;
 use crate::trace::{
@@ -22,8 +25,6 @@ use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
 const WEIGHT_MAGNITUDE: f32 = 3.0;
 const WEIGHT_PHASE: f32 = 2.0;
 const WEIGHT_COHERENCE: f32 = 1.0;
-/// Legend row pitch.
-const ROW: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TfPaneKind {
@@ -65,7 +66,7 @@ pub(crate) const SELECTED_WIDTH: f32 = 2.0;
 /// drawn, not a glyph: the plot font has no arrow-like marks.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn legend_swatch(
-    c: &mut Canvas,
+    layer: &mut Layer,
     x: f32,
     y: f32,
     w: f32,
@@ -75,13 +76,13 @@ pub(crate) fn legend_swatch(
     theme: &Theme,
 ) {
     let h = if selected { 3.0 * SELECTED_WIDTH } else { 3.0 };
-    c.overlay.rects.push(FillRect {
+    layer.rects.push(FillRect {
         rect: Rect::new(x, y - h / 2.0, w, h),
         color,
         clip,
     });
     if selected {
-        c.overlay.rects.push(FillRect {
+        layer.rects.push(FillRect {
             rect: Rect::new(x - 5.0, y - 5.0, 2.0, 10.0),
             color: theme.text,
             clip,
@@ -98,7 +99,12 @@ pub struct TfScene {
     pub reference: Option<PhaseReference>,
     pub traces: Vec<DisplayTrace>,
     pub legend: Vec<LegendEntry>,
+    /// Where the legend went (`None`: hidden or nothing to list): the UI moves, resizes and
+    /// scrolls it by this.
+    pub legend_box: Option<LegendBox>,
     pub cursor: Option<CursorReadout>,
+    /// The cursor values' plate.
+    pub readout_box: Option<Rect>,
     /// Reference trace's delay: `ref m1 12.34 ms · 4.24 m @ 20 °C`.
     pub delay: Option<String>,
     /// Present when coherence is drawn over the magnitude pane.
@@ -285,6 +291,107 @@ fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme
         theme.small_font_size,
         theme.text_dim,
     ));
+}
+
+/// The cursor values on a plate of their own: each on its trace's legend row, on the side of
+/// the plot away from the legend, the frequency above them (below when the pane title or the
+/// plot's top leaves no room). When that plate would run into the legend (a narrow pane,
+/// long names) the values go under the legend, or over it when it sits low, in the same
+/// order. With the legend hidden each value names its trace. Returns the plate.
+#[allow(clippy::too_many_arguments)]
+fn cursor_values(
+    c: &mut Canvas,
+    cr: &CursorReadout,
+    shown: &[DisplayTrace],
+    legend: Option<&LegendBox>,
+    area: Rect,
+    block: f32,
+    clip: Rect,
+    theme: &Theme,
+) -> Option<Rect> {
+    let font = theme.small_font_size;
+    let values = |r: &readout::CursorRow| format!("{}  {}  {}", r.magnitude, r.phase, r.coherence);
+    let lines = cr.rows.iter().filter_map(|r| {
+        let i = shown.iter().position(|t| t.key == r.key)?;
+        let text = match legend {
+            Some(_) => values(r),
+            None => format!("{}  {}", shown[i].name, values(r)),
+        };
+        Some((text, trace_stroke(&shown[i], false, theme).color, i))
+    });
+    let first_y = area.y + INSET + PAD_Y + ROW * 1.5;
+    let (right_side, mut rows): (bool, Vec<(String, Color, f32)>) = match legend {
+        Some(b) => (
+            b.rect.x + b.rect.w / 2.0 <= area.x + area.w / 2.0,
+            lines
+                .filter_map(|(t, col, i)| b.row_y(i).map(|y| (t, col, y)))
+                .collect(),
+        ),
+        None => (
+            true,
+            lines
+                .enumerate()
+                .map(|(k, (t, col, _))| (t, col, first_y + k as f32 * ROW))
+                .take_while(|l| l.2 + ROW / 2.0 + PAD_Y <= area.bottom() - INSET)
+                .collect(),
+        ),
+    };
+    let w = rows
+        .iter()
+        .map(|l| text_width(&l.0, font))
+        .chain([text_width(&cr.freq, font)])
+        .fold(0.0f32, f32::max)
+        + 2.0 * PAD_X;
+    let x = if right_side {
+        area.right() - INSET - w
+    } else {
+        area.x + INSET
+    };
+    if let Some(b) = legend
+        && !rows.is_empty()
+        && x < b.rect.right()
+        && x + w > b.rect.x
+    {
+        let need = (rows.len() + 1) as f32 * ROW + 2.0 * PAD_Y;
+        let top = if b.rect.bottom() + 2.0 + need <= area.bottom() {
+            b.rect.bottom() + 2.0
+        } else {
+            b.rect.y - 2.0 - need
+        };
+        for (k, l) in rows.iter_mut().enumerate() {
+            l.2 = top + PAD_Y + ROW * (k as f32 + 1.5);
+        }
+    }
+    let lo = rows.iter().map(|l| l.2).fold(f32::INFINITY, f32::min);
+    let hi = rows.iter().map(|l| l.2).fold(f32::NEG_INFINITY, f32::max);
+    // The pane title is at the left: on the right the frequency may share its line.
+    let ceiling = if right_side { block } else { area.y };
+    let freq_y = if rows.is_empty() {
+        area.y + INSET + PAD_Y + ROW / 2.0
+    } else if lo - ROW * 1.5 - PAD_Y >= ceiling {
+        lo - ROW
+    } else {
+        hi + ROW
+    };
+    let (top, bottom) = (lo.min(freq_y), hi.max(freq_y));
+    let rect = Rect::new(
+        x,
+        top - ROW / 2.0 - PAD_Y,
+        w,
+        bottom - top + ROW + 2.0 * PAD_Y,
+    );
+    crate::legend::plate(&mut c.overlay, rect, false, clip, theme);
+    let (tx, h) = if right_side {
+        (rect.right() - PAD_X, HAlign::Right)
+    } else {
+        (rect.x + PAD_X, HAlign::Left)
+    };
+    for (text, color, y) in std::iter::once((cr.freq.clone(), theme.text, freq_y)).chain(rows) {
+        let mut l = label(text, [tx, y], anchor(h, VAlign::Center), font, color);
+        l.clip = Some(clip);
+        c.overlay.labels.push(l);
+    }
+    Some(rect)
 }
 
 /// Builds the transfer view.
@@ -479,85 +586,41 @@ pub fn transfer_scene(
             readout::delay_readout(r.delay.0, view.temperature_c)
         )
     });
+    let mut legend_box = None;
+    let mut readout_box = None;
     if let Some(&(_, top)) = panes_at.first() {
-        let x0 = top.x + 8.0;
-        // The text block starts under the pane title, which in overlay mode sits under the
+        // The text starts under the pane title, which in overlay mode sits under the
         // coherence band.
         let block = coherence_overlay
             .as_ref()
             .map_or(top.y, |o: &CoherenceOverlay| o.band.bottom());
-        let y0 = block + 22.0;
-        for (i, (e, t)) in legend.iter().zip(&shown).enumerate() {
-            let y = y0 + i as f32 * ROW;
-            let color = trace_stroke(t, e.selected, theme).color;
-            legend_swatch(&mut c, x0, y, 12.0, color, e.selected, Some(top), theme);
-            let mut l = label(
-                e.text.clone(),
-                [x0 + 18.0, y],
-                anchor(HAlign::Left, VAlign::Center),
-                theme.small_font_size,
-                if e.stale { theme.text_dim } else { theme.text },
-            );
-            l.clip = Some(top);
-            c.overlay.labels.push(l);
-        }
-        if let Some(d) = &delay {
-            let mut l = label(
-                d.clone(),
-                [x0, y0 + legend.len() as f32 * ROW],
-                anchor(HAlign::Left, VAlign::Center),
-                theme.small_font_size,
-                theme.text_dim,
-            );
-            l.clip = Some(top);
-            c.overlay.labels.push(l);
+        let area_top = block + 16.0;
+        let area = Rect::new(top.x, area_top, top.w, (top.bottom() - area_top).max(1.0));
+        let texts: Vec<&str> = legend.iter().map(|e| e.text.as_str()).collect();
+        let notes: Vec<String> = delay.iter().cloned().collect();
+        let placed =
+            crate::legend::place(&view.tf.legend, area, &texts, &notes, theme.small_font_size);
+        if let Some(b) = &placed {
+            let styles: Vec<RowStyle> = legend
+                .iter()
+                .zip(&shown)
+                .map(|(e, t)| RowStyle {
+                    color: trace_stroke(t, e.selected, theme).color,
+                    dim: e.stale,
+                    selected: e.selected,
+                })
+                .collect();
+            crate::legend::draw(&mut c.overlay, b, &styles, view.tf.legend.hover, top, theme);
         }
         if let Some(cr) = &cursor {
-            let xr = top.right() - 8.0;
-            let mut l = label(
-                cr.freq.clone(),
-                [xr, block + 6.0],
-                anchor(HAlign::Right, VAlign::Top),
-                theme.small_font_size,
-                theme.text,
-            );
-            l.clip = Some(top);
-            c.overlay.labels.push(l);
-            let size = theme.small_font_size;
-            let row_text =
-                |r: &readout::CursorRow| format!("{}  {}  {}", r.magnitude, r.phase, r.coherence);
-            // Values sit on their trace's legend row; when any row would run into its legend
-            // text (a narrow pane, long names), all of them move below the legend block.
-            let collides = cr.rows.iter().any(|r| {
-                shown.iter().position(|t| t.key == r.key).is_some_and(|i| {
-                    let legend_end = x0 + 18.0 + text_width(&legend[i].text, size);
-                    legend_end + ROW > xr - text_width(&row_text(r), size)
-                })
-            });
-            let rows_y0 = if collides {
-                y0 + (legend.len() + usize::from(delay.is_some())) as f32 * ROW
-            } else {
-                y0
-            };
-            for row in &cr.rows {
-                let Some(i) = shown.iter().position(|t| t.key == row.key) else {
-                    continue;
-                };
-                let text = row_text(row);
-                let mut l = label(
-                    text,
-                    [xr, rows_y0 + i as f32 * ROW],
-                    anchor(HAlign::Right, VAlign::Center),
-                    theme.small_font_size,
-                    trace_stroke(&shown[i], false, theme).color,
-                );
-                l.clip = Some(top);
-                c.overlay.labels.push(l);
-            }
+            readout_box =
+                cursor_values(&mut c, cr, &shown, placed.as_ref(), area, block, top, theme);
+            // Under the plates: the line runs behind the legend, never through its text.
             for (_, plot) in &panes_at {
-                canvas::vline(&mut c.overlay, *plot, xm.to_px(cr.freq_hz), theme.cursor);
+                canvas::vline(&mut c.data, *plot, xm.to_px(cr.freq_hz), theme.cursor);
             }
         }
+        legend_box = placed;
     }
 
     TfScene {
@@ -567,7 +630,9 @@ pub fn transfer_scene(
         reference,
         traces: shown,
         legend,
+        legend_box,
         cursor,
+        readout_box,
         delay,
         coherence_overlay,
         strip: strip.rect,
@@ -819,17 +884,27 @@ mod tests {
             .iter()
             .find(|l| l.text == "t7 · Δt 0.00 ms")
             .expect("legend row");
-        // Swatch, swatch, then the bar: thicker swatch and the bar on the selected row.
+        // The two swatches (12 wide), the selected one thicker, and the bar on its row.
         let rects: Vec<Rect> = s.scene.layers[2].rects.iter().map(|r| r.rect).collect();
-        assert_eq!(rects.len(), 3, "{rects:?}");
-        assert_eq!(rects[0].h, 3.0);
-        assert_eq!(rects[1].h, 3.0 * SELECTED_WIDTH);
-        assert_eq!(
-            rects[2].y + rects[2].h / 2.0,
-            row.pos[1],
-            "on the selected row"
-        );
-        assert!(rects[2].right() < rects[1].x);
+        let swatches: Vec<&Rect> = rects.iter().filter(|r| r.w == 12.0).collect();
+        assert_eq!(swatches.len(), 2, "{rects:?}");
+        assert_eq!(swatches[0].h, 3.0);
+        assert_eq!(swatches[1].h, 3.0 * SELECTED_WIDTH);
+        let bar = rects
+            .iter()
+            .find(|r| r.w == 2.0 && r.h == 10.0)
+            .expect("bar");
+        assert_eq!(bar.y + bar.h / 2.0, row.pos[1], "on the selected row");
+        assert!(bar.right() < swatches[1].x);
+        // All of it on the plate.
+        let plate = s.legend_box.as_ref().expect("legend").rect;
+        assert!(rects.contains(&plate));
+        for r in [*swatches[0], *swatches[1], *bar] {
+            assert!(
+                r.x >= plate.x && r.right() <= plate.right(),
+                "{r:?} in {plate:?}"
+            );
+        }
     }
 
     #[test]
@@ -895,8 +970,14 @@ mod tests {
         let stroke = &s.scene.layers[1].polylines[1].stroke;
         assert!((stroke.color.a - Theme::dark().stale_alpha).abs() < 1e-6);
         assert_eq!(s.banners[0].text, "STALE · 3.2 s");
-        // Cursor line in every pane.
-        assert_eq!(s.scene.layers[2].polylines.len(), 3);
+        // Cursor line in every pane, with the curves: under the legend's plate.
+        let cursor_lines = s.scene.layers[1]
+            .polylines
+            .iter()
+            .filter(|p| p.stroke == Theme::dark().cursor)
+            .count();
+        assert_eq!(cursor_lines, 3);
+        assert!(s.scene.layers[2].polylines.is_empty());
         // The drawn strings include the legend and the cursor values.
         let labels: Vec<&str> = s.scene.layers[2]
             .labels
@@ -1259,13 +1340,21 @@ mod tests {
                 .map(|l| l.pos[1])
                 .expect(needle)
         };
-        // Wide: values share the legend rows.
+        // Wide: values share the legend rows, on a plate of their own at the right.
         let wide = build(1400.0);
         assert_eq!(row_y(&wide, "0.0 dB"), row_y(&wide, "Main left hang"));
-        // Narrow: values go below the legend and the delay line; nothing overlaps.
-        let narrow = build(460.0);
-        let legend_bottom = row_y(&narrow, "ref Main left hang");
-        assert!(row_y(&narrow, "0.0 dB") > legend_bottom);
+        let (legend, values) = (
+            wide.legend_box.as_ref().expect("legend").rect,
+            wide.readout_box.expect("values"),
+        );
+        assert!(values.x > legend.right());
+        // Narrow: the plates would meet, so the values go below the legend (its rows and
+        // delay line); nothing overlaps.
+        let narrow = build(360.0);
+        let legend = narrow.legend_box.as_ref().expect("legend").rect;
+        let values = narrow.readout_box.expect("values");
+        assert!(values.y >= legend.bottom(), "{values:?} below {legend:?}");
+        assert!(row_y(&narrow, "0.0 dB") > row_y(&narrow, "ref Main left hang"));
         let labels: Vec<&crate::primitives::Label> = narrow.scene.layers[2].labels.iter().collect();
         for (i, a) in labels.iter().enumerate() {
             for b in &labels[i + 1..] {
@@ -1277,5 +1366,130 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Eighteen curves: the legend stops at 70 % of the magnitude pane and scrolls, its rows on
+    /// a translucent plate in the plot's colour, the rest counted; the cursor values follow
+    /// the shown rows. The pointer on it makes the plate opaque.
+    #[test]
+    fn many_curves_scroll_on_a_plate() {
+        use crate::legend::LegendHover;
+        let a = cols(97);
+        let ts: Vec<TfTrace<'_>> = (0..18)
+            .map(|i| {
+                let mut t = trace(&a, TraceKey::Stored(TraceId(i)), 0.010);
+                t.name = format!("xc-xone-tf-cap {i}");
+                t
+            })
+            .collect();
+        let theme = Theme::light();
+        let mut view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        let build = |view: &ViewState| {
+            transfer_scene(
+                &ts,
+                &DisplayCache::default(),
+                &Status::default(),
+                view,
+                &theme,
+                SIZE,
+            )
+        };
+        let s = build(&view);
+        let b = s.legend_box.clone().expect("legend");
+        let mag = s.panes[0].plot;
+        assert!(b.rect.h <= 0.7 * mag.h, "{:?} in {mag:?}", b.rect);
+        assert!(b.shown > 3 && b.shown < 18, "{}", b.shown);
+        assert_eq!(b.more, Some(format!("{} below", 18 - b.shown)));
+        let overlay = &s.scene.layers[2];
+        let plate = overlay
+            .rects
+            .iter()
+            .find(|r| r.rect == b.rect)
+            .expect("plate");
+        assert_eq!(plate.color, theme.plot_background.with_alpha(0.88));
+        let on_plate = |y: f32| y > b.rect.y && y < b.rect.bottom();
+        for (text, y) in &b.rows {
+            let l = overlay
+                .labels
+                .iter()
+                .find(|l| &l.text == text)
+                .expect("row");
+            assert!(on_plate(l.pos[1]) && l.pos[1] == *y);
+            assert_eq!(l.color, theme.text);
+        }
+        // The values of the shown rows only, and the frequency.
+        let values = s.readout_box.expect("values");
+        let n = overlay
+            .labels
+            .iter()
+            .filter(|l| l.pos[1] > values.y && l.pos[1] < values.bottom() && l.pos[0] > values.x)
+            .count();
+        assert_eq!(n, b.shown + 1);
+        // Scrolled to the end, the pointer on it.
+        view.tf.legend.first = b.scrolled(100);
+        view.tf.legend.hover = Some(LegendHover::Plate);
+        let s = build(&view);
+        let b = s.legend_box.clone().expect("legend");
+        assert_eq!(b.first + b.shown, 18);
+        assert_eq!(
+            b.rows.last().map(|r| r.0.as_str()),
+            Some("xc-xone-tf-cap 17 · Δt 0.00 ms")
+        );
+        assert_eq!(b.more, Some(format!("{} above", 18 - b.shown)));
+        let plate = s.scene.layers[2]
+            .rects
+            .iter()
+            .find(|r| r.rect == b.rect)
+            .expect("plate");
+        assert_eq!(plate.color, theme.plot_background);
+    }
+
+    /// Snapped to the bottom-right corner, the legend sits there and the values move to the
+    /// left; hidden, no plate and each value names its trace.
+    #[test]
+    fn legend_corners_and_hidden() {
+        let a = cols(97);
+        let ta = trace(&a, TraceKey::Live(MeasId(1)), 0.010);
+        let tb = trace(&a, TraceKey::Live(MeasId(2)), 0.0115);
+        let mut view = ViewState {
+            cursor_hz: Some(1000.0),
+            ..ViewState::default()
+        };
+        view.tf
+            .legend
+            .snap(crate::legend::LegendCorner::BottomRight);
+        let build = |view: &ViewState| {
+            transfer_scene(
+                &[ta.clone(), tb.clone()],
+                &DisplayCache::default(),
+                &Status::default(),
+                view,
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let s = build(&view);
+        let mag = s.panes[0].plot;
+        let b = s.legend_box.as_ref().expect("legend");
+        assert_eq!(b.rect.right(), mag.right() - crate::legend::INSET);
+        assert_eq!(b.rect.bottom(), mag.bottom() - crate::legend::INSET);
+        let values = s.readout_box.expect("values");
+        assert_eq!(values.x, mag.x + crate::legend::INSET);
+        view.tf.legend.hidden = true;
+        let s = build(&view);
+        assert_eq!(s.legend_box, None);
+        let labels: Vec<&str> = s.scene.layers[2]
+            .labels
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        assert!(
+            labels.iter().any(|l| l.starts_with("m2  0.0 dB  ")),
+            "{labels:?}"
+        );
+        assert!(!labels.iter().any(|l| l.starts_with("m1 · ")), "{labels:?}");
     }
 }

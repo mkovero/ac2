@@ -31,6 +31,7 @@ pub mod finding;
 pub mod format;
 pub mod grid;
 pub mod ir;
+pub mod legend;
 pub mod leq;
 pub mod leq_preset;
 pub mod math;

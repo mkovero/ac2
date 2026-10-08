@@ -108,6 +108,18 @@ pub(crate) fn text_width(text: &str, size: f32) -> f32 {
     text.chars().count() as f32 * 0.62 * size
 }
 
+/// `text` cut to `width` with an ellipsis (no font metrics: [`text_width`]'s generous
+/// advance per character).
+pub(crate) fn cut_to(text: &str, width: f32, font: f32) -> String {
+    if text_width(text, font) <= width {
+        return text.to_string();
+    }
+    let n = (width / text_width("x", font)).floor() as usize;
+    let mut s: String = text.chars().take(n.saturating_sub(1)).collect();
+    s.push('…');
+    s
+}
+
 /// Plot background, grid from both axes' ticks, y labels left of the plot, x labels below
 /// it when `x_labels`, and the y-axis title inside the top-left corner.
 pub(crate) fn pane_frame(
