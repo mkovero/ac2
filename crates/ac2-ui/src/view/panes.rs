@@ -362,19 +362,27 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 format!("{n}  {}", pane.title()),
             )
         });
-        name.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
+        // No tooltip on the name: it would open over the top of the plot (where the legend
+        // sits) whenever the pointer crosses the title; the hint line carries it instead.
         if let Some(items) = &line {
             let strip = egui::Rect::from_min_max(
                 egui::pos2(rect.min.x + 2.0, bottom),
                 egui::pos2(rect.max.x - 2.0, rect.max.y - 2.0),
             );
             hint_line(ui, strip, items, ch);
-            ui.interact(
+            let line = ui.interact(
                 strip,
                 ui.id().with(("pane-hints", pane as u32)),
                 egui::Sense::hover(),
-            )
-            .on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
+            );
+            line.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Label,
+                    true,
+                    format!("{} keys", pane.title()),
+                )
+            });
+            line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
         }
         let mut x = label.right() + 10.0;
         if let Some(chip) = title_chip(app, ui, pane, title, x, ch) {
@@ -639,7 +647,7 @@ pub(crate) fn hint_galleys(
     })
 }
 
-/// The tooltip of a pane's title and hint line: every hint with the command's full title,
+/// The tooltip of a pane's hint line: every hint with the command's full title,
 /// and how to hide the line.
 fn hints_tooltip(
     ui: &mut egui::Ui,

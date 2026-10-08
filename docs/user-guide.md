@@ -2160,7 +2160,8 @@ smoothing · Shift+I IR · W maximise · Alt+↑ offset · H all keys`.
 - The keys are the ones bound now (a key changed in `keys.toml` shows its new chord; macOS
   shows `⌘ ⌥ ⇧`).
 - On a narrow pane the least used drop off first; **H all keys** always stays.
-- Hovering over a pane's name (or the line) lists the same keys with what each does;
+- Hovering over the hint line lists the same keys with what each does (the pane's name has
+  no tooltip: it would open over the top of the plot, where the legend sits);
   hovering over a clickable control (the **dB | %** toggle, **Stop**, a trace's colour dot
   or row, a measurement, a pane's measurement chip) names the key that does the same.
 - **Shift+H** (palette: *Key hints on / off*) turns the line off and on; the app remembers

@@ -2563,8 +2563,8 @@ fn key_hints() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "key_hints");
-    // The SPL title's tooltip.
-    h.get_by_label("4  SPL").hover();
+    // The SPL hint line's tooltip (the title has none: it would cover the plot's top).
+    h.get_by_label("SPL keys").hover();
     for _ in 0..6 {
         h.step();
     }
