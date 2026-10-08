@@ -44,8 +44,10 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024.
 - Put a new dependency in the crate's own `Cargo.toml`; don't edit `[workspace.dependencies]`
   in parallel branches.
 - Audio callback: no allocation, locks or syscalls.
-- CI must stay green on all three OS: after pushing, check the run (`gh run list --branch main`);
-  local runs are Linux only, so macOS/Windows breakage shows only there.
+- CI must stay green: after pushing, check the run (`gh run list --branch main`). Pushes run
+  Linux only; macOS/Windows run before each release or on demand
+  (`gh workflow run ci.yml --ref <branch> -f all_os=true`) — dispatch that after touching
+  platform code (audio backends, paths, packaging, `cfg(windows|macos)`).
 - Any change to what goes on the wire bumps `PROTO_VERSION` (pre-1.0: no compatibility);
   `fixtures/protocol/WIRE_LOCK` and its test enforce it.
 

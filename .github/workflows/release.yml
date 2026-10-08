@@ -60,6 +60,8 @@ jobs:
   ci:
     name: tests
     uses: ./.github/workflows/ci.yml
+    with:
+      all_os: true
 
   linux:
     name: package (linux)

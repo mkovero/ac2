@@ -4,8 +4,18 @@ on:
   push:
     branches: ["**"]
   pull_request:
-  # The release workflow runs the same gates before it packages anything.
+  # The release workflow runs the same gates on every OS before it packages anything.
   workflow_call:
+    inputs:
+      all_os:
+        type: boolean
+        default: false
+  # `gh workflow run ci.yml --ref <branch> -f all_os=true` runs the macOS/Windows jobs on demand.
+  workflow_dispatch:
+    inputs:
+      all_os:
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -44,7 +54,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Pushes check Linux only: deploys are built on the rigs, not from CI artifacts, and
+        # macOS/Windows run when asked (dispatch with all_os) and before every release.
+        os: ${{ fromJSON(inputs.all_os && '["ubuntu-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v5
 
@@ -89,7 +101,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.all_os && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v5
 
