@@ -183,7 +183,7 @@ jobs:
 
       - name: Upload golden-image diffs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: golden-images-${{ matrix.os }}
           path: target/golden-images/
