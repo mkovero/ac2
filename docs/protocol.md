@@ -1,4 +1,4 @@
-# ac2 protocol (version 1)
+# ac2 protocol
 
 Normative description of the wire protocol between `ac2d` and its clients. The Rust types
 in `crates/ac2-proto` are the implementation; `crates/ac2-proto/tests/doc_parity.rs` fails
@@ -737,7 +737,10 @@ Design: `docs/design/sweep-distortion.md`. `sweep.run {lease_token, meas, name}`
 sweep measurement `meas` (`MeasKind::Sweep`, `SweepConfig` above) with its settings:
 `sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`, `fade_in`, `fade_out`}, `tail`
 (silence recorded after each sweep: the room's decay and its noise, at most 20 s; nil or
-shorter = the analysis minimum, ≥ 1 s). `name` nil names the trace `Run <number>`.
+shorter = the analysis minimum, ≥ 1 s). The emitted sweep keeps the rate but starts up to two
+octaves below `start` (a whole number of cycles per rate constant, at least 1 Hz) and fades
+in up to `start` in place of `fade_in`, so a path's switch-on transient lies below the
+analysed band; responses are reported from `start`. `name` nil names the trace `Run <number>`.
 
 - Refused (`refused`) above the ceiling, or while the generator is not armed by the caller
   (arm with `gen.set` first: like firing, the run needs it), while it fires, while a
@@ -756,7 +759,7 @@ shorter = the analysis minimum, ≥ 1 s). `name` nil names the trace `Run <numbe
 - Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `meas`, `owner`,
   `name`,
   `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
-  (actual), `post_roll`, `repeats`, `gate`, `started_at`, `status` (`SweepStatus`, tagged by
+  (actual, of each emitted sweep), `post_roll`, `repeats`, `gate`, `started_at`, `status` (`SweepStatus`, tagged by
   `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`trace`} or `failed`
   {`reason`, `msg`}. `SweepFailure`: `stopped` (`gen.stop`, `gen.release`, forced takeover),
   `lease_expired`, `session_closed`, `dropout` (audio lost while recording), `no_reference`
@@ -1106,7 +1109,7 @@ layout as code.
 | field | type | meaning |
 |---|---|---|
 | `v` | u16 | protocol version |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `levels`, `session_levels`, `preview_levels`, `timing`, `ka`; equals the topic and the `meta` key |
+| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `timing`, `ka`; equals the topic and the `meta` key |
 | `seq` | u64 | per topic per incarnation; clients keep the max per topic when draining |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
