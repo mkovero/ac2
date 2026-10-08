@@ -40,6 +40,9 @@ guide explains the concepts and the everyday workflow.
   - [Room parameters (ISO 3382-1)](#room-parameters-iso-3382-1)
 - [Sessions](#sessions)
   - [Autosave](#autosave)
+- [Recording and replay](#recording-and-replay)
+  - [Recording](#recording)
+  - [Replay](#replay)
 - [Calibration and SPL](#calibration-and-spl)
   - [The Calibrations view](#the-calibrations-view)
   - [What the calibration labels say](#what-the-calibration-labels-say)
@@ -65,6 +68,7 @@ guide explains the concepts and the everyday workflow.
 | measure response and harmonic distortion with a sweep | [Sweep measurement](#sweep-measurement-response-and-harmonic-distortion) |
 | read dB SPL and Leq | [Calibration and SPL](#calibration-and-spl), [SPL meter](#spl-meter), [Leq windows and limits](#leq-windows-and-limits) |
 | save the work, or get it back after a crash | [Sessions](#sessions), [Autosave](#autosave) |
+| record the inputs and measure them again later | [Recording and replay](#recording-and-replay) |
 | look up a key | [Keyboard map](#keyboard-map) |
 | script it | [Command line](#command-line), [protocol.md](protocol.md) |
 
@@ -1288,6 +1292,62 @@ The autosave is kind to SD cards and batteries:
 
 <sub>[↑ Contents](#contents)</sub>
 
+## Recording and replay
+
+A **recording** keeps exactly what the converter delivered on the session's inputs, with
+what the operator was doing, so the measurements can be run again later (on another
+machine, with another build, with other settings) and a rig problem (a dropout, an odd
+transfer function) can be examined after the show. It is not a programme recorder: no
+compression, no outputs.
+
+### Recording
+
+- **App:** the palette's *Record* toggle (`Ctrl+K`, type `rec`) records every input of the
+  session; it stops by itself after the time set on Settings › **Recording** (one hour by
+  default, up to 8 h). The top bar shows `REC 1:23 · 23.0 MB` while it runs (the time is audio in the
+  file), then `recorded show · 1:23 · 23.0 MB (time limit)`, or the failure in warning
+  colour.
+- **CLI:** `ac2 rec start --max 10min [--in 1,2] [--max-size 2GB] [--name show]` (`--max` is
+  required), `ac2 rec stop`, `ac2 rec status`, `ac2 rec list`.
+
+One recording at a time. It ends, and the file is finished and kept, on stop, at its time or
+size limit, on a write error (disk full: everything before is kept), when the session closes
+or reopens, and when the daemon stops. A gap in the audio (an xrun, a disk too slow for the
+recorder) is never filled: the file holds only captured samples, and its sidecar says where
+they do not follow each other.
+
+Files, on the daemon's machine, in `recordings/` in the ac2 data directory
+(`ac2d --recordings <dir>` puts them elsewhere); a name is never reused:
+
+| File | Holds |
+|---|---|
+| `<name>.wav` | 32-bit float, the inputs in order, bit for bit as captured; RF64 past 4 GiB |
+| `<name>.ac2rec.json` | the sidecar: device, inputs with their mics and roles, calibrations, every measurement and generator change during the recording, and the gaps |
+
+### Replay
+
+**Replay** opens a session on the recording instead of a device: the running measurements
+analyse it as they did the live inputs, with the recorded device's calibrations and mic
+curves, and no outputs.
+
+- **App:** the palette's *Replay a recording as the session (name or path)…*.
+- **CLI:** `ac2 session replay <name|path> [--fast]`: a name from `ac2 rec list`, or the
+  path of a `.wav` or `.ac2rec.json`. Real time by default; `--fast` goes as fast as the
+  measurements take it, and never drops audio.
+
+A replay reproduces the recorded samples, blocks and gaps exactly. Results averaged over
+blocks (transfer function, spectrum, SPL) match the live run to rounding; anything paced by
+wall time (the RTA's averaging of noise, the per-second SPL log) matches closely only in a
+real-time replay.
+
+**A recorder's WAV:** `ac2 rec import ZOOM0001.WAV [--name bedroom] [--dir DIR]` turns a
+16-, 24- or 32-bit PCM or float WAV into a recording that `session replay` plays; it runs on
+this computer, no daemon needed. Used for the [band transfer](#4-a-recorder-in-the-bedroom).
+
+How it works and what is tested: [raw-capture.md](design/raw-capture.md).
+
+<sub>[↑ Contents](#contents)</sub>
+
 ## Calibration and SPL
 
 Inputs carry a **mic name** (**N** on the input in Settings › Inputs & outputs or
@@ -2318,6 +2378,7 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
 | `ac2 sweep run <meas>` | a run of a sweep measurement with its settings, stored under it |
 | `ac2 ir capture` | a sweep with its settings as flags: runs the sweep measurement with exactly those settings (made when there is none), the run stored under it |
+| `ac2 rec start / stop / status / list / import`, `ac2 session replay` | raw recording of the inputs, and replaying a recording as the session |
 | `ac2 trace capture / list / show / rename / display / slot / move / rm / average / import / export / smooth / mic` | stored traces; `list` says what each is filed under; `move <traces> --to MEAS` (or `--imported`) files them elsewhere |
 | `ac2 cal spl / electrical / curve import / curve rename / curve rm / use / list / rm` | sensitivity calibrations and the mic library |
 | `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
