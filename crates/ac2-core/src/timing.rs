@@ -84,6 +84,14 @@ pub struct TimingConfig {
     pub track_radius: i64,
     /// Minimum peak-to-sidelobe ratio (peak over RMS of all other lags), dB.
     pub psr_floor_db: f64,
+    /// Widest main lobe (at half the peak) a window may have to give an offset, s. The
+    /// lobe is about the inverse of the stimulus bandwidth. A narrowband window (a sweep's
+    /// first seconds, even a few hundred hertz wide) still has a clear peak, but where its
+    /// whitened band ends the leakage of the window's edges pulls the peak off the true lag
+    /// by a fraction of the lobe: tens of samples at a 500-lag lobe, a sample at 30, none
+    /// below 15 (96 kHz, 0.68 s windows). Against `jump_samples` that reads as a lock
+    /// elsewhere, a jump back, and a drift line tilted by the biased points.
+    pub max_lobe_s: f64,
     /// Generator-history level below which there is no stimulus, dBFS RMS.
     pub stimulus_floor_dbfs: f64,
     /// Loopback level below which a window is not measured, dBFS RMS.
@@ -125,6 +133,7 @@ impl TimingConfig {
             },
             track_radius: 64,
             psr_floor_db: 20.0,
+            max_lobe_s: 0.2e-3,
             stimulus_floor_dbfs: -100.0,
             loopback_floor_dbfs: -80.0,
             agree_samples: 1.0,
@@ -171,6 +180,8 @@ pub struct Peak {
     pub fraction: f64,
     /// Peak over RMS of all other lags (excluding the main lobe), dB.
     pub psr_db: f64,
+    /// Width of the main lobe where it stays at or above half the peak, lags.
+    pub lobe: usize,
 }
 
 /// Why a window with stimulus present produced no offset.
@@ -180,6 +191,8 @@ pub enum NoEstimate {
     LowLoopbackLevel,
     /// Correlation peak not clear enough.
     LowConfidence,
+    /// Peak clear but its lobe too wide to time to a sample ([`TimingConfig::max_lobe_s`]).
+    Narrowband,
 }
 
 /// Outcome of one window.
@@ -380,6 +393,11 @@ impl GccPhat {
             }
         }
         let side_rms = (side_e / side_n.max(1) as f64).sqrt();
+        let half = 0.5 * best;
+        let below = |k: usize| r[k % n].abs() < half;
+        let lo = (1..n / 2).find(|&d| below(k_best + n - d)).unwrap_or(n / 2);
+        let hi = (1..n / 2).find(|&d| below(k_best + d)).unwrap_or(n / 2);
+        let lobe = lo + hi - 1;
         let psr_db = 20.0 * (best / side_rms).log10();
         let delta = if k_best > 0 && k_best < span {
             let (ym, y0, yp) = (r[k_best - 1].abs(), best, r[k_best + 1].abs());
@@ -397,6 +415,7 @@ impl GccPhat {
             offset: range.max - k_best as i64,
             fraction: -delta,
             psr_db,
+            lobe,
         }))
     }
 
@@ -427,8 +446,16 @@ impl GccPhat {
             Outcome::NoEstimate(NoEstimate::LowLoopbackLevel)
         } else {
             match self.correlate(capture, reference, range)? {
-                Some(p) if p.psr_db >= cfg.psr_floor_db => Outcome::Offset(p),
-                _ => Outcome::NoEstimate(NoEstimate::LowConfidence),
+                // A wide lobe is the stimulus' own (a missing or unrelated loopback whitens to
+                // a narrow one), so it is judged before the peak's clarity.
+                Some(p) if p.lobe as f64 > cfg.max_lobe_s * cfg.sample_rate => {
+                    Outcome::NoEstimate(NoEstimate::Narrowband)
+                }
+                Some(p) if p.psr_db < cfg.psr_floor_db => {
+                    Outcome::NoEstimate(NoEstimate::LowConfidence)
+                }
+                Some(p) => Outcome::Offset(p),
+                None => Outcome::NoEstimate(NoEstimate::LowConfidence),
             }
         };
         Ok(WindowMeasurement {
@@ -771,6 +798,9 @@ impl TimingTracker {
                 }
                 self.reset_search();
             }
+            // The stimulus cannot be timed to a sample, which says nothing about the loopback:
+            // the state and the search stay as they are.
+            Outcome::NoEstimate(NoEstimate::Narrowband) => {}
             Outcome::NoEstimate(_) => {
                 if self.state == TimingState::NoStimulus {
                     self.state = TimingState::Acquiring;
