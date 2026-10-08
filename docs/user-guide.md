@@ -32,6 +32,12 @@ guide explains the concepts and the everyday workflow.
   - [Export and import](#export-and-import)
   - [Mic curve on a stored trace](#mic-curve-on-a-stored-trace)
 - [Sweep measurement: response and harmonic distortion](#sweep-measurement-response-and-harmonic-distortion)
+  - [Making and running a sweep (app)](#making-and-running-a-sweep-app)
+  - [The Sweep / distortion pane](#the-sweep--distortion-pane)
+  - [Progress strip](#progress-strip)
+  - [Sweeps from the CLI](#sweeps-from-the-cli)
+  - [Arrival](#arrival)
+  - [Room parameters (ISO 3382-1)](#room-parameters-iso-3382-1)
 - [Sessions](#sessions)
   - [Autosave](#autosave)
 - [Calibration and SPL](#calibration-and-spl)
@@ -1064,117 +1070,194 @@ speaker's output and on the loopback output; ac2 records the loopback (reference
 divides one by the other, and separates the harmonics, which arrive before the linear impulse
 response. Design and accuracy: [sweep-distortion.md](design/sweep-distortion.md).
 
-The sweep starts about two octaves below the asked start frequency at a rising level, reaching
-full level at the asked start, so the response and distortion are reported from the asked start
-(the extension adds a little to the duration). A path's switch-on transient in those first
-octaves would otherwise read as distortion. Mind the loudspeaker's excursion when asking for a
-very low start: the extension plays lower still, though below full level.
+The sweep starts about two octaves below the asked start frequency at a rising level,
+reaching full level at the asked start, so the response and distortion are reported from the
+asked start (the extension adds a little to the duration). A path's switch-on transient in
+those first octaves would otherwise read as distortion.
 
-- **App:** a sweep is a **measurement** like a transfer function: **Shift+S** (or **New sweep
-  measurement** in the palette) opens the dialog that makes one: reference, mic and the
-  speaker's output by name (the session's loopback output always plays too), the **level**
-  (typed, no default), 20 Hz – 20 kHz, duration (1 s quick look, 3 s default; 6 s and 12 s
-  lower the noise floor), repeats (each doubling lowers the floor by 3 dB), silence after,
-  name. The reference is the session's loopback input; a session without a loopback mapping
-  leaves it as "choose the reference", and the measurement is not made until one is picked.
-  **←/→** step a choice (→ longer / more) and stop at the ends; a text field's text is
-  selected when it gets the focus (**Ctrl+A** selects it again), so typing replaces it.
-  **Enter** makes the sweep measurement and **plays nothing**: it waits in the tree, and the
-  sweep pane comes up focused. **Space** on the sweep pane arms a run of the selected sweep
-  measurement with its settings (the safety of any stimulus: typed level, the rig's
-  maximum, the lease), **Enter** plays it, **Esc** stops (and discards it). Once the run has
-  played the stimulus is off (STIM OFF) and the lease is given back: nothing stays armed.
-  **Space** and **Enter** again run it again; each run is stored **under the measurement**
-  as *Run 1*, *Run 2* … (renamed with F2 like any trace). **Edit the selected measurement…**
-  (palette) changes a sweep measurement's settings for its next run. The newest run of the
-  selected sweep measurement is what the pane shows (or the run selected). The result opens the
-  **Sweep / distortion** pane (**Alt+5**): the fundamental's response above, the distortion
-  below. Where an order is within the noise it is drawn dashed at its own floor; the shading
-  is the noise under every order's floor. The **dB | %** toggle in the pane's title (or
-  **U**) switches the distortion between dB re fundamental and percent (a log axis: 0.01 %,
-  0.1 %, 1 %, …), readouts included. **G** steps the pane's views, one at a time, as in the
-  spectrum and SPL panes: response & distortion → the sweep's **impulse response** with the
-  harmonics' impulses marked (**Shift+G**: linear / log / ETC) → the **room parameters**
-  table alone, the whole pane, as large as it fits (read across a room; maximised with
-  **W**) → back; the view is remembered. **Shift+I** goes straight to the impulse response
-  and back. **N** steps through stored sweeps (selecting each), **Shift+W** hides the pane. A run is also a stored
-  trace, drawn in the transfer pane like any capture and listed under its sweep measurement (see *The measurement tree*).
-- **Progress strip:** while a sweep runs (from this app, another client or the CLI), a strip
-  drawn over the bottom of the panes — visible whichever pane is maximised, and never
-  resizing or moving them (not shown in full screen) — shows its name and level,
-  *sweep 1 of 2*, a bar and the time left (about the remaining repeats × (sweep + the
-  silence after it), counted from when each repeat began), then *analysing…*. Its
-  **Stop (Shift+Esc)** button, like **Shift+Esc** (from anywhere) or **Esc** (with no window
-  open), fades the output out, disarms the generator and discards the run; nothing is
-  stored.
-- **CLI:** `ac2 meas new sweep --ref 2 --meas 1 --out 1,2 --level -50dbfs --name "Genelec 1
-  m"` (`--from 20hz --to 20khz --duration 3s --repeats 1 --gate 5ms --tail 2s`) makes a sweep
-  measurement; `ac2 sweep run "Genelec 1 m"` runs it. `ac2 ir capture --ref 2 --mic 1 --out
-  1,2 --level -50dbfs` (same flags, `--name` names the run) runs the sweep measurement with
-  exactly those settings, making one (`Sweep 1`, …) when there is none: the same command
-  again is the next run of the same measurement. Like `gen`, both arm and wait:
-  **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. The daemon disarms the generator as soon
-  as the sweep has played (or failed); any client arms again for the next one. It then prints THD at 100 Hz, 1 kHz and
-  10 kHz and each order's highest point; `--json` gives the same as JSON lines.
-  `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
-  floor, THD), the analysis facts and the impulse response; `ac2 trace import` of that file
-  restores the sweep. The sweep's columns are uncorrected even when its mic has a curve:
-  `ac2 trace mic <sweep> <mic>` applies it.
-- **Arrival:** the sweep's arrival is the peak of its impulse response re the reference, to
-  a fraction of a sample (the peak interpolated band-limited: about a thousandth of a sample
-  on a clean path), shown to the µs where it has a finer part (`arrival 0.004 ms`). The
-  phase, the IR's t = 0 and an export's `delay_ms` and `sweep_info` `arrival` are referred to
-  that arrival, so a path's sub-sample delay leaves the phase rather than showing as a phase
-  lag rising with frequency. `ac2 trace delay-diff A B` prints the difference of two traces'
-  delays — for two sweeps, of their arrivals — to 0.1 µs with the path length it stands for
-  (`+3.7 µs · +1.3 mm @ 20 °C`; `--temp` sets the air temperature).
-- **Room parameters (ISO 3382-1):** every sweep also computes EDT, T20, T30, C50, C80 and
-  D50 of its impulse response per octave band (and one-third octave) and broadband
-  (`docs/design/room-metrics.md`). In the app, the sweep pane's impulse response
-  (**Shift+I**) shows the octave table under the plot when the pane is tall enough, and the
-  room view (**G** from the IR) shows it alone in large type. A value
-  the measurement cannot support is a word, never a number: `noise` (the decay meets the
-  noise too soon: T30 needs 45 dB of decay range, T20 35 dB, EDT and C/D 20 dB), `short`
-  (the decay is too short for that band's filter), `—` (no decay, e.g. an anechoic
-  measurement); T30 with `*` is a curved decay (more than 10 % above T20). The silence after
-  the sweep must hold the room's decay: the dialog's **Silence after** (1, 2, 4, 8 s) or
-  `--tail 4s` on the CLI; a hall of 2 s wants 4 s. `ac2 ir metrics <sweep> [--third]
-  [--json]` prints the table; `ac2 ir capture` prints the octave table after its summary;
-  the CSV export carries them.
+> Mind the loudspeaker's excursion when asking for a very low start: the extension plays
+> lower still, though below full level.
+
+### Making and running a sweep (app)
+
+A sweep is a **measurement** like a transfer function. **Shift+S** (or **New sweep
+measurement** in the palette) opens the dialog that makes one:
+
+| Field | Choices |
+|---|---|
+| reference | the session's loopback input; a session without a loopback mapping leaves it as "choose the reference", and the measurement is not made until one is picked |
+| mic, output | by name (the session's loopback output always plays too) |
+| **level** | typed, no default |
+| range | 20 Hz – 20 kHz |
+| duration | 1 s quick look, 3 s default; 6 s and 12 s lower the noise floor |
+| repeats | each doubling lowers the floor by 3 dB |
+| silence after | 1, 2, 4, 8 s: must hold the room's decay ([room parameters](#room-parameters-iso-3382-1)) |
+| name | |
+
+**←/→** step a choice (→ longer / more) and stop at the ends; a text field's text is
+selected when it gets the focus (**Ctrl+A** selects it again), so typing replaces it.
+
+Running it:
+
+1. **Enter** makes the sweep measurement and **plays nothing**: it waits in the tree, and the
+   sweep pane comes up focused.
+2. **Space** on the sweep pane arms a run of the selected sweep measurement with its
+   settings, with the safety of any stimulus: typed level, the rig's maximum, the lease.
+3. **Enter** plays it; **Esc** stops (and discards it).
+4. Once the run has played the stimulus is off (STIM OFF) and the lease is given back:
+   nothing stays armed. **Space** and **Enter** again run it again.
+
+Each run is stored **under the measurement** as *Run 1*, *Run 2* … (renamed with F2 like any
+trace). **Edit the selected measurement…** (palette) changes a sweep measurement's settings
+for its next run. A run is also a stored trace, drawn in the transfer pane like any capture
+and listed under its sweep measurement ([the measurement tree](#the-measurement-tree)).
+
+### The Sweep / distortion pane
+
+The result opens the **Sweep / distortion** pane (**Alt+5**): the fundamental's response
+above, the distortion below. It shows the newest run of the selected sweep measurement (or
+the run selected).
+
+- Where an order is within the noise it is drawn dashed at its own floor; the shading is the
+  noise under every order's floor.
 - A distortion value is only shown where it is at least 6 dB above the noise in its window;
   elsewhere it reads `< −72.0 dB` (`< 0.0251 %`: the floor). Lower the floor with repeats or
   a longer sweep, not with more level than the speaker should take.
+
+| Key | Does |
+|---|---|
+| **U** (or the **dB \| %** toggle in the title) | distortion in dB re fundamental or percent (a log axis: 0.01 %, 0.1 %, 1 %, …), readouts included |
+| **G** | steps the views: response & distortion → **impulse response** with the harmonics' impulses marked → **room parameters** table alone, the whole pane, as large as it fits (read across a room; maximised with **W**) → back. The view is remembered. |
+| **Shift+G** | IR view: linear / log / ETC |
+| **Shift+I** | straight to the impulse response and back |
+| **N** | steps through stored sweeps, selecting each |
+| **Shift+W** | hides the pane |
+
+### Progress strip
+
+While a sweep runs (from this app, another client or the CLI), a strip is drawn over the
+bottom of the panes. It is visible whichever pane is maximised, never resizes or moves them,
+and is not shown in full screen. It shows:
+
+- the sweep's name and level, *sweep 1 of 2*;
+- a bar and the time left (about the remaining repeats × (sweep + the silence after it),
+  counted from when each repeat began);
+- then *analysing…*.
+
+Its **Stop (Shift+Esc)** button, like **Shift+Esc** (from anywhere) or **Esc** (with no
+window open), fades the output out, disarms the generator and discards the run; nothing is
+stored.
+
+### Sweeps from the CLI
+
+```sh
+ac2 meas new sweep --ref 2 --meas 1 --out 1,2 --level -50dbfs --name "Genelec 1 m" \
+    [--from 20hz --to 20khz --duration 3s --repeats 1 --gate 5ms --tail 2s]
+ac2 sweep run "Genelec 1 m"
+ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs    # same flags; --name names the run
+```
+
+- `ac2 ir capture` runs the sweep measurement with exactly those settings, making one
+  (`Sweep 1`, …) when there is none: the same command again is the next run of the same
+  measurement.
+- Like `gen`, both arm and wait: **Enter** plays, **Esc**/**q**/**Ctrl-C** stops. The daemon
+  disarms the generator as soon as the sweep has played (or failed); any client arms again
+  for the next one.
+- Then it prints THD at 100 Hz, 1 kHz and 10 kHz and each order's highest point; `--json`
+  gives the same as JSON lines.
+- `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
+  floor, THD), the analysis facts and the impulse response; `ac2 trace import` of that file
+  restores the sweep.
+- The sweep's columns are uncorrected even when its mic has a curve:
+  `ac2 trace mic <sweep> <mic>` applies it.
+
+### Arrival
+
+The sweep's arrival is the peak of its impulse response re the reference, to a fraction of a
+sample (the peak interpolated band-limited: about a thousandth of a sample on a clean path),
+shown to the µs where it has a finer part (`arrival 0.004 ms`).
+
+- The phase, the IR's t = 0 and an export's `delay_ms` and `sweep_info` `arrival` are
+  referred to that arrival, so a path's sub-sample delay leaves the phase rather than
+  showing as a phase lag rising with frequency.
+- `ac2 trace delay-diff A B` prints the difference of two traces' delays (for two sweeps, of
+  their arrivals) to 0.1 µs with the path length it stands for
+  (`+3.7 µs · +1.3 mm @ 20 °C`; `--temp` sets the air temperature).
+
+### Room parameters (ISO 3382-1)
+
+Every sweep also computes EDT, T20, T30, C50, C80 and D50 of its impulse response per octave
+band (and one-third octave) and broadband ([room-metrics.md](design/room-metrics.md)).
+
+- In the app, the sweep pane's impulse response (**Shift+I**) shows the octave table under
+  the plot when the pane is tall enough, and the room view (**G** from the IR) shows it
+  alone in large type.
+- `ac2 ir metrics <sweep> [--third] [--json]` prints the table; `ac2 ir capture` prints the
+  octave table after its summary; the CSV export carries them.
+
+A value the measurement cannot support is a word, never a number:
+
+| Shown | Means |
+|---|---|
+| `noise` | the decay meets the noise too soon: T30 needs 45 dB of decay range, T20 35 dB, EDT and C/D 20 dB |
+| `short` | the decay is too short for that band's filter |
+| `—` | no decay, e.g. an anechoic measurement |
+| T30 with `*` | a curved decay (more than 10 % above T20) |
+
+The silence after the sweep must hold the room's decay: the dialog's **Silence after** (1, 2,
+4, 8 s) or `--tail 4s` on the CLI; a hall of 2 s wants 4 s.
 
 <sub>[↑ Contents](#contents)</sub>
 
 ## Sessions
 
-`ac2 session save <name>` (or **Session: save** in the palette) stores the measurements and
-traces, including slots, display edits (smoothing, a mic curve applied after capture; curves
-are saved as measured), sweep distortion and impulse responses, and each SPL meter's
-per-second log, in the daemon's session directory (`sessions/` in the ac2 data directory);
-`ac2 session load <name>` (**Session: load** in the palette) restores them and
-`ac2 session list` lists them. A path instead of a name saves or loads anywhere on the
-daemon's machine. Calibrations are not part of a session: they describe the machine's
-hardware and stay in its calibration store. A session saved with a different session format
-is refused with the version named. A loaded session always comes up disarmed: nothing plays
-until someone types a level and fires.
+| CLI | Palette | Does |
+|---|---|---|
+| `ac2 session save <name>` | **Session: save** | stores the session in the daemon's session directory (`sessions/` in the ac2 data directory) |
+| `ac2 session load <name>` | **Session: load** | restores it |
+| `ac2 session list` | | lists them |
+
+A path instead of a name saves or loads anywhere on the daemon's machine.
+
+A session holds:
+
+- the measurements and traces, including slots;
+- display edits (smoothing, a mic curve applied after capture; curves are saved as
+  measured);
+- sweep distortion and impulse responses;
+- each SPL meter's per-second log.
+
+Not in a session: **calibrations**. They describe the machine's hardware and stay in its
+calibration store.
+
+- A session saved with a different session format is refused with the version named.
+- A loaded session always comes up disarmed: nothing plays until someone types a level and
+  fires.
 
 ### Autosave
 
 A stand-alone daemon (`ac2d`, `ac2 daemon start`, the `ac2d` user service) also **autosaves**
-the same content — measurements, traces with sweep distortion and impulse responses, slots,
-display edits — shortly after every change (1.5 s after the last edit of a burst, at most
-10 s after the first) and once more when it stops. When it starts again, for example after
-`--max-level` was changed, it loads that autosave exactly like `session load`: disarmed, no
-audio session opened (open one as usual; restored measurements wait for it). Its log says
-what was restored.
+the same content (measurements, traces with sweep distortion and impulse responses, slots,
+display edits):
 
-The top bar shows the state next to the stimulus: *autosaved just now* / *autosaved 5 min
-ago*, *saving…* while a change is being written, and *autosave failed: <reason>* in warning
-colour when the disk refused (it retries; hover for the whole reason). `ac2 status` and
-`ac2 session status` print the same line. The daemon hosted inside the app does not autosave;
-save a session by name there.
+- shortly after every change: 1.5 s after the last edit of a burst, at most 10 s after the
+  first;
+- once more when it stops.
+
+When it starts again, for example after `--max-level` was changed, it loads that autosave
+exactly like `session load`: disarmed, no audio session opened (open one as usual; restored
+measurements wait for it). Its log says what was restored.
+
+> The daemon hosted inside the app does **not** autosave; save a session by name there.
+
+The top bar shows the state next to the stimulus (`ac2 status` and `ac2 session status`
+print the same line):
+
+| Shown | Means |
+|---|---|
+| *autosaved just now* / *autosaved 5 min ago* | saved |
+| *saving…* | a change is being written |
+| *autosave failed: <reason>* (warning colour) | the disk refused; it retries. Hover for the whole reason. |
 
 Files, in the ac2 data directory (`~/.local/share/ac2` on Linux, `~/Library/Application
 Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
@@ -1188,13 +1271,20 @@ Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
 
 Any of these loads by path: `ac2 session load ~/.local/share/ac2/autosave.unrestored`.
 
-The autosave is kind to SD cards and batteries: a write adds only the traces that changed,
-and an SPL meter's per-second log is a file the daemon appends to — the new rows every 30 s,
-synced to the card every 5 minutes and when the daemon stops. A running meter does not make
-the top bar say *saving…*. After a power cut a log is back up to its last few minutes; after
-a crash of the daemon alone, up to its last 30 s.
-`ac2d --no-restore` starts empty, `--autosave <dir>` puts the autosave elsewhere (one daemon
-per directory), `--no-autosave` keeps everything in memory only.
+The autosave is kind to SD cards and batteries:
+
+- a write adds only the traces that changed;
+- an SPL meter's per-second log is a file the daemon appends to: the new rows every 30 s,
+  synced to the card every 5 minutes and when the daemon stops. A running meter does not
+  make the top bar say *saving…*.
+- After a power cut a log is back up to its last few minutes; after a crash of the daemon
+  alone, up to its last 30 s.
+
+| Flag | Does |
+|---|---|
+| `ac2d --no-restore` | starts empty |
+| `--autosave <dir>` | puts the autosave elsewhere (one daemon per directory) |
+| `--no-autosave` | keeps everything in memory only |
 
 <sub>[↑ Contents](#contents)</sub>
 
