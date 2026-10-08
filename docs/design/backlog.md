@@ -3,6 +3,14 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to
 `backlog-done.md` with the commit when it lands.
 
+## Protocol tidy-up (2026-10-08, protocol.md audit)
+
+- **`EssSpec.fade_in` is mostly dead on the wire.** Since the sweep starts below the asked
+  band at a rising level (d418172), that extension is the fade-in, and a sweep run no longer
+  uses the field; it may still act only where no lower start fits. Either drop it from
+  `EssSpec` or state where it applies, in the same `PROTO_VERSION` bump as the next sweep
+  wire change.
+
 ## Timing precision (operator, 2026-10-07, after the REW cross-check)
 
 - **Sub-sample sweep arrival, fractional tracking, A − B arrival readout, and a group delay
