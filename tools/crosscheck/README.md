@@ -134,7 +134,7 @@ reach of Ctrl-C.
    - ac2's third-octave RTA,
    - a JACK recording analysed in numpy (FFT, analytic A/C weighting, the mic curve).
 2. **genelec** at −50 dBFS: out 1 → Genelec → mic on in 1; reference out 2 → in 2.
-3. **xone** at `--emit`: out 3 → Xone → in 5; reference out 2 → in 2. With
+3. **xone** at `--emit`: out 5 → Xone (L) → in 5; reference out 2 → in 2. With
    `--allow-electrical-level`, the drop-in is installed just before this stage.
 
 Each path stage runs these sub-stages (`--skip` takes their names):

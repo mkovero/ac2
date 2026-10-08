@@ -32,7 +32,7 @@ def test_full_scale_sine_convention():
 
 def test_nothing_without_emit():
     with pytest.raises(PolicyError, match="--emit"):
-        pol().check([3, 2], -50, speaker_stage=False)
+        pol().check([5, 2], -50, speaker_stage=False)
     with pytest.raises(PolicyError, match="--emit-speaker"):
         pol(emit="-50dbfs", path="genelec").check([1, 2], -50, speaker_stage=True)
 
@@ -42,8 +42,8 @@ def test_xone_never_touches_out_1():
     with pytest.raises(PolicyError):
         p.check([1, 2], -50, speaker_stage=False)
     with pytest.raises(PolicyError):
-        p.check([3, 1], -60, speaker_stage=False)
-    assert p.check([3, 2], -50, speaker_stage=False) == -50
+        p.check([5, 1], -60, speaker_stage=False)
+    assert p.check([5, 2], -50, speaker_stage=False) == -50
 
 
 def test_unknown_output_refused():
@@ -53,12 +53,12 @@ def test_unknown_output_refused():
 
 def test_electrical_above_rig_bound_needs_allowance():
     with pytest.raises(PolicyError, match="allow-electrical-level"):
-        pol(emit="-30dbfs").check([3, 2], -30, speaker_stage=False)
-    assert pol(emit="-30dbfs", allow="-30dbfs").check([3, 2], -30, speaker_stage=False) == -30
+        pol(emit="-30dbfs").check([5, 2], -30, speaker_stage=False)
+    assert pol(emit="-30dbfs", allow="-30dbfs").check([5, 2], -30, speaker_stage=False) == -30
     with pytest.raises(PolicyError, match="electrical cap"):
-        pol(emit="-8dbfs", allow="-8dbfs").check([3, 2], -8, speaker_stage=False)  # above pupu.toml's -10
+        pol(emit="-8dbfs", allow="-8dbfs").check([5, 2], -8, speaker_stage=False)  # above pupu.toml's -10
     with pytest.raises(PolicyError, match="above --emit"):
-        pol(emit="-40dbfs", allow="-30dbfs").check([3, 2], -35, speaker_stage=False)
+        pol(emit="-40dbfs", allow="-30dbfs").check([5, 2], -35, speaker_stage=False)
 
 
 def test_speaker_hard_ceiling_whatever_the_config():
@@ -81,7 +81,7 @@ def test_electrical_allowance_never_reaches_the_speaker():
 def test_speaker_stage_drives_one_speaker_beside_electrical_outputs():
     p = pol(speaker="-50dbfs", path="genelec")
     with pytest.raises(PolicyError, match="exactly one"):
-        p.check([2, 3], -50, speaker_stage=True)
+        p.check([2, 5], -50, speaker_stage=True)
 
 
 def test_stimulus_peak():
@@ -109,6 +109,6 @@ def test_fades_start_and_end_at_zero():
 def test_electrical_hard_backstop_whatever_the_config():
     loose = replace(pol(emit="-3dbfs", allow="-3dbfs"), electrical_max_dbfs=0.0)
     with pytest.raises(PolicyError, match="electrical cap"):
-        loose.check([3, 2], -3, speaker_stage=False)
+        loose.check([5, 2], -3, speaker_stage=False)
     ok = replace(pol(emit="-10dbfs", allow="-10dbfs"), electrical_max_dbfs=-10.0)
-    assert ok.check([3, 2], -10, speaker_stage=False) == -10
+    assert ok.check([5, 2], -10, speaker_stage=False) == -10

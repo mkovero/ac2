@@ -22,10 +22,14 @@ note = "Genelec 1083"
 port = "system:playback_2"
 role = "loopback"
 note = "cable to in 2 (reference)"
-[outputs.3]
-port = "system:playback_3"
+[outputs.5]
+port = "system:playback_5"
 role = "electrical"
-note = "Xone:62 to in 5"
+note = "Xone:62 ch 1 line L to master L, in 5 (balanced)"
+[outputs.6]
+port = "system:playback_6"
+role = "electrical"
+note = "Xone:62 ch 1 line R to master R, in 6"
 
 [inputs.1]
 port = "system:capture_1"
@@ -35,12 +39,15 @@ port = "system:capture_2"
 note = "loopback reference"
 [inputs.5]
 port = "system:capture_5"
-note = "Xone return"
+note = "Xone master L"
+[inputs.6]
+port = "system:capture_6"
+note = "Xone master R"
 
 # The two paths the suite measures. forbidden_outputs: refused in that path's stages.
 [paths.xone]
 kind = "electrical"
-out = 3
+out = 5
 ref_out = 2
 meas_in = 5
 ref_in = 2

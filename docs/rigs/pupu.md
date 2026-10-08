@@ -226,18 +226,22 @@ CSV, not against ac2's own summary:
 
 ## Wiring and FF400 reset recovery (2026-10-05)
 
-Measured with a −60 dBFS 1 kHz sine from ac2 on one output at a time, all eight captures read by
-an independent JACK client (`~/ac2-test/probe_levels.py`, venv `venv-meas`); crosstalk elsewhere
-below −118 dBFS:
+Rewired 2026-10-08 (balanced, more Xone gain). Measured with a −50 dBFS 1 kHz sine on one
+output at a time from an independent JACK client (the suite's `jackio`), all eight captures read;
+crosstalk elsewhere below −118 dBFS except the Xone's own L/R (−68 dB):
 
 | out | goes to | reads | gain |
 |---|---|---|---|
 | 1 | Genelec 1083 | — (never probed) | |
-| 2 | in 2 (loopback reference) | −57.6 dBFS | +2.4 dB |
-| 3 | Xone:62 ch 1 (RCA L) → Xone mono out → in 5 (no speaker on the Xone; EQ off) | −74.8 dBFS | −14.8 dB (Xone gain/fader) |
-| 4 | in 6 | −66.0 dBFS | −6.0 dB |
-| 5 | in 7 | −66.1 dBFS | −6.1 dB |
-| 6 | in 8 | −66.1 dBFS | −6.1 dB |
+| 2 | in 2 (loopback reference) | −47.6 dBFS | +2.4 dB |
+| 3, 4 | nothing | — | |
+| 5 | Xone:62 ch 1 line L (RCA) → master L → in 5, balanced (no speaker on the Xone) | −47.2 dBFS | +2.8 dB |
+| 6 | Xone:62 ch 1 line R → master R → in 6 | −47.2 dBFS | +2.8 dB |
+
+The FF400's jacks: ins 1–4 on the front, 5–8 on the back. In silence in 5/6 hold the Xone's noise
+(−90 dBFS rms) and hum at −111 dBFS (50, 150 Hz). Before 2026-10-08: out 3 → Xone (unbalanced,
+−14.8 dB) → in 5, outs 4–6 → ins 6–8 at −6 dB; the runs and notes below up to that date are on
+that wiring.
 
 In 1 is the MM1 (phantom, mic gain 20); ins 3–4 are empty. Session:
 `session open --backend jack --in 1-8 --outputs 6 --loopback-out 2 --loopback-in 2 --mic "1=MM1 34804"`.
