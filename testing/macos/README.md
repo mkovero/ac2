@@ -10,8 +10,8 @@ stability. Install and first start (microphone prompt) were confirmed on 2026-10
 The build is a universal disk image (Apple silicon and Intel, macOS 11 or newer), unsigned
 for now.
 
-1. The disk image `ac2-0.0.0-dev.9-macos-universal.dmg` (main 9dc4274, built
-   2026-10-05) is in this directory, with `SHA256SUMS` beside it (check with
+1. The disk image `ac2-0.0.0-dev.10-macos-universal.dmg` (built 2026-10-08;
+   the code of main 81fcb14, build id e415ef1) is in this directory, with `SHA256SUMS` beside it (check with
    `shasum -a 256 -c SHA256SUMS --ignore-missing`). The `.zip` beside it holds the same
    programs unpacked, for use without the disk image.
 2. Open the .dmg and drag **ac2** to Applications. If a previous ac2 is there, replace it.
@@ -96,6 +96,18 @@ With a speaker and mic instead of the second cable: same steps at a quiet level.
 should match the mic distance (about 2.9 ms per metre); magnitude shows the speaker and
 room.
 
+**Sweep over the cable** (same wiring, stimulus stopped):
+
+1. **Shift+S** opens *New sweep measurement*: reference input 1, mic input 2, output 2
+   (output 1, the loopback, always plays too), level `-40`, 3 s, **Enter**. Nothing plays
+   yet; the **Sweep / distortion** pane comes up.
+2. **Space** arms, **Enter** plays. A strip at the bottom counts down, then *analysing…*.
+3. Expect a flat response near 0 dB across the band and distortion far down (H2, H3 well
+   below −80 dB, or drawn dashed at the noise floor). The arrival is about 0 ms.
+4. **G** steps to the impulse response (one sharp peak) and the room table (mostly `—` over
+   a cable: there is no decay). Note anything odd, and whether the run finished without a
+   dropout warning.
+
 ## 5. Test 3: spectrum, RTA and the SPL meter
 
 Pass: each view shows live data that moves with the signal, and the SPL meter reads
@@ -131,7 +143,20 @@ crash.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
 
-## 7. What to send back
+## 7. Optional: record and replay
+
+Checks the file writes and the replay path on macOS.
+
+1. With the session open and pink noise playing, **Ctrl+K**, type `rec`, **Enter** on
+   *Record: raw audio of every input on / off*. The top bar shows `REC 0:12 · … MB`. After
+   a minute, the same command again stops it; the top bar names the recording
+   (`recorded rec-… · 1:00 · … MB`).
+2. **Shift+Esc** stops the stimulus. **Ctrl+K → Replay a recording as the session (name or
+   path)…**, type that name, **Enter**. The measurements should show the same curves as
+   live. Note what the app shows when the recording ends.
+3. The files are in `~/Library/Application Support/ac2/recordings/`. Note their size.
+
+## 8. What to send back
 
 A short note per test is enough; failures with a screenshot and the log are the most
 useful.
@@ -143,8 +168,10 @@ useful.
 | ac2 version (top bar, *build …*) | |
 | Test 1: interface listed, input meters move, session opens (rate / buffer shown) | |
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence) | |
+| Test 2 sweep: flat response, distortion level, arrival; finished cleanly? | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
 | Test 4: 1 h run clean? CPU %, memory and battery at start and end | |
+| Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |
 | Any banner, freeze, crash or odd behaviour | |
