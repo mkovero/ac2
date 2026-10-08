@@ -81,7 +81,11 @@ name = "ac2-paths"
 version = "0.0.0"
 dependencies = [
  "directories",
+ "log",
  "tempfile",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -164,6 +168,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]

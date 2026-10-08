@@ -12,6 +12,7 @@ guide explains the concepts and the everyday workflow.
 ## Contents
 
 - [How the pieces fit](#how-the-pieces-fit)
+  - [Log files](#log-files)
   - [Audio backends](#audio-backends)
   - [Settings](#settings)
   - [Inputs & outputs and Audio](#inputs--outputs-and-audio)
@@ -111,6 +112,24 @@ ac2 meas new tf --ref 1 --meas 3 --name sub
 ac2 meas new rta --input 2 --name rta
 ac2 meas start main-l
 ```
+
+### Log files
+
+The app and a daemon started by hand write what they do (sessions opened, devices lost,
+capture discontinuities, *audio arrives in bursts*, errors) to their terminal and to a file,
+which is what to attach to a bug report:
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| directory | `~/.local/state/ac2` (`$XDG_STATE_HOME/ac2`) | `~/Library/Logs/ac2` (Console.app lists it) | `%LOCALAPPDATA%\ac2\logs` |
+
+`ac2-ui.log` is the app's, with the daemon it hosts; `ac2d.log` a standalone daemon's. Each
+start moves the previous run's file to `ac2-ui.log.1` / `ac2d.log.1`, so the log of a run that
+went wrong survives one restart. A daemon run by systemd (`systemctl --user`, a rig's
+service) writes no file: its log is in the journal (`journalctl --user -u ac2d`).
+`RUST_LOG` chooses what is logged (default `warn,ac2=info`; `RUST_LOG=debug` for
+everything); `AC2_LOG_DIR` moves the files. The app's notifications are not in the file;
+*Recent notifications…* lists them ([Notifications](#notifications)).
 
 ### Audio backends
 

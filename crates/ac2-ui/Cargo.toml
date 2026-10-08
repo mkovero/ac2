@@ -28,7 +28,7 @@ embedded = ["dep:ac2d"]
 ac2-client = { path = "../ac2-client" }
 ac2-discovery = { path = "../ac2-discovery" }
 ac2d = { path = "../ac2d", optional = true }
-ac2-paths = { path = "../ac2-paths" }
+ac2-paths = { path = "../ac2-paths", features = ["log"] }
 ac2-plot = { path = "../ac2-plot" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
@@ -40,6 +40,7 @@ eframe = { version = "0.36.2", default-features = false, features = ["default_fo
 egui-wgpu = "0.36.2"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.53", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tracing = "0.1"
 toml = "0.8"
 
 [dev-dependencies]

@@ -22,7 +22,7 @@ path = "src/main.rs"
 ac2-audio = { path = "../ac2-audio" }
 ac2-core = { path = "../ac2-core" }
 ac2-discovery = { path = "../ac2-discovery" }
-ac2-paths = { path = "../ac2-paths" }
+ac2-paths = { path = "../ac2-paths", features = ["log"] }
 ac2-proto = { path = "../ac2-proto" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
@@ -33,9 +33,9 @@ num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ac2-client = { path = "../ac2-client" }
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time"] }
 rmp-serde = "1.3"

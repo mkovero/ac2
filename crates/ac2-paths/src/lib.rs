@@ -7,13 +7,21 @@
 //! |---|---|---|---|
 //! | config ([`config_dir`]) | `~/.config/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\config` |
 //! | data ([`data_dir`]) | `~/.local/share/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\data` |
+//! | logs ([`log_dir`]) | `~/.local/state/ac2` | `~/Library/Logs/ac2` | `%LOCALAPPDATA%\ac2\logs` |
 //!
 //! Config holds what belongs to this machine and user: the calibration store (it describes
 //! the hardware, not a show), UI preferences, key bindings, the daemon's network keys. Data
 //! holds the operator's documents: saved sessions and the daemon's autosave. `XDG_CONFIG_HOME` / `XDG_DATA_HOME` are
 //! honoured on Linux; `AC2_CONFIG_DIR` and `AC2_SESSION_DIR` override for tests and
 //! unusual setups.
+//!
+//! Logs are neither: they are disposable diagnostics of this machine, so each OS's own log
+//! location ([`log_dir`]). With the `log` feature, [`log`] installs the shared tracing
+//! subscriber (stderr plus a per-program file there).
 #![forbid(unsafe_code)]
+
+#[cfg(feature = "log")]
+pub mod log;
 
 use std::fs;
 use std::io::{self, Write};
@@ -44,6 +52,37 @@ pub fn config_dir() -> PathBuf {
 /// Per-user data directory (table above). Without a home directory: `./ac2-data`.
 pub fn data_dir() -> PathBuf {
     project().map_or_else(|| PathBuf::from("ac2-data"), |d| d.data_dir().to_path_buf())
+}
+
+/// Per-user log directory: `$AC2_LOG_DIR`, else the platform's place for logs (table above).
+/// XDG puts logs under state (`$XDG_STATE_HOME`), not data, because they are not documents
+/// worth backing up; macOS Console.app lists `~/Library/Logs`; Windows keeps logs out of the
+/// roaming profile, in `%LOCALAPPDATA%`. Without a home directory: `./ac2-logs`.
+pub fn log_dir() -> PathBuf {
+    env_dir("AC2_LOG_DIR").unwrap_or_else(|| {
+        directories::BaseDirs::new()
+            .map_or_else(|| PathBuf::from("ac2-logs"), |b| platform_log_dir(&b))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn platform_log_dir(b: &directories::BaseDirs) -> PathBuf {
+    b.home_dir().join("Library").join("Logs").join("ac2")
+}
+
+#[cfg(windows)]
+fn platform_log_dir(b: &directories::BaseDirs) -> PathBuf {
+    b.data_local_dir().join("ac2").join("logs")
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn platform_log_dir(b: &directories::BaseDirs) -> PathBuf {
+    b.state_dir()
+        .map_or_else(
+            || b.home_dir().join(".local").join("state"),
+            Path::to_path_buf,
+        )
+        .join("ac2")
 }
 
 /// The daemon's calibration store: `<config>/calibrations.json`.
@@ -155,6 +194,31 @@ mod tests {
         assert_eq!(autosave_dir(), data_dir().join("autosave"));
         if std::env::var_os("AC2_SESSION_DIR").is_none() {
             assert_eq!(session_dir(), data_dir().join("sessions"));
+        }
+    }
+
+    /// Logs go where each OS keeps them: XDG state on Linux, `~/Library/Logs` on macOS,
+    /// the local (non-roaming) app data on Windows.
+    #[test]
+    fn log_dir_follows_the_platform() {
+        if std::env::var_os("AC2_LOG_DIR").is_some() {
+            return;
+        }
+        let d = log_dir();
+        let b = directories::BaseDirs::new().expect("a home directory");
+        #[cfg(target_os = "macos")]
+        assert_eq!(d, b.home_dir().join("Library/Logs/ac2"));
+        #[cfg(windows)]
+        {
+            assert_eq!(d, b.data_local_dir().join("ac2").join("logs"));
+            assert!(d.ends_with("AppData\\Local\\ac2\\logs"), "{}", d.display());
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            assert_eq!(d, b.state_dir().expect("XDG state dir").join("ac2"));
+            if std::env::var_os("XDG_STATE_HOME").is_none() {
+                assert_eq!(d, b.home_dir().join(".local/state/ac2"));
+            }
         }
     }
 

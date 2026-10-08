@@ -50,7 +50,9 @@ Audio / WASAPI) on macOS and Windows.
   -V, --version          print the version and build id
   -h, --help             this text
 
-Logging: RUST_LOG (default info).";
+Logging: RUST_LOG (default warn,ac2=info) to stderr; when not started by systemd
+(which keeps stderr in the journal) also to ac2d.log in the ac2 log directory
+(~/.local/state/ac2 on Linux), the previous run's kept as ac2d.log.1.";
 
 #[derive(Debug)]
 struct Args {
@@ -137,12 +139,6 @@ fn parse() -> Result<Option<Args>, String> {
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
     let args = match parse() {
         Ok(Some(a)) => a,
         Ok(None) => {
@@ -154,6 +150,18 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // systemd sets JOURNAL_STREAM when stderr goes to the journal, which already keeps and
+    // rotates the log; a second copy on disk would only grow.
+    let file_dir = std::env::var_os("JOURNAL_STREAM")
+        .is_none()
+        .then(ac2_paths::log_dir);
+    if let Some(path) = ac2_paths::log::init_in(file_dir.as_deref(), "ac2d") {
+        tracing::info!(
+            "ac2d {}: logging to {}",
+            env!("CARGO_PKG_VERSION"),
+            path.display()
+        );
+    }
     let backends = match ac2d::backends(args.backend) {
         Ok(b) => b,
         Err(e) => {
