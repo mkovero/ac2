@@ -7,7 +7,7 @@ Open-source (MIT) live dual-channel analyzer for PA tuning. Clean-slate successo
 ## Build
 ```
 cargo build --workspace
-cargo nextest run --workspace        # what CI runs (.config/nextest.toml); plain `cargo test --workspace` works too
+cargo nextest run --workspace        # quick tier (see Tests)
 cargo test --workspace --doc         # doctests (nextest skips them)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
@@ -17,16 +17,17 @@ binary, `tests/it/` (a module per area): `cargo test -p ac2d --test it leq::`. A
 its process to itself (global allocator, process CPU time) stays a separate file in `tests/`.
 
 ## Tests: quick tier and full tier
-Real-time tests (Leq windows, device recovery, drift, band Leq, the CLI rig tests) take
-20–35 s each. Don't run them on every iteration:
-- **Quick tier**: iteration and an agent's pre-commit run. Skips the lengthy tests:
-  ```
-  cargo nextest run --workspace -E 'not (binary(leq) | binary(recovery) | binary(band_leq) | binary(drift) | binary(leq_rig) | binary(band_rig) | binary(drift_rig) | binary(recovery_rig) | test(/^spl::/))'
-  ```
-  plus `cargo test --workspace --doc` when docs changed.
-- **Full tier**: everything (`cargo nextest run --workspace`, or plain `cargo test --workspace`)
-  — the lead runs it once before pushing to main, and CI runs it on every push.
-- In nextest, `-j` means test threads; build jobs are `--build-jobs N`.
+A test whose function name starts with `slow_` needs seconds of real time (Leq windows
+filling, device recovery backoffs, drift, the app driven end to end on the real-time rig).
+Name a test `slow_…` when it takes about 5 s or more once its waits are as short as what it
+checks allows. Profiles are in `.config/nextest.toml`:
+- **Quick tier**: `cargo nextest run --workspace` (default profile, skips `slow_*`) —
+  iteration and an agent's pre-commit run; plus `cargo test --workspace --doc` when docs changed.
+- **Full tier**: `cargo nextest run --workspace --profile full` and
+  `cargo test --workspace --doc` — once before merging to main; CI runs it (`--profile ci`)
+  on every push. Plain `cargo test --workspace` also runs everything.
+- In nextest, `-j` means test threads; build jobs are `--build-jobs N`. One area of one
+  crate: `cargo nextest run -p ac2d -E 'test(/^leq::/)'`.
 
 ## Crate map
 | crate | role |
