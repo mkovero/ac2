@@ -501,7 +501,8 @@ fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
             Stream::Ir => &[PaneKind::Ir],
             Stream::Spec | Stream::Rta => &[PaneKind::Spectrum],
             Stream::Spl | Stream::Leq => &[PaneKind::Spl],
-            Stream::Levels => &[],
+            // No pane draws the band meter yet.
+            Stream::Levels | Stream::BandLeq => &[],
         },
         _ => &[],
     }

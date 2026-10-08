@@ -45,6 +45,7 @@ fn meas_config(name: &str) -> MeasConfig {
         name: name.into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                bands: None,
                 input: 2,
                 weighting: Weighting::A,
                 time_weighting: TimeWeighting::Fast,

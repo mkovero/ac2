@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{LeqJudgement, LeqWindow, LevelScale, PeakQuantity, PositionCorrection, Weighting};
-use crate::units::{Db, DbSpl, Dbfs, MeasId, Seconds, WallNs};
+use crate::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds, WallNs};
 
 /// The per-second log of an SPL meter and the state of its Leq windows
 /// (`docs/design/leq.md`). Changes only when a window's judgement changes, the windows
@@ -106,6 +106,13 @@ pub enum AlarmSubject {
         /// LCpeak or LAFmax.
         quantity: PeakQuantity,
     },
+    /// A 1/3-octave band window of the band meter (its limit at the mic).
+    Band {
+        /// Nominal centre.
+        nominal: Hz,
+    },
+    /// The band meter's predicted dwelling LAeq window.
+    Predicted,
 }
 
 impl AlarmSubject {
@@ -113,7 +120,7 @@ impl AlarmSubject {
     pub fn duration(&self) -> Option<Seconds> {
         match self {
             AlarmSubject::Window { duration, .. } => Some(*duration),
-            AlarmSubject::Peak { .. } => None,
+            AlarmSubject::Peak { .. } | AlarmSubject::Band { .. } | AlarmSubject::Predicted => None,
         }
     }
 }

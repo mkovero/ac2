@@ -1286,6 +1286,13 @@ impl Shared {
                 self.spl_log_for(&m);
                 ReplyBody::Ack { rev: self.rev }
             }
+            C::SplBandTransfer { meas, .. } => {
+                self.spl_meter(meas)?;
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake daemon runs no band meter",
+                ));
+            }
             C::StateSnapshot => ReplyBody::Snapshot(Box::new(StateSnapshot {
                 state: self.state.clone(),
                 rev: self.rev,

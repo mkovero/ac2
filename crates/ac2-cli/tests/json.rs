@@ -246,7 +246,8 @@ async fn session_meas_delay_trace_flow() -> R {
                         "horizon": 60.0,
                         "peaks": { "lcpeak": null, "lafmax": null }
                     },
-                    "position": null
+                    "position": null,
+                    "bands": null
                 }}
             },
             "config_rev": 2,

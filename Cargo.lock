@@ -188,6 +188,7 @@ dependencies = [
  "ac2-proto",
  "ac2-traces",
  "ac2-zmq",
+ "chrono",
  "ctrlc",
  "getrandom 0.3.4",
  "jack",

@@ -150,6 +150,7 @@ pub fn spl(name: &str, input: u16) -> MeasConfig {
         name: name.into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                bands: None,
                 input,
                 weighting: ac2_proto::model::Weighting::Z,
                 time_weighting: ac2_proto::model::TimeWeighting::Fast,

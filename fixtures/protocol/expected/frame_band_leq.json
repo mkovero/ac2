@@ -1,0 +1,152 @@
+{
+ "topic": "d/4/band_leq",
+ "header": {
+  "v": 26,
+  "kind": "band_leq",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 8,
+  "n": 0,
+  "arrays": [],
+  "meta": {
+   "band_leq": {
+    "scale": "db_spl",
+    "cal": {
+     "type": "verified",
+     "calibrated_at": 1789000000000000000,
+     "basis": {
+      "type": "electrical",
+      "connection": "injected",
+      "mic_sensitivity": 15.0,
+      "data_sheet": false,
+      "uncertainty": 1.0
+     }
+    },
+    "mic_curve": true,
+    "duration": 3600.0,
+    "horizon": 60.0,
+    "elapsed": 1800.0,
+    "measured": 1790.0,
+    "period": "night",
+    "period_after_horizon": "night",
+    "correction": 5.0,
+    "limits_from": "transferred",
+    "bands": [
+     {
+      "nominal": 20.0,
+      "leq": 40.0,
+      "limit": 90.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 85.25,
+      "recover": null
+     },
+     {
+      "nominal": 25.0,
+      "leq": 44.5,
+      "limit": 88.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 84.25,
+      "recover": null
+     },
+     {
+      "nominal": 31.5,
+      "leq": 49.0,
+      "limit": 86.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 83.25,
+      "recover": null
+     },
+     {
+      "nominal": 40.0,
+      "leq": 53.5,
+      "limit": 84.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 82.25,
+      "recover": null
+     },
+     {
+      "nominal": 50.0,
+      "leq": 58.0,
+      "limit": 82.0,
+      "judgement": "near",
+      "on_course": true,
+      "allowed": 81.25,
+      "recover": null
+     },
+     {
+      "nominal": 63.0,
+      "leq": 62.5,
+      "limit": 80.0,
+      "judgement": "over",
+      "on_course": false,
+      "allowed": null,
+      "recover": 412.0
+     },
+     {
+      "nominal": 80.0,
+      "leq": 67.0,
+      "limit": 78.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 79.25,
+      "recover": null
+     },
+     {
+      "nominal": 100.0,
+      "leq": 71.5,
+      "limit": 76.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 78.25,
+      "recover": null
+     },
+     {
+      "nominal": 125.0,
+      "leq": 76.0,
+      "limit": 74.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 77.25,
+      "recover": null
+     },
+     {
+      "nominal": 160.0,
+      "leq": 80.5,
+      "limit": 72.0,
+      "judgement": "ok",
+      "on_course": false,
+      "allowed": 76.25,
+      "recover": null
+     },
+     {
+      "nominal": 200.0,
+      "leq": 85.0,
+      "limit": null,
+      "judgement": "no_limit",
+      "on_course": false,
+      "allowed": null,
+      "recover": null
+     }
+    ],
+    "worst": 5,
+    "predicted": {
+     "estimate": 23.5,
+     "at_most": 27.25,
+     "limit": 25.0,
+     "judgement": "near"
+    }
+   }
+  }
+ },
+ "arrays": {}
+}

@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, MeasKind, Measurement,
-    PeakQuantity, SplHistory, SplLog, SplLogWhich, Weighting,
+    AlarmSubject, BAND_COUNT, BandLevelSource, BandTransferSet, LeqAlarm, LeqAlarmKind, LeqConfig,
+    LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog, SplLogWhich, Weighting,
 };
-use ac2_proto::units::{MeasId, Rev, WallNs};
+use ac2_proto::units::{ClientId, MeasId, Rev, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 use ac2_traces::session::{SavedSplLog, SplLogOnDisk};
 use ac2_traces::spl_log::SplLogInfo;
@@ -48,6 +48,8 @@ fn subject_name(s: &AlarmSubject) -> String {
         AlarmSubject::Peak {
             quantity: PeakQuantity::LafMax,
         } => "LAFmax".into(),
+        AlarmSubject::Band { nominal } => format!("{} Hz band Leq", nominal.0),
+        AlarmSubject::Predicted => "predicted dwelling LAeq".into(),
     }
 }
 
@@ -161,6 +163,7 @@ impl Control {
                 .unwrap_or_default(),
             peak_judgements: PeakQuantity::ALL
                 .map(|q| entity.map_or(LeqJudgement::NoLimit, |l| l.peaks.get(q).judgement)),
+            local: self.s.local_clock,
         }
     }
 
@@ -399,9 +402,13 @@ impl Control {
     pub(super) fn saved_spl_logs(&self) -> Vec<SavedSplLog> {
         self.spl_log_infos()
             .into_iter()
-            .map(|(info, log)| SavedSplLog {
-                info,
-                rows: leq_log::lock(log).rows(),
+            .map(|(info, log)| {
+                let l = leq_log::lock(log);
+                SavedSplLog {
+                    info,
+                    rows: l.rows(),
+                    bands: l.band_rows(),
+                }
             })
             .collect()
     }
@@ -411,16 +418,140 @@ impl Control {
     pub(super) fn spl_log_specs(&self, resume: &[SplLogOnDisk]) -> Vec<LogSpec> {
         self.spl_log_infos()
             .into_iter()
-            .map(|(info, log)| LogSpec {
-                meas: info.meas,
-                log: log.clone(),
-                resume: resume.iter().find(|r| r.meas == info.meas).map(|r| Resume {
-                    file: r.file.clone(),
-                    rows: r.rows,
-                    complete_len: r.complete_len,
-                }),
-                info,
+            .map(|(info, log)| {
+                let on_disk = resume.iter().find(|r| r.meas == info.meas);
+                LogSpec {
+                    meas: info.meas,
+                    log: log.clone(),
+                    resume: on_disk.map(|r| Resume {
+                        file: r.file.clone(),
+                        rows: r.rows,
+                        complete_len: r.complete_len,
+                    }),
+                    resume_bands: on_disk.and_then(|r| r.bands.as_ref()).map(|b| Resume {
+                        file: b.file.clone(),
+                        rows: b.rows,
+                        complete_len: b.complete_len,
+                    }),
+                    info,
+                }
             })
             .collect()
+    }
+}
+
+impl Control {
+    /// Band levels, dB SPL, per band (NaN where not measured) from `src`.
+    fn band_levels(&self, src: &BandLevelSource) -> Result<[f64; BAND_COUNT], ProtoError> {
+        let inv = |m: String| perr(ErrorCode::Invalid, m);
+        match src {
+            BandLevelSource::Levels { levels } => {
+                if levels.len() != BAND_COUNT {
+                    return Err(inv(format!(
+                        "band levels are {BAND_COUNT} values, 20 Hz … 10 kHz"
+                    )));
+                }
+                if levels.iter().flatten().any(|l| !l.0.is_finite()) {
+                    return Err(inv("a band level must be finite".into()));
+                }
+                let mut out = [f64::NAN; BAND_COUNT];
+                for (o, l) in out.iter_mut().zip(levels) {
+                    if let Some(l) = l {
+                        *o = l.0;
+                    }
+                }
+                Ok(out)
+            }
+            BandLevelSource::Log { meas, from, until } => {
+                self.spl_meter(*meas)?;
+                if until <= from {
+                    return Err(inv("the span ends before it starts".into()));
+                }
+                let rows = self
+                    .spl_logs
+                    .get(meas)
+                    .map(|l| leq_log::lock(l).band_rows_in(*from, *until))
+                    .unwrap_or_default();
+                if rows.is_empty() {
+                    return Err(inv(format!(
+                        "SPL meter {meas} logged no band seconds in that span"
+                    )));
+                }
+                if rows.iter().any(|r| r.sensitivity.is_none()) {
+                    return Err(inv(format!(
+                        "SPL meter {meas} was not calibrated for all of that span: a \
+                         transfer needs dB SPL"
+                    )));
+                }
+                // The energy average over the measured time, each second on the
+                // sensitivity it was logged with; the §13 correction is the music's, not
+                // the building's, so it stays out.
+                let mut e = [0.0; BAND_COUNT];
+                let mut m = 0.0;
+                for r in &rows {
+                    let s = r.sensitivity.map_or(0.0, |d| d.0);
+                    for (e, &l) in e.iter_mut().zip(&r.levels) {
+                        let p = 10f64.powf((f64::from(l) + s) / 10.0);
+                        if p.is_finite() {
+                            *e += p * r.measured.0;
+                        }
+                    }
+                    m += r.measured.0;
+                }
+                if m <= 0.0 {
+                    return Err(inv(format!(
+                        "SPL meter {meas} measured nothing in that span"
+                    )));
+                }
+                Ok(e.map(|e| 10.0 * (e / m).log10()))
+            }
+        }
+    }
+
+    /// `spl.band_transfer`: the transfer computed and stored in the band meter's
+    /// configuration, applied as `meas.update` applies any change to it.
+    pub(super) fn spl_band_transfer(
+        &mut self,
+        client: &ClientId,
+        meas: MeasId,
+        foh: &BandLevelSource,
+        dwelling: &BandLevelSource,
+        background: Option<&BandLevelSource>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let m = self.spl_meter(meas)?.clone();
+        let MeasKind::Spl { config } = &m.config.kind else {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("{meas} is not an SPL meter"),
+            ));
+        };
+        if config.bands.is_none() {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("SPL meter {meas} has no band meter: enable it first"),
+            ));
+        }
+        let foh = self.band_levels(foh)?;
+        let dwelling = self.band_levels(dwelling)?;
+        let background = background.map(|b| self.band_levels(b)).transpose()?;
+        let t = ac2_core::band_leq::Transfer::measure(&foh, &dwelling, background.as_ref());
+        let set = BandTransferSet {
+            measured_at: WallNs(wall_ns()),
+            bands: t.bands().map(crate::conv::band_transfer_band),
+        };
+        let mut config = m.config.clone();
+        if let MeasKind::Spl { config: c } = &mut config.kind
+            && let Some(b) = &mut c.bands
+        {
+            b.transfer = Some(set);
+        }
+        tracing::info!(
+            "SPL meter {meas}: FOH → dwelling transfer stored ({} of {BAND_COUNT} bands measured)",
+            set.bands
+                .iter()
+                .filter(|b| !matches!(b, ac2_proto::model::BandTransferBand::Missing))
+                .count()
+        );
+        self.execute(client, ac2_proto::Command::MeasUpdate { meas, config })
     }
 }

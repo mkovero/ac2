@@ -189,6 +189,8 @@ pub(crate) struct Setup {
     /// Where `rec.start` writes and `session.replay` finds recordings by name; `None`:
     /// this daemon does not record.
     pub(crate) recording_dir: Option<std::path::PathBuf>,
+    /// Local time of day for the band meters' day and night limits.
+    pub(crate) local_clock: crate::config::LocalClock,
 }
 
 impl Setup {
@@ -926,6 +928,12 @@ impl Control {
                 max,
             } => self.spl_log_get(meas, log, from, max),
             Command::SplLogNew { meas } => self.spl_log_new(meas),
+            Command::SplBandTransfer {
+                meas,
+                foh,
+                dwelling,
+                background,
+            } => self.spl_band_transfer(client, meas, &foh, &dwelling, background.as_ref()),
             Command::SplHistoryGet { meas, seconds } => self.spl_history_get(meas, seconds),
 
             Command::SweepRun {

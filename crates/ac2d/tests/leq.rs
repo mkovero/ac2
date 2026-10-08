@@ -61,6 +61,7 @@ fn meter(windows: Vec<LeqWindow>) -> MeasConfig {
         name: "FOH SPL".into(),
         kind: MeasKind::Spl {
             config: SplConfig {
+                bands: None,
                 input: 1,
                 weighting: Weighting::A,
                 time_weighting: TimeWeighting::Fast,
@@ -874,6 +875,7 @@ async fn a_long_log_in_pages_and_its_history() {
                     mic: None,
                 },
                 rows: rows.clone(),
+                bands: Vec::new(),
             }],
             traces: Vec::new(),
         },

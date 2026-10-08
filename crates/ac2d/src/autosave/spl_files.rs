@@ -8,6 +8,9 @@
 //! a power cut, after which a log loses at most its last few minutes and reads up to its
 //! last whole line ([`ac2_traces::spl_log::import_csv`]).
 //!
+//! Each meter has two files: its A/C/Z log ([`ac2_traces::spl_log`]) and its band meter's
+//! log beside it ([`ac2_traces::band_log`]), kept the same way from the same shared log.
+//!
 //! A file is written whole only when it starts (a new meter, a loaded session, a new log),
 //! after a failed append, and when it has grown [`COMPACT_SLACK`] rows past the retention
 //! (once a day of logging), each time renamed into place complete.
@@ -21,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::model::SplLogPage;
 use ac2_proto::units::MeasId;
+use ac2_traces::band_log;
 use ac2_traces::session::{self, SPL_DIR, SavedMeasurement, SavedSplLogFile};
 use ac2_traces::spl_log::{self, SplLogInfo};
 
@@ -58,9 +62,75 @@ pub(crate) struct LogSpec {
     pub(crate) info: SplLogInfo,
     /// Set for a log restored from the autosave.
     pub(crate) resume: Option<Resume>,
+    /// Where its band log's file stands, when restored with one.
+    pub(crate) resume_bands: Option<Resume>,
+}
+
+/// Which of a meter's two logs a file holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Kind {
+    /// The A/C/Z seconds.
+    Spl,
+    /// The band meter's seconds.
+    Bands,
+}
+
+impl Kind {
+    fn total(self, l: &leq_log::LeqLog) -> u64 {
+        match self {
+            Kind::Spl => l.total(),
+            Kind::Bands => l.band_total(),
+        }
+    }
+
+    /// The whole file's text of what the log holds, and its row count.
+    fn whole(self, l: &leq_log::LeqLog, info: &SplLogInfo) -> (String, u64) {
+        match self {
+            Kind::Spl => {
+                let rows = l.rows();
+                (spl_log::export_csv(info, &rows), rows.len() as u64)
+            }
+            Kind::Bands => {
+                let rows = l.band_rows();
+                (band_log::export_csv(info, &rows), rows.len() as u64)
+            }
+        }
+    }
+
+    /// The lines of the rows numbered `from` on, and their count.
+    fn lines_from(self, l: &leq_log::LeqLog, from: u64) -> (String, u64) {
+        let mut text = String::new();
+        let n = match self {
+            Kind::Spl => {
+                let rows = l.rows_from(from);
+                text.reserve(rows.len() * 100);
+                for r in &rows {
+                    spl_log::push_row(&mut text, r);
+                }
+                rows.len()
+            }
+            Kind::Bands => {
+                let rows = l.band_rows_from(from);
+                text.reserve(rows.len() * 260);
+                for r in &rows {
+                    band_log::push_row(&mut text, r);
+                }
+                rows.len()
+            }
+        };
+        (text, n as u64)
+    }
+
+    fn suffix(self) -> &'static str {
+        match self {
+            Kind::Spl => "csv",
+            Kind::Bands => "bands.csv",
+        }
+    }
 }
 
 struct LogFile {
+    kind: Kind,
     log: SharedLog,
     /// The log's id ([`crate::leq_log::LeqLog::id`]) the file holds.
     id: u64,
@@ -78,7 +148,7 @@ struct LogFile {
 /// The write thread's SPL log files.
 pub(crate) struct SplFiles {
     dir: PathBuf,
-    files: BTreeMap<MeasId, LogFile>,
+    files: BTreeMap<(MeasId, Kind), LogFile>,
     next_flush: Instant,
     next_sync: Instant,
     /// Bytes written so far (whole files and appends).
@@ -119,50 +189,57 @@ impl SplFiles {
     /// The logs to keep are `specs`: a file for each, carried on where it is the same log,
     /// others closed.
     pub(crate) fn apply(&mut self, specs: Vec<LogSpec>) {
-        let gone: Vec<MeasId> = self
+        let gone: Vec<(MeasId, Kind)> = self
             .files
             .keys()
-            .filter(|m| specs.iter().all(|s| s.meas != **m))
+            .filter(|(m, _)| specs.iter().all(|s| s.meas != *m))
             .copied()
             .collect();
-        for m in gone {
-            if let Some(f) = self.files.remove(&m) {
+        for k in gone {
+            if let Some(f) = self.files.remove(&k) {
                 self.close(f);
             }
         }
         for s in specs {
             let id = leq_log::lock(&s.log).id();
-            if let Some(f) = self.files.get_mut(&s.meas)
-                && Arc::ptr_eq(&f.log, &s.log)
-                && f.id == id
-            {
-                f.info = s.info;
-                continue;
+            for (kind, resume) in [
+                (Kind::Spl, s.resume.clone()),
+                (Kind::Bands, s.resume_bands.clone()),
+            ] {
+                let key = (s.meas, kind);
+                if let Some(f) = self.files.get_mut(&key)
+                    && Arc::ptr_eq(&f.log, &s.log)
+                    && f.id == id
+                {
+                    f.info = s.info.clone();
+                    continue;
+                }
+                if let Some(old) = self.files.remove(&key) {
+                    self.close(old);
+                }
+                let mut f = LogFile {
+                    kind,
+                    log: s.log.clone(),
+                    id,
+                    info: s.info.clone(),
+                    rel: None,
+                    file: None,
+                    written: 0,
+                    rows_in_file: 0,
+                    unsynced: false,
+                };
+                let resumed = resume.is_some_and(|r| self.resume(&mut f, r));
+                if !resumed {
+                    self.start(s.meas, &mut f);
+                }
+                self.files.insert(key, f);
             }
-            if let Some(old) = self.files.remove(&s.meas) {
-                self.close(old);
-            }
-            let mut f = LogFile {
-                log: s.log,
-                id,
-                info: s.info,
-                rel: None,
-                file: None,
-                written: 0,
-                rows_in_file: 0,
-                unsynced: false,
-            };
-            let resumed = s.resume.is_some_and(|r| self.resume(&mut f, r));
-            if !resumed {
-                self.start(s.meas, &mut f);
-            }
-            self.files.insert(s.meas, f);
         }
     }
 
     /// Carries on appending to a restored log's file: cut back to its last whole line.
     fn resume(&mut self, f: &mut LogFile, r: Resume) -> bool {
-        let total = leq_log::lock(&f.log).total();
+        let total = f.kind.total(&leq_log::lock(&f.log));
         if total < r.rows {
             return false;
         }
@@ -203,17 +280,24 @@ impl SplFiles {
 
     /// A new file for the log of `f`, written whole.
     fn start(&mut self, meas: MeasId, f: &mut LogFile) {
-        let rel = self.new_name(meas);
         f.rel = None;
         f.file = None;
+        // A meter without a band meter keeps no band file; one appears with the first band
+        // row (an append finds no file and starts it then).
+        if f.kind == Kind::Bands && f.kind.total(&leq_log::lock(&f.log)) == 0 {
+            f.written = 0;
+            f.rows_in_file = 0;
+            return;
+        }
+        let rel = self.new_name(meas, f.kind);
         self.rewrite(f, rel);
     }
 
-    /// `spl/<meas>-<wall ns>.csv`, not taken.
-    fn new_name(&self, meas: MeasId) -> String {
+    /// `spl/<meas>-<wall ns>.csv` (`.bands.csv`), not taken.
+    fn new_name(&self, meas: MeasId, kind: Kind) -> String {
         let mut t = crate::util::wall_ns();
         loop {
-            let rel = format!("{SPL_DIR}/{}-{t}.csv", meas.0);
+            let rel = format!("{SPL_DIR}/{}-{t}.{}", meas.0, kind.suffix());
             if !self.dir.join(&rel).exists()
                 && self.files.values().all(|f| f.rel.as_ref() != Some(&rel))
             {
@@ -226,11 +310,10 @@ impl SplFiles {
     /// Writes the whole log held to `rel` (renamed into place complete) and opens it for
     /// appending.
     fn rewrite(&mut self, f: &mut LogFile, rel: String) {
-        let (id, total, rows) = {
+        let (id, total, (text, rows)) = {
             let l = leq_log::lock(&f.log);
-            (l.id(), l.total(), l.rows())
+            (l.id(), f.kind.total(&l), f.kind.whole(&l, &f.info))
         };
-        let text = spl_log::export_csv(&f.info, &rows);
         let p = self.dir.join(&rel);
         let spl_dir = self.dir.join(SPL_DIR);
         let result = fs::create_dir_all(&spl_dir)
@@ -249,7 +332,7 @@ impl SplFiles {
                 f.rel = Some(rel);
                 f.file = Some(file);
                 f.written = total;
-                f.rows_in_file = rows.len() as u64;
+                f.rows_in_file = rows;
                 // `write_atomic` synced it.
                 f.unsynced = false;
                 self.succeeded();
@@ -277,24 +360,24 @@ impl SplFiles {
 
     /// Appends every log's new rows.
     pub(crate) fn append_all(&mut self) {
-        let metas: Vec<MeasId> = self.files.keys().copied().collect();
-        for m in metas {
-            if let Some(mut f) = self.files.remove(&m) {
-                self.append(m, &mut f);
-                self.files.insert(m, f);
+        let keys: Vec<(MeasId, Kind)> = self.files.keys().copied().collect();
+        for k in keys {
+            if let Some(mut f) = self.files.remove(&k) {
+                self.append(k.0, &mut f);
+                self.files.insert(k, f);
             }
         }
     }
 
     fn append(&mut self, meas: MeasId, f: &mut LogFile) {
-        let (id, total, rows) = {
+        let (id, total, (text, rows)) = {
             let l = leq_log::lock(&f.log);
-            let rows = if l.id() == f.id {
-                l.rows_from(f.written)
+            let lines = if l.id() == f.id {
+                f.kind.lines_from(&l, f.written)
             } else {
-                Vec::new()
+                (String::new(), 0)
             };
-            (l.id(), l.total(), rows)
+            (l.id(), f.kind.total(&l), lines)
         };
         if id != f.id {
             // `spl.log_new` replaced the log: the ended one's file is closed as it stands
@@ -315,18 +398,14 @@ impl SplFiles {
             }
             return;
         };
-        if rows.is_empty() {
+        if rows == 0 {
             return;
-        }
-        let mut text = String::with_capacity(rows.len() * 100);
-        for r in &rows {
-            spl_log::push_row(&mut text, r);
         }
         match file.write_all(text.as_bytes()) {
             Ok(()) => {
                 self.bytes += text.len() as u64;
                 f.written = total;
-                f.rows_in_file += rows.len() as u64;
+                f.rows_in_file += rows;
                 f.unsynced = true;
                 self.succeeded();
             }
@@ -380,11 +459,17 @@ impl SplFiles {
     pub(crate) fn linked(&self, measurements: &[SavedMeasurement]) -> Vec<SavedSplLogFile> {
         self.files
             .iter()
-            .filter(|(m, _)| measurements.iter().any(|sm| sm.id == **m))
-            .filter_map(|(m, f)| {
+            .filter(|((m, kind), _)| {
+                *kind == Kind::Spl && measurements.iter().any(|sm| sm.id == *m)
+            })
+            .filter_map(|((m, _), f)| {
                 f.rel.as_ref().map(|rel| SavedSplLogFile {
                     meas: *m,
                     file: rel.clone(),
+                    bands: self
+                        .files
+                        .get(&(*m, Kind::Bands))
+                        .and_then(|b| b.rel.clone()),
                 })
             })
             .collect()
@@ -393,7 +478,7 @@ impl SplFiles {
     #[cfg(test)]
     pub(crate) fn path_of(&self, meas: MeasId) -> Option<PathBuf> {
         self.files
-            .get(&meas)
+            .get(&(meas, Kind::Spl))
             .and_then(|f| f.rel.as_ref())
             .map(|r| self.dir.join(r))
     }

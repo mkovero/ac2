@@ -410,6 +410,7 @@ mod tests {
                 name: "x".into(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
+                        bands: None,
                         input: 0,
                         weighting: Weighting::A,
                         time_weighting: TimeWeighting::Fast,
@@ -464,6 +465,7 @@ mod tests {
                 mic: None,
             },
             resume,
+            resume_bands: None,
         }
     }
 
@@ -663,7 +665,7 @@ mod tests {
         let r = restore(&dir).expect("restore");
         let rows = &r.data.spl_logs[0].rows;
         assert_eq!(rows.len(), 150);
-        let restored = LeqLog::from_rows(rows.clone());
+        let restored = LeqLog::from_rows(rows.clone(), Vec::new());
         let logged = leq_log::lock(&log).run().expect("run");
         let back = restored.run().expect("run");
         assert_eq!(back.started_at, logged.started_at);
@@ -693,6 +695,90 @@ mod tests {
             r.iter()
                 .enumerate()
                 .all(|(k, x)| x.start == row(k as u64).start)
+        );
+    }
+
+    fn band_row(k: u64) -> ac2_traces::band_log::BandLogRow {
+        let mut levels = [-70.0f32; ac2_proto::model::BAND_COUNT];
+        levels[5] = -60.0 - (k % 7) as f32 * 0.25;
+        ac2_traces::band_log::BandLogRow {
+            start: WallNs(T0 + k * NS),
+            measured: Seconds(1.0),
+            levels,
+            correction: Db(if k.is_multiple_of(2) { 0.0 } else { 5.0 }),
+            period: ac2_proto::model::BandPeriod::Night,
+            sensitivity: Some(Db(120.0)),
+        }
+    }
+
+    fn push_bands(log: &SharedLog, from: u64, n: u64) {
+        let mut l = leq_log::lock(log);
+        for k in from..from + n {
+            l.push(row(k));
+            l.push_band(band_row(k));
+        }
+    }
+
+    /// A band meter's rows go to their own file beside the SPL log: written whole, then
+    /// appended, read back row for row, and resumed after a restore.
+    #[test]
+    fn band_rows_are_appended_beside_and_resumed() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let dir = root.path().join("autosave");
+        let log: SharedLog = Arc::new(Mutex::new(LeqLog::default()));
+        push_bands(&log, 0, 40);
+        let mut files = SplFiles::new(dir.clone(), Instant::now());
+        files.apply(vec![spec(&log, None)]);
+        write(&dir, &with_meter(1), &files.linked(&[meter()])).expect("first");
+        push_bands(&log, 40, 20);
+        files.append_all();
+        write(&dir, &with_meter(2), &files.linked(&[meter()])).expect("second");
+        files.close_all();
+
+        let r = restore(&dir).expect("restore");
+        let bands = &r.data.spl_logs[0].bands;
+        assert_eq!(bands.len(), 60);
+        for (k, b) in bands.iter().enumerate() {
+            let want = band_row(k as u64);
+            assert_eq!(b.start, want.start);
+            assert_eq!(b.correction, want.correction);
+            assert_eq!(b.period, want.period);
+            assert!((b.levels[5] - want.levels[5]).abs() < 0.006, "{b:?}");
+        }
+        let disk = r.logs[0].bands.as_ref().expect("band file");
+        assert!(disk.file.ends_with(".bands.csv"), "{}", disk.file);
+        assert_eq!(disk.rows, 60);
+
+        // Resumed: appended after the last whole line, not rewritten.
+        let restored = LeqLog::from_rows(r.data.spl_logs[0].rows.clone(), bands.clone());
+        let log: SharedLog = Arc::new(Mutex::new(restored));
+        let main = &r.logs[0];
+        let mut files = SplFiles::new(dir.clone(), Instant::now());
+        files.apply(vec![LogSpec {
+            resume_bands: Some(Resume {
+                file: disk.file.clone(),
+                rows: disk.rows,
+                complete_len: disk.complete_len,
+            }),
+            ..spec(
+                &log,
+                Some(Resume {
+                    file: main.file.clone(),
+                    rows: main.rows,
+                    complete_len: main.complete_len,
+                }),
+            )
+        }]);
+        assert_eq!(files.bytes, 0, "resumed, not rewritten");
+        push_bands(&log, 60, 10);
+        files.close_all();
+        let (back, _) = session::load_named(&dir, MANIFEST).expect("load");
+        let b = &back.spl_logs[0].bands;
+        assert_eq!(b.len(), 70);
+        assert!(
+            b.iter()
+                .enumerate()
+                .all(|(k, x)| x.start == band_row(k as u64).start)
         );
     }
 
@@ -781,6 +867,7 @@ mod tests {
                     name: "x".into(),
                     kind: MeasKind::Spl {
                         config: SplConfig {
+                            bands: None,
                             input: 0,
                             weighting: Weighting::A,
                             time_weighting: TimeWeighting::Fast,

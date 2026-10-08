@@ -243,6 +243,138 @@
        "position": {
         "level": 2.5,
         "peak": 1.5
+       },
+       "bands": {
+        "duration": 3600.0,
+        "day": [
+         79.0,
+         69.0,
+         61.0,
+         54.0,
+         49.0,
+         47.0,
+         45.0,
+         43.0,
+         41.0,
+         39.0,
+         37.0
+        ],
+        "night": [
+         74.0,
+         64.0,
+         56.0,
+         49.0,
+         44.0,
+         42.0,
+         40.0,
+         38.0,
+         36.0,
+         34.0,
+         32.0
+        ],
+        "warn_margin": 3.0,
+        "predicted": {
+         "day": null,
+         "night": 25.0
+        },
+        "correction": {
+         "impulse": "plus5",
+         "tonal": "none"
+        },
+        "transfer": {
+         "measured_at": 1789500000000000000,
+         "bands": [
+          {
+           "status": "unchecked",
+           "attenuation": 20.0
+          },
+          {
+           "status": "clean",
+           "attenuation": 25.5
+          },
+          {
+           "status": "corrected",
+           "attenuation": 30.0,
+           "margin": 5.5
+          },
+          {
+           "status": "unusable",
+           "at_least": 35.0
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          },
+          {
+           "status": "missing"
+          }
+         ]
+        }
        }
       }
      }
@@ -366,6 +498,27 @@
       "kind": "recovered",
       "level": 133.5,
       "limit": 135.0,
+      "position": null
+     },
+     {
+      "at": 1790000620000000000,
+      "subject": {
+       "type": "band",
+       "nominal": 63.0
+      },
+      "kind": "over",
+      "level": 82.5,
+      "limit": 80.0,
+      "position": null
+     },
+     {
+      "at": 1790000630000000000,
+      "subject": {
+       "type": "predicted"
+      },
+      "kind": "over",
+      "level": 26.5,
+      "limit": 25.0,
       "position": null
      }
     ]

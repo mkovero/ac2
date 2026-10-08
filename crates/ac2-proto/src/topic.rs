@@ -32,19 +32,22 @@ pub enum Stream {
     Spl,
     /// Rolling Leq windows of an SPL meter (once a second).
     Leq,
+    /// 1/3-octave band Leq of an SPL meter's band meter (once a second).
+    BandLeq,
     /// Input meters.
     Levels,
 }
 
 impl Stream {
     /// All streams.
-    pub const ALL: [Stream; 7] = [
+    pub const ALL: [Stream; 8] = [
         Self::Tf,
         Self::Ir,
         Self::Rta,
         Self::Spec,
         Self::Spl,
         Self::Leq,
+        Self::BandLeq,
         Self::Levels,
     ];
 
@@ -57,6 +60,7 @@ impl Stream {
             Self::Spec => "spec",
             Self::Spl => "spl",
             Self::Leq => "leq",
+            Self::BandLeq => "band_leq",
             Self::Levels => "levels",
         }
     }

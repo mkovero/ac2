@@ -1,7 +1,7 @@
 # Band Leq: low-frequency limits in a neighbour's bedroom
 
-Status: stage 1 implemented (`ac2_core::band_leq`, the `finland-545` preset of
-`docs/design/leq.md`); stages 2 and 3 below are not.
+Status: stages 1 and 2 implemented (`ac2_core::band_leq`; the daemon's band meter,
+`spl.band_transfer`, the `band_leq` frame, the band log); stage 3 below is not.
 
 ## What the operator and the artist get
 
@@ -197,14 +197,30 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
 1. **Core** (done): `ac2_core::band_leq` — the band integrator over the 1/3-octave bank,
    per-band rolling windows judged on the leq rules, the day/night selection, the transfer
    with the background rules, FOH limits and the predicted LAeq; the `finland-545` preset.
-2. **Daemon and protocol**: the band meter's configuration (band limits as presets
-   `finland-545-lf` and the predicted music window, the transfer as a stored set with its
-   per-band status, corrections with their time span), the per-second band log (columns
-   above, saved with the session and the autosave, 48 h as the A/C/Z log), rebuilding the
-   windows from the log by wall time, the band frame per second (per band: Leq, limit,
-   verdict, headroom, recover time; the worst band; the predicted LAeq with its bound),
-   a transfer measurement job (FOH and bedroom band Leq of the test signal, the
-   background), `PROTO_VERSION` bump with `WIRE_LOCK` and fixtures.
+2. **Daemon and protocol** (done): `SplConfig.bands` (`BandLeqConfig`: window length, day
+   and night limits per band 20 … 200 Hz, warn margin, predicted LAeq limits, §13
+   correction, the stored transfer with its per-band status; presets as
+   `BandLeqPreset` `Finland545Lf` and `Finland545LivingRoom`, filled in by front ends), the band meter in
+   the SPL job on the meter's second grid (`SplMeter::process_tapped` hands it the
+   mic-curve corrected, unweighted signal), the period from the local wall time of each
+   second (`ac2d::LocalClock`, injectable), alarms with the Leq windows' hysteresis
+   (`AlarmSubject::band` / `predicted`), the `band_leq` frame each second, the per-second
+   band log (`ac2_traces::band_log`, `<meter>.bands.csv` beside the SPL log in sessions and
+   the autosave, same retention), windows rebuilt from it by wall time on a job start or a
+   configuration change, and `spl.band_transfer` (`docs/protocol.md`, *Band meter*);
+   `PROTO_VERSION` 26, session format 13. Decided on the way:
+   - The transfer is stored in the meter's configuration, not the calibration store: it
+     belongs to a FOH position and a dwelling, not to a mic, and the calibration store's
+     format is versioned per device, input and mic, so a change there would set aside
+     operators' calibrations. It travels with the session and the autosave.
+   - The position correction is not applied to the band meter: it is calibrated on A/C
+     levels at the measuring position, and the band limits are in the dwelling.
+   - The transfer takes FOH, dwelling and background band levels from spans of a band log
+     (the same mic moved, or a second meter) or from typed or imported levels
+     (`ac2_traces::band_levels`, `<Hz> <dB>` lines). There is no dedicated two-position
+     capture job: the operator plays the test signal and names the spans. That job, and
+     reading the band log back over the protocol (a `spl.band_log_get`), are left for
+     stage 3 or later.
 3. **Scene, UI, CLI**: the artist view — eleven bars 20 … 200 Hz with the limit line, the
    headroom ("stay ≤ …") and "cooling down in …" per band, the worst band named, the day /
    night set and when it changes next, the predicted bedroom LAeq against 25 dB; `ac2 spl

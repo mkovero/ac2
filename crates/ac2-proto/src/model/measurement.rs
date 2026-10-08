@@ -105,8 +105,12 @@ pub struct SplConfig {
     /// Rolling Leq windows (`docs/design/leq.md`).
     pub leq: LeqConfig,
     /// Measuring-position correction: added to every level the meter reports once
-    /// calibrated (the log keeps what was measured, with the correction in force).
+    /// calibrated (the log keeps what was measured, with the correction in force). Not
+    /// applied to the band meter, whose transfer is measured from the mic's own position.
     pub position: Option<PositionCorrection>,
+    /// 1/3-octave band Leq against dwelling limits (`docs/design/band-leq.md`); `None`:
+    /// off.
+    pub bands: Option<Box<super::BandLeqConfig>>,
 }
 
 /// The level difference from where the mic is to where a limit applies (the loudest

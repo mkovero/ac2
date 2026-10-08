@@ -314,7 +314,10 @@ impl Control {
 
         // In with the new: the SPL logs first, so a meter's job carries on from its log.
         for l in data.spl_logs {
-            self.set_spl_log(l.info.meas, crate::leq_log::LeqLog::from_rows(l.rows));
+            self.set_spl_log(
+                l.info.meas,
+                crate::leq_log::LeqLog::from_rows(l.rows, l.bands),
+            );
         }
         // Traces first: a math channel's stored operands must be there when it starts.
         for t in data.traces {

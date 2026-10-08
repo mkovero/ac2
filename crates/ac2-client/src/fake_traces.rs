@@ -606,6 +606,7 @@ impl Shared {
                             mic: None,
                         },
                         rows: self.spl_rows.get(&m.id).cloned().unwrap_or_default(),
+                        bands: Vec::new(),
                     }),
                     _ => None,
                 })

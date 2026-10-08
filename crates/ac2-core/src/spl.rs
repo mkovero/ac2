@@ -534,8 +534,22 @@ impl SplMeter {
     /// the frequency weightings — so it feeds the time-weighted, Lmax/Lmin, Leq and
     /// per-second paths — and never before the peak path: LCpeak stays on the uncorrected
     /// samples (§5.3).
-    pub fn process(&mut self, block: &[f64], mut emit: impl FnMut(Second)) {
+    pub fn process(&mut self, block: &[f64], emit: impl FnMut(Second)) {
+        self.process_tapped(block, emit, |_| {});
+    }
+
+    /// [`Self::process`], handing `tap` the mic-curve-corrected, unweighted samples in
+    /// order (the block itself without a correction): the signal the A/C/Z seconds are
+    /// integrated from, for analyses that must measure exactly what the log measures (the
+    /// 1/3-octave band Leq). Does not allocate.
+    pub fn process_tapped(
+        &mut self,
+        block: &[f64],
+        mut emit: impl FnMut(Second),
+        mut tap: impl FnMut(&[f64]),
+    ) {
         let Some(mut fir) = self.correction.take() else {
+            tap(block);
             self.run::<false>(block, block, &mut emit);
             return;
         };
@@ -543,6 +557,7 @@ impl SplMeter {
         for chunk in block.chunks(corrected.len().max(1)) {
             let c = &mut corrected[..chunk.len()];
             fir.process(chunk, c);
+            tap(c);
             self.run::<true>(chunk, c, &mut emit);
         }
         self.corrected = corrected;

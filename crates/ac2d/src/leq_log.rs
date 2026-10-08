@@ -10,12 +10,15 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+use ac2_core::band_leq::{BandSecond, Period, Placed};
 use ac2_core::leq::{LogTotal, PEAK_HOLD_S, PeakHold, RollingLeq, Second};
+use ac2_proto::model::BandPeriod;
 use ac2_proto::model::{
     LeqConfig, LeqJudgement, LeqPeakState, LeqWindow, LeqWindowState, PeakQuantity, PeakStates,
     SplLogPage, SplLogRow,
 };
 use ac2_proto::units::{MeasId, WallNs};
+use ac2_traces::band_log::BandLogRow;
 
 const NS: u64 = 1_000_000_000;
 
@@ -42,6 +45,11 @@ pub(crate) struct LeqLog {
     /// Which log of the meter this is: `spl.log_new` starts the next. A job that finds the
     /// number changed starts its windows over.
     epoch: u64,
+    /// The band meter's seconds, newest [`SplLogPage::RETAINED_ROWS`], kept beside the
+    /// A/C/Z rows (`docs/design/band-leq.md`, *Stored per second*).
+    bands: VecDeque<BandLogRow>,
+    /// Band rows logged so far.
+    band_total: u64,
 }
 
 /// The log as a whole: from its oldest kept second to its newest.
@@ -79,6 +87,8 @@ impl Default for LeqLog {
             sum: LogTotal::default(),
             trimmed_since_exact: 0,
             epoch: 0,
+            bands: VecDeque::new(),
+            band_total: 0,
         }
     }
 }
@@ -89,13 +99,67 @@ impl LeqLog {
         self.id
     }
 
-    /// A log holding `rows` (a loaded session's), numbered from 0.
-    pub(crate) fn from_rows(rows: Vec<SplLogRow>) -> Self {
+    /// A log holding `rows` and band rows `bands` (a loaded session's), numbered from 0.
+    pub(crate) fn from_rows(rows: Vec<SplLogRow>, bands: Vec<BandLogRow>) -> Self {
         let mut l = Self::default();
         for r in rows {
             l.push(r);
         }
+        for b in bands {
+            l.push_band(b);
+        }
         l
+    }
+
+    /// Appends a band row, dropping the oldest beyond the retention.
+    pub(crate) fn push_band(&mut self, r: BandLogRow) {
+        if self.bands.len() >= SplLogPage::RETAINED_ROWS {
+            self.bands.pop_front();
+        }
+        self.bands.push_back(r);
+        self.band_total += 1;
+    }
+
+    /// Band rows logged so far.
+    pub(crate) fn band_total(&self) -> u64 {
+        self.band_total
+    }
+
+    /// Every band row held, oldest first.
+    pub(crate) fn band_rows(&self) -> Vec<BandLogRow> {
+        self.bands.iter().copied().collect()
+    }
+
+    /// The band rows numbered `from` on, oldest first.
+    pub(crate) fn band_rows_from(&self, from: u64) -> Vec<BandLogRow> {
+        let oldest = self.band_total - self.bands.len() as u64;
+        let skip = usize::try_from(from.saturating_sub(oldest)).unwrap_or(usize::MAX);
+        self.bands.iter().skip(skip).copied().collect()
+    }
+
+    /// The band rows starting in `[from, until)`.
+    pub(crate) fn band_rows_in(&self, from: WallNs, until: WallNs) -> Vec<BandLogRow> {
+        self.bands
+            .iter()
+            .filter(|r| r.start >= from && r.start < until)
+            .copied()
+            .collect()
+    }
+
+    /// The band seconds of the `seconds` before `now` (wall ns), placed by wall time and
+    /// with the §13 correction each was logged with applied: what rebuilds the band windows
+    /// ([`Placed::seconds`]).
+    pub(crate) fn place_bands(&self, now: u64, seconds: u32) -> Placed {
+        let from = now.saturating_sub(u64::from(seconds) * NS + NS);
+        Placed::new(
+            self.bands
+                .iter()
+                .rev()
+                .take_while(|r| r.start.0 >= from)
+                .map(|r| (r.start.0, band_second(r), conv_period(r.period))),
+            now,
+            seconds,
+        )
     }
 
     /// An empty log, the next of the meter after `self`.
@@ -234,6 +298,20 @@ impl LeqLog {
         for r in recent.into_iter().rev() {
             peaks.push(&row_second(r));
         }
+    }
+}
+
+/// A band row back as energy, its §13 correction applied (the windows judge the rating
+/// level `L + K`).
+pub(crate) fn band_second(r: &BandLogRow) -> BandSecond {
+    BandSecond::from_levels(&r.levels.map(f64::from), r.measured.0).corrected(r.correction.0)
+}
+
+/// The core's period of a logged one.
+pub(crate) fn conv_period(p: BandPeriod) -> Period {
+    match p {
+        BandPeriod::Day => Period::Day,
+        BandPeriod::Night => Period::Night,
     }
 }
 
@@ -460,7 +538,7 @@ mod tests {
         );
         assert!(!run.trimmed);
         // Reloaded from its rows (a daemon restart): the same run, from the same start.
-        let again = LeqLog::from_rows(l.rows()).run().expect("rows");
+        let again = LeqLog::from_rows(l.rows(), Vec::new()).run().expect("rows");
         assert_eq!(again.started_at, run.started_at);
         assert!((again.levels_dbfs[0] - run.levels_dbfs[0]).abs() < 1e-9);
         assert!((again.gaps - run.gaps).abs() < 1e-9);
@@ -501,7 +579,12 @@ mod tests {
             run.levels_dbfs[0]
         );
         // A full log reloaded is still the last 48 h.
-        assert!(LeqLog::from_rows(l.rows()).run().expect("rows").trimmed);
+        assert!(
+            LeqLog::from_rows(l.rows(), Vec::new())
+                .run()
+                .expect("rows")
+                .trimmed
+        );
     }
 
     #[test]

@@ -352,6 +352,15 @@ impl BandWindows {
         self.last_night = None;
     }
 
+    /// Empties the windows and pushes `seconds` (oldest first, as [`Placed::seconds`]
+    /// gives a log's rows placed by wall time).
+    pub fn refill(&mut self, seconds: impl IntoIterator<Item = (BandSecond, Period)>) {
+        self.clear();
+        for (s, p) in seconds {
+            self.push(s, p);
+        }
+    }
+
     /// The windows: values, headroom and recovery per band.
     pub fn windows(&self) -> &RollingLeq<BandSecond> {
         &self.ring
@@ -414,6 +423,88 @@ impl BandWindows {
                 headroom: ahead[i].map(|l| self.ring.headroom(i, mean_square(l - offset_db))),
             };
         }
+    }
+}
+
+/// Logged seconds placed by wall time on the grid of the `seconds` seconds before a
+/// moment, as [`RollingLeq::refill`] places A/C/Z seconds: what rebuilds band windows (and
+/// anything fed the same seconds, such as the predicted dwelling level) from a log.
+#[derive(Debug, Clone)]
+pub struct Placed {
+    span_start_ns: u64,
+    slots: Vec<Option<(BandSecond, Period)>>,
+}
+
+impl Placed {
+    const NS: u64 = 1_000_000_000;
+
+    /// Places rows `(wall start ns, second, period)`, newest first, in the `seconds` before
+    /// `now_ns`; rows older than that end the walk. Two rows in one slot (a clock step) add,
+    /// night if either was.
+    pub fn new(
+        newest_first: impl IntoIterator<Item = (u64, BandSecond, Period)>,
+        now_ns: u64,
+        seconds: u32,
+    ) -> Self {
+        let cap = u64::from(seconds.max(1));
+        let span_start_ns = now_ns.saturating_sub(cap * Self::NS);
+        let mut slots: Vec<Option<(BandSecond, Period)>> = vec![None; cap as usize];
+        for (start, s, p) in newest_first {
+            let Some(off) = (start + Self::NS / 2).checked_sub(span_start_ns) else {
+                break;
+            };
+            let k = off / Self::NS;
+            if k >= cap {
+                continue;
+            }
+            let slot = &mut slots[k as usize];
+            *slot = Some(match slot {
+                Some((o, op)) => {
+                    let mut energy = o.energy;
+                    energy.iter_mut().zip(s.energy).for_each(|(a, b)| *a += b);
+                    let night = *op == Period::Night || p == Period::Night;
+                    (
+                        BandSecond {
+                            energy,
+                            measured: o.measured + s.measured,
+                        },
+                        if night { Period::Night } else { Period::Day },
+                    )
+                }
+                None => (s, p),
+            });
+        }
+        Self {
+            span_start_ns,
+            slots,
+        }
+    }
+
+    /// The seconds from the oldest placed row to the newest slot, oldest first: a slot
+    /// without a row is a gap ([`BandSecond::GAP`]) in the period `period_at(its wall
+    /// start)`, so a stopped meter's night seconds still put a window under the night
+    /// limits. Empty when no row was placed.
+    pub fn seconds<'a>(
+        &'a self,
+        period_at: impl Fn(u64) -> Period + 'a,
+    ) -> impl Iterator<Item = (BandSecond, Period)> + 'a {
+        let first = self
+            .slots
+            .iter()
+            .position(Option::is_some)
+            .unwrap_or(self.slots.len());
+        self.slots
+            .iter()
+            .enumerate()
+            .skip(first)
+            .map(move |(k, s)| {
+                s.unwrap_or_else(|| {
+                    (
+                        BandSecond::GAP,
+                        period_at(self.span_start_ns + k as u64 * Self::NS),
+                    )
+                })
+            })
     }
 }
 

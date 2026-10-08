@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 25`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 26`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -115,6 +115,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `seconds: u32` | `spl_history` | |
+| `spl.band_transfer` | `meas`, `foh`, `dwelling: BandLevelSource`, `background: BandLevelSource \| nil` | `measurement` (as `meas.update`) | |
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
@@ -410,7 +411,8 @@ The meter's `spl_log` entity (§4.1) changes when a window's judgement changes (
 {`lcpeak`, `lafmax`: `LeqPeakState` {`judgement`, `since`}}, `no_limit` without that limit),
 when the windows change and when the log starts (`started_at`). Going over and recovering
 append a `LeqAlarm` {`at`, `subject`: `AlarmSubject` (`window` {`duration`, `weighting`} \|
-`peak` {`quantity`: `lcpeak` \| `lafmax`}), `kind`: `over` \| `recovered`, `level` (the
+`peak` {`quantity`: `lcpeak` \| `lafmax`} \| `band` {`nominal`: Hz, a band of the band meter}
+\| `predicted` (the band meter's predicted dwelling LAeq)), `kind`: `over` \| `recovered`, `level` (the
 window's Leq or the peak limit's held level, with the correction), `limit`, `position`: Db
 \| nil (the correction included in `level`)} to `alarms` (the newest 100).
 
@@ -423,6 +425,67 @@ have been dropped and `started_at` is the oldest kept), and `laeq`, `lceq`, `lze
 the frame's `scale`: the energy average over all the measured time, exactly from the
 seconds' energies; NaN before anything was measured). The run clock is `until −
 started_at`; it carries on across app and daemon restarts as the log does.
+
+#### Band meter (`SplConfig.bands`, `spl.band_transfer`, `band_leq` frames)
+
+Design: `docs/design/band-leq.md`. `SplConfig.bands`: `BandLeqConfig` \| nil (nil: no band
+meter) = {`duration`: Seconds (whole seconds, 1 s … 24 h; the decree's 1 h), `day`, `night`:
+[DbSpl \| nil; 11] (limits in the dwelling per band 20, 25, 31.5, 40, 50, 63, 80, 100, 125,
+160, 200 Hz, `day` 07:00–22:00, `night` 22:00–07:00 local time), `warn_margin`: Db ≥ 0,
+`predicted`: `PredictedLimits` {`day`, `night`: DbSpl \| nil} (limits of the predicted
+dwelling LAeq, judged only with a transfer), `correction`: `BandCorrection` {`impulse`:
+`none` \| `plus5` \| `plus10`, `tonal`: `none` \| `plus3` \| `plus6`} (STM 545/2015 §13,
+summed, applied to the seconds from when it is set), `transfer`: `BandTransferSet` \| nil}.
+`BandTransferSet` = {`measured_at`: WallNs, `bands`: [`BandTransferBand`; 28] (20 Hz … 10
+kHz)}; `BandTransferBand` (tagged by `status`): `unchecked` {`attenuation`: Db} (no
+background measured), `clean` {`attenuation`} (≥ 10 dB over the background), `corrected`
+{`attenuation`, `margin`: Db} (3 … 10 dB over it, the background subtracted), `unusable`
+{`at_least`: Db} (< 3 dB over it: a bound), `missing`. A configuration outside these bounds
+is `invalid` at `meas.create` / `meas.update`. The presets (`ac2_proto::model::BandLeqPreset`:
+STM 545/2015 low frequencies, night 74 … 32 dB, day 5 dB higher, predicted night LAeq 25 dB;
+living room, no band limits, predicted day 35, night 30 dB) are filled in by the front ends;
+the daemon sees the values.
+
+A running SPL meter with a band meter filters its input after the mic curve, unweighted,
+through the 1/3-octave bank and integrates each band per second on the meter's own second
+grid (a gap moves it on without energy). The seconds are logged (§7.4, band log) with the
+period of their local start, the correction and the sensitivity in force; rolling windows of
+`duration` on the eleven bands 20 … 200 Hz hold each second's energy with its correction.
+Without a transfer the dwelling limits are judged at the mic as they are; with one each
+band's limit at the mic is the dwelling limit plus the attenuation (the bound for an
+unusable band; a missing band has no limit), and the dwelling LAeq is predicted from every
+second: each band less its attenuation, A-weighted at the band centre, summed (the estimate
+from the measured bands; `at_most` with the unusable bands at their bound). The windows are
+judged by the night limits while they hold a night second, else by the day limits; headroom
+against the set in force once the horizon (the meter's `leq.horizon`) has passed. Judging,
+filling windows, headroom and hysteresis are the Leq windows' (above), on dB SPL only (the
+sensitivity; the position correction is not applied to the band meter). A band going over
+or recovering, and the predicted LAeq, append an alarm as a window does. The windows rebuild
+from the band log by wall time when the job restarts and when the configuration changes
+(not for a change of the correction or the margin alone); `spl.log_new` starts them over.
+
+`spl.band_transfer` computes a FOH → dwelling transfer and stores it in the meter's
+`bands.transfer` (then applied as `meas.update`, whose reply it returns). `foh`, `dwelling`
+and `background` are each a `BandLevelSource` (tagged by `type`): `log` {`meas`, `from`,
+`until`: WallNs} — the energy average dB SPL of the band seconds of SPL meter `meas`'s current
+log starting in [`from`, `until`) (the same meter moved, or another meter), without the
+correction; `invalid` when none were logged there or one was uncalibrated — or `levels`
+{`levels`: [DbSpl \| nil; 28]} (typed, or read from a text file of `<Hz> <dB>` lines; nil:
+not measured). Per band: FOH and dwelling of the same test signal over the same time,
+attenuation = FOH − dwelling, with the background rules above. `invalid` for a meter without
+a band meter.
+
+The `band_leq` frame (§5.4), once a second while subscribed: `scale` (`db_spl` once
+calibrated; limits are judged only then), `cal`, `mic_curve`, `duration`, `horizon`,
+`elapsed` and `measured` (Seconds, of the windows), `period` and `period_after_horizon`
+(`BandPeriod`: `day` \| `night`), `correction` (Db in force), `limits_from`
+(`BandLimitPlace`: `at_mic` \| `transferred`), `bands`: 11 × `BandLeqBand` {`nominal`: Hz,
+`leq`: f64 (in `scale`, correction included; NaN before anything was measured), `limit`:
+f64 \| nil (at the mic), `judgement`: `LeqJudgement`, `on_course`: bool, `allowed`: f64 \|
+nil (headroom), `recover`: Seconds \| nil}, `worst`: u8 \| nil (index into `bands`: the most
+severe judgement, then the furthest above or least below its limit), `predicted`:
+`PredictedLeq` {`estimate`, `at_most`: f64 (dB SPL; NaN uncalibrated), `limit`: DbSpl \| nil,
+`judgement`} \| nil without a transfer.
 
 #### Devices, preview and loopback detection (`session.*`)
 
@@ -967,6 +1030,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `d/<meas>/spec` | narrowband spectrum |
 | `d/<meas>/spl` | SPL meter |
 | `d/<meas>/leq` | rolling Leq windows of an SPL meter, once a second |
+| `d/<meas>/band_leq` | an SPL meter's band meter (1/3-octave band Leq 20 … 200 Hz), once a second |
 | `d/<meas>/levels` | input meters of the measurement's channels |
 | `session/levels` | input meters of every input of the open session |
 | `session/preview` | input meters of every input of the previewed device |
@@ -1045,6 +1109,7 @@ layout as code.
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
+| `band_leq` | none (n = 0) | `scale`, `cal`, `mic_curve`, `duration`, `horizon`, `elapsed`, `measured`, `period`, `period_after_horizon`, `correction`, `limits_from`, `bands` ([`BandLeqBand`], 20 … 200 Hz), `worst` (u8 \| nil), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |
@@ -1178,11 +1243,12 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/session.json           manifest
 <dir>/traces/<id>-<hash>.csv one ac2 CSV per trace (a sweep's whole data included)
 <dir>/spl/<name>.csv         one SPL log per SPL meter (§7.4)
+<dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 12, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 13, saved_at, measurements:
 [{id, config: MeasConfig, running, frozen, delay: {applied, nudged, tracking} | null}], spl_logs:
-[{meas, file}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
+[{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
 dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace
 file is named by its trace id and a 64-bit FNV-1a hash of its content, so it never changes
@@ -1199,8 +1265,8 @@ in a `*.sweep.json` sidecar and had no mic curves on traces, version 5 named a c
 curve by name only, without its label, file and content hash, version 6 had no Leq windows
 and no SPL logs, version 7 named files by save generation and its autosave kept the
 previous one as a separate directory, version 8 had no spatial averages and no room
-parameters on sweeps, version 9 held spatial averages where version 10 holds math channels
-— are refused). A directory that holds other files is never written
+parameters on sweeps, version 9 held spatial averages where version 10 holds math channels, version 12 had no
+band meters — are refused). A directory that holds other files is never written
 into.
 
 ### 7.3 Autosave
@@ -1249,6 +1315,17 @@ measuring-position correction in force, energy and peak (empty without one): a c
 level is the row's level plus the correction, which the row records but never applies.
 Reading it back takes `start_ns`, `measured_s`, the levels, the sensitivity and the
 correction.
+
+A meter's band log (`<name>.bands.csv`, kept and appended beside its SPL log by sessions and
+the autosave, same 48 h retention): first line exactly `# ac2 band log v1`, the same `# key:
+value` lines, then the header
+`start_utc,start_ns,measured_s,unit,period,correction_db,sensitivity_db,z20hz,z25hz,…,z10000hz`
+(28 band columns, `z<nominal>hz`) and one row per second with anything measured: start
+(UTC and ns), measured time, `dB SPL` or `dBFS`, `day` or `night` (the limit set of the
+second's local start), the §13 correction in force (dB), the sensitivity (empty
+uncalibrated; 4 decimals), and the 28 unweighted band Leq in the row's unit to 0.01 dB
+(`-inf` without energy), **without** the correction: the rating level is the band level plus
+`correction_db`, which the windows apply when they are rebuilt from the log.
 
 ### 7.5 Raw capture files (`rec.start`)
 

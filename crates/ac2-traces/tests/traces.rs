@@ -757,6 +757,21 @@ fn session_sample() -> Session {
                     position: Some(ac2_proto::model::PositionCorrection::both(3.0)),
                 })
                 .collect(),
+            // Quarter-dB levels: the file's 0.01 dB reads them back exactly.
+            bands: (0..2)
+                .map(|k| ac2_traces::band_log::BandLogRow {
+                    start: WallNs(1_790_000_000_000_000_000 + k * 1_000_000_000),
+                    measured: Seconds(1.0),
+                    levels: std::array::from_fn(|i| -60.25 + i as f32 * 0.5 + k as f32),
+                    correction: Db(if k == 0 { 0.0 } else { 5.0 }),
+                    period: if k == 0 {
+                        ac2_proto::model::BandPeriod::Day
+                    } else {
+                        ac2_proto::model::BandPeriod::Night
+                    },
+                    sensitivity: Some(Db(120.0)),
+                })
+                .collect(),
         }],
         traces: vec![a, b],
     }
@@ -781,6 +796,8 @@ fn session_round_trip_and_generations() {
         );
         assert!((x.laeq.0 - y.laeq.0).abs() < 1e-9);
     }
+    // The band log beside it comes back as written.
+    assert_eq!(back.spl_logs[0].bands, s.spl_logs[0].bands);
     assert_eq!(back.traces.len(), 2);
     // Columns come back unsmoothed (bit for bit) with the smoothing as an edit.
     assert_eq!(
@@ -809,11 +826,18 @@ fn session_round_trip_and_generations() {
         .collect();
     assert_eq!(files.len(), 1);
     assert!(files[0].starts_with("4-"), "{files:?}");
-    let logs: Vec<_> = std::fs::read_dir(dir.join("spl"))
+    let mut logs: Vec<_> = std::fs::read_dir(dir.join("spl"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(logs, vec![format!("{}-2.csv", s2.saved_at.0)]);
+    logs.sort();
+    assert_eq!(
+        logs,
+        vec![
+            format!("{}-2.bands.csv", s2.saved_at.0),
+            format!("{}-2.csv", s2.saved_at.0)
+        ]
+    );
     assert_eq!(session::load(&dir).unwrap().traces.len(), 1);
     let listed = session::list(tmp.path()).unwrap();
     assert_eq!(listed.len(), 1);
@@ -839,6 +863,7 @@ fn autosave_in_place_writes_only_what_changed() {
     let linked = [session::SavedSplLogFile {
         meas: MeasId(2),
         file: rel.clone(),
+        bands: None,
     }];
     let first = session::save_autosave(&dir, &s, &linked).unwrap();
     assert!(!dir.join(session::PREV_MANIFEST).exists());
@@ -887,6 +912,7 @@ fn autosave_in_place_writes_only_what_changed() {
             file: rel,
             rows: log.rows.len() as u64,
             complete_len: whole_len as u64,
+            bands: None,
         }]
     );
 }
@@ -900,16 +926,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 12", "\"version\": 11")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 13", "\"version\": 12")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 11
+            found: 12
         }
     );
-    assert!(e.to_string().contains("reads version 12 only"), "{e}");
+    assert!(e.to_string().contains("reads version 13 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))

@@ -66,7 +66,7 @@ use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType, TcpLiveness
 
 pub use config::{
     Advertise, AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError,
-    NetworkSecurity, ReplayLimits, pid_file, runtime_dir,
+    LocalClock, NetworkSecurity, ReplayLimits, pid_file, runtime_dir,
 };
 
 pub use backend::{
@@ -448,6 +448,7 @@ impl Daemon {
             cal_store: config.cal_store.clone(),
             autosave: config.autosave.clone(),
             recording_dir: config.recording_dir.clone(),
+            local_clock: config.local_clock,
         });
         let control = std::thread::Builder::new()
             .name("ac2d-control".into())

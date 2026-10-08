@@ -1040,6 +1040,7 @@ mod tests {
             c.kind,
             MeasKind::Spl {
                 config: SplConfig {
+                    bands: None,
                     input: 1,
                     weighting: Weighting::A,
                     time_weighting: TimeWeighting::Fast,

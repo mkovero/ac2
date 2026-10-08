@@ -392,6 +392,7 @@ impl Rig {
                     "FOH SPL",
                     MeasKind::Spl {
                         config: SplConfig {
+                            bands: None,
                             input: 1,
                             weighting: Weighting::A,
                             time_weighting: TimeWeighting::Fast,

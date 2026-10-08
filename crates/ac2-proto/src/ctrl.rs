@@ -457,6 +457,22 @@ pub enum Command {
         /// SPL measurement.
         meas: MeasId,
     },
+    /// Computes a FOH → dwelling transfer per band (`docs/design/band-leq.md`, *The
+    /// transfer*) from the band levels of a steady test signal at FOH and in the dwelling,
+    /// and the dwelling's background with the system silent, and stores it in the band
+    /// meter of `meas` (which must have one); the reply is the updated measurement. The
+    /// levels come from band logs over a span or as typed values.
+    #[serde(rename = "spl.band_transfer")]
+    SplBandTransfer {
+        /// SPL meter whose band meter gets the transfer.
+        meas: MeasId,
+        /// Band levels at FOH (the meter's own mic position).
+        foh: crate::model::BandLevelSource,
+        /// Band levels in the dwelling, the same signal.
+        dwelling: crate::model::BandLevelSource,
+        /// The dwelling's background, the system silent; `None`: every band unchecked.
+        background: Option<crate::model::BandLevelSource>,
+    },
 
     // -- sweep --------------------------------------------------------------------------
     /// Run a sweep measurement with its settings: plays its `repeats` synchronised sweeps,
@@ -605,6 +621,7 @@ impl Command {
             Self::CalDelete { .. } => "cal.delete",
             Self::SplLogGet { .. } => "spl.log_get",
             Self::SplLogNew { .. } => "spl.log_new",
+            Self::SplBandTransfer { .. } => "spl.band_transfer",
             Self::SplHistoryGet { .. } => "spl.history_get",
             Self::SweepRun { .. } => "sweep.run",
             Self::StateSnapshot => "state.snapshot",

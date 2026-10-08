@@ -280,6 +280,54 @@ def frames():
                 ),
             ],
         ),
+        "band_leq": frame(
+            "d/4/band_leq",
+            "band_leq",
+            None,
+            {
+                "scale": "db_spl",
+                "cal": {
+                    "type": "verified",
+                    "calibrated_at": CAL_AT,
+                    "basis": {
+                        "type": "electrical",
+                        "connection": "injected",
+                        "mic_sensitivity": 15.0,
+                        "data_sheet": False,
+                        "uncertainty": 1.0,
+                    },
+                },
+                "mic_curve": True,
+                "duration": 3600.0,
+                "horizon": 60.0,
+                "elapsed": 1800.0,
+                "measured": 1790.0,
+                "period": "night",
+                "period_after_horizon": "night",
+                "correction": 5.0,
+                "limits_from": "transferred",
+                "bands": [
+                    {
+                        "nominal": BAND_NOMINAL_HZ[i],
+                        "leq": 40.0 + i * 4.5,
+                        "limit": 90.0 - i * 2.0 if i < 10 else None,
+                        "judgement": {10: "no_limit", 5: "over", 4: "near"}.get(i, "ok"),
+                        "on_course": i == 4,
+                        "allowed": 85.25 - i if i < 10 and i != 5 else None,
+                        "recover": 412.0 if i == 5 else None,
+                    }
+                    for i in range(11)
+                ],
+                "worst": 5,
+                "predicted": {
+                    "estimate": 23.5,
+                    "at_most": 27.25,
+                    "limit": 25.0,
+                    "judgement": "near",
+                },
+            },
+            [],
+        ),
         "levels": frame(
             "d/1/levels",
             "levels",
@@ -373,6 +421,32 @@ MEAS_CONFIG = {
 }
 
 
+BAND_NOMINAL_HZ = [
+    20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
+    500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0,
+    6300.0, 8000.0, 10000.0,
+]
+FINLAND_545_NIGHT = [74.0, 64.0, 56.0, 49.0, 44.0, 42.0, 40.0, 38.0, 36.0, 34.0, 32.0]
+
+BAND_LEQ_CONFIG = {
+    "duration": 3600.0,
+    "day": [l + 5.0 for l in FINLAND_545_NIGHT],
+    "night": FINLAND_545_NIGHT,
+    "warn_margin": 3.0,
+    "predicted": {"day": None, "night": 25.0},
+    "correction": {"impulse": "plus5", "tonal": "none"},
+    "transfer": {
+        "measured_at": 1789500000000000000,
+        "bands": [
+            {"status": "unchecked", "attenuation": 20.0},
+            {"status": "clean", "attenuation": 25.5},
+            {"status": "corrected", "attenuation": 30.0, "margin": 5.5},
+            {"status": "unusable", "at_least": 35.0},
+        ]
+        + [{"status": "missing"}] * 24,
+    },
+}
+
 SPL_MEASUREMENT = {
     "id": 4,
     "config": {
@@ -396,6 +470,7 @@ SPL_MEASUREMENT = {
                     },
                 },
                 "position": {"level": 2.5, "peak": 1.5},
+                "bands": BAND_LEQ_CONFIG,
             },
         },
     },
@@ -442,6 +517,22 @@ SPL_LOG = {
             "kind": "recovered",
             "level": 133.5,
             "limit": 135.0,
+            "position": None,
+        },
+        {
+            "at": 1790000620000000000,
+            "subject": {"type": "band", "nominal": 63.0},
+            "kind": "over",
+            "level": 82.5,
+            "limit": 80.0,
+            "position": None,
+        },
+        {
+            "at": 1790000630000000000,
+            "subject": {"type": "predicted"},
+            "kind": "over",
+            "level": 26.5,
+            "limit": 25.0,
             "position": None,
         },
     ],
@@ -707,6 +798,24 @@ def requests():
         ),
         req(58, "server.info", mutation=False),
         req(60, "server.revoke", {"name": "laptop"}),
+        req(
+            61,
+            "spl.band_transfer",
+            {
+                "meas": 4,
+                "foh": {
+                    "type": "log",
+                    "meas": 4,
+                    "from": 1789500000000000000,
+                    "until": 1789500030000000000,
+                },
+                "dwelling": {
+                    "type": "levels",
+                    "levels": [50.0, 49.0, 48.0] + [None] * 25,
+                },
+                "background": None,
+            },
+        ),
     ]
 
 

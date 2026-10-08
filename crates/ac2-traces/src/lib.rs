@@ -9,6 +9,8 @@
 //! only when a trace's data is served ([`smooth`], [`mic`]).
 #![forbid(unsafe_code)]
 
+pub mod band_levels;
+pub mod band_log;
 pub mod columns;
 pub mod math;
 pub mod meta;

@@ -382,3 +382,78 @@ pub(crate) fn delay_finding(
         found_at,
     }
 }
+
+// The wire's band table is the core's.
+const _: () = assert!(pm::BAND_COUNT == core::band_leq::BANDS);
+const _: () = assert!(pm::LF_BAND_COUNT == core::band_leq::LF_BANDS);
+
+pub(crate) fn band_period(p: core::band_leq::Period) -> pm::BandPeriod {
+    match p {
+        core::band_leq::Period::Day => pm::BandPeriod::Day,
+        core::band_leq::Period::Night => pm::BandPeriod::Night,
+    }
+}
+
+pub(crate) fn band_transfer_band(b: core::band_leq::BandTransfer) -> pm::BandTransferBand {
+    use ac2_proto::units::Db;
+    use core::band_leq::BandTransfer as T;
+    use pm::BandTransferBand as P;
+    match b {
+        T::Unchecked { attenuation_db } => P::Unchecked {
+            attenuation: Db(attenuation_db),
+        },
+        T::Clean { attenuation_db } => P::Clean {
+            attenuation: Db(attenuation_db),
+        },
+        T::Corrected {
+            attenuation_db,
+            margin_db,
+        } => P::Corrected {
+            attenuation: Db(attenuation_db),
+            margin: Db(margin_db),
+        },
+        T::Unusable { at_least_db } => P::Unusable {
+            at_least: Db(at_least_db),
+        },
+        T::Missing => P::Missing,
+    }
+}
+
+pub(crate) fn band_transfer(t: &pm::BandTransferSet) -> core::band_leq::Transfer {
+    use core::band_leq::BandTransfer as T;
+    use pm::BandTransferBand as P;
+    core::band_leq::Transfer::from_bands(t.bands.map(|b| match b {
+        P::Unchecked { attenuation } => T::Unchecked {
+            attenuation_db: attenuation.0,
+        },
+        P::Clean { attenuation } => T::Clean {
+            attenuation_db: attenuation.0,
+        },
+        P::Corrected {
+            attenuation,
+            margin,
+        } => T::Corrected {
+            attenuation_db: attenuation.0,
+            margin_db: margin.0,
+        },
+        P::Unusable { at_least } => T::Unusable {
+            at_least_db: at_least.0,
+        },
+        P::Missing => T::Missing,
+    }))
+}
+
+/// The dwelling limits of a band meter, dB SPL, on the core's 28 bands.
+pub(crate) fn band_limits(c: &pm::BandLeqConfig) -> core::band_leq::BandLimits {
+    let widen = |l: &[Option<ac2_proto::units::DbSpl>; pm::LF_BAND_COUNT]| {
+        let mut out = [None; core::band_leq::BANDS];
+        for (o, l) in out.iter_mut().zip(l) {
+            *o = l.map(|l| l.0);
+        }
+        out
+    };
+    core::band_leq::BandLimits {
+        day: widen(&c.day),
+        night: widen(&c.night),
+    }
+}

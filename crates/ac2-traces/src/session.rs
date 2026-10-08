@@ -5,6 +5,7 @@
 //! <dir>/session.prev.json            the autosave's previous manifest ([`save_autosave`])
 //! <dir>/traces/<id>-<hash>.csv       one ac2 CSV per trace (columns; header repeats metadata)
 //! <dir>/spl/<name>.csv               one per-second log per SPL meter ([`crate::spl_log`])
+//! <dir>/spl/<name>.bands.csv         its band meter's per-second log ([`crate::band_log`])
 //! ```
 //!
 //! A sweep trace's CSV holds all of it: distortion curves as columns, analysis facts in its
@@ -46,6 +47,7 @@ use ac2_proto::units::{MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::band_log::{self, BandLogRow};
 use crate::columns::StoredTrace;
 use crate::spl_log::{self, SplLogInfo};
 use crate::text::{export_csv, import};
@@ -53,7 +55,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -113,6 +115,8 @@ pub struct SavedSplLogFile {
     pub meas: MeasId,
     /// Log file, relative to the session directory.
     pub file: String,
+    /// The band meter's per-second log beside it ([`crate::band_log`]), if one was kept.
+    pub bands: Option<String>,
 }
 
 /// The manifest.
@@ -140,6 +144,8 @@ pub struct SavedSplLog {
     pub info: SplLogInfo,
     /// Rows, oldest first.
     pub rows: Vec<SplLogRow>,
+    /// The band meter's rows, oldest first (empty when it never ran).
+    pub bands: Vec<BandLogRow>,
 }
 
 /// Where a loaded SPL log came from, for appending to it.
@@ -147,6 +153,19 @@ pub struct SavedSplLog {
 pub struct SplLogOnDisk {
     /// SPL measurement.
     pub meas: MeasId,
+    /// Log file, relative to the session directory.
+    pub file: String,
+    /// Rows read.
+    pub rows: u64,
+    /// Bytes up to the end of the last whole line.
+    pub complete_len: u64,
+    /// Where its band log was read from.
+    pub bands: Option<BandLogOnDisk>,
+}
+
+/// Where a loaded band log came from, for appending to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BandLogOnDisk {
     /// Log file, relative to the session directory.
     pub file: String,
     /// Rows read.
@@ -315,9 +334,20 @@ fn save_into(dir: &Path, s: &Session, mode: &Mode<'_>) -> Result<Manifest, Sessi
             &dir.join(&file),
             spl_log::export_csv(&l.info, &l.rows).as_bytes(),
         )?;
+        let bands = if l.bands.is_empty() {
+            None
+        } else {
+            let file = format!("{SPL_DIR}/{generation}-{}.bands.csv", l.info.meas.0);
+            write_atomic(
+                &dir.join(&file),
+                band_log::export_csv(&l.info, &l.bands).as_bytes(),
+            )?;
+            Some(file)
+        };
         logs.push(SavedSplLogFile {
             meas: l.info.meas,
             file,
+            bands,
         });
     }
     if let Mode::Autosave { linked } = mode {
@@ -392,6 +422,7 @@ fn files_of(m: &Manifest) -> Vec<String> {
         .iter()
         .map(|t| t.file.clone())
         .chain(m.spl_logs.iter().map(|l| l.file.clone()))
+        .chain(m.spl_logs.iter().filter_map(|l| l.bands.clone()))
         .collect()
 }
 
@@ -529,11 +560,35 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
             path: p.clone(),
             msg: e.to_string(),
         })?;
+        let (bands, bands_on_disk) = match &l.bands {
+            None => (Vec::new(), None),
+            Some(bf) => {
+                if bf.contains("..") || Path::new(bf).is_absolute() {
+                    return Err(SessionError::Corrupt {
+                        path: dir.join(name),
+                        msg: format!("band log file {bf:?} is outside the session"),
+                    });
+                }
+                let bp = dir.join(bf);
+                let bytes = fs::read(&bp).map_err(io(&bp))?;
+                let read = band_log::import_csv(&bytes).map_err(|e| SessionError::Corrupt {
+                    path: bp.clone(),
+                    msg: e.to_string(),
+                })?;
+                let on = BandLogOnDisk {
+                    file: bf.clone(),
+                    rows: read.rows.len() as u64,
+                    complete_len: read.complete_len as u64,
+                };
+                (read.rows, Some(on))
+            }
+        };
         on_disk.push(SplLogOnDisk {
             meas: l.meas,
             file: f.clone(),
             rows: read.rows.len() as u64,
             complete_len: read.complete_len as u64,
+            bands: bands_on_disk,
         });
         spl_logs.push(SavedSplLog {
             info: SplLogInfo {
@@ -543,6 +598,7 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
                 mic: None,
             },
             rows: read.rows,
+            bands,
         });
     }
     Ok((

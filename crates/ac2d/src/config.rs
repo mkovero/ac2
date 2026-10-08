@@ -48,6 +48,46 @@ pub struct DaemonConfig {
     /// mDNS advert of a network-mode daemon (`_ac2._tcp`); ignored in local modes, which
     /// are not reachable from the network. `None` advertises nothing.
     pub advertise: Option<Advertise>,
+    /// Local time of day, which decides each band-meter second's day or night limits.
+    pub local_clock: LocalClock,
+}
+
+/// How the daemon tells the local time of day from its wall clock: the band meter's day
+/// (07–22) and night (22–07) limits follow local time (`docs/design/band-leq.md`, *Day
+/// and night*).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LocalClock {
+    /// The host's time zone rules (daylight saving included).
+    #[default]
+    Host,
+    /// A fixed offset east of UTC: a rig whose host keeps UTC, and tests that place the
+    /// daemon at a chosen time of day.
+    FixedOffset {
+        /// Seconds east of UTC (−18 h … +18 h).
+        east_s: i32,
+    },
+}
+
+impl LocalClock {
+    /// Seconds since local midnight of the wall time `wall_ns` (Unix ns).
+    pub fn seconds_of_day(self, wall_ns: u64) -> u32 {
+        let secs = i64::try_from(wall_ns / 1_000_000_000).unwrap_or(i64::MAX);
+        match self {
+            LocalClock::Host => {
+                use chrono::{TimeZone, Timelike};
+                match chrono::Local.timestamp_opt(secs, 0) {
+                    chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => {
+                        t.num_seconds_from_midnight()
+                    }
+                    // A Unix instant always has a local time; UTC if the zone says not.
+                    chrono::LocalResult::None => secs.rem_euclid(86_400) as u32,
+                }
+            }
+            LocalClock::FixedOffset { east_s } => {
+                (secs + i64::from(east_s)).rem_euclid(86_400) as u32
+            }
+        }
+    }
 }
 
 /// Where the daemon autosaves, and whether it loads that autosave when it starts.
@@ -92,6 +132,7 @@ impl fmt::Debug for DaemonConfig {
             .field("autosave", &self.autosave)
             .field("recording_dir", &self.recording_dir)
             .field("advertise", &self.advertise)
+            .field("local_clock", &self.local_clock)
             .finish()
     }
 }
@@ -115,6 +156,7 @@ impl DaemonConfig {
             autosave: None,
             recording_dir: None,
             advertise: None,
+            local_clock: LocalClock::Host,
         }
     }
 }

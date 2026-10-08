@@ -513,3 +513,41 @@ fn nominal_and_exact_centres_agree() {
     }
     assert_eq!(NOMINAL_HZ[LF_BANDS - 1], 200.0);
 }
+
+#[test]
+fn logged_seconds_refill_by_wall_time_with_gaps_in_their_period() {
+    const NS: u64 = 1_000_000_000;
+    let lv = |db: f64| BandSecond::from_levels(&[db; BANDS], 1.0);
+    // Rows at t = 100, 101, 103 s (102 missing), now = 104 s, window 3 s: slots 101…103.
+    let rows = [
+        (103 * NS, lv(-20.0), Period::Day),
+        (101 * NS, lv(-30.0), Period::Day),
+        (100 * NS, lv(-10.0), Period::Day),
+    ];
+    let placed = Placed::new(rows, 104 * NS, 3);
+    let night_at_102 = |t: u64| {
+        if t == 102 * NS {
+            Period::Night
+        } else {
+            Period::Day
+        }
+    };
+    let got: Vec<(BandSecond, Period)> = placed.seconds(night_at_102).collect();
+    assert_eq!(got.len(), 3);
+    assert_eq!(got[0], (lv(-30.0), Period::Day));
+    assert_eq!(got[1], (BandSecond::GAP, Period::Night));
+    assert_eq!(got[2], (lv(-20.0), Period::Day));
+
+    let mut w = BandWindows::new(3, LF_BANDS, 1);
+    w.refill(placed.seconds(night_at_102));
+    // The gap second was a night second: the window is judged at night.
+    assert_eq!(w.period(), Period::Night);
+    let v = w.windows().value(0);
+    assert_eq!(v.measured, 2.0);
+    let want = power_dbfs((mean_square(-30.0) + mean_square(-20.0)) / 2.0);
+    assert!(close_db(v.leq_dbfs, want, 1e-9), "{} {want}", v.leq_dbfs);
+
+    // Nothing in the span: nothing pushed.
+    let empty = Placed::new([(10 * NS, lv(0.0), Period::Day)], 104 * NS, 3);
+    assert_eq!(empty.seconds(|_| Period::Day).count(), 0);
+}

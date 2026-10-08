@@ -4,6 +4,7 @@
 //! re-exports) so the protocol has no dependency on the DSP or audio crates and so a change
 //! there cannot silently change the wire; the daemon converts at its boundary.
 
+mod band_leq;
 mod calibration;
 mod defaults;
 mod delay;
@@ -17,6 +18,7 @@ mod state;
 mod sweep;
 mod trace;
 
+pub use band_leq::*;
 pub use calibration::*;
 pub use delay::*;
 pub use dsp::*;

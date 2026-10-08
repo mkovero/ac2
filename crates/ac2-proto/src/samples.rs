@@ -9,11 +9,11 @@ use crate::ctrl::{
 };
 use crate::event::{Change, Event, Patch, StateSnapshot};
 use crate::frame::{
-    ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame, IrMeta, KaMeta, LeqFlags,
-    LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, MathState, OperandState,
-    OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta,
-    SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
-    TimingWindow, ValidityMask,
+    BandLeqFrame, BandLeqMeta, ClipFlags, Frame, FrameData, FrameStamp, GenSummary, IrFrame,
+    IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta,
+    MathState, OperandState, OperandStatus, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags,
+    RtaFrame, RtaMeta, SessionLevelsFrame, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta,
+    TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -392,6 +392,20 @@ pub fn commands() -> Vec<Command> {
         },
         Command::ServerRevoke {
             name: "laptop".into(),
+        },
+        Command::SplBandTransfer {
+            meas: MeasId(4),
+            foh: BandLevelSource::Log {
+                meas: MeasId(4),
+                from: WallNs(1_789_500_000_000_000_000),
+                until: WallNs(1_789_500_030_000_000_000),
+            },
+            dwelling: BandLevelSource::Levels {
+                levels: (0..BAND_COUNT)
+                    .map(|i| (i < 3).then_some(DbSpl(50.0 - i as f64)))
+                    .collect(),
+            },
+            background: None,
         },
     ]
 }
@@ -1077,6 +1091,34 @@ pub fn spl_config() -> SplConfig {
             level: Db(2.5),
             peak: Db(1.5),
         }),
+        bands: Some(Box::new(band_leq_config())),
+    }
+}
+
+/// A band meter on the `finland-545-lf` limits with a transfer of every band status and a
+/// §13 impulse correction in force.
+pub fn band_leq_config() -> BandLeqConfig {
+    let mut bands = [BandTransferBand::Missing; BAND_COUNT];
+    bands[0] = BandTransferBand::Unchecked {
+        attenuation: Db(20.0),
+    };
+    bands[1] = BandTransferBand::Clean {
+        attenuation: Db(25.5),
+    };
+    bands[2] = BandTransferBand::Corrected {
+        attenuation: Db(30.0),
+        margin: Db(5.5),
+    };
+    bands[3] = BandTransferBand::Unusable { at_least: Db(35.0) };
+    BandLeqConfig {
+        correction: BandCorrection {
+            impulse: ImpulseCorrection::Plus5,
+            tonal: TonalCorrection::None,
+        },
+        ..BandLeqPreset::Finland545Lf.config(Some(BandTransferSet {
+            measured_at: WallNs(1_789_500_000_000_000_000),
+            bands,
+        }))
     }
 }
 
@@ -1146,6 +1188,22 @@ fn spl_log() -> SplLog {
                 kind: LeqAlarmKind::Recovered,
                 level: DbSpl(133.5),
                 limit: DbSpl(135.0),
+                position: None,
+            },
+            LeqAlarm {
+                at: WallNs(1_790_000_620_000_000_000),
+                subject: AlarmSubject::Band { nominal: Hz(63.0) },
+                kind: LeqAlarmKind::Over,
+                level: DbSpl(82.5),
+                limit: DbSpl(80.0),
+                position: None,
+            },
+            LeqAlarm {
+                at: WallNs(1_790_000_630_000_000_000),
+                subject: AlarmSubject::Predicted,
+                kind: LeqAlarmKind::Over,
+                level: DbSpl(26.5),
+                limit: DbSpl(25.0),
                 position: None,
             },
         ],
@@ -1729,6 +1787,13 @@ pub fn frames() -> Vec<Frame> {
         },
         Frame {
             stamp: stamp(None),
+            data: FrameData::BandLeq(Box::new(BandLeqFrame {
+                meas: MeasId(4),
+                meta: band_leq_meta(),
+            })),
+        },
+        Frame {
+            stamp: stamp(None),
             data: FrameData::Levels(LevelsFrame {
                 meas: MeasId(1),
                 meta: LevelsMeta {
@@ -1802,4 +1867,52 @@ pub fn frames() -> Vec<Frame> {
             }),
         },
     ]
+}
+
+/// A band meter's frame at night: band 5 (63 Hz) over and cannot recover within the horizon,
+/// band 4 (50 Hz) on course, 200 Hz without a limit.
+fn band_leq_meta() -> BandLeqMeta {
+    let bands = (0..LF_BAND_COUNT)
+        .map(|i| {
+            let judgement = match i {
+                10 => LeqJudgement::NoLimit,
+                5 => LeqJudgement::Over,
+                4 => LeqJudgement::Near,
+                _ => LeqJudgement::Ok,
+            };
+            BandLeqBand {
+                nominal: Hz(BAND_NOMINAL_HZ[i]),
+                leq: 40.0 + i as f64 * 4.5,
+                limit: (i < 10).then_some(90.0 - i as f64 * 2.0),
+                judgement,
+                on_course: i == 4,
+                allowed: (i < 10 && i != 5).then_some(85.25 - i as f64),
+                recover: (i == 5).then_some(Seconds(412.0)),
+            }
+        })
+        .collect();
+    BandLeqMeta {
+        scale: LevelScale::DbSpl,
+        cal: CalStatus::Verified {
+            calibrated_at: WallNs(1_789_000_000_000_000_000),
+            basis: electrical_basis(),
+        },
+        mic_curve: true,
+        duration: Seconds(3600.0),
+        horizon: Seconds(60.0),
+        elapsed: Seconds(1800.0),
+        measured: Seconds(1790.0),
+        period: BandPeriod::Night,
+        period_after_horizon: BandPeriod::Night,
+        correction: Db(5.0),
+        limits_from: BandLimitPlace::Transferred,
+        bands,
+        worst: Some(5),
+        predicted: Some(PredictedLeq {
+            estimate: 23.5,
+            at_most: 27.25,
+            limit: Some(DbSpl(25.0)),
+            judgement: LeqJudgement::Near,
+        }),
+    }
 }

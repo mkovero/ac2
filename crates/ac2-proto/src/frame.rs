@@ -181,6 +181,8 @@ pub enum FrameKind {
     Spl,
     /// Rolling Leq windows of an SPL meter.
     Leq,
+    /// 1/3-octave band Leq of an SPL meter's band meter.
+    BandLeq,
     /// Input meters.
     Levels,
     /// Input meters of the open session.
@@ -477,6 +479,43 @@ pub struct LeqMeta {
     pub position: Option<PositionCorrection>,
 }
 
+/// An SPL meter's band meter once a second (`docs/design/band-leq.md`): every limited band's
+/// window judged, the worst band, the period, the predicted dwelling LAeq. No arrays: eleven
+/// bands fit the header.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BandLeqMeta {
+    /// Unit of every level (`db_spl` once calibrated; limits are judged only then).
+    pub scale: LevelScale,
+    /// Calibration applied.
+    pub cal: CalStatus,
+    /// The mic-curve correction filter ran before the band filters.
+    pub mic_curve: bool,
+    /// Window length.
+    pub duration: Seconds,
+    /// Headroom horizon (the meter's Leq horizon).
+    pub horizon: Seconds,
+    /// Seconds of the window elapsed (less than `duration` while it fills).
+    pub elapsed: Seconds,
+    /// Seconds of those measured.
+    pub measured: Seconds,
+    /// The limit set the windows are judged by: night while they hold a night second.
+    pub period: crate::model::BandPeriod,
+    /// The set the headroom figures are computed against (once the horizon has passed).
+    pub period_after_horizon: crate::model::BandPeriod,
+    /// The §13 correction in force, dB (included in the newest seconds' levels).
+    pub correction: Db,
+    /// Where the limits at the mic come from.
+    pub limits_from: crate::model::BandLimitPlace,
+    /// The bands 20 … 200 Hz, low to high.
+    pub bands: Vec<crate::model::BandLeqBand>,
+    /// Index into `bands` of the worst band: the most severe judgement, then the furthest
+    /// above (or least below) its limit; `None` when nothing is judged.
+    pub worst: Option<u8>,
+    /// The predicted dwelling LAeq window; `None` without a transfer.
+    pub predicted: Option<crate::model::PredictedLeq>,
+}
+
 /// A peak limit's state: the highest second within the hold, judged against the limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -608,6 +647,8 @@ pub enum FrameMeta {
     Spl(SplMeta),
     /// Leq windows.
     Leq(LeqMeta),
+    /// Band Leq.
+    BandLeq(BandLeqMeta),
     /// Levels.
     Levels(LevelsMeta),
     /// Session levels.
@@ -629,6 +670,7 @@ impl FrameMeta {
             Self::Spec(_) => FrameKind::Spec,
             Self::Spl(_) => FrameKind::Spl,
             Self::Leq(_) => FrameKind::Leq,
+            Self::BandLeq(_) => FrameKind::BandLeq,
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
@@ -796,6 +838,15 @@ pub struct LeqFrame {
     pub flags: Vec<LeqFlags>,
 }
 
+/// An SPL meter's band meter, published once a second.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BandLeqFrame {
+    /// Measurement.
+    pub meas: MeasId,
+    /// The bands, the period, the prediction.
+    pub meta: BandLeqMeta,
+}
+
 /// Input meters frame.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LevelsFrame {
@@ -852,6 +903,8 @@ pub enum FrameData {
     Spl(SplFrame),
     /// `d/<meas>/leq`.
     Leq(Box<LeqFrame>),
+    /// `d/<meas>/band_leq`.
+    BandLeq(Box<BandLeqFrame>),
     /// `d/<meas>/levels`.
     Levels(LevelsFrame),
     /// `session/levels`.
@@ -883,6 +936,7 @@ impl FrameData {
             Self::Spec(_) => FrameKind::Spec,
             Self::Spl(_) => FrameKind::Spl,
             Self::Leq(_) => FrameKind::Leq,
+            Self::BandLeq(_) => FrameKind::BandLeq,
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
@@ -901,6 +955,7 @@ impl FrameData {
             Self::Spec(f) => data(f.meas, Stream::Spec),
             Self::Spl(f) => data(f.meas, Stream::Spl),
             Self::Leq(f) => data(f.meas, Stream::Leq),
+            Self::BandLeq(f) => data(f.meas, Stream::BandLeq),
             Self::Levels(f) => data(f.meas, Stream::Levels),
             Self::SessionLevels(_) => Topic::SessionLevels,
             Self::PreviewLevels(_) => Topic::PreviewLevels,
@@ -1135,6 +1190,7 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
             FrameMeta::Spec(f.meta.clone())
         }
         FrameData::Spl(f) => FrameMeta::Spl(f.meta),
+        FrameData::BandLeq(f) => FrameMeta::BandLeq(f.meta.clone()),
         FrameData::Leq(f) => {
             let unit = level_unit(f.meta.scale);
             cols.push((desc(ArrayName::Leq, unit), Col::F(&f.leq)));
@@ -1343,6 +1399,7 @@ fn stream_kind(s: Stream) -> FrameKind {
         Stream::Spec => FrameKind::Spec,
         Stream::Spl => FrameKind::Spl,
         Stream::Leq => FrameKind::Leq,
+        Stream::BandLeq => FrameKind::BandLeq,
         Stream::Levels => FrameKind::Levels,
     }
 }
@@ -1467,6 +1524,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             meta,
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
+        FrameMeta::BandLeq(meta) => FrameData::BandLeq(Box::new(BandLeqFrame { meas, meta })),
         FrameMeta::Leq(meta) => {
             let unit = level_unit(meta.scale);
             FrameData::Leq(Box::new(LeqFrame {

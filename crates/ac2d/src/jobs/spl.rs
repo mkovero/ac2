@@ -7,6 +7,8 @@
 //! control thread, which keeps the `spl_log` entity. Freeze and reset are display
 //! operations of the meter: the log and the windows carry on through them.
 
+mod bands;
+
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
@@ -18,7 +20,8 @@ use ac2_core::mic_curve::Correction;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::spl::{Sensitivity, SplMeter, SplMeterConfig};
 use ac2_proto::frame::{
-    FrameData, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, ProtectionFlags, SplFrame, SplMeta,
+    BandLeqFrame, FrameData, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, ProtectionFlags,
+    SplFrame, SplMeta,
 };
 use ac2_proto::model::{
     AlarmSubject, LeqAlarm, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, PeakQuantity,
@@ -29,6 +32,7 @@ use ac2_proto::units::{DbSpl, Dbfs, MeasId, Rev, Seconds, WallNs};
 
 use super::{Analysis, Due, Emitter, Flush, JobCmd, LevelsMeter, Pace, StampArgs, channel_f64};
 use crate::calstore::InputCal;
+use crate::config::LocalClock;
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Block;
@@ -60,6 +64,9 @@ pub(crate) struct Spl {
     end: Option<u64>,
     wall: u64,
     leq: LeqWindows,
+    /// The band meter, while configured.
+    band: Option<bands::BandMeter>,
+    local: LocalClock,
     /// Advances whenever the reading may have changed: a block metered, a command.
     generation: u64,
     pace: Pace,
@@ -135,6 +142,8 @@ pub(crate) struct LeqSetup {
     pub(crate) judgements: Vec<LeqJudgement>,
     /// The peak limits' judgements likewise ([`PeakQuantity::ALL`] order).
     pub(crate) peak_judgements: [LeqJudgement; 2],
+    /// Local time, for the band limits' day and night.
+    pub(crate) local: LocalClock,
 }
 
 /// Index of `q` in [`PeakQuantity::ALL`].
@@ -231,7 +240,17 @@ impl Spl {
             peak_weighting: conv::peak_weighting(cfg.peak_weighting),
         })
         .map_err(|e| e.to_string())?;
+        let local = leq.local;
         let leq = LeqWindows::new(cfg.leq.clone(), leq);
+        let band = cfg.bands.clone().and_then(|b| {
+            bands::BandMeter::new(
+                *b,
+                fs,
+                cfg.leq.horizon_seconds().unwrap_or(60),
+                &leq.log,
+                local,
+            )
+        });
         if let Some(c) = &cal.correction {
             meter.set_correction(Some(&c.design_fir(fs)));
         }
@@ -250,6 +269,8 @@ impl Spl {
             end: None,
             wall: 0,
             leq,
+            band,
+            local,
             generation: 0,
             pace: Pace::new(std::time::Duration::from_secs_f64(1.0 / f64::from(SPL_FPS))),
         })
@@ -269,6 +290,7 @@ impl Spl {
         let fs = self.fs;
         let l = &mut self.leq;
         let meter = &mut self.meter;
+        let band = &mut self.band;
         let block_wall = (b.wall_ns as f64 - f64::from(b.frames) / fs * NS).max(0.0) as u64;
         match l.second_start {
             None => {
@@ -278,22 +300,43 @@ impl Spl {
                 l.next = b.start_sample;
                 l.next_wall = block_wall;
                 leq_log::lock(&l.log).rebuild(&mut l.ring, &mut l.peaks, block_wall);
+                if let Some(bm) = band {
+                    bm.second_start = Some(b.start_sample);
+                    bm.rebuild(&l.log, block_wall);
+                }
             }
             Some(_) if b.start_sample > l.next => {
                 // Lost samples: the second grid moves on without energy or measured time.
                 let lost = b.start_sample - l.next;
                 let done = &mut l.done;
                 meter.skip(lost, |s| done.push(s));
+                if let Some(bm) = band {
+                    let done = &mut bm.done;
+                    bm.integ.skip(lost, |s| done.push(s));
+                }
             }
             Some(_) => {}
         }
         l.next = b.start_sample;
         l.next_wall = block_wall;
         let done = &mut l.done;
-        meter.process(&self.buf, |s| done.push(s));
+        match band {
+            // The band filters take the meter's mic-curve corrected signal before its
+            // frequency weighting: band limits are on unweighted levels.
+            Some(bm) => {
+                let (integ, bdone) = (&mut bm.integ, &mut bm.done);
+                meter.process_tapped(
+                    &self.buf,
+                    |s| done.push(s),
+                    |x| integ.process(x, |s| bdone.push(s)),
+                );
+            }
+            None => meter.process(&self.buf, |s| done.push(s)),
+        }
         l.next = b.end_sample();
         l.next_wall = b.wall_ns;
-        if l.done.is_empty() {
+        self.push_bands();
+        if self.leq.done.is_empty() {
             return;
         }
         let per = self.meter.seconds().samples_per_second();
@@ -349,6 +392,71 @@ impl Spl {
         self.leq.done = seconds;
         self.leq.done.clear();
         self.leq.fresh = true;
+    }
+
+    /// Logs and judges the band meter's completed seconds; alarms go to the control thread.
+    fn push_bands(&mut self) {
+        let Some(bm) = &mut self.band else {
+            return;
+        };
+        if bm.done.is_empty() {
+            return;
+        }
+        let per = self.meter.seconds().samples_per_second();
+        let mut seconds = std::mem::take(&mut bm.done);
+        let mut alarms = Vec::new();
+        for s in &seconds {
+            let start = bm.second_start.unwrap_or(0);
+            let end = start + per;
+            bm.second_start = Some(end);
+            let span = (
+                self.leq.wall_of(start, self.fs),
+                self.leq.wall_of(end, self.fs),
+            );
+            bm.second(s, span, &self.leq.log, self.cal.sensitivity, &mut alarms);
+        }
+        seconds.clear();
+        bm.done = seconds;
+        if !alarms.is_empty() {
+            let at = alarms[alarms.len() - 1].at;
+            self.report(at, alarms);
+        }
+    }
+
+    /// Takes a new band meter configuration: a meter turned on carries on from the log on
+    /// the meter's second grid; a changed one rebuilds its windows from the log, unless only
+    /// the correction or the warn margin changed.
+    fn set_bands(&mut self, cfg: Option<ac2_proto::model::BandLeqConfig>) {
+        let horizon = self.cfg.leq.horizon_seconds().unwrap_or(60);
+        match (cfg, &mut self.band) {
+            (None, _) => self.band = None,
+            (Some(c), Some(bm)) if bm.same_windows(&c) && bm.horizon() == horizon => {
+                bm.set_light(c);
+            }
+            (Some(c), _) => {
+                self.band = bands::BandMeter::new(c, self.fs, horizon, &self.leq.log, self.local);
+                if let (Some(bm), Some(start)) = (&mut self.band, self.leq.second_start) {
+                    // On the meter's second grid: the integrator starts as far into the
+                    // current second as the meter is, without energy for that part.
+                    let into = self.meter.seconds().position();
+                    bm.integ.skip(into, |_| {});
+                    bm.second_start = Some(start);
+                    bm.rebuild(&self.leq.log, self.leq.wall_of(start, self.fs));
+                }
+            }
+        }
+    }
+
+    fn band_frame(&self) -> Option<BandLeqFrame> {
+        let bm = self.band.as_ref()?;
+        Some(BandLeqFrame {
+            meas: self.meas,
+            meta: bm.meta(
+                self.cal.sensitivity,
+                self.cal.status,
+                self.meter.has_correction(),
+            ),
+        })
     }
 
     /// The measuring-position correction in force: the configured one while calibrated (a
@@ -666,7 +774,24 @@ impl Analysis for Spl {
                 );
                 let leq_changed = config.leq != self.cfg.leq;
                 let position_changed = config.position != self.cfg.position;
+                let bands_changed = config.bands != self.cfg.bands;
                 self.cfg = *config;
+                let at = if self.wall > 0 {
+                    self.wall
+                } else {
+                    crate::util::wall_ns()
+                };
+                if bands_changed || leq_changed {
+                    // The horizon is the Leq configuration's.
+                    self.set_bands(self.cfg.bands.as_deref().cloned());
+                    let mut alarms = Vec::new();
+                    if let Some(bm) = &mut self.band {
+                        bm.judge(WallNs(at), self.cal.sensitivity, &mut alarms);
+                    }
+                    if !alarms.is_empty() {
+                        self.report(WallNs(at), alarms);
+                    }
+                }
                 if !leq_changed && !position_changed {
                     return;
                 }
@@ -677,11 +802,6 @@ impl Analysis for Spl {
                 }
                 // The rebuilt windows are judged at once: a new limit below the level is
                 // an alarm now, not a second later, and the next frame carries the state.
-                let at = if self.wall > 0 {
-                    self.wall
-                } else {
-                    crate::util::wall_ns()
-                };
                 self.judge(WallNs(at));
             }
             JobCmd::SetDelay { .. }
@@ -724,6 +844,19 @@ impl Analysis for Spl {
         // A second not sent stays fresh, so a new subscriber gets the windows at once.
         if self.leq.fresh && e.wants(leq_topic) {
             self.leq.fresh = !e.send(stamp, FrameData::Leq(Box::new(self.leq_frame())));
+        }
+        let band_topic = Topic::Data {
+            meas: self.meas,
+            stream: Stream::BandLeq,
+        };
+        if self.band.as_ref().is_some_and(|b| b.fresh)
+            && e.wants(band_topic)
+            && let Some(f) = self.band_frame()
+        {
+            let sent = e.send(stamp, FrameData::BandLeq(Box::new(f)));
+            if let Some(b) = &mut self.band {
+                b.fresh = !sent;
+            }
         }
         self.levels.send(e, self.meas, stamp);
         Flush::from_due(due)

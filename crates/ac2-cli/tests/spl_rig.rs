@@ -90,6 +90,7 @@ async fn spl_watch_reads_its_input_on_a_fresh_meter() {
                 name: "spl-in2".into(),
                 kind: MeasKind::Spl {
                     config: SplConfig {
+                        bands: None,
                         input: 1,
                         weighting: Weighting::Z,
                         time_weighting: TimeWeighting::Fast,

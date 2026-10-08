@@ -316,6 +316,7 @@ fn spl() -> Spl {
     Spl::new(
         MeasId(1),
         SplConfig {
+            bands: None,
             input: 0,
             weighting: Weighting::Z,
             time_weighting: TimeWeighting::Fast,
@@ -333,6 +334,7 @@ fn spl() -> Spl {
             to_control,
             judgements: Vec::new(),
             peak_judgements: [ac2_proto::model::LeqJudgement::NoLimit; 2],
+            local: crate::config::LocalClock::Host,
         },
     )
     .expect("spl")

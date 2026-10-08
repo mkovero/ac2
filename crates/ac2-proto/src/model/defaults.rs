@@ -95,6 +95,7 @@ impl SplConfig {
             peak_weighting: PeakWeighting::C,
             leq: LeqConfig::default_windows(),
             position: None,
+            bands: None,
         }
     }
 
@@ -106,6 +107,9 @@ impl SplConfig {
                 "a position correction is at most ±{} dB",
                 PositionCorrection::MAX_DB
             ));
+        }
+        if let Some(b) = &self.bands {
+            b.check()?;
         }
         Ok(())
     }
