@@ -115,10 +115,18 @@ async fn status_shows_the_clock_domain_and_the_drift() {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
     };
-    // 14 s of device time in 50 ms steps, so the fan-out keeps up.
+    // 14 s of device time in 50 ms steps, each once the daemon has read the last: stepping
+    // on regardless overflows the capture ring on a busy machine.
     for _ in 0..280 {
         d.run_blocks(10);
-        tokio::time::sleep(Duration::from_millis(2)).await;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while d.capture_queued() > 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the daemon stopped reading audio"
+            );
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
     }
     let deadline = Instant::now() + Duration::from_secs(30);
     let text = loop {

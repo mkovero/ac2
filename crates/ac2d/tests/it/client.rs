@@ -18,7 +18,7 @@ use common::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ac2_client_drives_the_daemon() {
     init_log();
-    let h = Daemon::start(config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
     let ep = Endpoints {
         ctrl: h.ctrl_endpoint().to_owned(),
         data: h.data_endpoint().to_owned(),

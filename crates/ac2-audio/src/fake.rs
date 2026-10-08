@@ -939,6 +939,14 @@ impl FakeDriver {
         self.run_blocks(frames.div_ceil(u64::from(self.sim.cfg.block_frames)));
     }
 
+    /// Captured blocks the stream's reader has not taken yet. A test that steps the
+    /// device faster than real time waits for this to reach zero between steps: a real
+    /// device cannot outrun its reader, it would overflow, and a loaded machine must not
+    /// turn into lost audio a test never asked for.
+    pub fn capture_queued(&self) -> usize {
+        self.sim.producer.blocks_queued()
+    }
+
     /// Callbacks run so far.
     pub fn blocks(&self) -> u64 {
         self.sim.stats.blocks

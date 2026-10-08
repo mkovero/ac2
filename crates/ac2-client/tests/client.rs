@@ -15,7 +15,9 @@ use ac2_proto::{
 
 type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-const DEADLINE: Duration = Duration::from_secs(10);
+/// A ceiling, not an expectation: waits end on their condition, normally within a second;
+/// a run sharing the machine with builds can stall a process for several.
+const DEADLINE: Duration = Duration::from_secs(30);
 
 async fn until<F, Fut>(what: &str, mut f: F) -> R
 where

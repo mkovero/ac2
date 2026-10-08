@@ -82,6 +82,16 @@ pub fn config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
     DaemonConfig::new(Arc::new(backend), listen, -10.0)
 }
 
+/// [`config`] with a stimulus lease that outlives any stall of a loaded machine, for tests
+/// that play a tone through a whole real-time run: a refresh missed by a starved test
+/// process would silence it and read as a wrong level. The expiry itself is tested against
+/// short deadlines (`stimulus`, `remote_stimulus`, `sweep`).
+pub fn steady_config(backend: FakeBackend, listen: Listen) -> DaemonConfig {
+    let mut cfg = config(backend, listen);
+    cfg.lease_expiry = Duration::from_secs(60);
+    cfg
+}
+
 pub fn inproc(name: &str) -> Listen {
     Listen::Inproc { name: unique(name) }
 }
@@ -315,7 +325,7 @@ pub fn driver(b: &FakeBackend) -> FakeDriver {
     }
 }
 
-/// Runs `seconds` of device time in 50 ms steps (the fan-out keeps up between steps).
+/// Runs `seconds` of device time in 50 ms steps, each once the daemon has taken the last.
 pub fn run(d: &mut FakeDriver, seconds: f64) {
     let blocks = (seconds * f64::from(FS) / f64::from(BLOCK)).ceil() as u64;
     let chunk = (0.05 * f64::from(FS) / f64::from(BLOCK)).ceil() as u64;
@@ -324,7 +334,21 @@ pub fn run(d: &mut FakeDriver, seconds: f64) {
         let n = chunk.min(blocks - done);
         d.run_blocks(n);
         done += n;
-        std::thread::sleep(Duration::from_millis(2));
+        taken(d);
+    }
+}
+
+/// Waits until the daemon has read every captured block. Stepping on regardless would
+/// overflow the capture ring whenever the machine is busy, and the tests would see lost
+/// audio they never scripted.
+pub fn taken(d: &FakeDriver) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while d.capture_queued() > 0 {
+        assert!(
+            Instant::now() < deadline,
+            "the daemon stopped reading audio"
+        );
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 

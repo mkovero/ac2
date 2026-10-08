@@ -105,7 +105,9 @@ fn routes_selected_channels_with_contiguous_exact_indices() {
         .open_manual(DuplexRequest::new(vec![3, 1], 2, max_level()))
         .expect("open");
     d.run_blocks(50);
+    assert_eq!(d.capture_queued(), 50);
     let blocks = drain(&mut s);
+    assert_eq!(d.capture_queued(), 0);
     assert_eq!(blocks.len(), 50);
     for (i, (h, data)) in blocks.iter().enumerate() {
         assert_eq!(

@@ -38,7 +38,7 @@ async fn connect(h: &Handle) -> Client {
 }
 
 fn start(store: &std::path::Path) -> Handle {
-    let mut cfg = config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_tcp());
     cfg.cal_store = Some(store.to_owned());
     Daemon::start(cfg).unwrap()
 }

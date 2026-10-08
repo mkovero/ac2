@@ -277,6 +277,11 @@ impl BlockProducer {
             && self.samples.slots() >= frames as usize * usize::from(self.channels.max(1))
     }
 
+    /// Blocks pushed that the consumer has not popped yet.
+    pub(crate) fn blocks_queued(&self) -> usize {
+        self.headers.buffer().capacity() - self.headers.slots()
+    }
+
     fn drop_block(&mut self, frames: u32) -> PushOutcome {
         self.carry |= BlockFlags::OVERFLOW | BlockFlags::DISCONTINUITY;
         self.counters.blocks_dropped.fetch_add(1, Ordering::Relaxed);

@@ -285,7 +285,7 @@ async fn a_vanished_device_is_reopened_with_backoff_until_it_returns() {
     );
 }
 
-/// A device that comes back in the middle of a 30 s wait is reopened within about the
+/// A device that comes back in the middle of a long wait is reopened within about the
 /// probe's second, not at the end of the wait; while it stays away, the attempts keep their
 /// backoff (the probe never starts one of its own).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -300,22 +300,28 @@ async fn a_device_back_mid_wait_is_reopened_at_once() {
         }) => Some((*attempt, *next_at)),
         _ => None,
     };
-    // Attempts at about 0, 1, 3, 7, 15 and 31 s; the sixth failed waits 30 s.
-    let s = until(&c, "the 30 s wait", Duration::from_secs(60), |s| {
-        waiting(s).is_some_and(|(a, _)| a >= 6)
+    // Attempts at about 0, 1, 3 and 7 s; the fourth failed waits 8 s. Every wait from 4 s
+    // on (up to the 30 s cap, see the backoff's unit tests) is watched the same way, and
+    // 8 s leaves room to tell a probe's reopen from the next scheduled attempt.
+    let s = until(&c, "the 8 s wait", Duration::from_secs(30), |s| {
+        waiting(s).is_some_and(|(a, _)| a >= 4)
     })
     .await;
     let (attempt, next_at) = waiting(&s).unwrap();
-    assert_eq!(attempt, 6, "no attempt besides the backoff's");
+    assert_eq!(attempt, 4, "no attempt besides the backoff's");
     let left = next_at.0.saturating_sub(wall_now_ns()) as f64 / 1e9;
-    assert!(left > 25.0, "{left}");
+    assert!(left > 6.0, "{left}");
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(
         waiting(&state(&c)).map(|(a, _)| a),
-        Some(6),
+        Some(4),
         "the device still away: no early attempt"
     );
     let back = Instant::now();
+    // The scheduled attempt is further away than the reopen may take, so only a probe can
+    // have found the device.
+    let left = next_at.0.saturating_sub(wall_now_ns()) as f64 / 1e9;
+    assert!(left > 3.0, "{left}");
     backend.restore();
     let s = until(&c, "reopened", WAIT, |s| s.session.stopped.is_none()).await;
     let took = back.elapsed();

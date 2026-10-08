@@ -162,7 +162,7 @@ async fn set_level(lease: &StimulusLease, level: f64) {
 async fn windows_go_over_and_recover_and_survive() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_tcp());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -451,7 +451,7 @@ async fn previous_page(c: &Client) -> Result<SplLogPage, ClientError> {
 async fn a_new_log_starts_over_and_keeps_the_windows() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_tcp());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -616,7 +616,7 @@ async fn spl_until(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn weightings_change_in_place_and_keep_the_log() {
     init_log();
-    let h = Daemon::start(config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
     let c = connect(&h).await;
     c.call(Command::SessionOpen {
         config: session(false),
@@ -707,7 +707,7 @@ async fn weightings_change_in_place_and_keep_the_log() {
 async fn a_filling_window_goes_over_when_its_budget_is_spent() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_tcp());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;
@@ -838,7 +838,7 @@ async fn a_long_log_in_pages_and_its_history() {
     use ac2_traces::session::{SavedMeasurement, SavedSplLog, Session};
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let h = Daemon::start(config(realtime_rig(), local_tcp())).unwrap();
+    let h = Daemon::start(steady_config(realtime_rig(), local_tcp())).unwrap();
     let c = connect(&h).await;
     let n = SplLogPage::MAX_ROWS as u64 * 2 + 5000;
     let t0 = 1_790_000_000_000_000_000;
@@ -947,7 +947,7 @@ async fn peak_limits_and_the_position_correction() {
     use ac2_proto::model::{AlarmSubject, PeakLimit, PeakLimits, PeakQuantity, PositionCorrection};
     init_log();
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = config(realtime_rig(), local_tcp());
+    let mut cfg = steady_config(realtime_rig(), local_tcp());
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
     let h = Daemon::start(cfg).unwrap();
     let c = connect(&h).await;

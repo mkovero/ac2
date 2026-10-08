@@ -309,14 +309,20 @@ fn electrical_calibration_from_the_app() -> R {
         height: 720.0,
     };
     let want = "electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB";
-    d.until("the SPL meter in dB SPL, electrically calibrated", |s| {
-        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now()).is_some_and(|x| {
-            let t = scene_texts(&x.scene);
+    let texts = |s: &AppState| {
+        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now())
+            .map(|x| scene_texts(&x.scene))
+    };
+    let r = d.until("the SPL meter in dB SPL, electrically calibrated", |s| {
+        texts(s).is_some_and(|t| {
             t.iter().any(|l| l.contains(want))
                 && t.iter().any(|l| l == "94.0")
                 && t.iter().any(|l| l.contains("dB SPL"))
         })
-    })?;
+    });
+    if r.is_err() {
+        return Err(format!("{r:?}; the meter shows {:?}", texts(&d.st)).into());
+    }
     d.until("the Leq caption naming the electrical calibration", |s| {
         ac2_ui::scenes::leq(s, &Theme::dark(), size, now())
             .is_some_and(|x| scene_texts(&x.scene).iter().any(|l| l.contains(want)))
@@ -473,14 +479,20 @@ fn acoustic_calibration_from_the_app() -> R {
         width: 1280.0,
         height: 720.0,
     };
-    d.until("the SPL meter at the calibrator's 94.0 dB SPL", |s| {
-        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now()).is_some_and(|x| {
-            let t = scene_texts(&x.scene);
+    let texts = |s: &AppState| {
+        ac2_ui::scenes::spl(s, &Keymap::default(), &Theme::dark(), size, now())
+            .map(|x| scene_texts(&x.scene))
+    };
+    let r = d.until("the SPL meter at the calibrator's 94.0 dB SPL", |s| {
+        texts(s).is_some_and(|t| {
             t.iter().any(|l| l.contains("cal 94 dB"))
                 && t.iter().any(|l| l == "94.0")
                 && t.iter().any(|l| l.contains("dB SPL"))
         })
-    })?;
+    });
+    if r.is_err() {
+        return Err(format!("{r:?}; the meter shows {:?}", texts(&d.st)).into());
+    }
     drop(tone);
     drop(d);
     drop(daemon);
