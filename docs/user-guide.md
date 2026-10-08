@@ -333,41 +333,55 @@ running)`.
 
 The transfer pane shows **magnitude**, **phase** and **coherence** of measurement / reference
 on a log-frequency grid (48 points per octave), computed with a multi-time-window FFT ladder
-so low frequencies get long windows and high frequencies stay responsive. Coherence (γ²) is
-how much of the measured energy is explained by the reference: drawn as the transparency of
-the traces, as its own curve, or as a mask that blanks the traces where γ² is below a chosen
-threshold (`B` cycles through off, 0.3, 0.5, 0.7, 0.9).
+so low frequencies get long windows and high frequencies stay responsive.
 
-Averaging accumulates the cross- and auto-spectra; **F** freezes the average, **R** resets
-it. Smoothing (1/3 … 1/48 octave) is applied after coherence, so it never makes bad data look
-coherent.
+- **Coherence (γ²)** is how much of the measured energy is explained by the reference. It is
+  drawn as the transparency of the traces, as its own curve, or as a mask that blanks the
+  traces where γ² is below a chosen threshold (`B` cycles through off, 0.3, 0.5, 0.7, 0.9).
+- **Averaging** accumulates the cross- and auto-spectra; **F** freezes the average, **R**
+  resets it.
+- **Smoothing** (1/3 … 1/48 octave) is applied after coherence, so it never makes bad data
+  look coherent.
 
 ### Choosing what a pane shows
 
 Each pane's title has a **chip** naming the measurement it shows (the transfer pane draws
 every transfer measurement, with that one first in the legend; the IR pane follows the
-transfer pane's choice). Click the chip for the list of measurements the pane can show and
-pick one, or use the keyboard: focus the pane (click it, **Tab**, **Alt+1 … Alt+4**) and
-**N** / **Shift+N** step through that pane's kind only — transfer measurements in the
-transfer pane, spectra and RTAs in the spectrum pane. **Choose the measurement the focused
-pane shows…** in the palette opens the same list (**↑/↓**, **Enter**).
+transfer pane's choice). To pick another:
 
-A click inside a pane selects the measurement it shows, exactly as clicking it in the
-measurement list does; selecting one in the list makes its pane show it and gives that pane
-the focus (unless the focused pane draws it already: the IR pane keeps it for a transfer
-measurement). **S** (start / stop) and **R** (reset) act on the measurement the focused pane
-shows — never on one of another kind selected elsewhere — and say what to create when the
-pane shows none. **F**, **X** and the delay keys act on the selected measurement and say
-which kind they need when it is another.
+- click the chip for the list of measurements the pane can show;
+- or focus the pane (click it, **Tab**, **Alt+1 … Alt+4**) and press **N** / **Shift+N**:
+  they step through that pane's kind only (transfer measurements in the transfer pane,
+  spectra and RTAs in the spectrum pane);
+- or use **Choose the measurement the focused pane shows…** in the palette (**↑/↓**,
+  **Enter**).
 
-**What A and Delete act on: the item selected last.** One measurement and at most one stored
-trace are selected at a time, and the one selected last has the keys that act on "the
-selected curve": a click (or **N**, a pane's chip, a click in its pane) on a measurement
-gives them to it (its row in the measurement tree, its live curve's row, or a math channel's
-row); a click on a trace in the tree (or **V**, **Alt+V**) gives them to that trace; **Esc**
-with no window open hands them back to the measurement. The tree shows which: the
-measurement row is filled while it has the keys and only outlined while a trace selected
-after it does; the trace's row is filled while it is selected.
+Which measurement the keys act on:
+
+- A click inside a pane selects the measurement it shows, exactly as clicking it in the
+  measurement list does. Selecting one in the list makes its pane show it and gives that
+  pane the focus (unless the focused pane draws it already: the IR pane keeps it for a
+  transfer measurement).
+- **S** (start / stop) and **R** (reset) act on the measurement the focused pane shows,
+  never on one of another kind selected elsewhere, and say what to create when the pane
+  shows none.
+- **F**, **X** and the delay keys act on the selected measurement and say which kind they
+  need when it is another.
+
+#### What A and Delete act on: the item selected last
+
+One measurement and at most one stored trace are selected at a time, and the one selected
+last has the keys that act on "the selected curve":
+
+- a click on a measurement (its row in the measurement tree, its live curve's row, or a
+  math channel's row; or **N**, a pane's chip, a click in its pane) gives them to it;
+- a click on a trace in the tree (or **V**, **Alt+V**) gives them to that trace;
+- **Esc** with no window open hands them back to the measurement.
+
+The tree shows which: the measurement row is filled while it has the keys and only
+outlined while a trace selected after it does; the trace's row is filled while it is
+selected.
+
 - **Shift+A** hides a measurement **and everything under it** — its live curve, its stored
   traces, the math channels made on it — and shows them all again when all are hidden
   (with a trace selected: that trace's group).
@@ -386,33 +400,53 @@ after it does; the trace's row is filled while it is selected.
   the confirmation's place, naming the channel to edit or delete first, and only closes.
 - On a stored trace both act on the trace (below).
 
-**One pane only, full screen (W).** **W** steps through three layouts: the split layout →
-the focused pane alone in the window → that pane **full screen** → the split layout again.
+#### One pane only, full screen (W)
+
+**W** steps through three layouts:
+
+1. the split layout;
+2. the focused pane alone in the window;
+3. that pane **full screen**; then back to the split layout.
+
 Full screen is the **stage view**: the window fills the screen and holds the pane's picture
-alone — no top bar, measurement list or pane title; a plot keeps a one-line caption naming
-the pane and its measurement, the SPL meter and its Leq windows name themselves. Key hints
-are off there. Full screen is your explicit choice to see only the pane: arming, playing
-or stopping the stimulus and a running sweep change nothing on it — no top bar, strip or
-badge comes back and no pane resizes; Esc and Shift+Esc stop as always. Outside full
-screen the top bar shows the stimulus as usual. **F11** on its own
-puts the whole window full screen (or back) in whatever layout it is in — with one pane up,
-that is the same stage view. Esc stops the stimulus as anywhere else (Shift+Esc too, also
-with a window open).
+alone.
+
+- No top bar, measurement list or pane title. A plot keeps a one-line caption naming the
+  pane and its measurement; the SPL meter and its Leq windows name themselves.
+- Key hints are off.
+- It is your explicit choice to see only the pane: arming, playing or stopping the stimulus
+  and a running sweep change nothing on it. No top bar, strip or badge comes back and no
+  pane resizes. Esc and Shift+Esc stop as always.
+- Outside full screen the top bar shows the stimulus as usual.
+
+**F11** on its own puts the whole window full screen (or back) in whatever layout it is in;
+with one pane up, that is the same stage view. Esc stops the stimulus as anywhere else
+(Shift+Esc too, also with a window open).
 
 With the focused pane maximised, picking a measurement in the list switches the one pane to
-the pane that shows it — a transfer measurement to the transfer pane, a spectrum or RTA to
-the spectrum / RTA pane, an SPL meter to the SPL pane — and the layout stays maximised. A
-stored trace selected while maximised (a click in the Traces list, **V**) does the same: a
+the pane that shows it, and the layout stays maximised:
+
+- a transfer measurement → the transfer pane;
+- a spectrum or RTA → the spectrum / RTA pane;
+- an SPL meter → the SPL pane.
+
+A stored trace selected while maximised (a click in the Traces list, **V**) does the same: a
 transfer capture or target brings up the transfer pane, a spectrum capture the spectrum
 pane, a sweep the sweep pane (unless the transfer pane is up: it draws sweeps too). In the
 split layout every pane is on screen and selecting a trace leaves the focus where it is.
 
-**The layout comes back.** The app remembers in `ui.toml` (written when the layout changes
-and on exit) which pane has the focus, whether it is maximised or full screen, the
-measurement each pane shows (by name), the SPL pane's view (meter, Leq windows or both), the Leq windows'
-style, the IR mode, the sweep pane's dB / % and the window's size and position, and each
-pane's level axis range (see below). The next
-start comes back to them — full screen too — without arming or playing anything; a
+#### The layout comes back
+
+The app remembers in `ui.toml` (written when the layout changes and on exit):
+
+- which pane has the focus, and whether it is maximised or full screen;
+- the measurement each pane shows (by name);
+- the SPL pane's view (meter, Leq windows or both) and the Leq windows' style;
+- the IR mode and the sweep pane's dB / %;
+- the window's size and position;
+- each pane's level axis range (see below).
+
+The next start comes back to them (full screen too) without arming or playing anything. A
 measurement that is gone (deleted, another daemon) quietly leaves its pane on its usual
 choice, and a window larger than the screen it opens on is made to fit. On Wayland the
 system places the window.
@@ -445,64 +479,94 @@ after that stays until the next sweep):
   on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
 
-The **impulse-response pictures** — the IR pane (**Alt+3**) and the sweep pane's IR view
-(**G**) — take the same keys and mouse on a **time axis** (ms re t = 0): **I** / **O** and the
-wheel zoom time (about the pointer; the keys about the cursor while it is in view), **←** /
-**→** and a drag pan it, **Home** shows the whole IR. The value axis is the amplitude in FS
-(linear view) or dB re the peak (log and ETC views): **Ctrl+I** / **Ctrl+O**, **Ctrl+↑** /
-**Ctrl+↓**, **Ctrl+wheel** and **Shift+wheel** move it; **Shift+Home** shows the whole IR
-with the value axis framing the curve (linear: ±110 % of its peak; log / ETC: from the noise
-to the peak); **Ctrl+Home** puts the defaults back (the whole IR, ±110 % of the peak, −60 …
-+3 dB). Time zooms no closer than four samples and pans no further than one IR length
-outside the IR. **C** (or a click) puts a time cursor on the IR and **Shift+←** /
-**Shift+→** step it (a sample when zoomed in, a hundredth of the shown span otherwise); the
-readout under the origin line reads its sample: `1.25 ms · +0.500 FS` or `1.25 ms · −12.3 dB`.
-The IR pane and the sweep's IR view each keep their own zoom and cursor; the log / ETC
-ranges are remembered in `ui.toml` (`ir`, `sweep_ir`). The sweep's response & distortion
-view uses the frequency keys and mouse of the other panes, its level axis in dB or in % (the
-wheel zooms about the level under the pointer either way), and its cursor reads the
-fundamental, every harmonic and THD; the room table has no axes.
+#### Impulse-response pictures
 
-**What the spectrum's level means.** A narrowband spectrum's levels are **per FFT bin**,
-and its axis says how wide a bin is: `dBFS per 1.46 Hz bin (tone)` (48 kHz / 32 768
-points), `dB SPL per 0.73 Hz bin (tone)`. A sine reads its RMS level whatever the FFT length
-(*tone* level), but broadband sound — pink noise, programme, a crowd — spreads its power over
-many bins, so each bin reads far below the band or total level, and lower the finer the bins:
-3 dB lower per doubling of the FFT length. That is why a calibrated spectrum of a loud room
-can sit at 40 dB SPL, and an uncalibrated one below −100 dBFS. **Use an RTA for band levels
-in dB SPL** (its axis says `(band)`); hovering over the spectrum's unit says the same. The
-width named is the bin spacing (sample rate / FFT length); with the Hann window broadband
-sound reads 1.8 dB above what that spacing alone would give (the window's noise bandwidth
-is 1.5 bins). Curves on different FFT lengths share `per bin, mixed widths`; a narrow pane
-shortens the unit (`dBFS per 1.46 Hz bin`, `dBFS/bin`, `dBFS`).
+The IR pane (**Alt+3**) and the sweep pane's IR view (**G**) take the same keys and mouse on
+a **time axis** (ms re t = 0):
 
-**The spectrum legend** names every curve the pane draws — live spectra and RTAs, then
-shown captures — with its colour and what sets it apart: `stopped`, `STALE 3.2 s`, a display
-offset (`offset +3.0 dB`). It sits in rows of its own above the plot, so it never covers a
-curve; a narrow pane drops the tags first, then names what fits and `+2 more`.
+| Action | Time axis | Value axis |
+|---|---|---|
+| zoom | **I** / **O** and the wheel (about the pointer; the keys about the cursor while it is in view) | **Ctrl+I** / **Ctrl+O**, **Ctrl+wheel** |
+| pan | **←** / **→**, a drag | **Ctrl+↑** / **Ctrl+↓**, **Shift+wheel** |
+| show all | **Home**: the whole IR | **Shift+Home**: the whole IR, the value axis framing the curve (linear: ±110 % of its peak; log / ETC: from the noise to the peak) |
+| defaults | **Ctrl+Home**: the whole IR, ±110 % of the peak, −60 … +3 dB | |
 
-A live **narrowband spectrum** is drawn from display columns, not from every FFT bin: each
-bin is its own column while bins are wider than 1/96 octave (up to about 100 Hz at the
-default 65 536 points and 48 kHz), above that a column spans 1/96 octave and shows the
-highest bin in it. A tone keeps its level, and the cursor reads its frequency to within
-1/96 octave; that is one column every pixel or two over 20 Hz – 20 kHz, and keeps the
-spectrum small enough for a laptop on WiFi. For finer detail, zoom in on a **capture**
-(**Ctrl+1**): a stored spectrum keeps every bin. A long FFT updates every eighth of its
-window — about 6 times a second at 65 536 points — since windows overlapping more than that
-add work but no new information; short FFTs update about 30 times a second.
+- The value axis is the amplitude in FS (linear view) or dB re the peak (log and ETC views).
+- Time zooms no closer than four samples and pans no further than one IR length outside the
+  IR.
+- **C** (or a click) puts a time cursor on the IR; **Shift+←** / **Shift+→** step it (a
+  sample when zoomed in, a hundredth of the shown span otherwise). The readout under the
+  origin line reads its sample: `1.25 ms · +0.500 FS` or `1.25 ms · −12.3 dB`.
+- The IR pane and the sweep's IR view each keep their own zoom and cursor; the log / ETC
+  ranges are remembered in `ui.toml` (`ir`, `sweep_ir`).
+
+The sweep's response & distortion view uses the frequency keys and mouse of the other
+panes, its level axis in dB or in % (the wheel zooms about the level under the pointer
+either way), and its cursor reads the fundamental, every harmonic and THD; the room table
+has no axes.
+
+#### What the spectrum's level means
+
+A narrowband spectrum's levels are **per FFT bin**, and its axis says how wide a bin is:
+`dBFS per 1.46 Hz bin (tone)` (48 kHz / 32 768 points), `dB SPL per 0.73 Hz bin (tone)`.
+
+- A sine reads its RMS level whatever the FFT length (*tone* level).
+- Broadband sound (pink noise, programme, a crowd) spreads its power over many bins, so each
+  bin reads far below the band or total level, and lower the finer the bins: 3 dB lower per
+  doubling of the FFT length. That is why a calibrated spectrum of a loud room can sit at
+  40 dB SPL, and an uncalibrated one below −100 dBFS.
+
+> **Use an RTA for band levels in dB SPL** (its axis says `(band)`); hovering over the
+> spectrum's unit says the same.
+
+The width named is the bin spacing (sample rate / FFT length); with the Hann window
+broadband sound reads 1.8 dB above what that spacing alone would give (the window's noise
+bandwidth is 1.5 bins). Curves on different FFT lengths share `per bin, mixed widths`; a
+narrow pane shortens the unit (`dBFS per 1.46 Hz bin`, `dBFS/bin`, `dBFS`).
+
+#### The spectrum legend
+
+It names every curve the pane draws (live spectra and RTAs, then shown captures) with its
+colour and what sets it apart: `stopped`, `STALE 3.2 s`, a display offset
+(`offset +3.0 dB`). It sits in rows of its own above the plot, so it never covers a curve;
+a narrow pane drops the tags first, then names what fits and `+2 more`.
+
+#### How a live spectrum is drawn
+
+A live **narrowband spectrum** is drawn from display columns, not from every FFT bin:
+
+- each bin is its own column while bins are wider than 1/96 octave (up to about 100 Hz at
+  the default 65 536 points and 48 kHz);
+- above that a column spans 1/96 octave and shows the highest bin in it.
+
+A tone keeps its level, and the cursor reads its frequency to within 1/96 octave; that is
+one column every pixel or two over 20 Hz – 20 kHz, and keeps the spectrum small enough for a
+laptop on WiFi. For finer detail, zoom in on a **capture** (**Ctrl+1**): a stored spectrum
+keeps every bin.
+
+A long FFT updates every eighth of its window (about 6 times a second at 65 536 points),
+since windows overlapping more than that add work but no new information; short FFTs update
+about 30 times a second.
 
 ### Spectrograph
 
-**G** in the spectrum pane steps its views: the spectrum → the spectrum with the
-**spectrograph** of the pane's measurement under it → the spectrograph alone (the whole pane;
-**W** or F11 for the whole screen) → the spectrum; the view is remembered. Frequency across on the spectrum's own axis (zoom and pan move both), time down with
-the newest frame at the top, level as colour. The colour bar on the right spans the pane's
-level axis, so **Ctrl+I / Ctrl+O**, **Ctrl+↑/↓**, **Shift+Home** and **Ctrl+Home** change the
-colours as they change the curve's axis; the colours are a perceptual, colour-blind-safe map
-(viridis): equal steps in dB look like equal steps. **Shift+G** steps the history through 10,
-30 (the default), 60 and 120 s; it starts afresh at each length and when the spectrograph
-comes into view (from the split to the spectrograph alone it is kept). Alone, the caption
-above it also names the spectrum's window and calibration.
+**G** in the spectrum pane steps its views (the view is remembered):
+
+1. the spectrum;
+2. the spectrum with the **spectrograph** of the pane's measurement under it;
+3. the spectrograph alone (the whole pane; **W** or F11 for the whole screen).
+
+Frequency runs across on the spectrum's own axis (zoom and pan move both), time down with
+the newest frame at the top, level as colour.
+
+- The colour bar on the right spans the pane's level axis, so **Ctrl+I / Ctrl+O**,
+  **Ctrl+↑/↓**, **Shift+Home** and **Ctrl+Home** change the colours as they change the
+  curve's axis. The colours are a perceptual, colour-blind-safe map (viridis): equal steps
+  in dB look like equal steps.
+- **Shift+G** steps the history through 10, 30 (the default), 60 and 120 s. It starts afresh
+  at each length and when the spectrograph comes into view (from the split to the
+  spectrograph alone it is kept).
+- Alone, the caption above it also names the spectrum's window and calibration.
 
 - A click in the spectrograph puts the cursor there: above the plot it reads frequency, time
   before the newest frame and level (`1.00 kHz · 4.2 s ago · −32.0 dBFS`); **C** turns it
@@ -520,11 +584,15 @@ above it also names the spectrum's window and calibration.
 
 ### Smoothing
 
-**K** makes the smoothing coarser and **Shift+K** finer, through off, 1/48, 1/24, 1/12, 1/6
-and 1/3 octave; the palette also sets a step directly (**Smoothing: 1/6 oct**, …). The keys
-work in the transfer pane and in the spectrum pane. Each pane's title says the smoothing of
-what it shows (`smoothing 1/6 oct`), and every transfer legend row shows the smoothing of its
-curve.
+| Key | Does |
+|---|---|
+| **K** | coarser: off → 1/48 → 1/24 → 1/12 → 1/6 → 1/3 octave |
+| **Shift+K** | finer |
+| palette *Smoothing: 1/6 oct*, … | sets a step directly |
+
+The keys work in the transfer pane and in the spectrum pane. Each pane's title says the
+smoothing of what it shows (`smoothing 1/6 oct`), and every transfer legend row shows the
+smoothing of its curve.
 
 - **Transfer functions** smooth the magnitude (power-averaged) **and the phase**, so the
   phase pane, unwrapped phase and group delay all read the smoothed curve. The phase is
@@ -568,10 +636,15 @@ the smoothing its measurement had, so a trace can be re-smoothed at any time; av
 math channels combine the unsmoothed curves (an average starts with the smoothing its inputs
 share, a math channel has its own).
 
-The banners say what is wrong rather than showing a misleading curve: **NO REFERENCE**, **NO
-SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (no fresh frame; the age is shown), **NO
-DELAY ESTIMATE**, and for a math channel **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** /
-**NO RESULT** (below).
+#### Banners
+
+The banners say what is wrong rather than showing a misleading curve:
+
+- **NO REFERENCE**, **NO SIGNAL**, **CHECK ROUTING**, **CLIP**;
+- **STALE**: no fresh frame; the age is shown;
+- **NO DELAY ESTIMATE**;
+- for a math channel: **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**
+  ([below](#math-channels)).
 
 ### Math channels
 
@@ -582,12 +655,16 @@ drawn: transfer math on the magnitude, phase and coherence panes, spectrum and R
 the spectrum pane. The daemon computes it, so it updates with every live operand and every
 client (and `ac2 meas list`) sees the same result.
 
-**Shift+M** (or *New math channel…* in the palette) opens its dialog: **A** (←/→ steps
-through every live measurement and stored trace by name, `(live)` or `(stored, S2)`), the
-**operator**, and **B** (the curves of A's kind). The name follows the expression (`Main L ÷
-Sub`) until you type another. **Enter** creates and starts it. *Edit the selected math
-channel…* in the palette opens the same dialog on an existing one: change its operands,
-operator, method or smoothing, **Enter** applies.
+**Shift+M** (or *New math channel…* in the palette) opens its dialog:
+
+- **A**: ←/→ steps through every live measurement and stored trace by name, `(live)` or
+  `(stored, S2)`;
+- the **operator**;
+- **B**: the curves of A's kind.
+
+The name follows the expression (`Main L ÷ Sub`) until you type another. **Enter** creates
+and starts it. *Edit the selected math channel…* in the palette opens the same dialog on an
+existing one: change its operands, operator, method or smoothing, **Enter** applies.
 
 Transfer functions combine as complex values — magnitude **and** phase together:
 
@@ -605,22 +682,30 @@ sum; their average is the power mean. A spectrum combines with a spectrum on the
 length, an RTA with an RTA on the same bands; the dialog only offers B of A's kind, and the
 daemon says why it refuses anything else.
 
-What the legend says: `Main L ÷ Sub`; `Main L + Sub · no coherence` (a sum has no coherence
-of its own); `phase: own alignments` when an operand shares no time base with the other (an
-import, a capture from an earlier session: each keeps its own alignment, their relative
-arrival is unknown); `magnitude only` against a target. **A ÷ B** and **A × B** take the
-lower coherence of the two per frequency, so the coherence mask blanks where either is
-unreliable. **A ÷ B**, **A − B** and **A + B** of two transfer functions on one time base also
-say how far apart their operands arrive, by the delays their phases are referred to:
-`Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C` (A − B, to 0.1 µs, a slope the phase pane
-hardly shows).
+What the legend says:
 
-**The average (spatial average).** A speaker sounds different from seat to seat, so tune to
-the average of several mic positions rather than to one spot. Make one transfer measurement
-per mic (same reference, each its own mic input), **Shift+M**, step the operator to *average
-of several*: every curve of A's kind is listed, all in the average to start with (**←/→**
-leaves one out), with a method and smoothing. Its legend counts the positions: `Average of 4
-· 4 positions · power avg`.
+| Legend | Means |
+|---|---|
+| `Main L ÷ Sub` | the expression |
+| `Main L + Sub · no coherence` | a sum has no coherence of its own |
+| `phase: own alignments` | an operand shares no time base with the other (an import, a capture from an earlier session): each keeps its own alignment, their relative arrival is unknown |
+| `magnitude only` | against a target |
+| `Main L ÷ Sub · arrival Δ +3.7 µs · +1.3 mm @ 20 °C` | **A ÷ B**, **A − B** and **A + B** of two transfer functions on one time base: how far apart the operands arrive, by the delays their phases are referred to (A − B, to 0.1 µs, a slope the phase pane hardly shows) |
+
+**A ÷ B** and **A × B** take the lower coherence of the two per frequency, so the coherence
+mask blanks where either is unreliable.
+
+#### The average (spatial average)
+
+A speaker sounds different from seat to seat, so tune to the average of several mic
+positions rather than to one spot.
+
+1. Make one transfer measurement per mic (same reference, each its own mic input).
+2. **Shift+M**, step the operator to *average of several*.
+3. Every curve of A's kind is listed, all in the average to start with (**←/→** leaves one
+   out), with a method and smoothing.
+
+Its legend counts the positions: `Average of 4 · 4 positions · power avg`.
 
 - **power** (default): the level over the positions, without cancellation between them;
   the right one to EQ against.
@@ -632,14 +717,21 @@ leaves one out), with a method and smoothing. Its legend counts the positions: `
 One mic moved from seat to seat: capture each position (**Ctrl+1 … 9**) and average the
 stored captures the same way — or with **M** (*Traces and slots*), the same mathematics.
 
+#### Missing operands
+
 An operand that is stopped, still settling, showing CLIP, NO REFERENCE, CHECK ROUTING or NO
 SIGNAL, or that does not combine with the others is left out and named: **AVERAGE · 3 OF 4
-POSITIONS** says which and why, and the legend says `3 of 4 positions`. With fewer than two
-positions there is no average (**NO AVERAGE**, no curve), and without both operands no ratio
-or sum (**NO RESULT · 1 OF 2 OPERANDS**) — never one curve passed off as the result. An
-operand cannot be deleted, or moved to another grid, while a math channel names it. **F**
-freezes a math channel; **R** on it resets its live operands' averaging. **Ctrl+1 … 9**
-captures it as a stored trace that names the expression and the operands that went in.
+POSITIONS** says which and why, and the legend says `3 of 4 positions`. Never is one curve
+passed off as the result:
+
+- with fewer than two positions there is no average (**NO AVERAGE**, no curve);
+- without both operands, no ratio or sum (**NO RESULT · 1 OF 2 OPERANDS**).
+
+An operand cannot be deleted, or moved to another grid, while a math channel names it.
+
+- **F** freezes a math channel; **R** on it resets its live operands' averaging.
+- **Ctrl+1 … 9** captures it as a stored trace that names the expression and the operands
+  that went in.
 
 From a script:
 
