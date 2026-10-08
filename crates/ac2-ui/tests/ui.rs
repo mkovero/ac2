@@ -3020,7 +3020,7 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
 
 /// From an empty fake daemon, using the app: a session, an SPL meter from the palette, Shift+L
 /// and ↑ to the band meter rows under the Leq windows — → turns it on with the STM 545/2015
-/// bedroom limits, ↓↓ → a +5 dB impulse correction — Enter sends it. The daemon (the test,
+/// bedroom limits, ↓↓↓ → a +5 dB impulse correction — Enter sends it. The daemon (the test,
 /// through the fake) then reports 63 Hz over; G goes on from meter + Leq to the bands, which
 /// name 63 Hz in the headline and draw it red against its limit line.
 #[test]
@@ -3076,15 +3076,16 @@ fn band_leq_from_an_empty_daemon() {
         .map(|m| m.id)
         .expect("meter");
 
-    // Shift+L, ↑ ×4: from the preset row up past the wrap to the band meter's first row.
+    // Shift+L, ↑ ×5: from the preset row up past the wrap to the band meter's first row.
     h.key_press_modifiers(Modifiers::SHIFT, Key::L);
     step_until(&mut h, "the Leq dialog", |a| {
         a.state.overlay.leq().is_some()
     });
-    for _ in 0..4 {
+    for _ in 0..5 {
         h.key_press(Key::ArrowUp);
     }
     h.key_press(Key::ArrowRight);
+    h.key_press(Key::ArrowDown);
     h.key_press(Key::ArrowDown);
     h.key_press(Key::ArrowDown);
     h.key_press(Key::ArrowRight);
@@ -3188,5 +3189,151 @@ fn band_leq_from_an_empty_daemon() {
             a.state.toasts.clear();
         },
         has_frame,
+    );
+
+    band_transfer_step(&mut h, &fake, meas);
+}
+
+/// The band log of `meas` from `from` on, every second at `db_spl` in every band (dBFS at
+/// a 120 dB sensitivity); the seconds before `from` stay as they were.
+fn log_from(
+    fake: &ac2_client::fake::FakeDaemon,
+    meas: MeasId,
+    from: ac2_proto::units::WallNs,
+    db_spl: f32,
+) {
+    use ac2_proto::model::{BAND_COUNT, BandPeriod};
+    use ac2_proto::units::{Db, Seconds, WallNs};
+    use ac2_traces::band_log::BandLogRow;
+    const S: u64 = 1_000_000_000;
+    let mut st = fake.lock();
+    let rows = st.band_rows.entry(meas).or_default();
+    rows.retain(|r| r.start < from);
+    let first = from.0.div_ceil(S);
+    rows.extend((first..first + 600).map(|s| BandLogRow {
+        start: WallNs(s * S),
+        measured: Seconds(1.0),
+        levels: [db_spl - 120.0; BAND_COUNT],
+        correction: Db(0.0),
+        period: BandPeriod::Day,
+        sensitivity: Some(Db(120.0)),
+    }));
+}
+
+/// The band transfer step, on from the Leq dialog's band rows (T): Space starts and stops
+/// each span on the meter's clock; the FOH span reads 90 dB, the bedroom 60 dB, the
+/// background 30 dB (the log is rewritten from each span's start), each read back with
+/// `spl.band_log_get`; Enter stores a 30 dB clean transfer in the meter.
+fn band_transfer_step(h: &mut Harness<'_, App>, fake: &ac2_client::fake::FakeDaemon, meas: MeasId) {
+    use ac2_proto::model::{BandTransferBand, MeasKind};
+    use ac2_scene::band_transfer::{SpanRole, SpanState};
+    use ac2_ui::leq_dialog::TransferStep;
+    fn step_of(a: &App) -> Option<&TransferStep> {
+        a.state.overlay.leq().and_then(|d| d.transfer.as_ref())
+    }
+    h.key_press(Key::W);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+    step_until(h, "the Leq dialog", |a| a.state.overlay.leq().is_some());
+    for _ in 0..5 {
+        h.key_press(Key::ArrowUp);
+    }
+    h.key_press(Key::T);
+    step_until(h, "the band transfer step", |a| {
+        step_of(a).is_some_and(|t| t.focus == SpanRole::Foh)
+    });
+    let next = step_of(h.state())
+        .map(TransferStep::next_step)
+        .unwrap_or_default();
+    assert!(
+        next.starts_with("Play a steady test signal (pink noise)"),
+        "{next}"
+    );
+
+    let levels = [90.0, 60.0, 30.0];
+    for (role, db) in SpanRole::ALL.into_iter().zip(levels) {
+        h.key_press(Key::Space);
+        step_until(h, role.title(), |a| {
+            step_of(a).is_some_and(|t| matches!(t.span(role).state, SpanState::Marking { .. }))
+        });
+        let Some(SpanState::Marking { from }) = step_of(h.state()).map(|t| t.span(role).state)
+        else {
+            panic!("marking");
+        };
+        log_from(fake, meas, from, db);
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_millis(2200) {
+            h.step();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        h.key_press(Key::Space);
+        step_until(h, "the span read back", |a| {
+            step_of(a).is_some_and(|t| t.span(role).average.is_some())
+        });
+        let t = step_of(h.state()).expect("step");
+        let a = t.span(role).average.as_ref().expect("average");
+        assert!(a.seconds >= 1, "{a:?}");
+        let l = a.levels.expect("dB SPL")[5].expect("63 Hz").0;
+        assert!((l - f64::from(db)).abs() < 1e-3, "{role:?}: {l}");
+    }
+    let next = step_of(h.state())
+        .map(TransferStep::next_step)
+        .unwrap_or_default();
+    assert!(
+        next.starts_with("Enter computes the band transfer and stores it in "),
+        "{next}"
+    );
+
+    h.key_press(Key::Enter);
+    step_until(h, "the transfer stored", |a| {
+        step_of(a).is_some_and(|t| t.stored.is_some())
+    });
+    let t = step_of(h.state()).expect("step");
+    assert!(
+        t.next_step().starts_with("Band transfer stored in "),
+        "{}",
+        t.next_step()
+    );
+    let lines = t.result_lines();
+    assert_eq!(lines[0], "transfer 20–200 Hz: 11 clean");
+    assert_eq!(lines[6], "63 Hz 30.0 dB");
+    let stored = h
+        .state()
+        .state
+        .measurements()
+        .iter()
+        .find(|m| m.id == meas)
+        .and_then(|m| match &m.config.kind {
+            MeasKind::Spl { config } => config.bands.as_ref().and_then(|b| b.transfer),
+            _ => None,
+        });
+    assert!(
+        matches!(stored.map(|s| s.bands[5]), Some(BandTransferBand::Clean { attenuation }) if (attenuation.0 - 30.0).abs() < 1e-6),
+        "{stored:?}"
+    );
+    // The picture at fixed times: 21:00–21:02 at FOH, 21:04–21:06 in the bedroom, 21:07–
+    // 21:08 silent (the show's zone), each second logged.
+    h.event(Event::PointerGone);
+    h.state_mut().state.local_zone = SHOW_ZONE;
+    snapshot_when(
+        h,
+        "band_transfer_step",
+        |a| {
+            a.state.toasts.clear();
+            let base = 20_734 * 86_400 + 19 * 3600;
+            let spans = [(0, 120), (240, 360), (420, 480)];
+            if let Some(t) = a.state.overlay.leq_mut().and_then(|d| d.transfer.as_mut()) {
+                for (span, (from, until)) in t.spans.iter_mut().zip(spans) {
+                    span.state = SpanState::Marked {
+                        from: ac2_proto::units::WallNs((base + from) * 1_000_000_000),
+                        until: ac2_proto::units::WallNs((base + until) * 1_000_000_000),
+                    };
+                    if let Some(a) = &mut span.average {
+                        a.seconds = (until - from) as u32;
+                        a.measured = ac2_proto::units::Seconds((until - from) as f64);
+                    }
+                }
+            }
+        },
+        |_| true,
     );
 }

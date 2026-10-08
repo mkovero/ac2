@@ -12,8 +12,8 @@ use ac2_core::leq::{Headroom, Judgement, Latch, RollingLeq, judge_window};
 use ac2_core::spectrum::power_dbfs;
 use ac2_proto::frame::BandLeqMeta;
 use ac2_proto::model::{
-    AlarmSubject, BAND_NOMINAL_HZ, BandLeqBand, BandLeqConfig, BandLimitPlace, CalStatus, LeqAlarm,
-    LeqAlarmKind, LeqJudgement, LevelScale, PredictedLeq,
+    AlarmSubject, BAND_NOMINAL_HZ, BandLeqBand, BandLeqConfig, BandLimitPlace, BandMicPlace,
+    CalStatus, LeqAlarm, LeqAlarmKind, LeqJudgement, LevelScale, PredictedLeq, TransferOrigin,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
 use ac2_traces::band_log::BandLogRow;
@@ -123,7 +123,13 @@ impl BandMeter {
 
     fn set_transfer(&mut self) {
         let dwelling = conv::band_limits(&self.cfg);
-        match &self.cfg.transfer {
+        // A mic in the dwelling hears the dwelling: its limits apply as they are, and a
+        // transfer measured for it is not used.
+        let transfer = match self.cfg.mic {
+            BandMicPlace::Foh => self.cfg.transfer.as_ref(),
+            BandMicPlace::Dwelling => None,
+        };
+        match transfer {
             Some(t) => {
                 let t = conv::band_transfer(t);
                 self.limits = t.foh_limits(&dwelling);
@@ -243,6 +249,9 @@ impl BandMeter {
     ) {
         let margin = self.cfg.warn_margin.0;
         let o = sensitivity.unwrap_or(0.0);
+        // At FOH without a transfer the limits are the dwelling's: a level at the mic says
+        // nothing about them, so nothing is judged (they are still shown).
+        let judging = self.predicted.is_some() || self.cfg.mic == BandMicPlace::Dwelling;
         self.at_horizon = self.period_at(at.0 + u64::from(self.horizon) * NS);
         self.windows
             .judge(&self.limits, o, margin, self.at_horizon, &mut self.states);
@@ -253,7 +262,7 @@ impl BandMeter {
             .zip(&mut self.judgements)
             .zip(BAND_NOMINAL_HZ);
         for (((st, latch), judgement), nominal) in bands {
-            let (j, verdict) = match (st.limit_db, sensitivity) {
+            let (j, verdict) = match (st.limit_db.filter(|_| judging), sensitivity) {
                 (None, _) => {
                     *latch = Latch::default();
                     (LeqJudgement::NoLimit, None)
@@ -394,10 +403,17 @@ impl BandMeter {
                 self.windows.period_after_horizon(self.at_horizon),
             ),
             correction: Db(self.cfg.correction.db()),
-            limits_from: if self.predicted.is_some() {
-                BandLimitPlace::Transferred
-            } else {
-                BandLimitPlace::AtMic
+            limits_from: match (
+                self.cfg.mic,
+                &self.predicted,
+                self.cfg.transfer.map(|t| t.origin),
+            ) {
+                (BandMicPlace::Dwelling, ..) => BandLimitPlace::AtMic,
+                (BandMicPlace::Foh, None, _) => BandLimitPlace::NoTransfer,
+                (BandMicPlace::Foh, Some(_), Some(TransferOrigin::Estimated)) => {
+                    BandLimitPlace::Estimated
+                }
+                (BandMicPlace::Foh, Some(_), _) => BandLimitPlace::Transferred,
             },
             bands,
             worst: worst_band(&self.states).map(|i| i as u8),

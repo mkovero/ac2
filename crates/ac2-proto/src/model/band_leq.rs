@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{Db, DbSpl, Hz, Seconds, WallNs};
+use crate::units::{Db, DbSpl, Hz, MeasId, Seconds, WallNs};
 
 /// Bands integrated: 1/3 octaves 20 Hz … 10 kHz ([`BAND_NOMINAL_HZ`]).
 pub const BAND_COUNT: usize = 28;
@@ -119,10 +119,25 @@ pub enum BandTransferBand {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandTransferSet {
-    /// When it was computed.
+    /// When it was computed (or typed, for an estimate).
     pub measured_at: WallNs,
+    /// Measured from band levels, or the operator's estimate.
+    pub origin: TransferOrigin,
     /// Per band, low to high.
     pub bands: [BandTransferBand; BAND_COUNT],
+}
+
+/// Where a band transfer's attenuations come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferOrigin {
+    /// `spl.band_transfer`: FOH and dwelling band levels under the same test signal.
+    Measured,
+    /// Typed by the operator (`meas.update`) where the dwelling cannot be reached: each
+    /// band [`BandTransferBand::Unchecked`] with the guessed attenuation. Judging the
+    /// dwelling's limits at FOH is then only as good as the guess, and every display says
+    /// so.
+    Estimated,
 }
 
 /// Where a set of band levels for a transfer comes from.
@@ -147,6 +162,66 @@ pub enum BandLevelSource {
         /// Per band, low to high ([`BAND_COUNT`] of them).
         levels: Vec<Option<DbSpl>>,
     },
+}
+
+/// One logged second of a band meter as `spl.band_log_get` returns it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BandLogSecond {
+    /// Wall time of the second's start.
+    pub start: WallNs,
+    /// Time measured within it (0 … 1 s).
+    pub measured: Seconds,
+    /// Limit set of its local start.
+    pub period: BandPeriod,
+    /// §13 correction in force (not included in `levels`).
+    pub correction: Db,
+    /// dB SPL of 0 dBFS in force, if calibrated.
+    pub sensitivity: Option<Db>,
+    /// Band Leq per band of [`BAND_NOMINAL_HZ`]: dB SPL when `sensitivity` is set, else
+    /// dBFS; `None`: no energy in the band.
+    pub levels: [Option<f64>; BAND_COUNT],
+}
+
+/// The energy average of a span of a band log: what `spl.band_transfer` takes from a
+/// [`BandLevelSource::Log`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BandLogAverage {
+    /// Seconds logged in the span.
+    pub seconds: u32,
+    /// Time measured within them.
+    pub measured: Seconds,
+    /// Of `seconds`, those logged without a sensitivity.
+    pub uncalibrated: u32,
+    /// Per band, dB SPL, each second on the sensitivity it was logged with, the §13
+    /// correction left out; `None` when the span has no seconds, measured nothing or has an
+    /// uncalibrated second (a band without energy is `None` in it).
+    pub levels: Option<[Option<DbSpl>; BAND_COUNT]>,
+}
+
+/// `spl.band_log_get`: a span of an SPL meter's band log.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SplBandLog {
+    /// SPL meter.
+    pub meas: crate::units::MeasId,
+    /// Start (inclusive).
+    pub from: WallNs,
+    /// End (exclusive).
+    pub until: WallNs,
+    /// Every `step`-th logged second is in `rows`; `None`: no rows, the average alone.
+    pub step: Option<u32>,
+    /// Over every second of the span, whatever `step`.
+    pub average: BandLogAverage,
+    /// The seconds asked for, oldest first.
+    pub rows: Vec<BandLogSecond>,
+}
+
+impl SplBandLog {
+    /// Most rows one reply carries: an hour of seconds. A span and step that would return
+    /// more is refused, naming the step that fits.
+    pub const MAX_ROWS: u32 = 3600;
 }
 
 /// Limits of the predicted dwelling LAeq window (§12: music at night ≤ 25 dB in rooms for
@@ -179,9 +254,23 @@ pub struct BandLeqConfig {
     pub predicted: PredictedLimits,
     /// §13 corrections in force (each second is logged with the one in force).
     pub correction: BandCorrection,
-    /// FOH → dwelling transfer; without one the dwelling limits are judged at the mic as
-    /// they are (as if the dwelling were where the mic is) and nothing is predicted.
+    /// Where the mic is: at FOH the limits are judged through `transfer`, and without one
+    /// not at all (a level at FOH says nothing about the dwelling); in the dwelling they are
+    /// judged as they are.
+    pub mic: BandMicPlace,
+    /// FOH → dwelling transfer; nothing is predicted without one.
     pub transfer: Option<BandTransferSet>,
+}
+
+/// Where a band meter's mic is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BandMicPlace {
+    /// At FOH (or anywhere but the dwelling): the limits need a transfer.
+    #[default]
+    Foh,
+    /// In the dwelling (a bedroom monitor): the limits apply at the mic as they are.
+    Dwelling,
 }
 
 /// Informational presets of the band meter. Not legal advice: a prediction from FOH is
@@ -239,11 +328,16 @@ pub struct PredictedLeq {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BandLimitPlace {
-    /// No transfer: the dwelling's limits as they are.
+    /// The mic is in the dwelling ([`BandMicPlace::Dwelling`]): its limits as they are.
     AtMic,
+    /// The mic is at FOH without a transfer: the limits are shown, not judged.
+    NoTransfer,
     /// The dwelling's limits plus each band's attenuation (the bound for an unusable band;
     /// a missing band has none).
     Transferred,
+    /// As [`Self::Transferred`], with the operator's estimated attenuation
+    /// ([`TransferOrigin::Estimated`]).
+    Estimated,
 }
 
 impl BandLeqConfig {
@@ -360,7 +454,92 @@ impl BandLeqPreset {
             warn_margin: Db(super::LeqWindow::DEFAULT_WARN_MARGIN_DB),
             predicted,
             correction: BandCorrection::default(),
+            mic: BandMicPlace::Foh,
             transfer,
         }
+    }
+}
+
+/// Two spans of a transfer on the same meter that overlap: one mic cannot be at FOH and in
+/// the bedroom at once, nor hear the test signal and the silence at once. The refusal
+/// names them and the meter (`name` of its id), or `None` when every pair is apart (or on
+/// different meters).
+pub fn overlapping_spans(
+    foh: &BandLevelSource,
+    dwelling: &BandLevelSource,
+    background: Option<&BandLevelSource>,
+    name: impl Fn(MeasId) -> String,
+) -> Option<String> {
+    let span = |s: &BandLevelSource| match s {
+        BandLevelSource::Log { meas, from, until } => Some((*meas, *from, *until)),
+        BandLevelSource::Levels { .. } => None,
+    };
+    let named = [
+        ("FOH", Some(foh)),
+        ("bedroom", Some(dwelling)),
+        ("background", background),
+    ];
+    for (i, (a_name, a)) in named.iter().enumerate() {
+        for (b_name, b) in &named[i + 1..] {
+            let (Some((ma, fa, ua)), Some((mb, fb, ub))) = (a.and_then(span), b.and_then(span))
+            else {
+                continue;
+            };
+            if ma == mb && fa < ub && fb < ua {
+                return Some(format!(
+                    "the {a_name} and {b_name} spans overlap on {}: one mic cannot \
+                     be in two places at once; mark them one after another (the same \
+                     test-signal level for FOH and bedroom), or measure the bedroom with a \
+                     second meter",
+                    name(ma)
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod overlap_tests {
+    use super::*;
+
+    #[test]
+    fn spans_of_one_meter_must_not_overlap() {
+        let log = |meas: u32, from: u64, until: u64| BandLevelSource::Log {
+            meas: MeasId(meas),
+            from: WallNs(from * 1_000_000_000),
+            until: WallNs(until * 1_000_000_000),
+        };
+        let n = |m: MeasId| format!("meter {}", m.0);
+        let typed = BandLevelSource::Levels {
+            levels: vec![None; BAND_COUNT],
+        };
+        // One mic moved: FOH, then the bedroom, then the background.
+        assert_eq!(
+            overlapping_spans(
+                &log(1, 0, 60),
+                &log(1, 120, 180),
+                Some(&log(1, 200, 260)),
+                n
+            ),
+            None
+        );
+        // Two mics: the same span on two meters.
+        assert_eq!(
+            overlapping_spans(&log(1, 0, 60), &log(2, 0, 60), None, n),
+            None
+        );
+        assert_eq!(overlapping_spans(&typed, &log(1, 0, 60), None, n), None);
+        let e = overlapping_spans(&log(1, 0, 60), &log(1, 30, 90), None, n).unwrap_or_default();
+        assert!(
+            e.starts_with("the FOH and bedroom spans overlap on meter 1"),
+            "{e}"
+        );
+        let e = overlapping_spans(&log(1, 0, 60), &log(2, 0, 60), Some(&log(2, 59, 90)), n)
+            .unwrap_or_default();
+        assert!(
+            e.starts_with("the bedroom and background spans overlap"),
+            "{e}"
+        );
     }
 }

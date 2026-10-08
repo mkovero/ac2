@@ -36,6 +36,7 @@ const FLOAT_GUID: [u8; 16] = [
     0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
 ];
 
+const FORMAT_PCM: u16 = 1;
 const FORMAT_FLOAT: u16 = 3;
 const FORMAT_EXTENSIBLE: u16 = 0xfffe;
 
@@ -255,11 +256,44 @@ pub fn repair(path: &Path) -> Result<WavInfo, WavError> {
     })
 }
 
-/// Reads interleaved `f32` frames of a float WAV / RF64 file.
+/// How a file's samples are stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Encoding {
+    F32,
+    /// Integer PCM of this many bytes (2, 3 or 4), full scale ±1.0 as in float files.
+    Pcm(u8),
+}
+
+impl Encoding {
+    fn bytes(self) -> usize {
+        match self {
+            Encoding::F32 => 4,
+            Encoding::Pcm(n) => usize::from(n),
+        }
+    }
+
+    fn decode(self, b: &[u8]) -> f32 {
+        match self {
+            Encoding::F32 => f32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+            Encoding::Pcm(2) => f32::from(i16::from_le_bytes([b[0], b[1]])) / 32_768.0,
+            Encoding::Pcm(3) => {
+                (i32::from_le_bytes([0, b[0], b[1], b[2]]) >> 8) as f32 / 8_388_608.0
+            }
+            Encoding::Pcm(_) => {
+                (f64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])) / 2_147_483_648.0) as f32
+            }
+        }
+    }
+}
+
+/// Reads interleaved `f32` frames of a float WAV / RF64 file (what ac2 records), or of an
+/// integer PCM file of 16, 24 or 32 bits (what a recorder writes) scaled to the same full
+/// scale, so a recorder's file can be imported ([`super::import_wav`]).
 #[derive(Debug)]
 pub struct WavReader {
     input: BufReader<File>,
     info: WavInfo,
+    encoding: Encoding,
     /// Frames read so far.
     pos: u64,
     bytes: Vec<u8>,
@@ -297,7 +331,7 @@ impl WavReader {
         }
         let mut at = 12u64;
         let mut ds64_data: Option<u64> = None;
-        let mut fmt: Option<(u16, u32)> = None;
+        let mut fmt: Option<(u16, u32, Encoding)> = None;
         loop {
             let mut ch = [0u8; 8];
             input
@@ -325,23 +359,31 @@ impl WavReader {
                     let channels = u16_at(&b, 2);
                     let rate = u32_at(&b, 4);
                     let bits = u16_at(&b, 14);
-                    let float = match tag {
-                        FORMAT_FLOAT => true,
-                        FORMAT_EXTENSIBLE => b.len() >= 40 && b[24..40] == FLOAT_GUID,
-                        _ => false,
+                    // The extensible subformat GUIDs differ from each other only in their
+                    // first two bytes, which carry the plain format tag.
+                    let kind = match tag {
+                        FORMAT_EXTENSIBLE if b.len() >= 40 && b[26..40] == FLOAT_GUID[2..] => {
+                            u16_at(&b, 24)
+                        }
+                        t => t,
                     };
-                    if !float || bits != 32 {
-                        return Err(WavError::Format(format!(
-                            "format tag {tag:#06x}, {bits} bits; raw captures are 32-bit float"
-                        )));
-                    }
+                    let encoding = match (kind, bits) {
+                        (FORMAT_FLOAT, 32) => Encoding::F32,
+                        (FORMAT_PCM, 16 | 24 | 32) => Encoding::Pcm((bits / 8) as u8),
+                        _ => {
+                            return Err(WavError::Format(format!(
+                                "format tag {tag:#06x}, {bits} bits; this reads 32-bit float \
+                                 and 16-, 24- or 32-bit integer PCM"
+                            )));
+                        }
+                    };
                     if channels == 0 || rate == 0 {
                         return Err(WavError::Malformed("zero channels or rate".into()));
                     }
-                    fmt = Some((channels, rate));
+                    fmt = Some((channels, rate, encoding));
                 }
                 b"data" => {
-                    let (channels, sample_rate) =
+                    let (channels, sample_rate, encoding) =
                         fmt.ok_or_else(|| WavError::Malformed("data before fmt".into()))?;
                     let available = len.saturating_sub(at);
                     let stated = if rf64 && size == RIFF_LIMIT {
@@ -351,7 +393,7 @@ impl WavReader {
                     } else {
                         size
                     };
-                    let block = u64::from(channels) * SAMPLE_BYTES;
+                    let block = u64::from(channels) * encoding.bytes() as u64;
                     if stated > available {
                         return Err(WavError::Malformed(format!(
                             "data chunk states {stated} bytes, the file holds {available}"
@@ -364,6 +406,7 @@ impl WavReader {
                             channels,
                             frames: stated / block,
                         },
+                        encoding,
                         pos: 0,
                         bytes: Vec::new(),
                     });
@@ -394,10 +437,11 @@ impl WavReader {
         if frames == 0 {
             return Ok(0);
         }
-        self.bytes.resize(frames * n * 4, 0);
+        let size = self.encoding.bytes();
+        self.bytes.resize(frames * n * size, 0);
         self.input.read_exact(&mut self.bytes)?;
-        for (v, b) in out.iter_mut().zip(self.bytes.chunks_exact(4)) {
-            *v = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        for (v, b) in out.iter_mut().zip(self.bytes.chunks_exact(size)) {
+            *v = self.encoding.decode(b);
         }
         self.pos += frames as u64;
         Ok(frames)
@@ -503,7 +547,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_float_wav_reads_and_pcm_is_refused() {
+    fn plain_float_and_integer_pcm_wavs_read() {
         let dir = tempfile::tempdir().expect("dir");
         let mut wav = Vec::new();
         let fmt = |tag: u16, bits: u16| {
@@ -541,7 +585,35 @@ mod tests {
         let mut b = [0.0f32; 2];
         r.read(&mut b).expect("read");
         assert_eq!(b, [0.5, -0.25]);
-        build(1, 16, &mut wav);
+        // The same 8 data bytes as 16-bit PCM: four samples.
+        build(FORMAT_PCM, 16, &mut wav);
+        std::fs::write(&p, &wav).expect("write");
+        let mut r = WavReader::open(&p).expect("open");
+        assert_eq!(r.info().frames, 4);
+        let mut b = [0.0f32; 4];
+        r.read(&mut b).expect("read");
+        let words: Vec<f32> = wav[wav.len() - 8..]
+            .chunks_exact(2)
+            .map(|w| f32::from(i16::from_le_bytes([w[0], w[1]])) / 32_768.0)
+            .collect();
+        assert_eq!(b.to_vec(), words);
+        // 24-bit: -1/2 full scale and the smallest step.
+        let mut pcm24 = Vec::new();
+        for v in [-4_194_304i32, 1] {
+            pcm24.extend_from_slice(&v.to_le_bytes()[..3]);
+        }
+        build(FORMAT_PCM, 24, &mut wav);
+        let at = wav.len() - 8;
+        wav.truncate(at - 4);
+        wav.extend_from_slice(&6u32.to_le_bytes());
+        wav.extend_from_slice(&pcm24);
+        std::fs::write(&p, &wav).expect("write");
+        let mut r = WavReader::open(&p).expect("open");
+        assert_eq!(r.info().frames, 2);
+        let mut b = [0.0f32; 2];
+        r.read(&mut b).expect("read");
+        assert_eq!(b, [-0.5, 1.0 / 8_388_608.0]);
+        build(FORMAT_PCM, 8, &mut wav);
         std::fs::write(&p, &wav).expect("write");
         assert!(matches!(WavReader::open(&p), Err(WavError::Format(_))));
     }

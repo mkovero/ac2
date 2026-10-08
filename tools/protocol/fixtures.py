@@ -435,8 +435,10 @@ BAND_LEQ_CONFIG = {
     "warn_margin": 3.0,
     "predicted": {"day": None, "night": 25.0},
     "correction": {"impulse": "plus5", "tonal": "none"},
+    "mic": "foh",
     "transfer": {
         "measured_at": 1789500000000000000,
+        "origin": "measured",
         "bands": [
             {"status": "unchecked", "attenuation": 20.0},
             {"status": "clean", "attenuation": 25.5},
@@ -815,6 +817,17 @@ def requests():
                 },
                 "background": None,
             },
+        ),
+        req(
+            62,
+            "spl.band_log_get",
+            {
+                "meas": 4,
+                "from": 1789500000000000000,
+                "until": 1789500030000000000,
+                "step": 10,
+            },
+            mutation=False,
         ),
     ]
 

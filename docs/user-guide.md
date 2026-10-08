@@ -1554,25 +1554,19 @@ bedroom is than FOH — moves the limits to the mic and predicts the bedroom's L
 - **Turning it on**: Shift+L (the SPL / Leq settings), ↑ from the preset row to the
   **Band meter** rows under the windows: ←/→ picks off, **Finland STM 545/2015, low
   frequencies (bedroom)** or **… living room** (no band limits; the predicted LAeq against
-  35 dB by day, 30 dB at night); then the **band window** and the §13 **impulse** (+5 / +10
-  dB) and **narrowband** (+3 / +6 dB) corrections, which you put in force while the
+  35 dB by day, 30 dB at night); then the **band mic** (**at FOH**, the usual place, or
+  **in the bedroom** for a bedroom monitor), the **band window** and the §13 **impulse** (+5
+  / +10 dB) and **narrowband** (+3 / +6 dB) corrections, which you put in force while the
   character is heard (ac2 does not detect it). Enter applies. A preset keeps a measured
-  transfer. In the terminal: `ac2 spl bands set --preset finland-545-lf [--duration 1h]
-  [--impulse none|5|10] [--tonal none|3|6] [--warn 3db]`, `--off` to turn it off.
-- **Measuring the transfer** (at setup, before the doors): play a steady test signal (pink
-  noise, loud enough to stand well over the bedroom's background in every band) through the
-  system with the band meter running at FOH, and a calibrated mic in the bedroom — the same
-  mic moved there, or a second SPL meter with its own band meter. Note the times. Then,
-  system silent, measure the bedroom's background. Then
-  `ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:00:30" --dwelling
-  "Bedroom@21:00:00..21:00:30" --background "Bedroom@21:02:00..21:02:30"` (a meter by name
-  or id and a span of its band log: local times today, `2026-10-08T21:00:00` local, `…Z`
-  UTC, `-30s` before now, `now`), or files of `<Hz> <dB>` lines from another instrument
-  (`--dwelling bedroom.txt`). Per band the transfer is clean (10 dB or more over the
-  background), background-subtracted (3 … 10 dB over it), a bound (less than 3 dB over it:
-  the bedroom is at least that much quieter) or not measured (no limit at the mic). The
-  settings show it per band. Moved speakers, a changed system EQ, an open window or another
-  room invalidate it: measure again.
+  transfer. In the terminal: `ac2 spl bands set --preset finland-545-lf [--mic foh|bedroom]
+  [--duration 1h] [--impulse none|5|10] [--tonal none|3|6] [--warn 3db]`, `--off` to turn
+  it off.
+- **Without a transfer** a meter at FOH does not judge the bands: the limits are the
+  bedroom's, and a level at FOH says nothing about the bedroom. The bars show the levels and
+  the limit lines in neutral colours, and the headline says **"no band transfer — limits are
+  for the bedroom, measure the transfer"**. A meter whose mic is in the bedroom judges them
+  as they are.
+- **Measuring the transfer**: below, [Measuring the band transfer](#measuring-the-band-transfer).
 - **What the artist sees**: G in the SPL pane steps on from meter + Leq to the **bands**
   (only when the meter has a band meter; the palette's "SPL pane: the band Leq bars" goes
   there directly). Eleven bars, 20 … 200 Hz, each the band's Leq at the mic with its limit
@@ -1581,8 +1575,8 @@ bedroom is than FOH — moves the limits to the mic and predicts the bedroom's L
   headline names the worst band and what to do: **"63 Hz band Leq 3.2 dB over its limit ·
   cooling down in 6 min 52 s"**, or "… 1.5 dB under its limit · next 1 min: stay ≤ 81.2 dB".
   Under it: night or day limits (and "headroom for the night limits from 22:00" late in the
-  evening), whether the limits are transferred from the dwelling or judged at the mic as
-  they are, a correction in force, and **"predicted dwelling LAeq 23.6 dB · at most 26.1 dB
+  evening), where the limits come from (transferred from the dwelling, an estimated
+  transfer, the mic in the bedroom, or no band transfer), a correction in force, and **"predicted dwelling LAeq 23.6 dB · at most 26.1 dB
   · limit 25.0 dB · NEAR"** ("at most" counts the bound bands at their bound). Uncalibrated,
   the bands read dBFS and nothing is judged. A band going over or back toasts like a window
   ("63 Hz band Leq over its limit — …"). `ac2 spl bands watch` (`--json`: one line a
@@ -1591,6 +1585,135 @@ bedroom is than FOH — moves the limits to the mic and predicts the bedroom's L
   meet IEC 61260-1 class 1 but the mic, its calibration and the interface are yours; a
   prediction from FOH is not a measurement in the dwelling. Only a measurement there shows
   compliance. How it is computed and what is claimed: `docs/design/band-leq.md`.
+
+#### Measuring the band transfer
+
+The **band transfer** is, per band, how much quieter the bedroom is than FOH: its
+**attenuation**. Measure it at setup, before the doors, and again after moved speakers, a
+changed system EQ, an open window or another room.
+
+What it needs:
+
+- **The same steady test signal at the same level** at FOH and in the bedroom: pink noise
+  from the system, loud enough to stand well over the bedroom's background in every band.
+  The two measurements need **not** be at the same time, and the clocks need not agree: the
+  signal is steady, so a span of each is enough.
+- **The background**: the bedroom with the system silent. Without it every band is
+  "no background" (unchecked).
+- **Spans of SPL meters' band logs**, each from a meter with its band meter on and
+  calibrated (dB SPL), within the last 48 h (the log keeps two days). A span is a start
+  and an end on that meter's clock. Or a file of `<Hz> <dB>` lines, one band a line.
+
+Per band the result is **clean** (10 dB or more over the background), **background
+subtracted** (3 … 10 dB over it), a **bound** (less than 3 dB over it: the bedroom is at
+least that much quieter) or **not measured** (no limit at the mic). The SPL / Leq settings
+show it per band.
+
+| Situation | Recipe |
+|---|---|
+| one mic, carried from FOH to the bedroom (most common) | [1. One mic moved](#1-one-mic-moved) |
+| a second mic on the same interface, cabled to the bedroom | [2. Two mics on one interface](#2-two-mics-on-one-interface) |
+| the bedroom mic on another rig (e.g. a Pi there) | [3. The bedroom on another rig](#3-the-bedroom-on-another-rig) |
+| no cable to the bedroom, a calibrated recorder | [4. A recorder in the bedroom](#4-a-recorder-in-the-bedroom) |
+| no access to the bedroom at all | [5. No access: an estimate](#5-no-access-an-estimate) |
+
+##### 1. One mic moved
+
+All three spans are on the **same meter at different times**, at the same test-signal
+level. This is the app's band transfer step:
+
+1. Shift+L, ↑ to a band row, **T**: the band transfer step opens on this meter (its band
+   meter on and applied first).
+2. Play the test signal, the mic at FOH. **Space** starts the FOH span, **Space** again
+   stops it (or **1–9**: the last 1–9 minutes). Its average per band reads back under it,
+   with how many of its seconds were logged.
+3. "Move the mic to the bedroom and keep the same test-signal level": **Space**, **Space**
+   for the bedroom span.
+4. "Silence the system, the mic still in the bedroom": **Space**, **Space** for the
+   background span (or skip it: every band unchecked).
+5. **Enter** computes the band transfer and stores it in the meter; the step lists each
+   band. **Esc** goes back to the settings.
+
+Keys in the step: **↑/↓** span, **Space** start / stop, **1–9** the last minutes, **←/→**
+the meter of the bedroom or background span, **Delete** clears a span, **Enter** stores,
+**Esc** back. Spans of one meter must not overlap (one mic cannot be in two places at
+once): the step and the daemon refuse them. In the terminal:
+
+```
+ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:02:00" \
+    --dwelling "FOH SPL@21:05:00..21:07:00" --background "FOH SPL@21:09:00..21:10:00"
+```
+
+(a meter by name or id and a span of its band log: local times today,
+`2026-10-08T21:00:00` local, `…Z` UTC, `-30s` before now, `now`).
+
+##### 2. Two mics on one interface
+
+A second SPL meter on the second input, its mic in the bedroom, calibrated, its band meter
+on. The FOH and bedroom spans can then be the **same** span on the two meters: in the step,
+**←/→** on the bedroom span picks the second meter.
+
+```
+ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:02:00" \
+    --dwelling "Bedroom@21:00:00..21:02:00" --background "Bedroom@21:04:00..21:05:00"
+```
+
+##### 3. The bedroom on another rig
+
+The bedroom's meter runs on another daemon (a Pi there, say), band meter on, calibrated.
+Its spans are written there as `<Hz> <dB>` files and carried over:
+
+```
+# on the bedroom rig
+ac2 spl bands log --from 21:05:00 --until 21:07:00 --levels-out bedroom.txt
+ac2 spl bands log --from 21:09:00 --until 21:10:00 --levels-out background.txt
+# at FOH
+ac2 spl bands transfer --foh "FOH SPL@21:00:00..21:02:00" \
+    --dwelling bedroom.txt --background background.txt
+```
+
+`ac2 spl bands log` alone prints the span's average per band and how much of it was
+logged; `--step N` adds every N-th second (at most 3600 rows).
+
+##### 4. A recorder in the bedroom
+
+No cable to the bedroom, a calibrated recorder there instead:
+
+1. Loop pink noise from a source that stays put (the console, a player — not the laptop
+   that will measure), at the show's test level.
+2. In the bedroom, the recorder records the **calibrator tone** first, then the
+   **pink-noise period**, then the **background** with the system silent. Note roughly when
+   each part starts in the file.
+3. At FOH, measure the FOH span on the rig with the same noise playing (recipe 1, step 2).
+4. Import the recorder's WAV (16-, 24- or 32-bit PCM or float) and replay it **in real
+   time** (`--fast` compresses the clock and the spans cannot be named):
+
+   ```
+   ac2 rec import ZOOM0001.WAV --name bedroom      # writes bedroom.wav + bedroom.ac2rec.json
+   ac2 session replay /path/to/bedroom.ac2rec.json
+   ```
+
+   File second *t* is the replay's start + *t* on the meter's clock.
+5. An SPL meter on the replayed input with its band meter on; while the tone plays,
+   calibrate it from the recorded tone (Calibration page, or `ac2 cal spl --input 1 --ref
+   94db`).
+6. Mark the bedroom and background spans of that replay meter as the file plays (Space /
+   Space in the step, or spans after it), or write them with `ac2 spl bands log
+   --levels-out`, and use them as recipe 3 does.
+
+##### 5. No access: an estimate
+
+Without a transfer the bedroom's limits mean nothing at FOH, and the band view says so
+rather than showing bands over. If the bedroom cannot be measured at all, type an
+**estimated** attenuation per band (a file of `<Hz> <dB>` lines, 0 dB or more; a band left
+out has no limit at FOH):
+
+```
+ac2 spl bands estimate --attenuation guess.txt
+```
+
+It is stored as an estimated transfer, and every place that shows it says
+"estimated … typed, not measured". Measure it as soon as the bedroom can be reached.
 
 <sub>[↑ Contents](#contents)</sub>
 

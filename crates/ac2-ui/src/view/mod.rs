@@ -2,6 +2,7 @@
 //! (clicks, wheel, drags) through [`App::dispatch`]; never computes a measurement value.
 
 mod autosave;
+mod band_transfer;
 mod cal;
 mod chrome;
 mod leq;

@@ -53,6 +53,25 @@ fn recording_grammar() {
     for sub in ["stop", "status", "list"] {
         ok(&["rec", sub]);
     }
+    let Cmd::Rec {
+        cmd: RecCmd::Import(a),
+    } = ok(&[
+        "rec",
+        "import",
+        "ZOOM0001.WAV",
+        "--name",
+        "bedroom",
+        "--dir",
+        "/tmp/r",
+    ])
+    .cmd
+    else {
+        panic!("not rec import");
+    };
+    assert_eq!(a.file, std::path::PathBuf::from("ZOOM0001.WAV"));
+    assert_eq!(a.name.as_deref(), Some("bedroom"));
+    assert_eq!(a.dir, Some(std::path::PathBuf::from("/tmp/r")));
+    assert!(parse(&["rec", "import"]).is_err(), "the file is required");
     assert!(matches!(
         ok(&["session", "replay", "show", "--fast"]).cmd,
         Cmd::Session { cmd: SessionCmd::Replay { ref recording, fast: true } } if recording == "show"

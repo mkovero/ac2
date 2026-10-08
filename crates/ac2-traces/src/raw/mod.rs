@@ -488,5 +488,117 @@ pub fn frame_of(start: u64, discontinuities: &[Discontinuity], sample: u64) -> u
     next_frame.map_or(f, |n| f.min(n))
 }
 
+/// Imports `src`, a WAV from elsewhere (a recorder's 16-, 24- or 32-bit PCM or float file),
+/// as recording `name` in `dir`: its samples as 32-bit float beside a sidecar, so a replay
+/// can open it like an ac2 recording. The recorder's clock is not ac2's: the sidecar puts
+/// the first frame at `now_ns`, and a replay's analyses run on the replay's own clock (at
+/// real-time pace, file second `t` is replay start + `t`). Calibrations are keyed by the
+/// device id `file:<file name>`, so a calibrator tone in the file calibrates its replay.
+pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sidecar, RawError> {
+    validate_name(name)?;
+    let out = audio_path(dir, name);
+    if out.exists() || sidecar_path(dir, name).exists() {
+        return Err(RawError::Exists(name.to_owned()));
+    }
+    let audio = |path: &Path, err: WavError| RawError::Audio {
+        path: path.to_path_buf(),
+        err,
+    };
+    let io = |path: &Path, e: std::io::Error| RawError::Io {
+        path: path.to_path_buf(),
+        msg: e.to_string(),
+    };
+    let mut reader = WavReader::open(src).map_err(|e| audio(src, e))?;
+    let info = reader.info();
+    let mut writer =
+        WavWriter::create(&out, info.channels, info.sample_rate).map_err(|e| io(&out, e))?;
+    let mut buf = vec![0.0f32; 4096 * usize::from(info.channels)];
+    let copied = (|| loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            return Ok::<(), std::io::Error>(());
+        }
+        writer.write(&buf[..n * usize::from(info.channels)])?;
+    })();
+    let finished = copied.and_then(|()| writer.finish());
+    let written = match finished {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = fs::remove_file(&out);
+            return Err(io(src, e));
+        }
+    };
+    let device = DeviceId(format!(
+        "file:{}",
+        src.file_name()
+            .map_or_else(String::new, |f| f.to_string_lossy().into_owned())
+    ));
+    let sidecar = Sidecar {
+        format: FORMAT.into(),
+        version: VERSION,
+        software: Software {
+            ac2: format!("ac2-traces {} (import)", env!("CARGO_PKG_VERSION")),
+            build: String::new(),
+            protocol: ac2_proto::PROTO_VERSION,
+        },
+        audio: AudioFile {
+            file: format!("{name}{AUDIO_SUFFIX}"),
+            sample_rate: info.sample_rate,
+            channels: (0..info.channels)
+                .map(|input| RecordedChannel {
+                    input,
+                    name: None,
+                    mic: None,
+                    roles: Vec::new(),
+                })
+                .collect(),
+        },
+        device: RecordedDevice {
+            backend: BackendKind::Replay,
+            input_device: device.clone(),
+            output_device: device,
+            buffer_frames: 0,
+            clock: ClockRelation::Unknown,
+            session_epoch: SessionEpoch(0),
+            loopback: None,
+        },
+        start: Mark::new(0, now_ns),
+        end: Some(End {
+            at: Mark::new(
+                written.frames,
+                now_ns + written.frames * 1_000_000_000 / u64::from(info.sample_rate),
+            ),
+            frames: written.frames,
+            reason: RecordingEnd::Stopped,
+        }),
+        limits: Limits {
+            max_duration: Seconds(written.frames as f64 / f64::from(info.sample_rate)),
+            max_bytes: None,
+        },
+        started_by: ClientId("import".into()),
+        initial: Initial {
+            measurements: Vec::new(),
+            generator: Generator {
+                owner: None,
+                armed: false,
+                firing: false,
+                settings: None,
+                ceiling: ac2_proto::units::Dbfs(0.0),
+                ceiling_bound: ac2_proto::units::Dbfs(0.0),
+                last_action: None,
+            },
+            inputs: Vec::new(),
+            calibrations: Vec::new(),
+        },
+        timeline: Vec::new(),
+        discontinuities: Vec::new(),
+    };
+    if let Err(e) = write_sidecar(dir, name, &sidecar) {
+        let _ = fs::remove_file(&out);
+        return Err(e);
+    }
+    Ok(sidecar)
+}
+
 #[cfg(test)]
 mod tests;

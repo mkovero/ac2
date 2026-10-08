@@ -128,6 +128,9 @@ pub struct Shared {
     pub spl_rows: HashMap<MeasId, Vec<SplLogRow>>,
     /// The rows `spl.log_new` ended last, per SPL meter (`spl.log_get` of the previous log).
     pub spl_prev_rows: HashMap<MeasId, Vec<SplLogRow>>,
+    /// Per-second band rows of each SPL meter's band log (a test fills them): what
+    /// `spl.band_log_get` and a `spl.band_transfer` span read; the fake runs no band meter.
+    pub band_rows: HashMap<MeasId, Vec<ac2_traces::band_log::BandLogRow>>,
     traces: traces::FakeTraces,
     lease: Option<LeaseSlot>,
     dedup: HashMap<(Vec<u8>, u64), Vec<u8>>,
@@ -262,9 +265,12 @@ fn fake_cal_key(input: u16, mic: &str) -> Result<CalKey, ProtoError> {
     })
 }
 
-/// Band levels of a transfer source: typed levels as the daemon takes them; the fake runs
-/// no band meter, so it has no band log to read a span from.
-fn fake_band_levels(src: &BandLevelSource) -> Result<[f64; BAND_COUNT], ProtoError> {
+/// Band levels of a transfer source as the daemon takes them: typed levels, or a span of
+/// the band rows a test gave the fake (`FakeDaemon::band_rows`).
+fn fake_band_levels(
+    src: &BandLevelSource,
+    band_rows: &HashMap<MeasId, Vec<ac2_traces::band_log::BandLogRow>>,
+) -> Result<[f64; BAND_COUNT], ProtoError> {
     match src {
         BandLevelSource::Levels { levels } => {
             if levels.len() != BAND_COUNT {
@@ -284,11 +290,33 @@ fn fake_band_levels(src: &BandLevelSource) -> Result<[f64; BAND_COUNT], ProtoErr
             }
             Ok(out)
         }
-        BandLevelSource::Log { meas, .. } => Err(err(
-            ErrorCode::Invalid,
-            format!("no band seconds logged by {meas} there (the fake daemon runs no band meter)"),
-        )),
+        BandLevelSource::Log { meas, from, until } => {
+            if until <= from {
+                return Err(err(ErrorCode::Invalid, "the span ends before it starts"));
+            }
+            let rows = fake_band_rows_in(band_rows, *meas, *from, *until);
+            ac2_traces::band_log::span_average(&rows)
+                .levels()
+                .map_err(|g| err(ErrorCode::Invalid, format!("SPL meter {meas}: {g}")))
+        }
     }
+}
+
+fn fake_band_rows_in(
+    band_rows: &HashMap<MeasId, Vec<ac2_traces::band_log::BandLogRow>>,
+    meas: MeasId,
+    from: WallNs,
+    until: WallNs,
+) -> Vec<ac2_traces::band_log::BandLogRow> {
+    band_rows
+        .get(&meas)
+        .map(|r| {
+            r.iter()
+                .filter(|r| r.start >= from && r.start < until)
+                .copied()
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn fake_transfer_band(b: ac2_core::band_leq::BandTransfer) -> BandTransferBand {
@@ -346,6 +374,7 @@ impl Shared {
             last_find: None,
             spl_rows: HashMap::new(),
             spl_prev_rows: HashMap::new(),
+            band_rows: HashMap::new(),
             traces: traces::FakeTraces::default(),
             lease: None,
             dedup: HashMap::new(),
@@ -1327,6 +1356,18 @@ impl Shared {
                     over: vec![Vec::new(); n],
                 }))
             }
+            C::SplBandLogGet {
+                meas,
+                from,
+                until,
+                step,
+            } => {
+                self.spl_meter(meas)?;
+                let rows = fake_band_rows_in(&self.band_rows, meas, from, until);
+                ac2_traces::band_log::span_reply(meas, from, until, step, &rows)
+                    .map(|r| ReplyBody::SplBandLog(Box::new(r)))
+                    .map_err(|m| err(ErrorCode::Invalid, m))?
+            }
             C::SplLogNew { meas } => {
                 let m = self.spl_meter(meas)?;
                 let rows = self.spl_rows.remove(&meas).unwrap_or_default();
@@ -1354,12 +1395,27 @@ impl Shared {
                         format!("SPL meter {meas} has no band meter: enable it first"),
                     ));
                 };
-                let foh = fake_band_levels(&foh)?;
-                let dwelling = fake_band_levels(&dwelling)?;
-                let background = background.as_ref().map(fake_band_levels).transpose()?;
+                if let Some(e) = ac2_proto::model::overlapping_spans(
+                    &foh,
+                    &dwelling,
+                    background.as_ref(),
+                    |id| {
+                        self.meas(id)
+                            .map_or_else(|_| format!("SPL meter {id}"), |m| m.config.name)
+                    },
+                ) {
+                    return Err(err(ErrorCode::Invalid, e));
+                }
+                let foh = fake_band_levels(&foh, &self.band_rows)?;
+                let dwelling = fake_band_levels(&dwelling, &self.band_rows)?;
+                let background = background
+                    .as_ref()
+                    .map(|b| fake_band_levels(b, &self.band_rows))
+                    .transpose()?;
                 let t = ac2_core::band_leq::Transfer::measure(&foh, &dwelling, background.as_ref());
                 bands.transfer = Some(BandTransferSet {
                     measured_at: WallNs(self.now_ns()),
+                    origin: ac2_proto::model::TransferOrigin::Measured,
                     bands: t.bands().map(fake_transfer_band),
                 });
                 m.config_rev = Rev(self.rev.0 + 1);

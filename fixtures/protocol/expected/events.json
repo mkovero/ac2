@@ -281,8 +281,10 @@
          "impulse": "plus5",
          "tonal": "none"
         },
+        "mic": "foh",
         "transfer": {
          "measured_at": 1789500000000000000,
+         "origin": "measured",
          "bands": [
           {
            "status": "unchecked",

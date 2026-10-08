@@ -463,49 +463,60 @@ impl Control {
                 Ok(out)
             }
             BandLevelSource::Log { meas, from, until } => {
-                self.spl_meter(*meas)?;
                 if until <= from {
                     return Err(inv("the span ends before it starts".into()));
                 }
-                let rows = self
-                    .spl_logs
-                    .get(meas)
-                    .map(|l| leq_log::lock(l).band_rows_in(*from, *until))
-                    .unwrap_or_default();
-                if rows.is_empty() {
-                    return Err(inv(format!(
-                        "SPL meter {meas} logged no band seconds in that span"
-                    )));
-                }
-                if rows.iter().any(|r| r.sensitivity.is_none()) {
-                    return Err(inv(format!(
-                        "SPL meter {meas} was not calibrated for all of that span: a \
-                         transfer needs dB SPL"
-                    )));
-                }
-                // The energy average over the measured time, each second on the
-                // sensitivity it was logged with; the §13 correction is the music's, not
-                // the building's, so it stays out.
-                let mut e = [0.0; BAND_COUNT];
-                let mut m = 0.0;
-                for r in &rows {
-                    let s = r.sensitivity.map_or(0.0, |d| d.0);
-                    for (e, &l) in e.iter_mut().zip(&r.levels) {
-                        let p = 10f64.powf((f64::from(l) + s) / 10.0);
-                        if p.is_finite() {
-                            *e += p * r.measured.0;
-                        }
-                    }
-                    m += r.measured.0;
-                }
-                if m <= 0.0 {
-                    return Err(inv(format!(
-                        "SPL meter {meas} measured nothing in that span"
-                    )));
-                }
-                Ok(e.map(|e| 10.0 * (e / m).log10()))
+                let rows = self.band_rows_in(*meas, *from, *until)?;
+                ac2_traces::band_log::span_average(&rows)
+                    .levels()
+                    .map_err(|g| inv(format!("SPL meter {meas}: {g}")))
             }
         }
+    }
+
+    /// The band seconds of SPL meter `meas`'s current log starting in `[from, until)`.
+    fn band_rows_in(
+        &self,
+        meas: MeasId,
+        from: WallNs,
+        until: WallNs,
+    ) -> Result<Vec<ac2_traces::band_log::BandLogRow>, ProtoError> {
+        let m = self.spl_meter(meas)?;
+        let banded = matches!(&m.config.kind, MeasKind::Spl { config } if config.bands.is_some());
+        let name = m.config.name.clone();
+        let rows = self
+            .spl_logs
+            .get(&meas)
+            .map(|l| leq_log::lock(l).band_rows_in(from, until))
+            .unwrap_or_default();
+        // A band meter turned off keeps its log: only an empty span of a meter without one
+        // says how to get a log.
+        if rows.is_empty() && !banded {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!(
+                    "{name} has no band meter, so it logs no band levels: turn it on (Leq \
+                     settings, or `ac2 spl bands set --preset finland-545-lf`), calibrate it, \
+                     then measure the span again"
+                ),
+            ));
+        }
+        Ok(rows)
+    }
+
+    /// `spl.band_log_get`: a span of the meter's band log, averaged as a transfer takes it,
+    /// with every `step`-th second.
+    pub(super) fn spl_band_log_get(
+        &self,
+        meas: MeasId,
+        from: WallNs,
+        until: WallNs,
+        step: Option<u32>,
+    ) -> Result<ReplyBody, ProtoError> {
+        let rows = self.band_rows_in(meas, from, until)?;
+        ac2_traces::band_log::span_reply(meas, from, until, step, &rows)
+            .map(|r| ReplyBody::SplBandLog(Box::new(r)))
+            .map_err(|m| perr(ErrorCode::Invalid, m))
     }
 
     /// `spl.band_transfer`: the transfer computed and stored in the band meter's
@@ -531,12 +542,20 @@ impl Control {
                 format!("SPL meter {meas} has no band meter: enable it first"),
             ));
         }
+        let name = |id: MeasId| {
+            self.spl_meter(id)
+                .map_or_else(|_| format!("SPL meter {id}"), |m| m.config.name.clone())
+        };
+        if let Some(e) = ac2_proto::model::overlapping_spans(foh, dwelling, background, name) {
+            return Err(perr(ErrorCode::Invalid, e));
+        }
         let foh = self.band_levels(foh)?;
         let dwelling = self.band_levels(dwelling)?;
         let background = background.map(|b| self.band_levels(b)).transpose()?;
         let t = ac2_core::band_leq::Transfer::measure(&foh, &dwelling, background.as_ref());
         let set = BandTransferSet {
             measured_at: WallNs(wall_ns()),
+            origin: ac2_proto::model::TransferOrigin::Measured,
             bands: t.bands().map(crate::conv::band_transfer_band),
         };
         let mut config = m.config.clone();

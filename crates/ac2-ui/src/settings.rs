@@ -110,7 +110,8 @@ impl Page {
             }
             Page::Leq => {
                 "Enter applies (the log and the windows carry on) · ↑↓ row · Tab cell · ←→ \
-                 choose · Insert adds a window · Delete removes it · Esc closes"
+                 choose · Insert adds a window · Delete removes it · T on a band row: band \
+                 transfer · Esc closes"
             }
             Page::Recording => "↑↓ move · type minutes, Enter applies · Esc closes",
             Page::Display => "↑↓ move · ←→ change · Enter resets the level axes · Esc closes",
@@ -781,6 +782,7 @@ impl Settings {
         match self.page {
             Page::Calibration => self.cal.electrical.is_some() || self.cal.acoustic.is_some(),
             Page::Io => self.ceiling.confirm.is_some(),
+            Page::Leq => self.leq.as_ref().is_some_and(|d| d.transfer.is_some()),
             _ => false,
         }
     }
@@ -793,6 +795,10 @@ impl Settings {
                 self.ceiling = CeilingEdit::default();
                 true
             }
+            Page::Leq => self
+                .leq
+                .as_mut()
+                .is_some_and(|d| d.transfer.take().is_some()),
             _ => false,
         }
     }

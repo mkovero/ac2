@@ -22,8 +22,10 @@
 
 use std::fmt::Write as _;
 
-use ac2_proto::model::{BAND_COUNT, BAND_NOMINAL_HZ, BandPeriod};
-use ac2_proto::units::{Db, Seconds, WallNs};
+use ac2_proto::model::{
+    BAND_COUNT, BAND_NOMINAL_HZ, BandLogAverage, BandLogSecond, BandPeriod, SplBandLog,
+};
+use ac2_proto::units::{Db, DbSpl, MeasId, Seconds, WallNs};
 
 use crate::spl_log::{SplLogError, SplLogInfo, utc_iso};
 
@@ -225,6 +227,154 @@ pub fn import_csv(bytes: &[u8]) -> Result<BandLogRead, SplLogError> {
     Ok(BandLogRead { rows, complete_len })
 }
 
+/// The energy average of band seconds over the time they measured
+/// ([`span_average`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpanAverage {
+    /// Seconds averaged.
+    pub seconds: u32,
+    /// Time they measured, s.
+    pub measured: f64,
+    /// Of `seconds`, those without a sensitivity.
+    pub uncalibrated: u32,
+    /// dB SPL per band (−∞: no energy).
+    levels: [f64; BAND_COUNT],
+}
+
+/// Why a span gives no band levels in dB SPL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpanGap {
+    /// No second was logged in it.
+    Empty,
+    /// A second in it had no sensitivity: the levels would mix dBFS and dB SPL.
+    Uncalibrated,
+    /// Its seconds measured no time.
+    NothingMeasured,
+}
+
+impl std::fmt::Display for SpanGap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SpanGap::Empty => "no band seconds logged in that span",
+            SpanGap::Uncalibrated => "not calibrated for all of that span: a transfer needs dB SPL",
+            SpanGap::NothingMeasured => "nothing measured in that span",
+        })
+    }
+}
+
+impl SpanAverage {
+    /// The levels a transfer takes, dB SPL per band (−∞: no energy), or why there are none.
+    pub fn levels(&self) -> Result<[f64; BAND_COUNT], SpanGap> {
+        if self.seconds == 0 {
+            Err(SpanGap::Empty)
+        } else if self.uncalibrated > 0 {
+            Err(SpanGap::Uncalibrated)
+        } else if self.measured <= 0.0 {
+            Err(SpanGap::NothingMeasured)
+        } else {
+            Ok(self.levels)
+        }
+    }
+
+    /// As `spl.band_log_get` carries it.
+    pub fn wire(&self) -> BandLogAverage {
+        BandLogAverage {
+            seconds: self.seconds,
+            measured: Seconds(self.measured),
+            uncalibrated: self.uncalibrated,
+            levels: self
+                .levels()
+                .ok()
+                .map(|l| l.map(|l| l.is_finite().then_some(DbSpl(l)))),
+        }
+    }
+}
+
+/// The energy average of `rows` per band over the time they measured, each second on the
+/// sensitivity it was logged with: a level held for half a second weighs half. The §13
+/// correction stays out: it belongs to the music's character, not to the building.
+pub fn span_average(rows: &[BandLogRow]) -> SpanAverage {
+    let mut e = [0.0; BAND_COUNT];
+    let mut measured = 0.0;
+    let mut uncalibrated = 0;
+    for r in rows {
+        let Some(s) = r.sensitivity else {
+            uncalibrated += 1;
+            continue;
+        };
+        for (e, &l) in e.iter_mut().zip(&r.levels) {
+            let p = 10f64.powf((f64::from(l) + s.0) / 10.0);
+            if p.is_finite() {
+                *e += p * r.measured.0;
+            }
+        }
+        measured += r.measured.0;
+    }
+    SpanAverage {
+        seconds: u32::try_from(rows.len()).unwrap_or(u32::MAX),
+        measured,
+        uncalibrated,
+        levels: e.map(|e| 10.0 * (e / measured).log10()),
+    }
+}
+
+/// A logged second as `spl.band_log_get` carries it: levels in dB SPL when calibrated.
+pub fn wire_row(r: &BandLogRow) -> BandLogSecond {
+    let o = r.sensitivity.map_or(0.0, |s| s.0);
+    BandLogSecond {
+        start: r.start,
+        measured: r.measured,
+        period: r.period,
+        correction: r.correction,
+        sensitivity: r.sensitivity,
+        levels: r.levels.map(|l| {
+            let l = f64::from(l) + o;
+            l.is_finite().then_some(l)
+        }),
+    }
+}
+
+/// The reply to `spl.band_log_get` from the band rows of `meas` starting in
+/// `[from, until)`: the average over all of them and every `step`-th as a row; refused
+/// when the span is empty or backwards, `step` is 0, or the rows would pass
+/// [`SplBandLog::MAX_ROWS`].
+pub fn span_reply(
+    meas: MeasId,
+    from: WallNs,
+    until: WallNs,
+    step: Option<u32>,
+    rows: &[BandLogRow],
+) -> Result<SplBandLog, String> {
+    if until <= from {
+        return Err("the span ends before it starts".into());
+    }
+    let out = match step {
+        None => Vec::new(),
+        Some(0) => return Err("the step is 1 or more seconds".into()),
+        Some(n) => {
+            let n = n as usize;
+            let count = rows.len().div_ceil(n);
+            if count > SplBandLog::MAX_ROWS as usize {
+                let fits = rows.len().div_ceil(SplBandLog::MAX_ROWS as usize);
+                return Err(format!(
+                    "{count} rows at step {n}: at most {} per reply; ask with step {fits} or \
+                     more, or a shorter span",
+                    SplBandLog::MAX_ROWS
+                ));
+            }
+            rows.iter().step_by(n).map(wire_row).collect()
+        }
+    };
+    Ok(SplBandLog {
+        meas,
+        from,
+        until,
+        step,
+        average: span_average(rows).wire(),
+        rows: out,
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -298,5 +448,73 @@ mod tests {
             import_csv(bad.as_bytes()),
             Err(SplLogError::Line { line: 7, .. })
         ));
+    }
+
+    #[test]
+    fn a_span_averages_energy_over_the_time_measured() {
+        let row = |start_s: u64, measured: f64, l: f32, sens: Option<f64>| BandLogRow {
+            start: WallNs(start_s * 1_000_000_000),
+            measured: Seconds(measured),
+            levels: [l; BAND_COUNT],
+            correction: Db(5.0),
+            period: BandPeriod::Night,
+            sensitivity: sens.map(Db),
+        };
+        // 1 s at 70 dB SPL and 0.5 s at 80: (10^7 + 0.5·10^8) / 1.5.
+        let mut rows = vec![
+            row(100, 1.0, -50.0, Some(120.0)),
+            row(101, 0.5, -40.0, Some(120.0)),
+        ];
+        rows[0].levels[3] = f32::NEG_INFINITY;
+        rows[1].levels[3] = f32::NEG_INFINITY;
+        let a = span_average(&rows);
+        let want = 10.0 * ((1e7 + 0.5e8) / 1.5f64).log10();
+        let l = a.levels().unwrap();
+        assert!((l[0] - want).abs() < 1e-9, "{}", l[0]);
+        assert_eq!(l[3], f64::NEG_INFINITY);
+        let w = a.wire();
+        assert_eq!(
+            (w.seconds, w.measured, w.uncalibrated),
+            (2, Seconds(1.5), 0)
+        );
+        let wl = w.levels.unwrap();
+        assert!((wl[0].unwrap().0 - want).abs() < 1e-9);
+        assert_eq!(wl[3], None, "no energy in the band");
+        // A second without a sensitivity: no dB SPL average.
+        rows.push(row(102, 1.0, -40.0, None));
+        let a = span_average(&rows);
+        assert_eq!(a.levels(), Err(SpanGap::Uncalibrated));
+        assert_eq!((a.wire().uncalibrated, a.wire().levels), (1, None));
+        assert_eq!(span_average(&[]).levels(), Err(SpanGap::Empty));
+        assert_eq!(
+            span_average(&[row(1, 0.0, -40.0, Some(120.0))]).levels(),
+            Err(SpanGap::NothingMeasured)
+        );
+    }
+
+    #[test]
+    fn a_span_reply_steps_and_bounds_its_rows() {
+        let rows: Vec<BandLogRow> = (0..7200u64)
+            .map(|i| BandLogRow {
+                start: WallNs(i * 1_000_000_000),
+                ..rows()[0]
+            })
+            .collect();
+        let (from, until) = (WallNs(0), WallNs(7200 * 1_000_000_000));
+        let r = span_reply(MeasId(4), from, until, None, &rows).unwrap();
+        assert!(r.rows.is_empty());
+        assert_eq!(r.average.seconds, 7200);
+        let e = span_reply(MeasId(4), from, until, Some(1), &rows).unwrap_err();
+        assert!(e.contains("ask with step 2"), "{e}");
+        let r = span_reply(MeasId(4), from, until, Some(2), &rows).unwrap();
+        assert_eq!(r.rows.len(), 3600);
+        assert_eq!(r.rows[1].start, WallNs(2_000_000_000));
+        // Levels in dB SPL when calibrated; no energy is none.
+        assert!((r.rows[0].levels[0].unwrap() - (-60.0 + 120.02)).abs() < 1e-4);
+        assert_eq!(r.rows[0].levels[27], None);
+        assert!(span_reply(MeasId(4), from, until, Some(0), &rows).is_err());
+        assert!(span_reply(MeasId(4), until, from, None, &rows).is_err());
+        // Uncalibrated rows read in dBFS.
+        assert_eq!(wire_row(&self::rows()[1]).levels[0], Some(-80.5));
     }
 }

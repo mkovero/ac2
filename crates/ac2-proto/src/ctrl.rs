@@ -474,6 +474,22 @@ pub enum Command {
         background: Option<crate::model::BandLevelSource>,
     },
 
+    /// A span of an SPL meter's band log (its current log): the energy average over
+    /// `[from, until)` as `spl.band_transfer` takes it from a log source, and with `step`
+    /// every `step`-th logged second (at most [`crate::model::SplBandLog::MAX_ROWS`] rows,
+    /// else refused).
+    #[serde(rename = "spl.band_log_get")]
+    SplBandLogGet {
+        /// SPL meter.
+        meas: MeasId,
+        /// Start (inclusive).
+        from: crate::units::WallNs,
+        /// End (exclusive).
+        until: crate::units::WallNs,
+        /// Rows wanted: every `step`-th second (1: each); `None`: the average alone.
+        step: Option<u32>,
+    },
+
     // -- sweep --------------------------------------------------------------------------
     /// Run a sweep measurement with its settings: plays its `repeats` synchronised sweeps,
     /// records the reference and measurement inputs and stores a `sweep` trace it owns
@@ -622,6 +638,7 @@ impl Command {
             Self::SplLogGet { .. } => "spl.log_get",
             Self::SplLogNew { .. } => "spl.log_new",
             Self::SplBandTransfer { .. } => "spl.band_transfer",
+            Self::SplBandLogGet { .. } => "spl.band_log_get",
             Self::SplHistoryGet { .. } => "spl.history_get",
             Self::SweepRun { .. } => "sweep.run",
             Self::StateSnapshot => "state.snapshot",
@@ -661,6 +678,7 @@ impl Command {
                 | Self::FileSave { .. }
                 | Self::SplLogGet { .. }
                 | Self::SplHistoryGet { .. }
+                | Self::SplBandLogGet { .. }
                 | Self::FileList
                 | Self::RecList
                 | Self::ServerInfo
@@ -764,6 +782,8 @@ pub enum ReplyBody {
     SplLogPage(SplLogPage),
     /// `spl.history_get`.
     SplHistory(Box<SplHistory>),
+    /// `spl.band_log_get`.
+    SplBandLog(Box<crate::model::SplBandLog>),
     /// `state.snapshot`.
     Snapshot(Box<StateSnapshot>),
     /// `state.since`.

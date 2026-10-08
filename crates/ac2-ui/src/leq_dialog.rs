@@ -14,7 +14,9 @@ use ac2_proto::model::{
 use ac2_proto::units::{Db, DbSpl, MeasId, Seconds};
 
 mod bands;
+mod transfer;
 pub use bands::{BandField, BandLimits, BandSection};
+pub use transfer::{Ask, Sources, Span, TransferStep};
 
 /// Window lengths offered, shortest first (→ longer). A length outside the list (from the
 /// CLI) is kept until changed.
@@ -240,6 +242,8 @@ pub struct LeqDialog {
     pub selected: bool,
     /// Why the last Enter was refused.
     pub error: Option<String>,
+    /// The band transfer step, open over the dialog.
+    pub transfer: Option<TransferStep>,
     base: SplConfig,
 }
 
@@ -285,6 +289,7 @@ impl LeqDialog {
             focus: Focus::Preset,
             selected: false,
             error: None,
+            transfer: None,
             base: config.clone(),
         })
     }
@@ -907,9 +912,14 @@ mod tests {
     #[test]
     fn the_band_meter_rows() {
         let mut d = LeqDialog::new(&meter(), true).expect("spl");
-        d.move_cell(-4);
+        d.move_cell(-(BandField::ALL.len() as i32));
         assert_eq!(d.focus, Focus::Band(BandField::Limits));
         d.cycle(1);
+        d.move_cell(1);
+        assert_eq!(d.focus, Focus::Band(BandField::Mic));
+        assert_eq!(d.bands.text(BandField::Mic), "at FOH");
+        d.cycle(1);
+        assert_eq!(d.bands.text(BandField::Mic), "in the bedroom");
         d.move_cell(1);
         d.move_cell(1);
         assert_eq!(d.focus, Focus::Band(BandField::Impulse));
@@ -920,6 +930,7 @@ mod tests {
         let b = config.bands.expect("on");
         assert_eq!(b.night[5], Some(DbSpl(42.0)));
         assert_eq!(b.correction.db(), 5.0);
+        assert_eq!(b.mic, ac2_proto::model::BandMicPlace::Dwelling);
         assert_eq!(config.leq, d.leq_config().expect("windows"));
     }
 

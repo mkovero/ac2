@@ -21,6 +21,7 @@ pub mod audio;
 pub mod autosave;
 pub mod axis;
 pub mod band_leq;
+pub mod band_transfer;
 pub mod banner;
 pub mod cal;
 mod canvas;

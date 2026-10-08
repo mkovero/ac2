@@ -55,6 +55,11 @@ pub(super) fn settings(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32
     if s.page == Page::Calibration {
         super::cal::cal_dialogs(app, ctx, ch, &s.cal);
     }
+    if s.page == Page::Leq
+        && let Some(t) = s.leq.as_ref().and_then(|d| d.transfer.as_ref())
+    {
+        super::band_transfer::dialog(app, ctx, ch, t);
+    }
     if let Some(m) = msg {
         app.dispatch(m);
     }

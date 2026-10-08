@@ -407,6 +407,12 @@ pub fn commands() -> Vec<Command> {
             },
             background: None,
         },
+        Command::SplBandLogGet {
+            meas: MeasId(4),
+            from: WallNs(1_789_500_000_000_000_000),
+            until: WallNs(1_789_500_030_000_000_000),
+            step: Some(10),
+        },
     ]
 }
 
@@ -1117,6 +1123,7 @@ pub fn band_leq_config() -> BandLeqConfig {
         },
         ..BandLeqPreset::Finland545Lf.config(Some(BandTransferSet {
             measured_at: WallNs(1_789_500_000_000_000_000),
+            origin: TransferOrigin::Measured,
             bands,
         }))
     }
@@ -1227,6 +1234,35 @@ fn spl_history() -> SplHistory {
         ],
         leq: vec![vec![98.5, 99.75], vec![99.0, 99.25]],
         over: vec![vec![false, false], vec![false, true]],
+    }
+}
+
+fn spl_band_log() -> SplBandLog {
+    let mut levels = [None; BAND_COUNT];
+    levels[0] = Some(71.25);
+    levels[5] = Some(80.5);
+    let mut average = [None; BAND_COUNT];
+    average[0] = Some(DbSpl(70.75));
+    average[5] = Some(DbSpl(80.0));
+    SplBandLog {
+        meas: MeasId(4),
+        from: WallNs(1_789_500_000_000_000_000),
+        until: WallNs(1_789_500_030_000_000_000),
+        step: Some(10),
+        average: BandLogAverage {
+            seconds: 30,
+            measured: Seconds(29.5),
+            uncalibrated: 0,
+            levels: Some(average),
+        },
+        rows: vec![BandLogSecond {
+            start: WallNs(1_789_500_000_000_000_000),
+            measured: Seconds(1.0),
+            period: BandPeriod::Night,
+            correction: Db(5.0),
+            sensitivity: Some(Db(120.0)),
+            levels,
+        }],
     }
 }
 
@@ -1469,6 +1505,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Mic(mic())),
         Ok(ReplyBody::SplLogPage(spl_log_page())),
         Ok(ReplyBody::SplHistory(Box::new(spl_history()))),
+        Ok(ReplyBody::SplBandLog(Box::new(spl_band_log()))),
         Ok(ReplyBody::Snapshot(Box::new(StateSnapshot {
             state: state(),
             rev: Rev(42),

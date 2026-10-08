@@ -194,3 +194,43 @@ fn paths_name_their_recording() {
     assert!(validate_name("show 1").is_ok());
     assert!(validate_name("../x").is_err());
 }
+
+/// A 16-bit PCM WAV as a recorder writes it: mono, 48 kHz.
+fn pcm16(path: &Path, samples: &[i16]) {
+    let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&48_000u32.to_le_bytes());
+    b.extend_from_slice(&96_000u32.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    b.extend_from_slice(&data);
+    fs::write(path, b).expect("write");
+}
+
+#[test]
+fn a_recorders_wav_imports_as_a_finished_recording() {
+    let dir = tempfile::tempdir().expect("dir");
+    let src = dir.path().join("ZOOM0001.WAV");
+    pcm16(&src, &[16_384, -32_768, 1, 0]);
+    let s = import_wav(&src, dir.path(), "bedroom", 1_000_000_000).expect("import");
+    assert_eq!(s.device.input_device.0, "file:ZOOM0001.WAV");
+    assert_eq!(s.audio.sample_rate, 48_000);
+    assert_eq!(s.end.as_ref().map(|e| e.frames), Some(4));
+    assert_eq!(read_sidecar(dir.path(), "bedroom").expect("read"), s);
+    let mut r = WavReader::open(&audio_path(dir.path(), "bedroom")).expect("open");
+    let mut b = [0.0f32; 4];
+    assert_eq!(r.read(&mut b).expect("read"), 4);
+    assert_eq!(b, [0.5, -1.0, 1.0 / 32_768.0, 0.0]);
+    assert!(matches!(
+        import_wav(&src, dir.path(), "bedroom", 0),
+        Err(RawError::Exists(_))
+    ));
+}

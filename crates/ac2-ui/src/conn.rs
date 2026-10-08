@@ -134,6 +134,13 @@ pub enum ConnEvent {
         ask: u64,
         result: Result<Box<SplHistory>, String>,
     },
+    /// A span of a band log read back ([`Request::BandLogGet`]).
+    BandLog {
+        ask: crate::leq_dialog::Ask,
+        result: Result<Box<ac2_proto::model::SplBandLog>, String>,
+    },
+    /// `spl.band_transfer` answered with the meter that took the transfer, or why not.
+    BandTransfer(Result<Box<Measurement>, String>),
 }
 
 /// Stimulus lease outcomes.
@@ -236,6 +243,13 @@ pub enum Request {
     /// `spl.history_get` of SPL meter `meas` over the history the strip keeps
     /// ([`ConnEvent::LeqBackfill`]).
     LeqBackfill { meas: MeasId, ask: u64 },
+    /// `spl.band_log_get` of a span, its average alone ([`ConnEvent::BandLog`]).
+    BandLogGet(crate::leq_dialog::Ask),
+    /// `spl.band_transfer` into `meas` ([`ConnEvent::BandTransfer`]).
+    BandTransfer {
+        meas: MeasId,
+        sources: Box<crate::leq_dialog::Sources>,
+    },
     /// The measurement streams to receive: what the visible panes draw and what the
     /// reducer folds (an IR nobody shows is never computed, since the daemon derives it
     /// only for subscribers). Kept across reconnects.
@@ -635,6 +649,13 @@ async fn wait_retry(
                 Some(Ctl::Req(Request::DisplayPeriod(p))) => wants.period = p,
                 // Asked again once connected: the history follows the daemon's log.
                 Some(Ctl::Req(Request::LeqBackfill { .. })) => {}
+                Some(Ctl::Req(Request::BandLogGet(ask))) => out.send(ConnEvent::BandLog {
+                    ask,
+                    result: Err("not connected".into()),
+                }),
+                Some(Ctl::Req(Request::BandTransfer { .. })) => {
+                    out.send(ConnEvent::BandTransfer(Err("not connected".into())));
+                }
                 Some(Ctl::Req(Request::PreviewStop)) => {}
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
@@ -673,6 +694,8 @@ fn request_name(r: &Request) -> String {
         Request::DetectLoopback(_) => "detect loopback".into(),
         Request::CreateMeas { config } => format!("new measurement {}", config.name),
         Request::LeqBackfill { .. } => "SPL history".into(),
+        Request::BandLogGet(_) => "band log".into(),
+        Request::BandTransfer { .. } => "band transfer".into(),
         Request::Topics(_) => "subscribe".into(),
         Request::DisplayPeriod(_) => "display rate".into(),
         Request::Reconnect => "reconnect".into(),
@@ -1221,6 +1244,44 @@ fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<StimOp>, out
                     .and_then(|r| expect_body!("spl.history_get", r, ReplyBody::SplHistory(h) => h))
                     .map_err(|e| e.to_string());
                 o.send(ConnEvent::LeqBackfill { meas, ask, result });
+            });
+        }
+        Request::BandLogGet(ask) => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call(Command::SplBandLogGet {
+                        meas: ask.meas,
+                        from: ask.from,
+                        until: ask.until,
+                        step: None,
+                    })
+                    .await
+                    .and_then(
+                        |r| expect_body!("spl.band_log_get", r, ReplyBody::SplBandLog(l) => l),
+                    )
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::BandLog { ask, result });
+            });
+        }
+        Request::BandTransfer { meas, sources } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let (foh, dwelling, background) = *sources;
+                let result = c
+                    .call(Command::SplBandTransfer {
+                        meas,
+                        foh,
+                        dwelling,
+                        background,
+                    })
+                    .await
+                    .and_then(
+                        |r| expect_body!("spl.band_transfer", r, ReplyBody::Measurement(m) => m),
+                    )
+                    .map(Box::new)
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::BandTransfer(result));
             });
         }
         // Applied by the session loop.

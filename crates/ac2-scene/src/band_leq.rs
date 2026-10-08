@@ -11,8 +11,8 @@
 
 use ac2_proto::frame::BandLeqMeta;
 use ac2_proto::model::{
-    BandLeqPreset, BandLimitPlace, BandPeriod, BandTransferBand, BandTransferSet, LF_BAND_COUNT,
-    LeqJudgement, LevelScale,
+    BandLeqPreset, BandLimitPlace, BandMicPlace, BandPeriod, BandTransferBand, BandTransferSet,
+    LF_BAND_COUNT, LeqJudgement, LevelScale, TransferOrigin,
 };
 
 use crate::banner::{BannerRow, Status};
@@ -92,7 +92,7 @@ pub struct BandLeqText {
     /// `night limits (22–07)`, `day limits (07–22) · headroom for the night limits from
     /// 22:00`.
     pub period: String,
-    /// `limits transferred from the dwelling`, `dwelling limits at the mic (no transfer)`.
+    /// `limits transferred from the dwelling`, `no band transfer: the limits are the bedroom's, …`.
     pub limits_from: String,
     /// `§13 correction +5 dB`.
     pub correction: Option<String>,
@@ -152,11 +152,36 @@ pub fn period_text(period: BandPeriod, after_horizon: BandPeriod) -> String {
     }
 }
 
+/// Where a band meter's mic is, as its setting reads.
+pub fn mic_place_text(p: BandMicPlace) -> &'static str {
+    match p {
+        BandMicPlace::Foh => "at FOH",
+        BandMicPlace::Dwelling => "in the bedroom",
+    }
+}
+
+/// What the mic's place means for the limits.
+pub fn mic_place_note(p: BandMicPlace) -> &'static str {
+    match p {
+        BandMicPlace::Foh => {
+            "the bedroom's limits apply at FOH through the band transfer; without one they \
+             are shown, not judged"
+        }
+        BandMicPlace::Dwelling => "a bedroom monitor: the limits apply at the mic as they are",
+    }
+}
+
 /// Where the limits judged at the mic come from.
 pub fn limits_from_text(p: BandLimitPlace) -> &'static str {
     match p {
-        BandLimitPlace::AtMic => "dwelling limits at the mic (no transfer)",
+        BandLimitPlace::AtMic => "limits at the mic: the mic is in the bedroom",
+        BandLimitPlace::NoTransfer => {
+            "no band transfer: the limits are the bedroom's, not judged at the mic"
+        }
         BandLimitPlace::Transferred => "limits transferred from the dwelling",
+        BandLimitPlace::Estimated => {
+            "limits transferred with an estimated attenuation (typed, not measured)"
+        }
     }
 }
 
@@ -172,12 +197,19 @@ pub fn band_leq_text(m: &BandLeqMeta) -> BandLeqText {
     // A window filling for at least the horizon has its headroom until it is full.
     let until_full = filling && duration - elapsed >= m.horizon.0;
     let horizon = length(m.horizon.0);
+    // Without a transfer the limits are the bedroom's: a level at the mic over them says
+    // nothing about the bedroom, so no band is judged.
+    let at_mic = m.limits_from == BandLimitPlace::NoTransfer;
     let bars: Vec<BandBar> = m
         .bands
         .iter()
         .map(|b| {
-            let state = TileState::from(b.judgement);
-            let is_judged = judged(b.judgement);
+            let is_judged = judged(b.judgement) && !at_mic;
+            let state = if at_mic && judged(b.judgement) {
+                TileState::NoLimit
+            } else {
+                TileState::from(b.judgement)
+            };
             let on_course = is_judged && b.on_course;
             // Floored: a ceiling to stay under.
             let allowed_db = b
@@ -272,6 +304,12 @@ fn headline(m: &BandLeqMeta, bars: &[BandBar], worst: Option<usize>) -> (String,
         return (
             "not calibrated: band levels in dBFS, limits not judged".to_owned(),
             TileState::NotCalibrated,
+        );
+    }
+    if m.limits_from == BandLimitPlace::NoTransfer && m.scale == LevelScale::DbSpl {
+        return (
+            "no band transfer — limits are for the bedroom, measure the transfer".to_owned(),
+            TileState::NoLimit,
         );
     }
     if bars.iter().all(|b| !b.leq_db.is_finite()) {
@@ -403,8 +441,18 @@ pub fn transfer_band_text(nominal_hz: f64, b: &BandTransferBand) -> String {
 /// 1 bound, 1 not measured`; `no transfer: limits judged at the mic`.
 pub fn transfer_summary(t: Option<&BandTransferSet>) -> String {
     let Some(t) = t else {
-        return "no transfer: dwelling limits judged at the mic".to_owned();
+        return "no band transfer: the bedroom's limits are not judged at the mic".to_owned();
     };
+    if t.origin == TransferOrigin::Estimated {
+        let typed = t.bands[..LF_BAND_COUNT]
+            .iter()
+            .filter(|b| !matches!(b, BandTransferBand::Missing))
+            .count();
+        return format!(
+            "estimated transfer 20–200 Hz: {typed} bands typed, not measured (measure it when \
+             the bedroom can be reached)"
+        );
+    }
     let mut n = [0usize; 5];
     for b in &t.bands[..LF_BAND_COUNT] {
         n[match b {

@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 26`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 27`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -116,6 +116,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `seconds: u32` | `spl_history` | |
 | `spl.band_transfer` | `meas`, `foh`, `dwelling: BandLevelSource`, `background: BandLevelSource \| nil` | `measurement` (as `meas.update`) | |
+| `spl.band_log_get` | `meas`, `from`, `until: WallNs`, `step: u32 \| nil` | `spl_band_log` | non-mutating |
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
@@ -426,7 +427,7 @@ the frame's `scale`: the energy average over all the measured time, exactly from
 seconds' energies; NaN before anything was measured). The run clock is `until −
 started_at`; it carries on across app and daemon restarts as the log does.
 
-#### Band meter (`SplConfig.bands`, `spl.band_transfer`, `band_leq` frames)
+#### Band meter (`SplConfig.bands`, `spl.band_transfer`, `spl.band_log_get`, `band_leq` frames)
 
 Design: `docs/design/band-leq.md`. `SplConfig.bands`: `BandLeqConfig` \| nil (nil: no band
 meter) = {`duration`: Seconds (whole seconds, 1 s … 24 h; the decree's 1 h), `day`, `night`:
@@ -435,9 +436,13 @@ meter) = {`duration`: Seconds (whole seconds, 1 s … 24 h; the decree's 1 h), `
 `predicted`: `PredictedLimits` {`day`, `night`: DbSpl \| nil} (limits of the predicted
 dwelling LAeq, judged only with a transfer), `correction`: `BandCorrection` {`impulse`:
 `none` \| `plus5` \| `plus10`, `tonal`: `none` \| `plus3` \| `plus6`} (STM 545/2015 §13,
-summed, applied to the seconds from when it is set), `transfer`: `BandTransferSet` \| nil}.
-`BandTransferSet` = {`measured_at`: WallNs, `bands`: [`BandTransferBand`; 28] (20 Hz … 10
-kHz)}; `BandTransferBand` (tagged by `status`): `unchecked` {`attenuation`: Db} (no
+summed, applied to the seconds from when it is set), `mic`: `BandMicPlace` (`foh`: the
+limits are judged through the transfer, and without one not at all; `dwelling`: a bedroom
+monitor, the limits judged at the mic as they are and a stored transfer not used),
+`transfer`: `BandTransferSet` \| nil}. `BandTransferSet` = {`measured_at`: WallNs, `origin`:
+`TransferOrigin` (`measured`: by `spl.band_transfer`; `estimated`: typed by the operator
+through `meas.update`, each band `unchecked` at the guessed attenuation or `missing`),
+`bands`: [`BandTransferBand`; 28] (20 Hz … 10 kHz)}; `BandTransferBand` (tagged by `status`): `unchecked` {`attenuation`: Db} (no
 background measured), `clean` {`attenuation`} (≥ 10 dB over the background), `corrected`
 {`attenuation`, `margin`: Db} (3 … 10 dB over it, the background subtracted), `unusable`
 {`at_least`: Db} (< 3 dB over it: a bound), `missing`. A configuration outside these bounds
@@ -451,8 +456,10 @@ through the 1/3-octave bank and integrates each band per second on the meter's o
 grid (a gap moves it on without energy). The seconds are logged (§7.4, band log) with the
 period of their local start, the correction and the sensitivity in force; rolling windows of
 `duration` on the eleven bands 20 … 200 Hz hold each second's energy with its correction.
-Without a transfer the dwelling limits are judged at the mic as they are; with one each
-band's limit at the mic is the dwelling limit plus the attenuation (the bound for an
+With the mic in the dwelling the limits are judged at the mic as they are; at FOH without a
+transfer they are carried in the frame but not judged (`no_limit`, no alarm: a level at FOH
+says nothing about the dwelling); at FOH with one each band's limit at the mic is the
+dwelling limit plus the attenuation (the bound for an
 unusable band; a missing band has no limit), and the dwelling LAeq is predicted from every
 second: each band less its attenuation, A-weighted at the band centre, summed (the estimate
 from the measured bands; `at_most` with the unusable bands at their bound). The windows are
@@ -471,15 +478,33 @@ and `background` are each a `BandLevelSource` (tagged by `type`): `log` {`meas`,
 log starting in [`from`, `until`) (the same meter moved, or another meter), without the
 correction; `invalid` when none were logged there or one was uncalibrated — or `levels`
 {`levels`: [DbSpl \| nil; 28]} (typed, or read from a text file of `<Hz> <dB>` lines; nil:
-not measured). Per band: FOH and dwelling of the same test signal over the same time,
-attenuation = FOH − dwelling, with the background rules above. `invalid` for a meter without
-a band meter.
+not measured). Per band: FOH and dwelling of the same steady test signal at the same level
+(not necessarily at the same time or on synchronised clocks), attenuation = FOH − dwelling,
+with the background rules above. `invalid` for a meter without a band meter; for two `log`
+spans of the same meter that overlap (one mic cannot be at FOH and in the dwelling, or hear
+the signal and the silence, at once); and for a `log` span of a meter without a band meter
+and nothing logged there (the message says to turn it on and calibrate).
+
+`spl.band_log_get` reads a span of the band log back: `spl_band_log` = `SplBandLog`
+{`meas`, `from`, `until`, `step`, `average`: `BandLogAverage` {`seconds`: u32 (logged in
+the span), `measured`: Seconds, `uncalibrated`: u32 (seconds without a sensitivity),
+`levels`: [DbSpl \| nil; 28] \| nil (the energy average a `log` source gives the transfer;
+nil unless every second is calibrated and something was measured)}, `rows`: [`BandLogSecond`
+{`start`: WallNs, `measured`: Seconds, `period`, `correction`: Db, `sensitivity`: Db \| nil,
+`levels`: [f64 \| nil; 28] (dB SPL with a sensitivity, else dBFS; without the correction)}]}.
+`rows` holds every `step`-th logged second (nil: none, the average only). The reply is
+bounded: more than 3600 rows is `invalid`, naming the step that fits; `step` 0 and a span
+that ends before it starts are `invalid`; a meter that is not an SPL meter `invalid`, an
+unknown one `not_found`. A replayed recording's meter logs at the replay's wall time: at
+`realtime` pace file second t is the replay's start + t, so its spans are addressable; at
+`fast` pace they are not.
 
 The `band_leq` frame (§5.4), once a second while subscribed: `scale` (`db_spl` once
 calibrated; limits are judged only then), `cal`, `mic_curve`, `duration`, `horizon`,
 `elapsed` and `measured` (Seconds, of the windows), `period` and `period_after_horizon`
 (`BandPeriod`: `day` \| `night`), `correction` (Db in force), `limits_from`
-(`BandLimitPlace`: `at_mic` \| `transferred`), `bands`: 11 × `BandLeqBand` {`nominal`: Hz,
+(`BandLimitPlace`: `at_mic` (the mic in the dwelling) \| `no_transfer` (at FOH, nothing
+judged) \| `transferred` \| `estimated` (an estimated transfer)), `bands`: 11 × `BandLeqBand` {`nominal`: Hz,
 `leq`: f64 (in `scale`, correction included; NaN before anything was measured), `limit`:
 f64 \| nil (at the mic), `judgement`: `LeqJudgement`, `on_course`: bool, `allowed`: f64 \|
 nil (headroom), `recover`: Seconds \| nil}, `worst`: u8 \| nil (index into `bands`: the most
@@ -932,7 +957,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
 `export`, `calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`,
-`spl_log_page`, `spl_history`,
+`spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `sweep`, `recording`, `recordings`.
 
@@ -1355,6 +1380,14 @@ in the recording directory:
 The sidecar is written when recording starts and replaced atomically when it ends. Session
 sample of file frame f: `start.session_sample + f + Σ lost_frames` of the discontinuities at
 or before f.
+
+A WAV from elsewhere (16-, 24- or 32-bit integer PCM or 32-bit float, e.g. a recorder's)
+becomes a recording on the client: `ac2 rec import` (`ac2_traces::raw::import_wav`) writes
+its samples as above (integer full scale is ±1.0) with a sidecar of `device.backend`
+`replay`, `input_device` = `output_device` = `file:<file name>`, `clock` `unknown`,
+`buffer_frames` 0, `start` at the import's wall time and session sample 0, no timeline or
+discontinuities, and `end.reason` `stopped`. Calibrations of its replay are keyed by that
+device id, so `cal.spl` on a recorded calibrator tone calibrates it.
 
 ## 8. Cross-language fixtures
 

@@ -102,9 +102,11 @@ boundaries never move relative to the seconds around them.
 ## The transfer FOH → bedroom
 
 **Measurement** (once, at setup): a steady test signal (pink noise) through the system;
-band Leq over the same period at FOH (the meter's mic) and in the bedroom (a second
-calibrated mic, or the same mic moved while the signal stays the same), then the bedroom's
-**background** with the system silent. All three on one level scale (dB SPL). Per band:
+band Leq at FOH (the meter's mic) and in the bedroom (the same mic moved, a second
+calibrated mic, another rig's meter, or a calibrated recorder replayed), then the bedroom's
+**background** with the system silent. All three on one level scale (dB SPL). The FOH and
+bedroom figures need the **same steady signal at the same level**, not the same time: they
+need not be simultaneous or on synchronised clocks. Per band:
 
     margin = L_bedroom − L_background
 
@@ -119,6 +121,15 @@ calibrated mic, or the same mic moved while the signal stays the same), then the
   until the band is usable.
 - Without a background measurement every band is **unchecked**: the difference as is, and
   the caption says so.
+
+**Without a transfer** a meter whose mic is at FOH (`BandMicPlace::Foh`, the default)
+shows the bedroom's limits but does not judge them (`BandLimitPlace::NoTransfer`): a level
+at FOH over a bedroom limit says nothing about the bedroom, and red bars would claim it
+did. A meter whose mic is in the bedroom (`BandMicPlace::Dwelling`, a bedroom monitor)
+judges them at the mic as they are (`AtMic`). Where the bedroom cannot be reached, the
+operator can type an **estimated** attenuation per band (`TransferOrigin::Estimated`, each
+band unchecked at the guess); it is judged like a measured one and labelled estimated
+everywhere (`BandLimitPlace::Estimated`).
 
 **FOH limits**: `L_lim,FOH(b) = L_lim,bedroom(b) + D_b` (an unusable band's bound in place
 of `D_b`, so the FOH limit is lower, i.e. safe). Judging FOH band Leq against FOH limits is
@@ -219,9 +230,7 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
    - The transfer takes FOH, dwelling and background band levels from spans of a band log
      (the same mic moved, or a second meter) or from typed or imported levels
      (`ac2_traces::band_levels`, `<Hz> <dB>` lines). There is no dedicated two-position
-     capture job: the operator plays the test signal and names the spans. That job, and
-     reading the band log back over the protocol (a `spl.band_log_get`), are left for
-     stage 3 or later.
+     capture job: the operator plays the test signal and names the spans (stage 4).
 3. **Scene, UI, CLI** (done): `ac2_scene::band_leq` words and draws the `band_leq` frame —
    eleven bars 20 … 200 Hz with the limit line, the headroom ("≤ …") and "cooling down in
    …" per band, the worst band named in a headline with what to do ("63 Hz band Leq 3.2 dB
@@ -236,7 +245,29 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
      transfer, and `spl leq set --preset` replaces windows, which a band preset never does.
    - A transfer source on the CLI is a file of `<Hz> <dB>` lines or `METER@FROM..UNTIL`,
      times resolved on the CLI's host (local time of day, local or UTC date-time, `-30s`,
-     `now`); the fake client answers typed levels and refuses spans (it keeps no band log).
-   - Not yet: a two-position transfer capture job in the app (the operator names the
-     spans), reading the band log back over the protocol (`spl.band_log_get`), the band
-     history in the view.
+     `now`).
+4. **Measuring the transfer** (done): `spl.band_log_get` reads a span of the band log back
+   (the energy average a transfer takes, `ac2_traces::band_log::span_average`, shared by the
+   daemon, the fake client and the reply; every `step`-th second; at most 3600 rows, else
+   refused naming the step that fits); `ac2 spl bands log [--step N] [--levels-out FILE]`;
+   the app's **band transfer step** over the Leq dialog (T on a band row: FOH, bedroom and
+   background spans marked with Space / Space or the last 1–9 minutes on the meter's clock,
+   each read back, then Enter stores the transfer); `spl.band_transfer` refuses
+   overlapping spans of one meter and a span of a meter without a band meter or log, saying
+   what to do; `BandLeqConfig.mic` and `BandLimitPlace::NoTransfer` (nothing judged at FOH
+   without a transfer, the headline asks for one); `BandTransferSet.origin` and `ac2 spl
+   bands estimate`; `ac2 rec import` (a recorder's 16/24/32-bit PCM or float WAV as a
+   recording, so a calibrated recorder in a bedroom without a cable replays, calibrates from
+   its recorded tone and gives the bedroom spans); `PROTO_VERSION` 27. The fake client
+   keeps band rows a test puts in (`Shared::band_rows`) and answers spans from them.
+   Decided on the way:
+   - A span is timed on the meter's clock (its newest frame's capture wall time in the
+     app; the CLI's host clock for `METER@FROM..UNTIL`), so a rig elsewhere lines up with its
+     own log.
+   - A replay logs at the replay's wall time: at real-time pace file second t is the
+     replay's start + t, so its spans are addressable; at fast pace they are not, and the
+     guide says to replay a recorder in real time. Spans in file time (rather than replay
+     wall time) are not offered.
+   - The reply is bounded by refusing, not by decimating behind the caller's back.
+   - Not yet: typing an estimated attenuation in the app (the CLI does it), the band
+     history in the view, a recorder's file-time marks shown in the step.

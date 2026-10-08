@@ -1,6 +1,6 @@
 //! `ac2 rec …` and `ac2 session replay` against a real daemon on the simulated rig: a
 //! recording bounded by its time limit ends by itself, is listed, and replays as a session
-//! on the recorded inputs.
+//! on the recorded inputs; a recorder's WAV imported beside it does too.
 #![allow(clippy::unwrap_used)]
 
 use std::time::{Duration, Instant};
@@ -127,5 +127,45 @@ async fn record_list_and_replay() {
     let (code, _, err) = ac2(&ep, &["session", "replay", "missing"]).await;
     assert_ne!(code, 0);
     assert!(err.contains("missing"), "{err}");
+
+    // A recorder's 16-bit WAV, imported into the recording directory, lists and replays.
+    let wav = dir.path().join("ZOOM0001.WAV");
+    let data: Vec<u8> = (0..4800i32)
+        .flat_map(|i| (((i % 48) * 600) as i16).to_le_bytes())
+        .collect();
+    let mut b = b"RIFF".to_vec();
+    b.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&[1, 0, 1, 0]);
+    b.extend_from_slice(&48_000u32.to_le_bytes());
+    b.extend_from_slice(&96_000u32.to_le_bytes());
+    b.extend_from_slice(&[2, 0, 16, 0]);
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    b.extend_from_slice(&data);
+    std::fs::write(&wav, b).unwrap();
+    let (code, text, err) = ac2(
+        &ep,
+        &["rec", "import", wav.to_str().unwrap(), "--name", "bedroom"],
+    )
+    .await;
+    assert_eq!(code, 0, "{err}");
+    assert!(text.contains("1 channel(s) at 48000 Hz, 0.1 s"), "{text}");
+    assert!(text.contains("ac2 session replay"), "{text}");
+    let (code, _, err) = ac2(
+        &ep,
+        &["rec", "import", wav.to_str().unwrap(), "--name", "bedroom"],
+    )
+    .await;
+    assert_ne!(code, 0);
+    assert!(err.contains("exists already"), "{err}");
+    let l = json(&ep, &["rec", "list"]).await;
+    assert!(
+        l.as_array().unwrap().iter().any(|r| r["name"] == "bedroom"),
+        "{l}"
+    );
+    let s = json(&ep, &["session", "replay", "bedroom", "--fast"]).await;
+    assert_eq!(s["open"]["replay"]["frames"], 4800);
     h.shutdown();
 }

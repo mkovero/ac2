@@ -9,7 +9,7 @@ use super::{AppState, Overlay, PaneKind, StimPhase, typed_char};
 use crate::cal_view::CalView;
 use crate::conn::Request;
 use crate::keys::{Chord, CommandId, Keymap, Scope};
-use crate::leq_dialog::LeqDialog;
+use crate::leq_dialog::{Focus, LeqDialog};
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 use crate::settings::{
     ConnAction, DisplayRow, Page, RecordingRow, SERVER_INFO_EVERY_S, Settings, step_hold,
@@ -177,7 +177,13 @@ impl AppState {
             self.swallow_text = swallow;
             return;
         };
+        if d.transfer.is_some() {
+            self.band_transfer_key(chord, out);
+            return;
+        }
+        let plain = !(chord.command || chord.alt || chord.shift);
         match chord.key {
+            Key::T if plain && matches!(d.focus, Focus::Band(_)) => self.open_band_transfer(),
             Key::Enter => self.submit_leq(out),
             Key::ArrowUp => d.move_row(-1),
             Key::ArrowDown => d.move_row(1),
@@ -519,7 +525,10 @@ impl AppState {
             Page::Io | Page::Audio => s.session.type_text(t),
             Page::Calibration => s.cal.type_text(t),
             Page::Leq => {
-                if let Some(d) = &mut s.leq {
+                // The band transfer step takes keys, not text.
+                if let Some(d) = &mut s.leq
+                    && d.transfer.is_none()
+                {
                     d.type_text(t);
                 }
             }
@@ -545,6 +554,9 @@ impl AppState {
             Page::Io | Page::Audio => s.session.backspace(),
             Page::Calibration if s.cal.typing() => s.cal.backspace(),
             Page::Calibration => self.cal_view_key(Chord::key(Key::Delete), None, out),
+            Page::Leq if s.leq.as_ref().is_some_and(|d| d.transfer.is_some()) => {
+                self.band_transfer_key(Chord::key(Key::Delete), out);
+            }
             Page::Leq => {
                 if let Some(d) = &mut s.leq {
                     d.backspace();

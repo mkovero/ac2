@@ -1,9 +1,12 @@
 //! `spl bands` against a real daemon on the simulated rig, from an empty daemon: a 63 Hz
 //! tone reaches input 2 at about 94 dB SPL once calibrated at 1 kHz. `spl bands set
 //! --preset finland-545-lf --duration 5s` turns the band meter on; `spl bands watch --json`
-//! shows eleven bands with 63 Hz the worst, far over its limit, and the headline naming it;
-//! `spl bands transfer` with typed levels moves the limits to the mic and predicts the
-//! dwelling's LAeq.
+//! with the mic in the bedroom shows eleven bands with 63 Hz the worst, far over its limit, and the headline naming it;
+//! `spl bands log` reads the tone's seconds back with their average and writes them as a
+//! `<Hz> <dB>` file that `spl bands transfer` reads back; at FOH without a transfer nothing
+//! is judged; overlapping spans of one meter are refused; `spl bands estimate` stores a
+//! typed transfer; `spl bands transfer` with typed levels moves the limits to the mic and
+//! predicts the dwelling's LAeq.
 #![allow(clippy::unwrap_used)]
 
 use std::time::{Duration, Instant};
@@ -86,6 +89,9 @@ async fn bands_set_watch_and_transfer() {
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = DaemonConfig::new(backend, listen, -10.0);
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
+    // The lease is held across many CLI runs; a slow runner can stall the client's refresher
+    // past the 1.5 s expiry, and the lease is not under test here.
+    cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let ep = Endpoints {
         ctrl: h.ctrl_endpoint().to_owned(),
@@ -175,6 +181,8 @@ async fn bands_set_watch_and_transfer() {
             "5s",
             "--tonal",
             "3",
+            "--mic",
+            "bedroom",
         ],
     )
     .await;
@@ -186,13 +194,15 @@ async fn bands_set_watch_and_transfer() {
     assert_eq!(bands["day"][5], 47.0);
     assert_eq!(bands["predicted"]["night"], 25.0);
     assert_eq!(bands["correction"]["tonal"], "plus3");
+    assert_eq!(bands["mic"], "dwelling");
 
-    // The window fills with the tone; 63 Hz is the worst band, tens of dB over.
+    // A bedroom monitor: the window fills with the tone; 63 Hz is the worst band, tens of
+    // dB over.
     tokio::time::sleep(Duration::from_secs(6)).await;
     let last = watch_last(&ep, "2.5s").await;
     assert_eq!(last["name"], "FOH SPL");
     assert_eq!(last["scale"], "db_spl");
-    assert_eq!(last["limits_from"], "at_mic");
+    assert_eq!(last["limits_from"], "at_mic", "the mic is in the bedroom");
     assert_eq!(last["correction_db"], 3.0);
     let bs = last["bands"].as_array().unwrap();
     assert_eq!(bs.len(), 11, "{last}");
@@ -223,6 +233,136 @@ async fn bands_set_watch_and_transfer() {
         "{last}"
     );
     assert!(last["predicted"].is_null(), "no transfer, no prediction");
+
+    // The band log over three seconds of the tone: about 94 dB SPL at 63 Hz (the log
+    // keeps the correction apart), every second calibrated, one row each.
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl", "bands", "log", "--from", "-4s", "--until", "-1s", "--step", "1",
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let l = document(&text);
+    let a = &l["average"];
+    let seconds = a["seconds"].as_u64().unwrap();
+    assert!(seconds >= 2, "{l}");
+    assert_eq!(a["uncalibrated"], 0);
+    assert!((a["levels"][5].as_f64().unwrap() - 94.0).abs() < 1.5, "{a}");
+    assert_eq!(l["rows"].as_array().unwrap().len() as u64, seconds);
+    assert_eq!(l["rows"][0]["levels"].as_array().unwrap().len(), 28);
+    // Too many rows for one reply is refused by the daemon, naming the step that fits.
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl", "bands", "log", "--from", "-1s", "--until", "now", "--step", "0",
+        ],
+    )
+    .await;
+    assert_eq!(code, 1, "{text}");
+
+    // The span's averages as a `<Hz> <dB>` file, read back as typed levels: what a rig in
+    // the bedroom hands to the one at FOH.
+    let span_file = dir.path().join("span.txt");
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "bands",
+            "log",
+            "--from",
+            "-4s",
+            "--until",
+            "-1s",
+            "--levels-out",
+            span_file.to_str().unwrap(),
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let avg = document(&text)["average"]["levels"].clone();
+    let written = std::fs::read_to_string(&span_file).unwrap();
+    assert!(written.starts_with("# FOH SPL band log "), "{written}");
+    let back = ac2_traces::band_levels::parse(&written).unwrap();
+    for (i, b) in back.iter().enumerate() {
+        match (b, avg[i].as_f64()) {
+            (Some(b), Some(a)) => assert!((b - a).abs() < 0.006, "band {i}: {b} {a}"),
+            (None, None) => {}
+            other => panic!("band {i}: {other:?}"),
+        }
+    }
+
+    // At FOH without a transfer the bedroom's limits are not judged.
+    let (code, text) = run(&ep, &["spl", "bands", "set", "--mic", "foh"]).await;
+    assert_eq!(code, 0, "{text}");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let last = watch_last(&ep, "1.5s").await;
+    assert_eq!(last["limits_from"], "no_transfer");
+    assert_eq!(
+        last["text"]["headline"],
+        "no band transfer — limits are for the bedroom, measure the transfer"
+    );
+    assert!(last["worst"].is_null(), "{last}");
+
+    // The span file as the dwelling, 0 dB attenuation everywhere from FOH's own span.
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "bands",
+            "transfer",
+            "--foh",
+            span_file.to_str().unwrap(),
+            "--dwelling",
+            span_file.to_str().unwrap(),
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let t = &document(&text)["config"]["kind"]["config"]["bands"]["transfer"];
+    assert_eq!(t["origin"], "measured");
+    assert_eq!(t["bands"][5]["attenuation"], 0.0);
+    // One mic cannot be at FOH and in the bedroom over the same seconds.
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "bands",
+            "transfer",
+            "--foh",
+            "FOH SPL@-10s..-5s",
+            "--dwelling",
+            "FOH SPL@-6s..-1s",
+        ],
+    )
+    .await;
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("spans overlap on FOH SPL"), "{text}");
+
+    // An estimated transfer, typed where the bedroom cannot be reached.
+    let guess = dir.path().join("guess.txt");
+    std::fs::write(&guess, "63 25\n125 30\n").unwrap();
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "bands",
+            "estimate",
+            "--attenuation",
+            guess.to_str().unwrap(),
+        ],
+    )
+    .await;
+    assert_eq!(code, 0, "{text}");
+    let t = &document(&text)["config"]["kind"]["config"]["bands"]["transfer"];
+    assert_eq!(t["origin"], "estimated");
+    assert_eq!(t["bands"][5]["status"], "unchecked");
+    assert_eq!(t["bands"][5]["attenuation"], 25.0);
+    assert_eq!(t["bands"][0]["status"], "missing");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let last = watch_last(&ep, "1.5s").await;
+    assert_eq!(last["limits_from"], "estimated");
 
     // A transfer from typed levels: 30 dB quieter in the dwelling in every limited band.
     let foh = dir.path().join("foh.txt");

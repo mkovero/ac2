@@ -56,6 +56,8 @@ pub use settings_impl::SettingsMsg;
 #[path = "state_ir.rs"]
 mod ir_nav;
 pub use ir_nav::IrNavMsg;
+#[path = "state_band_transfer.rs"]
+mod band_transfer;
 #[path = "state_commands.rs"]
 mod commands;
 #[path = "state_dialogs.rs"]

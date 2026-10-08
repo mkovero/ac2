@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crate::units::{
     BandSourceArg, ByteSize, Celsius, Channel, Channels, DelayAmount, Freq, Gain, LeqLimitArg,
     LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg, PositionArg, SampleCount, SplLevel,
-    Time, VoltsArg,
+    Time, TimeRef, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -872,6 +872,25 @@ pub enum BandsCmd {
     /// the same steady test signal, and the dwelling's background with the system silent;
     /// stored in the meter's band meter.
     Transfer(BandsTransfer),
+    /// A span of the meter's band log: the energy average per band (as `transfer` takes
+    /// it from `METER@FROM..UNTIL`) and how much of the span was logged; `--step` adds the
+    /// logged seconds. `--levels-out` writes the averages as a `<Hz> <dB>` file that
+    /// `transfer --dwelling FILE` (or `--foh`, `--background`) reads on another rig.
+    Log(BandsLog),
+    /// Store an estimated transfer where the bedroom cannot be reached: per-band
+    /// attenuation typed from a `<Hz> <dB>` file, marked estimated everywhere it shows.
+    Estimate(BandsEstimate),
+}
+
+/// `spl bands estimate`.
+#[derive(Debug, Args)]
+pub struct BandsEstimate {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// `<Hz> <dB>` lines: each band's estimated attenuation FOH → bedroom (dB, ≥ 0); a
+    /// band not in the file has no limit at FOH.
+    #[arg(long, value_name = "FILE")]
+    pub attenuation: std::path::PathBuf,
 }
 
 /// Band meter presets (not legal advice; `docs/design/band-leq.md`).
@@ -914,7 +933,7 @@ pub enum TonalArg {
 /// `spl bands set`.
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("what").required(true).multiple(true)
-    .args(["preset", "duration", "impulse", "tonal", "warn", "off"])))]
+    .args(["preset", "duration", "impulse", "tonal", "warn", "mic", "off"])))]
 pub struct BandsSet {
     #[command(flatten)]
     pub meter: MeterRef,
@@ -934,9 +953,22 @@ pub struct BandsSet {
     /// Warn margin of every band: near when this close below its limit, e.g. `3db`.
     #[arg(long, value_name = "DB")]
     pub warn: Option<Gain>,
+    /// Where the mic is: `foh` (the limits apply through the band transfer; without one
+    /// they are not judged) or `bedroom` (a bedroom monitor: the limits apply as they are).
+    #[arg(long, value_enum)]
+    pub mic: Option<BandMicArg>,
     /// Turn the band meter off (its configuration and transfer go).
-    #[arg(long, conflicts_with_all = ["preset", "duration", "impulse", "tonal", "warn"])]
+    #[arg(long, conflicts_with_all = ["preset", "duration", "impulse", "tonal", "warn", "mic"])]
     pub off: bool,
+}
+
+/// Where a band meter's mic is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BandMicArg {
+    /// At FOH.
+    Foh,
+    /// In the bedroom (the dwelling).
+    Bedroom,
 }
 
 /// `spl bands transfer`. Each source is a file of `<Hz> <dB>` lines (dB SPL per 1/3-octave
@@ -957,6 +989,31 @@ pub struct BandsTransfer {
     /// unchecked.
     #[arg(long, value_name = "SOURCE")]
     pub background: Option<BandSourceArg>,
+}
+
+/// `spl bands log`. Times: `21:00:30` (local, today), `2026-10-08T21:00:30` (local),
+/// `…Z` (UTC), `-30s` (before now) or `now`.
+#[derive(Debug, Args)]
+pub struct BandsLog {
+    #[command(flatten)]
+    pub meter: MeterRef,
+    /// Start of the span.
+    #[arg(long, value_name = "TIME", allow_hyphen_values = true)]
+    pub from: TimeRef,
+    /// End of the span.
+    #[arg(
+        long,
+        value_name = "TIME",
+        default_value = "now",
+        allow_hyphen_values = true
+    )]
+    pub until: TimeRef,
+    /// Also every STEP-th logged second (1: each; at most 3600 rows).
+    #[arg(long, value_name = "STEP")]
+    pub step: Option<u32>,
+    /// Write the span's per-band averages (dB SPL) to FILE as `<Hz> <dB>` lines.
+    #[arg(long, value_name = "FILE")]
+    pub levels_out: Option<std::path::PathBuf>,
 }
 
 /// `spl set`.
@@ -1540,6 +1597,23 @@ pub enum RecCmd {
     Status,
     /// Recordings in the daemon's recording directory.
     List,
+    /// Turn a WAV from elsewhere (a recorder's 16-, 24- or 32-bit PCM or float file) into a
+    /// recording `session replay` plays; written on this computer, no daemon needed.
+    Import(RecImportArgs),
+}
+
+/// `rec import`.
+#[derive(Debug, Args)]
+pub struct RecImportArgs {
+    /// The WAV file.
+    pub file: std::path::PathBuf,
+    /// Recording name (default: the file's name without its extension).
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Directory to write it to (default: the WAV's own directory; for a local daemon's
+    /// `rec list`, its recording directory).
+    #[arg(long, value_name = "DIR")]
+    pub dir: Option<std::path::PathBuf>,
 }
 
 /// `rec start`.

@@ -151,6 +151,8 @@ impl AppState {
             ConnEvent::LeqBackfill { meas, ask, result } => {
                 self.leq_backfilled(meas, ask, result);
             }
+            ConnEvent::BandLog { ask, result } => self.band_log_answered(ask, result),
+            ConnEvent::BandTransfer(result) => self.band_transfer_answered(result),
             ConnEvent::MeasCreated(m) => {
                 self.selected = Some(m.id);
                 self.pending_select = Some(m.id);

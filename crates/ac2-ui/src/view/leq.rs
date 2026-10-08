@@ -254,13 +254,7 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
         if !per_band.is_empty() {
             note(ui, per_band.join(" · "));
         }
-        note(
-            ui,
-            "Measure it at setup: a steady test signal at FOH with a mic in the bedroom, then \
-             the bedroom with the system silent; `ac2 spl bands transfer --foh … --dwelling … \
-             --background …`."
-                .into(),
-        );
+        note(ui, d.bands.transfer_hint().into());
     }
     if let Some(e) = &d.error {
         ui.add_space(4.0);

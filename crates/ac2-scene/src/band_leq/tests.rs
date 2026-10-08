@@ -2,6 +2,7 @@ use ac2_proto::frame::BandLeqMeta;
 use ac2_proto::model::{
     BAND_NOMINAL_HZ, BandLeqBand, BandLeqPreset, BandLimitPlace, BandPeriod, BandTransferBand,
     BandTransferSet, CalStatus, LF_BAND_COUNT, LeqJudgement, LevelScale, PredictedLeq,
+    TransferOrigin,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
 
@@ -133,7 +134,6 @@ fn filling_period_change_correction_and_offline() {
     m.period = BandPeriod::Day;
     m.period_after_horizon = BandPeriod::Night;
     m.correction = Db(8.0);
-    m.limits_from = BandLimitPlace::AtMic;
     m.predicted = None;
     let t = band_leq_text(&m);
     assert_eq!(t.filling.as_deref(), Some("so far · 30:00 / 1:00:00"));
@@ -143,7 +143,7 @@ fn filling_period_change_correction_and_offline() {
         "day limits (07–22) · headroom for the night limits from 22:00"
     );
     assert_eq!(t.correction.as_deref(), Some("§13 correction +8 dB"));
-    assert_eq!(t.limits_from, "dwelling limits at the mic (no transfer)");
+    assert_eq!(t.limits_from, "limits transferred from the dwelling");
     assert_eq!(
         t.bars[4].headroom.as_deref(),
         Some("until full: stay ≤ 81.2 dB")
@@ -248,6 +248,7 @@ fn presets_and_transfer_read_in_words() {
     bands[10] = BandTransferBand::Missing;
     let set = BandTransferSet {
         measured_at: WallNs(0),
+        origin: TransferOrigin::Measured,
         bands,
     };
     assert_eq!(
@@ -256,7 +257,16 @@ fn presets_and_transfer_read_in_words() {
     );
     assert_eq!(
         transfer_summary(None),
-        "no transfer: dwelling limits judged at the mic"
+        "no band transfer: the bedroom's limits are not judged at the mic"
+    );
+    let estimated = BandTransferSet {
+        origin: TransferOrigin::Estimated,
+        ..set
+    };
+    assert_eq!(
+        transfer_summary(Some(&estimated)),
+        "estimated transfer 20–200 Hz: 10 bands typed, not measured (measure it when the \
+         bedroom can be reached)"
     );
     assert_eq!(
         transfer_band_text(31.5, &bands[2]),
@@ -364,4 +374,46 @@ fn an_allowed_level_off_the_scale_is_neither_marked_nor_keyed() {
     assert!(!t.iter().any(|l| l.contains("stay ≤")), "{t:?}");
     assert!(t.iter().any(|l| l == "≤ 127.8"), "{t:?}");
     assert!(t.iter().any(|l| l == "limit"), "{t:?}");
+}
+
+/// Without a transfer the limits are the bedroom's: the mic's levels are not judged
+/// against them, and the headline says what to do instead of showing bands over.
+#[test]
+fn without_a_transfer_nothing_is_judged_and_the_headline_asks_for_one() {
+    let mut m = meta();
+    m.limits_from = BandLimitPlace::NoTransfer;
+    m.predicted = None;
+    let t = band_leq_text(&m);
+    assert_eq!(
+        t.headline,
+        "no band transfer — limits are for the bedroom, measure the transfer"
+    );
+    assert_eq!(t.headline_state, TileState::NoLimit);
+    assert_eq!(
+        t.limits_from,
+        "no band transfer: the limits are the bedroom's, not judged at the mic"
+    );
+    assert!(t.bars.iter().all(|b| b.state == TileState::NoLimit
+        && b.headroom.is_none()
+        && b.recover.is_none()
+        && b.state_text.is_none()));
+    assert!(
+        t.bars.iter().any(|b| b.limit.is_some()),
+        "the limits still show"
+    );
+    // A bedroom monitor judges them as they are.
+    m.limits_from = BandLimitPlace::AtMic;
+    let t = band_leq_text(&m);
+    assert_eq!(
+        t.limits_from,
+        "limits at the mic: the mic is in the bedroom"
+    );
+    assert!(t.bars.iter().any(|b| b.state == TileState::Over));
+    m.limits_from = BandLimitPlace::Estimated;
+    let t = band_leq_text(&m);
+    assert_eq!(
+        t.limits_from,
+        "limits transferred with an estimated attenuation (typed, not measured)"
+    );
+    assert!(t.bars.iter().any(|b| b.state == TileState::Over));
 }

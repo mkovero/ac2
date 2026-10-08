@@ -1,9 +1,10 @@
 //! The band meter's section of the Leq dialog (`docs/design/band-leq.md`): on or off with
 //! the limits of a rule, the window length, the §13 corrections in force, and the measured
-//! FOH → dwelling transfer as it stands (measured with `ac2 spl bands transfer`).
+//! FOH → dwelling transfer as it stands (measured in its band transfer step or with `ac2 spl
+//! bands transfer`).
 
 use ac2_proto::model::{
-    BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandTransferSet,
+    BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandMicPlace, BandTransferSet,
     ImpulseCorrection, LF_BAND_COUNT, TonalCorrection,
 };
 use ac2_proto::units::Seconds;
@@ -15,6 +16,8 @@ use super::LENGTHS;
 pub enum BandField {
     /// Off, or the limits of a preset (or as set from the CLI).
     Limits,
+    /// Where the mic is: at FOH (limits through a transfer) or in the dwelling.
+    Mic,
     /// Window length.
     Duration,
     /// §13 impulse correction.
@@ -24,8 +27,9 @@ pub enum BandField {
 }
 
 impl BandField {
-    pub const ALL: [BandField; 4] = [
+    pub const ALL: [BandField; 5] = [
         BandField::Limits,
+        BandField::Mic,
         BandField::Duration,
         BandField::Impulse,
         BandField::Tonal,
@@ -34,9 +38,10 @@ impl BandField {
     pub(super) fn index(self) -> usize {
         match self {
             BandField::Limits => 0,
-            BandField::Duration => 1,
-            BandField::Impulse => 2,
-            BandField::Tonal => 3,
+            BandField::Mic => 1,
+            BandField::Duration => 2,
+            BandField::Impulse => 3,
+            BandField::Tonal => 4,
         }
     }
 
@@ -44,6 +49,7 @@ impl BandField {
     pub fn title(self) -> &'static str {
         match self {
             BandField::Limits => "Band meter",
+            BandField::Mic => "Band mic",
             BandField::Duration => "Band window",
             BandField::Impulse => "§13 impulse",
             BandField::Tonal => "§13 narrowband",
@@ -64,6 +70,7 @@ pub enum BandLimits {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandSection {
     pub limits: BandLimits,
+    pub mic: BandMicPlace,
     pub seconds: u32,
     pub impulse: ImpulseCorrection,
     pub tonal: TonalCorrection,
@@ -92,6 +99,7 @@ impl BandSection {
         let correction = base.map(|c| c.correction).unwrap_or_default();
         Self {
             limits,
+            mic: base.map(|c| c.mic).unwrap_or_default(),
             seconds,
             impulse: correction.impulse,
             tonal: correction.tonal,
@@ -120,6 +128,9 @@ impl BandSection {
             BandField::Limits => self.limits = step(&self.choices(), self.limits, d),
             // The rest set nothing while the meter is off.
             _ if self.limits == BandLimits::Off => {}
+            BandField::Mic => {
+                self.mic = step(&[BandMicPlace::Foh, BandMicPlace::Dwelling], self.mic, d);
+            }
             BandField::Duration => {
                 self.seconds = if d > 0 {
                     LENGTHS
@@ -157,6 +168,7 @@ impl BandSection {
                 BandLimits::Preset(p) => p.name().into(),
             },
             _ if off => "—".into(),
+            BandField::Mic => ac2_scene::band_leq::mic_place_text(self.mic).into(),
             BandField::Duration => ac2_scene::band_leq::meter_name(f64::from(self.seconds)),
             BandField::Impulse => match self.impulse {
                 ImpulseCorrection::None => "none".into(),
@@ -186,6 +198,7 @@ impl BandSection {
                       dwelling; informational, not legal advice"
                     .into(),
             },
+            BandField::Mic => ac2_scene::band_leq::mic_place_note(self.mic).into(),
             BandField::Duration => "the decree's is 1 h".into(),
             BandField::Impulse | BandField::Tonal => {
                 "added from now while the character is heard (ac2 does not detect it)".into()
@@ -195,7 +208,28 @@ impl BandSection {
 
     /// The transfer as it stands, in a line.
     pub fn transfer_text(&self) -> String {
+        if self.mic == BandMicPlace::Dwelling {
+            return ac2_scene::band_leq::mic_place_note(self.mic).to_owned();
+        }
         ac2_scene::band_leq::transfer_summary(self.transfer.as_ref())
+    }
+
+    /// A transfer stored since the dialog opened: every preset keeps it from now.
+    pub fn set_transfer(&mut self, t: Option<BandTransferSet>) {
+        self.transfer = t;
+        if let Some(k) = &mut self.kept {
+            k.transfer = t;
+        }
+        if let Some(b) = &mut self.base {
+            b.transfer = t;
+        }
+    }
+
+    /// How the transfer is measured, under it.
+    pub fn transfer_hint(&self) -> &'static str {
+        "Measure it at setup: T on a band row opens the band transfer step (a steady test \
+         signal at FOH, then the same level with the mic in the bedroom, then the bedroom \
+         with the system silent; the band meter applied first). Or `ac2 spl bands transfer`."
     }
 
     /// The transfer per limited band, when there is one.
@@ -227,6 +261,7 @@ impl BandSection {
             }
         };
         c.duration = Seconds(f64::from(self.seconds));
+        c.mic = self.mic;
         c.correction = BandCorrection {
             impulse: self.impulse,
             tonal: self.tonal,
@@ -284,7 +319,7 @@ mod tests {
         assert_eq!(c.night, BandLeqPreset::Finland545Lf.config(None).night);
         assert_eq!(
             s.transfer_text(),
-            "no transfer: dwelling limits judged at the mic"
+            "no band transfer: the bedroom's limits are not judged at the mic"
         );
     }
 

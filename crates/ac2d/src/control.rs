@@ -935,6 +935,12 @@ impl Control {
                 background,
             } => self.spl_band_transfer(client, meas, &foh, &dwelling, background.as_ref()),
             Command::SplHistoryGet { meas, seconds } => self.spl_history_get(meas, seconds),
+            Command::SplBandLogGet {
+                meas,
+                from,
+                until,
+                step,
+            } => self.spl_band_log_get(meas, from, until, step),
 
             Command::SweepRun {
                 lease_token,
