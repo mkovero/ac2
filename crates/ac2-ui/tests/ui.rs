@@ -3017,9 +3017,9 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
             horizon: Seconds(60.0),
             correction: Db(0.0),
             limits_from: BandLimitPlace::AtMic,
-            bands: (0..LF_BAND_COUNT as u8).collect(),
             windows: vec![
                 BandWindowState {
+                    bands: ac2_proto::model::BandRange::LF,
                     duration: Seconds(3600.0),
                     weighting: Weighting::Z,
                     elapsed: Seconds(3600.0),
@@ -3029,6 +3029,7 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
                     worst: Some(5),
                 },
                 BandWindowState {
+                    bands: ac2_proto::model::BandRange::LF,
                     duration: Seconds(900.0),
                     weighting: Weighting::A,
                     elapsed: Seconds(450.0),
@@ -3089,6 +3090,50 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
     f
 }
 
+/// A session and an SPL meter from the palette, from an empty fake daemon: the meter's id.
+fn spl_meter_from_an_empty_daemon(h: &mut Harness<'_, App>) -> MeasId {
+    use ac2_proto::model::MeasKind;
+    step_until(h, "synced", |a| {
+        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+    });
+    h.key_press_modifiers(Modifiers::SHIFT, Key::O);
+    step_until(h, "the session dialog with its devices", |a| {
+        session_dialog_of(a).is_some_and(|d| d.device_info().is_some())
+            && a.state.input_meters().len() == 4
+    });
+    h.key_press(Key::Enter);
+    step_until(h, "session open", |a| a.state.open_session().is_some());
+    if matches!(h.state().state.overlay, Overlay::Offer(_)) {
+        h.key_press(Key::N);
+    }
+    step_until(h, "no dialog", |a| a.state.overlay == Overlay::None);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    h.event(Event::Text("new spl".into()));
+    step_until(h, "palette typed", |a| {
+        matches!(&a.state.overlay, Overlay::Palette(_))
+    });
+    h.key_press(Key::Enter);
+    step_until(
+        h,
+        "the SPL dialog",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Spl),
+    );
+    h.key_press(Key::Enter);
+    step_until(h, "the meter, running", |a| {
+        a.state
+            .measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
+    });
+    h.state()
+        .state
+        .measurements()
+        .iter()
+        .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
+        .map(|m| m.id)
+        .expect("meter")
+}
+
 /// From an empty fake daemon, using the app: a session, an SPL meter from the palette, Shift+L
 /// and ↑ to the band meter's row under the Leq windows — →→ turns it on with the STM
 /// 545/2015 low-frequency preset, ↓ to its window, Insert adds a second one, ←/Tab make it
@@ -3108,46 +3153,7 @@ fn band_leq_from_an_empty_daemon() {
     let bands = BandPublisher::start(Arc::clone(&fake));
     let mut h = harness(options_at(Some(fake.endpoints())));
     h.state_mut().state.local_zone = SHOW_ZONE;
-    step_until(&mut h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
-    });
-    h.key_press_modifiers(Modifiers::SHIFT, Key::O);
-    step_until(&mut h, "the session dialog with its devices", |a| {
-        session_dialog_of(a).is_some_and(|d| d.device_info().is_some())
-            && a.state.input_meters().len() == 4
-    });
-    h.key_press(Key::Enter);
-    step_until(&mut h, "session open", |a| a.state.open_session().is_some());
-    if matches!(h.state().state.overlay, Overlay::Offer(_)) {
-        h.key_press(Key::N);
-    }
-    step_until(&mut h, "no dialog", |a| a.state.overlay == Overlay::None);
-    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
-    h.event(Event::Text("new spl".into()));
-    step_until(&mut h, "palette typed", |a| {
-        matches!(&a.state.overlay, Overlay::Palette(_))
-    });
-    h.key_press(Key::Enter);
-    step_until(
-        &mut h,
-        "the SPL dialog",
-        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::Spl),
-    );
-    h.key_press(Key::Enter);
-    step_until(&mut h, "the meter, running", |a| {
-        a.state
-            .measurements()
-            .iter()
-            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
-    });
-    let meas = h
-        .state()
-        .state
-        .measurements()
-        .iter()
-        .find(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
-        .map(|m| m.id)
-        .expect("meter");
+    let meas = spl_meter_from_an_empty_daemon(&mut h);
 
     // Shift+L, ↑: from the preset row up past the wrap to the band meter's row (off: its
     // only one).
@@ -3163,20 +3169,20 @@ fn band_leq_from_an_empty_daemon() {
             d.bands.meter == ac2_ui::leq_dialog::BandMeter::Preset(BandLeqPreset::Finland545Lf)
         })
     });
-    // From, up to, also, then the window; Insert: a second one after it.
-    for _ in 0..4 {
-        h.key_press(Key::ArrowDown);
-    }
+    // ↓ to the window's band; Insert: a second one after it, Tab Tab to its length.
+    h.key_press(Key::ArrowDown);
     h.key_press(Key::Insert);
+    h.key_press(Key::Tab);
+    h.key_press(Key::Tab);
     for _ in 0..3 {
         h.key_press(Key::ArrowLeft);
     }
     h.key_press(Key::Tab);
     h.key_press(Key::ArrowLeft);
     h.key_press(Key::ArrowLeft);
-    // Its limits: ↓ lands under the weighting (25 Hz), Tab ×4 on 63 Hz.
+    // Its limits: ↓ lands under the weighting (40 Hz), Tab ×2 on 63 Hz.
     h.key_press(Key::ArrowDown);
-    for _ in 0..4 {
+    for _ in 0..2 {
         h.key_press(Key::Tab);
     }
     h.event(Event::Text("20".into()));
@@ -3272,8 +3278,8 @@ fn band_leq_from_an_empty_daemon() {
         "{texts:?}"
     );
     for want in [
-        "LZeq 60 min · night limits (22–07)",
-        "LAeq 15 min · so far · 7:30 / 15:00",
+        "20–200 Hz LZeq 60 min · night limits (22–07)",
+        "20–200 Hz LAeq 15 min · so far · 7:30 / 15:00",
     ] {
         assert!(texts.contains(&want), "{want:?} not in {texts:?}");
     }
@@ -3301,6 +3307,183 @@ fn band_leq_from_an_empty_daemon() {
     );
 
     band_transfer_step(&mut h, &fake, meas);
+}
+
+/// From an empty fake daemon, with the mouse and keys: Shift+L, + on the band windows'
+/// heading turns the band meter on with one window (20 Hz alone); Tab to its length, ← to
+/// 1 min, Z as it is, Tab to its limit on the row, 80 typed, Enter. The daemon (the test,
+/// through the fake) reports the window; the band view shows it as one 20 Hz bar. Then −
+/// on its row removes it.
+#[test]
+fn a_single_band_window_with_plus_and_minus() {
+    use ac2_proto::frame::{BandLeqFrame, BandLeqMeta, BandWindowState, LeqFlags};
+    use ac2_proto::model::{
+        BandLimitPlace, BandPeriod, BandRange, CalStatus, LevelScale, MeasKind, Weighting,
+    };
+    use ac2_proto::units::{Db, DbSpl, Hz, Seconds, WallNs};
+    use ac2_ui::leq_dialog::{BandCol, BandMeter};
+    if !have_gpu("a_single_band_window_with_plus_and_minus") {
+        return;
+    }
+    let fake =
+        Arc::new(ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon"));
+    let _meters = Meters::start(Arc::clone(&fake));
+    let bands = BandPublisher::start(Arc::clone(&fake));
+    let mut h = harness(options_at(Some(fake.endpoints())));
+    h.state_mut().state.local_zone = SHOW_ZONE;
+    let meas = spl_meter_from_an_empty_daemon(&mut h);
+    h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+    step_until(&mut h, "the Leq dialog", |a| {
+        a.state.overlay.leq().is_some()
+    });
+    // The band windows' + is the page's last.
+    h.get_all_by_label("+").last().expect("the band +").click();
+    step_until(&mut h, "a band window, the meter on", |a| {
+        a.state.overlay.leq().is_some_and(|d| {
+            d.bands.meter == BandMeter::On
+                && d.bands.rows.len() == 1
+                && d.bands.rows[0].cell(BandCol::Band) == "20 Hz"
+                && d.bands.rows[0].cell(BandCol::UpTo) == "this band only"
+        })
+    });
+    h.key_press(Key::Tab);
+    h.key_press(Key::Tab);
+    for _ in 0..5 {
+        h.key_press(Key::ArrowLeft);
+    }
+    h.key_press(Key::Tab);
+    h.key_press(Key::Tab);
+    h.event(Event::Text("80".into()));
+    step_until(&mut h, "20 Hz LZeq 1 min, limit 80", |a| {
+        a.state.overlay.leq().is_some_and(|d| {
+            d.bands.rows[0].name() == "20 Hz LZeq 1 min" && d.bands.rows[0].limits[0] == "80"
+        })
+    });
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.clear();
+    h.step();
+    snapshot(&mut h, "leq_dialog_band_single");
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    h.key_press(Key::Enter);
+    let single = BandRange::single(Hz(20.0));
+    step_until(&mut h, "the band window set", |a| {
+        a.state.overlay == Overlay::None
+            && a.state.measurements().iter().any(|m| match &m.config.kind {
+                MeasKind::Spl { config } => config.bands.as_ref().is_some_and(|b| {
+                    b.windows.len() == 1
+                        && b.windows[0].bands == single
+                        && b.windows[0].duration == Seconds(60.0)
+                        && b.windows[0].weighting == Weighting::Z
+                        && b.windows[0].limits.night()[0] == Some(DbSpl(80.0))
+                }),
+                _ => false,
+            })
+    });
+    let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
+    bands.set(BandLeqFrame {
+        meas,
+        meta: BandLeqMeta {
+            scale: LevelScale::DbSpl,
+            cal: CalStatus::Verified {
+                calibrated_at: WallNs(0),
+                basis: ac2_proto::model::CalBasis::Acoustic {
+                    calibrator_level: DbSpl(94.0),
+                },
+            },
+            mic_curve: false,
+            horizon: Seconds(60.0),
+            correction: Db(0.0),
+            limits_from: BandLimitPlace::AtMic,
+            windows: vec![BandWindowState {
+                bands: single,
+                duration: Seconds(60.0),
+                weighting: Weighting::Z,
+                elapsed: Seconds(60.0),
+                measured: Seconds(60.0),
+                period: BandPeriod::Day,
+                period_after_horizon: BandPeriod::Day,
+                worst: Some(0),
+            }],
+            predicted: None,
+        },
+        leq: vec![72.0],
+        limit: vec![80.0],
+        allowed: vec![f32::NAN],
+        recover: vec![f32::NAN],
+        flags: vec![judged],
+    });
+    h.key_press(Key::G);
+    step_until(&mut h, "the bands", |a| {
+        a.state.view.spl.mode == ac2_scene::view::SplMode::Bands
+    });
+    step_until(&mut h, "the band frame", move |a| {
+        a.state.data.as_ref().is_some_and(|d| {
+            d.latest
+                .get(&Topic::Data {
+                    meas,
+                    stream: Stream::BandLeq,
+                })
+                .is_some()
+        })
+    });
+    let scene = ac2_ui::scenes::band_leq(
+        &h.state().state,
+        &ac2_scene::Theme::dark(),
+        ac2_scene::Viewport {
+            width: 1200.0,
+            height: 700.0,
+        },
+        ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: WallNs(0),
+        },
+    )
+    .expect("the band view");
+    assert_eq!(scene.columns.len(), 1, "one window");
+    assert_eq!(scene.columns[0].len(), 1, "one bar");
+    let texts: Vec<&str> = scene
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+        .collect();
+    for want in ["20 Hz LZeq 1 min", "20", "72.0"] {
+        assert!(texts.contains(&want), "{want:?} not in {texts:?}");
+    }
+    // − on its row: gone.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::L);
+    step_until(&mut h, "the Leq dialog again", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| d.bands.rows.len() == 1)
+    });
+    h.get_all_by_label("−").last().expect("the band −").click();
+    step_until(&mut h, "no band window", |a| {
+        a.state
+            .overlay
+            .leq()
+            .is_some_and(|d| d.bands.rows.is_empty())
+    });
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the band windows gone", |a| {
+        a.state.overlay == Overlay::None
+            && a.state.measurements().iter().any(|m| match &m.config.kind {
+                MeasKind::Spl { config } => {
+                    config.bands.as_ref().is_some_and(|b| b.windows.is_empty())
+                }
+                _ => false,
+            })
+    });
 }
 
 /// The band log of `meas` from `from` on, every second at `db_spl` in every band (dBFS at

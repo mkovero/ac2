@@ -499,8 +499,6 @@ pub struct BandLeqMeta {
     pub correction: Db,
     /// Where the limits at the mic come from.
     pub limits_from: crate::model::BandLimitPlace,
-    /// The shown bands, indices into [`crate::model::BAND_NOMINAL_HZ`], low to high.
-    pub bands: Vec<u8>,
     /// The windows, in the configuration's order.
     pub windows: Vec<BandWindowState>,
     /// The predicted level at the transfer's place; `None` without a transfer or a
@@ -508,10 +506,24 @@ pub struct BandLeqMeta {
     pub predicted: Option<crate::model::PredictedLeq>,
 }
 
+impl BandLeqMeta {
+    /// Columns of the windows before window `w`.
+    pub fn columns_before(&self, w: usize) -> usize {
+        self.windows.iter().take(w).map(|s| s.bands.len()).sum()
+    }
+
+    /// Columns of the frame: every window's bands.
+    pub fn columns(&self) -> usize {
+        self.columns_before(self.windows.len())
+    }
+}
+
 /// One band window of a `band_leq` frame.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandWindowState {
+    /// The window's bands: its columns, low to high.
+    pub bands: crate::model::BandRange,
     /// Window length.
     pub duration: Seconds,
     /// Weighting of its band levels.
@@ -524,7 +536,7 @@ pub struct BandWindowState {
     pub period: crate::model::BandPeriod,
     /// The set its headroom figures are computed against (once the horizon has passed).
     pub period_after_horizon: crate::model::BandPeriod,
-    /// Index into the frame's `bands` of the window's worst band: the most severe
+    /// Index into the window's `bands` of its worst band: the most severe
     /// judgement, then the furthest above (or least below) its limit; `None` when nothing
     /// is judged.
     pub worst: Option<u8>,
@@ -852,8 +864,8 @@ pub struct LeqFrame {
     pub flags: Vec<LeqFlags>,
 }
 
-/// An SPL meter's band meter, published once a second: one column per window and shown
-/// band ([`BandLeqMeta`]).
+/// An SPL meter's band meter, published once a second: one column per band of each window,
+/// window after window ([`BandLeqMeta`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BandLeqFrame {
     /// Measurement.
@@ -877,9 +889,9 @@ pub struct BandLeqFrame {
 }
 
 impl BandLeqFrame {
-    /// Column of band `i` (into `meta.bands`) of window `w`.
+    /// Column of band `i` (into window `w`'s `bands`) of window `w`.
     pub fn col(&self, w: usize, i: usize) -> usize {
-        w * self.meta.bands.len() + i
+        self.meta.columns_before(w) + i
     }
 }
 
@@ -1572,9 +1584,9 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         }),
         FrameMeta::Spl(meta) => FrameData::Spl(SplFrame { meas, meta }),
         FrameMeta::BandLeq(meta) => {
-            if meta.windows.len() * meta.bands.len() != h.n as usize {
+            if meta.windows.iter().any(|w| w.bands.is_empty()) || meta.columns() != h.n as usize {
                 return Err(DecodeError::Schema(
-                    "band_leq: windows.len() × bands.len() != n".into(),
+                    "band_leq: the windows' bands are not n columns".into(),
                 ));
             }
             let unit = level_unit(meta.scale);

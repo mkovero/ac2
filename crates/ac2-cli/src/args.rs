@@ -7,7 +7,7 @@ use ac2_client::RemoteAddr;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::units::{
-    BandLimitArg, BandRangeArg, BandSourceArg, ByteSize, Celsius, Channel, Channels, DayOffsetArg,
+    BandLimitArg, BandSourceArg, BandWindowArg, ByteSize, Celsius, Channel, Channels, DayOffsetArg,
     DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg,
     PositionArg, SampleCount, SplLevel, Time, TimeRef, VoltsArg,
 };
@@ -940,7 +940,7 @@ pub enum TonalArg {
 /// `spl bands set`.
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("what").required(true).multiple(true)
-    .args(["preset", "windows", "bands", "limits", "day_offsets", "impulse", "tonal", "warn",
+    .args(["preset", "windows", "limits", "day_offsets", "impulse", "tonal", "warn",
         "off"])))]
 pub struct BandsSet {
     #[command(flatten)]
@@ -950,19 +950,20 @@ pub struct BandsSet {
     /// advice.
     #[arg(long, value_enum)]
     pub preset: Option<BandPresetArg>,
-    /// The band windows, replacing the meter's: `z:60min,a:15min` (Z unless `a:` or `c:`;
-    /// any Leq length up to 24 h). A window kept keeps its limits; at most 8.
+    /// The band windows, replacing the meter's, each its length and weighting and its bands
+    /// after `@`: `z:1min@20hz,z:60min@20hz..200hz` (Z unless `a:` or `c:`; any Leq length
+    /// up to 24 h; one band or a range; 20 … 200 Hz without `@`). A window kept (same bands,
+    /// length and weighting) keeps its limits; at most 8.
     #[arg(long, value_delimiter = ',', value_name = "WINDOWS")]
-    pub windows: Option<Vec<LeqWindowArg>>,
-    /// The bands shown, judged and alarmed: `20hz..200hz`, `20hz..200hz,1khz`.
-    #[arg(long, value_delimiter = ',', value_name = "BANDS")]
-    pub bands: Option<Vec<BandRangeArg>>,
-    /// A band limit of a window, dB SPL where the limits apply: `z:60min:63hz=42db`;
-    /// `…=none` removes it; repeatable.
+    pub windows: Option<Vec<BandWindowArg>>,
+    /// A band limit of a window, dB SPL where the limits apply: `z:60min:63hz=42db`,
+    /// `z:60min@20hz..200hz:63hz=42db`, a single-band window's `z:1min@20hz=80db` (name the
+    /// window's bands when two windows share length and weighting); `…=none` removes it;
+    /// repeatable.
     #[arg(long = "limit", value_name = "WINDOW:BAND=LIMIT")]
     pub limits: Vec<BandLimitArg>,
-    /// `z:60min=5db`: the window's limits hold at night (22–07), the day's this much
-    /// higher; `z:60min=none`: one set day and night; repeatable.
+    /// `z:60min=5db` (`z:1min@20hz=5db`): the window's limits hold at night (22–07), the
+    /// day's this much higher; `z:60min=none`: one set day and night; repeatable.
     #[arg(long = "day-offset", value_name = "WINDOW=DB")]
     pub day_offsets: Vec<DayOffsetArg>,
     /// §13 impulse correction in force from now: `none`, `5` or `10` dB.
@@ -975,7 +976,7 @@ pub struct BandsSet {
     #[arg(long, value_name = "DB")]
     pub warn: Option<Gain>,
     /// Turn the band meter off (its configuration and transfer go).
-    #[arg(long, conflicts_with_all = ["preset", "windows", "bands", "limits", "day_offsets",
+    #[arg(long, conflicts_with_all = ["preset", "windows", "limits", "day_offsets",
         "impulse", "tonal", "warn"])]
     pub off: bool,
 }

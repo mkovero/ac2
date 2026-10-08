@@ -61,12 +61,13 @@ can be reviewed against the raw record.
 
 ## Windows and judging per band
 
-A **band window** (`BandWindow`) has a length (1 s … 24 h in whole seconds), a weighting
-(Z, A or C; *Weighting a band*), limits per band (`BandLimitSet::Always`, one set, or
-`NightDay`, night limits and a day offset; *Day and night*) and a warn margin. A meter has
-up to eight, like its Leq windows, and every window covers the same **shown bands**
-(`BandLeqConfig.bands`, any of the 28, at least one): only those are drawn, judged and
-alarmed. A band of a window is a **rolling window**, one-second steps, built on the same
+A **band window** (`BandWindow`) has its **bands** (`BandRange` {`low`, `high`}: one of the
+28 bands, or a run of adjacent ones), a length (1 s … 24 h in whole seconds), a weighting
+(Z, A or C; *Weighting a band*), limits on its own bands (`BandLimitSet::Always`, one set,
+or `NightDay`, night limits and a day offset; *Day and night*) and a warn margin. A meter
+has up to eight, like its Leq windows. Only a window's own bands are drawn, judged and
+alarmed in it; every band is integrated and logged whatever the windows, so a window
+added or moved to other bands is rebuilt from the log. A band of a window is a **rolling window**, one-second steps, built on the same
 ring and sums as the A/C/Z windows (`ac2_core::leq::RollingLeq`, generic over
 the slot: a band second is just another set of channels). Everything in
 `docs/design/leq.md` *Windows*, *Limits*, *Judging a filling window* and the headroom /
@@ -209,7 +210,7 @@ correction beside them.
 
 ## Presets
 
-A preset replaces the windows, the shown bands and the predicted window, and keeps the §13
+A preset replaces the windows (with their bands) and the predicted window, and keeps the §13
 correction and the transfer; everything stays settable after it. Informational, not legal
 advice.
 
@@ -351,3 +352,17 @@ pätevyysvaatimuksista (asumisterveysasetus), original text as published, retrie
      name (or "receiving room") in every line about it; a scene test greps for the rest.
    - Not yet: setting the predicted window other than by a preset (the dialog and the CLI
      keep it), per-band warn margins.
+6. **Bands per window** (done): `BandWindow.bands` (`BandRange`) replaces the meter-wide
+   `BandLeqConfig.bands`, so "20 Hz, LZeq 1 min, 80 dB" is one window beside the 20 … 200 Hz
+   hour. A window's limits are on its own bands only (`check` refuses others). The
+   `band_leq` frame has a `bands` per `BandWindowState` and a window's columns follow the
+   previous windows'; `PROTO_VERSION` 30, session format 16 (older ones refused). The view
+   names a window by its bands ("20 Hz LZeq 1 min", "20–200 Hz LZeq 60 min") in its
+   caption, the dialog and the CLI alike. Dialog: a row per window `‹Band› ‹Up to›
+   ‹LZeq 1 min› ‹Z› limit day+dB warn −`, a single band's limit on its row, a range's on a
+   sub-row; + at the Leq and band headings, − per row (Insert / Delete as before). CLI:
+   `--windows z:1min@20hz,z:60min@20hz..200hz` (without `@`: 20 … 200 Hz), a window named
+   in `--limit` / `--day-offset` by length and weighting, with `@BANDS` when two share
+   them (`z:60min@20hz..200hz:63hz=42db`), a single band's limit without naming the band
+   (`z:1min@20hz=80db`); `--bands` is gone. `bands watch --json` gives each window its
+   `bands_hz` [low, high].

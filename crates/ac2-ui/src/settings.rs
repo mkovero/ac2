@@ -110,8 +110,8 @@ impl Page {
             }
             Page::Leq => {
                 "Enter applies (the log and the windows carry on) · ↑↓ row · Tab cell · ←→ \
-                 choose · Insert adds a window · Delete removes it · T on a band row: band \
-                 transfer · Esc closes"
+                 choose · Insert or + adds a window to the section · Delete or − removes the \
+                 focused one · T on a band row: band transfer · Esc closes"
             }
             Page::Recording => "↑↓ move · type minutes, Enter applies · Esc closes",
             Page::Display => "↑↓ move · ←→ change · Enter resets the level axes · Esc closes",

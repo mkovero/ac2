@@ -1,15 +1,15 @@
 //! The band meter's section of the Leq dialog (`docs/design/band-leq.md`): off, on, or a
-//! rule's preset; the bands shown (a range and single bands); a table of band windows like
-//! the Leq windows — length, weighting, day offset and warn margin on a row, the shown
-//! bands' limits on a sub-row under it, Insert / Delete adding and removing windows; the
-//! §13 corrections in force; and the transfer as it stands (measured in its band transfer
-//! step or with `ac2 spl bands transfer`). A preset replaces the windows, the bands and the
-//! predicted window only; everything stays editable after.
+//! rule's preset; a table of band windows like the Leq windows — each its bands (one band
+//! or a range), length, weighting, limit, day offset and warn margin on a row, a range's
+//! per-band limits on a sub-row under it, + / Insert and − / Delete adding and removing
+//! windows; the §13 corrections in force; and the transfer as it stands (measured in its
+//! band transfer step or with `ac2 spl bands transfer`). A preset replaces the windows and
+//! the predicted window only; everything stays editable after.
 
 use ac2_proto::model::{
     BAND_COUNT, BAND_NOMINAL_HZ, BandCorrection, BandLeqConfig, BandLeqPreset, BandLimitSet,
-    BandTransferSet, BandWindow, ImpulseCorrection, LF_BAND_COUNT, LeqConfig, PredictedWindow,
-    TonalCorrection, Weighting, band_index,
+    BandRange, BandTransferSet, BandWindow, ImpulseCorrection, LeqConfig, PredictedWindow,
+    TonalCorrection, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, Seconds};
 
@@ -20,12 +20,6 @@ use super::{LENGTHS, WEIGHTINGS, number_text, weighting_letter};
 pub enum BandField {
     /// Off, on, or a rule's preset.
     Meter,
-    /// The lowest band of the shown range.
-    From,
-    /// The highest band of the shown range.
-    To,
-    /// Single bands shown besides the range, typed.
-    Also,
     /// §13 impulse correction.
     Impulse,
     /// §13 narrowband correction.
@@ -37,9 +31,6 @@ impl BandField {
     pub fn title(self) -> &'static str {
         match self {
             BandField::Meter => "Band meter",
-            BandField::From => "Bands from",
-            BandField::To => "… up to",
-            BandField::Also => "Also bands",
             BandField::Impulse => "§13 impulse",
             BandField::Tonal => "§13 narrowband",
         }
@@ -49,27 +40,26 @@ impl BandField {
 /// A column of a band window row, or of the limits sub-row under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BandCol {
+    /// The window's (lowest) band.
+    Band,
+    /// Its highest band: the same for a single-band window.
+    UpTo,
     Length,
     Weighting,
     /// How much higher the day limits are; empty: one set day and night.
     DayOffset,
     Margin,
-    /// The limit of band `b` (an index into [`BAND_NOMINAL_HZ`]).
+    /// The limit of band `b` (an index into [`BAND_NOMINAL_HZ`]): on the row of a
+    /// single-band window, on the sub-row under a range's.
     Limit(usize),
 }
 
 impl BandCol {
-    /// The columns of a window's own row.
-    pub const ROW: [BandCol; 4] = [
-        BandCol::Length,
-        BandCol::Weighting,
-        BandCol::DayOffset,
-        BandCol::Margin,
-    ];
-
     /// Column heading.
     pub fn title(self) -> String {
         match self {
+            BandCol::Band => "Band".into(),
+            BandCol::UpTo => "Up to".into(),
             BandCol::Length => "Band window".into(),
             BandCol::Weighting => "Weighting".into(),
             BandCol::DayOffset => "Day +dB".into(),
@@ -79,7 +69,10 @@ impl BandCol {
     }
 
     fn is_text(self) -> bool {
-        !matches!(self, BandCol::Length | BandCol::Weighting)
+        !matches!(
+            self,
+            BandCol::Band | BandCol::UpTo | BandCol::Length | BandCol::Weighting
+        )
     }
 }
 
@@ -98,7 +91,7 @@ impl BandFocus {
     /// The focus is on typed text.
     pub fn is_text(self) -> bool {
         match self {
-            BandFocus::Field(f) => f == BandField::Also,
+            BandFocus::Field(_) => false,
             BandFocus::Window { col, .. } => col.is_text(),
         }
     }
@@ -117,19 +110,25 @@ pub enum BandMeter {
 /// One band window being edited.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandRow {
+    /// Lowest and highest band, indices into [`BAND_NOMINAL_HZ`] (equal: one band).
+    pub low: usize,
+    pub high: usize,
     pub seconds: u32,
     pub weighting: Weighting,
     /// Typed; empty: the limits hold day and night.
     pub day_offset: String,
     /// Typed warn margin.
     pub margin: String,
-    /// Typed limit per band (every band, shown or not, so a range edit loses none).
+    /// Typed limit per band (every band, in the window or not, so a range edit loses none).
     pub limits: [String; BAND_COUNT],
 }
 
 impl BandRow {
     fn of(w: &BandWindow) -> Self {
+        let r = w.bands.indices().unwrap_or(0..=0);
         Self {
+            low: *r.start(),
+            high: *r.end(),
             seconds: w.seconds().unwrap_or(3600),
             weighting: w.weighting,
             day_offset: w
@@ -143,13 +142,65 @@ impl BandRow {
         }
     }
 
+    /// A new window: the lowest band alone, LZeq 60 min.
     fn new_row() -> Self {
-        Self::of(&BandWindow::minutes(60, Weighting::Z))
+        Self::of(&BandWindow::minutes(
+            BandRange::single(Hz(BAND_NOMINAL_HZ[0])),
+            60,
+            Weighting::Z,
+        ))
+    }
+
+    /// Its bands.
+    pub fn range(&self) -> BandRange {
+        BandRange::of_indices(self.low, self.high)
+    }
+
+    /// One band, its limit on the row.
+    pub fn is_single(&self) -> bool {
+        self.low == self.high
+    }
+
+    /// The cells of its row, left to right: a single band's limit among them, a range's on
+    /// the sub-row ([`Self::sub_row`]).
+    pub fn row_cols(&self) -> Vec<BandCol> {
+        let mut c = vec![
+            BandCol::Band,
+            BandCol::UpTo,
+            BandCol::Length,
+            BandCol::Weighting,
+        ];
+        if self.is_single() {
+            c.push(BandCol::Limit(self.low));
+        }
+        c.extend([BandCol::DayOffset, BandCol::Margin]);
+        c
+    }
+
+    /// The limits sub-row of a range: one cell per band; none for a single band.
+    pub fn sub_row(&self) -> Vec<BandCol> {
+        if self.is_single() {
+            return Vec::new();
+        }
+        (self.low..=self.high).map(BandCol::Limit).collect()
+    }
+
+    /// The window as named everywhere: `20 Hz LZeq 1 min`.
+    pub fn name(&self) -> String {
+        ac2_scene::band_leq::ranged_window_name(
+            &self.range(),
+            f64::from(self.seconds),
+            self.weighting,
+        )
     }
 
     /// The cell as the dialog shows it.
     pub fn cell(&self, c: BandCol) -> String {
+        let hz = |b: usize| format!("{} Hz", ac2_scene::band_leq::band_label(BAND_NOMINAL_HZ[b]));
         match c {
+            BandCol::Band => hz(self.low),
+            BandCol::UpTo if self.is_single() => "this band only".into(),
+            BandCol::UpTo => format!("up to {}", hz(self.high)),
             BandCol::Length => {
                 ac2_scene::band_leq::window_name(f64::from(self.seconds), self.weighting)
             }
@@ -161,14 +212,15 @@ impl BandRow {
     }
 
     fn window(&self, n: usize) -> Result<BandWindow, String> {
-        let name = self.cell(BandCol::Length);
+        let name = self.name();
         let parse = |t: &str, what: &str| {
             crate::state::parse_number(t, &["db spl", "dbspl", "db"])
                 .map_err(|e| format!("band window {n} ({name}) {what}: {e}"))
         };
         let mut limits = [None; BAND_COUNT];
+        // A limit typed for a band outside the window is kept as typed, not sent.
         for (b, t) in self.limits.iter().enumerate() {
-            if t.trim().is_empty() {
+            if t.trim().is_empty() || !(self.low..=self.high).contains(&b) {
                 continue;
             }
             let hz = ac2_scene::band_leq::band_label(BAND_NOMINAL_HZ[b]);
@@ -202,6 +254,7 @@ impl BandRow {
             ));
         }
         Ok(BandWindow {
+            bands: self.range(),
             duration: Seconds(f64::from(self.seconds)),
             weighting: self.weighting,
             limits,
@@ -215,11 +268,6 @@ impl BandRow {
 pub struct BandSection {
     pub meter: BandMeter,
     pub rows: Vec<BandRow>,
-    /// The shown range, indices into [`BAND_NOMINAL_HZ`].
-    pub from: usize,
-    pub to: usize,
-    /// Single bands shown besides the range, typed (`1000, 2 kHz`).
-    pub also: String,
     pub impulse: ImpulseCorrection,
     pub tonal: TonalCorrection,
     /// The predicted window: a preset's or the CLI's, kept.
@@ -229,25 +277,9 @@ pub struct BandSection {
 }
 
 fn preset_of(c: &BandLeqConfig) -> Option<BandLeqPreset> {
-    BandLeqPreset::ALL.into_iter().find(|p| {
-        c.windows == p.windows() && c.bands == p.bands() && c.predicted == Some(p.predicted())
-    })
-}
-
-/// `1000` → 1000 Hz, `2 kHz` → 2000 Hz.
-fn parse_band(t: &str) -> Result<usize, String> {
-    let l = t.trim().to_ascii_lowercase();
-    let (num, scale) = match l.strip_suffix("khz") {
-        Some(n) => (n.to_owned(), 1000.0),
-        None => (l.strip_suffix("hz").unwrap_or(&l).to_owned(), 1.0),
-    };
-    let v = crate::state::parse_number(&num, &[]).map_err(|e| format!("also bands: {e}"))?;
-    band_index(v * scale).ok_or_else(|| {
-        format!(
-            "also bands: {:?} is not a 1/3-octave band 20 Hz … 10 kHz",
-            t.trim()
-        )
-    })
+    BandLeqPreset::ALL
+        .into_iter()
+        .find(|p| c.windows == p.windows() && c.predicted == Some(p.predicted()))
 }
 
 impl BandSection {
@@ -256,60 +288,19 @@ impl BandSection {
             None => BandMeter::Off,
             Some(c) => preset_of(c).map_or(BandMeter::On, BandMeter::Preset),
         };
-        let mut s = Self {
+        Self {
             meter,
             rows: base.map_or_else(Vec::new, |c| c.windows.iter().map(BandRow::of).collect()),
-            from: 0,
-            to: LF_BAND_COUNT - 1,
-            also: String::new(),
             impulse: base.map(|c| c.correction.impulse).unwrap_or_default(),
             tonal: base.map(|c| c.correction.tonal).unwrap_or_default(),
             predicted: base.and_then(|c| c.predicted),
             transfer: base.and_then(|c| c.transfer.clone()),
-        };
-        if let Some(b) = base.and_then(BandLeqConfig::band_indices) {
-            s.set_bands(&b);
         }
-        s
     }
 
-    /// The range is the first run of adjacent bands; the rest are typed beside it.
-    fn set_bands(&mut self, bands: &[usize]) {
-        let Some(&first) = bands.first() else {
-            return;
-        };
-        let run = bands
-            .iter()
-            .enumerate()
-            .take_while(|(i, b)| **b == first + i)
-            .count();
-        self.from = first;
-        self.to = first + run - 1;
-        self.also = bands[run..]
-            .iter()
-            .map(|&b| ac2_scene::band_leq::band_label(BAND_NOMINAL_HZ[b]))
-            .collect::<Vec<_>>()
-            .join(", ");
-    }
-
-    /// The single bands typed besides the range, checked.
-    fn also_bands(&self) -> Result<Vec<usize>, String> {
-        self.also
-            .split([',', ';'])
-            .filter(|t| !t.trim().is_empty())
-            .map(parse_band)
-            .collect()
-    }
-
-    /// The bands shown, judged and alarmed, low to high (the typed single bands as far as
-    /// they parse).
+    /// Every window's bands together, low to high, each once.
     pub fn shown(&self) -> Vec<usize> {
-        let mut b: Vec<usize> = (self.from..=self.to).collect();
-        b.extend(
-            self.also
-                .split([',', ';'])
-                .filter_map(|t| parse_band(t).ok()),
-        );
+        let mut b: Vec<usize> = self.rows.iter().flat_map(|r| r.low..=r.high).collect();
         b.sort_unstable();
         b.dedup();
         b
@@ -326,29 +317,18 @@ impl BandSection {
         if !self.is_on() {
             return vec![f(BandField::Meter)];
         }
-        let mut g = vec![
-            f(BandField::Meter),
-            f(BandField::From),
-            f(BandField::To),
-            f(BandField::Also),
-        ];
-        let shown = self.shown();
-        for row in 0..self.rows.len() {
-            g.push(
-                BandCol::ROW
-                    .iter()
-                    .map(|&col| BandFocus::Window { row, col })
-                    .collect(),
-            );
-            g.push(
-                shown
-                    .iter()
-                    .map(|&b| BandFocus::Window {
-                        row,
-                        col: BandCol::Limit(b),
-                    })
-                    .collect(),
-            );
+        let mut g = vec![f(BandField::Meter)];
+        for (row, r) in self.rows.iter().enumerate() {
+            let cells = |cols: Vec<BandCol>| -> Vec<BandFocus> {
+                cols.into_iter()
+                    .map(|col| BandFocus::Window { row, col })
+                    .collect()
+            };
+            g.push(cells(r.row_cols()));
+            let sub = r.sub_row();
+            if !sub.is_empty() {
+                g.push(cells(sub));
+            }
         }
         g.push(f(BandField::Impulse));
         g.push(f(BandField::Tonal));
@@ -385,9 +365,6 @@ impl BandSection {
                         let c = p.apply(None);
                         self.rows = c.windows.iter().map(BandRow::of).collect();
                         self.predicted = c.predicted;
-                        if let Some(b) = c.band_indices() {
-                            self.set_bands(&b);
-                        }
                     }
                     BandMeter::On if self.rows.is_empty() => self.rows.push(BandRow::new_row()),
                     _ => {}
@@ -395,14 +372,6 @@ impl BandSection {
             }
             // The rest set nothing while the meter is off.
             _ if !self.is_on() => {}
-            BandFocus::Field(BandField::From) => {
-                self.from = idx(self.from, 0, self.to);
-                self.edited();
-            }
-            BandFocus::Field(BandField::To) => {
-                self.to = idx(self.to, self.from, BAND_COUNT - 1);
-                self.edited();
-            }
             BandFocus::Field(BandField::Impulse) => {
                 use ImpulseCorrection as I;
                 self.impulse = step(&[I::None, I::Plus5, I::Plus10], self.impulse, d);
@@ -411,12 +380,18 @@ impl BandSection {
                 use TonalCorrection as T;
                 self.tonal = step(&[T::None, T::Plus3, T::Plus6], self.tonal, d);
             }
-            BandFocus::Field(BandField::Also) => {}
             BandFocus::Window { row, col } => {
                 let Some(r) = self.rows.get_mut(row) else {
                     return;
                 };
                 match col {
+                    // A single band moves as one; a range keeps its top at or above.
+                    BandCol::Band => {
+                        let single = r.is_single();
+                        r.low = idx(r.low, 0, BAND_COUNT - 1);
+                        r.high = if single { r.low } else { r.high.max(r.low) };
+                    }
+                    BandCol::UpTo => r.high = idx(r.high, r.low, BAND_COUNT - 1),
                     BandCol::Length => {
                         r.seconds = if d > 0 {
                             LENGTHS
@@ -448,22 +423,22 @@ impl BandSection {
         }
         self.edited();
         match f {
-            BandFocus::Field(BandField::Also) => Some(&mut self.also),
             BandFocus::Window { row, col } => {
                 let r = self.rows.get_mut(row)?;
                 match col {
                     BandCol::DayOffset => Some(&mut r.day_offset),
                     BandCol::Margin => Some(&mut r.margin),
                     BandCol::Limit(b) => r.limits.get_mut(b),
-                    BandCol::Length | BandCol::Weighting => None,
+                    BandCol::Band | BandCol::UpTo | BandCol::Length | BandCol::Weighting => None,
                 }
             }
             BandFocus::Field(_) => None,
         }
     }
 
-    /// Insert: a new band window after the one at `at` (or at the end), one length longer;
-    /// the focus to move to.
+    /// Insert, or the plus at the heading: a new band window after the one at `at` (or at
+    /// the end), on the same bands one length longer (the first: [`BandRow::new_row`]); the
+    /// focus to move to: its band.
     pub fn add_window(&mut self, at: BandFocus) -> Result<BandFocus, String> {
         if self.rows.len() >= LeqConfig::MAX_WINDOWS {
             return Err(format!(
@@ -507,22 +482,22 @@ impl BandSection {
         );
         Ok(BandFocus::Window {
             row,
-            col: BandCol::Length,
+            col: BandCol::Band,
         })
     }
 
-    /// Delete on band window `row`: removed; the focus to move to.
+    /// − / Delete on band window `row`: removed; the focus to move to.
     pub fn remove_window(&mut self, row: usize, col: BandCol) -> BandFocus {
         if row < self.rows.len() {
             self.rows.remove(row);
             self.edited();
         }
         if self.rows.is_empty() {
-            BandFocus::Field(BandField::Also)
+            BandFocus::Field(BandField::Meter)
         } else {
             let row = row.min(self.rows.len() - 1);
             let col = match col {
-                BandCol::Limit(_) => BandCol::Length,
+                BandCol::Limit(_) => BandCol::Band,
                 c => c,
             };
             BandFocus::Window { row, col }
@@ -538,15 +513,6 @@ impl BandSection {
                 BandMeter::Preset(p) => p.name().into(),
             },
             _ if !self.is_on() => "—".into(),
-            BandField::From => format!(
-                "{} Hz",
-                ac2_scene::band_leq::band_label(BAND_NOMINAL_HZ[self.from])
-            ),
-            BandField::To => format!(
-                "{} Hz",
-                ac2_scene::band_leq::band_label(BAND_NOMINAL_HZ[self.to])
-            ),
-            BandField::Also => self.also.clone(),
             BandField::Impulse => match self.impulse {
                 ImpulseCorrection::None => "none".into(),
                 ImpulseCorrection::Plus5 => "+5 dB".into(),
@@ -572,14 +538,9 @@ impl BandSection {
                     format!("{what}. {}", ac2_scene::band_leq::preset_source(p))
                 }
                 _ => "1/3-octave band Leq per window against per-band limits; a preset replaces \
-                      the windows, limits and bands; informational, not legal advice"
+                      the windows and their limits; informational, not legal advice"
                     .into(),
             },
-            BandField::From | BandField::To => format!(
-                "shown, judged and alarmed: {}",
-                ac2_scene::band_leq::bands_text(&self.shown())
-            ),
-            BandField::Also => "single bands besides the range, e.g. 1000, 2 kHz".into(),
             BandField::Impulse | BandField::Tonal => {
                 "added from now while the character is heard (ac2 does not detect it)".into()
             }
@@ -634,13 +595,8 @@ impl BandSection {
             .enumerate()
             .map(|(i, r)| r.window(i + 1))
             .collect::<Result<Vec<_>, _>>()?;
-        let mut bands: Vec<usize> = (self.from..=self.to).collect();
-        bands.extend(self.also_bands()?);
-        bands.sort_unstable();
-        bands.dedup();
         let c = BandLeqConfig {
             windows,
-            bands: bands.into_iter().map(|b| Hz(BAND_NOMINAL_HZ[b])).collect(),
             predicted: self.predicted,
             correction: BandCorrection {
                 impulse: self.impulse,
@@ -661,6 +617,10 @@ mod tests {
         BandFocus::Field(BandField::Meter)
     }
 
+    fn at(row: usize, col: BandCol) -> BandFocus {
+        BandFocus::Window { row, col }
+    }
+
     #[test]
     fn off_to_a_preset_then_edited() {
         let mut s = BandSection::new(None);
@@ -677,38 +637,33 @@ mod tests {
         );
         assert!(
             s.note(BandField::Meter)
-                .starts_with("LZeq 60 min, 20–200 Hz, night 74 … 32 dB")
+                .starts_with("20–200 Hz LZeq 60 min, night 74 … 32 dB")
         );
         assert!(s.note(BandField::Meter).contains("not legal advice"));
         assert_eq!(s.rows.len(), 1);
+        assert_eq!(s.rows[0].cell(BandCol::Band), "20 Hz");
+        assert_eq!(s.rows[0].cell(BandCol::UpTo), "up to 200 Hz");
         assert_eq!(s.rows[0].cell(BandCol::DayOffset), "5");
-        // Meter, range, also; a window row and its 11 limits; the corrections.
+        // The meter; the window's row (no limit on it) and its 11 limits; the corrections.
         let g = s.grid();
-        assert_eq!(g.len(), 8);
-        assert_eq!(g[5].len(), 11);
+        assert_eq!(g.len(), 5);
+        assert_eq!(g[1].len(), 6);
+        assert_eq!(g[2].len(), 11);
         let c = s.config().expect("valid").expect("on");
         assert_eq!(c, BandLeqPreset::Finland545Lf.apply(None));
         // An edit: the preset's settings become the operator's.
-        s.cycle(
-            BandFocus::Window {
-                row: 0,
-                col: BandCol::Weighting,
-            },
-            -1,
-        );
+        s.cycle(at(0, BandCol::Weighting), -1);
         assert_eq!(s.meter, BandMeter::On);
         assert_eq!(s.rows[0].cell(BandCol::Length), "LCeq 60 min");
-        s.cycle(BandFocus::Field(BandField::To), -5);
-        assert_eq!(s.text(BandField::To), "63 Hz");
-        *s.text_mut(BandFocus::Field(BandField::Also)).expect("text") = "1 kHz, 2000".into();
-        assert_eq!(
-            s.note(BandField::From),
-            "shown, judged and alarmed: 20–63 Hz, 1000 Hz, 2000 Hz"
-        );
+        s.cycle(at(0, BandCol::UpTo), -5);
+        assert_eq!(s.rows[0].cell(BandCol::UpTo), "up to 63 Hz");
         let c = s.config().expect("valid").expect("on");
-        assert_eq!(c.bands.len(), 8);
+        assert_eq!(c.windows[0].bands.len(), 6);
         assert_eq!(c.windows[0].weighting, Weighting::C);
-        // A hidden band keeps its limit.
+        // A band out of the window keeps its typed limit for when it comes back.
+        assert_eq!(c.windows[0].limits.night()[8], None);
+        s.cycle(at(0, BandCol::UpTo), 5);
+        let c = s.config().expect("valid").expect("on");
         assert_eq!(
             c.windows[0].limits.night()[8],
             BandLeqPreset::Finland545Lf.windows()[0].limits.night()[8]
@@ -721,37 +676,61 @@ mod tests {
     }
 
     #[test]
+    fn a_single_band_window_has_its_limit_on_its_row() {
+        let mut s = BandSection::new(None);
+        // + on the band section of a meter that is off: on, with a window.
+        let f = s.add_window(meter()).expect("room");
+        assert_eq!(s.meter, BandMeter::On);
+        assert_eq!(f, at(0, BandCol::Band));
+        let r = &s.rows[0];
+        assert_eq!(r.cell(BandCol::Band), "20 Hz");
+        assert_eq!(r.cell(BandCol::UpTo), "this band only");
+        assert_eq!(
+            r.row_cols(),
+            vec![
+                BandCol::Band,
+                BandCol::UpTo,
+                BandCol::Length,
+                BandCol::Weighting,
+                BandCol::Limit(0),
+                BandCol::DayOffset,
+                BandCol::Margin,
+            ]
+        );
+        assert_eq!(s.grid().len(), 4, "the meter, the row, the corrections");
+        for _ in 0..5 {
+            s.cycle(at(0, BandCol::Length), -1);
+        }
+        assert_eq!(s.rows[0].cell(BandCol::Length), "LZeq 1 min");
+        *s.text_mut(at(0, BandCol::Limit(0))).expect("text") = "80".into();
+        let c = s.config().expect("valid").expect("on");
+        assert_eq!(c.windows.len(), 1);
+        let w = c.windows[0];
+        assert_eq!(w.bands, BandRange::single(Hz(20.0)));
+        assert_eq!(w.duration, Seconds(60.0));
+        assert_eq!(w.weighting, Weighting::Z);
+        assert_eq!(w.limits.night()[0], Some(DbSpl(80.0)));
+        // A single band moves as one.
+        s.cycle(at(0, BandCol::Band), 5);
+        assert_eq!(s.rows[0].range(), BandRange::single(Hz(63.0)));
+        assert_eq!(s.rows[0].name(), "63 Hz LZeq 1 min");
+        // − removes it: the focus goes back to the meter.
+        assert_eq!(s.remove_window(0, BandCol::Margin), meter());
+        assert!(s.rows.is_empty());
+    }
+
+    #[test]
     fn band_windows_are_added_typed_and_removed() {
         let mut s = BandSection::new(None);
         s.cycle(meter(), 1);
         assert_eq!(s.meter, BandMeter::On);
         assert_eq!(s.rows.len(), 1);
-        let at = s
-            .add_window(BandFocus::Window {
-                row: 0,
-                col: BandCol::Margin,
-            })
-            .expect("room");
-        assert_eq!(
-            at,
-            BandFocus::Window {
-                row: 1,
-                col: BandCol::Length
-            }
-        );
-        assert_eq!(s.rows[1].cell(BandCol::Length), "LZeq 120 min");
-        s.cycle(
-            BandFocus::Window {
-                row: 1,
-                col: BandCol::Weighting,
-            },
-            -2,
-        );
-        *s.text_mut(BandFocus::Window {
-            row: 1,
-            col: BandCol::Limit(5),
-        })
-        .expect("text") = "48".into();
+        s.cycle(at(0, BandCol::UpTo), 10);
+        let f = s.add_window(at(0, BandCol::Margin)).expect("room");
+        assert_eq!(f, at(1, BandCol::Band));
+        assert_eq!(s.rows[1].name(), "20–200 Hz LZeq 120 min");
+        s.cycle(at(1, BandCol::Weighting), -2);
+        *s.text_mut(at(1, BandCol::Limit(5))).expect("text") = "48".into();
         let c = s.config().expect("valid").expect("on");
         assert_eq!(c.windows.len(), 2);
         assert_eq!(c.windows[1].weighting, Weighting::A);
@@ -767,24 +746,17 @@ mod tests {
         s.rows[1].limits[6] = "loud".into();
         assert_eq!(
             s.config(),
-            Err("band window 2 (LAeq 120 min) 80 Hz limit: not a number: \"loud\"".into())
+            Err(
+                "band window 2 (20–200 Hz LAeq 120 min) 80 Hz limit: not a number: \"loud\"".into()
+            )
         );
         s.rows[1].limits[6].clear();
-        s.also = "1100".into();
-        assert!(s.config().expect_err("not a band").contains("1100"));
-        s.also.clear();
         for _ in 0..LeqConfig::MAX_WINDOWS - 2 {
             s.add_window(meter()).expect("room");
         }
         assert!(s.add_window(meter()).is_err());
         let f = s.remove_window(0, BandCol::Limit(5));
-        assert_eq!(
-            f,
-            BandFocus::Window {
-                row: 0,
-                col: BandCol::Length
-            }
-        );
+        assert_eq!(f, at(0, BandCol::Band));
         assert_eq!(s.rows.len(), LeqConfig::MAX_WINDOWS - 1);
     }
 
@@ -795,8 +767,8 @@ mod tests {
         assert_eq!(s.meter, BandMeter::On);
         let c = s.config().expect("valid").expect("on");
         assert_eq!(c, measured);
-        assert_eq!(s.text(BandField::Also), "1000");
-        assert_eq!(s.transfer_bands().len(), LF_BAND_COUNT + 1);
+        assert_eq!(s.rows[1].name(), "1000 Hz LAeq 15 min");
+        assert_eq!(s.transfer_bands().len(), 12);
         assert!(
             s.transfer_text()
                 .starts_with("transfer from flat 4 bedroom, 20–200 Hz, 1000 Hz: "),

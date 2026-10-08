@@ -1112,15 +1112,14 @@ pub fn band_leq_config() -> BandLeqConfig {
     bands[3] = BandTransferBand::Unusable { at_least: Db(35.0) };
     let mut cfg = BandLeqPreset::Finland545Lf.apply(None);
     let mut limits = [None; BAND_COUNT];
-    limits[5] = Some(DbSpl(48.0));
     limits[17] = Some(DbSpl(30.5));
     cfg.windows.push(BandWindow {
+        bands: BandRange::single(Hz(1000.0)),
         duration: Seconds(900.0),
         weighting: Weighting::A,
         limits: BandLimitSet::Always { limits },
         warn_margin: Db(2.0),
     });
-    cfg.bands.push(Hz(1000.0));
     BandLeqConfig {
         correction: BandCorrection {
             impulse: ImpulseCorrection::Plus5,
@@ -1930,9 +1929,12 @@ fn band_leq_frame() -> BandLeqFrame {
             horizon: Seconds(60.0),
             correction: Db(5.0),
             limits_from: BandLimitPlace::Transferred,
-            bands: vec![4, 5, 17],
             windows: vec![
                 BandWindowState {
+                    bands: BandRange {
+                        low: Hz(50.0),
+                        high: Hz(63.0),
+                    },
                     duration: Seconds(3600.0),
                     weighting: Weighting::Z,
                     elapsed: Seconds(1800.0),
@@ -1942,13 +1944,14 @@ fn band_leq_frame() -> BandLeqFrame {
                     worst: Some(1),
                 },
                 BandWindowState {
+                    bands: BandRange::single(Hz(1000.0)),
                     duration: Seconds(900.0),
                     weighting: Weighting::A,
                     elapsed: Seconds(900.0),
                     measured: Seconds(900.0),
                     period: BandPeriod::Night,
                     period_after_horizon: BandPeriod::Night,
-                    worst: Some(1),
+                    worst: Some(0),
                 },
             ],
             predicted: Some(PredictedLeq {
@@ -1959,16 +1962,13 @@ fn band_leq_frame() -> BandLeqFrame {
                 judgement: LeqJudgement::Near,
             }),
         },
-        leq: vec![58.0, 62.5, 41.0, 31.5, 36.25, 40.0],
-        limit: vec![60.0, 58.0, nan, nan, 74.0, 46.5],
-        allowed: vec![59.5, nan, nan, nan, 80.0, 49.0],
-        recover: vec![nan, 412.0, nan, nan, nan, nan],
+        leq: vec![58.0, 62.5, 40.0],
+        limit: vec![60.0, 58.0, 46.5],
+        allowed: vec![59.5, nan, 49.0],
+        recover: vec![nan, 412.0, nan],
         flags: vec![
             judged.with(LeqFlags::NEAR).with(LeqFlags::ON_COURSE),
             judged.with(LeqFlags::OVER).with(LeqFlags::CANNOT_RECOVER),
-            LeqFlags::NONE,
-            LeqFlags::NONE,
-            judged,
             judged,
         ],
     }

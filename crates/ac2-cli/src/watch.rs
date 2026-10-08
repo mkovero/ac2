@@ -788,6 +788,7 @@ pub async fn bands(
                     })
                     .collect();
                 windows.push(json!({
+                    "bands_hz": [st.bands.low.0, st.bands.high.0],
                     "duration_s": st.duration.0,
                     "weighting": st.weighting,
                     "elapsed_s": st.elapsed.0,
@@ -805,6 +806,19 @@ pub async fn bands(
                     },
                 }));
             }
+            // Every window's bands together, low to high.
+            let mut shown: Vec<usize> = meta
+                .windows
+                .iter()
+                .filter_map(|w| w.bands.indices())
+                .flatten()
+                .collect();
+            shown.sort_unstable();
+            shown.dedup();
+            let bands_hz: Vec<f64> = shown
+                .into_iter()
+                .map(|b| ac2_proto::model::BAND_NOMINAL_HZ[b])
+                .collect();
             let worst = t.worst.map(|(w, i)| {
                 json!({
                     "window": w,
@@ -828,11 +842,7 @@ pub async fn bands(
                     "horizon_s": meta.horizon.0,
                     "correction_db": meta.correction.0,
                     "limits_from": meta.limits_from,
-                    "bands_hz": meta
-                        .bands
-                        .iter()
-                        .map(|&b| ac2_proto::model::BAND_NOMINAL_HZ[usize::from(b)])
-                        .collect::<Vec<_>>(),
+                    "bands_hz": bands_hz,
                     "worst": worst,
                     "predicted": meta.predicted.map(|p| json!({
                         "duration_s": p.duration.0,

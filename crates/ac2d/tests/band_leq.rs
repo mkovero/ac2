@@ -14,9 +14,10 @@ use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusL
 use ac2_proto::frame::{BandLeqFrame, FrameData};
 use ac2_proto::model::{
     AlarmSubject, BAND_COUNT, BandLeqConfig, BandLeqPreset, BandLevelSource, BandLimitPlace,
-    BandLimitSet, BandPeriod, BandTransferBand, BandTransferSet, BandWindow, GeneratorDesired,
-    GeneratorSettings, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale, MeasConfig, MeasKind,
-    PeakWeighting, SessionRef, Signal, SplConfig, SplLog, TimeWeighting, Weighting,
+    BandLimitSet, BandPeriod, BandRange, BandTransferBand, BandTransferSet, BandWindow,
+    GeneratorDesired, GeneratorSettings, LeqAlarmKind, LeqConfig, LeqJudgement, LevelScale,
+    MeasConfig, MeasKind, PeakWeighting, SessionRef, Signal, SplConfig, SplLog, TimeWeighting,
+    Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds, WallNs};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};
@@ -207,19 +208,28 @@ async fn transfer_until(
 /// at −26.02 dBFS reads 94 dB: dB SPL = `level` + 113.96.
 const TO_SPL: f64 = 113.96;
 
-/// The bands of the two-window meter: 40 … 80 Hz and 1 kHz.
-const SEL: [f64; 5] = [40.0, 50.0, 63.0, 80.0, 1000.0];
+/// The bands of the first window: 40 … 80 Hz.
+const SEL: BandRange = BandRange {
+    low: Hz(40.0),
+    high: Hz(80.0),
+};
 /// Index of 63 Hz in [`SEL`].
 const S63: usize = 2;
 
-/// Two windows on [`SEL`]: LZeq 5 s with the decree's table (day +5 dB), LAeq 3 s with
-/// 63 Hz limited to 20 dB all day.
+/// Two windows: LZeq 5 s on [`SEL`] with the decree's table (day +5 dB), LAeq 3 s on the
+/// 63 Hz band alone, limited to 20 dB all day.
 fn two_windows() -> BandLeqConfig {
     let mut c = bands();
-    c.bands = SEL.map(Hz).to_vec();
+    c.windows[0].bands = SEL;
+    for (b, l) in c.windows[0].limits.night_mut().iter_mut().enumerate() {
+        if !(3..=6).contains(&b) {
+            *l = None;
+        }
+    }
     let mut limits = [None; BAND_COUNT];
     limits[B63] = Some(DbSpl(20.0));
     c.windows.push(BandWindow {
+        bands: BandRange::single(Hz(63.0)),
         duration: Seconds(3.0),
         weighting: Weighting::A,
         limits: BandLimitSet::Always { limits },
@@ -239,8 +249,10 @@ async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_t
     let mut bad = two_windows();
     bad.windows[1].duration = Seconds(2.5);
     let mut bad_band = two_windows();
-    bad_band.bands.push(Hz(1100.0));
-    for cfg in [bad, bad_band] {
+    bad_band.windows[1].bands.high = Hz(1100.0);
+    let mut bad_limit = two_windows();
+    bad_limit.windows[1].limits.night_mut()[B63 + 1] = Some(DbSpl(30.0));
+    for cfg in [bad, bad_band, bad_limit] {
         let e = c
             .call(Command::MeasCreate {
                 config: meter(Some(cfg)),
@@ -263,21 +275,19 @@ async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_t
     })
     .await;
     assert_eq!(f.meta.scale, LevelScale::Dbfs);
-    assert_eq!(f.meta.bands, [3, 4, 5, 6, 17]);
     assert_eq!(f.meta.windows.len(), 2);
-    assert_eq!(f.leq.len(), 10);
+    assert_eq!(f.meta.windows[0].bands, SEL);
+    assert_eq!(f.meta.windows[1].bands, BandRange::single(Hz(63.0)));
+    assert_eq!(f.leq.len(), 5);
     assert_eq!(f.meta.windows[0].period, BandPeriod::Day);
     assert_eq!(f.meta.windows[1].weighting, Weighting::A);
     // No transfer: the limits apply at the mic as typed.
     assert_eq!(f.meta.limits_from, BandLimitPlace::AtMic);
     assert_eq!(cell(&f, 0, S63).1, Some(47.0));
     assert_eq!(cell(&f, 0, S63).2, LeqJudgement::NotCalibrated);
-    assert_eq!(cell(&f, 1, S63).1, Some(20.0));
-    assert_eq!(
-        cell(&f, 0, 4).1,
-        None,
-        "1 kHz has no limit in the decree's table"
-    );
+    assert_eq!(cell(&f, 1, 0).1, Some(20.0));
+    // 80 Hz, the window's last band: the decree's 40 dB, +5 by day.
+    assert_eq!(cell(&f, 0, 3).1, Some(45.0));
     assert!(f.meta.predicted.is_none());
 
     let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
@@ -289,22 +299,21 @@ async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_t
     lease.set(tone(63.0, level - TO_SPL)).await.unwrap();
     let f = band_until(&c, "63 Hz over in both windows", |f| {
         let (z, _, zj) = cell(f, 0, S63);
-        let (_, _, aj) = cell(f, 1, S63);
+        let (_, _, aj) = cell(f, 1, 0);
         zj == LeqJudgement::Over && aj == LeqJudgement::Over && (z - level).abs() < 0.5
     })
     .await;
     assert_eq!(f.meta.scale, LevelScale::DbSpl);
-    let (a, ..) = cell(&f, 1, S63);
+    let (a, ..) = cell(&f, 1, 0);
     assert!(
         (a - (level + A63)).abs() < 0.5,
         "LAeq of the 63 Hz band {a}"
     );
-    for w in 0..2 {
-        for i in [0, 1, 3, 4] {
-            assert_ne!(cell(&f, w, i).2, LeqJudgement::Over, "window {w} band {i}");
-        }
-        assert_eq!(f.meta.windows[w].worst, Some(S63 as u8));
+    for i in [0, 1, 3] {
+        assert_ne!(cell(&f, 0, i).2, LeqJudgement::Over, "band {i}");
     }
+    assert_eq!(f.meta.windows[0].worst, Some(S63 as u8));
+    assert_eq!(f.meta.windows[1].worst, Some(0));
     let l = log_until(&c, "63 Hz alarms", |l| l.alarms.len() >= 2).await;
     let z63 = AlarmSubject::Band {
         duration: Seconds(5.0),
@@ -331,7 +340,9 @@ async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_t
     // 60 s window holds the seconds logged before it existed.
     tokio::time::sleep(Duration::from_secs(4)).await;
     let mut three = two_windows();
-    three.windows.push(BandWindow::minutes(1, Weighting::C));
+    three
+        .windows
+        .push(BandWindow::minutes(SEL, 1, Weighting::C));
     c.call(Command::MeasUpdate {
         meas: M,
         config: meter(Some(three)),
@@ -396,7 +407,10 @@ async fn two_band_windows_judge_a_63_hz_tone_at_the_mic_and_the_transfer_moves_t
     })
     .await
     .unwrap();
-    let f = band_until(&c, "the preset's bands", |f| f.meta.bands.len() == 11).await;
+    let f = band_until(&c, "the preset's bands", |f| {
+        f.meta.windows.len() == 1 && f.meta.windows[0].bands.len() == 11
+    })
+    .await;
     assert_eq!(f.meta.limits_from, BandLimitPlace::AtMic);
     assert_eq!(b63(&f).1, Some(47.0));
 

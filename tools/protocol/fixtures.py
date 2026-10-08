@@ -300,9 +300,9 @@ def frames():
                 "horizon": 60.0,
                 "correction": 5.0,
                 "limits_from": "transferred",
-                "bands": [4, 5, 17],
                 "windows": [
                     {
+                        "bands": {"low": 50.0, "high": 63.0},
                         "duration": 3600.0,
                         "weighting": "z",
                         "elapsed": 1800.0,
@@ -312,13 +312,14 @@ def frames():
                         "worst": 1,
                     },
                     {
+                        "bands": {"low": 1000.0, "high": 1000.0},
                         "duration": 900.0,
                         "weighting": "a",
                         "elapsed": 900.0,
                         "measured": 900.0,
                         "period": "night",
                         "period_after_horizon": "night",
-                        "worst": 1,
+                        "worst": 0,
                     },
                 ],
                 "predicted": {
@@ -330,18 +331,15 @@ def frames():
                 },
             },
             [
-                (arr("leq", "db_spl"), [58.0, 62.5, 41.0, 31.5, 36.25, 40.0]),
-                (arr("limit", "db_spl"), [60.0, 58.0, NAN, NAN, 74.0, 46.5]),
-                (arr("allowed", "db_spl"), [59.5, NAN, NAN, NAN, 80.0, 49.0]),
-                (arr("recover", "seconds"), [NAN, 412.0, NAN, NAN, NAN, NAN]),
+                (arr("leq", "db_spl"), [58.0, 62.5, 40.0]),
+                (arr("limit", "db_spl"), [60.0, 58.0, 46.5]),
+                (arr("allowed", "db_spl"), [59.5, NAN, 49.0]),
+                (arr("recover", "seconds"), [NAN, 412.0, NAN]),
                 (
                     arr("leq_flags", "bitmask", "u32"),
                     [
                         LIMIT | JUDGED | NEAR | ON_COURSE,
                         LIMIT | JUDGED | OVER | CANNOT_RECOVER,
-                        0,
-                        0,
-                        LIMIT | JUDGED,
                         LIMIT | JUDGED,
                     ],
                 ),
@@ -440,16 +438,12 @@ MEAS_CONFIG = {
 }
 
 
-BAND_NOMINAL_HZ = [
-    20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0, 400.0,
-    500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0,
-    6300.0, 8000.0, 10000.0,
-]
 FINLAND_545_NIGHT = [74.0, 64.0, 56.0, 49.0, 44.0, 42.0, 40.0, 38.0, 36.0, 34.0, 32.0]
 
 BAND_LEQ_CONFIG = {
     "windows": [
         {
+            "bands": {"low": 20.0, "high": 200.0},
             "duration": 3600.0,
             "weighting": "z",
             "limits": {
@@ -460,16 +454,16 @@ BAND_LEQ_CONFIG = {
             "warn_margin": 3.0,
         },
         {
+            "bands": {"low": 1000.0, "high": 1000.0},
             "duration": 900.0,
             "weighting": "a",
             "limits": {
                 "type": "always",
-                "limits": [48.0 if i == 5 else 30.5 if i == 17 else None for i in range(28)],
+                "limits": [30.5 if i == 17 else None for i in range(28)],
             },
             "warn_margin": 2.0,
         },
     ],
-    "bands": BAND_NOMINAL_HZ[:11] + [1000.0],
     "predicted": {"duration": 3600.0, "day": None, "night": 25.0, "warn_margin": 3.0},
     "correction": {"impulse": "plus5", "tonal": "none"},
     "transfer": {

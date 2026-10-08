@@ -310,8 +310,7 @@ impl LeqDialog {
 
     /// What choosing a preset does, shown under the preset row.
     pub fn preset_note(&self) -> &'static str {
-        "A preset replaces the windows with the rule's own (its limits only); Insert adds \
-         more after."
+        "A preset replaces the windows with the rule's own (its limits only); + adds more."
     }
 
     /// Where the chosen preset's figures come from.
@@ -962,19 +961,17 @@ mod tests {
             d.bands.meter,
             BandMeter::Preset(ac2_proto::model::BandLeqPreset::Finland545Lf)
         );
-        // Meter, from, to, also; the window row, its limits.
-        for _ in 0..4 {
-            d.move_row(1);
-        }
+        // The meter; the window row, its limits.
+        d.move_row(1);
         let w = |col| Focus::Band(BandFocus::Window { row: 0, col });
-        assert_eq!(d.focus, w(BandCol::Length));
-        d.move_cell(1);
+        assert_eq!(d.focus, w(BandCol::Band));
+        d.move_cell(3);
         d.cycle(-2);
         assert_eq!(d.bands.rows[0].cell(BandCol::Length), "LAeq 60 min");
         assert_eq!(d.bands.meter, BandMeter::On, "an edit: the operator's own");
         d.move_row(1);
-        assert_eq!(d.focus, w(BandCol::Limit(1)), "the limit under the column");
-        d.move_cell(4);
+        assert_eq!(d.focus, w(BandCol::Limit(3)), "the limit under the column");
+        d.move_cell(2);
         assert_eq!(d.focus, w(BandCol::Limit(5)));
         assert!(d.selected);
         d.type_text("30");
@@ -983,7 +980,7 @@ mod tests {
             d.focus,
             Focus::Band(BandFocus::Window {
                 row: 1,
-                col: BandCol::Length
+                col: BandCol::Band
             })
         );
         d.move_row(1);

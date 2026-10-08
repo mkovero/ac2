@@ -246,6 +246,10 @@
        "bands": {
         "windows": [
          {
+          "bands": {
+           "low": 20.0,
+           "high": 200.0
+          },
           "duration": 3600.0,
           "weighting": "z",
           "limits": {
@@ -285,6 +289,10 @@
           "warn_margin": 3.0
          },
          {
+          "bands": {
+           "low": 1000.0,
+           "high": 1000.0
+          },
           "duration": 900.0,
           "weighting": "a",
           "limits": {
@@ -295,7 +303,7 @@
             null,
             null,
             null,
-            48.0,
+            null,
             null,
             null,
             null,
@@ -322,20 +330,6 @@
           },
           "warn_margin": 2.0
          }
-        ],
-        "bands": [
-         20.0,
-         25.0,
-         31.5,
-         40.0,
-         50.0,
-         63.0,
-         80.0,
-         100.0,
-         125.0,
-         160.0,
-         200.0,
-         1000.0
         ],
         "predicted": {
          "duration": 3600.0,

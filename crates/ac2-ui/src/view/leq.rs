@@ -1,5 +1,6 @@
 //! The Leq windows dialog: the preset and horizon on top, one row per window (length and
-//! weighting by name, limit and warn margin typed), keys drive it, the mouse can too.
+//! weighting by name, limit and warn margin typed, − to remove it) under a heading whose +
+//! adds one, the band windows likewise; keys drive it, the mouse can too.
 
 use eframe::egui::{self, RichText};
 
@@ -48,6 +49,29 @@ fn choice(
     }
     if ui.small_button("›").clicked() {
         *msg = Some(LeqMsg::Cycle(at, 1));
+    }
+}
+
+/// A section heading with its +: a window added at the section's end.
+fn heading(ui: &mut egui::Ui, title: &str, add: Focus, msg: &mut Option<LeqMsg>, ch: &Chrome) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).strong().color(ch.text));
+        let b = ui
+            .small_button(RichText::new("+").strong())
+            .on_hover_text(format!("add a window to {} (Insert)", title.to_lowercase()));
+        if b.clicked() {
+            *msg = Some(LeqMsg::Add(add));
+        }
+    });
+}
+
+/// A row's −: the window removed.
+fn remove_button(ui: &mut egui::Ui, at: Focus, msg: &mut Option<LeqMsg>) {
+    let b = ui
+        .small_button(RichText::new("−").strong())
+        .on_hover_text("remove this window (Delete)");
+    if b.clicked() {
+        *msg = Some(LeqMsg::Remove(at));
     }
 }
 
@@ -162,13 +186,24 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
             ui.end_row();
         });
     ui.add_space(8.0);
+    // + adds after the last window (or as the first, from the horizon).
+    let leq_add = d
+        .rows
+        .len()
+        .checked_sub(1)
+        .map_or(Focus::Horizon, |row| Focus::Window {
+            row,
+            col: Col::Length,
+        });
+    heading(ui, "Leq windows", leq_add, &mut msg, ch);
     egui::Grid::new("ac2-leq-windows")
-        .num_columns(4)
+        .num_columns(5)
         .spacing(egui::vec2(12.0, 6.0))
         .show(ui, |ui| {
             for c in [Col::Length, Col::Weighting, Col::Limit, Col::Margin] {
                 ui.label(RichText::new(c.title()).small().color(ch.dim));
             }
+            ui.label("");
             ui.end_row();
             for (row, r) in d.rows.iter().enumerate() {
                 let at = |col| Focus::Window { row, col };
@@ -214,11 +249,12 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
                     &mut msg,
                     ch,
                 );
+                remove_button(ui, at(Col::Length), &mut msg);
                 ui.end_row();
             }
         });
     if d.rows.is_empty() {
-        ui.label(RichText::new("No windows: Insert adds one.").color(ch.dim));
+        ui.label(RichText::new("No windows: + adds one.").color(ch.dim));
     }
     ui.add_space(8.0);
     egui::Grid::new("ac2-leq-extra")
@@ -255,12 +291,6 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
         if ui.button("Apply").clicked() {
             msg = Some(LeqMsg::Submit);
         }
-        if ui.button("Add a window here").clicked() {
-            msg = Some(LeqMsg::Add);
-        }
-        if ui.button("Remove this window").clicked() {
-            msg = Some(LeqMsg::Remove);
-        }
         if ui.button("Cancel").clicked() {
             msg = Some(LeqMsg::Cancel);
         }
@@ -268,8 +298,9 @@ pub(super) fn leq_page(ui: &mut egui::Ui, d: &LeqDialog, ch: &Chrome) -> Option<
     msg
 }
 
-/// The band meter's rows: the meter and its bands, then its windows each with a sub-row of
-/// the shown bands' limits, then the corrections and the transfer.
+/// The band meter's rows: the meter, then its windows under a heading with a + (each
+/// window a row like a Leq window's, a range's per-band limits on a sub-row under it), then
+/// the corrections and the transfer.
 fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: &Chrome) {
     let b = &d.bands;
     // Rows, not a grid: the notes under a row wrap to the page's width.
@@ -286,41 +317,57 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
             let title = RichText::new(f.title()).color(if focused { ch.text } else { ch.dim });
             band_title(ui, title);
             ui.add_space(12.0);
-            if f == BandField::Also {
-                text_cell(ui, &b.text(f), focused, d.selected, "none", at, msg, ch);
-            } else {
-                choice(ui, b.text(f), focused, at, msg, ch);
-            }
+            choice(ui, b.text(f), focused, at, msg, ch);
         });
     };
     field(ui, BandField::Meter, msg);
     note(ui, b.note(BandField::Meter));
+    ui.add_space(4.0);
+    // + adds after the last window, turning the meter on.
+    heading(
+        ui,
+        "Band windows",
+        Focus::Band(BandFocus::Field(BandField::Meter)),
+        msg,
+        ch,
+    );
     if !b.is_on() {
+        note(
+            ui,
+            "Off: + adds a band window and turns the band meter on.".into(),
+        );
         return;
     }
-    field(ui, BandField::From, msg);
-    field(ui, BandField::To, msg);
-    note(ui, b.note(BandField::From));
-    field(ui, BandField::Also, msg);
-    note(ui, b.note(BandField::Also));
-    ui.add_space(4.0);
-    let shown = b.shown();
-    // Not a grid: each window's limits wrap on a sub-row under it, the full width.
-    const WIDTHS: [f32; 4] = [200.0, 110.0, 100.0, 120.0];
+    // Not a grid: a range's limits wrap on a sub-row under it, the full width; fixed widths
+    // keep the columns aligned row to row.
+    const COLS: [(BandCol, f32); 7] = [
+        (BandCol::Band, 92.0),
+        (BandCol::UpTo, 142.0),
+        (BandCol::Length, 140.0),
+        (BandCol::Weighting, 66.0),
+        (BandCol::Limit(0), 92.0),
+        (BandCol::DayOffset, 96.0),
+        (BandCol::Margin, 92.0),
+    ];
     let cell = |ui: &mut egui::Ui, w: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
         ui.allocate_ui_with_layout(
             egui::vec2(w, 20.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.set_min_width(w);
+                ui.set_max_width(w);
                 add(ui);
             },
         );
     };
     ui.horizontal(|ui| {
-        for (c, w) in BandCol::ROW.into_iter().zip(WIDTHS) {
+        for (c, w) in COLS {
+            let title = match c {
+                BandCol::Limit(_) => "Limit (dB)".to_owned(),
+                c => c.title(),
+            };
             cell(ui, w, &mut |ui| {
-                ui.label(RichText::new(c.title()).small().color(ch.dim));
+                ui.label(RichText::new(&title).small().color(ch.dim));
             });
         }
     });
@@ -328,10 +375,27 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
         let at = |col| Focus::Band(BandFocus::Window { row, col });
         let fo = |col| d.focus == at(col);
         ui.horizontal(|ui| {
-            for (col, w) in BandCol::ROW.into_iter().zip(WIDTHS) {
+            for (col, w) in COLS {
                 cell(ui, w, &mut |ui| match col {
-                    BandCol::Length | BandCol::Weighting => {
+                    BandCol::Band | BandCol::UpTo | BandCol::Length | BandCol::Weighting => {
                         choice(ui, r.cell(col), fo(col), at(col), msg, ch);
+                    }
+                    // A single band's limit on its row, as a Leq window's.
+                    BandCol::Limit(_) if r.is_single() => {
+                        let col = BandCol::Limit(r.low);
+                        text_cell(
+                            ui,
+                            &r.cell(col),
+                            fo(col),
+                            d.selected,
+                            "no limit",
+                            at(col),
+                            msg,
+                            ch,
+                        );
+                    }
+                    BandCol::Limit(_) => {
+                        ui.label(RichText::new("per band ↓").small().color(ch.dim));
                     }
                     _ => text_cell(
                         ui,
@@ -349,8 +413,13 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
                     ),
                 });
             }
+            remove_button(ui, at(BandCol::Band), msg);
         });
-        // The limits sub-row: one small cell per shown band, its band above it.
+        let sub = r.sub_row();
+        if sub.is_empty() {
+            continue;
+        }
+        // The limits sub-row: one small cell per band of the range, its band above it.
         ui.horizontal_wrapped(|ui| {
             ui.add_space(12.0);
             ui.label(
@@ -362,8 +431,8 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
                 .small()
                 .color(ch.dim),
             );
-            for &band in &shown {
-                let col = BandCol::Limit(band);
+            for col in sub {
+                let BandCol::Limit(band) = col else { continue };
                 let centred = egui::Layout::top_down(egui::Align::Center);
                 ui.allocate_ui_with_layout(egui::vec2(44.0, 40.0), centred, |ui| {
                     ui.label(RichText::new(col.title()).small().color(ch.dim));
@@ -384,8 +453,9 @@ fn band_section(ui: &mut egui::Ui, d: &LeqDialog, msg: &mut Option<LeqMsg>, ch: 
         ui.add_space(4.0);
     }
     if b.rows.is_empty() {
-        note(ui, "No band windows: Insert adds one.".into());
+        note(ui, "No band windows: + adds one.".into());
     }
+    ui.add_space(4.0);
     field(ui, BandField::Impulse, msg);
     field(ui, BandField::Tonal, msg);
     note(ui, b.note(BandField::Impulse));

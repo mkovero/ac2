@@ -169,11 +169,9 @@ impl AppState {
                     _ => None,
                 };
                 let shown = match &m.config.kind {
-                    MeasKind::Spl { config } => config
-                        .bands
-                        .as_ref()
-                        .and_then(|b| b.band_indices())
-                        .unwrap_or_default(),
+                    MeasKind::Spl { config } => {
+                        config.bands.as_ref().map(|b| b.shown()).unwrap_or_default()
+                    }
                     _ => Vec::new(),
                 };
                 if let Some(d) = self.overlay.leq_mut()

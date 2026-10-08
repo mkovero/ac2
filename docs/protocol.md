@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 29`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 30`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -429,13 +429,13 @@ started_at`; it carries on across app and daemon restarts as the log does.
 #### Band meter (`SplConfig.bands`, `spl.band_transfer`, `spl.band_log_get`, `band_leq` frames)
 
 Design: `docs/design/band-leq.md`. `SplConfig.bands`: `BandLeqConfig` \| nil (nil: no band
-meter) = {`windows`: [`BandWindow`] (at most 8, in display order), `bands`: [Hz] (nominal
-centres of the bands shown, judged and alarmed, low to high, at least one, each a
-1/3-octave band 20 Hz … 10 kHz; every band is integrated and logged whatever this),
+meter) = {`windows`: [`BandWindow`] (at most 8, in display order),
 `predicted`: `PredictedWindow` \| nil, `correction`: `BandCorrection` {`impulse`: `none` \|
 `plus5` \| `plus10`, `tonal`: `none` \| `plus3` \| `plus6`} (STM 545/2015 §13, summed, applied
 to the seconds from when it is set), `transfer`: `BandTransferSet` \| nil}. `BandWindow` =
-{`duration`: Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weighting
+{`bands`: `BandRange` {`low`, `high`: Hz} (nominal centres of the window's lowest and highest
+1/3-octave band 20 Hz … 10 kHz, `low` ≤ `high`, equal for one band: the bands shown, judged
+and alarmed; every band is integrated and logged whatever the windows), `duration`: Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weighting
 at each band's exact mid-band frequency added to its unweighted level), `limits`:
 `BandLimitSet`, `warn_margin`: Db ≥ 0}; `BandLimitSet` (tagged by `type`): `always`
 {`limits`: [DbSpl \| nil; 28]} \| `night_day` {`night`: [DbSpl \| nil; 28] (22:00–07:00
@@ -462,7 +462,7 @@ A running SPL meter with a band meter filters its input after the mic curve, unw
 through the 1/3-octave bank and integrates each band per second on the meter's own second
 grid (a gap moves it on without energy). The seconds are logged (§7.4, band log) unweighted
 with the period of their local start, the correction and the sensitivity in force; each
-band window holds every second's energy of the shown bands with its weighting and
+band window holds every second's energy of its own bands with its weighting and
 correction. Without a transfer the limits are judged at the mic as they are; with one each
 band's limit at the mic is the place's limit plus the attenuation (the bound for an
 unusable band; a missing band has no limit), and the LAeq at the place is predicted from
@@ -506,18 +506,17 @@ unknown one `not_found`. A replayed recording's meter logs at the replay's wall 
 `realtime` pace file second t is the replay's start + t, so its spans are addressable; at
 `fast` pace they are not.
 
-The `band_leq` frame (§5.4), once a second while subscribed: one column per window and shown
-band, window-major (column `w · len(bands) + i` is band `bands[i]` of window `w`; n =
-windows × bands): `leq` (in `scale`, weighted, correction included; NaN before anything was
+The `band_leq` frame (§5.4), once a second while subscribed: one column per band of each
+window, window-major (window `w`'s bands, low to high, follow the columns of windows `0 … w−1`;
+n = the windows' bands summed): `leq` (in `scale`, weighted, correction included; NaN before anything was
 measured), `limit` (at the mic; NaN: none), `allowed` (headroom; NaN: none), `recover`
 (Seconds; NaN: none), `leq_flags` (§5.5, the Leq windows' bits: the judgement and on course).
 Meta: `scale` (`db_spl` once calibrated; limits are judged only then), `cal`, `mic_curve`,
 `horizon`, `correction` (Db in force), `limits_from` (`BandLimitPlace`: `at_mic` (no
 transfer: the limits as typed) \| `transferred` \| `estimated` (an estimated transfer)),
-`bands`: [u8] (the shown bands, indices into the 28 bands 20 Hz … 10 kHz), `windows`:
-[`BandWindowState` {`duration`, `weighting`, `elapsed`, `measured` (Seconds), `period`,
+`windows`: [`BandWindowState` {`bands` (`BandRange`), `duration`, `weighting`, `elapsed`, `measured` (Seconds), `period`,
 `period_after_horizon` (`BandPeriod`: `day` \| `night`), `worst`: u8 \| nil (index into
-`bands`: the most severe judgement, then the furthest above or least below its limit)}] in
+the window's bands: the most severe judgement, then the furthest above or least below its limit)}] in
 the configuration's order, `predicted`: `PredictedLeq` {`duration`, `estimate`, `at_most`:
 f64 (dB SPL; NaN uncalibrated), `limit`: DbSpl \| nil, `judgement`} \| nil without a transfer
 or a predicted window.
@@ -1147,7 +1146,7 @@ layout as code.
 | `spec` | `level`: dbfs or db_spl (tone level; smoothed when `smoothing` is set; NaN for no power) on a `log_bins` grid: each column the highest level among its bins | `window`, `scale`, `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
-| `band_leq` | one column per band window and shown band, window-major: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `bands` ([u8]), `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
+| `band_leq` | one column per band of each band window, window-major: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `preview_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `backend`, `device`, `channels` (device input per column; length n) |

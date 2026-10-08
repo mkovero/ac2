@@ -12,8 +12,8 @@
 use ac2_proto::frame::BandLeqFrame;
 use ac2_proto::model::{
     BAND_NOMINAL_HZ, BandLeqConfig, BandLeqPreset, BandLimitPlace, BandLimitSet, BandPeriod,
-    BandTransferBand, BandTransferSet, BandWindow, LeqJudgement, LevelScale, PredictedLeq,
-    TransferOrigin, Weighting,
+    BandRange, BandTransferBand, BandTransferSet, BandWindow, LeqJudgement, LevelScale,
+    PredictedLeq, TransferOrigin, Weighting,
 };
 
 use crate::banner::{BannerRow, Status};
@@ -70,6 +70,20 @@ pub fn bands_text(bands: &[usize]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// A band window's bands in words: `20 Hz`, `20–200 Hz`.
+pub fn range_text(r: &BandRange) -> String {
+    r.indices().map_or_else(
+        || "no bands".to_owned(),
+        |i| bands_text(&i.collect::<Vec<_>>()),
+    )
+}
+
+/// A band window as the dialog, the view and the CLI name it: `20 Hz LZeq 1 min`,
+/// `20–200 Hz LZeq 60 min`.
+pub fn ranged_window_name(r: &BandRange, duration_s: f64, weighting: Weighting) -> String {
+    format!("{} {}", range_text(r), window_name(duration_s, weighting))
 }
 
 /// The place a transfer moves the limits from, as every text names it.
@@ -132,7 +146,7 @@ pub struct PredictedText {
 /// One band window as shown.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BandWindowText {
-    /// `LZeq 60 min`.
+    /// `20–200 Hz LZeq 60 min`.
     pub name: String,
     pub bars: Vec<BandBar>,
     /// Index of the worst band, as the daemon picked it.
@@ -153,7 +167,7 @@ pub struct BandWindowText {
 }
 
 impl BandWindowText {
-    /// `LZeq 60 min · night limits (22–07) · so far · 30:00 / 1:00:00`.
+    /// `20–200 Hz LZeq 60 min · night limits (22–07) · so far · 30:00 / 1:00:00`.
     pub fn caption(&self) -> String {
         let mut parts = vec![self.name.clone()];
         parts.extend(self.period.iter().cloned());
@@ -168,7 +182,7 @@ impl BandWindowText {
 pub struct BandLeqText {
     /// `dB SPL` or `dBFS`.
     pub unit: String,
-    /// The bands shown, `20–200 Hz`.
+    /// The bands of every window, `20–200 Hz`, `20 Hz, 63 Hz`.
     pub bands: String,
     pub windows: Vec<BandWindowText>,
     /// The window and band the headline is about: the worst band of the window nearest to
@@ -254,13 +268,15 @@ fn window_text(cfg: &BandLeqConfig, f: &BandLeqFrame, w: usize) -> BandWindowTex
     // A window filling for at least the horizon has its headroom until it is full.
     let until_full = filling && duration - elapsed >= m.horizon.0;
     let horizon = length(m.horizon.0);
-    let bars: Vec<BandBar> = m
+    let bars: Vec<BandBar> = st
         .bands
-        .iter()
+        .indices()
+        .into_iter()
+        .flatten()
         .enumerate()
-        .map(|(i, &b)| {
+        .map(|(i, b)| {
             let k = f.col(w, i);
-            let nominal = BAND_NOMINAL_HZ[usize::from(b)];
+            let nominal = BAND_NOMINAL_HZ[b];
             let flags = f.flags[k];
             let judgement = flags.judgement();
             let is_judged = judged(judgement);
@@ -322,7 +338,7 @@ fn window_text(cfg: &BandLeqConfig, f: &BandLeqFrame, w: usize) -> BandWindowTex
         )
     });
     BandWindowText {
-        name: window_name(duration, st.weighting),
+        name: ranged_window_name(&st.bands, duration, st.weighting),
         worst: st.worst.map(usize::from).filter(|&i| i < bars.len()),
         period: day_night.then(|| period_text(st.period, st.period_after_horizon)),
         filling: filling.then(|| format!("so far · {} / {}", clock(elapsed), clock(duration))),
@@ -370,7 +386,14 @@ pub fn band_leq_text(cfg: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqText {
         .map(|(w, i, _)| (w, i));
     let place = place_of(cfg.transfer.as_ref());
     let (headline, headline_state) = headline(f, &windows, worst);
-    let shown: Vec<usize> = m.bands.iter().map(|&b| usize::from(b)).collect();
+    let mut shown: Vec<usize> = m
+        .windows
+        .iter()
+        .filter_map(|w| w.bands.indices())
+        .flatten()
+        .collect();
+    shown.sort_unstable();
+    shown.dedup();
     BandLeqText {
         unit: unit.to_owned(),
         bands: bands_text(&shown),
@@ -474,14 +497,12 @@ fn with_db(v: f64) -> String {
 /// What a band preset sets, as the dialog and the CLI show it.
 pub fn preset_summary(p: BandLeqPreset) -> String {
     let c = p.apply(None);
-    let shown: Vec<usize> = c.band_indices().unwrap_or_default();
     let mut parts = Vec::new();
     for w in &c.windows {
         parts.push(format!(
-            "{}, {}, {}",
-            window_name(w.duration.0, w.weighting),
-            bands_text(&shown),
-            limits_summary(w, &shown)
+            "{}, {}",
+            ranged_window_name(&w.bands, w.duration.0, w.weighting),
+            limits_summary(w)
         ));
     }
     if let Some(pr) = c.predicted {
@@ -503,12 +524,15 @@ pub fn preset_summary(p: BandLeqPreset) -> String {
     format!("{}: {}", p.name(), parts.join("; "))
 }
 
-/// A window's limits on the shown bands (indices) in words: `night 74 … 32 dB, day 5 dB
-/// higher`, `70 … 42 dB`, `no limits`; the first and last shown band that has one.
-pub fn limits_summary(w: &BandWindow, shown: &[usize]) -> String {
-    let lims: Vec<f64> = shown
-        .iter()
-        .filter_map(|&b| w.limits.night().get(b).copied().flatten().map(|l| l.0))
+/// A window's limits on its bands in words: `night 74 … 32 dB, day 5 dB higher`, `70 … 42
+/// dB`, `no limits`; the first and last of its bands that has one.
+pub fn limits_summary(w: &BandWindow) -> String {
+    let lims: Vec<f64> = w
+        .bands
+        .indices()
+        .into_iter()
+        .flatten()
+        .filter_map(|b| w.limits.night().get(b).copied().flatten().map(|l| l.0))
         .collect();
     match (lims.first(), lims.last(), w.limits.day_offset()) {
         (Some(a), Some(b), Some(o)) if a == b => {

@@ -971,10 +971,11 @@ pub enum LeqMsg {
     Focus(crate::leq_dialog::Focus),
     /// ‹/› on a choice.
     Cycle(crate::leq_dialog::Focus, i32),
-    /// Insert (a window after the focused one).
-    Add,
-    /// Delete (the focused window).
-    Remove,
+    /// Insert, or the plus at a section's heading: a window in the section of this focus,
+    /// after its row (at the end from the heading).
+    Add(crate::leq_dialog::Focus),
+    /// − on a row or Delete: the window of this focus removed.
+    Remove(crate::leq_dialog::Focus),
     Submit,
     /// Closes the dialog without touching the stimulus.
     Cancel,

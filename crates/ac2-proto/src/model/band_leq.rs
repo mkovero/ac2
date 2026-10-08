@@ -340,11 +340,69 @@ impl BandLimitSet {
     }
 }
 
-/// One rolling band window: every shown band's Leq over the same length and weighting,
-/// each against its own limit.
+/// A run of adjacent 1/3-octave bands by nominal centre, `low` … `high` inclusive (one band
+/// when they are equal).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BandRange {
+    /// Lowest band's nominal centre, one of [`BAND_NOMINAL_HZ`].
+    pub low: Hz,
+    /// Highest band's nominal centre, one of [`BAND_NOMINAL_HZ`], not below `low`.
+    pub high: Hz,
+}
+
+impl BandRange {
+    /// The 20 … 200 Hz bands of STM 545/2015.
+    pub const LF: BandRange = BandRange {
+        low: Hz(BAND_NOMINAL_HZ[0]),
+        high: Hz(BAND_NOMINAL_HZ[LF_BAND_COUNT - 1]),
+    };
+
+    /// The single band of nominal centre `hz`.
+    pub const fn single(hz: Hz) -> Self {
+        Self { low: hz, high: hz }
+    }
+
+    /// The bands of indices `low ..= high` into [`BAND_NOMINAL_HZ`] (clamped into range).
+    pub fn of_indices(low: usize, high: usize) -> Self {
+        let at = |i: usize| Hz(BAND_NOMINAL_HZ[i.min(BAND_COUNT - 1)]);
+        Self {
+            low: at(low),
+            high: at(high.max(low)),
+        }
+    }
+
+    /// Indices into [`BAND_NOMINAL_HZ`], low to high; `None` when an end is not a band or
+    /// they are reversed.
+    pub fn indices(&self) -> Option<std::ops::RangeInclusive<usize>> {
+        let (l, h) = (band_index(self.low.0)?, band_index(self.high.0)?);
+        (l <= h).then_some(l..=h)
+    }
+
+    /// Bands in the range (0 when it is not one).
+    pub fn len(&self) -> usize {
+        self.indices().map_or(0, |r| r.count())
+    }
+
+    /// Whether it is not a range of bands.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Whether it is one band.
+    pub fn is_single(&self) -> bool {
+        self.len() == 1
+    }
+}
+
+/// One rolling band window: the Leq of each of its bands over the same length and
+/// weighting, each against its own limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandWindow {
+    /// The bands shown, judged and alarmed; every band is integrated and logged whatever
+    /// this.
+    pub bands: BandRange,
     /// Length: whole seconds, 1 s … [`LeqWindow::MAX_SECONDS`].
     pub duration: Seconds,
     /// Frequency weighting of the band levels: the weighting at each band's exact mid-band
@@ -358,9 +416,11 @@ pub struct BandWindow {
 }
 
 impl BandWindow {
-    /// A window of `minutes` with `weighting`, no limits, the default warn margin.
-    pub fn minutes(minutes: u32, weighting: Weighting) -> Self {
+    /// A window of `bands` over `minutes` with `weighting`, no limits, the default warn
+    /// margin.
+    pub fn minutes(bands: BandRange, minutes: u32, weighting: Weighting) -> Self {
         Self {
+            bands,
             duration: Seconds(f64::from(minutes) * 60.0),
             weighting,
             limits: BandLimitSet::default(),
@@ -381,17 +441,14 @@ fn whole_seconds(d: Seconds) -> Option<u32> {
 }
 
 /// The band meter of an SPL meter: the 1/3-octave band Leq of the unweighted (mic-curve
-/// corrected) input in rolling band windows of their own length and weighting, on the
-/// bands the operator keeps, against per-band limits; with a transfer, the limits are moved
+/// corrected) input in rolling band windows of their own bands, length and weighting,
+/// against per-band limits; with a transfer, the limits are moved
 /// from its place to the mic and the A-weighted level there is predicted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BandLeqConfig {
     /// Windows, in display order (at most [`LeqConfig::MAX_WINDOWS`]).
     pub windows: Vec<BandWindow>,
-    /// Nominal centres of the bands shown, judged and alarmed, low to high (at least one,
-    /// each of [`BAND_NOMINAL_HZ`]); every band is integrated and logged whatever this.
-    pub bands: Vec<Hz>,
     /// The predicted level at the transfer's place; `None`: not predicted.
     pub predicted: Option<PredictedWindow>,
     /// §13 corrections in force (each second is logged with the one in force).
@@ -403,7 +460,7 @@ pub struct BandLeqConfig {
 
 /// Informational presets of the band meter. Not legal advice: a prediction from FOH is
 /// not a measurement in the receiving room (`docs/design/band-leq.md`, *What is and isn't
-/// claimed*). A preset replaces the windows, the bands and the predicted window; the
+/// claimed*). A preset replaces the windows and the predicted window; the
 /// correction and the transfer stay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BandLeqPreset {
@@ -447,11 +504,18 @@ pub struct PredictedLeq {
 }
 
 impl BandLeqConfig {
-    /// The shown bands' indices into [`BAND_NOMINAL_HZ`], low to high; `None` when one is
-    /// not a band or they are not in order.
-    pub fn band_indices(&self) -> Option<Vec<usize>> {
-        let idx: Option<Vec<usize>> = self.bands.iter().map(|h| band_index(h.0)).collect();
-        idx.filter(|v| v.windows(2).all(|w| w[0] < w[1]))
+    /// Every window's bands together, indices into [`BAND_NOMINAL_HZ`], low to high, each
+    /// once.
+    pub fn shown(&self) -> Vec<usize> {
+        let mut v: Vec<usize> = self
+            .windows
+            .iter()
+            .filter_map(|w| w.bands.indices())
+            .flatten()
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
     }
 
     /// Why the configuration cannot run, if it cannot.
@@ -462,18 +526,27 @@ impl BandLeqConfig {
                 LeqConfig::MAX_WINDOWS
             ));
         }
-        if self.bands.is_empty() || self.band_indices().is_none() {
-            return Err(
-                "the band meter shows one band or more, each a 1/3-octave band 20 Hz … 10 kHz \
-                 named once, low to high"
-                    .into(),
-            );
-        }
         let finite = |l: &Option<DbSpl>| l.is_none_or(|l| l.0.is_finite());
         let margin = |m: Db| m.0.is_finite() && m.0 >= 0.0;
         for w in &self.windows {
+            if w.bands.is_empty() {
+                return Err(
+                    "a band window shows one 1/3-octave band 20 Hz … 10 kHz or a range of \
+                     them, low to high"
+                        .into(),
+                );
+            }
             if w.seconds().is_none() {
                 return Err("a band window is 1 s … 24 h in whole seconds".into());
+            }
+            let inside = w.bands.indices().unwrap_or(0..=0);
+            if w.limits
+                .night()
+                .iter()
+                .enumerate()
+                .any(|(b, l)| l.is_some() && !inside.contains(&b))
+            {
+                return Err("a band window has limits on its own bands only".into());
             }
             if !w.limits.night().iter().all(finite)
                 || w.limits.day_offset().is_some_and(|o| !o.0.is_finite())
@@ -556,17 +629,9 @@ impl BandLeqPreset {
         }
     }
 
-    /// The bands the preset shows: 20 … 200 Hz.
-    pub fn bands(self) -> Vec<Hz> {
-        BAND_NOMINAL_HZ[..LF_BAND_COUNT]
-            .iter()
-            .map(|&h| Hz(h))
-            .collect()
-    }
-
     /// The preset's windows.
     pub fn windows(self) -> Vec<BandWindow> {
-        let mut w = BandWindow::minutes(60, Weighting::Z);
+        let mut w = BandWindow::minutes(BandRange::LF, 60, Weighting::Z);
         if self == BandLeqPreset::Finland545Lf {
             let mut night = [None; BAND_COUNT];
             for (n, l) in night.iter_mut().zip(Self::FINLAND_545_NIGHT_DB) {
@@ -594,13 +659,12 @@ impl BandLeqPreset {
         }
     }
 
-    /// `to` with the preset's windows, bands and predicted window, its correction and
+    /// `to` with the preset's windows and predicted window, its correction and
     /// transfer kept (a preset never discards a measured transfer); a band meter turned on
     /// by the preset starts without either.
     pub fn apply(self, to: Option<&BandLeqConfig>) -> BandLeqConfig {
         BandLeqConfig {
             windows: self.windows(),
-            bands: self.bands(),
             predicted: Some(self.predicted()),
             correction: to.map(|c| c.correction).unwrap_or_default(),
             transfer: to.and_then(|c| c.transfer.clone()),

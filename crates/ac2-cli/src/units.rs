@@ -743,7 +743,7 @@ impl FromStr for BandNominalArg {
     }
 }
 
-/// Bands shown: `20hz..200hz` (a range, both ends shown) or `1khz` (one band).
+/// A band window's bands: `20hz..200hz` (a range, both ends included) or `1khz` (one band).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BandRangeArg {
     pub from: usize,
@@ -770,28 +770,61 @@ impl FromStr for BandRangeArg {
     }
 }
 
-/// A band window's limit for one band: `z:60min:63hz=42db` (`60min:63hz=42db`: Z);
-/// `…=none` removes it.
+/// A band window: its length and weighting, then its bands after `@`: `z:1min@20hz`,
+/// `z:60min@20hz..200hz` (Z unless `a:` or `c:`). Without `@BANDS` a new window is on
+/// 20 … 200 Hz, and a reference names the one window of that length and weighting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BandWindowArg {
+    pub window: LeqWindowArg,
+    pub bands: Option<BandRangeArg>,
+}
+
+impl FromStr for BandWindowArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        let (w, b) = match s.split_once('@') {
+            Some((w, b)) => (w, Some(b.parse()?)),
+            None => (s, None),
+        };
+        Ok(Self {
+            window: w.parse()?,
+            bands: b,
+        })
+    }
+}
+
+/// A band window's limit for one band: `z:60min:63hz=42db` or `z:60min@20hz..200hz:63hz=42db`;
+/// a single-band window's needs no band: `z:1min@20hz=80db`. `…=none` removes it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandLimitArg {
-    pub window: LeqWindowArg,
-    pub band: usize,
+    pub window: BandWindowArg,
+    /// `None`: the band of a single-band window.
+    pub band: Option<usize>,
     pub limit: Option<DbSpl>,
 }
 
 impl FromStr for BandLimitArg {
     type Err = UnitError;
     fn from_str(s: &str) -> Result<Self, UnitError> {
-        let usage =
-            || format!("{s:?}: expected window:band=limit, e.g. z:60min:63hz=42db (or …=none)");
-        let parts = s
-            .split_once('=')
-            .and_then(|(lhs, l)| lhs.rsplit_once(':').map(|(w, b)| (w, b, l)));
-        let Some((w, b, l)) = parts else {
+        let usage = || {
+            format!(
+                "{s:?}: expected window:band=limit, e.g. z:60min:63hz=42db, or a single-band \
+                 window's z:1min@20hz=80db (or …=none)"
+            )
+        };
+        let Some((lhs, l)) = s.split_once('=') else {
             return fail(usage());
         };
-        let Ok(band) = b.parse::<BandNominalArg>() else {
-            return fail(usage());
+        // The band follows the window's last `:`, unless that `:` is the weighting's.
+        let (w, band) = match lhs.rsplit_once(':') {
+            Some((w, b)) if !w.is_empty() && !matches!(w.trim(), "a" | "c" | "z") => {
+                let Ok(band) = b.parse::<BandNominalArg>() else {
+                    return fail(usage());
+                };
+                (w, Some(band.0))
+            }
+            _ if lhs.contains('@') => (lhs, None),
+            _ => return fail(usage()),
         };
         let limit = if l.trim().eq_ignore_ascii_case("none") {
             None
@@ -800,17 +833,17 @@ impl FromStr for BandLimitArg {
         };
         Ok(Self {
             window: w.parse()?,
-            band: band.0,
+            band,
             limit,
         })
     }
 }
 
-/// A band window's day offset: `z:60min=5db` (its limits hold at night, the day's this much
-/// higher); `z:60min=none`: one set day and night.
+/// A band window's day offset: `z:60min=5db`, `z:1min@20hz=5db` (its limits hold at night,
+/// the day's this much higher); `z:60min=none`: one set day and night.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DayOffsetArg {
-    pub window: LeqWindowArg,
+    pub window: BandWindowArg,
     pub offset: Option<Db>,
 }
 
@@ -856,19 +889,48 @@ mod tests {
         assert!(bad::<BandRangeArg>("200hz..20hz").contains("low to high"));
         let l: BandLimitArg = ok("z:60min:63hz=42db");
         assert_eq!(
-            (l.window.weighting, l.window.seconds, l.band, l.limit),
+            (
+                l.window.window.weighting,
+                l.window.window.seconds,
+                l.window.bands,
+                l.band,
+                l.limit
+            ),
             (
                 Some(ac2_proto::model::Weighting::Z),
                 3600,
-                5,
+                None,
+                Some(5),
                 Some(DbSpl(42.0))
             )
         );
         let l: BandLimitArg = ok("15min:1khz=none");
-        assert_eq!((l.window.weighting, l.band, l.limit), (None, 17, None));
+        assert_eq!(
+            (l.window.window.weighting, l.band, l.limit),
+            (None, Some(17), None)
+        );
         assert!(bad::<BandLimitArg>("z:60min=42db").contains("window:band=limit"));
+        // A single-band window's limit needs no band; a range names it after its bands.
+        let l: BandLimitArg = ok("z:1min@20hz=80db");
+        assert_eq!(
+            (l.window.window.seconds, l.window.bands, l.band),
+            (60, Some(BandRangeArg { from: 0, to: 0 }), None)
+        );
+        let l: BandLimitArg = ok("z:60min@20hz..200hz:63hz=42db");
+        assert_eq!(
+            (l.window.bands, l.band),
+            (Some(BandRangeArg { from: 0, to: 10 }), Some(5))
+        );
+        let w: BandWindowArg = ok("a:15min@1khz");
+        assert_eq!(
+            (w.window.seconds, w.bands),
+            (900, Some(BandRangeArg { from: 17, to: 17 }))
+        );
+        assert_eq!(ok::<BandWindowArg>("z:60min").bands, None);
         let d: DayOffsetArg = ok("z:60min=5db");
         assert_eq!(d.offset, Some(Db(5.0)));
+        let d: DayOffsetArg = ok("z:1min@20hz=5db");
+        assert_eq!(d.window.bands, Some(BandRangeArg { from: 0, to: 0 }));
         assert_eq!(ok::<DayOffsetArg>("60min=none").offset, None);
         assert!(bad::<DayOffsetArg>("60min=40db").contains("day offset"));
     }

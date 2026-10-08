@@ -4,7 +4,8 @@
 //! short windows; `spl bands watch --json` shows eleven bands per window, the A window's 63
 //! Hz band 26 dB under the Z one, 63 Hz the worst and the headline naming its window;
 //! `spl bands log` reads the tone's seconds back with their average and writes them as a
-//! `<Hz> <dB>` file that `spl bands transfer` reads back; `--bands` keeps only some bands;
+//! `<Hz> <dB>` file that `spl bands transfer` reads back; `--windows …,a:5s@63hz` makes a
+//! single-band window whose limit is typed as `a:5s@63hz=30db`;
 //! overlapping spans of one meter are refused; `spl bands estimate` stores a typed
 //! transfer; `spl bands transfer` with typed levels moves the limits of a named place to
 //! the mic and predicts the place's LAeq.
@@ -310,16 +311,39 @@ async fn bands_set_watch_and_transfer() {
         }
     }
 
-    // Only some bands shown: every window shows those, the log keeps them all.
-    let (code, text) = run(&ep, &["spl", "bands", "set", "--bands", "50hz..80hz,1khz"]).await;
+    // A single-band window: the A window on 63 Hz alone, its limit typed without naming
+    // the band; the Z window kept with its limits; the log keeps every band.
+    let (code, text) = run(
+        &ep,
+        &[
+            "spl",
+            "bands",
+            "set",
+            "--windows",
+            "z:5s,a:5s@63hz",
+            "--limit",
+            "a:5s@63hz=30db",
+        ],
+    )
+    .await;
     assert_eq!(code, 0, "{text}");
+    let set = document(&text);
+    let a = &set["config"]["kind"]["config"]["bands"]["windows"][1];
+    assert_eq!(a["bands"], serde_json::json!({"low": 63.0, "high": 63.0}));
+    assert_eq!(a["limits"]["limits"][5], 30.0);
+    let z = &set["config"]["kind"]["config"]["bands"]["windows"][0];
+    assert_eq!(z["limits"]["night"][5], 42.0, "kept");
     tokio::time::sleep(Duration::from_secs(1)).await;
     let last = watch_last(&ep, "1.5s").await;
-    assert_eq!(
-        last["bands_hz"],
-        serde_json::json!([50.0, 63.0, 80.0, 1000.0])
-    );
-    assert_eq!(last["windows"][1]["bands"].as_array().unwrap().len(), 4);
+    let a = &last["windows"][1];
+    assert_eq!(a["bands_hz"], serde_json::json!([63.0, 63.0]), "{last}");
+    assert_eq!(a["text"]["name"], "63 Hz LAeq 5 s");
+    let bs = a["bands"].as_array().unwrap();
+    assert_eq!(bs.len(), 1, "{last}");
+    assert_eq!(bs[0]["nominal_hz"], 63.0);
+    assert_eq!(bs[0]["limit"], 30.0);
+    assert_eq!(bs[0]["judgement"], "over", "{last}");
+    assert_eq!(last["windows"][0]["bands"].as_array().unwrap().len(), 11);
     assert_eq!(last["worst"]["nominal_hz"], 63.0);
 
     // The span file as the place, 0 dB attenuation everywhere from FOH's own span.

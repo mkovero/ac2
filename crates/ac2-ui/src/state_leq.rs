@@ -139,8 +139,14 @@ impl AppState {
                 d.focus = f;
                 d.cycle(step);
             }
-            LeqMsg::Add => d.add_window(),
-            LeqMsg::Remove => d.remove_window(),
+            LeqMsg::Add(f) => {
+                d.focus = f;
+                d.add_window();
+            }
+            LeqMsg::Remove(f) => {
+                d.focus = f;
+                d.remove_window();
+            }
             LeqMsg::Cancel => self.overlay = Overlay::None,
             LeqMsg::Submit => {}
         }
