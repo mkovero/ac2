@@ -47,8 +47,9 @@ pub enum PaneNode {
     },
 }
 
-/// Panes narrower or lower than this share of the area are not split further: a split
-/// past it leaves plots too small to read.
+/// Ctrl+N refuses a split whose halves would be narrower or lower than this share of the
+/// panes' area, and a saved ratio keeps each side of its split at least this share of it:
+/// plots past it are too small to read.
 const MIN_RATIO: f32 = 0.05;
 
 impl PaneNode {
@@ -154,25 +155,29 @@ impl PaneNode {
         }
     }
 
-    /// Removes leaf `id`: its sibling takes the parent's place. The first leaf of that
-    /// sibling, which gets the focus; `None` for the last leaf (never removed) or no such
+    /// Removes leaf `id`: its sibling takes the parent's place. The leaf of that sibling
+    /// that bordered `id` along the split (its first when `id` was `a`, its last when `id`
+    /// was `b`), which gets the focus; `None` for the last leaf (never removed) or no such
     /// leaf.
     pub fn remove(&mut self, id: PaneId) -> Option<PaneId> {
         let PaneNode::Split { a, b, .. } = self else {
             return None;
         };
         let keep = if **a == PaneNode::Leaf(id) {
-            Some((**b).clone())
+            let k = (**b).clone();
+            let near = k.leaves().first().copied();
+            Some((k, near))
         } else if **b == PaneNode::Leaf(id) {
-            Some((**a).clone())
+            let k = (**a).clone();
+            let near = k.leaves().last().copied();
+            Some((k, near))
         } else {
             None
         };
         match keep {
-            Some(k) => {
-                let first = k.leaves().first().copied();
+            Some((k, near)) => {
                 *self = k;
-                first
+                near
             }
             None => a.remove(id).or_else(|| b.remove(id)),
         }
@@ -254,6 +259,9 @@ pub struct Layout {
     /// Panes by when they last had the focus, the focused one first: an IR pane follows the
     /// transfer pane focused last.
     mru: Vec<PaneId>,
+    /// The id the next split's pane takes: past every id used this run, so a closed pane's
+    /// id never comes back to a new pane (what it showed, kept by id, would follow it).
+    next_id: u32,
 }
 
 impl Default for Layout {
@@ -272,6 +280,7 @@ impl Layout {
             focus: id,
             maximized: false,
             mru: vec![id],
+            next_id: id.0 + 1,
         }
     }
 
@@ -290,12 +299,14 @@ impl Layout {
         } else {
             leaves[0]
         };
+        let next_id = leaves.iter().map(|id| id.0).max().unwrap_or(0) + 1;
         Self {
             root,
             views,
             focus,
             maximized: false,
             mru: vec![focus],
+            next_id,
         }
     }
 
@@ -365,9 +376,10 @@ impl Layout {
         } else {
             Axis::Column
         };
-        let new = PaneId(self.views.keys().map(|k| k.0).max().unwrap_or(0) + 1);
+        let new = PaneId(self.next_id);
         let view = self.focused();
         if self.root.split(self.focus, axis, new) {
+            self.next_id += 1;
             self.views.insert(new, view);
             self.set_focus(new);
         }
@@ -506,11 +518,11 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// The rectangle of pane `id` in the area last drawn.
+    /// The focused pane's rectangle in the area last drawn, as the tree is laid out there
+    /// (a split un-maximises, so the laid-out tree is what shows after it).
     fn focused_rect(&self) -> PaneRect {
         let (w, h) = self.pane_area;
-        self.layout
-            .root
+        self.laid_out_tree()
             .rects(PaneRect::new(0.0, 0.0, w, h), 0.0)
             .into_iter()
             .find(|(id, _)| *id == self.layout.focus)
@@ -522,6 +534,16 @@ impl AppState {
     /// all panes.
     pub(super) fn split_pane(&mut self) {
         let rect = self.focused_rect();
+        let (w, h) = self.pane_area;
+        let (side, extent) = if rect.w >= rect.h {
+            (rect.w, w)
+        } else {
+            (rect.h, h)
+        };
+        if side / 2.0 < MIN_RATIO * extent {
+            self.warn("the pane is too small to split: Ctrl+D closes one to make room");
+            return;
+        }
         // Both halves keep showing what the pane did, whatever is selected later: an
         // unchosen pane would follow the selection. An IR pane following the transfer pane
         // keeps following it.
@@ -532,16 +554,24 @@ impl AppState {
         {
             v.meas = v.meas.or(shown);
         }
+        let waiting = self.pending_pane_meas.get(&f).cloned();
         self.layout.maximized = false;
-        self.layout.split_focused(rect);
+        let new = self.layout.split_focused(rect);
+        if let Some(n) = waiting {
+            self.pending_pane_meas.insert(new, n);
+        }
     }
 
     /// Ctrl+D: the focused pane closed, its neighbour taking its place and the focus; the
     /// last pane stays.
     pub(super) fn close_pane(&mut self) {
+        let gone = self.layout.focus;
         if !self.layout.close_focused() {
             self.warn("the last pane stays: Ctrl+Tab changes what it shows");
             return;
+        }
+        if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
+            self.overlay = Overlay::None;
         }
         let f = self.layout.focus;
         self.pending_pane_meas

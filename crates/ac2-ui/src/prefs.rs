@@ -354,8 +354,9 @@ struct File {
     sessions: BTreeMap<String, RolesFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     leq: Option<LeqFile>,
-    /// A layout this version cannot read (an older one's) is dropped: the app starts with
-    /// one pane instead of refusing the whole file.
+    /// A `[layout]` that does not parse as a pane tree is dropped (with a warning in the
+    /// log): the panes are a convenience, so the app starts with one pane instead of
+    /// refusing the hold times, sessions and devices the rest of the file keeps.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -663,19 +664,21 @@ impl NodeFile {
         }
     }
 
-    fn node(&self) -> PaneNode {
-        match self {
+    /// The tree; `None` when a ratio is not a number (NaN passes a clamp, and a split by
+    /// it has no place for either side).
+    fn node(&self) -> Option<PaneNode> {
+        Some(match self {
             Self::Leaf { pane } => PaneNode::Leaf(PaneId(*pane)),
             Self::Split { split, ratio, a, b } => PaneNode::Split {
                 axis: match split {
                     AxisFile::Row => Axis::Row,
                     AxisFile::Column => Axis::Column,
                 },
-                ratio: ratio.clamp(0.0, 1.0),
-                a: Box::new(a.node()),
-                b: Box::new(b.node()),
+                ratio: ratio.is_finite().then(|| ratio.clamp(0.0, 1.0))?,
+                a: Box::new(a.node()?),
+                b: Box::new(b.node()?),
             },
-        }
+        })
     }
 }
 
@@ -799,20 +802,42 @@ fn unit_db() -> UnitFile {
     UnitFile::Db
 }
 
-/// The `[layout]` table if this version reads it, else none.
+/// The `[layout]` table if it parses, else none and a warning naming why.
 fn lenient_layout<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<LayoutFile>, D::Error> {
     let v = toml::Value::deserialize(d)?;
-    Ok(LayoutFile::deserialize(v).ok())
+    match LayoutFile::deserialize(v) {
+        Ok(l) => Ok(Some(l)),
+        Err(e) => {
+            tracing::warn!("ui.toml: [layout] dropped, one pane instead: {e}");
+            Ok(None)
+        }
+    }
 }
 
 impl LayoutFile {
     fn parse(self) -> LayoutPrefs {
         let panes = self.tree.as_ref().and_then(|t| {
-            let root = t.node();
+            let Some(root) = t.node() else {
+                tracing::warn!(
+                    "ui.toml: pane tree dropped, one pane instead: a ratio is not a number"
+                );
+                return None;
+            };
             let leaves = root.leaves();
             let mut seen = BTreeSet::new();
-            // A pane twice in the tree has no place to be drawn: the tree is dropped.
+            // A pane twice in the tree has no place to be drawn, and two entries of one id
+            // say two things of one pane: either way the tree is dropped.
             if !leaves.iter().all(|id| seen.insert(*id)) {
+                tracing::warn!(
+                    "ui.toml: pane tree dropped, one pane instead: a pane twice in the tree"
+                );
+                return None;
+            }
+            let mut seen = BTreeSet::new();
+            if !self.panes.iter().all(|p| seen.insert(p.id)) {
+                tracing::warn!(
+                    "ui.toml: pane tree dropped, one pane instead: two [[layout.panes]] of one id"
+                );
                 return None;
             }
             let views: Vec<PanePrefs> = self
@@ -1346,9 +1371,9 @@ mod tests {
         }
     }
 
-    /// A layout this version cannot read — an older fixed grid's, a pane twice in the tree,
-    /// an unknown view — is dropped: the rest of the file stays and the app starts with one
-    /// pane.
+    /// A layout that is not a pane tree — tables of panes by kind, a pane twice in the tree,
+    /// an unknown view, a ratio not a number, two entries of one pane — is dropped: the rest
+    /// of the file stays and the app starts with one pane.
     #[test]
     fn an_unreadable_layout_starts_with_one_pane() {
         for old in [
@@ -1356,6 +1381,8 @@ mod tests {
             "[layout]\nfocus = 1\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 1 }\nb = { pane = 1 }\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\nspl_view = \"bars\"\n",
             "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\nchrome = \"bare\"\n",
+            "[layout]\nfocus = 1\n\n[layout.tree]\nsplit = \"row\"\nratio = nan\na = { pane = 1 }\nb = { pane = 2 }\n",
+            "[layout]\n\n[layout.tree]\npane = 1\n\n[[layout.panes]]\nid = 1\nkind = \"spl\"\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\n",
         ] {
             let text = format!("spl_hold_ms = 250\n{old}");
             let q = UiPrefs::from_toml(&text).expect(&text);

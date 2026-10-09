@@ -318,6 +318,10 @@ impl AppState {
     /// Selects `id` as what pane `p` shows: a sweep picked on the transfer pane is that
     /// pane's (its runs drawn there), and an IR pane's pick is its own.
     pub(super) fn select_on(&mut self, p: PaneId, id: MeasId) {
+        // A pane closed since (a stale menu or click) has nothing to show it on.
+        if self.layout.view(p).is_none() {
+            return;
+        }
         self.selected = Some(id);
         self.selected_trace = None;
         if let Some(v) = self.layout.view_mut(p) {

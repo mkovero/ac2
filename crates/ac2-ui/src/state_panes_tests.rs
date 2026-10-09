@@ -251,3 +251,151 @@ fn nested_splits_share_the_space_after_the_gaps() {
         assert!((r[&id].x - i as f32 * (w + gap)).abs() < 1e-3, "{id:?}");
     }
 }
+
+/// A closed pane's id never comes back: the next split takes a new one, also past the ids
+/// of a layout read back from `ui.toml`.
+#[test]
+fn closed_pane_ids_are_not_reused() {
+    let mut t = empty();
+    t.key("Ctrl+N");
+    t.key("Ctrl+N");
+    let gone = t.st.layout.focus;
+    t.key("Ctrl+D");
+    t.key("Ctrl+N");
+    let new = t.st.layout.focus;
+    assert_ne!(new, gone);
+    assert!(new.0 > gone.0, "{new:?} after {gone:?}");
+
+    let mut u = T::fresh();
+    let text = "[layout]\nfocus = 7\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 2 }\nb = { pane = 7 }\n";
+    u.st.set_prefs(crate::prefs::UiPrefs::from_toml(text).expect("parse"));
+    u.key("Ctrl+N");
+    assert_eq!(u.st.layout.focus, PaneId(8));
+}
+
+/// Closing a pane closes its list, and a pick on a pane no longer there changes nothing.
+#[test]
+fn a_closed_pane_takes_its_list_and_picks_with_it() {
+    let mut t = empty();
+    t.conn(mirror(four()));
+    t.key("Ctrl+N");
+    let gone = t.st.layout.focus;
+    t.st.update(Msg::PaneMenu(gone), &t.keys);
+    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == gone));
+    // The menu keeps the keys: the close comes as the command.
+    t.st.update(Msg::Command(crate::keys::CommandId::ClosePane), &t.keys);
+    assert!(t.st.layout.view(gone).is_none());
+    assert!(matches!(t.st.overlay, Overlay::None), "{:?}", t.st.overlay);
+    let before = t.st.selected;
+    t.st.update(Msg::PanePick(gone, PaneMenuRow::Meas(MeasId(3))), &t.keys);
+    assert_eq!(t.st.selected, before);
+    assert_ne!(before, Some(MeasId(3)));
+    assert!(t.st.layout.view(gone).is_none());
+}
+
+/// Closing a pane focuses the pane that bordered it: closing the right half of
+/// `(a / c) | b` focuses `c`, the left subtree's leaf next to it, not `a`.
+#[test]
+fn closing_focuses_the_neighbour_along_the_split() {
+    let mut t = empty();
+    let a = t.st.layout.focus;
+    t.key("Ctrl+N");
+    let b = t.st.layout.focus;
+    t.key("Alt+1");
+    t.key("Ctrl+N");
+    let c = t.st.layout.focus;
+    assert_eq!(t.st.layout.root.reading_order(), [a, b, c]);
+    t.key("Alt+2");
+    assert_eq!(t.st.layout.focus, b);
+    t.key("Ctrl+D");
+    assert_eq!(t.st.layout.focus, c);
+    // Closing an `a` side focuses the first leaf of its sibling.
+    t.key("Alt+1");
+    t.key("Ctrl+D");
+    assert_eq!(t.st.layout.focus, c);
+}
+
+/// The axis of the split whose `a` is leaf `id`.
+fn axis_before(n: &PaneNode, id: PaneId) -> Option<Axis> {
+    match n {
+        PaneNode::Leaf(_) => None,
+        PaneNode::Split { axis, a, b, .. } => {
+            if **a == PaneNode::Leaf(id) {
+                Some(*axis)
+            } else {
+                axis_before(a, id).or_else(|| axis_before(b, id))
+            }
+        }
+    }
+}
+
+/// A split measures the focused pane as it is laid out on screen: with a pane left out
+/// (panes following the selection), the pane it gave its place to is tall and stacks.
+#[test]
+fn a_split_measures_the_pane_as_laid_out() {
+    let mut t = empty();
+    t.conn(mirror(four()));
+    t.st.pane_area = (1280.0, 760.0);
+    let a = t.st.layout.focus;
+    t.key("Ctrl+N");
+    let b = t.st.layout.focus;
+    t.key("Ctrl+N");
+    t.key("Ctrl+Tab");
+    assert_eq!(kinds(&t)[2], PaneKind::Spectrum);
+    t.st.update(Msg::FocusPane(a), &t.keys);
+    t.st.prefs.panes_follow = true;
+    t.st.update(Msg::FocusPane(b), &t.keys);
+    assert_eq!(t.st.laid_out_panes(), [a, b]);
+    t.key("Ctrl+N");
+    // In the whole tree `b` is 640 × 380 and would split side by side.
+    assert_eq!(axis_before(&t.st.layout.root, b), Some(Axis::Column));
+}
+
+/// Ctrl+N refuses a split whose halves would be too small to read, saying so, and every
+/// pane stays at least that share of the area.
+#[test]
+fn ctrl_n_refuses_halves_too_small() {
+    let mut t = empty();
+    let (w, h) = (1280.0, 760.0);
+    t.st.pane_area = (w, h);
+    for _ in 0..40 {
+        t.key("Ctrl+N");
+    }
+    assert!(
+        t.last_toast().contains("too small to split"),
+        "{}",
+        t.last_toast()
+    );
+    let n = t.st.layout.panes().len();
+    assert!(n < 41, "{n}");
+    for (id, r) in t.st.pane_rects(PaneRect::new(0.0, 0.0, w, h), 0.0) {
+        assert!(r.w >= 0.05 * w && r.h >= 0.05 * h, "{id:?}: {r:?}");
+    }
+}
+
+/// A pane that follows the selection saves no measurement, so it follows again next run;
+/// a pane added while the daemon is away saves none of a closed pane's.
+#[test]
+fn an_unchosen_pane_saves_no_measurement() {
+    let mut t = empty();
+    t.conn(mirror(four()));
+    t.key("Ctrl+Tab");
+    t.key("Ctrl+Shift+Tab");
+    let f = t.st.layout.focus;
+    assert_eq!(t.st.layout.view(f).expect("view").meas, None);
+    assert!(t.st.pane_meas(f).is_some());
+    let saved = t.st.layout_prefs().panes.expect("panes");
+    assert_eq!(saved.views[0].measurement, None);
+
+    let mut u = T::fresh();
+    let text = "[layout]\nfocus = 2\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 1 }\nb = { pane = 2 }\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\n\n[[layout.panes]]\nid = 2\nkind = \"transfer\"\nmeasurement = \"Delay tower\"\n";
+    u.st.set_prefs(crate::prefs::UiPrefs::from_toml(text).expect("parse"));
+    u.key("Ctrl+D");
+    u.key("Ctrl+N");
+    let saved = u.st.layout_prefs().panes.expect("panes");
+    assert_eq!(saved.views.len(), 2);
+    assert!(
+        saved.views.iter().all(|v| v.measurement.is_none()),
+        "{saved:?}"
+    );
+}

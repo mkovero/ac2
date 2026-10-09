@@ -242,7 +242,8 @@ fn placeholder(id: PaneId, app: &App) -> &'static str {
 
 pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome) {
     let area = ui.available_rect_before_wrap();
-    // The reducer splits along the longer side of the focused pane as drawn here.
+    // The reducer lays the tree out in this area to split the focused pane along its longer
+    // side and to refuse a split too small to read.
     app.state.pane_area = (area.width(), area.height());
     // The stage view is the pane's picture alone: no frame, no title.
     let stage = app.state.stage_view();

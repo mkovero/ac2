@@ -683,8 +683,9 @@ impl AppState {
                     let measurement = match (self.pending_pane_meas.get(&id), self.daemon()) {
                         (Some(n), _) => Some(n.clone()),
                         (None, None) => remembered(id),
-                        // An IR pane following the transfer pane keeps following it.
-                        (None, Some(_)) if v.kind == PaneKind::Ir && v.meas.is_none() => None,
+                        // A pane following the selection (an IR pane the transfer pane)
+                        // keeps following it: what it resolves to now is not its choice.
+                        (None, Some(_)) if v.meas.is_none() => None,
                         (None, Some(_)) => self.pane_meas(id).map(|m| m.config.name.clone()),
                     };
                     Some(crate::prefs::PanePrefs {

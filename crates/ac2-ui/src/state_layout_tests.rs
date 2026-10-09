@@ -299,11 +299,9 @@ fn layout_is_remembered_and_restored() {
         view(PaneKind::Spl).measurement.as_deref(),
         Some("Stage SPL")
     );
-    assert_eq!(
-        view(PaneKind::Transfer).measurement.as_deref(),
-        Some("Main L")
-    );
-    // The IR pane follows the transfer pane: no measurement of its own.
+    // The transfer pane follows the selection and the IR pane the transfer pane: no
+    // measurement of their own.
+    assert_eq!(view(PaneKind::Transfer).measurement, None);
     assert_eq!(view(PaneKind::Ir).measurement, None);
     // Ticks change nothing and write nothing.
     t.st.prefs_dirty = false;
@@ -366,7 +364,8 @@ fn layout_is_remembered_and_restored() {
         "{:?}",
         v.st.toasts
     );
-    assert_eq!(spl_entry(&mut v.st.prefs), Some(Some("FOH SPL".to_owned())));
+    // The usual choice is not the operator's: nothing is saved for the pane.
+    assert_eq!(spl_entry(&mut v.st.prefs), Some(None));
 }
 
 /// The link receives the streams the visible panes draw: the TF of every transfer
