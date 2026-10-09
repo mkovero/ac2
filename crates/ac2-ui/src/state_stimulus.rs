@@ -494,9 +494,8 @@ impl AppState {
                         ));
                     }
                     None => self.toast(format!(
-                        "{}{of} stored: Ctrl+Tab to the {} pane to see it",
-                        r.name,
-                        PaneKind::Distortion.title()
+                        "{}{of} stored: Tab to it to see it in the focused pane",
+                        r.name
                     )),
                 }
             }
@@ -610,7 +609,7 @@ impl AppState {
             .or_else(|| all.last().copied())
     }
 
-    /// N / Shift+N on the sweep pane: the next / previous stored sweep, selected (the
+    /// V / Shift+V on the sweep pane: the next / previous stored sweep run, selected (the
     /// transfer pane and the trace keys follow it).
     pub(super) fn cycle_sweep(&mut self, d: i32) {
         let ids: Vec<TraceId> = self.sweep_traces().iter().map(|(t, _)| t.meta.id).collect();

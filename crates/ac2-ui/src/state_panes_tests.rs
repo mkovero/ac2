@@ -60,14 +60,14 @@ fn a_fresh_start_is_one_pane() {
     assert_eq!(t.st.layout_prefs().panes, None);
 }
 
-/// Ctrl+N splits the focused pane along its longer side and focuses the new half: a wide
+/// N splits the focused pane along its longer side and focuses the new half: a wide
 /// window splits left | right, the tall right half then top / bottom.
 #[test]
-fn ctrl_n_twice_gives_three_panes() {
+fn n_twice_gives_three_panes() {
     let mut t = empty();
     let first = t.st.layout.focus;
-    t.key("Ctrl+N");
-    t.key("Ctrl+N");
+    t.key("N");
+    t.key("N");
     let order = t.st.layout.root.reading_order();
     assert_eq!(order.len(), 3);
     assert_eq!(order[0], first);
@@ -83,65 +83,141 @@ fn ctrl_n_twice_gives_three_panes() {
     assert!(t.st.layout_prefs().panes.is_some());
 }
 
-/// Ctrl+D closes the focused pane, its sibling taking the space and the focus; the last
-/// pane stays, saying how to change what it shows.
+/// Q closes the focused pane, its sibling taking the space and the focus; the last pane
+/// stays, saying how to change what it shows.
 #[test]
-fn ctrl_d_closes_and_keeps_the_last_pane() {
+fn q_closes_and_keeps_the_last_pane() {
     let mut t = empty();
     let first = t.st.layout.focus;
-    t.key("Ctrl+D");
+    t.key("Q");
     assert_eq!(t.st.layout.root, PaneNode::Leaf(first));
     assert!(
         t.last_toast().contains("the last pane stays"),
         "{}",
         t.last_toast()
     );
-    t.key("Ctrl+N");
+    t.key("N");
     assert_ne!(t.st.layout.focus, first);
-    t.key("Ctrl+D");
+    t.key("Q");
     assert_eq!(t.st.layout.root, PaneNode::Leaf(first));
     assert_eq!(t.st.layout.focus, first);
 }
 
-/// Ctrl+Tab changes what the focused pane shows and nothing else.
-#[test]
-fn ctrl_tab_changes_only_the_focused_pane() {
-    let mut t = empty();
-    t.conn(mirror(four()));
-    t.key("Ctrl+N");
-    t.key("Ctrl+N");
-    t.key("Ctrl+Tab");
-    assert_eq!(
-        kinds(&t),
-        [PaneKind::Transfer, PaneKind::Transfer, PaneKind::Spectrum]
-    );
-    t.key("Alt+1");
-    t.key("Ctrl+Shift+Tab");
-    // Back from the transfer kind: the sweep pane, where a sweep is set up.
-    assert_eq!(
-        kinds(&t),
-        [PaneKind::Distortion, PaneKind::Transfer, PaneKind::Spectrum]
-    );
-    // SPL has no meter here: skipped.
-    t.key("Ctrl+Shift+Tab");
-    assert_eq!(kinds(&t)[0], PaneKind::Ir);
+/// The views of every pane but the focused one.
+fn others(t: &T) -> Vec<(PaneId, View)> {
+    let l = &t.st.layout;
+    l.views
+        .iter()
+        .filter(|(id, _)| **id != l.focus)
+        .map(|(id, v)| (*id, *v))
+        .collect()
 }
 
-/// Two transfer panes keep their own measurements: N steps the focused one only, each
-/// draws its own curve, and the IR pane follows the transfer pane focused last.
+/// Tab puts the next measurement of the tree in the focused pane, which turns into that
+/// measurement's kind of pane; Shift+Tab goes back. No other pane changes.
 #[test]
-fn two_transfer_panes_keep_their_measurements() {
+fn tab_puts_the_next_measurement_in_the_focused_pane() {
+    let mut t = empty();
+    t.key("Tab");
+    assert!(
+        t.last_toast().contains("no measurements"),
+        "{}",
+        t.last_toast()
+    );
+    let mut s = four();
+    s.measurements.push(meas(5, "FOH SPL", spl_meter()));
+    t.conn(mirror(s));
+    t.key("N");
+    t.key("N");
+    // The meter in the focused pane: an SPL pane.
+    t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
+    let f = t.st.layout.focus;
+    assert_eq!(t.focus_kind(), PaneKind::Spl);
+    let before = others(&t);
+    let order = t.st.tree_meas_order();
+    let at = order.iter().position(|m| *m == MeasId(5)).expect("listed");
+    let next = order[(at + 1) % order.len()];
+    let kind_of = |t: &T, id: MeasId| PaneKind::for_kind(&t.st.meas(id).expect("meas").config.kind);
+    assert_eq!(kind_of(&t, next), PaneKind::Transfer, "{order:?}");
+    t.key("Tab");
+    assert_eq!(t.st.layout.focus, f);
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
+    assert_eq!(t.st.pane_meas(f).map(|m| m.id), Some(next));
+    assert_eq!(t.st.selected, Some(next));
+    assert_eq!(others(&t), before);
+    // Every measurement of the tree in turn, each in its kind of pane.
+    for _ in 0..order.len() {
+        t.key("Tab");
+        let m = t.st.pane_meas(f).map(|m| m.id).expect("shown");
+        assert_eq!(t.focus_kind(), kind_of(&t, m));
+        assert_eq!(t.st.layout.focus, f);
+        assert_eq!(others(&t), before);
+    }
+    // Back: the meter again, in an SPL pane.
+    t.key("Shift+Tab");
+    assert_eq!(t.st.pane_meas(f).map(|m| m.id), Some(MeasId(5)));
+    assert_eq!(t.focus_kind(), PaneKind::Spl);
+    assert_eq!(others(&t), before);
+}
+
+/// G steps the focused transfer pane through response → phase → coherence → impulse
+/// response → response; the phase and coherence views are that plot alone, and the IR view
+/// has the IR's keys (Shift+G its mode).
+#[test]
+fn g_steps_the_transfer_views() {
+    use ac2_scene::tf::TfPaneKind as P;
+    let mut t = empty();
+    t.conn(mirror(four()));
+    let f = t.st.layout.focus;
+    let plots = |t: &T| -> Vec<P> {
+        crate::scenes::transfer(&t.st, f, &Theme::dark(), SIZE, now())
+            .panes
+            .iter()
+            .map(|p| p.kind)
+            .collect()
+    };
+    let view = |t: &T| t.st.layout.focused().modes.transfer;
+    assert_eq!(view(&t), TransferView::Response);
+    assert_eq!(plots(&t).first(), Some(&P::Magnitude));
+    t.key("G");
+    assert_eq!(view(&t), TransferView::Phase);
+    assert_eq!(plots(&t), [P::Phase]);
+    t.key("G");
+    assert_eq!(view(&t), TransferView::Coherence);
+    assert_eq!(plots(&t), [P::Coherence]);
+    t.key("G");
+    assert_eq!(view(&t), TransferView::Ir);
+    assert_eq!(t.st.scope(), crate::keys::Scope::Ir);
+    assert!(crate::scenes::ir(&t.st, f, &t.keys, &Theme::dark(), SIZE, now()).is_some());
+    t.key("Shift+G");
+    assert_eq!(t.st.layout.focused().modes.ir, IrMode::Log);
+    t.key("G");
+    assert_eq!(view(&t), TransferView::Response);
+    assert_eq!(t.st.scope(), crate::keys::Scope::Transfer);
+    assert_eq!(plots(&t).first(), Some(&P::Magnitude));
+    // The phase and coherence views draw no magnitude: the level keys say so.
+    t.key("G");
+    t.key("Ctrl+I");
+    assert!(
+        t.last_toast().contains("no level axis"),
+        "{}",
+        t.last_toast()
+    );
+}
+
+/// Two transfer panes keep their own measurements and their own views: picking in the list
+/// changes the focused one only, each draws its own curve, and G steps the focused one.
+#[test]
+fn two_transfer_panes_keep_their_measurements_and_views() {
     let mut t = empty();
     t.conn(mirror(four()));
     super::tf_group::tf_frames(&mut t, &[1, 3]);
     let a = t.st.layout.focus;
-    t.key("Ctrl+N");
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.key("N");
     let b = t.st.layout.focus;
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(1)));
-    t.key("N");
-    assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
-    t.key("N");
-    t.key("N");
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     t.key("Alt+1");
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
@@ -149,16 +225,28 @@ fn two_transfer_panes_keep_their_measurements() {
     assert_eq!(legend(&t, a), ["Main L"]);
     assert_eq!(legend(&t, b), ["Delay tower"]);
 
-    // An IR pane under the second: it shows the IR of the transfer pane focused last.
+    // The second in its IR view, the first still drawing the response.
     t.key("Alt+2");
-    t.key("Ctrl+N");
-    t.show(PaneKind::Ir);
-    let ir = t.st.layout.focus;
-    assert_eq!(shows(&t, ir), Some(3));
+    t.key("G");
+    t.key("G");
+    t.key("G");
+    let mode = |t: &T, id: PaneId| t.st.layout.view(id).expect("view").modes.transfer;
+    assert_eq!(
+        (mode(&t, a), mode(&t, b)),
+        (TransferView::Response, TransferView::Ir)
+    );
+    assert_eq!(shows(&t, b), Some(3));
+    // A split copies the view; the halves then step apart.
+    t.key("N");
+    let c = t.st.layout.focus;
+    assert_eq!((mode(&t, c), shows(&t, c)), (TransferView::Ir, Some(3)));
+    t.key("G");
+    assert_eq!(
+        (mode(&t, b), mode(&t, c)),
+        (TransferView::Ir, TransferView::Response)
+    );
     t.st.update(Msg::FocusPane(a), &t.keys);
-    assert_eq!(shows(&t, ir), Some(1));
-    t.st.update(Msg::FocusPane(b), &t.keys);
-    assert_eq!(shows(&t, ir), Some(3));
+    assert_eq!((shows(&t, b), shows(&t, c)), (Some(3), Some(3)));
 }
 
 /// Alt+number focuses the panes in reading order; past the last one it says how many there
@@ -166,8 +254,8 @@ fn two_transfer_panes_keep_their_measurements() {
 #[test]
 fn alt_numbers_focus_panes_in_reading_order() {
     let mut t = empty();
-    t.key("Ctrl+N");
-    t.key("Ctrl+N");
+    t.key("N");
+    t.key("N");
     let order = t.st.layout.root.reading_order();
     t.key("Alt+2");
     assert_eq!(t.st.layout.focus, order[1]);
@@ -189,11 +277,13 @@ fn alt_numbers_focus_panes_in_reading_order() {
 fn the_layout_comes_back_from_ui_toml() {
     let mut t = empty();
     t.conn(mirror(four()));
-    t.key("Ctrl+N");
+    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("N");
-    t.key("Ctrl+N");
-    t.key("Ctrl+Tab");
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    // The second transfer pane on its phase view.
+    t.key("G");
     t.key("N");
+    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
     t.key("G");
     let before: Vec<_> =
         t.st.layout
@@ -213,8 +303,10 @@ fn the_layout_comes_back_from_ui_toml() {
             (PaneKind::Spectrum, Some(4)),
         ]
     );
+    assert_eq!(before[1].2.transfer, TransferView::Phase);
     let text = t.st.prefs.to_toml();
     assert!(text.contains("measurement = \"Delay tower\""), "{text}");
+    assert!(text.contains("transfer_view = \"phase\""), "{text}");
 
     let mut u = T::fresh();
     u.st.set_prefs(crate::prefs::UiPrefs::from_toml(&text).expect("parse"));
@@ -257,11 +349,11 @@ fn nested_splits_share_the_space_after_the_gaps() {
 #[test]
 fn closed_pane_ids_are_not_reused() {
     let mut t = empty();
-    t.key("Ctrl+N");
-    t.key("Ctrl+N");
+    t.key("N");
+    t.key("N");
     let gone = t.st.layout.focus;
-    t.key("Ctrl+D");
-    t.key("Ctrl+N");
+    t.key("Q");
+    t.key("N");
     let new = t.st.layout.focus;
     assert_ne!(new, gone);
     assert!(new.0 > gone.0, "{new:?} after {gone:?}");
@@ -269,7 +361,7 @@ fn closed_pane_ids_are_not_reused() {
     let mut u = T::fresh();
     let text = "[layout]\nfocus = 7\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 2 }\nb = { pane = 7 }\n";
     u.st.set_prefs(crate::prefs::UiPrefs::from_toml(text).expect("parse"));
-    u.key("Ctrl+N");
+    u.key("N");
     assert_eq!(u.st.layout.focus, PaneId(8));
 }
 
@@ -278,7 +370,7 @@ fn closed_pane_ids_are_not_reused() {
 fn a_closed_pane_takes_its_list_and_picks_with_it() {
     let mut t = empty();
     t.conn(mirror(four()));
-    t.key("Ctrl+N");
+    t.key("N");
     let gone = t.st.layout.focus;
     t.st.update(Msg::PaneMenu(gone), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == gone));
@@ -299,19 +391,19 @@ fn a_closed_pane_takes_its_list_and_picks_with_it() {
 fn closing_focuses_the_neighbour_along_the_split() {
     let mut t = empty();
     let a = t.st.layout.focus;
-    t.key("Ctrl+N");
+    t.key("N");
     let b = t.st.layout.focus;
     t.key("Alt+1");
-    t.key("Ctrl+N");
+    t.key("N");
     let c = t.st.layout.focus;
     assert_eq!(t.st.layout.root.reading_order(), [a, b, c]);
     t.key("Alt+2");
     assert_eq!(t.st.layout.focus, b);
-    t.key("Ctrl+D");
+    t.key("Q");
     assert_eq!(t.st.layout.focus, c);
     // Closing an `a` side focuses the first leaf of its sibling.
     t.key("Alt+1");
-    t.key("Ctrl+D");
+    t.key("Q");
     assert_eq!(t.st.layout.focus, c);
 }
 
@@ -337,29 +429,29 @@ fn a_split_measures_the_pane_as_laid_out() {
     t.conn(mirror(four()));
     t.st.pane_area = (1280.0, 760.0);
     let a = t.st.layout.focus;
-    t.key("Ctrl+N");
+    t.key("N");
     let b = t.st.layout.focus;
-    t.key("Ctrl+N");
-    t.key("Ctrl+Tab");
+    t.key("N");
+    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
     assert_eq!(kinds(&t)[2], PaneKind::Spectrum);
     t.st.update(Msg::FocusPane(a), &t.keys);
     t.st.prefs.panes_follow = true;
     t.st.update(Msg::FocusPane(b), &t.keys);
     assert_eq!(t.st.laid_out_panes(), [a, b]);
-    t.key("Ctrl+N");
+    t.key("N");
     // In the whole tree `b` is 640 × 380 and would split side by side.
     assert_eq!(axis_before(&t.st.layout.root, b), Some(Axis::Column));
 }
 
-/// Ctrl+N refuses a split whose halves would be too small to read, saying so, and every
-/// pane stays at least that share of the area.
+/// N refuses a split whose halves would be too small to read, saying so, and every pane
+/// stays at least that share of the area.
 #[test]
-fn ctrl_n_refuses_halves_too_small() {
+fn n_refuses_halves_too_small() {
     let mut t = empty();
     let (w, h) = (1280.0, 760.0);
     t.st.pane_area = (w, h);
     for _ in 0..40 {
-        t.key("Ctrl+N");
+        t.key("N");
     }
     assert!(
         t.last_toast().contains("too small to split"),
@@ -379,8 +471,6 @@ fn ctrl_n_refuses_halves_too_small() {
 fn an_unchosen_pane_saves_no_measurement() {
     let mut t = empty();
     t.conn(mirror(four()));
-    t.key("Ctrl+Tab");
-    t.key("Ctrl+Shift+Tab");
     let f = t.st.layout.focus;
     assert_eq!(t.st.layout.view(f).expect("view").meas, None);
     assert!(t.st.pane_meas(f).is_some());
@@ -390,8 +480,8 @@ fn an_unchosen_pane_saves_no_measurement() {
     let mut u = T::fresh();
     let text = "[layout]\nfocus = 2\n\n[layout.tree]\nsplit = \"row\"\nratio = 0.5\na = { pane = 1 }\nb = { pane = 2 }\n\n[[layout.panes]]\nid = 1\nkind = \"transfer\"\n\n[[layout.panes]]\nid = 2\nkind = \"transfer\"\nmeasurement = \"Delay tower\"\n";
     u.st.set_prefs(crate::prefs::UiPrefs::from_toml(text).expect("parse"));
-    u.key("Ctrl+D");
-    u.key("Ctrl+N");
+    u.key("Q");
+    u.key("N");
     let saved = u.st.layout_prefs().panes.expect("panes");
     assert_eq!(saved.views.len(), 2);
     assert!(

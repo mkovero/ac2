@@ -297,7 +297,7 @@ fn no_reference_reminds_of_the_stimulus_keys() {
 }
 
 /// Panes following the selection: the transfer measurement selected, only the transfer
-/// and impulse-response panes are laid out, sharing the window.
+/// panes (its response and its impulse response) are laid out, sharing the window.
 #[test]
 fn panes_follow_selection() {
     if !have_gpu("panes_follow_selection") {
@@ -312,7 +312,7 @@ fn panes_follow_selection() {
     h.state_mut()
         .dispatch(ac2_ui::state::Msg::SelectMeas(MeasId(1)));
     step_until(&mut h, "the transfer and IR panes alone", |a| {
-        crate::common::visible(&a.state) == [PaneKind::Transfer, PaneKind::Ir]
+        crate::common::visible(&a.state) == [PaneKind::Transfer, PaneKind::Transfer]
     });
     h.state_mut().state.toasts.clear();
     h.step();
@@ -335,14 +335,14 @@ fn ir_pane_of_a_stopped_measurement() {
     step_until(&mut h, "the IR pane alone, its measurement stopped", |a| {
         let st = &a.state;
         st.layout.maximized
-            && st.layout.focus_kind() == PaneKind::Ir
+            && st.layout.focused().shows_ir()
             && st.meas(MeasId(1)).is_some_and(|m| !m.running)
     });
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::ir(
             st,
-            crate::common::pane(st, ac2_ui::state::PaneKind::Ir),
+            crate::common::ir_pane(st),
             &h.state().keymap,
             &ac2_scene::theme::Theme::dark(),
             ac2_scene::primitives::Viewport {
@@ -1019,10 +1019,10 @@ fn stored_traces_and_target() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    // Ctrl+1 captures Main L (selected) into slot 1; N, Ctrl+2 Delay tower into slot 2.
+    // Ctrl+1 captures Main L (selected) into slot 1; Tab, Ctrl+2 Delay tower into slot 2.
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
-    h.key_press(Key::N);
+    h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
         a.state.selected == Some(MeasId(2))
     });
@@ -1581,7 +1581,7 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_dialog");
-    // A sweep pane beside the others (as Ctrl+N, Ctrl+Tab make one): the sweep goes there.
+    // A sweep pane beside the others (as N and the pane menu make one): the sweep goes there.
     h.state_mut().state.layout = common::layout_of(&common::grid_with_sweep_prefs());
     h.key_press(Key::Enter);
     step_until(&mut h, "the sweep measurement, nothing armed", |a| {
@@ -2480,7 +2480,7 @@ fn traces_list() {
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
-    h.key_press(Key::N);
+    h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
         a.state.selected == Some(MeasId(2))
     });
@@ -2533,7 +2533,7 @@ fn measurement_hidden_and_delete_confirm() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    h.key_press(Key::N);
+    h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
         a.state.selected == Some(MeasId(2))
     });
@@ -2969,7 +2969,7 @@ fn measurement_tree_and_delete_choices() {
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
-    h.key_press(Key::N);
+    h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
         a.state.selected == Some(MeasId(2))
     });

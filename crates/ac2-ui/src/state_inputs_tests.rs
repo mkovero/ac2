@@ -791,6 +791,8 @@ fn pane_keys_act_on_the_panes_own_measurement() {
         .retain(|m| matches!(m.config.kind, MeasKind::Spl { .. }));
     s.measurements[0].running = true;
     t.conn(mirror(s));
+    // Picked on the SPL pane: the list puts it in the focused pane.
+    t.key("Alt+4");
     t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
     t.key("Alt+1");
     let r = t.key("S");
@@ -815,6 +817,7 @@ fn pane_keys_act_on_the_panes_own_measurement() {
         m.running = true;
     }
     t.conn(mirror(s));
+    t.key("Alt+4");
     t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
     t.key("Alt+1");
     let r = t.key("S");

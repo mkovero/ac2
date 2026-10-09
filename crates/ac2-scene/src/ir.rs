@@ -206,9 +206,9 @@ pub fn stored_frame(d: &TraceData) -> Option<IrFrame> {
     })
 }
 
-/// A stored transfer trace's impulse response in the IR pane: drawn in the trace's colour
-/// and tagged with its name, as its row in the transfer legend names it. `None` for a
-/// trace captured without one.
+/// A stored transfer trace's impulse response in the transfer IR view: drawn in the trace's
+/// colour and tagged with its name, as its row in the transfer legend names it. `None` for
+/// a trace captured without one.
 #[allow(clippy::too_many_arguments)]
 pub fn stored_ir_scene(
     d: &TraceData,

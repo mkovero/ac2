@@ -29,8 +29,8 @@ pub struct Sent {
 
 impl AppState {
     /// The streams to receive now:
-    /// - each transfer measurement's TF while the transfer pane is in view, and the IR and
-    ///   TF of the one the IR pane follows while that pane is;
+    /// - each transfer measurement's TF while a transfer pane draws its response, and the
+    ///   IR and TF of the one a transfer pane in its IR view shows;
     /// - each spectrum / RTA while the spectrum pane is in view or peak hold or the
     ///   spectrograph is on (both fold every frame, so a hidden pane keeps its history);
     /// - each SPL meter's readout and Leq windows always: the held reading, the Leq history
@@ -39,10 +39,15 @@ impl AppState {
     /// Per-measurement input levels are never drawn, so never received.
     pub fn wanted_topics(&self) -> HashSet<Topic> {
         let visible = self.visible_panes();
-        let shows = |p: PaneKind| visible.iter().any(|id| self.layout.kind(*id) == p);
+        let shows = |p: PaneKind| {
+            visible
+                .iter()
+                .filter_map(|id| self.layout.view(*id))
+                .any(|v| v.kind == p && !v.shows_ir())
+        };
         let ir_of: Vec<MeasId> = visible
             .iter()
-            .filter(|id| self.layout.kind(**id) == PaneKind::Ir)
+            .filter(|id| self.layout.view(**id).is_some_and(|v| v.shows_ir()))
             .filter_map(|id| self.pane_meas(*id).map(|m| m.id))
             .collect();
         let spectrum =
@@ -54,7 +59,7 @@ impl AppState {
                     match (shows(PaneKind::Transfer), ir_of.contains(&m.id)) {
                         (true, true) => &[Stream::Tf, Stream::Ir],
                         (true, false) => &[Stream::Tf],
-                        // The IR pane carries its transfer stream's banners (no reference, no
+                        // The IR view carries its transfer stream's banners (no reference, no
                         // signal), which only the transfer frames say.
                         (false, true) => &[Stream::Tf, Stream::Ir],
                         (false, false) => &[],

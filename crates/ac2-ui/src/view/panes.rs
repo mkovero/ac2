@@ -17,6 +17,7 @@ use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
     HintPlace, IrNavMsg, LegendMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
+    TransferView,
 };
 use crate::theme::Chrome;
 
@@ -49,12 +50,12 @@ const STAGE_CAPTION_H: f32 = 22.0;
 /// The stage view's caption of `pane`: `Transfer · Main L`; none for the SPL pane, whose
 /// meter and Leq windows name themselves.
 fn stage_caption(st: &crate::state::AppState, id: PaneId) -> Option<String> {
-    let pane = st.layout.kind(id);
-    if pane == PaneKind::Spl {
+    let view = st.layout.view(id)?;
+    if view.kind == PaneKind::Spl {
         return None;
     }
     let parts: Vec<String> = [
-        Some(pane.title().to_owned()),
+        Some(view.title().to_owned()),
         st.pane_meas(id).map(|m| m.config.name.clone()),
         st.pane_caption(id),
     ]
@@ -113,6 +114,20 @@ fn scene_for(
     let mut unit_tip = None;
     let mut legend = None;
     let (scene, axes) = match pane {
+        PaneKind::Transfer if view.shows_ir() => {
+            let s = scenes::ir(st, id, &app.keymap, theme, vp, now)?;
+            // Navigation needs an IR: the empty pane's axes only frame its reason.
+            let ir = st
+                .ir_extent(IrPane::Live)
+                .map(|_| (IrPane::Live, s.x_axis.mapping, s.y_axis.mapping));
+            (
+                s.scene,
+                Axes {
+                    ir,
+                    ..Axes::default()
+                },
+            )
+        }
         PaneKind::Transfer => {
             let s = scenes::transfer(st, id, theme, vp, now);
             legend = s.legend_box;
@@ -171,20 +186,6 @@ fn scene_for(
                 },
             )
         }
-        PaneKind::Ir => {
-            let s = scenes::ir(st, id, &app.keymap, theme, vp, now)?;
-            // Navigation needs an IR: the empty pane's axes only frame its reason.
-            let ir = st
-                .ir_extent(IrPane::Live)
-                .map(|_| (IrPane::Live, s.x_axis.mapping, s.y_axis.mapping));
-            (
-                s.scene,
-                Axes {
-                    ir,
-                    ..Axes::default()
-                },
-            )
-        }
         PaneKind::Spl => (
             scenes::spl_pane(st, id, &app.keymap, theme, vp, now)?,
             Axes::default(),
@@ -222,9 +223,10 @@ fn scene_for(
 
 fn placeholder(id: PaneId, app: &App) -> &'static str {
     let pane = app.state.layout.kind(id);
-    let spl = app.state.pane_modes(id).spl;
+    let modes = app.state.pane_modes(id);
+    let spl = modes.spl;
     match pane {
-        PaneKind::Ir => "no transfer measurement",
+        PaneKind::Transfer if modes.transfer == TransferView::Ir => "no transfer measurement",
         PaneKind::Spl if spl == SplMode::Leq && scenes::has_spl(&app.state) => {
             "no Leq windows yet: they show once the meter has measured a second"
         }
@@ -251,6 +253,11 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
     let order = app.state.laid_out_panes();
     for (id, rect) in layout(&app.state, area) {
         let pane = app.state.layout.kind(id);
+        let pane_title = app
+            .state
+            .layout
+            .view(id)
+            .map_or(pane.title(), |v| v.title());
         if stage {
             // The SPL meter and its Leq windows carry their own captions; a plot gets a slim
             // one naming the pane and its measurement, and nothing else.
@@ -317,7 +324,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         let label = painter.text(
             title.left_center() + egui::vec2(8.0, 0.0),
             egui::Align2::LEFT_CENTER,
-            format!("{n}  {}", pane.title()),
+            format!("{n}  {pane_title}"),
             egui::FontId::proportional(12.0),
             if focused { ch.text } else { ch.dim },
         );
@@ -344,11 +351,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             egui::Sense::hover(),
         );
         name.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Label,
-                true,
-                format!("{n}  {}", pane.title()),
-            )
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{n}  {pane_title}"))
         });
         // No tooltip on the name: it would open over the top of the plot (where the legend
         // sits) whenever the pointer crosses the title; the hint line carries it instead.
@@ -367,10 +370,10 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                 egui::WidgetInfo::labeled(
                     egui::WidgetType::Label,
                     true,
-                    format!("{} keys", pane.title()),
+                    format!("{pane_title} keys"),
                 )
             });
-            line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, &all, ch));
+            line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, pane_title, &all, ch));
         }
         let mut x = label.right() + 10.0;
         if let Some(chip) = title_chip(app, ui, id, title, x, ch) {
@@ -457,7 +460,6 @@ fn title_chip(
     ch: &Chrome,
 ) -> Option<egui::Rect> {
     let st = &app.state;
-    let pane = st.layout.kind(id);
     let m = st.pane_meas(id)?;
     let font = egui::FontId::proportional(12.0);
     let painter = ui.painter();
@@ -471,10 +473,12 @@ fn title_chip(
     chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     let next = app
         .keymap
-        .first_chord(CommandId::NextMeasurement, pane.scope())
+        .first_chord(CommandId::NextMeasurementInTree, Scope::Global)
         .map(|c| c.label());
     let chip = chip.on_hover_text(match next {
-        Some(k) => format!("{name}: click to choose what this pane shows · {k} the next one"),
+        Some(k) => format!(
+            "{name}: click to choose what this pane shows · {k} the next measurement in the list"
+        ),
         None => format!("{name}: click to choose what this pane shows"),
     });
     let open = matches!(st.overlay, Overlay::PaneMenu(pm) if pm.pane == id);
@@ -638,10 +642,11 @@ fn hints_tooltip(
     ui: &mut egui::Ui,
     keymap: &crate::keys::Keymap,
     pane: PaneKind,
+    title: &str,
     all: &[KeyHint],
     ch: &Chrome,
 ) {
-    ui.label(egui::RichText::new(format!("{} — most used keys", pane.title())).strong());
+    ui.label(egui::RichText::new(format!("{title} — most used keys")).strong());
     egui::Grid::new(("hints-tip", pane as u32))
         .num_columns(2)
         .spacing(egui::vec2(12.0, 3.0))

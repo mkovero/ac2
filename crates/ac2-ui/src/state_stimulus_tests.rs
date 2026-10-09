@@ -280,22 +280,25 @@ fn opening_key_is_not_typed_into_the_prompt() {
 #[test]
 fn keys_follow_the_focused_pane() {
     let mut t = T::new();
-    assert!(t.shown(PaneKind::Ir));
     // Spectrum pane: P is peak hold.
     t.key("Alt+2");
     assert_eq!(t.st.scope(), Scope::Spectrum);
     t.key("P");
     assert!(t.st.view.spectrum.peak_hold);
-    assert!(t.shown(PaneKind::Ir));
     // X means nothing there.
     assert!(t.key("X").is_empty());
-    // Ctrl+Tab changes what the focused pane shows, its keys with it; W maximizes.
+    // A transfer pane's IR view has the IR's keys; G back to its response, the transfer's.
+    t.key("Alt+3");
     let pane = t.st.layout.focus;
-    t.key("Ctrl+Tab");
-    assert_eq!((t.st.layout.focus, t.focus_kind()), (pane, PaneKind::Ir));
     assert_eq!(t.st.scope(), Scope::Ir);
-    t.key("Ctrl+Shift+Tab");
-    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
+    t.key("G");
+    assert_eq!(
+        (t.st.layout.focus, t.focus_kind()),
+        (pane, PaneKind::Transfer)
+    );
+    assert_eq!(t.st.scope(), Scope::Transfer);
+    // W maximizes.
+    t.key("Alt+2");
     t.key("W");
     assert_eq!(t.visible(), vec![PaneKind::Spectrum]);
 }
@@ -507,10 +510,6 @@ fn transfer_commands_need_a_transfer_measurement() {
             .is_empty()
     );
     assert!(t.last_toast().contains("transfer-function"));
-    // N in the transfer pane only goes through transfer measurements.
-    t.put(PaneKind::Transfer);
-    t.key("Shift+N");
-    assert_eq!(t.st.selected, Some(MeasId(1)));
 }
 
 /// Arms the generator at −20 dBFS and, with `fire`, plays it.
@@ -576,22 +575,25 @@ fn stopping_the_last_transfer_disarms_an_armed_stimulus() {
 
 #[test]
 fn every_stop_path_of_a_transfer_stops_the_stimulus() {
-    // S on the transfer pane, S on the IR pane, the palette's command (any pane), and the
-    // command on the sweep view with the transfer measurement selected.
+    // S on the transfer pane, S on its IR view (`None`), the palette's command (any pane),
+    // and the command on the sweep view with the transfer measurement selected.
     enum Via {
         Key,
         Palette,
     }
     for (focus, via) in [
-        (PaneKind::Transfer, Via::Key),
-        (PaneKind::Ir, Via::Key),
-        (PaneKind::Transfer, Via::Palette),
-        (PaneKind::Distortion, Via::Palette),
+        (Some(PaneKind::Transfer), Via::Key),
+        (None, Via::Key),
+        (Some(PaneKind::Transfer), Via::Palette),
+        (Some(PaneKind::Distortion), Via::Palette),
     ] {
         let mut t = T::new();
         t.put(PaneKind::Transfer);
         play_noise(&mut t, true);
-        t.put(focus);
+        match focus {
+            Some(p) => t.put(p),
+            None => t.put_ir(),
+        }
         t.st.selected = Some(MeasId(1));
         let r = match via {
             Via::Key => t.key("S"),

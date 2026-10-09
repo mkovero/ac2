@@ -39,7 +39,7 @@ pub fn parse_slot(text: &str) -> Result<Option<u8>, String> {
 /// Whether pane `p` draws stored trace `t` (when shown).
 pub(super) fn drawn_in(t: &TraceMeta, p: PaneKind) -> bool {
     match p {
-        PaneKind::Transfer | PaneKind::Ir => matches!(
+        PaneKind::Transfer => matches!(
             t.kind,
             TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
         ),

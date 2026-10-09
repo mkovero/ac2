@@ -198,12 +198,17 @@ fn shown_math(
 }
 
 /// The TF measurement the IR keys and the delay banner follow: the one the transfer pane
-/// worked in last shows; while that is a sweep (its runs drawn, no live curve), what an IR
-/// pane would show.
+/// worked in last shows; while that is a sweep (its runs drawn, no live curve), the live
+/// one another transfer pane shows.
 pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
-    st.kind_meas(PaneKind::Transfer)
-        .filter(|m| m.config.kind.publishes_tf())
-        .or_else(|| st.kind_meas(PaneKind::Ir))
+    let live = |m: &&Measurement| m.config.kind.publishes_tf();
+    st.kind_meas(PaneKind::Transfer).filter(live).or_else(|| {
+        st.layout
+            .panes()
+            .into_iter()
+            .filter(|id| st.layout.kind(*id) == PaneKind::Transfer)
+            .find_map(|id| st.pane_meas(id).filter(live))
+    })
 }
 
 /// The measurement with a live transfer curve transfer pane `pane` shows (`None` while it

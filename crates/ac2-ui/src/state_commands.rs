@@ -222,8 +222,7 @@ impl AppState {
         )
     }
 
-    /// Selects the measurement pane `p` shows, if any, leaving the pane's choice as it is:
-    /// an IR pane following the transfer pane keeps following it.
+    /// Selects the measurement pane `p` shows, if any, leaving the pane's choice as it is.
     pub(super) fn select_shown(&mut self, p: PaneId) {
         if let Some(id) = self.pane_meas(p).map(|m| m.id) {
             self.selected = Some(id);
@@ -231,42 +230,30 @@ impl AppState {
         }
     }
 
-    /// Selects `id` (deselecting a slot) and makes it what a pane shows: the focused one
-    /// when it can show it (a sweep only on the sweep pane: the transfer pane draws its runs
-    /// only when picked there), else the pane of its kind worked in last. An IR pane that
-    /// follows the transfer pane keeps following: the transfer pane takes the choice.
-    pub(super) fn select(&mut self, id: MeasId) {
-        self.selected = Some(id);
-        self.selected_trace = None;
-        let Some(kind) = self.meas(id).map(|m| m.config.kind.clone()) else {
+    /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and the
+    /// focused pane shows it, turning into the kind of pane that measurement belongs in. The
+    /// operator's eyes are on the focused pane: the measurement goes where they look, and
+    /// every other pane keeps what it shows.
+    ///
+    /// With panes following the selection the layout itself answers the selection: the
+    /// pane of its kind worked in last takes it and the focus, and only with none in the
+    /// layout does the focused pane turn into one.
+    pub(super) fn select_meas_row(&mut self, id: MeasId) {
+        let Some(kind) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) else {
             return;
         };
         let f = self.layout.focus;
-        let fk = self.layout.focus_kind();
-        let fits = fk.shows(&kind)
-            && !(matches!(kind, MeasKind::Sweep { .. }) && fk != PaneKind::Distortion);
-        let mut target = if fits {
-            Some(f)
-        } else {
-            self.layout.lead(PaneKind::for_kind(&kind))
-        };
-        if let Some(t) = target
-            && self.layout.kind(t) == PaneKind::Ir
-            && self.layout.view(t).is_some_and(|v| v.meas.is_none())
-            && let Some(tf) = self.layout.lead(PaneKind::Transfer)
-        {
-            target = Some(tf);
+        let lead = self
+            .prefs
+            .panes_follow
+            .then(|| self.layout.lead(kind))
+            .flatten();
+        match lead {
+            Some(p) => self.layout.set_focus(p),
+            None => self.set_pane_kind(f, kind),
         }
-        if let Some(v) = target.and_then(|t| self.layout.view_mut(t)) {
-            v.meas = Some(id);
-        }
-    }
-
-    /// A measurement's row in the tree chosen (click or key): selected, and a pane that draws
-    /// it has the focus.
-    pub(super) fn select_meas_row(&mut self, id: MeasId) {
-        self.select(id);
-        self.reveal_meas(id);
+        let p = self.layout.focus;
+        self.select_on(p, id);
         self.follow_selection_toast();
     }
 
@@ -316,7 +303,7 @@ impl AppState {
     }
 
     /// Selects `id` as what pane `p` shows: a sweep picked on the transfer pane is that
-    /// pane's (its runs drawn there), and an IR pane's pick is its own.
+    /// pane's (its runs drawn there).
     pub(super) fn select_on(&mut self, p: PaneId, id: MeasId) {
         // A pane closed since (a stale menu or click) has nothing to show it on.
         if self.layout.view(p).is_none() {
@@ -421,22 +408,6 @@ impl AppState {
                 self.call(out, Command::MeasUpdate { meas, config }, what);
             }
         }
-    }
-
-    /// N / Shift+N: the next / previous measurement the focused pane can show.
-    pub(super) fn cycle_meas(&mut self, d: i32) {
-        let p = self.layout.focus;
-        let kind = self.layout.kind(p);
-        let ids: Vec<MeasId> = self.pane_candidates(kind).iter().map(|m| m.id).collect();
-        if ids.is_empty() {
-            self.warn(format!("no {} measurements", kind.what()));
-            return;
-        }
-        let i = self
-            .pane_meas(p)
-            .and_then(|s| ids.iter().position(|x| *x == s.id))
-            .map_or(if d > 0 { -1 } else { 0 }, |i| i as i32);
-        self.select_on(p, ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
     }
 
     /// V / Shift+V: the next / previous shown stored trace in the list's order (slotted
@@ -676,20 +647,18 @@ impl AppState {
                     _ => SweepMode::Ir,
                 };
             }
-            C::NextPane => self.cycle_pane(1),
-            C::PrevPane => self.cycle_pane(-1),
             C::MaximizePane => self.cycle_layout(),
             C::NextMeasurementInTree => self.cycle_tree_meas(1),
             C::PrevMeasurementInTree => self.cycle_tree_meas(-1),
-            C::NextMeasurement if self.layout.focus_kind() == PaneKind::Distortion => {
+            C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
+            // The sweep pane draws one run at a time: V steps through the runs, never onto a
+            // curve the pane cannot draw.
+            C::NextTrace if self.layout.focus_kind() == PaneKind::Distortion => {
                 self.cycle_sweep(1);
             }
-            C::PrevMeasurement if self.layout.focus_kind() == PaneKind::Distortion => {
+            C::PrevTrace if self.layout.focus_kind() == PaneKind::Distortion => {
                 self.cycle_sweep(-1);
             }
-            C::NextMeasurement => self.cycle_meas(1),
-            C::PrevMeasurement => self.cycle_meas(-1),
-            C::PaneMeasurement => self.overlay = self.pane_menu(self.layout.focus),
             C::NextTrace => self.cycle_trace(1, false),
             C::PrevTrace => self.cycle_trace(-1, false),
             C::NextAnyTrace => self.cycle_trace(1, true),
@@ -745,11 +714,11 @@ impl AppState {
                 self.prefs_dirty = true;
             }
             C::PlotChrome => {
-                let kind = self.layout.focused().kind;
+                let title = self.layout.focused().title();
                 let c = &mut self.modes_mut().chrome;
                 *c = c.next();
                 let name = c.name();
-                self.toast(format!("{}: {name}", kind.title()));
+                self.toast(format!("{title}: {name}"));
             }
             // An IR picture navigates its time and value axes with the same keys.
             c if ir_nav::is_nav(c) && self.ir_target().is_some() => {
@@ -1387,6 +1356,11 @@ impl AppState {
                 // Slots of another length cannot hold the frames already placed.
                 self.spectrographs.clear();
                 self.toast(format!("spectrograph: last {span} s"));
+            }
+            C::TransferView => {
+                self.focus_kind(PaneKind::Transfer);
+                let m = self.modes_mut();
+                m.transfer = m.transfer.next();
             }
             C::IrMode => {
                 let m = self.modes_mut();

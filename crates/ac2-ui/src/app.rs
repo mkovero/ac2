@@ -528,8 +528,7 @@ impl Touches {
 fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
     match topic {
         Topic::Data { stream, .. } => match stream {
-            Stream::Tf => &[PaneKind::Transfer],
-            Stream::Ir => &[PaneKind::Ir],
+            Stream::Tf | Stream::Ir => &[PaneKind::Transfer],
             Stream::Spec | Stream::Rta => &[PaneKind::Spectrum],
             Stream::Spl | Stream::Leq | Stream::BandLeq => &[PaneKind::Spl],
             Stream::Levels => &[],

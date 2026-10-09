@@ -535,10 +535,10 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     assert_eq!(d.st.selected_trace, Some(second));
     assert_eq!(shown(&d.st), Some(second));
 
-    // N on the sweep pane steps the sweeps and selects them for the transfer pane.
+    // V on the sweep pane steps the sweep runs and selects them for the transfer pane.
     d.key("Alt+5");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
-    d.key("N");
+    d.key("V");
     assert_eq!(d.st.selected_trace, Some(first));
     assert_eq!(shown(&d.st), Some(first));
     d.key("Alt+1");

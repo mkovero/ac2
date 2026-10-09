@@ -273,9 +273,8 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
     s.traces = vec![run.clone()];
     let mut t = T::new();
     t.conn(mirror(s));
-    // A sweep pane beside the grid: the sweep selected goes there.
+    // A sweep pane beside the grid, focused: the sweep selected in the list goes there.
     t.go(PaneKind::Distortion);
-    t.key("Alt+1");
     let (data, grid) = sweep_data(20);
     t.conn(ConnEvent::Trace(data, grid));
     tf_frames(&mut t, &[1]);
@@ -291,7 +290,7 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
         &t.keys,
     );
     assert_eq!(legend(&t), [run.edit.name.as_str()]);
-    // The IR pane keeps a transfer measurement.
+    // The IR keys keep a transfer measurement: the IR view's.
     assert_eq!(
         crate::scenes::focus_tf(&t.st).map(|m| m.id),
         Some(MeasId(1))

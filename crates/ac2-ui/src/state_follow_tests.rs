@@ -3,7 +3,7 @@
 use super::*;
 use crate::state::panes_drawing;
 
-use PaneKind::{Distortion, Ir, Spectrum, Spl, Transfer};
+use PaneKind::{Distortion, Spectrum, Spl, Transfer};
 
 fn select(t: &mut T, id: u32) {
     let keys = t.keys.clone();
@@ -30,25 +30,27 @@ fn panes_drawing_each_kind() {
     spec.kind = TraceKind::Spectrum {
         scale: LevelScale::Dbfs,
     };
-    assert_eq!(panes_drawing(&[&transfer()], &[]), [Transfer, Ir]);
+    assert_eq!(panes_drawing(&[&transfer()], &[]), [Transfer]);
     assert_eq!(panes_drawing(&[&spectrum()], &[]), [Spectrum]);
     assert_eq!(panes_drawing(&[&rta()], &[]), [Spectrum]);
     assert_eq!(panes_drawing(&[&spl_meter()], &[]), [Spl]);
-    assert_eq!(panes_drawing(&[], &[&sweep]), [Transfer, Ir, Distortion]);
+    assert_eq!(panes_drawing(&[], &[&sweep]), [Transfer, Distortion]);
     assert_eq!(panes_drawing(&[], &[&spec]), [Spectrum]);
     assert_eq!(panes_drawing(&[&spl_meter()], &[&spec]), [Spectrum, Spl]);
     assert!(panes_drawing(&[], &[]).is_empty());
 }
 
 /// Off (the default) every shown pane is laid out whatever is selected; on, only those
-/// that draw the selected measurement, the focus on one of them, and W keeps one of them.
+/// that draw the selected measurement, the focus on one of them (the selection goes to the
+/// pane of its kind, not into the focused pane), and W keeps one of them.
 #[test]
 fn panes_follow_the_selected_measurement() {
     let mut t = T::new();
     t.conn(mirror(with_spl()));
     assert!(!t.st.prefs.panes_follow);
+    t.key("Alt+2");
     select(&mut t, 2);
-    assert_eq!(t.visible(), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(t.visible(), [Transfer, Spectrum, Transfer, Spl]);
 
     follow_on(&mut t);
     assert!(
@@ -60,13 +62,14 @@ fn panes_follow_the_selected_measurement() {
     assert_eq!(t.focus_kind(), Spectrum);
 
     select(&mut t, 1);
-    assert_eq!(t.visible(), [Transfer, Ir]);
+    assert_eq!(t.visible(), [Transfer, Transfer]);
     assert_eq!(t.focus_kind(), Transfer);
+    assert!(!t.st.layout.focused().shows_ir());
     // Alt+number counts the panes kept.
     t.key("Alt+2");
-    assert_eq!(t.focus_kind(), Ir);
+    assert!(t.st.layout.focused().shows_ir());
     t.key("Alt+1");
-    assert_eq!(t.focus_kind(), Transfer);
+    assert!(!t.st.layout.focused().shows_ir());
 
     // W: the focused pane alone; another selection maximises one of its own panes.
     t.key("W");
@@ -83,7 +86,7 @@ fn panes_follow_the_selected_measurement() {
     let keys = t.keys.clone();
     t.st.update(Msg::Command(CommandId::PanesFollow), &keys);
     assert!(!t.st.prefs.panes_follow);
-    assert_eq!(t.visible(), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(t.visible(), [Transfer, Spectrum, Transfer, Spl]);
 }
 
 /// A selected stored trace keeps the panes drawing it and its measurement; an imported one
@@ -102,7 +105,7 @@ fn panes_follow_a_selected_trace() {
     select(&mut t, 2);
     assert_eq!(t.visible(), [Spectrum]);
     select_trace(&mut t, 3);
-    assert_eq!(t.visible(), [Transfer, Ir]);
+    assert_eq!(t.visible(), [Transfer, Transfer]);
     assert_eq!(t.focus_kind(), Transfer);
     select_trace(&mut t, 9);
     assert_eq!(t.visible(), [Spectrum]);
@@ -140,7 +143,7 @@ fn panes_follow_a_sweep() {
     assert_eq!(t.focus_kind(), Distortion);
     s.traces = vec![sweep_meta(7)];
     t.conn(mirror(s));
-    assert_eq!(t.visible(), [Transfer, Ir, Distortion]);
+    assert_eq!(t.visible(), [Transfer, Transfer, Distortion]);
     assert_eq!(t.focus_kind(), Distortion);
 }
 
@@ -151,7 +154,7 @@ fn panes_follow_never_empties_the_screen() {
     let mut t = T::new();
     follow_on(&mut t);
     select(&mut t, 1);
-    assert_eq!(t.visible(), [Transfer, Ir]);
+    assert_eq!(t.visible(), [Transfer, Transfer]);
 
     t.key("Alt+4");
     assert_eq!(t.focus_kind(), Transfer);
@@ -160,5 +163,5 @@ fn panes_follow_never_empties_the_screen() {
         "{}",
         t.last_toast()
     );
-    assert_eq!(t.visible(), [Transfer, Ir]);
+    assert_eq!(t.visible(), [Transfer, Transfer]);
 }

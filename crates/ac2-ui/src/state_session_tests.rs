@@ -1035,8 +1035,8 @@ fn new_measurements_start_and_become_selected() {
     s.measurements.push(m);
     t.conn(mirror(s.clone()));
     assert_eq!(t.st.selected, Some(MeasId(7)));
-    // The selection is the operator's again: N moves on and a later mirror keeps it.
-    t.key("N");
+    // The selection is the operator's again: Tab moves on and a later mirror keeps it.
+    t.key("Tab");
     assert_ne!(t.st.selected, Some(MeasId(7)));
     let sel = t.st.selected;
     t.conn(mirror(s));

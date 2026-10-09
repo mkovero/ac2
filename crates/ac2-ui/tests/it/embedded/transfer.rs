@@ -273,7 +273,7 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
     };
     let s = ac2_ui::scenes::ir(
         &d.st,
-        crate::common::pane(&d.st, ac2_ui::state::PaneKind::Ir),
+        crate::common::ir_pane(&d.st),
         &d.keys,
         &Theme::dark(),
         size,
@@ -459,12 +459,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     let run = sweep_from_the_dialog(&mut d)?;
     d.key("Alt+1");
-    for _ in 0..4 {
-        if d.st.selected == Some(m.id) {
-            break;
-        }
-        d.send(Msg::Command(CommandId::NextMeasurement));
-    }
+    let f = d.st.layout.focus;
+    d.send(Msg::PanePick(f, ac2_ui::state::PaneMenuRow::Meas(m.id)));
     assert_eq!(d.st.selected, Some(m.id));
     let running = |s: &AppState| {
         s.daemon()
@@ -654,13 +650,9 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.stop()?;
 
     // Stopped: no live curve to move, so the keys change nothing and say why. The pane went
-    // to the sweep with its run; it steps back to the measurement first.
-    for _ in 0..4 {
-        if d.st.kind_meas(PaneKind::Transfer).map(|x| x.id) == Some(m.id) {
-            break;
-        }
-        d.send(Msg::Command(CommandId::NextMeasurement));
-    }
+    // to the sweep with its run; its list puts the measurement back first.
+    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(m.id)));
     assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|x| x.id), Some(m.id));
     d.send(Msg::Command(CommandId::StartStop));
     d.until("stopped", |s| {

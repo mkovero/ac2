@@ -8,8 +8,9 @@ fn panes_show_and_select_their_measurement() {
     t.conn(mirror(four()));
     let shown = |t: &T, p: PaneKind| t.st.kind_meas(p).map(|m| m.id.0);
     assert_eq!(t.st.selected, Some(MeasId(1)));
+    let ir = |t: &T| t.st.pane_meas(t.ir_pane()).map(|m| m.id.0);
     assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
-    assert_eq!(shown(&t, PaneKind::Ir), Some(1));
+    assert_eq!(ir(&t), Some(1));
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
     assert_eq!(shown(&t, PaneKind::Spl), None);
 
@@ -17,44 +18,42 @@ fn panes_show_and_select_their_measurement() {
     t.st.update(Msg::FocusPane(t.pane(PaneKind::Spectrum)), &t.keys);
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert_eq!(t.st.selected, Some(MeasId(2)));
-    // N / Shift+N go through the focused pane's kind only: spectrum and RTA here.
-    t.key("N");
+    // Its list offers the measurements of its kind: spectrum and RTA here.
+    let sp = t.pane(PaneKind::Spectrum);
+    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(4)));
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
-    t.key("N");
+    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(2)));
     // The transfer pane kept its own measurement.
     t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(1)));
-    t.key("N");
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!(t.st.selected, Some(MeasId(3)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
-    assert_eq!(
-        shown(&t, PaneKind::Ir),
-        Some(3),
-        "IR follows the transfer pane"
-    );
+    assert_eq!(ir(&t), Some(3), "an unchosen IR view follows the selection");
     // Focus by key selects too.
     t.key("Alt+2");
     assert_eq!(t.st.selected, Some(MeasId(2)));
+    // The IR view follows the selection, a spectrum now: it leads with the first transfer
+    // measurement.
     t.key("Alt+3");
-    assert_eq!(t.st.selected, Some(MeasId(3)));
+    assert_eq!(t.st.selected, Some(MeasId(1)));
 
-    // A list selection updates the pane that shows that kind, not the focused one.
+    // A list selection goes into the focused pane; the others keep theirs.
+    t.key("Alt+2");
     t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
-    assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
+    assert_eq!(t.st.pane_meas(PaneId(1)).map(|m| m.id.0), Some(3));
 
     // The title chip: the pane's list with what it shows highlighted; Up Enter shows the
     // one before it.
-    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
+    let tf = PaneId(1);
+    t.st.update(Msg::FocusPane(tf), &t.keys);
+    t.st.update(Msg::PaneMenu(tf), &t.keys);
     assert_eq!(
         t.st.overlay,
-        Overlay::PaneMenu(PaneMenu {
-            pane: t.pane(PaneKind::Transfer),
-            index: 1
-        })
+        Overlay::PaneMenu(PaneMenu { pane: tf, index: 1 })
     );
     // Keys other than the list's do nothing while it is open.
     assert!(t.key("X").is_empty());
@@ -99,13 +98,10 @@ fn panes_show_and_select_their_measurement() {
             .all(|(r, _)| matches!(r, PaneMenuRow::Kind(k) if *k != PaneKind::Spl))
     );
     t.key("Esc");
-    t.key("Alt+4");
-    t.key("N");
-    assert!(t.last_toast().contains("no SPL measurements"));
 
     // A deleted measurement leaves its pane showing the next one that fits.
     t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    t.key("N");
+    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
     let mut s = four();
     s.measurements.retain(|m| m.id != MeasId(3));
@@ -417,9 +413,9 @@ fn traces_are_selected_from_the_keyboard() {
     t.key("Esc");
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
-    // N (another measurement) deselects too.
+    // Tab (another measurement) deselects too.
     t.key("V");
-    t.key("N");
+    t.key("Tab");
     assert_eq!(t.st.selected_trace, None);
 }
 
@@ -652,14 +648,14 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
     t.key("Esc");
     assert_eq!(t.st.selected_trace, None);
     assert_eq!(shown(&t), Some(14));
-    // N on the sweep pane steps the sweeps and selects them for the transfer pane.
+    // V on the sweep pane steps the sweep runs and selects them for the transfer pane.
     t.go(PaneKind::Distortion);
     assert_eq!(t.focus_kind(), PaneKind::Distortion);
-    t.key("N");
+    t.key("V");
     assert_eq!(shown(&t), Some(15));
     assert_eq!(t.st.selected_trace, Some(TraceId(15)));
     assert_eq!(t.last_toast(), "t15 selected");
-    t.key("Shift+N");
+    t.key("Shift+V");
     assert_eq!(t.st.selected_trace, Some(TraceId(14)));
     // U on the sweep pane is its unit; on the transfer pane it inverts the selected sweep.
     assert!(t.key("U").is_empty());

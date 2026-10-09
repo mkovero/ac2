@@ -598,28 +598,39 @@ impl Rig {
     }
 }
 
+/// A transfer pane in its impulse-response view.
+fn ir_view() -> ac2_ui::state::View {
+    let mut v = ac2_ui::state::View::of(ac2_ui::state::PaneKind::Transfer);
+    v.modes.transfer = ac2_ui::state::TransferView::Ir;
+    v
+}
+
 /// The four panes most tests drive, as an operator would have saved them: transfer across
-/// the top, spectrum, impulse response and SPL side by side below it (Alt+1 … 4 in that
-/// order), the transfer pane focused.
+/// the top, spectrum, a transfer pane in its impulse-response view and SPL side by side
+/// below it (Alt+1 … 4 in that order), the transfer pane focused.
 pub fn grid_prefs() -> ac2_ui::prefs::PanesPrefs {
-    use ac2_ui::state::PaneKind;
-    grid_of(&[PaneKind::Spectrum, PaneKind::Ir, PaneKind::Spl])
+    use ac2_ui::state::{PaneKind, View};
+    grid_of(&[
+        View::of(PaneKind::Spectrum),
+        ir_view(),
+        View::of(PaneKind::Spl),
+    ])
 }
 
 /// [`grid_prefs`] with the sweep / distortion pane last in the bottom row (Alt+5).
 pub fn grid_with_sweep_prefs() -> ac2_ui::prefs::PanesPrefs {
-    use ac2_ui::state::PaneKind;
+    use ac2_ui::state::{PaneKind, View};
     grid_of(&[
-        PaneKind::Spectrum,
-        PaneKind::Ir,
-        PaneKind::Spl,
-        PaneKind::Distortion,
+        View::of(PaneKind::Spectrum),
+        ir_view(),
+        View::of(PaneKind::Spl),
+        View::of(PaneKind::Distortion),
     ])
 }
 
 /// Transfer across the top, `row` side by side below it in equal widths.
-fn grid_of(row: &[ac2_ui::state::PaneKind]) -> ac2_ui::prefs::PanesPrefs {
-    use ac2_ui::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode};
+fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
+    use ac2_ui::state::{Axis, PaneId, PaneKind, PaneNode, View};
     fn bottom(first: u32, n: usize) -> PaneNode {
         if n == 1 {
             return PaneNode::Leaf(PaneId(first));
@@ -637,14 +648,14 @@ fn grid_of(row: &[ac2_ui::state::PaneKind]) -> ac2_ui::prefs::PanesPrefs {
         a: Box::new(PaneNode::Leaf(PaneId(1))),
         b: Box::new(bottom(2, row.len())),
     };
-    let views = std::iter::once(PaneKind::Transfer)
+    let views = std::iter::once(View::of(PaneKind::Transfer))
         .chain(row.iter().copied())
         .zip(1..)
-        .map(|(kind, n)| ac2_ui::prefs::PanePrefs {
+        .map(|(v, n)| ac2_ui::prefs::PanePrefs {
             id: PaneId(n),
-            kind,
+            kind: v.kind,
             measurement: None,
-            modes: PaneModes::default(),
+            modes: v.modes,
         })
         .collect();
     ac2_ui::prefs::PanesPrefs {
@@ -666,6 +677,15 @@ pub fn pane(st: &ac2_ui::state::AppState, kind: ac2_ui::state::PaneKind) -> ac2_
     st.layout
         .lead(kind)
         .unwrap_or_else(|| panic!("no {kind:?} pane"))
+}
+
+/// The transfer pane in its impulse-response view (the first in reading order).
+pub fn ir_pane(st: &ac2_ui::state::AppState) -> ac2_ui::state::PaneId {
+    st.layout
+        .panes()
+        .into_iter()
+        .find(|id| st.layout.view(*id).is_some_and(|v| v.shows_ir()))
+        .expect("a transfer pane in its IR view")
 }
 
 /// What the panes drawn now show, in reading order.

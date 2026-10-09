@@ -59,7 +59,7 @@ impl Scope {
             Scope::Global => "Everywhere",
             Scope::Transfer => "Transfer function",
             Scope::Spectrum => "Spectrum / RTA",
-            Scope::Ir => "Impulse response",
+            Scope::Ir => "Transfer: impulse response view",
             Scope::Spl => "SPL",
             Scope::Distortion => "Sweep / distortion",
         }
@@ -380,13 +380,9 @@ commands! {
     FocusPane9 => "focus_pane_9", "Focus pane 9", [Global];
     SplitPane => "split_pane", "Split the focused pane in two (along its longer side)", [Global];
     ClosePane => "close_pane", "Close the focused pane", [Global];
-    NextPane => "next_pane", "Show next pane kind (transfer, spectrum, IR, SPL, sweep) in the focused pane", [Global];
-    PrevPane => "prev_pane", "Show previous pane kind in the focused pane", [Global];
     MaximizePane => "maximize_pane", "Layout: split → one pane → full screen", [Global];
-    NextMeasurement => "next_measurement", "Select next measurement of the focused pane", [Global];
-    PrevMeasurement => "prev_measurement", "Select previous measurement of the focused pane", [Global];
-    NextMeasurementInTree => "next_measurement_in_tree", "Select next measurement in the list", [Global];
-    PrevMeasurementInTree => "prev_measurement_in_tree", "Select previous measurement in the list", [Global];
+    NextMeasurementInTree => "next_measurement_in_tree", "Show the next measurement in the list in the focused pane", [Global];
+    PrevMeasurementInTree => "prev_measurement_in_tree", "Show the previous measurement in the list in the focused pane", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
     PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid → traces only", [Global];
@@ -521,6 +517,7 @@ commands! {
     Spectrograph => "spectrograph", "Spectrum pane: spectrum → spectrum + spectrograph → spectrograph", [Spectrum];
     SpectrographSpan => "spectrograph_span", "Spectrograph history: 10 → 30 → 60 → 120 s", [Spectrum];
 
+    TransferView => "transfer_view", "Transfer pane: response → phase → coherence → impulse response", [Transfer, Ir];
     IrMode => "ir_mode", "IR: linear → log → ETC", [Ir, Distortion];
 
     SplLeqView => "spl_leq_view", "SPL: meter → Leq windows → meter + Leq → bands", [Spl];
@@ -576,10 +573,6 @@ pub fn defaults() -> Vec<Binding> {
     let sh = Chord::shift;
     let cmd = Chord::command;
     let alt = Chord::alt;
-    let cmd_sh = |key| Chord {
-        shift: true,
-        ..Chord::command(key)
-    };
     let alt_sh = |key| Chord {
         shift: true,
         ..Chord::alt(key)
@@ -609,22 +602,18 @@ pub fn defaults() -> Vec<Binding> {
         (C::FocusPane7, S::Global, alt(K::Num7)),
         (C::FocusPane8, S::Global, alt(K::Num8)),
         (C::FocusPane9, S::Global, alt(K::Num9)),
-        // Ctrl+letter: plain N and D are the panes' own keys (next measurement, delay), and
-        // letters sit where they are on every layout.
-        (C::SplitPane, S::Global, cmd(K::N)),
-        (C::ClosePane, S::Global, cmd(K::D)),
+        // Plain letters: desktops take Ctrl+Tab and Ctrl+D for themselves, and letters sit
+        // where they are on every layout. Q closes a pane; Ctrl+Q, a step further, quits.
+        (C::SplitPane, S::Global, k(K::N)),
+        (C::ClosePane, S::Global, k(K::Q)),
         (C::SweepNew, S::Global, sh(K::S)),
         // Shift+M, a step on from M (average the shown traces): a math channel by name.
         (C::NewMath, S::Global, sh(K::M)),
-        // Tab walks the measurement list, the way it walks a form's fields; the panes step
-        // with Ctrl as a browser's tabs do.
+        // Tab walks the measurement list, the way it walks a form's fields, and the focused
+        // pane shows each measurement it reaches.
         (C::NextMeasurementInTree, S::Global, k(K::Tab)),
         (C::PrevMeasurementInTree, S::Global, sh(K::Tab)),
-        (C::NextPane, S::Global, cmd(K::Tab)),
-        (C::PrevPane, S::Global, cmd_sh(K::Tab)),
         (C::MaximizePane, S::Global, k(K::W)),
-        (C::NextMeasurement, S::Global, k(K::N)),
-        (C::PrevMeasurement, S::Global, sh(K::N)),
         // T strips the focused plot step by step (grid, then labels and cursor) for a clean
         // picture; the theme is in Settings › Display and the palette.
         (C::PlotChrome, S::Global, k(K::T)),
@@ -733,14 +722,18 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spl, k(K::S)),
         (C::SpectrumStyle, S::Spectrum, k(K::B)),
         (C::StartStop, S::Spectrum, k(K::S)),
-        // The IR pane shows the transfer measurement: S starts and stops it there too.
+        // The IR view shows the transfer measurement: S starts and stops it there too.
         (C::StartStop, S::Ir, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::P)),
-        // G is the view key of every pane (IR mode, SPL view): here the spectrograph, and
-        // with Shift how much history it shows.
+        // G is the view key of every pane: here the spectrograph, and with Shift how much
+        // history it shows.
         (C::Spectrograph, S::Spectrum, k(K::G)),
         (C::SpectrographSpan, S::Spectrum, sh(K::G)),
-        (C::IrMode, S::Ir, k(K::G)),
+        // The transfer pane's views; in the IR view its own steps take Shift, as on the
+        // sweep pane.
+        (C::TransferView, S::Transfer, k(K::G)),
+        (C::TransferView, S::Ir, k(K::G)),
+        (C::IrMode, S::Ir, sh(K::G)),
         (C::SplLeqView, S::Spl, k(K::G)),
         // B as the RTA's bars / line (C is the global cursor); Shift+B the other change of
         // the Leq windows' layout.
@@ -806,13 +799,13 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::NextTrace, "select trace", 90),
+                    hint(C::TransferView, "response/phase/coherence/IR", 75),
                     hint(C::ToggleSelected, "show/hide", 80),
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
                     hint(C::CoherenceMask, "coherence mask", 65),
                     hint(C::PhaseUnwrap, "wrap/unwrap", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
-                    hint(C::Compare, "compare", 45),
                 ]
             }
         }
@@ -834,11 +827,12 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Ir => {
             const {
                 &[
+                    hint(C::TransferView, "views", 92),
                     hint(C::IrMode, "linear/log/ETC", 90),
                     hint(C::ZoomIn, "zoom time", 80),
                     hint(C::LevelZoomIn, "zoom level", 65),
                     hint(C::LevelFit, "fit", 55),
-                    hint(C::NextMeasurement, "next measurement", 60),
+                    hint(C::NextMeasurementInTree, "next measurement", 60),
                     hint(C::ClosePane, "close pane", 45),
                     hint(C::MaximizePane, "maximise", 50),
                 ]
@@ -862,7 +856,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::SweepNew, "new sweep", 90),
-                    hint(C::NextMeasurement, "next sweep", 80),
+                    hint(C::NextTrace, "next sweep", 80),
                     hint(C::DistortionUnit, "dB/%", 70),
                     hint(C::SweepView, "response/IR/room", 75),
                     hint(C::IrMode, "linear/log/ETC", 70),
@@ -1227,9 +1221,9 @@ mod tests {
             ("9", CommandId::ShowSlot9),
             ("Alt+2", CommandId::FocusPane2),
             ("Alt+9", CommandId::FocusPane9),
-            ("Ctrl+N", CommandId::SplitPane),
-            ("Ctrl+D", CommandId::ClosePane),
-            ("Ctrl+Tab", CommandId::NextPane),
+            ("N", CommandId::SplitPane),
+            ("Q", CommandId::ClosePane),
+            ("G", CommandId::TransferView),
             ("Space", CommandId::StimulusArm),
             ("Enter", CommandId::StimulusFire),
             ("Esc", CommandId::StimulusStop),
@@ -1367,7 +1361,8 @@ mod tests {
         // Elsewhere macOS Control is no command key.
         assert!(!Chord::from_event(Key::K, mac_ctrl).command);
         let m = Keymap::default();
-        assert_eq!(m.lookup(Scope::Global, ctrl_tab), Some(CommandId::NextPane));
+        // Desktops take Ctrl+Tab (window and workspace switching): nothing is bound to it.
+        assert_eq!(m.lookup(Scope::Global, ctrl_tab), None);
         let tab = Chord::key(Key::Tab);
         assert_eq!(
             m.lookup(Scope::Global, tab),
@@ -1418,7 +1413,7 @@ mod tests {
         let m = Keymap::from_toml(
             r#"
             [transfer]
-            insert_delay = "Q"
+            insert_delay = "Shift+Q"
             invert = ["U", "I"]
 
             [global]
@@ -1429,7 +1424,7 @@ mod tests {
         let m = m.expect("valid");
         let c = |s: &str| Chord::parse(s).expect(s);
         assert_eq!(
-            m.lookup(Scope::Transfer, c("Q")),
+            m.lookup(Scope::Transfer, c("Shift+Q")),
             Some(CommandId::InsertDelay)
         );
         assert_eq!(m.lookup(Scope::Transfer, c("X")), None);
@@ -1448,16 +1443,16 @@ mod tests {
         let bad = [
             ("[transfer]\ninsert_delay = \"U\"", "bound to both"),
             ("[global]\nhelp = \"Space\"", "reserved"),
-            ("[global]\nstimulus_stop = \"Q\"", "Esc must stay"),
-            ("[global]\nstimulus_stop_anywhere = \"Q\"", "is fixed"),
+            ("[global]\nstimulus_stop = \"Shift+Q\"", "Esc must stay"),
+            ("[global]\nstimulus_stop_anywhere = \"Shift+Q\"", "is fixed"),
             (
                 "[global]\nstimulus_stop_anywhere = [\"Shift+Esc\", \"Ctrl+S\"]",
                 "is fixed",
             ),
             ("[global]\nhelp = \"Shift+Esc\"", "reserved"),
-            ("[spectrum]\ninsert_delay = \"Q\"", "does nothing"),
-            ("[nowhere]\nhelp = \"Q\"", "unknown scope"),
-            ("[global]\nfly = \"Q\"", "unknown command"),
+            ("[spectrum]\ninsert_delay = \"Shift+Q\"", "does nothing"),
+            ("[nowhere]\nhelp = \"Shift+Q\"", "unknown scope"),
+            ("[global]\nfly = \"Shift+Q\"", "unknown command"),
             ("[global]\nhelp = \"Ctrl+Nope\"", "unknown key"),
             ("[global]\nhelp = 3", "keys.toml"),
             // H is help in every pane: a pane's command on H conflicts with it there.
@@ -1507,7 +1502,7 @@ mod tests {
         );
         assert_eq!(
             m.first_chord(CommandId::ClosePane, Scope::Ir),
-            Chord::parse("Ctrl+D").ok()
+            Chord::parse("Q").ok()
         );
         assert_eq!(
             m.first_chord(CommandId::MaximizePane, Scope::Spl),
@@ -1516,46 +1511,73 @@ mod tests {
         assert_eq!(m.first_chord(CommandId::SweepIr, Scope::Spl), None);
     }
 
-    /// Ctrl+N splits and Ctrl+D closes in every pane: neither takes N (next measurement) or
-    /// D (the transfer pane's typed delay), nor a stimulus key, and both are a letter with
-    /// Ctrl, the same key on Nordic and every other layout (no AltGr, no dead key).
+    /// N splits and Q closes in every pane, plain letters the same on every layout; no
+    /// pane takes either for its own, nor is either a stimulus key. Desktops take Ctrl+Tab,
+    /// Ctrl+Shift+Tab and Ctrl+D: nothing is bound to them, nor to Ctrl+N. Ctrl+Q quits.
     #[test]
-    fn split_and_close_are_ctrl_letters_everywhere() {
+    fn split_and_close_are_plain_letters_everywhere() {
         let m = Keymap::default();
         let c = |s: &str| Chord::parse(s).expect(s);
         for scope in Scope::ALL {
             assert_eq!(
-                m.lookup(scope, c("Ctrl+N")),
+                m.lookup(scope, c("N")),
                 Some(CommandId::SplitPane),
                 "{scope:?}"
             );
             assert_eq!(
-                m.lookup(scope, c("Ctrl+D")),
+                m.lookup(scope, c("Q")),
                 Some(CommandId::ClosePane),
                 "{scope:?}"
             );
-            assert_ne!(m.lookup(scope, c("N")), Some(CommandId::SplitPane));
-            assert_ne!(m.lookup(scope, c("D")), Some(CommandId::ClosePane));
+            assert_eq!(
+                m.lookup(scope, c("Ctrl+Q")),
+                Some(CommandId::Quit),
+                "{scope:?}"
+            );
+            for gone in ["Ctrl+N", "Ctrl+D", "Ctrl+Tab", "Ctrl+Shift+Tab"] {
+                assert_eq!(m.lookup(scope, c(gone)), None, "{gone} in {scope:?}");
+            }
         }
         assert_eq!(
             m.lookup(Scope::Transfer, c("D")),
             Some(CommandId::TypeDelay)
         );
-        assert_eq!(
-            m.lookup(Scope::Global, c("N")),
-            Some(CommandId::NextMeasurement)
-        );
-        for chord in [c("Ctrl+N"), c("Ctrl+D")] {
+        for chord in [c("N"), c("Q")] {
             assert!(RESERVED.iter().all(|(r, _)| *r != chord), "{chord:?}");
-            assert!(chord.command && !chord.alt && !chord.shift, "{chord:?}");
-            assert!(
-                matches!(chord.key, Key::N | Key::D),
-                "a letter key: {chord:?}"
-            );
         }
         let bound = |cmd| m.bindings().iter().filter(|b| b.command == cmd).count();
         assert_eq!(bound(CommandId::SplitPane), 1);
         assert_eq!(bound(CommandId::ClosePane), 1);
+    }
+
+    /// G steps every pane's views; Shift+G is each pane's second view key (the IR's mode in
+    /// the transfer pane's IR view, as on the sweep pane).
+    #[test]
+    fn g_steps_the_views_of_every_pane() {
+        let m = Keymap::default();
+        let c = |s: &str| Chord::parse(s).expect(s);
+        for (scope, g, shift_g) in [
+            (Scope::Transfer, Some(CommandId::TransferView), None),
+            (
+                Scope::Ir,
+                Some(CommandId::TransferView),
+                Some(CommandId::IrMode),
+            ),
+            (
+                Scope::Spectrum,
+                Some(CommandId::Spectrograph),
+                Some(CommandId::SpectrographSpan),
+            ),
+            (Scope::Spl, Some(CommandId::SplLeqView), None),
+            (
+                Scope::Distortion,
+                Some(CommandId::SweepView),
+                Some(CommandId::IrMode),
+            ),
+        ] {
+            assert_eq!(m.lookup(scope, c("G")), g, "{scope:?}");
+            assert_eq!(m.lookup(scope, c("Shift+G")), shift_g, "{scope:?}");
+        }
     }
 
     #[test]

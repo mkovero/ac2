@@ -132,8 +132,8 @@ fn the_ir_pane_zooms_and_pans_time_and_value() {
     assert_eq!((live(&t).time_ms, live(&t).amplitude), (None, None));
 
     // Log: the dB axis. Ctrl+wheel about −30 dB, Shift+wheel pans.
-    t.key("G");
-    assert_eq!(t.st.kind_modes(PaneKind::Ir).ir, IrMode::Log);
+    t.key("Shift+G");
+    assert_eq!(t.st.layout.focused().modes.ir, IrMode::Log);
     nav(
         &mut t,
         IrPane::Live,
@@ -175,17 +175,10 @@ fn the_ir_cursor_reads_time_and_value() {
     t.key("Alt+3");
     let cursor = |t: &T| axes(t, IrPane::Live).cursor_ms;
     let reading = |t: &T| {
-        crate::scenes::ir(
-            &t.st,
-            t.pane(PaneKind::Ir),
-            &t.keys,
-            &Theme::dark(),
-            SIZE,
-            now(),
-        )
-        .expect("scene")
-        .cursor
-        .map(|c| c.text())
+        crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &Theme::dark(), SIZE, now())
+            .expect("scene")
+            .cursor
+            .map(|c| c.text())
     };
     t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(cursor(&t), Some(0.5));
@@ -196,7 +189,7 @@ fn the_ir_cursor_reads_time_and_value() {
     // A click: on the nearest sample.
     nav(&mut t, IrPane::Live, IrNavMsg::Cursor { t_ms: 1.47 });
     assert_eq!(reading(&t).as_deref(), Some("1.5 ms · −0.250 FS"));
-    t.key("G");
+    t.key("Shift+G");
     assert_eq!(reading(&t).as_deref(), Some("1.5 ms · −6.0 dB"));
     // The frequency cursor is the transfer pane's own.
     assert_eq!(t.st.view.cursor_hz, None);
@@ -320,12 +313,12 @@ fn stored_tf(id: u32, name: &str, ir: Option<TransferIr>) -> (TraceMeta, Arc<Tra
     (m, Arc::new(d))
 }
 
-/// The selected stored transfer trace's IR replaces the live one in the IR pane: its 64
-/// samples in the trace's colour, tagged with the trace's name, time zero at its delay, no
-/// live banners; Home and the cursor act on it. A trace captured without an IR, or none
-/// selected, leaves the pane on the live IR.
+/// The selected stored transfer trace's IR replaces the live one in the transfer IR view:
+/// its 64 samples in the trace's colour, tagged with the trace's name, time zero at its
+/// delay, no live banners; Home and the cursor act on it. A trace captured without an IR, or none
+/// selected, leaves the view on the live IR.
 #[test]
-fn the_ir_pane_shows_the_selected_stored_ir() {
+fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     let mut t = T::new();
     t.conn(ir_event(1));
     t.key("Alt+3");
@@ -351,9 +344,8 @@ fn the_ir_pane_shows_the_selected_stored_ir() {
     t.conn(ConnEvent::Trace(wd, grid.clone()));
     t.conn(ConnEvent::Trace(bd, grid));
     let theme = Theme::dark();
-    let scene = |t: &T| {
-        crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now()).expect("scene")
-    };
+    let scene =
+        |t: &T| crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
     // The curve: the longest polyline (axes and grid lines have two points).
     let curve = |s: &ac2_scene::ir::IrScene| {
         s.scene

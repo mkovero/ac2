@@ -3,7 +3,10 @@
 use super::*;
 
 fn hint_texts(t: &T, pane: PaneKind) -> Option<Vec<String>> {
-    let id = t.st.layout.lead(pane)?;
+    hints_of(t, t.st.layout.lead(pane)?)
+}
+
+fn hints_of(t: &T, id: PaneId) -> Option<Vec<String>> {
     t.st.key_hint_line(&t.keys, id, crate::keys::LabelStyle::Pc)
         .map(|v| v.iter().map(crate::hints::KeyHint::text).collect())
 }
@@ -17,16 +20,22 @@ fn key_hints_follow_the_focused_pane() {
     let tf = hint_texts(&t, PaneKind::Transfer).expect("transfer focused");
     assert_eq!(tf.first().map(String::as_str), Some("V select trace"));
     assert_eq!(tf.last().map(String::as_str), Some("H all keys"));
-    for p in [PaneKind::Spectrum, PaneKind::Ir, PaneKind::Spl] {
+    for p in [PaneKind::Spectrum, PaneKind::Spl] {
         assert_eq!(hint_texts(&t, p), None, "{p:?} is not focused");
     }
+    assert_eq!(
+        hints_of(&t, t.ir_pane()),
+        None,
+        "the IR view is not focused"
+    );
     t.key("Alt+2");
     assert_eq!(hint_texts(&t, PaneKind::Transfer), None);
     let sp = hint_texts(&t, PaneKind::Spectrum).expect("spectrum focused");
     assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
     t.key("Alt+3");
-    let ir = hint_texts(&t, PaneKind::Ir).expect("IR focused");
-    assert!(ir.contains(&"G linear/log/ETC".to_owned()), "{ir:?}");
+    let ir = hints_of(&t, t.ir_pane()).expect("IR view focused");
+    assert!(ir.contains(&"G views".to_owned()), "{ir:?}");
+    assert!(ir.contains(&"Shift+G linear/log/ETC".to_owned()), "{ir:?}");
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
     assert_eq!(spl[..3], ["G meter/Leq/both", "Shift+F F/S/I", "Z A/C/Z"]);
@@ -222,7 +231,7 @@ fn t_steps_only_the_focused_plot_and_is_remembered() {
     let chrome = |t: &T, id: PaneId| t.st.layout.view(id).expect("a pane").modes.chrome;
     let mut t = T::new();
     t.st.prefs_dirty = false;
-    let (tf, ir) = (t.pane(PaneKind::Transfer), t.pane(PaneKind::Ir));
+    let (tf, ir) = (t.pane(PaneKind::Transfer), t.ir_pane());
     // The transfer pane has the keyboard at start.
     t.key("T");
     assert_eq!(chrome(&t, tf), PlotChrome::NoGrid);
@@ -240,8 +249,8 @@ fn t_steps_only_the_focused_plot_and_is_remembered() {
         assert_eq!(chrome(&t, t.pane(p)), PlotChrome::Full, "{p:?}");
     }
     assert!(t.st.prefs_dirty);
-    // A split copies the step; the new IR pane then steps alone.
-    t.key("Ctrl+N");
+    // A split copies the step; the new IR view then steps alone.
+    t.key("N");
     let ir2 = t.st.layout.focus;
     assert_eq!(chrome(&t, ir2), PlotChrome::Bare);
     t.key("T");
@@ -277,10 +286,11 @@ fn layout_is_remembered_and_restored() {
     t.conn(mirror(state.clone()));
     t.st.prefs_dirty = false;
     t.key("Alt+3");
-    t.key("G");
-    assert_eq!(t.st.kind_modes(PaneKind::Ir).ir, IrMode::Log);
+    t.key("Shift+G");
+    let ir_mode = |t: &T| t.st.layout.view(t.ir_pane()).expect("view").modes.ir;
+    assert_eq!(ir_mode(&t), IrMode::Log);
     t.key("Alt+4");
-    t.key("N");
+    t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
     assert_eq!(t.st.kind_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(5)));
     t.key("G");
     t.key("W");
@@ -292,17 +302,21 @@ fn layout_is_remembered_and_restored() {
     assert_eq!(panes.root, t.st.layout.root);
     assert_eq!(panes.focus, t.pane(PaneKind::Spl));
     let view = |k: PaneKind| panes.views.iter().find(|v| v.kind == k).expect("a pane");
+    let ir_view = panes
+        .views
+        .iter()
+        .find(|v| v.modes.transfer == TransferView::Ir)
+        .expect("the IR view");
     // G from the default meter + Leq: the meter alone, remembered.
     assert_eq!(view(PaneKind::Spl).modes.spl, SplMode::Meter);
-    assert_eq!(view(PaneKind::Ir).modes.ir, IrMode::Log);
+    assert_eq!(ir_view.modes.ir, IrMode::Log);
     assert_eq!(
         view(PaneKind::Spl).measurement.as_deref(),
         Some("Stage SPL")
     );
-    // The transfer pane follows the selection and the IR pane the transfer pane: no
-    // measurement of their own.
+    // Both transfer panes follow the selection: no measurement of their own.
     assert_eq!(view(PaneKind::Transfer).measurement, None);
-    assert_eq!(view(PaneKind::Ir).measurement, None);
+    assert_eq!(ir_view.measurement, None);
     // Ticks change nothing and write nothing.
     t.st.prefs_dirty = false;
     t.st.update(
@@ -326,7 +340,7 @@ fn layout_is_remembered_and_restored() {
     assert_eq!(u.focus_kind(), PaneKind::Spl);
     assert!(u.st.layout.maximized && u.st.fullscreen);
     assert_eq!(u.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
-    assert_eq!(u.st.kind_modes(PaneKind::Ir).ir, IrMode::Log);
+    assert_eq!(ir_mode(&u), IrMode::Log);
     assert_eq!(u.st.stimulus.phase, StimPhase::Idle);
     // Before the daemon's state, the remembered names stay as they were.
     assert_eq!(u.st.layout_prefs(), prefs.layout);
@@ -407,9 +421,9 @@ fn the_link_receives_what_the_panes_draw() {
         ])
     );
     assert_eq!(t.st.display_period(), crate::conn::DISPLAY_PERIOD);
-    // The IR pane closed: no IR.
+    // The IR view closed: no IR.
     t.key("Alt+3");
-    t.key("Ctrl+D");
+    t.key("Q");
     assert!(!t.st.wanted_topics().contains(&topic(ir_of, Stream::Ir)));
     assert!(
         t.st.sync_link()
@@ -881,7 +895,7 @@ fn tab(t: &mut T, key: &str) -> Option<u32> {
 }
 
 /// Tab / Shift+Tab walk the measurements in the tree's order (math channels included, the
-/// traces and the Imported header skipped), wrapping; Ctrl+Tab steps the panes.
+/// traces and the Imported header skipped), wrapping; the focused pane shows each.
 #[test]
 fn tab_steps_through_the_trees_measurements() {
     let mut t = T::new();
@@ -898,17 +912,16 @@ fn tab_steps_through_the_trees_measurements() {
     t.st.selected = None;
     assert_eq!(tab(&mut t, "Shift+Tab"), Some(2));
 
-    // The focus goes to a pane that draws the selection, as a click on its row.
+    // The focused pane shows it, as on a click on its row, turning into its kind; the
+    // focus stays.
+    let pane = t.st.layout.focus;
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert_eq!(tab(&mut t, "Tab"), Some(1));
-    assert_eq!(t.focus_kind(), PaneKind::Transfer);
-
-    // Ctrl+Tab changes what the focused pane shows; the focus stays on it.
-    let (pane, before) = (t.st.layout.focus, t.focus_kind());
-    t.key("Ctrl+Tab");
-    assert_ne!(t.focus_kind(), before);
-    t.key("Ctrl+Shift+Tab");
-    assert_eq!((t.st.layout.focus, t.focus_kind()), (pane, before));
+    assert_eq!(
+        (t.st.layout.focus, t.focus_kind()),
+        (pane, PaneKind::Transfer)
+    );
+    assert_eq!(t.st.pane_meas(pane).map(|m| m.id), Some(MeasId(1)));
 }
 
 /// From a selected trace, Tab goes on from the measurement that owns it; from an imported

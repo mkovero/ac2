@@ -95,7 +95,7 @@ use ac2_scene::view::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode};
+use crate::state::{Axis, PaneId, PaneKind, PaneModes, PaneNode, TransferView};
 
 /// The session dialog's choices for one device (zero-based channels).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -174,7 +174,7 @@ pub struct LevelPrefs {
     pub spectrum_dbfs: Range,
     pub spectrum_spl: Range,
     pub distortion: Range,
-    /// The IR pane's log / ETC axis, dB re peak.
+    /// The transfer pane's IR view's log / ETC axis, dB re peak.
     pub ir: Range,
     /// The sweep pane's IR view's log / ETC axis, dB re peak.
     pub sweep_ir: Range,
@@ -522,7 +522,6 @@ impl LevelsFile {
 enum PaneFile {
     Transfer,
     Spectrum,
-    Ir,
     Spl,
     Distortion,
 }
@@ -532,7 +531,6 @@ impl PaneFile {
         match p {
             PaneKind::Transfer => Self::Transfer,
             PaneKind::Spectrum => Self::Spectrum,
-            PaneKind::Ir => Self::Ir,
             PaneKind::Spl => Self::Spl,
             PaneKind::Distortion => Self::Distortion,
         }
@@ -542,7 +540,6 @@ impl PaneFile {
         match self {
             Self::Transfer => PaneKind::Transfer,
             Self::Spectrum => PaneKind::Spectrum,
-            Self::Ir => PaneKind::Ir,
             Self::Spl => PaneKind::Spl,
             Self::Distortion => PaneKind::Distortion,
         }
@@ -565,6 +562,16 @@ enum SpectrumViewFile {
     Spectrum,
     SpectrumSpectrograph,
     Spectrograph,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TransferViewFile {
+    #[default]
+    Response,
+    Phase,
+    Coherence,
+    Ir,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -690,6 +697,8 @@ struct PaneEntryFile {
     kind: PaneFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     measurement: Option<String>,
+    #[serde(default)]
+    transfer_view: TransferViewFile,
     #[serde(default = "spl_meter_leq")]
     spl_view: SplViewFile,
     #[serde(default)]
@@ -709,6 +718,12 @@ impl PaneEntryFile {
             id: p.id.0,
             kind: PaneFile::of(p.kind),
             measurement: p.measurement.clone(),
+            transfer_view: match m.transfer {
+                TransferView::Response => TransferViewFile::Response,
+                TransferView::Phase => TransferViewFile::Phase,
+                TransferView::Coherence => TransferViewFile::Coherence,
+                TransferView::Ir => TransferViewFile::Ir,
+            },
             spl_view: match m.spl {
                 SplMode::Meter => SplViewFile::Meter,
                 SplMode::Leq => SplViewFile::Leq,
@@ -740,6 +755,12 @@ impl PaneEntryFile {
             kind: self.kind.pane(),
             measurement: self.measurement.clone(),
             modes: PaneModes {
+                transfer: match self.transfer_view {
+                    TransferViewFile::Response => TransferView::Response,
+                    TransferViewFile::Phase => TransferView::Phase,
+                    TransferViewFile::Coherence => TransferView::Coherence,
+                    TransferViewFile::Ir => TransferView::Ir,
+                },
                 spl: match self.spl_view {
                     SplViewFile::Meter => SplMode::Meter,
                     SplViewFile::Leq => SplMode::Leq,
@@ -1290,13 +1311,17 @@ mod tests {
                     id: PaneId(1),
                     kind: PaneKind::Transfer,
                     measurement: Some("Main L".to_owned()),
-                    modes: PaneModes::default(),
+                    modes: PaneModes {
+                        transfer: TransferView::Ir,
+                        ..PaneModes::default()
+                    },
                 },
                 PanePrefs {
                     id: PaneId(2),
                     kind: PaneKind::Spl,
                     measurement: Some("FOH SPL".to_owned()),
                     modes: PaneModes {
+                        transfer: TransferView::Coherence,
                         spl: SplMode::Leq,
                         spectrum: SpectrumMode::Spectrograph,
                         sweep: SweepMode::Room,

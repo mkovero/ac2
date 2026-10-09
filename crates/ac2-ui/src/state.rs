@@ -80,7 +80,8 @@ mod stimulus;
 #[path = "state_text.rs"]
 mod text;
 pub use panes::{
-    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect, View,
+    Axis, DEFAULT_PANE_AREA, Layout, PaneId, PaneMenuRow, PaneModes, PaneNode, PaneRect,
+    TransferView, View,
 };
 use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
@@ -91,9 +92,9 @@ pub use text::{
 /// The panes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PaneKind {
+    /// Live transfer curves; one of its views (G) is the impulse response.
     Transfer,
     Spectrum,
-    Ir,
     Spl,
     /// Sweep results: response, harmonic distortion, the sweep's IR. Hidden until a sweep
     /// is stored (or the operator shows it).
@@ -101,10 +102,9 @@ pub enum PaneKind {
 }
 
 impl PaneKind {
-    pub const ALL: [PaneKind; 5] = [
+    pub const ALL: [PaneKind; 4] = [
         PaneKind::Transfer,
         PaneKind::Spectrum,
-        PaneKind::Ir,
         PaneKind::Spl,
         PaneKind::Distortion,
     ];
@@ -113,7 +113,6 @@ impl PaneKind {
         match self {
             PaneKind::Transfer => Scope::Transfer,
             PaneKind::Spectrum => Scope::Spectrum,
-            PaneKind::Ir => Scope::Ir,
             PaneKind::Spl => Scope::Spl,
             PaneKind::Distortion => Scope::Distortion,
         }
@@ -123,33 +122,21 @@ impl PaneKind {
         match self {
             PaneKind::Transfer => "Transfer",
             PaneKind::Spectrum => "Spectrum / RTA",
-            PaneKind::Ir => "Impulse response",
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "Sweep / distortion",
         }
     }
 
-    /// Whether the pane shows measurements of kind `k` (the IR pane shows the transfer
-    /// pane's measurement).
+    /// Whether the pane shows measurements of kind `k`.
     pub fn shows(self, k: &MeasKind) -> bool {
         match self {
             // A sweep measurement has no live curve, but its runs are transfer curves: the
             // pane draws them when the sweep is its measurement.
             PaneKind::Transfer => k.publishes_tf() || matches!(k, MeasKind::Sweep { .. }),
-            // A math channel has no impulse response of its own.
-            PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
             PaneKind::Spectrum => k.publishes_levels(),
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
             // Sweep measurements: the pane shows their runs.
             PaneKind::Distortion => matches!(k, MeasKind::Sweep { .. }),
-        }
-    }
-
-    /// The pane whose measurement choice this one follows.
-    pub fn owner(self) -> PaneKind {
-        match self {
-            PaneKind::Ir => PaneKind::Transfer,
-            p => p,
         }
     }
 
@@ -166,7 +153,7 @@ impl PaneKind {
     /// What the pane's measurements are, for messages.
     pub fn what(self) -> &'static str {
         match self {
-            PaneKind::Transfer | PaneKind::Ir => "transfer",
+            PaneKind::Transfer => "transfer",
             PaneKind::Spectrum => "spectrum or RTA",
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "sweep",
@@ -936,7 +923,7 @@ pub enum Msg {
     Leq(LeqMsg),
     /// Mouse on the Settings view.
     Settings(SettingsMsg),
-    /// Mouse on an impulse-response picture (the IR pane, the sweep pane's IR view).
+    /// Mouse on an impulse-response picture (the transfer and sweep panes' IR views).
     IrNav(ac2_scene::view::IrPane, IrNavMsg),
 }
 
@@ -1043,10 +1030,10 @@ pub struct AppState {
     pub nav: FreqNav,
     pub layout: Layout,
     pub selected: Option<MeasId>,
-    /// The size of the panes' area as last drawn (the view writes it): Ctrl+N splits the
+    /// The size of the panes' area as last drawn (the view writes it): N splits the
     /// focused pane along its longer side.
     pub pane_area: (f32, f32),
-    /// The stored trace selected (list, V, the sweep pane's N): the trace keys change it
+    /// The stored trace selected (list, V): the trace keys change it
     /// instead of the pane's measurement, and a selected sweep is what the sweep pane shows.
     /// Selecting a measurement clears it, so whichever of the two was selected last is what
     /// the keys act on ([`AppState::keys_on_trace`]).

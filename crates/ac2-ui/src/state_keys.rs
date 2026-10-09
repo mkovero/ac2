@@ -5,7 +5,7 @@ use super::*;
 impl AppState {
     /// The wheel moves a list window's highlight; it never reaches what is behind it.
     pub(super) fn wheel(&mut self, rows: i32, keymap: &Keymap) {
-        let scope = self.layout.focus_kind().scope();
+        let scope = self.layout.focused().scope();
         match &mut self.overlay {
             Overlay::Palette(p) => {
                 let n = p.entries(keymap, scope).len();
@@ -99,7 +99,7 @@ impl AppState {
                 return;
             }
             Overlay::Palette(p) => {
-                let scope = self.layout.focus_kind().scope();
+                let scope = self.layout.focused().scope();
                 let n = p.entries(keymap, scope).len();
                 let page = crate::palette::PALETTE_ROWS as i32;
                 match chord.key {

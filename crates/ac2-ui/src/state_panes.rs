@@ -1,7 +1,8 @@
-//! The pane tree: the operator splits the screen into panes (Ctrl+N), closes them (Ctrl+D)
-//! and picks what each one shows (Ctrl+Tab, the title chip, N). A pane's content is a
-//! [`View`]: a kind, the measurement it shows and the kind's display modes. All of it is this
-//! app's: it lives in `ui.toml`, never on the wire.
+//! The pane tree: the operator splits the screen into panes (N), closes them (Q) and picks
+//! what each one shows (Tab and the list put a measurement in the focused pane, the title
+//! chip, G for the pane's views). A pane's content is a [`View`]: a kind, the measurement it
+//! shows and the kind's display modes. All of it is this app's: it lives in `ui.toml`, never
+//! on the wire.
 
 use super::*;
 
@@ -47,7 +48,7 @@ pub enum PaneNode {
     },
 }
 
-/// Ctrl+N refuses a split whose halves would be narrower or lower than this share of the
+/// N refuses a split whose halves would be narrower or lower than this share of the
 /// panes' area, and a saved ratio keeps each side of its split at least this share of it:
 /// plots past it are too small to read.
 const MIN_RATIO: f32 = 0.05;
@@ -202,13 +203,52 @@ impl PaneNode {
     }
 }
 
+/// What a transfer pane draws of its measurement (G steps through them in this order).
+/// Phase and coherence alone fill the pane: one quantity read at the full height.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TransferView {
+    /// Magnitude, phase and coherence (its placement is Shift+C's).
+    #[default]
+    Response,
+    Phase,
+    Coherence,
+    /// The impulse response of the measurement the pane shows.
+    Ir,
+}
+
+impl TransferView {
+    pub const ALL: [TransferView; 4] = [
+        TransferView::Response,
+        TransferView::Phase,
+        TransferView::Coherence,
+        TransferView::Ir,
+    ];
+
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// For the toast and the hint: what the pane now draws.
+    pub fn label(self) -> &'static str {
+        match self {
+            TransferView::Response => "response",
+            TransferView::Phase => "phase",
+            TransferView::Coherence => "coherence",
+            TransferView::Ir => "impulse response",
+        }
+    }
+}
+
 /// The display modes of a pane, each used while the pane shows its kind: two panes of one
-/// kind may show it differently (a spectrum beside its spectrograph).
+/// kind may show it differently (a spectrum beside its spectrograph, a response beside its
+/// impulse response).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PaneModes {
+    pub transfer: TransferView,
     pub spectrum: SpectrumMode,
     pub spl: SplMode,
-    /// The IR pane's and the sweep pane's IR view.
+    /// The transfer pane's and the sweep pane's IR view.
     pub ir: IrMode,
     pub sweep: SweepMode,
     /// Grid, labels and cursor (T), whatever the pane shows.
@@ -218,6 +258,7 @@ pub struct PaneModes {
 impl Default for PaneModes {
     fn default() -> Self {
         Self {
+            transfer: TransferView::Response,
             spectrum: SpectrumMode::Spectrum,
             spl: SplMode::MeterLeq,
             ir: IrMode::Linear,
@@ -230,9 +271,9 @@ impl Default for PaneModes {
 /// What a pane shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct View {
-    /// What Ctrl+Tab cycles: the kind of plot.
+    /// The kind of plot: the kind of the measurement put in it last (Tab, the list).
     pub kind: PaneKind,
-    /// The measurement chosen for it (N, the chip's list, a selection); `None` follows the
+    /// The measurement chosen for it (Tab, the list, the chip's list); `None` follows the
     /// selection.
     pub meas: Option<MeasId>,
     pub modes: PaneModes,
@@ -246,6 +287,31 @@ impl View {
             modes: PaneModes::default(),
         }
     }
+
+    /// A transfer pane in its IR view.
+    pub fn shows_ir(&self) -> bool {
+        self.kind == PaneKind::Transfer && self.modes.transfer == TransferView::Ir
+    }
+
+    /// The pane's name in its title: the IR view names what it draws, the other views the
+    /// kind (their plots carry their own titles).
+    pub fn title(&self) -> &'static str {
+        if self.shows_ir() {
+            "Impulse response"
+        } else {
+            self.kind.title()
+        }
+    }
+
+    /// The keys that act while this view has the focus: an IR has its own (time axis, IR
+    /// mode), the kind's otherwise.
+    pub fn scope(&self) -> Scope {
+        if self.shows_ir() {
+            Scope::Ir
+        } else {
+            self.kind.scope()
+        }
+    }
 }
 
 /// The panes on screen, what each shows and which has the keyboard.
@@ -256,8 +322,8 @@ pub struct Layout {
     pub focus: PaneId,
     /// Only the focused pane.
     pub maximized: bool,
-    /// Panes by when they last had the focus, the focused one first: an IR pane follows the
-    /// transfer pane focused last.
+    /// Panes by when they last had the focus, the focused one first: a command about a kind
+    /// acts on the pane of that kind focused last.
     mru: Vec<PaneId>,
     /// The id the next split's pane takes: past every id used this run, so a closed pane's
     /// id never comes back to a new pane (what it showed, kept by id, would follow it).
@@ -420,34 +486,18 @@ impl AppState {
     fn resolve_meas(&self, kind: PaneKind, own: Option<MeasId>) -> Option<&Measurement> {
         let c = self.pane_candidates(kind);
         let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
-        let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind).owner() == kind.owner();
+        let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind) == kind;
         pick(own)
             .or_else(|| pick(self.selected).filter(|m| home(m)))
             .or_else(|| c.iter().find(|m| home(m)).copied())
             .or_else(|| c.first().copied())
     }
 
-    /// What an IR pane without a choice of its own shows: what the lead transfer pane
-    /// shows (a math channel too: the IR pane then says it has no IR of it). A sweep's runs
-    /// there have their IR on the sweep pane: the IR pane keeps a live measurement.
-    fn followed(&self, kind: PaneKind, meas: Option<MeasId>) -> Option<Option<&Measurement>> {
-        match (kind, meas) {
-            (PaneKind::Ir, None) => self
-                .layout
-                .lead(PaneKind::Transfer)
-                .and_then(|t| self.pane_meas(t))
-                .filter(|m| !matches!(m.config.kind, MeasKind::Sweep { .. }))
-                .map(Some),
-            _ => None,
-        }
-    }
-
     /// The measurement pane `id` shows: its own choice, else the selected measurement if it
     /// fits, else the first that fits.
     pub fn pane_meas(&self, id: PaneId) -> Option<&Measurement> {
         let v = self.layout.view(id)?;
-        self.followed(v.kind, v.meas)
-            .unwrap_or_else(|| self.resolve_meas(v.kind, v.meas))
+        self.resolve_meas(v.kind, v.meas)
     }
 
     /// The measurement "the `kind` pane" shows, for what is about a kind rather than one pane
@@ -456,9 +506,7 @@ impl AppState {
     pub fn kind_meas(&self, kind: PaneKind) -> Option<&Measurement> {
         match self.layout.lead(kind) {
             Some(id) => self.pane_meas(id),
-            None => self
-                .followed(kind, None)
-                .unwrap_or_else(|| self.resolve_meas(kind, None)),
+            None => self.resolve_meas(kind, None),
         }
     }
 
@@ -469,6 +517,15 @@ impl AppState {
         v.spectrum.mode = modes.spectrum;
         v.ir.mode = modes.ir;
         v.chrome = modes.chrome;
+        // The transfer scene lays out the plots it is asked for: one alone fills the pane.
+        let shown = match modes.transfer {
+            TransferView::Response | TransferView::Ir => None,
+            TransferView::Phase => Some((false, true, false)),
+            TransferView::Coherence => Some((false, false, true)),
+        };
+        if let Some((m, p, c)) = shown {
+            (v.tf.show_magnitude, v.tf.show_phase, v.tf.show_coherence) = (m, p, c);
+        }
         v
     }
 
@@ -529,7 +586,7 @@ impl AppState {
             .map_or(PaneRect::new(0.0, 0.0, w, h), |(_, r)| r)
     }
 
-    /// Ctrl+N: the focused pane split in two along its longer side; the new half shows the
+    /// N: the focused pane split in two along its longer side; the new half shows the
     /// same and has the focus. Maximised, the split shows at once: the layout goes back to
     /// all panes.
     pub(super) fn split_pane(&mut self) {
@@ -541,17 +598,14 @@ impl AppState {
             (rect.h, h)
         };
         if side / 2.0 < MIN_RATIO * extent {
-            self.warn("the pane is too small to split: Ctrl+D closes one to make room");
+            self.warn("the pane is too small to split: Q closes one to make room");
             return;
         }
         // Both halves keep showing what the pane did, whatever is selected later: an
-        // unchosen pane would follow the selection. An IR pane following the transfer pane
-        // keeps following it.
+        // unchosen pane would follow the selection.
         let f = self.layout.focus;
         let shown = self.pane_meas(f).map(|m| m.id);
-        if let Some(v) = self.layout.view_mut(f)
-            && !(v.kind == PaneKind::Ir && v.meas.is_none())
-        {
+        if let Some(v) = self.layout.view_mut(f) {
             v.meas = v.meas.or(shown);
         }
         let waiting = self.pending_pane_meas.get(&f).cloned();
@@ -562,12 +616,12 @@ impl AppState {
         }
     }
 
-    /// Ctrl+D: the focused pane closed, its neighbour taking its place and the focus; the
+    /// Q: the focused pane closed, its neighbour taking its place and the focus; the
     /// last pane stays.
     pub(super) fn close_pane(&mut self) {
         let gone = self.layout.focus;
         if !self.layout.close_focused() {
-            self.warn("the last pane stays: Ctrl+Tab changes what it shows");
+            self.warn("the last pane stays: Tab puts the next measurement in it");
             return;
         }
         if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
@@ -587,10 +641,7 @@ impl AppState {
                 let id = *id;
                 self.focus_pane(id);
             }
-            None => self.warn(format!(
-                "no pane {n}: {} on screen (Ctrl+N splits)",
-                panes.len()
-            )),
+            None => self.warn(format!("no pane {n}: {} on screen (N splits)", panes.len())),
         }
     }
 
@@ -648,31 +699,6 @@ impl AppState {
         if !self.spectrograph_shown() {
             self.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
-        }
-    }
-
-    /// Ctrl+Tab / Ctrl+Shift+Tab: the focused pane shows the next / previous kind that has
-    /// something to show (the sweep pane needs a sweep).
-    pub(super) fn cycle_pane(&mut self, d: i32) {
-        let cur = self.layout.focus_kind();
-        let all = PaneKind::ALL;
-        let n = all.len() as i32;
-        let i = all.iter().position(|k| *k == cur).unwrap_or(0) as i32;
-        let next = (1..n)
-            .map(|s| all[((i + d * s).rem_euclid(n)) as usize])
-            // The sweep pane is where a sweep is set up (Space there opens its dialog): it is
-            // never skipped. Other kinds with nothing to show are.
-            .find(|k| *k == PaneKind::Distortion || !self.pane_candidates(*k).is_empty());
-        match next {
-            Some(k) => {
-                let f = self.layout.focus;
-                self.set_pane_kind(f, k);
-                self.focus_pane(f);
-            }
-            None if self.pane_candidates(cur).is_empty() => {
-                self.warn("nothing to show yet: Ctrl+K → New transfer measurement…");
-            }
-            None => self.warn(format!("only {} measurements to show", cur.what())),
         }
     }
 

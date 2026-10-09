@@ -389,30 +389,31 @@ first measurement (a transfer pane on an empty daemon). Lay it out as the job ne
 
 | Key | Does |
 |---|---|
-| **Ctrl+N** | splits the focused pane in two along its longer side (side by side in a wide pane, one above the other in a tall one); the new half shows the same and takes the focus |
-| **Ctrl+D** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Ctrl+Tab** changes what it shows) |
-| **Ctrl+Tab** / **Ctrl+Shift+Tab** | the focused pane shows the next / previous kind: transfer, spectrum / RTA, impulse response, SPL, sweep / distortion (kinds with nothing to show are skipped, except the sweep pane: Space there sets up a sweep) |
+| **N** | splits the focused pane in two along its longer side (side by side in a wide pane, one above the other in a tall one); the new half shows the same measurement and views and takes the focus |
+| **Q** | closes the focused pane; its neighbour takes the space and the focus. The last pane stays (**Tab** puts another measurement in it) |
+| **Tab** / **Shift+Tab** | the focused pane shows the next / previous measurement of the list, whatever its kind: the pane turns into the kind that draws it (transfer, spectrum / RTA, SPL, sweep / distortion) |
+| **G** | steps the focused pane's views; on a transfer pane: response → phase → coherence → impulse response |
 | **Alt+1 … Alt+9** | focus the panes in reading order: top to bottom, then left to right |
 | click | focuses the pane |
 
-Each pane is on its own: its kind, its measurement (from the title chip or **N**) and its
-views (**G** and the other view keys act on the focused pane only). Two transfer panes can
-show two measurements side by side; **N** steps the focused one only. The chip's list also
-offers the other kinds at its end (`pane  Spectrum / RTA`): a pick there turns the pane
-into that kind.
+**Ctrl+Q** still quits. Each pane is on its own: its kind, its measurement (from the title
+chip, **Tab** or a click in the list) and its views (**G** and the other view keys act on
+the focused pane only). Two transfer panes can show two measurements side by side, or one
+measurement as response and impulse response: split (**N**), then **G** the new half to the
+view wanted. The chip's list offers the measurements of the pane's kind, and the other kinds
+at its end (`pane  Spectrum / RTA`): a pick there turns the pane into that kind.
 
-An **impulse-response pane** without a measurement of its own shows the IR of what the
-transfer pane focused last shows: focus another transfer pane and it follows. Picking one on
-its chip keeps it there.
+The **impulse response** is a view of the transfer pane (**G** until the title reads
+`Impulse response`): it shows the IR of that pane's own measurement. **Shift+G** there steps
+linear / log / ETC.
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
 focused last; with none on screen the focused pane turns into one. A finished sweep opens
-no pane by itself: the toast says to **Ctrl+Tab** to the sweep pane.
+no pane by itself: the toast says to **Tab** to it to see it in the focused pane.
 
 ### Choosing what a pane shows
 
-Each pane's title has a **chip** naming the measurement it shows; an IR pane without a choice
-of its own follows the transfer pane's. The transfer pane draws that measurement's **group** as the
+Each pane's title has a **chip** naming the measurement it shows. The transfer pane draws that measurement's **group** as the
 measurement tree lists it, and nothing else:
 
 - its live curve (unless hidden with **A**), the math channels filed under it (unless
@@ -440,18 +441,19 @@ the group's own curves. Compared measurements are remembered by name (as hidden 
 To pick another measurement:
 
 - click the chip for the list of measurements the pane can show;
-- or focus the pane (click it, **Alt+1 … Alt+9**) and press **N** / **Shift+N**:
-  they step through that pane's kind only (transfer measurements in the transfer pane,
-  spectra and RTAs in the spectrum pane);
+- or focus the pane (click it, **Alt+1 … Alt+9**) and press **Tab** / **Shift+Tab**:
+  they step through the whole list, and the pane turns into the kind of the measurement
+  it lands on;
 - or use **Choose the measurement the focused pane shows…** in the palette (**↑/↓**,
   **Enter**).
 
 Which measurement the keys act on:
 
 - A click inside a pane selects the measurement it shows, exactly as clicking it in the
-  measurement list does. Selecting one in the list makes its pane show it and gives that
-  pane the focus (unless the focused pane draws it already: the IR pane keeps it for a
-  transfer measurement).
+  measurement list does. Selecting one in the list (click, **Enter**) puts it in the
+  focused pane, which turns into its kind; with panes following the selection it goes to
+  the pane of its kind focused last instead (the focused pane turns only when there is
+  none).
 - **S** (start / stop) and **R** (reset) act on the measurement the focused pane shows,
   never on one of another kind selected elsewhere, and say what to create when the pane
   shows none.
@@ -464,7 +466,7 @@ One measurement and at most one stored trace are selected at a time, and the one
 last has the keys that act on "the selected curve":
 
 - a click on a measurement (its row in the measurement tree, its live curve's row, or a
-  math channel's row; or **N**, a pane's chip, a click in its pane) gives them to it;
+  math channel's row; or **Tab**, a pane's chip, a click in its pane) gives them to it;
 - a click on a trace in the tree (or **V**, **Alt+V**) gives them to that trace;
 - **Esc** with no window open hands them back to the measurement.
 
@@ -477,10 +479,10 @@ selected.
   (with a trace selected: that trace's group).
 
 - **A** on a measurement hides its live curve in every pane (its legend row goes; the IR
-  pane says `TF 2 hidden — A shows it`); **A** again shows it. This is this app's display
+  view says `TF 2 hidden — A shows it`); **A** again shows it. This is this app's display
   only: the measurement keeps running and measuring, the other clients still see it. Its
   list row says `hidden` (dimmed), as does its row in a pane's measurement list, and its
-  pane's title starts with `TF 2 hidden`. **N** / **Shift+N** and a click still reach it.
+  pane's title starts with `TF 2 hidden`. **Tab** / **Shift+Tab** and a click still reach it.
   The app remembers hidden measurements by name in `ui.toml` (`hidden = ["TF 2"]` under
   `[layout]`).
 - **Delete** or **Backspace** (keyboards without a Delete key) on a measurement asks first:
@@ -513,8 +515,8 @@ alone.
 with one pane up, that is the same stage view. Esc stops the stimulus as anywhere else
 (Shift+Esc too, also with a window open).
 
-With the focused pane maximised, picking a measurement in the list switches the one pane to
-the pane that shows it, and the layout stays maximised:
+With the focused pane maximised, picking a measurement in the list puts it in the one pane,
+which turns into the kind that shows it, and the layout stays maximised:
 
 - a transfer measurement → the transfer pane;
 - a spectrum or RTA → the spectrum / RTA pane;
@@ -532,12 +534,12 @@ selection on / off*; off by default, kept in `ui.toml` as `panes_follow = true`)
 only the panes that draw what is selected in the list, and they share the freed space:
 
 - a measurement → the panes that can show it (the source chip in their title), and those
-  drawing its math channels and its shown stored traces: a transfer measurement → transfer
-  and impulse response; a spectrum or RTA → spectrum / RTA; an SPL meter → SPL; a sweep →
-  the sweep pane, and with runs the transfer and impulse-response panes that draw them;
+  drawing its math channels and its shown stored traces: a transfer measurement → the
+  transfer panes (in any view, impulse response too); a spectrum or RTA → spectrum / RTA; an
+  SPL meter → SPL; a sweep → the sweep pane, and with runs the transfer panes that draw them;
 - a stored trace → the panes drawing it and its measurement; an imported one → the panes
   drawing it;
-- nothing selected, or none of those panes shown (the IR pane or the sweep pane put away) →
+- nothing selected, or none of those panes shown (no transfer pane or no sweep pane shown) →
   every shown pane.
 
 The focus moves to a kept pane when the selection hides the focused one; **Alt+1 …** count
@@ -549,10 +551,9 @@ The app remembers in `ui.toml` (written when the layout changes and on exit):
 
 - the panes: how they are split, what kind each shows and which has the focus, and whether
   it is maximised or full screen;
-- the measurement each pane shows (by name; an IR pane following the transfer pane keeps
-  following it);
-- each pane's views: the SPL view (meter, Leq windows or both), the spectrum view, the sweep
-  view, the IR mode and how much of its plot is drawn (**T**: grid, labels,
+- the measurement each pane shows (by name);
+- each pane's views: the transfer view (response, phase, coherence or impulse response), the
+  SPL view (meter, Leq windows or both), the spectrum view, the sweep view, the IR mode and how much of its plot is drawn (**T**: grid, labels,
   cursor); the Leq windows' style and the sweep pane's dB / %;
 - the window's size and position;
 - each pane's level axis range (see below).
@@ -604,7 +605,7 @@ differ):
 **T** again comes back to the full plot; a toast names the pane and the step
 (`Transfer: no grid`). The axes keep their ranges in every step, so zoom, pan and the
 cursor keys work as before (the cursor comes back where it was). The step belongs to the
-pane: it stays when **Ctrl+Tab** changes what the pane shows, and a split copies it. A
+pane: it stays when **Tab** changes what the pane shows, and a split copies it. A
 spectrum pane's step covers the spectrograph too, an SPL pane's the Leq history strip, a
 sweep pane's its response, distortion and IR. The theme (dark, light, high contrast) is in Settings ›
 Display and in the palette (**Ctrl+K**, *Theme*).
@@ -630,7 +631,8 @@ size and whether it is hidden are kept in `ui.toml` (`[legend.transfer]`).
 
 #### Impulse-response pictures
 
-The IR pane (**Alt+3**) and the sweep pane's IR view (**G**) take the same keys and mouse on
+The transfer pane's IR view (**G** to `Impulse response`) and the sweep pane's IR view
+(**G**) take the same keys and mouse on
 a **time axis** (ms re t = 0):
 
 | Action | Time axis | Value axis |
@@ -646,9 +648,9 @@ a **time axis** (ms re t = 0):
 - A click (or *Comparison cursor on / off* in the palette) puts a time cursor on the IR;
   **Shift+←** / **Shift+→** step it (a sample when zoomed in, a hundredth of the shown span otherwise). The readout under the
   origin line reads its sample: `1.25 ms · +0.500 FS` or `1.25 ms · −12.3 dB`.
-- The IR pane and the sweep's IR view each keep their own zoom and cursor; the log / ETC
+- The transfer and sweep IR views each keep their own zoom and cursor; the log / ETC
   ranges are remembered in `ui.toml` (`ir`, `sweep_ir`). A selected transfer trace's stored
-  IR is drawn on the IR pane's axes ([The impulse-response pane](#the-impulse-response-pane)).
+  IR is drawn on the transfer IR view's axes ([The impulse-response view](#the-impulse-response-view)).
 
 The sweep's response & distortion view uses the frequency keys and mouse of the other
 panes, its level axis in dB or in % (the wheel zooms about the level under the pointer
@@ -775,7 +777,7 @@ smoothing of its curve.
   highlighted and the title of the pane it is drawn in names it (`slot 3 (…): smoothing …`,
   `Sweep 2: smoothing off`); then **K** / **Shift+K**. To go back to the live measurement,
   step past the last trace with **V**, click the trace again, choose *Deselect the stored
-  trace* in the palette, or select a measurement (**N**, **Alt+1 … Alt+9**, a click).
+  trace* in the palette, or select a measurement (**Tab**, **Alt+1 … Alt+9**, a click).
 - From the **command line**: `ac2 trace smooth <trace> 1/12` (also `1/3` … `1/48`, or just
   `12`; `none` turns it off). A transfer or sweep trace keeps the mode it had — magnitude
   and phase for one that was not smoothed — unless `--phase` (magnitude and phase) or
@@ -982,26 +984,27 @@ ac2 delay nudge main-l -0.25samples         # move it by a step
 ac2 delay set main-l 600.25samples          # move it to a value as D does (the arrival stays)
 ```
 
-#### The impulse-response pane
+#### The impulse-response view
 
-The inserted delay is also the time origin of the impulse-response pane (**Ctrl+Tab** a pane
-to it). The IR pane follows the transfer measurement and carries its banners (NO
+The inserted delay is also the time origin of the transfer pane's impulse-response view
+(**G** on a transfer pane until its title reads `Impulse response`). It shows the IR of that
+pane's measurement and carries its banners (NO
 REFERENCE, NO SIGNAL, AUDIO STOPPED, DAEMON NOT RESPONDING); a kept IR is tagged and dimmed as
 its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it says why:
 
-- `Main L stopped — S starts it` (**S** starts and stops it from the IR pane too);
+- `Main L stopped — S starts it` (**S** starts and stops it from the IR view too);
 - `no reference: nothing is playing — Space arms, Enter starts the stimulus` (or
   `armed — Enter starts the stimulus`, or, with the stimulus playing,
   `nothing is driving the loopback`);
 - `no signal: …`.
 
 **A stored IR.** A transfer capture (**Ctrl+1 … 9**, or *Capture*) keeps the impulse
-response the IR pane showed at that moment — every sample, time zero at the trace's
+response the IR view showed at that moment — every sample, time zero at the trace's
 inserted delay — unless the measurement had none yet (no reference). **Select** that trace
-(**V**, or a click on its row) and the IR pane draws its IR instead of the live one, in the
-trace's colour and named after the origin line as its legend row names it:
+(**V**, or a click on its row) and the transfer pane's IR view draws its IR instead of the
+live one, in the trace's colour and named after the origin line as its legend row names it:
 `t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`. No live banners apply to it;
-the keys, zoom and cursor are the pane's as before. The pane goes back to the live IR when
+the keys, zoom and cursor are the view's as before. The view goes back to the live IR when
 the trace is deselected (**V** past the last trace, a click on it again, *Deselect the stored
 trace*, or a measurement selected), or when the selected trace has no IR (an average, a math
 capture, an import of analyzer text, a capture taken without a reference). Only a trace the
@@ -1051,9 +1054,8 @@ Working with the tree:
   channels included, wrapping at the ends; stored traces and the Imported header are
   skipped. They start from the selected measurement, or from the selected trace's
   measurement. A measurement in a folded group is reached too (a math channel's group
-  unfolds to show it); the tree scrolls to it and the focus goes to a pane that draws it,
-  as a click on the row does. (**N** / **Shift+N** step only through the focused pane's
-  kind; **Alt+1 …** focus the panes.)
+  unfolds to show it); the tree scrolls to it and the focused pane shows it, turning into
+  its kind, as a click on the row does. (**Alt+1 …** focus the panes.)
 - **Move to measurement…** (**Shift+F2**, beside F2 rename, or the palette) files the
   selected stored trace — or the selected math channel — under another measurement or
   under Imported: **↑/↓** choose, **Enter** moves it, **Esc** cancels. Only where it is
@@ -1170,7 +1172,7 @@ measurement):
 #### Comparing traces
 
 - **One selection for the sweeps:** a sweep selected in the list or with V is the one the
-  **Sweep / distortion** pane shows, and **N** / **Shift+N** on that pane select the sweep they
+  **Sweep / distortion** pane shows, and **V** / **Shift+V** on that pane select the sweep they
   step to, for the transfer pane and the trace keys too. A finished sweep is selected.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
   times between traces stay visible.
@@ -1286,7 +1288,7 @@ and listed under its sweep measurement ([the measurement tree](#the-measurement-
 ### The Sweep / distortion pane
 
 The result shows on the **Sweep / distortion** pane (a sweep run from the dialog turns the
-focused pane into it; **Ctrl+Tab** a pane to it to see one later): the fundamental's response
+focused pane into it; **Tab** to the sweep measurement to see one later): the fundamental's response
 above, the distortion below. It shows the newest run of the selected sweep measurement (or
 the run selected).
 
@@ -1302,8 +1304,8 @@ the run selected).
 | **G** | steps the views: response & distortion → **impulse response** with the harmonics' impulses marked → **room parameters** table alone, the whole pane, as large as it fits (read across a room; maximised with **W**) → back. The view is remembered. |
 | **Shift+G** | IR view: linear / log / ETC |
 | **Shift+I** | straight to the impulse response and back |
-| **N** | steps through stored sweeps, selecting each |
-| **Ctrl+D** | closes the pane |
+| **V** / **Shift+V** | steps through stored sweeps, selecting each |
+| **Q** | closes the pane |
 
 ### Low-frequency harmonics (LF harmonics: fine)
 
@@ -2401,15 +2403,11 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+7` | Focus pane 7 | `focus_pane_7` |
 | `Alt+8` | Focus pane 8 | `focus_pane_8` |
 | `Alt+9` | Focus pane 9 | `focus_pane_9` |
-| `Ctrl+N` | Split the focused pane in two (along its longer side) | `split_pane` |
-| `Ctrl+D` | Close the focused pane | `close_pane` |
-| `Ctrl+Tab` | Show next pane kind (transfer, spectrum, IR, SPL, sweep) in the focused pane | `next_pane` |
-| `Ctrl+Shift+Tab` | Show previous pane kind in the focused pane | `prev_pane` |
+| `N` | Split the focused pane in two (along its longer side) | `split_pane` |
+| `Q` | Close the focused pane | `close_pane` |
 | `W` | Layout: split → one pane → full screen | `maximize_pane` |
-| `N` | Select next measurement of the focused pane | `next_measurement` |
-| `Shift+N` | Select previous measurement of the focused pane | `prev_measurement` |
-| `Tab` | Select next measurement in the list | `next_measurement_in_tree` |
-| `Shift+Tab` | Select previous measurement in the list | `prev_measurement_in_tree` |
+| `Tab` | Show the next measurement in the list in the focused pane | `next_measurement_in_tree` |
+| `Shift+Tab` | Show the previous measurement in the list in the focused pane | `prev_measurement_in_tree` |
 | `T` | Plot of the focused pane: grid, labels and cursor → no grid → traces only | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |
@@ -2489,6 +2487,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
 | `Shift+K` | Smoothing finer (selected trace or pane's measurement) | `smooth_finer` |
 | `Shift+P` | Phase / group delay | `group_delay` |
+| `G` | Transfer pane: response → phase → coherence → impulse response | `transfer_view` |
 
 #### Spectrum / RTA
 
@@ -2504,12 +2503,13 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `G` | Spectrum pane: spectrum → spectrum + spectrograph → spectrograph | `spectrograph` |
 | `Shift+G` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 
-#### Impulse response
+#### Transfer: impulse response view
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
 | `S` | Start / stop selected measurement | `start_stop` |
-| `G` | IR: linear → log → ETC | `ir_mode` |
+| `G` | Transfer pane: response → phase → coherence → impulse response | `transfer_view` |
+| `Shift+G` | IR: linear → log → ETC | `ir_mode` |
 
 #### SPL
 
@@ -2605,11 +2605,11 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `C` compare · `H` all keys |
+| Transfer function | `V` select trace · `G` response/phase/coherence/IR · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Impulse response | `G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `N` next measurement · `Ctrl+D` close pane · `W` maximise · `H` all keys |
+| Transfer: impulse response view | `G` views · `Shift+G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next measurement · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq/both/bands · `Shift+F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Ctrl+D` close pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Q` close pane · `H` all keys |
 
 <!-- keymap:end -->
 

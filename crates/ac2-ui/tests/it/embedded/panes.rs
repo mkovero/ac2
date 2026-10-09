@@ -61,13 +61,17 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     assert!(sp.contains(&"P peak hold".to_owned()), "{sp:?}");
     d.key("Alt+3");
     let ir = hint_line(&d.st);
-    assert_eq!(ir.first().map(String::as_str), Some("G linear/log/ETC"));
+    assert_eq!(ir.first().map(String::as_str), Some("G views"));
     d.key("Alt+4");
     let spl = hint_line(&d.st);
     assert_eq!(spl.first().map(String::as_str), Some("G meter/Leq/both"));
-    // A fifth pane, Ctrl+Tab to the sweep pane (after SPL).
-    d.key("Ctrl+N");
-    d.key("Ctrl+Tab");
+    // A fifth pane, turned into the sweep pane from its list.
+    d.key("N");
+    let f = d.st.layout.focus;
+    d.send(Msg::PanePick(
+        f,
+        ac2_ui::state::PaneMenuRow::Kind(ac2_ui::state::PaneKind::Distortion),
+    ));
     assert_eq!(
         d.st.layout.focus_kind(),
         ac2_ui::state::PaneKind::Distortion
@@ -107,7 +111,7 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
 /// the focus on one of them; off again, every pane.
 #[test]
 fn panes_follow_the_selection_from_an_empty_daemon() -> R {
-    use ac2_ui::state::PaneKind::{Ir, Spectrum, Spl, Transfer};
+    use ac2_ui::state::PaneKind::{Spectrum, Spl, Transfer};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.synced()?;
@@ -144,14 +148,19 @@ fn panes_follow_the_selection_from_an_empty_daemon() -> R {
             .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
             .map(|m| m.id)
             .ok_or("spectrum")?;
+    // Picked with the transfer pane focused: it lands there.
+    d.key("Alt+1");
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(crate::common::visible(&d.st), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [Transfer, Spectrum, Transfer, Spl]
+    );
 
     d.key("Ctrl+K");
     d.send(Msg::Text("panes follow".into()));
     d.key("Enter");
     assert!(d.st.prefs.panes_follow);
-    assert_eq!(crate::common::visible(&d.st), [Transfer, Ir]);
+    assert_eq!(crate::common::visible(&d.st), [Transfer, Transfer]);
     d.send(Msg::SelectMeas(sp));
     assert_eq!(crate::common::visible(&d.st), [Spectrum]);
     assert_eq!(d.st.layout.focus_kind(), Spectrum);
@@ -161,7 +170,7 @@ fn panes_follow_the_selection_from_an_empty_daemon() -> R {
         stream: Stream::Tf
     }));
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(crate::common::visible(&d.st), [Transfer, Ir]);
+    assert_eq!(crate::common::visible(&d.st), [Transfer, Transfer]);
     assert_eq!(d.st.layout.focus_kind(), Transfer);
     // W maximises within the kept panes.
     d.key("W");
@@ -174,7 +183,10 @@ fn panes_follow_the_selection_from_an_empty_daemon() -> R {
 
     d.send(Msg::Command(CommandId::PanesFollow));
     assert!(!d.st.prefs.panes_follow);
-    assert_eq!(crate::common::visible(&d.st), [Transfer, Spectrum, Ir, Spl]);
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [Transfer, Spectrum, Transfer, Spl]
+    );
     drop(d);
     drop(daemon);
     Ok(())
@@ -711,8 +723,8 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     assert!(!has(&d.st, Stream::Levels));
 
     d.key("Alt+3");
-    d.key("Ctrl+D");
-    assert!(d.st.layout.lead(ac2_ui::state::PaneKind::Ir).is_none());
+    d.key("Q");
+    assert!(d.st.layout.views.values().all(|v| !v.shows_ir()));
     d.until("no IR, its pane hidden", |s| {
         has(s, Stream::Tf) && !has(s, Stream::Ir)
     })?;
@@ -736,16 +748,13 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     d.key("W");
     d.key("W");
     assert!(!d.st.layout.maximized);
-    // A new pane beside the transfer pane, turned into an IR pane.
+    // A new pane beside the transfer pane, stepped (G) to its IR view.
     d.key("Alt+1");
-    d.key("Ctrl+N");
-    for _ in 0..5 {
-        if d.st.layout.focus_kind() == ac2_ui::state::PaneKind::Ir {
-            break;
-        }
-        d.key("Ctrl+Tab");
+    d.key("N");
+    for _ in 0..3 {
+        d.key("G");
     }
-    assert_eq!(d.st.layout.focus_kind(), ac2_ui::state::PaneKind::Ir);
+    assert!(d.st.layout.focused().shows_ir());
     d.until("the TF and the IR again", |s| {
         has(s, Stream::Tf) && has(s, Stream::Ir)
     })?;
@@ -1048,8 +1057,8 @@ fn record_and_replay_from_the_app() -> R {
 }
 
 /// From an empty daemon: a transfer measurement, a spectrum and an SPL meter made from the
-/// app; Tab / Shift+Tab select them in the tree's order, wrapping, and the focus follows to
-/// a pane that draws each; Ctrl+Tab still steps the panes.
+/// app; Tab / Shift+Tab select them in the tree's order, wrapping, and the focused pane
+/// shows each, turning into its kind.
 #[test]
 fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
     use ac2_ui::state::PaneKind::{Spectrum, Spl, Transfer};
@@ -1093,12 +1102,15 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
     assert_eq!(d.st.tree_meas_order(), [tf, sp, spl]);
 
     d.send(Msg::SelectMeas(tf));
+    let f = d.st.layout.focus;
     for i in 1..=4 {
         d.key("Tab");
         let (id, pane) = order[i % 3];
         assert_eq!(d.st.selected, Some(id), "Tab {i}");
         assert_eq!(d.st.selected_trace, None);
+        assert_eq!(d.st.layout.focus, f, "Tab {i}");
         assert_eq!(d.st.layout.focus_kind(), pane, "Tab {i}");
+        assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(id), "Tab {i}");
     }
     // On the spectrum now; back round once, by the SPL meter.
     for want in [tf, spl, sp] {
@@ -1106,8 +1118,6 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
         assert_eq!(d.st.selected, Some(want));
     }
     assert_eq!(d.st.layout.focus_kind(), Spectrum);
-    d.key("Ctrl+Tab");
-    assert_ne!(d.st.layout.focus_kind(), Spectrum);
     drop(d);
     drop(daemon);
     Ok(())

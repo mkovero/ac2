@@ -123,8 +123,9 @@ struct T {
     keys: Keymap,
 }
 
-/// Four panes the way most tests want them: transfer across the top, spectrum, impulse
-/// response and SPL side by side below it; Alt+1..4 focus them in that order.
+/// Four panes the way most tests want them: transfer across the top, spectrum, a transfer
+/// pane in its impulse-response view and SPL side by side below it; Alt+1..4 focus them in
+/// that order.
 fn grid() -> Layout {
     let leaf = |n| Box::new(PaneNode::Leaf(PaneId(n)));
     let root = PaneNode::Split {
@@ -143,15 +144,17 @@ fn grid() -> Layout {
             }),
         }),
     };
+    let mut ir = View::of(PaneKind::Transfer);
+    ir.modes.transfer = TransferView::Ir;
     let views = [
-        PaneKind::Transfer,
-        PaneKind::Spectrum,
-        PaneKind::Ir,
-        PaneKind::Spl,
+        View::of(PaneKind::Transfer),
+        View::of(PaneKind::Spectrum),
+        ir,
+        View::of(PaneKind::Spl),
     ]
     .into_iter()
     .enumerate()
-    .map(|(i, k)| (PaneId(i as u32 + 1), View::of(k)))
+    .map(|(i, v)| (PaneId(i as u32 + 1), v))
     .collect();
     Layout::of(root, views, PaneId(1))
 }
@@ -188,6 +191,21 @@ impl T {
     /// The pane showing `kind` (the lead one when several do).
     fn pane(&self, kind: PaneKind) -> PaneId {
         self.st.layout.lead(kind).expect("a pane of the kind")
+    }
+
+    /// The pane in a transfer pane's IR view (the grid's third).
+    fn ir_pane(&self) -> PaneId {
+        let l = &self.st.layout;
+        l.panes()
+            .into_iter()
+            .find(|id| l.view(*id).is_some_and(|v| v.shows_ir()))
+            .expect("a transfer pane in its IR view")
+    }
+
+    /// The focus on the grid's IR view without a message.
+    fn put_ir(&mut self) {
+        let id = self.ir_pane();
+        self.st.layout.set_focus(id);
     }
 
     /// What the focused pane shows.
@@ -235,7 +253,7 @@ impl T {
         }
         let last = *self.st.layout.root.reading_order().last().expect("a pane");
         self.st.update(Msg::FocusPane(last), &self.keys);
-        self.key("Ctrl+N");
+        self.key("N");
         self.show(kind);
     }
 

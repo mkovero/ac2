@@ -59,9 +59,7 @@ impl AppState {
         let m = self.pane_meas(self.layout.focus).cloned();
         if m.is_none() {
             self.warn(match p {
-                PaneKind::Transfer | PaneKind::Ir => {
-                    "no transfer measurement: Ctrl+K → New transfer measurement…"
-                }
+                PaneKind::Transfer => "no transfer measurement: Ctrl+K → New transfer measurement…",
                 PaneKind::Spectrum => "no spectrum or RTA: Ctrl+K → New spectrum / New RTA",
                 _ => "no SPL meter: Ctrl+K → New SPL meter",
             });
@@ -173,7 +171,7 @@ impl AppState {
                 meas_input(&m.config.kind).and_then(|i| self.curve_note(i, applied))
             }
             PaneKind::Distortion => self.shown_sweep().and_then(|(d, _)| stored(&d.meta)),
-            PaneKind::Ir | PaneKind::Spl => None,
+            PaneKind::Spl => None,
         }
     }
 
@@ -580,7 +578,7 @@ impl AppState {
 
     /// Keys go to the focused pane's scope.
     pub fn scope(&self) -> Scope {
-        self.layout.focus_kind().scope()
+        self.layout.focused().scope()
     }
 
     /// Navigation still moving: the UI keeps repainting until it settles.
@@ -683,8 +681,8 @@ impl AppState {
                     let measurement = match (self.pending_pane_meas.get(&id), self.daemon()) {
                         (Some(n), _) => Some(n.clone()),
                         (None, None) => remembered(id),
-                        // A pane following the selection (an IR pane the transfer pane)
-                        // keeps following it: what it resolves to now is not its choice.
+                        // A pane following the selection keeps following it: what it
+                        // resolves to now is not its choice.
                         (None, Some(_)) if v.meas.is_none() => None,
                         (None, Some(_)) => self.pane_meas(id).map(|m| m.config.name.clone()),
                     };
@@ -906,7 +904,8 @@ impl AppState {
             .layout
             .view(id)
             .map_or(SweepMode::Response, |v| v.modes.sweep);
-        let mut line = crate::hints::line(keymap, pane.scope(), style, |c| {
+        let scope = self.layout.view(id).map_or(pane.scope(), |v| v.scope());
+        let mut line = crate::hints::line(keymap, scope, style, |c| {
             pane == PaneKind::Distortion
                 && match c {
                     CommandId::DistortionUnit => mode != SweepMode::Response,

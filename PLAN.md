@@ -490,12 +490,13 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
 - Frame age shown; stale data marked, not just frozen.
 - Perceptual, colorblind-safe palettes. Dark, light, high-contrast sunlight theme.
 
-- Panes are a tiling tree: one pane at the first start; `Ctrl+N` splits the focused pane
-  along its longer side, `Ctrl+D` closes it (never the last), `Ctrl+Tab` / `Ctrl+Shift+Tab`
-  change what kind it shows, `Alt+1..9` focus the panes in reading order, a click focuses
-  one, `W` cycles maximised → stage view → back. Each pane has its own view: kind,
-  measurement and modes; an IR pane without its own measurement follows the transfer pane
-  focused last. Nothing opens a pane by itself (a finished sweep says where to look). The
+- Panes are a tiling tree: one pane at the first start; `N` splits the focused pane
+  along its longer side, `Q` closes it (never the last), `Tab` / `Shift+Tab` put the next /
+  previous list measurement in it (the pane takes that measurement's kind), `G` steps its
+  views (transfer: response → phase → coherence → impulse response), `Alt+1..9` focus the
+  panes in reading order, a click focuses one, `W` cycles maximised → stage view → back.
+  Each pane has its own view: kind, measurement and modes; the impulse response is a view
+  of a transfer pane, of that pane's measurement. Nothing opens a pane by itself (a finished sweep says where to look). The
   tree, kinds, views and measurements (by name) are kept in `ui.toml`; a layout an older
   version wrote is dropped for a fresh start.
 

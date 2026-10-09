@@ -109,13 +109,13 @@ mod tests {
             pc(Scope::Transfer),
             [
                 "V select trace",
+                "G response/phase/coherence/IR",
                 "A show/hide",
                 "Ctrl+1 capture",
                 "X find delay",
                 "B coherence mask",
                 "P wrap/unwrap",
                 "K smoothing",
-                "C compare",
                 "H all keys"
             ]
         );
@@ -135,12 +135,13 @@ mod tests {
         assert_eq!(
             pc(Scope::Ir),
             [
-                "G linear/log/ETC",
+                "G views",
+                "Shift+G linear/log/ETC",
                 "I zoom time",
                 "Ctrl+I zoom level",
                 "Shift+Home fit",
-                "N next measurement",
-                "Ctrl+D close pane",
+                "Tab next measurement",
+                "Q close pane",
                 "W maximise",
                 "H all keys"
             ]
@@ -163,12 +164,12 @@ mod tests {
             pc(Scope::Distortion),
             [
                 "Shift+S new sweep",
-                "N next sweep",
+                "V next sweep",
                 "U dB/%",
                 "G response/IR/room",
                 "Shift+G linear/log/ETC",
                 "W maximise",
-                "Ctrl+D close pane",
+                "Q close pane",
                 "H all keys"
             ]
         );
@@ -193,9 +194,9 @@ mod tests {
         assert!(!t.iter().any(|s| s.contains("find delay")), "{t:?}");
         assert_eq!(t.last().map(String::as_str), Some("F1 all keys"));
         // A pane's own binding wins over the global one.
-        let k = Keymap::from_toml("[distortion]\nsweep_view = \"Q\"\n").expect("valid");
+        let k = Keymap::from_toml("[distortion]\nsweep_view = \"Shift+Q\"\n").expect("valid");
         let t = texts(&line(&k, Scope::Distortion, LabelStyle::Pc, |_| false));
-        assert!(t.contains(&"Q response/IR/room".to_owned()), "{t:?}");
+        assert!(t.contains(&"Shift+Q response/IR/room".to_owned()), "{t:?}");
     }
 
     #[test]

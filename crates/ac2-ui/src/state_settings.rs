@@ -276,8 +276,9 @@ impl AppState {
                 };
                 let Some(pane) = self.layout.lead(kind) else {
                     self.warn(format!(
-                        "no {} pane: Ctrl+Tab turns the focused pane into one",
-                        kind.title()
+                        "no {} pane: Tab to a {} measurement shows one in the focused pane",
+                        kind.title(),
+                        kind.what()
                     ));
                     return;
                 };

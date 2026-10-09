@@ -270,9 +270,9 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     t.key("Shift+G");
     assert_eq!(t.st.kind_modes(PaneKind::Distortion).ir, IrMode::Log);
     assert_eq!(
-        t.st.kind_modes(PaneKind::Ir).ir,
+        t.st.layout.view(t.ir_pane()).expect("view").modes.ir,
         IrMode::Linear,
-        "the IR pane's own"
+        "the transfer pane's IR view's own"
     );
     t.key("Shift+I");
     assert_eq!(
@@ -280,9 +280,9 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         SweepMode::Response
     );
 
-    // The dialog turned the focused transfer pane into the sweep pane; Ctrl+Tab turns it
+    // The dialog turned the focused transfer pane into the sweep pane; its list turns it
     // back.
-    t.key("Ctrl+Tab");
+    t.show(PaneKind::Transfer);
     assert!(!t.shown(PaneKind::Distortion));
     assert_eq!(t.focus_kind(), PaneKind::Transfer);
 }

@@ -1,6 +1,6 @@
-//! Navigation of the impulse-response pictures (the IR pane, the sweep pane's IR view): the
-//! same keys and mouse gestures as the frequency panes, on a time axis. I / O and the wheel
-//! zoom time, ←/→ and a drag pan it, Ctrl+I / Ctrl+O, Ctrl+↑/↓ and Ctrl / Shift+wheel move
+//! Navigation of the impulse-response pictures (the transfer and sweep panes' IR views):
+//! the same keys and mouse gestures as the frequency panes, on a time axis. I / O and the
+//! wheel zoom time, ←/→ and a drag pan it, Ctrl+I / Ctrl+O, Ctrl+↑/↓ and Ctrl / Shift+wheel move
 //! the amplitude (linear) or dB (log, ETC) axis, Home shows the whole IR, Shift+Home frames
 //! the curve, Ctrl+Home goes back to the defaults; C, Shift+←/→ and a click place the
 //! cursor. Navigation only: the IR is drawn as received.
@@ -56,12 +56,12 @@ pub(super) fn is_nav(c: CommandId) -> bool {
 }
 
 impl AppState {
-    /// The IR picture the focused pane shows, if it shows one: the IR pane always (with or
-    /// without an IR), the sweep pane in its IR view while a sweep with an IR is shown
-    /// (without one it draws the distortion view, whose keys stay).
+    /// The IR picture the focused pane shows, if it shows one: the transfer pane in its IR
+    /// view always (with or without an IR), the sweep pane in its IR view while a sweep with
+    /// an IR is shown (without one it draws the distortion view, whose keys stay).
     pub fn ir_target(&self) -> Option<IrPane> {
         match self.layout.focus_kind() {
-            PaneKind::Ir => Some(IrPane::Live),
+            PaneKind::Transfer if self.layout.focused().shows_ir() => Some(IrPane::Live),
             PaneKind::Distortion
                 if self.modes().sweep == SweepMode::Ir
                     && self.shown_sweep().is_some_and(|(d, _)| d.sweep.is_some()) =>
@@ -72,20 +72,21 @@ impl AppState {
         }
     }
 
-    /// The measurement whose IR the IR keys act on: the focused IR pane's, else the one
-    /// an IR pane follows.
+    /// The measurement whose IR the IR keys act on: the focused IR view's, else the lead
+    /// transfer pane's.
     fn live_ir_meas(&self) -> Option<&ac2_proto::model::Measurement> {
-        match self.layout.focus_kind() {
-            PaneKind::Ir => self.pane_meas(self.layout.focus),
-            _ => crate::scenes::focus_tf(self),
+        if self.layout.focused().shows_ir() {
+            self.pane_meas(self.layout.focus)
+        } else {
+            crate::scenes::focus_tf(self)
         }
     }
 
-    /// The stored trace an IR pane following `shown` draws instead of its live IR: the
-    /// selected trace, when it is a transfer trace captured with an impulse response that a
-    /// transfer pane showing `shown` draws (in its group, or compared). Selecting the
+    /// The stored trace a transfer IR view following `shown` draws instead of its live IR:
+    /// the selected trace, when it is a transfer trace captured with an impulse response
+    /// that a transfer pane showing `shown` draws (in its group, or compared). Selecting the
     /// trace is what picks it, as it picks the sweep pane's run; with no such trace
-    /// selected the pane follows its measurement live.
+    /// selected the view follows its measurement live.
     pub fn stored_ir(&self, shown: Option<&ac2_proto::model::Measurement>) -> Option<&TraceData> {
         let (d, _) = self.traces.get(&self.selected_trace?)?;
         (d.meta.kind == TraceKind::Transfer

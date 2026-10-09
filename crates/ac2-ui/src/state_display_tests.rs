@@ -467,10 +467,11 @@ fn delete_asks_then_deletes_the_selected_trace() {
     );
 }
 
-/// Picking a measurement brings up the pane that draws it: in the maximised layout the one
-/// pane switches (and stays maximised), in the split layout the focus moves there.
+/// Picking a measurement in the list puts it in the focused pane, which turns into the kind
+/// of pane the measurement belongs in, maximised or not; every other pane keeps what it
+/// shows.
 #[test]
-fn picking_a_measurement_brings_up_its_pane() {
+fn picking_a_measurement_puts_it_in_the_focused_pane() {
     for maximised in [true, false] {
         let mut t = T::new();
         let mut s = four();
@@ -480,37 +481,50 @@ fn picking_a_measurement_brings_up_its_pane() {
             t.key("W");
         }
         assert_eq!(t.st.layout.maximized, maximised);
+        let f = t.st.layout.focus;
+        let others = |t: &T| {
+            let l = &t.st.layout;
+            l.views
+                .iter()
+                .filter(|(id, _)| **id != l.focus)
+                .map(|(id, v)| (*id, *v))
+                .collect::<Vec<_>>()
+        };
+        let before = others(&t);
         let shows = |t: &T, p: PaneKind, id: u32| {
+            assert_eq!(t.st.layout.focus, f, "maximised {maximised}");
             assert_eq!(t.focus_kind(), p, "maximised {maximised}");
-            assert_eq!(t.st.kind_meas(p).map(|m| m.id), Some(MeasId(id)));
+            assert_eq!(t.st.pane_meas(f).map(|m| m.id), Some(MeasId(id)));
             assert_eq!(t.st.layout.maximized, maximised);
+            assert_eq!(others(t), before);
             if maximised {
                 assert_eq!(t.visible(), [p]);
             }
         };
-        // An RTA: the spectrum / RTA pane.
+        // An RTA: the focused transfer pane turns into a spectrum / RTA pane.
         t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
         shows(&t, PaneKind::Spectrum, 4);
         // A narrowband spectrum stays there, and the pane shows it.
         t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
         shows(&t, PaneKind::Spectrum, 2);
-        // A transfer measurement: the transfer pane.
+        // A transfer measurement: back to a transfer pane.
         t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
         shows(&t, PaneKind::Transfer, 3);
-        // An SPL meter: the SPL pane.
+        // An SPL meter: an SPL pane.
         t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
         shows(&t, PaneKind::Spl, 5);
-        // The IR pane draws transfer measurements: it keeps the focus.
+        // The IR view is a transfer pane's: a transfer measurement keeps the view.
         t.key("Alt+3");
+        let ir = t.st.layout.focus;
         t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-        assert_eq!(t.focus_kind(), PaneKind::Ir);
-        assert_eq!(t.st.kind_meas(PaneKind::Ir).map(|m| m.id), Some(MeasId(1)));
+        assert_eq!(t.st.layout.focus, ir);
+        assert!(t.st.layout.focused().shows_ir());
+        assert_eq!(t.st.pane_meas(ir).map(|m| m.id), Some(MeasId(1)));
         // The pane's chip list picks for that pane.
-        t.st.update(
-            Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(4))),
-            &t.keys,
-        );
-        shows(&t, PaneKind::Spectrum, 4);
+        let sp = t.pane(PaneKind::Spectrum);
+        t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+        assert_eq!(t.st.layout.focus, sp);
+        assert_eq!(t.st.pane_meas(sp).map(|m| m.id), Some(MeasId(4)));
     }
 }
 
@@ -535,9 +549,9 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
     assert_eq!(t.visible(), [PaneKind::Distortion]);
-    // V steps the same way.
+    // V steps the same way (from the SPL pane: the sweep pane's V steps its runs).
     t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    t.key("Alt+2");
+    t.key("Alt+4");
     t.key("V");
     assert_eq!(t.st.selected_trace, Some(TraceId(13)));
     assert_eq!(t.visible(), [PaneKind::Transfer]);
@@ -548,7 +562,7 @@ fn picking_a_trace_while_maximised_brings_up_its_pane() {
     assert!(!t.st.layout.maximized);
     t.key("Alt+3");
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert_eq!(t.focus_kind(), PaneKind::Ir);
+    assert!(t.st.layout.focused().shows_ir());
 }
 
 /// The state with measurement `id` running or stopped.
@@ -757,15 +771,13 @@ fn the_ir_pane_says_why_there_is_no_ir() {
         s.banners.iter().map(|b| b.text.clone()).collect()
     };
     // Nothing yet from a running measurement.
-    let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
-        .expect("scene");
+    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
     assert_eq!(s.note.as_deref(), Some("Main L: no IR frame yet"));
     // Its transfer stream says nothing drives the reference: banner and reason, which
     // follow this app's stimulus.
     t.conn(snapshot(vec![tf.clone()]));
     let ir_and_banner = |t: &T| {
-        let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
-            .expect("scene");
+        let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
         assert!(
             texts(&s).contains(&"NO REFERENCE".to_owned()),
             "{:?}",
@@ -815,7 +827,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
             "stimulus off: arm it from a transfer pane".into()
         )
     );
-    t.put(PaneKind::Ir);
+    t.put_ir();
     // Another client's stimulus, armed and silent: not this app's keys to press.
     let mut other = daemon_state();
     other.generator.owner = Some(ClientId("other".into()));
@@ -829,8 +841,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     let mut st = daemon_state();
     st.measurements[1].running = false;
     t.conn(mirror(st.clone()));
-    let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
-        .expect("scene");
+    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
     assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
     assert!(!texts(&s).contains(&"NO REFERENCE".to_owned()));
     let r = t.key("S");
@@ -843,8 +854,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     );
     // Its kept IR: drawn, tagged as its transfer curve is, never STALE.
     t.conn(snapshot(vec![tf, ir]));
-    let s = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
-        .expect("scene");
+    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
     assert_eq!(s.note, None);
     assert_eq!(s.tag.as_deref(), Some("stopped"));
     assert!(texts(&s).iter().all(|b| !b.starts_with("STALE")));
@@ -1119,8 +1129,7 @@ fn a_hides_and_shows_the_selected_measurement() {
             "TF  Main L · hidden".to_owned()
         )
     );
-    let ir = crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now())
-        .expect("scene");
+    let ir = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
     assert_eq!(ir.note.as_deref(), Some("Main L hidden — A shows it"));
     // Remembered by name.
     assert_eq!(

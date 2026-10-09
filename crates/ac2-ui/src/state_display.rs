@@ -96,7 +96,7 @@ fn tenths(v: f64) -> f64 {
 fn level_pane(p: PaneKind) -> Option<PaneKind> {
     match p {
         PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion => Some(p),
-        PaneKind::Ir | PaneKind::Spl => None,
+        PaneKind::Spl => None,
     }
 }
 
@@ -107,7 +107,7 @@ pub fn level_range(view: &ViewState, pane: PaneKind, scale: LevelScale) -> Optio
         PaneKind::Transfer => Some(view.tf.magnitude_db),
         PaneKind::Spectrum => Some(view.spectrum.range(scale)),
         PaneKind::Distortion => Some(view.distortion.range_db),
-        PaneKind::Ir | PaneKind::Spl => None,
+        PaneKind::Spl => None,
     }
 }
 
@@ -116,7 +116,7 @@ fn level_range_mut(view: &mut ViewState, pane: PaneKind, scale: LevelScale) -> O
         PaneKind::Transfer => Some(&mut view.tf.magnitude_db),
         PaneKind::Spectrum => Some(view.spectrum.range_mut(scale)),
         PaneKind::Distortion => Some(&mut view.distortion.range_db),
-        PaneKind::Ir | PaneKind::Spl => None,
+        PaneKind::Spl => None,
     }
 }
 
@@ -209,14 +209,20 @@ impl AppState {
     /// The pane the level keys act on (the focused one), or why not.
     fn level_target(&mut self) -> Option<PaneKind> {
         let p = self.layout.focus_kind();
-        let p = level_pane(p).filter(|p| {
-            *p != PaneKind::Distortion || self.modes().sweep == ac2_scene::view::SweepMode::Response
+        // The level axis is the magnitude's: the transfer pane's phase and coherence views
+        // do not draw it.
+        let p = level_pane(p).filter(|p| match p {
+            PaneKind::Distortion => self.modes().sweep == ac2_scene::view::SweepMode::Response,
+            PaneKind::Transfer => self.modes().transfer == super::TransferView::Response,
+            _ => true,
         });
         if p.is_none() {
-            self.warn(format!(
-                "{} has no level axis to zoom",
-                self.layout.focus_kind().title()
-            ));
+            let f = self.layout.focused();
+            let what = match f.kind {
+                PaneKind::Transfer => format!("{} ({})", f.title(), f.modes.transfer.label()),
+                _ => f.title().to_owned(),
+            };
+            self.warn(format!("{what} has no level axis to zoom"));
         }
         p
     }
@@ -411,7 +417,7 @@ impl AppState {
                     }
                 }
             }
-            PaneKind::Ir | PaneKind::Spl => {}
+            PaneKind::Spl => {}
         }
         v
     }
@@ -872,34 +878,6 @@ impl AppState {
     }
 
     // ----- which pane a selection brings up ----------------------------------------------
-
-    /// After a measurement was picked (the list, a pane's chip): unless the focused pane
-    /// draws it, the pane of its kind worked in last gets the focus; with none on screen the
-    /// focused pane turns into one, so a single or maximised pane switches to it.
-    pub(super) fn reveal_meas(&mut self, id: MeasId) {
-        let Some(kind) = self.meas(id).map(|m| m.config.kind.clone()) else {
-            return;
-        };
-        // A sweep picked in the list is the sweep pane's: the transfer pane draws its runs
-        // only when chosen there.
-        let fk = self.layout.focus_kind();
-        if fk.shows(&kind)
-            && !(matches!(kind, MeasKind::Sweep { .. }) && fk != PaneKind::Distortion)
-        {
-            return;
-        }
-        let home = PaneKind::for_kind(&kind);
-        let laid = self.laid_out_panes();
-        match self.layout.lead(home).filter(|p| laid.contains(p)) {
-            Some(p) => self.layout.set_focus(p),
-            None => {
-                let f = self.layout.focus;
-                self.set_pane_kind(f, home);
-            }
-        }
-        let f = self.layout.focus;
-        self.select_on(f, id);
-    }
 
     /// After a stored trace was selected with the layout maximised, or with panes following
     /// the selection: the focus goes to a pane that draws it (the transfer pane draws sweeps
