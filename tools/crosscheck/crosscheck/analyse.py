@@ -971,7 +971,9 @@ class Analysis:
         # end is sharp (short fade-out); its start fades in, so it is found from the end.
         dur = _f(info.get("duration")) or (s.duration_s or 5.5)
         pre, post = info.get("window_pre", 0.0083229), info.get("window_post", 0.0916771)
-        post_roll = max(1.0, 4 * (pre + post))
+        fine = s.lf_harmonics == "fine"
+        own = {k: dsp.lf_window(L, k) for k in range(2, 6)} if fine else {}
+        post_roll = max(1.0, 4 * (pre + post), *(4 * (a + b) for a, b in own.values()))
         repeats = int(info.get("repeats") or 1)
         last = len(env) - int(np.argmax(env[::-1] > 0.1 * env.max()))
         period = int(round((dur + post_roll) * fs))
@@ -1001,6 +1003,15 @@ class Analysis:
         b = s.trace.freq
         fsel = b["freq_hz"][(b["freq_hz"] >= 20) & (b["freq_hz"] <= 10000)][::4]
         r = dsp.sweep_harmonics(h, d, fs, L, fsel, pre=pre, post=post, noise_h=hn, repeats=repeats)
+        # Fine: an order in its own window where the shared band had to be widened to the
+        # window's resolution (3 cells against 1/24 octave), as ac2 picks it.
+        half = 2 ** (1 / 48)
+        for k, (a_, b_) in own.items():
+            if k > 3:
+                continue
+            ro = dsp.sweep_harmonics(h, d, fs, L, fsel, pre=a_, post=b_, noise_h=hn, repeats=repeats)
+            sel = 3 / (pre + post) > k * fsel * (half - 1 / half)
+            r["floor"][k] = np.where(sel, ro["floor"][k], r["floor"][k])
         lim = float(self.tol["distortion"]["floor_disagree_db"])
         rows, flagged = [], 0
         for k in (2, 3):
@@ -1018,6 +1029,7 @@ class Analysis:
                              f"{src}, as long as ac2's record ({n_cut/fs:.2f} s), deconvolved by the same reference with "
                              "the reference input's noise scaled by the response (ac2 divides by a noisy reference too), "
                              f"8 windows at the harmonic's own lag, the floor band 1/3 octave like ac2's"
+                             + (", each order in its own window where ac2 uses it (LF harmonics fine)" if fine else "")
                              + (f", ÷ {repeats} for the mean of {repeats} repeats" if repeats > 1 else "")
                              + f". Value: median difference; {int(np.nansum(bad))} columns differ by more than {lim:g} dB",
                      detail={"columns_flagged": int(np.nansum(bad))})

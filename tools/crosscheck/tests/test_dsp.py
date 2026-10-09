@@ -293,3 +293,14 @@ def test_harmonic_phasors_are_fitted_with_the_fundamental_so_it_does_not_leak():
     assert abs(20 * np.log10(abs(h[3] / h[1])) - -100.0) < 0.01
     assert abs(np.angle(h[3] / h[1]) - 1.0) < 1e-3
     assert abs(h[2] / h[1]) < 1e-9
+
+
+def test_lf_window_matches_ac2s_own_windows():
+    # ac2-core `lf_window`: PRE_FRACTION of the gap up, the rest of the gap down; a rise of a
+    # third when the gap up allows it.
+    L = 5.5 / np.log(4000.0)
+    pre, post = dsp.lf_window(L, 2)
+    assert np.isclose(pre, 0.1 * L * np.log(1.5)) and np.isclose(post, 0.9 * L * np.log(2.0))
+    pre5, post5 = dsp.lf_window(L, 5)
+    assert pre5 + post5 < pre + post
+    assert pre5 <= L * np.log(6 / 5) and post5 <= L * np.log(5 / 4)

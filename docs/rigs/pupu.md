@@ -640,3 +640,23 @@ level as INFO instead of judging it. The 10 Hz sweeps' remaining +0.4 … +1.1 d
 resolution: at 0.1 s windows the H2 band at column 22 Hz spans 29–59 Hz (three 10 Hz cells), so
 the Xone's H2 rising below 22 Hz is averaged in; at 0.25 s windows they read −97.8 / −98.7. Re-run
 analysis: 261 PASS, 0 WARN, 0 FAIL.
+
+### Digital DUT: floors, the fade-out edge, LF harmonics fine (2026-10-09, ac2d 2416a06 → 511efb0, −10 dBFS)
+
+- **Floor +3 dB** in the suite's own model: it deconvolved the measurement input's noise only,
+  while ac2 divides by a noisy reference too (H = M/R adds −H·Nr/S; with |H| ≈ 1 and equal noise
+  on both inputs the floor rises 3 dB). `dsp.deconvolve_noise` takes both; DUT floor rows went
+  from +3.1 to +0.05 … +0.6 dB.
+- **H5 at 7.8 kHz read high**: the band at the sweep's fade-out edge (40 kHz sweep: f_top =
+  f2/5·2^(−1/24) = 7772 Hz, a 48/oct column). ac2 now reports an order only where its whole band
+  lies below the fade-out (292e28c); run `20261009T020317Z` has no such row.
+- **LF harmonics fine** (b90156c; variant `10Hz-5.5s-fine`): its longer post-roll had moved the
+  shared noise windows to later lags, where the DUT's aliased products sit at lower frequencies
+  (fa = fs·x/(k+x), x = e^(−τ/L)); fine's floor above its own-window columns differed from
+  standard's and hid H5 at 1040 Hz. 511efb0 keeps the shared windows where standard has them.
+  Run `20261009T021926Z`, re-analysed with the suite modelling fine's own windows: FAIL 0,
+  WARN 3, fine floor rows +0.37 / +0.30 dB.
+- Fine reads 12 and 15 Hz, which standard does not reach: +0.3 … +0.7 dB above the steady sine
+  (sine = analytic within 0.001 dB) on every order, behind the DUT's 20 Hz high-pass (−5.7 dB at
+  12 Hz). The same band averaging over a steep slope that fine removes at 20–30 Hz, at its own
+  lowest columns; a longer sweep lengthens the windows and reduces it.

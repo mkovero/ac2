@@ -426,6 +426,15 @@ def _band_power(s, bin_hz, f, octv, min_hz):
     return s[a:b + 1].mean() if b >= a else np.nan
 
 
+def lf_window(L: float, k: int, pre_fraction: float = 0.1) -> tuple[float, float]:
+    """ac2's own window for order k under LF harmonics fine (pre, post), s: the longest that
+    fits between the neighbouring orders' impulses, with a rise of at least a third."""
+    up, down = L * np.log((k + 1) / k), L * np.log(k / (k - 1))
+    pre, post = pre_fraction * up, (1 - pre_fraction) * down
+    w = pre + post
+    return (w / 3, w - w / 3) if up >= w else (pre, post)
+
+
 def sweep_harmonics(h: np.ndarray, d: int, fs: float, L: float, freqs: np.ndarray, kmax: int = 5,
                     pre: float = 0.0083229, post: float = 0.0916771, noise_h: np.ndarray | None = None,
                     noise_windows: int = 8, floor_oct: float = 1 / 3, repeats: int = 1) -> dict:
