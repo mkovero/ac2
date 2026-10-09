@@ -1113,3 +1113,52 @@ fn own_windows_resolve_the_lowest_columns_finer() {
     );
     assert!(roll_f >= 4.0 * 0.45 && roll_s < roll_f);
 }
+
+#[test]
+fn fine_reads_as_standard_above_its_own_windows() {
+    // A memoryless x⁵ at 48 kHz aliases: products above fs/2 fold down and land at positive
+    // lags, lower in frequency the later the lag. Fine's longer post-roll must not move the
+    // shared noise windows (or the linear gate) to other lags, or where both settings read
+    // the shared window they would report different floors.
+    let s = |lf_harmonics| SweepSpec {
+        level_dbfs: -13.0,
+        lf_harmonics,
+        grid: LogGrid::covering(48, 15.0, 20_000.0),
+        ..spec(ess(10.0, 20_000.0, 5.5))
+    };
+    let run = |lf_harmonics| {
+        let s = s(lf_harmonics);
+        let (reference, mic) = record(&s, 1, |x| polyn(x, &POLY5), 1e-7, 21);
+        analyse_recording(&s, &reference, &mic, 1).expect("analysis")
+    };
+    let (st, fi) = (run(LfHarmonics::Standard), run(LfHarmonics::Fine));
+    // Fine reads an order in its own window where the shared band was widened to its
+    // resolution: below this harmonic frequency.
+    let half = 2f64.powf(DISTORTION_BAND_OCT / 2.0);
+    let window_s = SweepTiming::new(&s(LfHarmonics::Standard))
+        .expect("timing")
+        .window_s();
+    let own_below = DISTORTION_MIN_CELLS / window_s / (half - 1.0 / half);
+    assert_eq!(st.frequencies, fi.frequencies);
+    let (mut d_mag, mut d_level, mut d_floor) = (0.0f64, 0.0f64, 0.0f64);
+    for (i, &f) in st.frequencies.iter().enumerate() {
+        if f >= 100.0 {
+            d_mag = d_mag.max((st.magnitude_db[i] - fi.magnitude_db[i]).abs());
+        }
+        for (a, b) in st.harmonics.iter().zip(&fi.harmonics) {
+            if f64::from(a.order) * f < 1.05 * own_below || !a.floor_db[i].is_finite() {
+                continue;
+            }
+            d_level = d_level.max((a.level_db[i] - b.level_db[i]).abs());
+            d_floor = d_floor.max((a.floor_db[i] - b.floor_db[i]).abs());
+        }
+    }
+    eprintln!(
+        "shared-window columns, fine − standard: magnitude {d_mag:.4} dB, harmonics \
+         {d_level:.4}, floors {d_floor:.3}"
+    );
+    assert!(
+        d_mag < 0.01 && d_level < 0.01 && d_floor < 0.01,
+        "{d_mag:.4} {d_level:.4} {d_floor:.3}"
+    );
+}

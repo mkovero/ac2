@@ -159,7 +159,10 @@ pub enum LfHarmonics {
     /// 5.5 s sweep about 0.47 s for H2, 0.16 s for H5; twice that on an 11 s sweep), with the
     /// fundamental and the floor in the same window: finer resolution and columns reported
     /// from 2/window up, for a floor raised by the window's length over the standard one.
-    /// The post-roll grows to four of the longest window.
+    /// The post-roll grows to four of the longest window; above these columns everything reads
+    /// as `Standard`. Its floor comes from later in the silence, where a digital path that
+    /// aliases (a nonlinearity without oversampling) leaves its folded products at hundreds
+    /// of hertz, and then reads them rather than the noise.
     Fine,
 }
 
@@ -241,6 +244,11 @@ pub struct SweepTiming {
     pub post_s: f64,
     /// Silence after each sweep, seconds.
     pub post_roll_s: f64,
+    /// The leading part of the post-roll that the shared noise windows, the linear gate and the room
+    /// response read, seconds: the post-roll without [`LfHarmonics::Fine`]'s extension. Past
+    /// the response, products that alias land at lower frequencies the later their lag, so
+    /// windows moved later would read another floor than the same sweep without Fine.
+    pub shared_roll_s: f64,
 }
 
 impl SweepTiming {
@@ -288,16 +296,16 @@ impl SweepTiming {
                 })
                 .fold(0.0, f64::max),
         };
-        let post_roll_s = MIN_POST_ROLL_S
+        let shared_roll_s = MIN_POST_ROLL_S
             .max(4.0 * (pre_s + post_s))
-            .max(4.0 * lf_max)
             .max(spec.tail_s.unwrap_or(0.0));
         Ok(Self {
             emitted,
             plan,
             pre_s,
             post_s,
-            post_roll_s,
+            post_roll_s: shared_roll_s.max(4.0 * lf_max),
+            shared_roll_s,
         })
     }
 
@@ -852,9 +860,12 @@ pub fn analyse_recording(
     // post-roll (which every repeat's record covers fully) over its second half, where the
     // system's own decay has ended. With the window at most MAX_WINDOW_S and the post-roll at
     // least MIN_POST_ROLL_S, at least four fit.
-    let noise_end = ((timing.post_roll_s - NOISE_MARGIN_S) * fs).floor() as i64;
+    let region = |roll_s: f64| {
+        let end = ((roll_s - NOISE_MARGIN_S) * fs).floor() as i64;
+        (end, (NOISE_REGION_START * roll_s * fs).ceil() as i64)
+    };
+    let (noise_end, noise_first) = region(timing.shared_roll_s);
     let noise_start = noise_end - w_len as i64;
-    let noise_first = (NOISE_REGION_START * timing.post_roll_s * fs).ceil() as i64;
     let noise_windows = usize::try_from((noise_end - noise_first) / w_len as i64)
         .unwrap_or(0)
         .max(1);
@@ -887,7 +898,8 @@ pub fn analyse_recording(
             let (pre, post) = lf_window(l, k);
             let (pre_n, post_n) = ((pre * fs).round() as usize, (post * fs).round() as usize);
             let w_len = pre_n + post_n;
-            let count = usize::try_from((noise_end - noise_first) / w_len as i64).unwrap_or(0);
+            let (end, first) = region(timing.post_roll_s);
+            let count = usize::try_from((end - first) / w_len as i64).unwrap_or(0);
             if count == 0 {
                 return None;
             }
@@ -905,7 +917,7 @@ pub fn analyse_recording(
                 bin: fs / nw as f64,
                 pk: power_spectrum(&segment(&hk, t_k(k) - pre_n as i64, &w), nw),
                 p1: power_spectrum(&segment(&h, t_k(1) - pre_n as i64, &w), nw),
-                noise: noise_power(&hk, noise_end, count, &w, nw),
+                noise: noise_power(&hk, end, count, &w, nw),
             })
         })
         .collect();
@@ -1029,7 +1041,7 @@ pub fn analyse_recording(
     // Room parameters: from half-way to H2's impulse (at most 100 ms before the arrival, room
     // for the band filters' pre-ringing) to the end of the silence.
     let room_start = d - ((0.5 * l * LN_2).min(ROOM_PRE_S) * fs).round() as i64;
-    let room_end = (((timing.post_roll_s - NOISE_MARGIN_S) * fs).floor() as i64).max(d + 2);
+    let room_end = (((timing.shared_roll_s - NOISE_MARGIN_S) * fs).floor() as i64).max(d + 2);
     let room_ir: Vec<f64> = (room_start..room_end).map(at).collect();
     let excited = (
         timing.full_level_hz(),

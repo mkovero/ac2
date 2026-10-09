@@ -1257,6 +1257,10 @@ LF distortion work:
   sweep from 10 Hz reads H2 from 10 Hz; set **From** low enough);
 - a **higher floor** at those columns (H2's window is several times the shared one, and its
   noise grows with it);
+- above those columns, everything reads exactly as with standard;
+- on a digital path that aliases (a DSP clipper or limiter without oversampling), the floor
+  at those columns can read the folded products rather than the noise, and hide a harmonic
+  that standard shows;
 - a **longer silence after the sweep** (up to four of the longest window), so each run takes
   a little longer. It is a setting of the measurement because it changes the recording.
 
