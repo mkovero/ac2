@@ -3,6 +3,7 @@
 
 use ac2_proto::Command;
 use ac2_proto::model::OutputSetup;
+use ac2_scene::view::{CoherencePlacement, DistortionUnit, LeqStyle};
 use eframe::egui::Key;
 
 use super::{AppState, Overlay, PaneKind, StimPhase, typed_char};
@@ -290,6 +291,11 @@ impl AppState {
                 }
                 self.layout.set_focus(focus);
             }
+            // The palette's commands without focusing a pane: the page stays in front.
+            DisplayRow::LeqStyle if d != 0 => self.toggle_leq_layout(false),
+            DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
+            DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
+            DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::LevelAxes if d == 0 => {
                 crate::prefs::LevelPrefs::default().apply(&mut self.view);
                 self.toast("every pane's level axis is back at its default");
@@ -637,5 +643,36 @@ impl AppState {
             "warning toasts {}",
             crate::settings::warning_toasts_text(self.prefs.warning_toasts)
         ));
+    }
+
+    /// Columns ↔ tiles, or the history strip on / off; remembered in the prefs.
+    pub(super) fn toggle_leq_layout(&mut self, history: bool) {
+        let l = &mut self.view.spl.layout;
+        if history {
+            l.history = !l.history;
+        } else {
+            l.style = match l.style {
+                LeqStyle::Columns => LeqStyle::Tiles,
+                LeqStyle::Tiles => LeqStyle::Columns,
+            };
+        }
+        self.prefs.leq = self.view.spl.layout;
+        self.prefs_dirty = true;
+    }
+
+    pub(super) fn toggle_distortion_unit(&mut self) {
+        let u = &mut self.view.distortion.unit;
+        *u = match *u {
+            DistortionUnit::Db => DistortionUnit::Percent,
+            DistortionUnit::Percent => DistortionUnit::Db,
+        };
+    }
+
+    pub(super) fn toggle_coherence_placement(&mut self) {
+        let c = &mut self.view.tf.coherence_placement;
+        *c = match *c {
+            CoherencePlacement::Pane => CoherencePlacement::OverlayOnMagnitude,
+            CoherencePlacement::OverlayOnMagnitude => CoherencePlacement::Pane,
+        };
     }
 }

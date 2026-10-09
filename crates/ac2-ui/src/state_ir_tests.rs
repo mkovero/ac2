@@ -274,7 +274,7 @@ fn the_distortion_cursor_reads_in_db_and_percent() {
         r.contains(&("H2".to_owned(), "−40.0 dB".to_owned())),
         "{r:?}"
     );
-    t.key("U");
+    t.st.update(Msg::Command(CommandId::DistortionUnit), &t.keys);
     let (_, r) = rows(&t);
     assert!(r.contains(&("H2".to_owned(), "1.00 %".to_owned())), "{r:?}");
     // 1 % under the pointer is −40 dB: zooming there keeps −40 dB where it was.

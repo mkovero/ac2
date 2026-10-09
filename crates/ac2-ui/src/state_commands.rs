@@ -629,12 +629,7 @@ impl AppState {
             C::SplitPane => self.split_pane(),
             C::ClosePane => self.close_pane(),
             C::SweepNew => self.open_sweep_dialog(keymap, out),
-            C::DistortionUnit => {
-                self.view.distortion.unit = match self.view.distortion.unit {
-                    DistortionUnit::Db => DistortionUnit::Percent,
-                    DistortionUnit::Percent => DistortionUnit::Db,
-                };
-            }
+            C::DistortionUnit => self.toggle_distortion_unit(),
             C::SweepView => {
                 self.focus_kind(PaneKind::Distortion);
                 let m = self.modes_mut();
@@ -1288,12 +1283,7 @@ impl AppState {
                     Some(t) => format!("coherence mask: hide γ² < {t:.1}"),
                 });
             }
-            C::CoherencePlacement => {
-                self.view.tf.coherence_placement = match self.view.tf.coherence_placement {
-                    CoherencePlacement::Pane => CoherencePlacement::OverlayOnMagnitude,
-                    CoherencePlacement::OverlayOnMagnitude => CoherencePlacement::Pane,
-                };
-            }
+            C::CoherencePlacement => self.toggle_coherence_placement(),
             C::LegendTopLeft => self.view.tf.legend.snap(LegendCorner::TopLeft),
             C::LegendTopRight => self.view.tf.legend.snap(LegendCorner::TopRight),
             C::LegendBottomLeft => self.view.tf.legend.snap(LegendCorner::BottomLeft),
@@ -1388,20 +1378,10 @@ impl AppState {
             }
             // Either shows the windows (a layout change is about them) and is remembered.
             C::SplLeqStyle | C::SplLeqHistory => {
-                let l = &mut self.view.spl.layout;
-                if c == C::SplLeqStyle {
-                    l.style = match l.style {
-                        LeqStyle::Columns => LeqStyle::Tiles,
-                        LeqStyle::Tiles => LeqStyle::Columns,
-                    };
-                } else {
-                    l.history = !l.history;
-                }
+                self.toggle_leq_layout(c == C::SplLeqHistory);
                 self.focus_kind(PaneKind::Spl);
                 let m = self.modes_mut();
                 m.spl = m.spl.with_leq();
-                self.prefs.leq = self.view.spl.layout;
-                self.prefs_dirty = true;
             }
             C::SplNewLog => match self.kind_meas(PaneKind::Spl).cloned() {
                 Some(m) => {

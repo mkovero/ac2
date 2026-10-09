@@ -39,16 +39,13 @@ fn key_hints_follow_the_focused_pane() {
     t.key("Alt+4");
     let spl = hint_texts(&t, PaneKind::Spl).expect("SPL focused");
     assert_eq!(spl[..3], ["G meter/Leq/both", "Shift+F F/S/I", "Z A/C/Z"]);
-    // The sweep pane names dB / % while it shows distortion, the IR mode while it shows the IR,
-    // and G its views in each.
+    // The sweep pane names the IR mode only while it shows the IR, and G its views in each.
     t.go(PaneKind::Distortion);
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
-    assert!(d.contains(&"U dB/%".to_owned()), "{d:?}");
     assert!(d.contains(&"G response/IR/room".to_owned()), "{d:?}");
     assert!(!d.contains(&"Shift+G linear/log/ETC".to_owned()), "{d:?}");
     t.key("Shift+I");
     let d = hint_texts(&t, PaneKind::Distortion).expect("sweep pane focused");
-    assert!(!d.contains(&"U dB/%".to_owned()), "{d:?}");
     assert!(d.contains(&"Shift+G linear/log/ETC".to_owned()), "{d:?}");
     // Mac labels.
     let mac: Vec<String> =
@@ -65,10 +62,10 @@ fn key_hints_follow_the_focused_pane() {
 
     // Off: no line anywhere, remembered, and the toast says how to bring it back.
     t.st.prefs_dirty = false;
-    t.key("Shift+H");
+    t.st.update(Msg::Command(CommandId::KeyHints), &t.keys);
     assert!(!t.st.prefs.key_hints);
     assert!(t.st.prefs_dirty);
-    assert!(t.last_toast().contains("Shift+H"), "{}", t.last_toast());
+    assert!(t.last_toast().contains("the palette"), "{}", t.last_toast());
     for p in PaneKind::ALL {
         assert_eq!(hint_texts(&t, p), None);
     }

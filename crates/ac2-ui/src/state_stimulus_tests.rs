@@ -421,10 +421,10 @@ fn transfer_commands() {
     assert_eq!(t.st.view.tf.phase, PhaseView::Wrapped);
     t.key("P");
     assert!(matches!(t.st.view.tf.phase, PhaseView::Unwrapped { .. }));
-    t.key("Shift+C");
+    t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
     assert_eq!(
         t.st.view.tf.coherence_placement,
-        CoherencePlacement::OverlayOnMagnitude
+        ac2_scene::view::CoherencePlacement::OverlayOnMagnitude
     );
     t.key("E");
     assert_eq!(

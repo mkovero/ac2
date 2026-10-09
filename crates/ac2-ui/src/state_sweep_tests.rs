@@ -230,7 +230,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(t.st.shown_sweep().map(|(d, _)| d.meta.id), Some(TraceId(7)));
     // The sweep is drawn like a transfer function in the transfer pane too.
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Db);
-    t.key("U");
+    t.st.update(Msg::Command(CommandId::DistortionUnit), &t.keys);
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Percent);
     // The pane's dB | % toggle: a click on either sets that unit (again: stays).
     for unit in [

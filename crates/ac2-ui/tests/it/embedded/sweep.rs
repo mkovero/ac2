@@ -118,11 +118,14 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
         .parse()?;
     assert!((h2 + 40.0).abs() < 1.0, "{db:?}");
     assert!(value(&db, "THD").ends_with(" dB"), "{db:?}");
-    d.key("U");
+    // The pane's dB | % toggle.
+    d.send(Msg::DistortionUnit(
+        ac2_scene::view::DistortionUnit::Percent,
+    ));
     let pc = rows(&d)?;
     let h2: f64 = value(&pc, "H2").trim_end_matches(" %").parse()?;
     assert!((h2 - 1.0).abs() < 0.15, "{pc:?}");
-    d.key("U");
+    d.send(Msg::DistortionUnit(ac2_scene::view::DistortionUnit::Db));
     d.key("G");
     assert_eq!(
         d.st.ir_target(),

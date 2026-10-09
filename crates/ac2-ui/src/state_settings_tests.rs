@@ -232,6 +232,19 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Down");
     t.key("Right");
     assert_eq!(t.st.prefs.spl_hold_ms, Some(250));
+    t.st.prefs_dirty = false;
+    let focus = t.focus_kind();
+    t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::LeqStyle);
+    t.key("Right");
+    assert_eq!(t.st.view.spl.layout.style, ac2_scene::view::LeqStyle::Tiles);
+    assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
+    assert!(t.st.prefs_dirty);
+    t.key("Down");
+    t.key("Right");
+    assert!(t.st.prefs.leq.history);
+    // A layout row leaves the pane's view and the focus as they were.
+    assert_eq!(t.focus_kind(), focus);
     t.key("Down");
     t.key("Right");
     assert_eq!(
@@ -252,6 +265,18 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     assert_eq!(
         t.st.kind_modes(PaneKind::Distortion).sweep,
         ac2_scene::view::SweepMode::Ir
+    );
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(
+        t.st.view.distortion.unit,
+        ac2_scene::view::DistortionUnit::Percent
+    );
+    t.key("Down");
+    t.key("Right");
+    assert_eq!(
+        t.st.view.tf.coherence_placement,
+        ac2_scene::view::CoherencePlacement::OverlayOnMagnitude
     );
     t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::LevelAxes);

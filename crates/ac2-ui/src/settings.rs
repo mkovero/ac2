@@ -21,7 +21,9 @@ use ac2_proto::model::{Generator, ServerInfo, ServerMode};
 use ac2_proto::units::Dbfs;
 use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
 use ac2_scene::theme::ThemeName;
-use ac2_scene::view::{SpectrumMode, SweepMode};
+use ac2_scene::view::{
+    CoherencePlacement, DistortionUnit, LeqLayout, LeqStyle, SpectrumMode, SweepMode,
+};
 
 use crate::cal_view::CalView;
 use crate::leq_dialog::LeqDialog;
@@ -45,7 +47,7 @@ pub enum Page {
     Leq,
     /// The record toggle's limit, where recordings go.
     Recording,
-    /// Theme, key hints, the SPL hold, the spectrograph, the level axes.
+    /// Theme, key hints, how each pane kind draws, the level axes.
     Display,
     /// The daemon link, this client's key, the server's mode and keys.
     Connection,
@@ -243,22 +245,30 @@ pub enum DisplayRow {
     PanesFollow,
     WarningToasts,
     SplHold,
+    LeqStyle,
+    LeqHistory,
     SpectrumView,
     Spectrograph,
     SweepView,
+    DistortionUnit,
+    Coherence,
     LevelAxes,
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 9] = [
+    pub const ALL: [DisplayRow; 13] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::PanesFollow,
         DisplayRow::WarningToasts,
         DisplayRow::SplHold,
+        DisplayRow::LeqStyle,
+        DisplayRow::LeqHistory,
         DisplayRow::SpectrumView,
         DisplayRow::Spectrograph,
         DisplayRow::SweepView,
+        DisplayRow::DistortionUnit,
+        DisplayRow::Coherence,
         DisplayRow::LevelAxes,
     ];
 
@@ -269,9 +279,13 @@ impl DisplayRow {
             DisplayRow::PanesFollow => "Panes follow selection",
             DisplayRow::WarningToasts => "Warning toasts",
             DisplayRow::SplHold => "SPL number holds",
+            DisplayRow::LeqStyle => "Leq windows",
+            DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::Spectrograph => "Spectrograph history",
+            DisplayRow::DistortionUnit => "Distortion in",
+            DisplayRow::Coherence => "Coherence",
             DisplayRow::LevelAxes => "Level axes",
         }
     }
@@ -331,6 +345,9 @@ pub fn sweep_view_name(m: SweepMode) -> &'static str {
 pub struct PaneViews {
     pub spectrum: SpectrumMode,
     pub sweep: SweepMode,
+    pub leq: LeqLayout,
+    pub distortion_unit: DistortionUnit,
+    pub coherence: CoherencePlacement,
 }
 
 /// What the Warning toasts setting says, on the Display page and in its toast.
@@ -384,7 +401,26 @@ pub fn display_rows(
                         format!("{} s", ac2_scene::format::fixed(f64::from(ms) / 1e3, 2))
                     }
                 },
+                DisplayRow::LeqStyle => match views.leq.style {
+                    LeqStyle::Columns => "columns".into(),
+                    LeqStyle::Tiles => "tiles".into(),
+                },
+                DisplayRow::LeqHistory => {
+                    if views.leq.history {
+                        "shown under the windows".into()
+                    } else {
+                        "hidden".into()
+                    }
+                }
                 DisplayRow::Spectrograph => format!("last {span_s} s"),
+                DisplayRow::DistortionUnit => match views.distortion_unit {
+                    DistortionUnit::Db => "dB re fundamental".into(),
+                    DistortionUnit::Percent => "% of fundamental".into(),
+                },
+                DisplayRow::Coherence => match views.coherence {
+                    CoherencePlacement::Pane => "its own strip under the phase".into(),
+                    CoherencePlacement::OverlayOnMagnitude => "over the magnitude".into(),
+                },
                 DisplayRow::SpectrumView => spectrum_view_name(views.spectrum).to_owned(),
                 DisplayRow::SweepView => sweep_view_name(views.sweep).to_owned(),
                 DisplayRow::LevelAxes => {
@@ -1010,6 +1046,12 @@ mod tests {
         let views = PaneViews {
             spectrum: SpectrumMode::Split,
             sweep: SweepMode::Room,
+            leq: LeqLayout {
+                style: LeqStyle::Tiles,
+                history: false,
+            },
+            distortion_unit: DistortionUnit::Percent,
+            coherence: CoherencePlacement::OverlayOnMagnitude,
         };
         let switches = DisplaySwitches {
             key_hints: false,
@@ -1026,9 +1068,13 @@ mod tests {
                 "off: every pane",
                 "off: warnings and Leq limit alarms go only to the notification log",
                 "0.50 s",
+                "tiles",
+                "hidden",
                 "the spectrum over its spectrograph",
                 "last 30 s",
                 "the room parameters",
+                "% of fundamental",
+                "over the magnitude",
                 "each pane's as last left · Enter resets them to the defaults",
             ]
         );

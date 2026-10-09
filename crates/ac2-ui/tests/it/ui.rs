@@ -2284,9 +2284,13 @@ fn leq_tiles_from_an_empty_daemon() {
         }
     };
     snapshot_when(&mut h, "leq_columns_over", pin, first_is(true));
-    // B: tiles, Shift+B: the history strip under them.
-    h.key_press(Key::B);
-    h.key_press_modifiers(Modifiers::SHIFT, Key::B);
+    // Tiles, and the history strip under them (Settings › Display, the palette).
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::SplLeqStyle,
+    ));
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::SplLeqHistory,
+    ));
     step_until(&mut h, "tiles with history", |a| {
         a.state.view.spl.layout
             == ac2_scene::view::LeqLayout {
@@ -2322,8 +2326,12 @@ fn leq_tiles_from_an_empty_daemon() {
     });
     snapshot_when(&mut h, "leq_tiles_recovered", pin, first_is(false));
     // Back to columns without the strip.
-    h.key_press(Key::B);
-    h.key_press_modifiers(Modifiers::SHIFT, Key::B);
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::SplLeqStyle,
+    ));
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::SplLeqHistory,
+    ));
     step_until(&mut h, "columns again", |a| {
         a.state.view.spl.layout == ac2_scene::view::LeqLayout::default()
     });

@@ -152,8 +152,6 @@ mod tests {
                 "G meter/Leq/both/bands",
                 "Shift+F F/S/I",
                 "Z A/C/Z",
-                "B columns/tiles",
-                "Shift+B history",
                 "Shift+L windows",
                 "Shift+R new log",
                 "W maximise",
@@ -165,7 +163,6 @@ mod tests {
             [
                 "Shift+S new sweep",
                 "V next sweep",
-                "U dB/%",
                 "G response/IR/room",
                 "Shift+G linear/log/ETC",
                 "W maximise",
@@ -203,10 +200,10 @@ mod tests {
     fn skipped_commands_leave_the_line() {
         let k = Keymap::default();
         let t = line(&k, Scope::Distortion, LabelStyle::Pc, |c| {
-            c == CommandId::DistortionUnit
+            c == CommandId::SweepNew
         });
-        assert!(t.iter().all(|h| h.command != CommandId::DistortionUnit));
-        assert_eq!(t.len(), 7);
+        assert!(t.iter().all(|h| h.command != CommandId::SweepNew));
+        assert_eq!(t.len(), 6);
     }
 
     #[test]

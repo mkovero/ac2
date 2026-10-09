@@ -61,9 +61,9 @@ fn render() -> String {
     }
     // The panes' hint lines (`ac2_ui::hints`), each closed by the help key.
     out.push_str(
-        "\n#### Key hint lines (`Shift+H` on / off)\n\n\
-         The least used go first on a narrow pane; the sweep pane shows `U` while it shows \
-         distortion and `G` while it shows the impulse response.\n\n\
+        "\n#### Key hint lines (Settings › Display › Key hints)\n\n\
+         The least used go first on a narrow pane; the sweep pane shows `Shift+G` only while \
+         it shows the impulse response.\n\n\
          | Pane | Hint line |\n|---|---|\n",
     );
     for scope in Scope::ALL.into_iter().filter(|s| *s != Scope::Global) {

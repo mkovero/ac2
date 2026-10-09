@@ -578,11 +578,9 @@ pub fn defaults() -> Vec<Binding> {
         ..Chord::alt(key)
     };
     let mut v: Vec<(C, S, Chord)> = vec![
-        // H, not `/`: `/` is Shift+7 on Nordic and German layouts. Shift+H, one step
-        // further, hides or shows the panes' key hints.
+        // H, not `/`: `/` is Shift+7 on Nordic and German layouts.
         (C::Help, S::Global, k(K::H)),
         (C::Help, S::Global, k(K::F1)),
-        (C::KeyHints, S::Global, sh(K::H)),
         (C::Palette, S::Global, cmd(K::K)),
         // Ctrl+P(references): the desktop's Ctrl+, is the transfer pane's whole-sample delay
         // step here, and a letter is on every layout.
@@ -706,7 +704,6 @@ pub fn defaults() -> Vec<Binding> {
         (C::Target, S::Transfer, k(K::Z)),
         // Shift+I shows or hides the impulse response wherever there is one (plain I zooms).
         (C::CoherenceMask, S::Transfer, k(K::B)),
-        (C::CoherencePlacement, S::Transfer, sh(K::C)),
         (C::Average, S::Transfer, k(K::M)),
         (C::PhaseUnwrap, S::Transfer, k(K::P)),
         // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
@@ -725,20 +722,14 @@ pub fn defaults() -> Vec<Binding> {
         // The IR view shows the transfer measurement: S starts and stops it there too.
         (C::StartStop, S::Ir, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::P)),
-        // G is the view key of every pane: here the spectrograph, and with Shift how much
-        // history it shows.
+        // G is the view key of every pane: here the spectrograph.
         (C::Spectrograph, S::Spectrum, k(K::G)),
-        (C::SpectrographSpan, S::Spectrum, sh(K::G)),
         // The transfer pane's views; in the IR view its own steps take Shift, as on the
         // sweep pane.
         (C::TransferView, S::Transfer, k(K::G)),
         (C::TransferView, S::Ir, k(K::G)),
         (C::IrMode, S::Ir, sh(K::G)),
         (C::SplLeqView, S::Spl, k(K::G)),
-        // B as the RTA's bars / line (C is the global cursor); Shift+B the other change of
-        // the Leq windows' layout.
-        (C::SplLeqStyle, S::Spl, k(K::B)),
-        (C::SplLeqHistory, S::Spl, sh(K::B)),
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
         // confirmation: it discards show data).
         (C::SplNewLog, S::Spl, sh(K::R)),
@@ -753,7 +744,6 @@ pub fn defaults() -> Vec<Binding> {
         // take Shift.
         (C::SweepView, S::Distortion, k(K::G)),
         (C::IrMode, S::Distortion, sh(K::G)),
-        (C::DistortionUnit, S::Distortion, k(K::U)),
         (C::SweepIr, S::Distortion, sh(K::I)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
@@ -844,8 +834,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SplLeqView, "meter/Leq/both/bands", 90),
                     hint(C::SplTimeWeighting, "F/S/I", 88),
                     hint(C::SplWeighting, "A/C/Z", 86),
-                    hint(C::SplLeqStyle, "columns/tiles", 70),
-                    hint(C::SplLeqHistory, "history", 60),
                     hint(C::LeqWindows, "windows", 80),
                     hint(C::SplNewLog, "new log", 50),
                     hint(C::MaximizePane, "maximise", 40),
@@ -857,7 +845,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                 &[
                     hint(C::SweepNew, "new sweep", 90),
                     hint(C::NextTrace, "next sweep", 80),
-                    hint(C::DistortionUnit, "dB/%", 70),
                     hint(C::SweepView, "response/IR/room", 75),
                     hint(C::IrMode, "linear/log/ETC", 70),
                     hint(C::MaximizePane, "maximise", 50),
@@ -1193,6 +1180,14 @@ mod tests {
             CommandId::Notifications,
             // Settings › Display has the theme row; T is the plot's grid / labels / cursor.
             CommandId::CycleTheme,
+            // Set once and left: Settings › Display has a row for each, so their keys went
+            // to what operators press while measuring.
+            CommandId::KeyHints,
+            CommandId::CoherencePlacement,
+            CommandId::SpectrographSpan,
+            CommandId::SplLeqStyle,
+            CommandId::SplLeqHistory,
+            CommandId::DistortionUnit,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {
@@ -1232,7 +1227,6 @@ mod tests {
             ("Down", CommandId::LevelDown),
             ("H", CommandId::Help),
             ("F1", CommandId::Help),
-            ("Shift+H", CommandId::KeyHints),
             ("Ctrl+K", CommandId::Palette),
             ("Shift+O", CommandId::OpenSession),
             ("O", CommandId::ZoomOut),
@@ -1563,11 +1557,8 @@ mod tests {
                 Some(CommandId::TransferView),
                 Some(CommandId::IrMode),
             ),
-            (
-                Scope::Spectrum,
-                Some(CommandId::Spectrograph),
-                Some(CommandId::SpectrographSpan),
-            ),
+            // The history length is set once: Settings › Display.
+            (Scope::Spectrum, Some(CommandId::Spectrograph), None),
             (Scope::Spl, Some(CommandId::SplLeqView), None),
             (
                 Scope::Distortion,

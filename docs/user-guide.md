@@ -715,7 +715,8 @@ the newest frame at the top, level as colour.
   **Ctrl+↑/↓**, **Shift+Home** and **Ctrl+Home** change the colours as they change the
   curve's axis. The colours are a perceptual, colour-blind-safe map (viridis): equal steps
   in dB look like equal steps.
-- **Shift+G** steps the history through 10, 30 (the default), 60 and 120 s. It starts afresh
+- **Settings › Display › Spectrograph history** (palette: *Spectrograph history*) steps the
+  history through 10, 30 (the default), 60 and 120 s. It starts afresh
   at each length and when the spectrograph comes into view (from the split to the
   spectrograph alone it is kept).
 - Alone, the caption above it also names the spectrum's window and calibration.
@@ -1300,7 +1301,7 @@ the run selected).
 
 | Key | Does |
 |---|---|
-| **U** (or the **dB \| %** toggle in the title) | distortion in dB re fundamental or percent (a log axis: 0.01 %, 0.1 %, 1 %, …), readouts included |
+| the **dB \| %** toggle in the title (or Settings › Display › Distortion in) | distortion in dB re fundamental or percent (a log axis: 0.01 %, 0.1 %, 1 %, …), readouts included |
 | **G** | steps the views: response & distortion → **impulse response** with the harmonics' impulses marked → **room parameters** table alone, the whole pane, as large as it fits (read across a room; maximised with **W**) → back. The view is remembered. |
 | **Shift+G** | IR view: linear / log / ETC |
 | **Shift+I** | straight to the impulse response and back |
@@ -1763,7 +1764,7 @@ pane: meter + Leq windows"), and the app remembers the choice.
 |---|---|
 | **meter** | the number and the meter's statistics ([below](#the-number)) |
 | **Leq windows** | the windows as columns or tiles ([next section](#leq-windows-and-limits)) |
-| **meter + Leq** (where a new meter starts) | the meter's number centred across the top third of the pane (its name and unit `LAF · dB SPL` under it, the live bar; the same number with the same hold as in the meter view, without its statistics) and the Leq windows below it as columns or tiles (**B**, **Shift+B** as in the Leq view), under one caption for both: the meter's name, the run and the calibration |
+| **meter + Leq** (where a new meter starts) | the meter's number centred across the top third of the pane (its name and unit `LAF · dB SPL` under it, the live bar; the same number with the same hold as in the meter view, without its statistics) and the Leq windows below it as columns or tiles (Settings › Display, as in the Leq view), under one caption for both: the meter's name, the run and the calibration |
 
 - **W** twice (or W, then **F**) makes it the stage view: the number and the windows, nothing
   else, also while a stimulus is armed or playing.
@@ -1914,8 +1915,10 @@ over is certain is ac2's choice for the time before.
 
 #### Tiles, history and the stage view
 
-- **B** switches between columns and **tiles** (a grid with every figure written out).
-- **Shift+B** shows or hides the **history strip** below them: each window over time against
+- **Settings › Display › Leq windows** (palette: *SPL Leq windows: columns / tiles*) switches
+  between columns and **tiles** (a grid with every figure written out).
+- **Settings › Display › Leq history strip** (palette: *SPL Leq windows: history strip on / off*)
+  shows or hides the **history strip** below them: each window over time against
   its limit (dashed), red where it was over. It holds the log's last 4 hours even when the
   app was not running: a restarted (or reconnected, or second) app gets it from the daemon,
   rebuilt from the meter's log as the meter computed it; a new log clears it.
@@ -1923,13 +1926,13 @@ over is certain is ac2's choice for the time before.
 - **W** gives the pane the whole window, once more (or **F**) the whole screen: the
   **stage view**, nothing but the columns (in meter + Leq, the number above them). The grey
   caption line (the meter's name, its calibration) shows there only with the history on
-  (Shift+B, then with the run), or with STALE when the values are; otherwise its room goes to
+  (the history strip on, then with the run), or with STALE when the values are; otherwise its room goes to
   the windows. Arming or playing the stimulus changes nothing there; Esc and Shift+Esc still
   stop it. W again goes back to the split layout.
 
 #### The run caption
 
-With the history on (**Shift+B**), the caption above the windows, centred, says how long
+With the history strip on, the caption above the windows, centred, says how long
   the meter has been logging and the level of the whole log: **`running 2:14:05 since 19:02 · LAeq total 97.8 · offline 12 s`** — the
   time since the log's first second (it keeps counting when the app or the daemon is
   restarted: the log comes back with the autosave), its start in local time, the energy
@@ -2266,8 +2269,14 @@ It is stored as an estimated transfer, and every place that shows it says
 
 Everything in the app is reachable from the keyboard.
 
-- **H** (or **F1**) shows the bindings.
+- **H** (or **F1**) shows the keys that work now: the focused pane's first, then the ones
+  that work everywhere, grouped as stimulus; measurements, traces and slots; zoom, axes and
+  cursor; panes and window; dialogs and app. Another pane's keys show when it is focused;
+  the full table is the [keyboard map](#keyboard-map).
 - **Ctrl+K** opens the command palette, which finds every command by name and shows its key.
+- Choices made once and left (key hints, the Leq windows' layout and history strip, the
+  spectrograph's history, the sweep pane's dB / %, where coherence is drawn) have no key:
+  they are rows of **Settings › Display** and commands in the palette.
 - Keys are scoped: the focused pane's keys apply first, then the global ones.
 - The defaults avoid `[ ] + - =` and other keys that need AltGr or a dead key on Nordic and
   other European layouts.
@@ -2332,8 +2341,8 @@ smoothing · W maximise · Alt+↑ offset · H all keys`.
   no tooltip: it would open over the top of the plot, where the legend sits);
   hovering over a clickable control (the **dB | %** toggle, **Stop**, a trace's colour dot
   or row, a measurement, a pane's measurement chip) names the key that does the same.
-- **Shift+H** (palette: *Key hints on / off*) turns the line off and on; the app remembers
-  it in `ui.toml` (`key_hints = false`). The stage view never shows it.
+- **Settings › Display › Key hints** (palette: *Key hints on / off*) turns the line off and
+  on; the app remembers it in `ui.toml` (`key_hints = false`). The stage view never shows it.
 
 Every pane's line is listed at the end of the [keyboard map](#keyboard-map).
 
@@ -2384,7 +2393,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+P` | Settings: inputs & outputs, audio, calibration, Leq, recording, display, connection… | `settings` |
 | `Ctrl+Q` | Quit | `quit` |
 | `F` or `F11` | Window full screen on / off | `fullscreen` |
-| `Shift+H` | Key hints on / off | `key_hints` |
 | `Space` | Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator) | `stimulus_arm` |
 | `Enter` | Stimulus: fire what is armed (named in the top bar) | `stimulus_fire` |
 | `Esc` | Stimulus: stop and disarm (no window open) | `stimulus_stop` |
@@ -2481,7 +2489,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `E` | Make selected trace the phase reference | `phase_reference` |
 | `Z` | Load a target curve file… | `target` |
 | `B` | Coherence mask: off → 0.3 → 0.5 → 0.7 → 0.9 | `coherence_mask` |
-| `Shift+C` | Coherence: own pane / over magnitude | `coherence_placement` |
 | `M` | Average shown stored traces (power) | `average` |
 | `P` | Phase wrapped / unwrapped | `phase_unwrap` |
 | `K` | Smoothing coarser (selected trace or pane's measurement) | `smooth_coarser` |
@@ -2501,7 +2508,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `B` | RTA: bars / line | `spectrum_style` |
 | `P` | Peak hold on / off | `peak_hold` |
 | `G` | Spectrum pane: spectrum → spectrum + spectrograph → spectrograph | `spectrograph` |
-| `Shift+G` | Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 
 #### Transfer: impulse response view
 
@@ -2518,8 +2524,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `R` | Reset averaging of selected measurement | `reset_average` |
 | `S` | Start / stop selected measurement | `start_stop` |
 | `G` | SPL: meter → Leq windows → meter + Leq → bands | `spl_leq_view` |
-| `B` | SPL Leq windows: columns / tiles | `spl_leq_style` |
-| `Shift+B` | SPL Leq windows: history strip on / off | `spl_leq_history` |
 | `Shift+R` | Start a new SPL log… | `spl_new_log` |
 | `Shift+F` | SPL meter: time weighting Fast → Slow → Impulse | `spl_time_weighting` |
 | `Z` | SPL meter: frequency weighting A → C → Z | `spl_weighting` |
@@ -2529,7 +2533,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Keys | Command | `keys.toml` |
 |---|---|---|
 | `Shift+G` | IR: linear → log → ETC | `ir_mode` |
-| `U` | Distortion in dB re fundamental / percent | `distortion_unit` |
 | `G` | Sweep pane: response & distortion → impulse response → room parameters | `sweep_view` |
 | `Shift+I` | Sweep pane: impulse response (again: response & distortion) | `sweep_ir` |
 
@@ -2538,6 +2541,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Command | `keys.toml` |
 |---|---|
 | Recent notifications… (the messages that went by in the corner) | `notifications` |
+| Key hints on / off | `key_hints` |
 | Panes follow selection on / off (only the panes that draw the selected measurement) | `panes_follow` |
 | Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log) | `warning_toasts` |
 | Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
@@ -2581,6 +2585,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Delay finder: sub band (20–120 Hz) | `finder_sub` |
 | Delay finder: custom band (Hz)… | `finder_custom` |
 | Delay finder: observation length (s)… | `finder_observation` |
+| Coherence: own pane / over magnitude | `coherence_placement` |
 | Legend: top-left corner (drag it anywhere; its corner grip resizes) | `legend_top_left` |
 | Legend: top-right corner | `legend_top_right` |
 | Legend: bottom-left corner | `legend_bottom_left` |
@@ -2594,22 +2599,26 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Smoothing: 1/12 oct | `smooth_12` |
 | Smoothing: 1/6 oct | `smooth_6` |
 | Smoothing: 1/3 oct | `smooth_3` |
+| Spectrograph history: 10 → 30 → 60 → 120 s | `spectrograph_span` |
 | SPL pane: the meter | `spl_show_meter` |
 | SPL pane: the Leq windows | `spl_show_leq` |
 | SPL pane: meter + Leq windows | `spl_show_meter_leq` |
 | SPL pane: the band Leq bars (20 … 200 Hz) | `spl_show_bands` |
+| SPL Leq windows: columns / tiles | `spl_leq_style` |
+| SPL Leq windows: history strip on / off | `spl_leq_history` |
+| Distortion in dB re fundamental / percent | `distortion_unit` |
 
-#### Key hint lines (`Shift+H` on / off)
+#### Key hint lines (Settings › Display › Key hints)
 
-The least used go first on a narrow pane; the sweep pane shows `U` while it shows distortion and `G` while it shows the impulse response.
+The least used go first on a narrow pane; the sweep pane shows `Shift+G` only while it shows the impulse response.
 
 | Pane | Hint line |
 |---|---|
 | Transfer function | `V` select trace · `G` response/phase/coherence/IR · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G` views · `Shift+G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `Tab` next measurement · `Q` close pane · `W` maximise · `H` all keys |
-| SPL | `G` meter/Leq/both/bands · `Shift+F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Q` close pane · `H` all keys |
+| SPL | `G` meter/Leq/both/bands · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `V` next sweep · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Q` close pane · `H` all keys |
 
 <!-- keymap:end -->
 

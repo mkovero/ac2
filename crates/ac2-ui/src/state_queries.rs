@@ -906,12 +906,7 @@ impl AppState {
             .map_or(SweepMode::Response, |v| v.modes.sweep);
         let scope = self.layout.view(id).map_or(pane.scope(), |v| v.scope());
         let mut line = crate::hints::line(keymap, scope, style, |c| {
-            pane == PaneKind::Distortion
-                && match c {
-                    CommandId::DistortionUnit => mode != SweepMode::Response,
-                    CommandId::IrMode => mode != SweepMode::Ir,
-                    _ => false,
-                }
+            pane == PaneKind::Distortion && c == CommandId::IrMode && mode != SweepMode::Ir
         });
         // G reaches the band view only when a meter has a band meter (`SplMode::next`).
         if !crate::scenes::has_band_meter(self) {

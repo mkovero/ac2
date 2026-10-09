@@ -303,6 +303,9 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
         crate::settings::PaneViews {
             spectrum: st.kind_modes(crate::state::PaneKind::Spectrum).spectrum,
             sweep: st.kind_modes(crate::state::PaneKind::Distortion).sweep,
+            leq: st.view.spl.layout,
+            distortion_unit: st.view.distortion.unit,
+            coherence: st.view.tf.coherence_placement,
         },
     );
     for (row, value) in rows {

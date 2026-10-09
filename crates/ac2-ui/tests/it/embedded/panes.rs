@@ -78,8 +78,8 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     );
     let sw = hint_line(&d.st);
     assert_eq!(sw.first().map(String::as_str), Some("Shift+S new sweep"));
-    // Shift+I shows the sweep's IR: dB / % gives way to the IR mode.
-    assert!(sw.contains(&"U dB/%".to_owned()), "{sw:?}");
+    // Shift+I shows the sweep's IR: the line names the IR mode.
+    assert!(!sw.contains(&"Shift+G linear/log/ETC".to_owned()), "{sw:?}");
     d.key("Shift+I");
     let sw = hint_line(&d.st);
     assert!(sw.contains(&"Shift+G linear/log/ETC".to_owned()), "{sw:?}");
@@ -88,8 +88,10 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     assert_eq!(d.st.overlay, Overlay::Help);
     d.key("H");
     assert_eq!(d.st.overlay, Overlay::None);
-    // Shift+H: no line anywhere, remembered.
-    d.key("Shift+H");
+    // Key hints off from the palette: no line anywhere, remembered.
+    d.key("Ctrl+K");
+    d.send(Msg::Text("key hints".into()));
+    d.key("Enter");
     assert!(!d.st.prefs.key_hints);
     assert!(d.st.prefs_dirty);
     assert!(hint_line(&d.st).is_empty());
@@ -870,8 +872,8 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.send(Msg::Command(CommandId::ToggleCursor));
     assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
 
-    // Shift+G: a minute of history, started afresh.
-    d.key("Shift+G");
+    // A minute of history (Settings › Display, the palette), started afresh.
+    d.send(Msg::Command(CommandId::SpectrographSpan));
     assert_eq!(d.st.view.spectrum.spectrograph.span_s, 60);
     assert!(!filled(&d.st, 1));
     d.until("frames in the minute", |s| filled(s, 10))?;

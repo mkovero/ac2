@@ -206,14 +206,14 @@ fn leq_layout_keys_and_prefs() {
     assert_eq!(t.focus_kind(), PaneKind::Spl);
     t.key("G");
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
-    // B from the meter: the windows, as tiles, under the meter.
-    t.key("B");
+    // Columns / tiles from the meter (the palette): the windows, as tiles, under the meter.
+    t.st.update(Msg::Command(CommandId::SplLeqStyle), &t.keys);
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
     assert_eq!(t.st.view.spl.layout.style, LeqStyle::Tiles);
     assert!(t.st.prefs_dirty);
     assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
     t.st.prefs_dirty = false;
-    t.key("Shift+B");
+    t.st.update(Msg::Command(CommandId::SplLeqHistory), &t.keys);
     assert!(t.st.view.spl.layout.history);
     assert!(t.st.prefs_dirty);
     assert_eq!(
@@ -229,14 +229,12 @@ fn leq_layout_keys_and_prefs() {
     t.key("G");
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     assert_eq!(t.st.prefs.leq.style, LeqStyle::Tiles);
+    t.st.update(Msg::Command(CommandId::SplLeqStyle), &t.keys);
+    t.st.update(Msg::Command(CommandId::SplLeqHistory), &t.keys);
+    assert_eq!(t.st.view.spl.layout, LeqLayout::default());
+    // The layout is set once (Settings › Display, the palette): B and Shift+B leave it.
     t.key("B");
     t.key("Shift+B");
-    assert_eq!(t.st.view.spl.layout, LeqLayout::default());
-    // Elsewhere B keeps its meaning (the RTA's bars / line), Shift+B means nothing.
-    t.key("Alt+2");
-    t.key("B");
-    assert!(t.key("Shift+B").is_empty());
-    t.key("B");
     assert_eq!(t.st.view.spl.layout, LeqLayout::default());
     // The next start takes the remembered layout.
     let prefs = crate::prefs::UiPrefs {

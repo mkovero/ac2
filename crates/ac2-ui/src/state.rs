@@ -28,8 +28,8 @@ use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
-    CoherencePlacement, DistortionUnit, FreqRange, IrMode, LeqStyle, PhaseView, PlotChrome,
-    SpectrumMode, SpectrumStyle, SplMode, SweepMode, ViewState,
+    DistortionUnit, FreqRange, IrMode, PhaseView, PlotChrome, SpectrumMode, SpectrumStyle, SplMode,
+    SweepMode, ViewState,
 };
 use ac2_scene::{axis::Range, format};
 
