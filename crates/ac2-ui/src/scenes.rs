@@ -725,14 +725,14 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
     let status = status(st, &[], None, now);
     let shown = st.shown_sweep();
     let pv = st.view_for(pane);
-    if pv.distortion.mode == ac2_scene::view::SweepMode::Room {
+    if st.pane_modes(pane).sweep == ac2_scene::view::SweepMode::Room {
         let room = shown.and_then(|(d, _)| d.sweep.as_ref()?.room.as_ref());
         let name = shown.map(|(d, _)| d.meta.edit.name.as_str());
         return SweepPane::Room(Box::new(ac2_scene::room::room_scene(
             room, name, &status, theme, size,
         )));
     }
-    if pv.distortion.mode == ac2_scene::view::SweepMode::Ir
+    if st.pane_modes(pane).sweep == ac2_scene::view::SweepMode::Ir
         && let Some((d, _)) = shown
     {
         let color = st.curve_colours(theme).trace(d.meta.id);
@@ -912,7 +912,7 @@ fn leq_view<'a>(
             .run
             .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
         stage: st.stage_view(),
-        chrome: st.view_for(pane).chrome,
+        chrome: st.pane_modes(pane).chrome,
     })
 }
 
@@ -1013,7 +1013,7 @@ pub fn spl_pane(
     size: Viewport,
     now: Now,
 ) -> Option<Scene> {
-    match st.view_for(pane).spl.mode {
+    match st.pane_modes(pane).spl {
         SplMode::Meter => spl(st, pane, keymap, theme, size, now).map(|s| s.scene),
         SplMode::Leq => leq(st, pane, theme, size, now).map(|s| s.scene),
         SplMode::Bands => band_leq(st, pane, theme, size, now).map(|s| s.scene),

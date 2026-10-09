@@ -453,14 +453,16 @@ impl AppState {
     /// The view state pane `id` is drawn with: the shared one with the pane's own modes.
     pub fn view_for(&self, id: PaneId) -> ViewState {
         let mut v = self.view;
-        if let Some(p) = self.layout.view(id) {
-            v.spectrum.mode = p.modes.spectrum;
-            v.spl.mode = p.modes.spl;
-            v.ir.mode = p.modes.ir;
-            v.distortion.mode = p.modes.sweep;
-            v.chrome = p.modes.chrome;
-        }
+        let modes = self.pane_modes(id);
+        v.spectrum.mode = modes.spectrum;
+        v.ir.mode = modes.ir;
+        v.chrome = modes.chrome;
         v
+    }
+
+    /// Pane `id`'s modes.
+    pub fn pane_modes(&self, id: PaneId) -> PaneModes {
+        self.layout.view(id).map(|v| v.modes).unwrap_or_default()
     }
 
     /// The focused pane's modes.

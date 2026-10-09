@@ -119,6 +119,12 @@ fn loaded(s: State) -> T {
     t
 }
 
+/// The measurement whose group the transfer pane draws: the one it shows, or the owner of
+/// the math channel it shows.
+fn transfer_group(t: &T) -> Option<MeasId> {
+    t.st.group_of_shown(t.st.kind_meas(PaneKind::Transfer))
+}
+
 fn legend(t: &T) -> Vec<String> {
     let mut v: Vec<String> = crate::scenes::transfer(
         &t.st,
@@ -143,7 +149,7 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
     let mut t = loaded(two_groups());
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
-    assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
+    assert_eq!(transfer_group(&t), Some(MeasId(1)));
     t.st.update(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(3))),
         &t.keys,
@@ -151,14 +157,14 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
     // A trace selected brings its measurement's group with it.
     t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
+    assert_eq!(transfer_group(&t), Some(MeasId(1)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     // The math channel shown on the pane draws its owner's group.
     t.st.update(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(6))),
         &t.keys,
     );
-    assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
+    assert_eq!(transfer_group(&t), Some(MeasId(1)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     // A hidden measurement leaves its live curve out; its group stays.
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
@@ -348,7 +354,7 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
     t.key("C");
-    assert_eq!(t.st.transfer_group(), Some(MeasId(1)));
+    assert_eq!(transfer_group(&t), Some(MeasId(1)));
     assert_eq!(
         legend(&t),
         ["Delay tower", "L ÷ tower", "Main L", "t10", "t12", "t13"]

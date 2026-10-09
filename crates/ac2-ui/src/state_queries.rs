@@ -467,13 +467,6 @@ impl AppState {
         })
     }
 
-    /// The measurement whose group the transfer pane draws: the one it shows, or the owner
-    /// of the math channel it shows. `None`: no measurement, or a math channel whose owner
-    /// is gone (the pane then draws that channel alone).
-    pub fn transfer_group(&self) -> Option<MeasId> {
-        self.group_of_shown(self.kind_meas(PaneKind::Transfer))
-    }
-
     /// The measurement whose group a transfer pane showing `shown` draws.
     pub fn group_of_shown(&self, shown: Option<&Measurement>) -> Option<MeasId> {
         let m = shown?;

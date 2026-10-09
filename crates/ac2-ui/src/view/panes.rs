@@ -222,7 +222,7 @@ fn scene_for(
 
 fn placeholder(id: PaneId, app: &App) -> &'static str {
     let pane = app.state.layout.kind(id);
-    let spl = app.state.view_for(id).spl.mode;
+    let spl = app.state.pane_modes(id).spl;
     match pane {
         PaneKind::Ir => "no transfer measurement",
         PaneKind::Spl if spl == SplMode::Leq && scenes::has_spl(&app.state) => {
@@ -377,7 +377,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
         }
         let mut right = title.right() - 8.0;
         if pane == PaneKind::Distortion
-            && app.state.view_for(id).distortion.mode == ac2_scene::view::SweepMode::Response
+            && app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response
             && let Some(left) = unit_toggle(app, ui, title, x, ch)
         {
             right = left - 10.0;
@@ -1022,7 +1022,7 @@ fn navigate(
         )
         .is_some()
         && (pane != PaneKind::Distortion
-            || app.state.view_for(id).distortion.mode == ac2_scene::view::SweepMode::Response)
+            || app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response)
     {
         // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
         let (zoom, shift, dx, pos) = ui.input(|i| {

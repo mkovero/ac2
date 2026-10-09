@@ -558,8 +558,6 @@ pub struct DistortionView {
     pub unit: DistortionUnit,
     /// y range of the dB view.
     pub range_db: Range,
-    /// Which of the sweep's views the pane shows.
-    pub mode: SweepMode,
     /// The axes and cursor of its impulse-response view.
     pub ir: IrAxes,
 }
@@ -569,7 +567,6 @@ impl Default for DistortionView {
         Self {
             unit: DistortionUnit::Db,
             range_db: Range::new(-100.0, 0.0),
-            mode: SweepMode::Response,
             ir: IrAxes::default(),
         }
     }
@@ -662,7 +659,6 @@ impl SplMode {
 /// The SPL pane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct SplView {
-    pub mode: SplMode,
     pub layout: LeqLayout,
 }
 
