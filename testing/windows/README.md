@@ -16,6 +16,9 @@ The build is an x64 installer for Windows 10 (1809) or newer, unsigned for now.
    `Get-FileHash ac2-0.0.0-dev.10-windows-x64.msi` and compare with the line in
    `SHA256SUMS`. The `.zip` beside it holds the same three programs unpacked, for use
    without installing.
+   Release files are not in git: if this directory has only `SHA256SUMS`, fetch them from
+   the dev.10 release run with `gh run download 37819512973 -R mkovero/ac2 -n dist-windows`
+   (or the run's *Artifacts* on GitHub; kept until 2027-01-06).
 2. Run the .msi. SmartScreen shows *Windows protected your PC* (unknown publisher): choose
    **More info → Run anyway**. It installs into `C:\Program Files\ac2`, adds a Start-menu
    entry **ac2**, and puts that folder on the system `PATH`. A newer MSI replaces an older

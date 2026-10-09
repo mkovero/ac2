@@ -14,6 +14,9 @@ for now.
    the code of main 81fcb14, build id e415ef1) is in this directory, with `SHA256SUMS` beside it (check with
    `shasum -a 256 -c SHA256SUMS --ignore-missing`). The `.zip` beside it holds the same
    programs unpacked, for use without the disk image.
+   Release files are not in git: if this directory has only `SHA256SUMS`, fetch them from
+   the dev.10 release run with `gh run download 37819512973 -R mkovero/ac2 -n dist-macos`
+   (or the run's *Artifacts* on GitHub; kept until 2027-01-06).
 2. Open the .dmg and drag **ac2** to Applications. If a previous ac2 is there, replace it.
 3. First start: **right-click ac2.app in Applications → Open**, then **Open** in the
    dialog. macOS remembers the answer for this one app; there is no need to allow unsigned

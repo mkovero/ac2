@@ -356,6 +356,14 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of c618724 (2026-10-09, all three hosts)
+
+Protocol 32 and session format 17 as at eb74253, so a plain binary swap: the daemon restored
+its autosave (14 measurements, 55 traces) and `session open` reopened audio; no restore
+script. New for the operator: Settings › Display › *Warning toasts* (also Ctrl+K), which
+keeps warnings and Leq limit alarms out of the corner toasts during deliberate over-limit
+testing; they still land in the notification log.
+
 ## Deploy of 6136f8a (2026-10-07, all three hosts)
 
 Protocol 25, session format 12 (a measurement's delay steps kept apart from its measured
