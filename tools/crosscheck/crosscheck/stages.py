@@ -220,7 +220,9 @@ def remove_dropin(ctx: Ctx) -> dict:
     ensure_session(ctx)
     c = verify_bound(ctx, float(ctx.rig["rig"]["system_max_dbfs"]))
     r = {"removed": existed, "ceiling_after": c}
-    ctx.manifest.setdefault("dropin", {}).update(r)
+    rec = ctx.manifest.setdefault("dropin", {})
+    # the run's final check after a stage already removed it must not erase that record
+    rec.update(r if existed or not rec.get("removed") else {"ceiling_after": c})
     ctx.save()
     return r
 
@@ -395,12 +397,13 @@ def rew_stage(ctx: Ctx, pname: str, cal_file: str | None):
             raise PolicyError(f"REW speaker stimulus starts at {start:.1f} Hz, below the speaker's "
                               f"{pc['speaker_min_request_hz']} Hz (README: make a 20 Hz – 20 kHz one)")
         level = ctx.policy.check(outs, ctx.policy.emit_speaker_dbfs, speaker_stage=True)
-        gain_db = min(0.0, level - peak)  # never louder than the file
     else:
         level = ctx.policy.check(outs, ctx.policy.electrical_level(), speaker_stage=False)
-        gain_db = level - peak
+    # scaled to the stage's level so REW's sweep and ac2's see the same drive; the policy
+    # has checked that level, and check_stimulus_peak bounds the played peak again below
+    gain_db = level - peak
     played_peak = peak + gain_db
-    levels.check_stimulus_peak(played_peak, level, speaker=speaker)
+    levels.check_stimulus_peak(played_peak, level, speaker_ceiling_dbfs=ctx.policy.speaker_ceiling() if speaker else None)
     g = 10 ** (gain_db / 20)
     reps = int(rig["stages"]["rew"].get("repeats", 1))
     gap = int(3.0 * ctx.fs)
@@ -570,10 +573,21 @@ def ac2_tf(ctx: Ctx, pname: str):
     ins = [int(pc["meas_in"]), int(pc["ref_in"])]
     cap = {}
     hp = ["--hp", f"{pc['speaker_min_request_hz']:g}hz"] if speaker else []
-    rec = ctx.ac2.rec_start(ins, settle + 30, f"{name}-{time.strftime('%Y%m%dT%H%M%S')}")
+    # A path with flight time (the speaker's metres of air) is measured as an operator would:
+    # the delay finder's first arrival inserted, then a full settle on the aligned windows.
+    # Uncompensated, the delay decorrelates each MTW window's ends and biases |H| low.
+    find_at = float(sc.get("delay_find_after_seconds", 6.0)) if speaker else 0.0
+    found = {}
+
+    def find_delay():
+        r = ctx.ac2.run("delay", "find", name, "--insert", check=False)
+        found.update(r if isinstance(r, dict) else {"result": r})
+
+    rec = ctx.ac2.rec_start(ins, find_at + settle + 30, f"{name}-{time.strftime('%Y%m%dT%H%M%S')}")
     try:
         ctx.ac2.foreground(["gen", "pink", "--out", ",".join(map(str, outs)), "--level", f"{level:g}dbfs", *hp],
-                           None, deadline=settle + 60, events_path=d / "events.jsonl", hold_s=settle,
+                           None, deadline=find_at + settle + 60, events_path=d / "events.jsonl",
+                           hold_s=find_at + settle, during=(find_at, find_delay) if speaker else None,
                            before_stop=lambda: cap.update(ctx.ac2.capture(name, f"{name}-cap") or {}))
     finally:
         ctx.ac2.run("gen", "stop", json_out=False, check=False)
@@ -586,6 +600,7 @@ def ac2_tf(ctx: Ctx, pname: str):
         shutil.copyfile(src, d / "rec.wav")
     inputs = list(rec["inputs"])
     _j(d / "info.json", {"level_dbfs": level, "settle_s": settle, "blocks": sc["blocks"], "hp": hp,
+                         "delay_find": found or None,
                          "rec_columns": [inputs.index(int(pc["meas_in"]) - 1), inputs.index(int(pc["ref_in"]) - 1)]})
 
 

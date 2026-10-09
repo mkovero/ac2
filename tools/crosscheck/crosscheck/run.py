@@ -21,7 +21,7 @@ from .rew import Rew, RewError
 ORDER = ("ambient", "genelec", "xone", "dut")
 
 
-def build_policy(rig: dict, emit=None, emit_speaker=None, allow=None, forbidden=()) -> Policy:
+def build_policy(rig: dict, emit=None, emit_speaker=None, allow=None, forbidden=(), allow_speaker=None) -> Policy:
     outs = {int(k): Output(int(k), v["port"], v["role"], v.get("note", "")) for k, v in rig["outputs"].items()}
     r = rig["rig"]
     return Policy(outputs=outs, forbidden=frozenset(int(x) for x in forbidden),
@@ -29,7 +29,8 @@ def build_policy(rig: dict, emit=None, emit_speaker=None, allow=None, forbidden=
                   speaker_max_dbfs=min(float(r["speaker_max_dbfs"]), levels.SPEAKER_HARD_MAX_DBFS),
                   emit_dbfs=levels.parse_dbfs(emit) if emit else None,
                   emit_speaker_dbfs=levels.parse_dbfs(emit_speaker) if emit_speaker else None,
-                  allow_electrical_dbfs=levels.parse_dbfs(allow) if allow else None)
+                  allow_electrical_dbfs=levels.parse_dbfs(allow) if allow else None,
+                  allow_speaker_dbfs=levels.parse_dbfs(allow_speaker) if allow_speaker else None)
 
 
 def path_policy(rig: dict, base: Policy, pname: str) -> Policy:
@@ -137,10 +138,11 @@ def main(a) -> int:
     ac2 = Ac2(rig["ac2"]["cmd"], rig["ac2"].get("timeout", "5s"), log=out / "ac2.log")
     rew = Rew(rig["rew"]["api"]) if rig.get("rew") else None
     if a.cmd == "run":
-        base = build_policy(rig, a.emit, a.emit_speaker, a.allow_electrical_level)
+        base = build_policy(rig, a.emit, a.emit_speaker, a.allow_electrical_level,
+                            allow_speaker=a.allow_speaker_level)
         # refuse impossible combinations before anything is touched
         if "genelec" in want and base.emit_speaker_dbfs is None:
-            raise PolicyError("the genelec stage needs --emit-speaker <level>dbfs (at most -50dbfs); or --stages without it")
+            raise PolicyError("the genelec stage needs --emit-speaker <level>dbfs (at most -50dbfs, or up to -30dbfs with --allow-speaker-level); or --stages without it")
         if "genelec" in want:
             pc = rig["paths"]["genelec"]
             path_policy(rig, base, "genelec").check([int(pc["out"]), int(pc["ref_out"])], base.emit_speaker_dbfs,
@@ -166,6 +168,7 @@ def main(a) -> int:
     man = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "rig": rig["rig"]["name"],
            "ac2_version": rep.get("ac2_build"), "rew_version": rep.get("rew_version"),
            "flags": {"emit": a.emit, "emit_speaker": a.emit_speaker, "allow_electrical_level": a.allow_electrical_level,
+                     "allow_speaker_level": a.allow_speaker_level,
                      "stages": want, "skip": a.skip},
            "mains_hz": rig["rig"].get("mains_hz", 50.0), "paths": {}, "preflight": rep,
            # the rig gets a copy without .git; rig-run.sh passes the commit it copied
@@ -216,13 +219,21 @@ def main(a) -> int:
                 man["paths"][s] = {"kind": pc["kind"], "mains_hz": stages.path_mains_hz(rig, s)}
                 ctx.policy = path_policy(rig, base, s)
                 if pc["kind"] == "speaker":
-                    stages.verify_bound(ctx, levels.SPEAKER_HARD_MAX_DBFS)
+                    spl = 63.0 + base.emit_speaker_dbfs - levels.SPEAKER_HARD_MAX_DBFS
                     _confirm(ctx, f"\n*** {s}: AUDIBLE. Out {pc['out']} drives the speaker at {base.emit_speaker_dbfs:g} dBFS "
-                                  f"(≈63 dB SPL at the mic for a 1 kHz sine at -50). Operator present, hearing "
+                                  f"(≈{spl:.0f} dB SPL at the mic for a 1 kHz sine). Operator present, hearing "
                                   f"protected, nothing loose near the driver?")
+                    if base.needs_raised_daemon_for_speaker():
+                        # ac2d's bound only as far as this stage's level, and back before the next stage
+                        stages.install_dropin(ctx, base.emit_speaker_dbfs)
+                    else:
+                        stages.remove_dropin(ctx)
+                        stages.verify_bound(ctx, levels.SPEAKER_HARD_MAX_DBFS)
                 elif base.needs_raised_daemon():
                     stages.install_dropin(ctx, base.allow_electrical_dbfs)
                 rc = run_path(ctx, s, cal_file) or rc
+                if pc["kind"] == "speaker" and base.needs_raised_daemon_for_speaker():
+                    stages.remove_dropin(ctx)
                 ctx.stage(s, "done")
             except PolicyError as e:
                 ctx.stage(s, "refused", str(e))

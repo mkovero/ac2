@@ -86,10 +86,34 @@ def test_speaker_stage_drives_one_speaker_beside_electrical_outputs():
 
 def test_stimulus_peak():
     with pytest.raises(PolicyError):
-        levels.check_stimulus_peak(-45.0, -40.0, speaker=True)
+        levels.check_stimulus_peak(-45.0, -40.0, speaker_ceiling_dbfs=-50.0)
     with pytest.raises(PolicyError):
-        levels.check_stimulus_peak(-49.0, -50.0, speaker=False)
-    levels.check_stimulus_peak(-50.0, -50.0, speaker=True)
+        levels.check_stimulus_peak(-49.0, -50.0, speaker_ceiling_dbfs=None)
+    levels.check_stimulus_peak(-50.0, -50.0, speaker_ceiling_dbfs=-50.0)
+    levels.check_stimulus_peak(-30.0, -30.0, speaker_ceiling_dbfs=-30.0)
+    with pytest.raises(PolicyError):  # a looser ceiling never lifts the stimulus past the backstop
+        levels.check_stimulus_peak(-20.0, -20.0, speaker_ceiling_dbfs=-10.0)
+
+
+def test_speaker_allowance_lifts_only_to_the_backstop():
+    def spk(level, allow=None):
+        return path_policy(RIG, build_policy(RIG, None, level, None, allow_speaker=allow), "genelec")
+    with pytest.raises(PolicyError, match="speaker ceiling"):
+        spk("-30dbfs").check([1, 2], -30, speaker_stage=True)
+    assert spk("-30dbfs", "-30dbfs").check([1, 2], -30, speaker_stage=True) == -30
+    assert spk("-30dbfs", "-30dbfs").needs_raised_daemon_for_speaker()
+    assert not spk("-50dbfs").needs_raised_daemon_for_speaker()
+    with pytest.raises(PolicyError, match="speaker ceiling"):
+        spk("-30dbfs", "-40dbfs").check([1, 2], -30, speaker_stage=True)
+    with pytest.raises(PolicyError, match="backstop"):
+        spk("-20dbfs", "-20dbfs").check([1, 2], -20, speaker_stage=True)
+
+
+def test_speaker_allowance_never_reaches_electrical_stages():
+    p = path_policy(RIG, build_policy(RIG, "-50dbfs", "-30dbfs", None, allow_speaker="-30dbfs"), "xone")
+    with pytest.raises(PolicyError):
+        p.check([5, 2], -30, speaker_stage=False)
+    assert not p.needs_raised_daemon()
 
 
 def test_signal_above_its_ceiling_is_refused_before_jack():

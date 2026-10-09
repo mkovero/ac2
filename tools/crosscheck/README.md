@@ -89,7 +89,8 @@ the baselines (below); differences are printed, they do not fail the script.
 
 ### The Genelec stage is audible: the operator must be present
 
-Out 1 drives the Genelec 1083. At −50 dBFS a 1 kHz sine gives about **63 dB SPL at the mic**:
+Out 1 drives the Genelec 1083. At −50 dBFS a 1 kHz sine gives about **63 dB SPL at the mic**
+(83 at −30 with `--allow-speaker-level`):
 −30 dBFS gave 83.2 dB SPL on 2026-10-03 (`docs/rigs/pupu.md`), and 20 dB less is about 63.
 Sweeps and pink noise at −50 dBFS are in the same range. The stage stops and waits for Enter
 (`--yes` skips the wait; without a terminal and without `--yes` it is refused). Stay within
@@ -102,8 +103,14 @@ reach of Ctrl-C.
 - **Nothing emits without a flag.** `--emit` covers the electrical-only outputs (out 3 Xone,
   out 2 loopback). `--emit-speaker` covers the speaker stage, which plays out 1 plus the
   loopback.
-- **The speaker never goes above −50 dBFS**, whatever the config or the other flags say
-  (`levels.SPEAKER_HARD_MAX_DBFS`). The Xone stages refuse out 1 (`forbidden_outputs`).
+- **The speaker stays at or below −50 dBFS** whatever the config or the electrical flags say
+  (`levels.SPEAKER_HARD_MAX_DBFS`). Only the operator, present at the rig, may lift it with
+  `--allow-speaker-level`, and never above −30 dBFS (`levels.SPEAKER_APPROVED_MAX_DBFS`,
+  about 83 dB SPL at the mic for a 1 kHz sine). That flag raises ac2d's bound through the
+  same drop-in for the speaker stage only and removes it before the next stage:
+  `./rig-run.sh --stages genelec --emit-speaker -30dbfs --allow-speaker-level -30dbfs`.
+  REW's stimulus file is scaled to the stage's level like every other signal. The Xone
+  stages refuse out 1 (`forbidden_outputs`).
 - **Above the rig's −50 needs `--allow-electrical-level`**, capped by the config
   (`electrical_max_dbfs`, −10 on pupu) and at −6 in code (`levels.ELECTRICAL_HARD_MAX_DBFS`).
   That flag installs a runtime systemd drop-in, restarts ac2d with `--max-level <level>` and
@@ -221,6 +228,13 @@ It checks the convention against the mic's stated mV/Pa and refuses a mismatch o
 REW's calibration is read at the start (`cal/rew_input_cal.before.json`) and put back at the
 end, with the SPL-meter and RTA settings. The report shows the mapping table. The Xone stages
 are uncalibrated ratio comparisons.
+
+The curve is in some columns and not in others: ac2's live TF carries it ("in the columns"
+in its export), its sweeps never do (the curve is a display edit there), REW's speaker import
+carries it, and the direct cross-spectra and steady sines are of the raw inputs. The suite
+takes the curve back out of the TF and of REW's dBFS response when it loads a run, so every
+relative comparison is of raw inputs; only the absolute-SPL rows put it back, for every
+source alike.
 
 ## Reading the report
 

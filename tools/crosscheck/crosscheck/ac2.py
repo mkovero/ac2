@@ -103,9 +103,10 @@ class Ac2:
 
     # ---------------------------------------------------------------- foreground emitters
     def foreground(self, args: list, until_event: str | None, deadline: float, events_path: Path,
-                   hold_s: float | None = None, before_stop=None) -> list[dict]:
+                   hold_s: float | None = None, before_stop=None, during=None) -> list[dict]:
         """Starts a foreground command, fires it with Enter, collects its JSON lines; ends at
         `until_event` (sweep) or after hold_s (generator), then sends q and waits for exit.
+        `during`: (seconds, fn) calls fn once that far into hold_s.
         On any error or Ctrl-C it sends q, then terminates: the daemon fades its stimulus out
         when the client goes."""
         argv = self.argv(*args, "--json")
@@ -139,7 +140,13 @@ class Ac2:
                     raise Ac2Error(f"ac2 {args[0]} {args[1]}: no '{until_event}' within {deadline:g} s")
             else:
                 t0 = time.monotonic()
+                pending = during
                 while time.monotonic() - t0 < hold_s:
+                    if pending and time.monotonic() - t0 >= pending[0]:
+                        pending[1]()
+                        # the hold's remainder starts after fn returns, however long it took
+                        t0 = time.monotonic() - pending[0]
+                        pending = None
                     if p.poll() is not None:
                         t.join(2)
                         why = "; ".join(event_errors(events)) or p.stderr.read()[-500:]

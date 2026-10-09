@@ -14,14 +14,18 @@ import math
 import re
 from dataclasses import dataclass
 
-# Backstops that no config can raise: the speaker never above -50 dBFS. Electrical-only paths
-# need a level well above their noise for the comparisons to be judgeable, and no ear is on
-# them; -6 dBFS keeps the sweep's and the sines' peaks clear of the converters' clip.
+# Backstops that no config can raise: the speaker never above -50 dBFS unless the operator,
+# present at the rig, types --allow-speaker-level, and even then never above -30 dBFS (about
+# 83 dB SPL at the mic for a 1 kHz sine on pupu). Electrical-only paths need a level well above
+# their noise for the comparisons to be judgeable, and no ear is on them; -6 dBFS keeps the
+# sweep's and the sines' peaks clear of the converters' clip.
 SPEAKER_HARD_MAX_DBFS = -50.0
+SPEAKER_APPROVED_MAX_DBFS = -30.0
 ELECTRICAL_HARD_MAX_DBFS = -6.0
-# REW's stimulus file: refuse a file whose peak (after scaling) is above this. A -50 dBFS
-# sweep in the RMS convention of the hand scripts peaks at -47; in ours at -50.
-STIMULUS_PEAK_HARD_MAX_DBFS = -46.0
+# REW's stimulus file: refuse a file whose peak (after scaling) is more than this above the
+# speaker ceiling in force. A -50 dBFS sweep in the RMS convention of the hand scripts peaks
+# at -47; in ours at -50.
+STIMULUS_PEAK_MARGIN_DB = 4.0
 
 _LEVEL = re.compile(r"^\s*([+-]?\d+(?:\.\d+)?)\s*dbfs\s*$", re.IGNORECASE)
 
@@ -80,6 +84,7 @@ class Policy:
     emit_dbfs: float | None  # --emit
     emit_speaker_dbfs: float | None  # --emit-speaker
     allow_electrical_dbfs: float | None  # --allow-electrical-level
+    allow_speaker_dbfs: float | None = None  # --allow-speaker-level
 
     def check(self, channels: list[int], level_dbfs: float, *, speaker_stage: bool) -> float:
         """Returns the level to emit on `channels` or raises PolicyError.
@@ -87,8 +92,9 @@ class Policy:
         Electrical stages: every channel configured and electrical-only, none forbidden;
         the level at most --emit, and above the system max only up to
         --allow-electrical-level (itself capped by config and the -30 backstop).
-        Speaker stage: --emit-speaker given, at most -50 dBFS whatever any config says;
-        the electrical allowance never reaches it."""
+        Speaker stage: --emit-speaker given, at most the speaker ceiling (-50 dBFS whatever any
+        config says, or --allow-speaker-level up to the -30 backstop); the electrical allowance
+        never reaches it."""
         if not channels:
             raise PolicyError("no output channel")
         for c in channels:
@@ -98,7 +104,7 @@ class Policy:
         if speaker_stage:
             if self.emit_speaker_dbfs is None:
                 raise PolicyError("the speaker stage needs --emit-speaker <level>dbfs")
-            cap = min(self.speaker_max_dbfs, SPEAKER_HARD_MAX_DBFS)
+            cap = self.speaker_ceiling()
             if self.emit_speaker_dbfs > cap:
                 raise PolicyError(f"--emit-speaker {self.emit_speaker_dbfs:g} dBFS is above the speaker ceiling {cap:g} dBFS")
             if level_dbfs > self.emit_speaker_dbfs:
@@ -143,11 +149,27 @@ class Policy:
     def needs_raised_daemon(self) -> bool:
         return self.emit_dbfs is not None and self.emit_dbfs > self.system_max_dbfs
 
+    def speaker_ceiling(self) -> float:
+        """The most the speaker stage may emit: the config's ceiling clamped to -50 dBFS, or
+        the operator's --allow-speaker-level, which may not exceed the -30 backstop."""
+        if self.allow_speaker_dbfs is None:
+            return min(self.speaker_max_dbfs, SPEAKER_HARD_MAX_DBFS)
+        if self.allow_speaker_dbfs > SPEAKER_APPROVED_MAX_DBFS:
+            raise PolicyError(f"--allow-speaker-level {self.allow_speaker_dbfs:g} is above the speaker backstop "
+                              f"{SPEAKER_APPROVED_MAX_DBFS:g} dBFS")
+        return self.allow_speaker_dbfs
 
-def check_stimulus_peak(peak_dbfs: float, level_dbfs: float, *, speaker: bool) -> None:
+    def needs_raised_daemon_for_speaker(self) -> bool:
+        return self.emit_speaker_dbfs is not None and self.emit_speaker_dbfs > self.system_max_dbfs
+
+
+def check_stimulus_peak(peak_dbfs: float, level_dbfs: float, *, speaker_ceiling_dbfs: float | None) -> None:
     """A file to be played must peak no higher than the level it is played at (sine
-    convention); on the speaker also never above the stimulus backstop."""
-    if speaker and peak_dbfs > STIMULUS_PEAK_HARD_MAX_DBFS + 1e-6:
-        raise PolicyError(f"stimulus peaks at {peak_dbfs:.2f} dBFS, above {STIMULUS_PEAK_HARD_MAX_DBFS} dBFS")
+    convention); on the speaker (`speaker_ceiling_dbfs` given) also never more than the
+    margin above the speaker ceiling in force."""
+    if speaker_ceiling_dbfs is not None:
+        top = min(speaker_ceiling_dbfs, SPEAKER_APPROVED_MAX_DBFS) + STIMULUS_PEAK_MARGIN_DB
+        if peak_dbfs > top + 1e-6:
+            raise PolicyError(f"stimulus peaks at {peak_dbfs:.2f} dBFS, above {top:g} dBFS")
     if peak_dbfs > level_dbfs + 0.01:
         raise PolicyError(f"stimulus peaks at {peak_dbfs:.2f} dBFS, above the allowed {level_dbfs:g} dBFS")

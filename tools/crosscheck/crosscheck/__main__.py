@@ -37,7 +37,11 @@ def main(argv=None) -> int:
         p.add_argument("--out", type=Path, help="run directory (default: runs/<UTC time>)")
         if name == "run":
             p.add_argument("--emit", help="level for electrical-only stages, e.g. -50dbfs (required to emit)")
-            p.add_argument("--emit-speaker", help="level for the speaker stage, e.g. -50dbfs (never above -50)")
+            p.add_argument("--emit-speaker", help="level for the speaker stage, e.g. -50dbfs (above -50 only "
+                                                   "with --allow-speaker-level)")
+            p.add_argument("--allow-speaker-level",
+                           help="operator present: lift the speaker ceiling and ac2d's bound for the speaker "
+                                "stage only, e.g. -30dbfs (never above -30; drop-in removed after the stage)")
             p.add_argument("--allow-electrical-level",
                            help="lift ac2d's bound for the electrical stages only, e.g. -30dbfs (systemd "
                                 "runtime drop-in, restored afterwards)")

@@ -79,3 +79,10 @@ def test_settle_lag_from_full_level_to_the_column():
     assert abs(lag - 5.5 / np.log(2000.0) * np.log(1.1)) < 1e-12 and lag < 0.1
     assert _settle_lag_s(SimpleNamespace(start_hz=10.0, end_hz=40000.0, duration_s=5.5), 22.0) > 0.5
     assert _settle_lag_s(SimpleNamespace(start_hz=30.0, end_hz=40000.0, duration_s=5.5), 22.0) is None
+
+
+def test_mic_curve_in_columns_reads_ac2s_export():
+    from crosscheck.model import mic_curve_in_columns
+    assert mic_curve_in_columns({"mic": 'MM1 34804 (curve: 90°, in the columns; file "x.txt", hash 0c)'})
+    assert not mic_curve_in_columns({"mic": "MM1 34804 (curve: none)"})
+    assert not mic_curve_in_columns({})

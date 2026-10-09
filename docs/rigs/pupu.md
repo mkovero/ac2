@@ -669,3 +669,27 @@ analysis: 261 PASS, 0 WARN, 0 FAIL.
   (sine = analytic within 0.001 dB) on every order, behind the DUT's 20 Hz high-pass (−5.7 dB at
   12 Hz). The same band averaging over a steep slope that fine removes at 20–30 Hz, at its own
   lowest columns; a longer sweep lengthens the windows and reduces it.
+
+### Genelec at −30 dBFS (2026-10-09, ac2d d6cc773, operator-approved, REW 5.40 b135)
+
+The operator approved the speaker at up to −30 dBFS for this session; the suite lifts its −50
+ceiling only with `--allow-speaker-level` (−30 at most) and ac2d's bound only for the speaker
+stage. Runs 20261009T160212Z (REW's file still played at its own −50), 20261009T161037Z (all
+at −30), 20261009T161810Z (live TF with the delay finder's 3.631 ms inserted). After every run
+`gen ceiling` read bound −50.
+
+- Magnitude, 1/48-oct, against numpy on REW's recording: ac2 sweep +0.001 / −0.003 / +0.047 dB
+  (20–100 / 100–1k / 1k–20k Hz); REW, its mic-curve correction taken back out, matches as well.
+  ac2 − REW phase −0.4 … +0.2°. Against the steady sines at 101 / 201 / 501 Hz: ac2 sweep
+  −0.06 / +0.02 / +0.04 dB.
+- Live TF (8 blocks, delay inserted) against numpy on its own capture: mean −0.07 / −0.02 /
+  −0.01 dB, +0.8 / +0.2 / +0.2°. The per-column spread (±0.4 dB) is the estimate's variance at
+  γ² ≈ 0.99 with 8 blocks (σ ≈ 0.3 dB), not a bias.
+- Harmonics where both are above their floors: H3 at 500 Hz ac2 −49.5, REW −49.2 dBr; H3 at
+  1 kHz −52.0 / −51.9; H2 at 5 kHz −57.2 / −57.1; H2 at 2 kHz −64.7 / −61.5 (sine −63.1).
+  H3 at 500 Hz reads +7.5 dB over the steady sine in both apps: the steady tone's harmonic in
+  the room, not either analyser.
+- Suite fixes from these runs: the mic curve is in the TF's and REW's columns and in nothing
+  else (it read as a −1 dB LF "error" of both); the absolute-SPL rows took the sweep's
+  "(curve: none)" for a curve in the columns (+0.8 … +1.5 dB at 50–200 Hz); the TF's
+  inserted delay is put back into its phase; TF SPL rows skip γ² < 0.99.

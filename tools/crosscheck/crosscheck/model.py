@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import formats, wav
+from . import dsp, formats, wav
 
 REFERENCE = Path(__file__).resolve().parent.parent / "reference"
 
@@ -151,8 +151,22 @@ def load_fixtures(root: Path) -> RunData:
                    manifest={"source": "fixtures 2026-10-07 (hand run)"})
 
 
+def mic_curve_in_columns(meta: dict) -> bool:
+    """ac2's export names the mic on every trace; only "(curve: …, in the columns)" means
+    the trace's magnitudes carry the curve's correction (a live TF does, a sweep never)."""
+    return "in the columns" in str(meta.get("mic", "")).lower()
+
+
+def _remove_curve(mag_db: np.ndarray, f: np.ndarray, curve) -> np.ndarray:
+    """Magnitudes as the raw inputs give them: the correction ac2 (and REW, which gets the
+    same curve normalised at 1 kHz) subtracted taken back out. Phase is never touched."""
+    return mag_db - dsp.mic_correction_db(curve, f)
+
+
 def load_run(root: Path) -> RunData:
     man = json.loads((root / "manifest.json").read_text())
+    cal = _json(root / "cal" / "store_excerpt.json")
+    curve = (cal or {}).get("curve_points")
     paths = {}
     for pname, pinfo in man.get("paths", {}).items():
         d = root / pname
@@ -177,14 +191,24 @@ def load_run(root: Path) -> RunData:
         td = d / "ac2_tf"
         if (td / "trace.csv").exists():
             p.tf = formats.read_ac2_csv(td / "trace.csv")
+            # every relative comparison (direct cross-spectra, steady sines, sweeps) is of the
+            # raw inputs; the absolute-SPL rows put the correction back for all sources alike
+            if curve and mic_curve_in_columns(p.tf.meta):
+                b = p.tf.freq
+                b["mag_db"] = _remove_curve(b["mag_db"], b["freq_hz"], curve)
+                p.tf.meta["mic"] = str(p.tf.meta["mic"]).replace("in the columns", "taken out at load")
             info = _json(td / "info.json") or {}
             if info.get("rec_columns") and (td / "rec.wav").exists():
                 p.tf_raw = _raw(td / "rec.wav", *info["rec_columns"])
         rd = d / "rew"
         if (rd / "meas_fr.json").exists():
             play = _json(rd / "play.json") or {}
+            meas_fr = formats.read_rew_curve(rd / "meas_fr.json")
+            if curve and play.get("cal_file"):
+                # imported with the cal file applied (speaker): its dBFS response carries the curve
+                meas_fr.mag = _remove_curve(meas_fr.mag, meas_fr.f, curve)
             p.rew = RewSet(label="REW offline import", level_dbfs=play.get("level_dbfs", np.nan),
-                           meas_fr=formats.read_rew_curve(rd / "meas_fr.json"),
+                           meas_fr=meas_fr,
                            ref_fr=_maybe(formats.read_rew_curve, rd / "ref_fr.json"),
                            meas_fr_spl=_maybe(formats.read_rew_curve, rd / "meas_fr_spl.json"),
                            meas_ir=_maybe(formats.read_rew_ir, rd / "meas_ir.json"),
@@ -206,5 +230,4 @@ def load_run(root: Path) -> RunData:
     ad = root / "ambient"
     if ad.exists():
         amb = {"dir": ad, "window": _json(ad / "window.json")}
-    cal = _json(root / "cal" / "store_excerpt.json")
     return RunData(root=root, paths=paths, ambient=amb, cal=cal, manifest=man)

@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from . import dsp, dut, levels
+from . import model
 from .model import PathData, RunData, Sweep
 
 TOLERANCES = Path(__file__).resolve().parent.parent / "tolerances.toml"
@@ -207,7 +208,11 @@ class Analysis:
         if p.tf is not None:
             b = p.tf.freq
             Ht = 10 ** (b["mag_db"] / 20) * np.exp(1j * np.deg2rad(b["phase_deg"]))
-            src["ac2 TF"] = self.at(b["freq_hz"], Ht, f)
+            # the live TF's phase is referred to its inserted delay (an operator's delay-finder
+            # result): interpolated there, where it is smooth, then the delay put back like a
+            # sweep's arrival so every source shares one phase reference
+            tf_delay = ((_f(p.tf.meta.get("delay_ms")) or 0.0) + (_f(p.tf.meta.get("delay_nudge_ms")) or 0.0)) / 1e3
+            src["ac2 TF"] = self.at(b["freq_hz"], Ht, f) * np.exp(-2j * np.pi * f * tf_delay)
             if "coherence" in b:
                 ok = np.isfinite(b["coherence"])
                 self.coh["ac2 TF"] = np.interp(np.log(f), np.log(b["freq_hz"][ok]), b["coherence"][ok],
@@ -1286,7 +1291,7 @@ class Analysis:
         sw = p.sweeps[p.primary]
         info = sw.trace.sweep_info or {}
         rl = _f(info.get("reference_level"))
-        curve_in_columns = str(sw.trace.meta.get("mic", "none")).strip().lower() not in ("none", "", "off")
+        curve_in_columns = model.mic_curve_in_columns(sw.trace.meta)
         for tone in t.get("tones", []):
             if "meas_level_dbfs" not in tone:
                 continue
@@ -1300,8 +1305,9 @@ class Analysis:
                 vals["ac2 sweep"] = float(dsp.db(H)) + rl + S_db + (0.0 if curve_in_columns else corr)
             if "ac2 TF" in self.src and rl is not None:
                 Ht = self.at(self.f, self.src["ac2 TF"], np.array([fc]))[0]
-                tf_curve = str(p.tf.meta.get("mic", "none")).strip().lower() not in ("none", "", "off")
-                if np.isfinite(Ht):
+                tf_curve = model.mic_curve_in_columns(p.tf.meta)
+                cg = float(np.interp(np.log(fc), np.log(self.f), self.coh["ac2 TF"])) if "ac2 TF" in self.coh else 1.0
+                if np.isfinite(Ht) and cg >= 0.99:  # as in the sine table: below it the TF is noise-limited
                     vals["ac2 TF × ref level"] = float(dsp.db(Ht)) + rl + S_db + (0.0 if tf_curve else corr)
             if p.rew and p.rew.meas_fr_spl is not None:
                 fr = p.rew.meas_fr_spl
