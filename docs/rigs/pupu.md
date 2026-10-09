@@ -356,6 +356,14 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 8b87f49 (2026-10-09, all three hosts)
+
+No protocol or session format change (protocol 33, session format 18): a plain swap, the
+daemon restored its autosave and `session open` reopened audio. New for the operator: a mic's
+curve now applies to sweeps through that input as well (a display edit on the stored trace,
+`meta.mic_curve`; the columns stay raw), and spectrum/RTA averaging is settable (`ac2 meas
+new spectrum|rta --average off|fifo:N|exp:T`, `ac2 meas set`, the Edit spectrum/RTA dialogs).
+
 ## Deploy of 2416a06, then 511efb0 (2026-10-09, all three hosts)
 
 Protocol 33, session format 18 (LF harmonics standard / fine): the c618724 deploy's state was
@@ -693,3 +701,13 @@ at −30), 20261009T161810Z (live TF with the delay finder's 3.631 ms inserted).
   else (it read as a −1 dB LF "error" of both); the absolute-SPL rows took the sweep's
   "(curve: none)" for a curve in the columns (+0.8 … +1.5 dB at 50–200 Hz); the TF's
   inserted delay is put back into its phase; TF SPL rows skip γ² < 0.99.
+
+### Ambient with an averaged RTA (2026-10-09, ac2d 8b87f49)
+
+Run `20261009T180151Z`: the ambient stage now sets the RTA to `--average fifo:N` over the Leq
+window (recorded as `ac2_rta_average` in `window.json`). LZ / LA / LC against numpy on the
+recording +0.005 / +0.004 / −0.002 dB; LAeq ac2 vs REW −0.009 dB. ac2's RTA against numpy's
+summed FFT bins: worst third octave +1.69 dB at 79 Hz (WARN), median +0.19 dB, was 7.7 dB
+from a single unaveraged frame; REW's worst on the same recording is 3.75 dB. What remains is
+filter skirts against ideal band edges in a falling LF ambient and the averaging span not
+matching the numpy window to the sample.
