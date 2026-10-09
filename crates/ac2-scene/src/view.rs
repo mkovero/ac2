@@ -666,6 +666,67 @@ pub struct SplView {
     pub layout: LeqLayout,
 }
 
+/// How much of a plot's furniture a pane draws around its traces. Fewer lines let a
+/// screenshot or a crowded overlay read as curves alone; the axes stay as they are, so
+/// nothing about the picture's scale changes between the steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PlotChrome {
+    /// Grid, axis labels and the cursor.
+    #[default]
+    Full,
+    /// Axis labels and the cursor, no grid lines.
+    NoGrid,
+    /// The traces alone: no grid, no axis labels, no cursor.
+    Bare,
+}
+
+impl PlotChrome {
+    /// T: full → no grid → traces only → full.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Full => Self::NoGrid,
+            Self::NoGrid => Self::Bare,
+            Self::Bare => Self::Full,
+        }
+    }
+
+    /// What the operator reads when stepping (toast, help).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Full => "grid, labels and cursor",
+            Self::NoGrid => "no grid",
+            Self::Bare => "traces only",
+        }
+    }
+
+    pub fn grid(self) -> bool {
+        self == Self::Full
+    }
+
+    /// Tick labels and the axis title.
+    pub fn labels(self) -> bool {
+        self != Self::Bare
+    }
+
+    /// The cursor line and its readout.
+    pub fn cursor(self) -> bool {
+        self != Self::Bare
+    }
+}
+
+/// Each pane's [`PlotChrome`]: a pane strips its plot without touching the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct PaneChrome {
+    pub transfer: PlotChrome,
+    /// The spectrum and the spectrograph.
+    pub spectrum: PlotChrome,
+    pub ir: PlotChrome,
+    /// The Leq history strip.
+    pub spl: PlotChrome,
+    /// The sweep pane: response, distortion and the sweep's IR.
+    pub distortion: PlotChrome,
+}
+
 /// Everything the operator chose about the view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ViewState {
@@ -680,6 +741,8 @@ pub struct ViewState {
     pub cursor_hz: Option<f64>,
     /// Air temperature for the delay → distance readout (decision A).
     pub temperature_c: f64,
+    /// Grid, labels and cursor per pane.
+    pub chrome: PaneChrome,
 }
 
 impl Default for ViewState {
@@ -693,6 +756,7 @@ impl Default for ViewState {
             spl: SplView::default(),
             cursor_hz: None,
             temperature_c: 20.0,
+            chrome: PaneChrome::default(),
         }
     }
 }
@@ -716,6 +780,27 @@ impl ViewState {
 
 #[cfg(test)]
 mod tests {
+    /// The plot steps full → no grid → traces only and wraps; each step names itself.
+    #[test]
+    fn plot_chrome_cycle_wraps() {
+        let mut c = PlotChrome::default();
+        assert_eq!(c, PlotChrome::Full);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            seen.push((c.name(), c.grid(), c.labels(), c.cursor()));
+            c = c.next();
+        }
+        assert_eq!(c, PlotChrome::Full);
+        assert_eq!(
+            seen,
+            [
+                ("grid, labels and cursor", true, true, true),
+                ("no grid", false, true, true),
+                ("traces only", false, false, false),
+            ]
+        );
+    }
+
     /// The time axis of an IR: zoom keeps the time under the pointer, never narrower than a
     /// few samples; pan and zoom out stop one IR length outside it.
     #[test]

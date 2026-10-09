@@ -951,6 +951,8 @@ pub struct LeqView<'a> {
     /// Full screen (the stage view): the windows read across a room, so the caption (meter,
     /// calibration) is drawn only with the history on or the values stale.
     pub stage: bool,
+    /// Grid and labels of the history strip.
+    pub chrome: crate::view::PlotChrome,
 }
 
 /// The Leq view as drawn.
@@ -1118,8 +1120,14 @@ fn draw_tile(
     );
 }
 
-fn draw_history(c: &mut Canvas, s: &HistoryStrip, shared: Option<&str>, theme: &Theme) {
-    canvas::pane_frame(c, s.plot, &s.x, &s.y, true, "dB", theme);
+fn draw_history(
+    c: &mut Canvas,
+    s: &HistoryStrip,
+    shared: Option<&str>,
+    chrome: crate::view::PlotChrome,
+    theme: &Theme,
+) {
+    canvas::pane_frame(c, s.plot, &s.x, &s.y, true, "dB", chrome, theme);
     for l in &s.lines {
         if let Some(y) = l.limit_y {
             canvas::hline(
@@ -1374,7 +1382,7 @@ pub(crate) fn leq_scene_under<T>(
     let history = match (hist_area, v.history) {
         (Some(r), Some(h)) => {
             let s = history_strip(v.cfg, h, judged, r, theme);
-            draw_history(&mut c, &s, shared.as_deref(), theme);
+            draw_history(&mut c, &s, shared.as_deref(), v.chrome, theme);
             Some(s)
         }
         _ => None,

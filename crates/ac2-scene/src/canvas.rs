@@ -7,6 +7,7 @@ use crate::primitives::{
     Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
+use crate::view::PlotChrome;
 
 /// Layer order: base (backgrounds, grids, axis labels) → data (traces) → overlay (cursor,
 /// legend, readouts) → banners (in their own strip above the plots, drawn last).
@@ -121,7 +122,9 @@ pub(crate) fn cut_to(text: &str, width: f32, font: f32) -> String {
 }
 
 /// Plot background, grid from both axes' ticks, y labels left of the plot, x labels below
-/// it when `x_labels`, and the y-axis title inside the top-left corner.
+/// it when `x_labels`, and the y-axis title inside the top-left corner; `chrome` leaves out
+/// the grid, or the grid, the labels and the title.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn pane_frame(
     c: &mut Canvas,
     plot: Rect,
@@ -129,10 +132,11 @@ pub(crate) fn pane_frame(
     y: &Axis,
     x_labels: bool,
     title: &str,
+    chrome: PlotChrome,
     theme: &Theme,
 ) {
     let at = [plot.x + 6.0, plot.y + 4.0];
-    pane_frame_at(c, plot, x, y, x_labels, title, at, theme);
+    pane_frame_at(c, plot, x, y, x_labels, title, at, chrome, theme);
 }
 
 /// [`pane_frame`] with the title's top-left at `title_at`.
@@ -145,6 +149,7 @@ pub(crate) fn pane_frame_at(
     x_labels: bool,
     title: &str,
     title_at: [f32; 2],
+    chrome: PlotChrome,
     theme: &Theme,
 ) {
     c.base.rects.push(FillRect {
@@ -152,28 +157,12 @@ pub(crate) fn pane_frame_at(
         color: theme.plot_background,
         clip: None,
     });
-    let mut lines = Vec::new();
-    for (axis, ga) in [(x, GridAxis::X), (y, GridAxis::Y)] {
-        for t in &axis.ticks {
-            if !t.pos.is_finite() {
-                continue;
-            }
-            lines.push(GridLine {
-                axis: ga,
-                pos: t.pos,
-                kind: match t.kind {
-                    TickKind::Major => GridKind::Major,
-                    TickKind::Minor => GridKind::Minor,
-                },
-            });
-        }
+    if chrome.grid() {
+        grid(c, plot, x, y, theme);
     }
-    c.base.grids.push(Grid {
-        rect: plot,
-        lines,
-        major: theme.grid_major,
-        minor: theme.grid_minor,
-    });
+    if !chrome.labels() {
+        return;
+    }
     for t in &y.ticks {
         if let Some(text) = &t.label {
             c.base.labels.push(label(
@@ -205,6 +194,32 @@ pub(crate) fn pane_frame_at(
         theme.small_font_size,
         theme.text_dim,
     ));
+}
+
+/// Grid lines at both axes' ticks.
+fn grid(c: &mut Canvas, plot: Rect, x: &Axis, y: &Axis, theme: &Theme) {
+    let mut lines = Vec::new();
+    for (axis, ga) in [(x, GridAxis::X), (y, GridAxis::Y)] {
+        for t in &axis.ticks {
+            if !t.pos.is_finite() {
+                continue;
+            }
+            lines.push(GridLine {
+                axis: ga,
+                pos: t.pos,
+                kind: match t.kind {
+                    TickKind::Major => GridKind::Major,
+                    TickKind::Minor => GridKind::Minor,
+                },
+            });
+        }
+    }
+    c.base.grids.push(Grid {
+        rect: plot,
+        lines,
+        major: theme.grid_major,
+        minor: theme.grid_minor,
+    });
 }
 
 /// A horizontal reference line (0 dB, 0°) when `y` is inside the plot.

@@ -202,6 +202,48 @@ fn w_cycles_split_maximised_full_screen() {
     assert!(!t.st.layout.maximized && !t.st.fullscreen);
 }
 
+/// T steps the focused pane's plot (grid, labels, cursor) and no other pane's; the toast
+/// names the pane and the step; each pane's step is kept for the next start.
+#[test]
+fn t_steps_only_the_focused_plot_and_is_remembered() {
+    use ac2_scene::view::{PaneChrome, PlotChrome};
+    let mut t = T::new();
+    t.st.prefs_dirty = false;
+    // The transfer pane has the keyboard at start.
+    t.key("T");
+    assert_eq!(
+        t.st.view.chrome,
+        PaneChrome {
+            transfer: PlotChrome::NoGrid,
+            ..PaneChrome::default()
+        }
+    );
+    assert_eq!(t.last_toast(), "Transfer: no grid");
+    t.key("Alt+3");
+    t.key("T");
+    t.key("T");
+    assert_eq!(t.last_toast(), "Impulse response: traces only");
+    let want = PaneChrome {
+        transfer: PlotChrome::NoGrid,
+        ir: PlotChrome::Bare,
+        ..PaneChrome::default()
+    };
+    assert_eq!(t.st.view.chrome, want);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(t.st.prefs.layout.chrome, want);
+    // A third step wraps to the full plot.
+    t.key("T");
+    assert_eq!(t.st.view.chrome.ir, PlotChrome::Full);
+    assert_eq!(t.last_toast(), "Impulse response: grid, labels and cursor");
+    // The theme is no longer on T.
+    assert_eq!(t.st.theme, T::new().st.theme);
+    // The next start draws each pane as it was left.
+    let mut v = T::new();
+    v.st.set_prefs(t.st.prefs.clone());
+    assert_eq!(v.st.view.chrome.transfer, PlotChrome::NoGrid);
+    assert_eq!(v.st.view.chrome.ir, PlotChrome::Full);
+}
+
 /// The layout goes into the preferences whenever it changes, measurements by name; the next
 /// start (preferences set before the link) comes back to it, the pane's measurement once
 /// the daemon's state is known. One that is gone falls back quietly.

@@ -5,7 +5,8 @@
 //! layout keeps only the panes that draw the selection, how long the SPL
 //! meter's number holds a reading, the theme, the record toggle's time limit, the
 //! spectrograph's history span, the layout and window as last left: the focused
-//! pane, maximised or full screen, what each pane shows, the window's size and position,
+//! pane, maximised or full screen, what each pane shows and how much of its plot (grid,
+//! labels, cursor), the window's size and position,
 //! and each pane's level axis range (a fit made for one show is a fair start for the next),
 //! and where the transfer pane's legend sat and how large it may be.
 //!
@@ -44,6 +45,10 @@
 //! hidden = ["TF 2"]
 //! compared = ["Main R"]
 //!
+//! [layout.chrome]
+//! transfer = "no_grid"
+//! ir = "traces_only"
+//!
 //! [layout.measurements]
 //! transfer = "Main L"
 //! spl = "FOH SPL"
@@ -79,7 +84,8 @@ use std::path::Path;
 use ac2_scene::axis::Range;
 use ac2_scene::legend::LegendView;
 use ac2_scene::view::{
-    DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SplMode, SweepMode, ViewState, level,
+    DistortionUnit, IrMode, LeqLayout, LeqStyle, PaneChrome, PlotChrome, SpectrumMode, SplMode,
+    SweepMode, ViewState, level,
 };
 use serde::{Deserialize, Serialize};
 
@@ -129,6 +135,8 @@ pub struct LayoutPrefs {
     /// Measurements whose live curves every transfer pane draws besides its own group
     /// (compare, C), by name.
     pub compared: BTreeSet<String>,
+    /// Each pane's grid, labels and cursor (T).
+    pub chrome: PaneChrome,
 }
 
 impl Default for LayoutPrefs {
@@ -145,6 +153,7 @@ impl Default for LayoutPrefs {
             measurements: BTreeMap::new(),
             hidden: BTreeSet::new(),
             compared: BTreeSet::new(),
+            chrome: PaneChrome::default(),
         }
     }
 }
@@ -566,6 +575,79 @@ enum UnitFile {
     Percent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ChromeFile {
+    #[default]
+    Full,
+    NoGrid,
+    TracesOnly,
+}
+
+impl ChromeFile {
+    fn of(c: PlotChrome) -> Self {
+        match c {
+            PlotChrome::Full => Self::Full,
+            PlotChrome::NoGrid => Self::NoGrid,
+            PlotChrome::Bare => Self::TracesOnly,
+        }
+    }
+
+    fn chrome(self) -> PlotChrome {
+        match self {
+            Self::Full => PlotChrome::Full,
+            Self::NoGrid => PlotChrome::NoGrid,
+            Self::TracesOnly => PlotChrome::Bare,
+        }
+    }
+
+    fn is_full(&self) -> bool {
+        *self == Self::Full
+    }
+}
+
+/// Only the panes stepped away from the full plot are written.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PaneChromeFile {
+    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
+    transfer: ChromeFile,
+    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
+    spectrum: ChromeFile,
+    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
+    ir: ChromeFile,
+    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
+    spl: ChromeFile,
+    #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
+    distortion: ChromeFile,
+}
+
+impl PaneChromeFile {
+    fn of(c: &PaneChrome) -> Self {
+        Self {
+            transfer: ChromeFile::of(c.transfer),
+            spectrum: ChromeFile::of(c.spectrum),
+            ir: ChromeFile::of(c.ir),
+            spl: ChromeFile::of(c.spl),
+            distortion: ChromeFile::of(c.distortion),
+        }
+    }
+
+    fn chrome(&self) -> PaneChrome {
+        PaneChrome {
+            transfer: self.transfer.chrome(),
+            spectrum: self.spectrum.chrome(),
+            ir: self.ir.chrome(),
+            spl: self.spl.chrome(),
+            distortion: self.distortion.chrome(),
+        }
+    }
+
+    fn is_full(&self) -> bool {
+        self.chrome() == PaneChrome::default()
+    }
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -603,7 +685,9 @@ struct LayoutFile {
     hidden: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     compared: Vec<String>,
-    /// Last: a table.
+    /// Tables last.
+    #[serde(default, skip_serializing_if = "PaneChromeFile::is_full")]
+    chrome: PaneChromeFile,
     #[serde(default)]
     measurements: MeasurementsFile,
 }
@@ -664,6 +748,7 @@ impl LayoutFile {
             measurements,
             hidden: self.hidden.into_iter().collect(),
             compared: self.compared.into_iter().collect(),
+            chrome: self.chrome.chrome(),
         }
     }
 
@@ -700,6 +785,7 @@ impl LayoutFile {
             },
             hidden: l.hidden.iter().cloned().collect(),
             compared: l.compared.iter().cloned().collect(),
+            chrome: PaneChromeFile::of(&l.chrome),
             measurements: MeasurementsFile {
                 transfer: name(PaneKind::Transfer),
                 spectrum: name(PaneKind::Spectrum),
@@ -1122,6 +1208,11 @@ mod tests {
             .into(),
             hidden: ["TF 2".to_owned()].into(),
             compared: ["Main R".to_owned()].into(),
+            chrome: PaneChrome {
+                transfer: PlotChrome::NoGrid,
+                ir: PlotChrome::Bare,
+                ..PaneChrome::default()
+            },
         };
         p.window = Some(WindowPrefs {
             width: 1600,
@@ -1141,6 +1232,9 @@ mod tests {
             "distortion_unit = \"percent\"",
             "hidden = [\"TF 2\"]",
             "compared = [\"Main R\"]",
+            "[layout.chrome]",
+            "transfer = \"no_grid\"",
+            "ir = \"traces_only\"",
             "[layout.measurements]",
             "spl = \"FOH SPL\"",
             "[window]",
@@ -1171,6 +1265,7 @@ mod tests {
             "[layout]\nfocus = \"nowhere\"\n",
             "[layout]\nfocus = \"spl\"\nspl_view = \"bars\"\n",
             "[layout.measurements]\nir = \"x\"\n",
+            "[layout]\nfocus = \"spl\"\n[layout.chrome]\nspl = \"bare\"\n",
             "[window]\nwidth = 100\nheight = 100\n",
         ] {
             assert!(UiPrefs::from_toml(bad).is_err(), "{bad}");

@@ -282,10 +282,10 @@ fn help_scrolls_with_the_arrows_and_page_keys() {
     assert!(t.st.help_scroll > 1e6, "the view clamps it to the end");
     t.key("Home");
     assert_eq!(t.st.help_scroll, 0.0);
-    // Other keys keep working with the keys shown: T cycles the theme.
-    let theme = t.st.theme;
+    // Other keys keep working with the keys shown: T steps the focused plot's grid.
+    let chrome = t.st.view.chrome;
     t.key("T");
-    assert_ne!(t.st.theme, theme);
+    assert_ne!(t.st.view.chrome, chrome);
     assert_eq!(t.st.overlay, Overlay::Help);
     // Opened again, it starts at the top.
     t.key("Down");

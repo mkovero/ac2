@@ -701,6 +701,7 @@ impl AppState {
             sweep_view: self.view.distortion.mode,
             ir_mode: self.view.ir.mode,
             distortion_unit: self.view.distortion.unit,
+            chrome: self.view.chrome,
             measurements,
             hidden,
             compared,
@@ -799,6 +800,7 @@ impl AppState {
         self.view.distortion.mode = l.sweep_view;
         self.view.ir.mode = l.ir_mode;
         self.view.distortion.unit = l.distortion_unit;
+        self.view.chrome = l.chrome;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.levels.apply(&mut self.view);
         prefs.legend.apply(&mut self.view.tf.legend);

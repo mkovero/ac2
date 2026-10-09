@@ -607,6 +607,7 @@ pub fn ir(
             &status,
             &st.view,
             &st.view.ir.axes,
+            st.view.chrome.ir,
             theme,
             size,
         ));
@@ -640,6 +641,7 @@ pub fn ir(
         missing_text(&m.config.name, why, &start),
         &status,
         &st.view.ir.axes,
+        st.view.chrome.ir,
         theme,
         size,
     ))
@@ -871,6 +873,7 @@ fn leq_view<'a>(st: &'a AppState, m: &'a Measurement, now: Now) -> Option<LeqVie
             .run
             .map(|r| ac2_scene::leq::run_text(&r, cfg, |t| st.local_zone.offset_s(t))),
         stage: st.stage_view(),
+        chrome: st.view.chrome.spl,
     })
 }
 

@@ -383,6 +383,7 @@ commands! {
     PrevMeasurementInTree => "prev_measurement_in_tree", "Select previous measurement in the list", [Global];
     PaneMeasurement => "pane_measurement", "Choose the measurement the focused pane shows…", [Global];
     CycleTheme => "cycle_theme", "Theme: dark → light → high contrast", [Global];
+    PlotChrome => "plot_chrome", "Plot of the focused pane: grid, labels and cursor → no grid → traces only", [Global];
     ZoomIn => "zoom_in", "Zoom frequency in (IR: time)", [Global];
     ZoomOut => "zoom_out", "Zoom frequency out (IR: time)", [Global];
     PanLeft => "pan_left", "Pan frequency down (IR: earlier)", [Global];
@@ -612,7 +613,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::MaximizePane, S::Global, k(K::W)),
         (C::NextMeasurement, S::Global, k(K::N)),
         (C::PrevMeasurement, S::Global, sh(K::N)),
-        (C::CycleTheme, S::Global, k(K::T)),
+        // T strips the focused plot step by step (grid, then labels and cursor) for a clean
+        // picture; the theme is in Settings › Display and the palette.
+        (C::PlotChrome, S::Global, k(K::T)),
         (C::ZoomIn, S::Global, k(K::I)),
         (C::ZoomOut, S::Global, k(K::O)),
         // Plain O zooms out; the session dialog takes Shift+O.
@@ -1186,6 +1189,8 @@ mod tests {
             CommandId::SplShowMeterLeq,
             CommandId::SplShowBands,
             CommandId::Notifications,
+            // Settings › Display has the theme row; T is the plot's grid / labels / cursor.
+            CommandId::CycleTheme,
         ];
         let m = Keymap::default();
         for c in CommandId::ALL {

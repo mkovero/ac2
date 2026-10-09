@@ -19,7 +19,7 @@ use crate::trace::{
     DisplayCache, DisplayTrace, PhaseReference, PhaseRelation, TfTrace, TraceKey, display_traces,
     group_delay_span,
 };
-use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
+use crate::view::{CoherencePlacement, PhaseView, PlotChrome, TfView, ViewState};
 
 /// Relative heights of the panes.
 const WEIGHT_MAGNITUDE: f32 = 3.0;
@@ -274,16 +274,20 @@ fn trace_line(
 }
 
 /// Right-margin axis of the overlaid coherence and a dashed line at γ² = 0.
-fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme) {
-    let floor = Stroke {
-        dash: Some(Dash {
-            on: 3.0,
-            off: 3.0,
-            offset: 0.0,
-        }),
-        ..theme.grid_major
-    };
-    canvas::hline(c, plot, o.band.bottom(), floor);
+fn overlay_frame(
+    c: &mut Canvas,
+    plot: Rect,
+    o: &CoherenceOverlay,
+    chrome: PlotChrome,
+    theme: &Theme,
+) {
+    // The band's floor is drawn as a grid line, so it goes with the grid.
+    if chrome.grid() {
+        overlay_floor(c, plot, o, theme);
+    }
+    if !chrome.labels() {
+        return;
+    }
     for t in &o.axis.ticks {
         if let Some(text) = &t.label {
             c.base.labels.push(label(
@@ -302,6 +306,18 @@ fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme
         theme.small_font_size,
         theme.text_dim,
     ));
+}
+
+fn overlay_floor(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme) {
+    let floor = Stroke {
+        dash: Some(Dash {
+            on: 3.0,
+            off: 3.0,
+            offset: 0.0,
+        }),
+        ..theme.grid_major
+    };
+    canvas::hline(c, plot, o.band.bottom(), floor);
 }
 
 /// The cursor values on a plate of their own: each on its trace's legend row, on the side of
@@ -506,6 +522,7 @@ pub fn transfer_scene(
             pi == last,
             &title,
             title_at,
+            view.chrome.transfer,
             theme,
         );
         let ym = y_axis.mapping;
@@ -513,7 +530,7 @@ pub fn transfer_scene(
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
         if let Some(o) = &band {
-            overlay_frame(&mut c, plot, o, theme);
+            overlay_frame(&mut c, plot, o, view.chrome.transfer, theme);
         }
 
         for t in &shown {
@@ -586,6 +603,7 @@ pub fn transfer_scene(
         .collect();
     let cursor = view
         .cursor_hz
+        .filter(|_| view.chrome.transfer.cursor())
         .and_then(|hz| readout::cursor_readout(&shown, hz, view.tf.phase));
     let delay = reference.as_ref().map(|r| {
         let name = shown
@@ -999,6 +1017,90 @@ mod tests {
         assert!(labels.contains(&"Main L · ref · 1/6 oct"));
         assert!(labels.contains(&"1.00 kHz"));
         assert!(labels.contains(&"+3.0 dB  0°  1.00"));
+    }
+
+    /// Full draws grid, tick labels and cursor; no grid keeps the labels and the cursor;
+    /// traces only drops all three. The curves are the same in every step.
+    #[test]
+    fn plot_chrome_steps_strip_grid_labels_and_cursor() {
+        use crate::view::PlotChrome;
+        let a = cols(97);
+        let draw = |chrome: PlotChrome| {
+            let mut view = ViewState {
+                cursor_hz: Some(1000.0),
+                ..ViewState::default()
+            };
+            view.chrome.transfer = chrome;
+            // Another pane's step never reaches this one.
+            view.chrome.spectrum = PlotChrome::Bare;
+            transfer_scene(
+                &[trace(&a, TraceKey::Live(MeasId(1)), 0.0)],
+                &DisplayCache::default(),
+                &Status::default(),
+                &view,
+                &Theme::dark(),
+                SIZE,
+            )
+        };
+        let grid_lines = |s: &TfScene| -> usize {
+            s.scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.grids)
+                .map(|g| g.lines.len())
+                .sum()
+        };
+        let tick_labels = |s: &TfScene| -> usize {
+            let ticks: Vec<&str> = s
+                .x_axis
+                .ticks
+                .iter()
+                .filter_map(|t| t.label.as_deref())
+                .collect();
+            s.scene.layers[0]
+                .labels
+                .iter()
+                .filter(|l| ticks.contains(&l.text.as_str()))
+                .count()
+        };
+        let cursor_lines = |s: &TfScene| -> usize {
+            s.scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.polylines)
+                .filter(|p| p.stroke == Theme::dark().cursor)
+                .count()
+        };
+        let curves = |s: &TfScene| -> Vec<Vec<[f32; 2]>> {
+            s.scene.layers[1]
+                .polylines
+                .iter()
+                .filter(|p| p.stroke != Theme::dark().cursor)
+                .map(|p| p.points.clone())
+                .collect()
+        };
+
+        let full = draw(PlotChrome::Full);
+        assert!(grid_lines(&full) > 0);
+        assert!(tick_labels(&full) > 0);
+        assert!(full.cursor.is_some());
+        assert_eq!(cursor_lines(&full), 3);
+
+        let no_grid = draw(PlotChrome::NoGrid);
+        assert_eq!(grid_lines(&no_grid), 0);
+        assert_eq!(tick_labels(&no_grid), tick_labels(&full));
+        assert!(no_grid.cursor.is_some());
+        assert_eq!(cursor_lines(&no_grid), 3);
+
+        let bare = draw(PlotChrome::Bare);
+        assert_eq!(grid_lines(&bare), 0);
+        assert_eq!(tick_labels(&bare), 0);
+        assert!(bare.cursor.is_none() && bare.readout_box.is_none());
+        assert_eq!(cursor_lines(&bare), 0);
+
+        assert!(!curves(&full).is_empty());
+        assert_eq!(curves(&no_grid), curves(&full));
+        assert_eq!(curves(&bare), curves(&full));
     }
 
     /// A stopped measurement's curve is its final result: tagged, drawn at full strength.

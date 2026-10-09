@@ -716,7 +716,16 @@ pub(crate) fn spectrum_scene_in(
         .unwrap_or_default();
     let x_axis = axis::freq_axis(view.freq.range(), plot.x, plot.right());
     let y_axis = axis::linear_axis(view.spectrum.level, plot.bottom(), plot.y, &unit);
-    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, &unit, theme);
+    canvas::pane_frame(
+        &mut c,
+        plot,
+        &x_axis,
+        &y_axis,
+        true,
+        &unit,
+        view.chrome.spectrum,
+        theme,
+    );
     c.base.labels.push(label(
         caption.clone(),
         [plot.right() - 6.0, plot.y + 4.0],
@@ -838,7 +847,8 @@ pub(crate) fn spectrum_scene_in(
         }
     }
 
-    let cursor = view.cursor_hz.and_then(|hz| {
+    let cursor_hz = view.cursor_hz.filter(|_| view.chrome.spectrum.cursor());
+    let cursor = cursor_hz.and_then(|hz| {
         let first = traces.first()?;
         let i = nearest_column(first.freqs, hz)?;
         let f = first.freqs[i];

@@ -438,6 +438,7 @@ pub fn distortion_scene(
         &y_fundamental,
         false,
         FUNDAMENTAL_TITLE,
+        view.chrome.distortion,
         theme,
     );
 
@@ -459,7 +460,16 @@ pub fn distortion_scene(
             "%",
         ),
     };
-    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, title, theme);
+    canvas::pane_frame(
+        &mut c,
+        plot,
+        &x_axis,
+        &y_axis,
+        true,
+        title,
+        view.chrome.distortion,
+        theme,
+    );
     let ym = y_axis.mapping;
 
     let mut legend = Vec::new();
@@ -619,7 +629,8 @@ pub fn distortion_scene(
         ));
     }
 
-    let cursor = view.cursor_hz.zip(sweep).and_then(|(hz, (t, s))| {
+    let cursor_hz = view.cursor_hz.filter(|_| view.chrome.distortion.cursor());
+    let cursor = cursor_hz.zip(sweep).and_then(|(hz, (t, s))| {
         let i = nearest_column(t.freqs, hz)?;
         let f = t.freqs[i];
         let mut rows = vec![(
@@ -735,6 +746,7 @@ pub fn sweep_ir_scene(
         status,
         view,
         &view.distortion.ir,
+        view.chrome.distortion,
         theme,
         ir_size,
     );

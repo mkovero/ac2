@@ -16,7 +16,7 @@ use crate::primitives::{Color, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Vi
 use crate::readout;
 use crate::theme::Theme;
 use crate::time::Freshness;
-use crate::view::{IrAxes, IrExtent, IrMode, ViewState};
+use crate::view::{IrAxes, IrExtent, IrMode, PlotChrome, ViewState};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrScene {
@@ -177,6 +177,7 @@ pub fn ir_scene(
     status: &Status,
     view: &ViewState,
     axes: &IrAxes,
+    chrome: PlotChrome,
     theme: &Theme,
     size: Viewport,
 ) -> IrScene {
@@ -193,7 +194,7 @@ pub fn ir_scene(
     let title = title(mode).to_string();
     let y_unit = if mode == IrMode::Linear { "FS" } else { "dB" };
     let y_axis = axis::linear_axis(yrange, plot.bottom(), plot.y, y_unit);
-    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, &title, theme);
+    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, &title, chrome, theme);
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
     if mode == IrMode::Linear {
         canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
@@ -268,6 +269,7 @@ pub fn ir_scene(
     }
     let cursor = values
         .as_ref()
+        .filter(|_| chrome.cursor())
         .and_then(|_| cursor_reading(frame, mode, axes));
     if let Some(cur) = &cursor {
         canvas::vline(&mut c.overlay, plot, xm.to_px(cur.t_ms), theme.cursor);
@@ -376,6 +378,7 @@ pub fn missing_scene(
     note: String,
     status: &Status,
     axes: &IrAxes,
+    chrome: PlotChrome,
     theme: &Theme,
     size: Viewport,
 ) -> IrScene {
@@ -389,7 +392,7 @@ pub fn missing_scene(
         .unwrap_or(Range::new(-1.0, 10.0));
     let x_axis = axis::linear_axis(trange, plot.x, plot.right(), "ms");
     let y_axis = axis::linear_axis(Range::new(-1.0, 1.0), plot.bottom(), plot.y, "FS");
-    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, "", theme);
+    canvas::pane_frame(&mut c, plot, &x_axis, &y_axis, true, "", chrome, theme);
     let (lines, font) = note_lines(&note, plot.w - 12.0, theme);
     let pitch = font * 1.4;
     let top = plot.y + plot.h / 2.0 - pitch * (lines.len() as f32 - 1.0) / 2.0;
@@ -476,6 +479,7 @@ mod tests {
             &Status::default(),
             &view(IrMode::Linear),
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -520,6 +524,7 @@ mod tests {
             &Status::default(),
             &view(IrMode::Log),
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -538,6 +543,7 @@ mod tests {
             &Status::default(),
             &view(IrMode::Etc),
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -564,6 +570,7 @@ mod tests {
             &Status::default(),
             &v,
             &v.ir.axes,
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -588,6 +595,7 @@ mod tests {
             &Status::default(),
             &view(IrMode::Log),
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -600,6 +608,7 @@ mod tests {
             &crate::banner::tests::everything(),
             &view(IrMode::Log),
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -624,6 +633,7 @@ mod tests {
                 &Status::default(),
                 &view(IrMode::Linear),
                 &IrAxes::default(),
+                PlotChrome::Full,
                 &Theme::dark(),
                 size,
             )
@@ -683,6 +693,7 @@ mod tests {
             t(IrMissing::NoReference(Drive::Playing)),
             &status,
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -733,6 +744,7 @@ mod tests {
                 &Status::default(),
                 &view(IrMode::Linear),
                 &IrAxes::default(),
+                PlotChrome::Full,
                 &theme,
                 SIZE,
             )
@@ -774,6 +786,7 @@ mod tests {
                 &Status::default(),
                 &view(mode),
                 &axes,
+                PlotChrome::Full,
                 &Theme::dark(),
                 SIZE,
             )
@@ -819,6 +832,7 @@ mod tests {
             &Status::default(),
             &view(IrMode::Linear),
             &IrAxes::default(),
+            PlotChrome::Full,
             &Theme::dark(),
             SIZE,
         );
@@ -845,6 +859,7 @@ mod tests {
                 &Status::default(),
                 &view(mode),
                 &axes,
+                PlotChrome::Full,
                 &Theme::dark(),
                 SIZE,
             )

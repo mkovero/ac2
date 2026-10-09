@@ -128,6 +128,30 @@ impl PaneKind {
         self as usize
     }
 
+    /// This pane's grid, labels and cursor in `c`.
+    pub fn chrome(self, c: &ac2_scene::view::PaneChrome) -> ac2_scene::view::PlotChrome {
+        match self {
+            PaneKind::Transfer => c.transfer,
+            PaneKind::Spectrum => c.spectrum,
+            PaneKind::Ir => c.ir,
+            PaneKind::Spl => c.spl,
+            PaneKind::Distortion => c.distortion,
+        }
+    }
+
+    pub fn chrome_mut(
+        self,
+        c: &mut ac2_scene::view::PaneChrome,
+    ) -> &mut ac2_scene::view::PlotChrome {
+        match self {
+            PaneKind::Transfer => &mut c.transfer,
+            PaneKind::Spectrum => &mut c.spectrum,
+            PaneKind::Ir => &mut c.ir,
+            PaneKind::Spl => &mut c.spl,
+            PaneKind::Distortion => &mut c.distortion,
+        }
+    }
+
     /// Whether the pane shows measurements of kind `k` (the IR pane shows the transfer
     /// pane's measurement).
     pub fn shows(self, k: &MeasKind) -> bool {

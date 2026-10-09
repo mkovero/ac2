@@ -227,6 +227,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         },
         run: run_of(&c, &f),
         stage: false,
+        chrome: crate::view::PlotChrome::Full,
     };
     let th = Theme::dark();
     let s = leq_scene(&v, &Status::default(), &th, size(1200.0, 700.0));
@@ -586,6 +587,7 @@ fn columns_view<'a>(c: &'a LeqConfig, f: &LeqFrame, h: Option<&'a LeqHistory>) -
         layout: LeqLayout::default(),
         run: run_of(c, f),
         stage: false,
+        chrome: crate::view::PlotChrome::Full,
     }
 }
 

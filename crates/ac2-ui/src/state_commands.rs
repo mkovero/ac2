@@ -746,6 +746,13 @@ impl AppState {
                 self.prefs.theme = Some(self.theme);
                 self.prefs_dirty = true;
             }
+            C::PlotChrome => {
+                let p = self.layout.focus;
+                let c = p.chrome_mut(&mut self.view.chrome);
+                *c = c.next();
+                let name = c.name();
+                self.toast(format!("{}: {name}", p.title()));
+            }
             // An IR picture navigates its time and value axes with the same keys.
             c if ir_nav::is_nav(c) && self.ir_target().is_some() => {
                 if let Some(p) = self.ir_target() {

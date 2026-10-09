@@ -873,10 +873,10 @@ fn themes() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    h.key_press(Key::T);
+    palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
     snapshot(&mut h, "theme_light");
-    h.key_press(Key::T);
+    palette(&mut h, "theme");
     step_until(&mut h, "high contrast", |a| {
         a.state.theme == ThemeName::HighContrast
     });
@@ -3886,7 +3886,7 @@ fn transfer_legend_many_curves() {
     // Snapped to a corner from the palette, in the light theme.
     palette(&mut h, "legend: bottom-right");
     assert_eq!(legend(&h).corner(), Some(LegendCorner::BottomRight));
-    h.key_press(Key::T);
+    palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
     h.event(Event::PointerMoved(egui::pos2(900.0, 120.0)));
     h.state_mut().state.toasts.clear();

@@ -200,6 +200,7 @@ mod tests {
             ("insert", CommandId::InsertDelay),
             ("group", CommandId::GroupDelay),
             ("theme", CommandId::CycleTheme),
+            ("grid", CommandId::PlotChrome),
             ("quit", CommandId::Quit),
             ("track", CommandId::TrackDelay),
             ("peak", CommandId::PeakHold),

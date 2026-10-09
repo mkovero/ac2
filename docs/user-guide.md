@@ -526,6 +526,7 @@ The app remembers in `ui.toml` (written when the layout changes and on exit):
 - the measurement each pane shows (by name);
 - the SPL pane's view (meter, Leq windows or both) and the Leq windows' style;
 - the IR mode and the sweep pane's dB / %;
+- how much of each pane's plot is drawn (**T**: grid, labels, cursor);
 - the window's size and position;
 - each pane's level axis range (see below).
 
@@ -561,6 +562,23 @@ after that stays until the next sweep):
   calibration never leaves the curves above a dBFS-sized axis. Zoom, pan, fit and reset act
   on the range in use.
 - The labels follow the range: tenths of a dB on a 1 dB range, tens on a 100 dB one.
+
+#### Grid, labels and cursor (T)
+
+**T** steps the focused pane's plot, the other panes keep theirs:
+
+1. **grid, labels and cursor** — the usual picture;
+2. **no grid** — the grid lines go, the axis labels and the cursor stay;
+3. **traces only** — no grid, no axis labels, no cursor line or readout: the curves
+   alone, for a screenshot or a crowded overlay. The legend stays (the transfer legend has
+   its own *Legend: hide / show*).
+
+**T** again comes back to the full plot; a toast names the pane and the step
+(`Transfer: no grid`). The axes keep their ranges in every step, so zoom, pan and the
+cursor keys work as before (the cursor comes back where it was). The spectrum pane's step
+covers the spectrograph too, the SPL pane's the Leq history strip, the sweep pane's its
+response, distortion and IR. The theme (dark, light, high contrast) is in Settings ›
+Display and in the palette (**Ctrl+K**, *Theme*).
 
 #### The transfer legend
 
@@ -2341,7 +2359,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+N` | Select previous measurement of the focused pane | `prev_measurement` |
 | `Tab` | Select next measurement in the list | `next_measurement_in_tree` |
 | `Shift+Tab` | Select previous measurement in the list | `prev_measurement_in_tree` |
-| `T` | Theme: dark → light → high contrast | `cycle_theme` |
+| `T` | Plot of the focused pane: grid, labels and cursor → no grid → traces only | `plot_chrome` |
 | `I` | Zoom frequency in (IR: time) | `zoom_in` |
 | `O` | Zoom frequency out (IR: time) | `zoom_out` |
 | `←` | Pan frequency down (IR: earlier) | `pan_left` |
@@ -2477,6 +2495,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
+| Theme: dark → light → high contrast | `cycle_theme` |
 | Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
 | Clear compare: no compared curves | `clear_compare` |
 | Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |

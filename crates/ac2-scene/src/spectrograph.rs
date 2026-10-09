@@ -372,6 +372,8 @@ pub fn spectrograph_scene(
     theme: &Theme,
     size: Viewport,
 ) -> SpectrographScene {
+    let chrome = view.chrome.spectrum;
+    let cursor_hz = view.cursor_hz.filter(|_| chrome.cursor());
     let alone = view.spectrum.mode == SpectrumMode::Spectrograph;
     let (spectrum, mut layers, banners, top) = if alone {
         let mut c0 = Canvas::new(size, theme);
@@ -444,6 +446,7 @@ pub fn spectrograph_scene(
         &major(&time_axis),
         true,
         "",
+        chrome,
         theme,
     );
 
@@ -537,7 +540,7 @@ pub fn spectrograph_scene(
                 }
                 _ => message = Some(format!("{}: no frames yet", s.name)),
             }
-            if let (Some(hz), Some(before)) = (view.cursor_hz, view.spectrum.spectrograph.cursor_s)
+            if let (Some(hz), Some(before)) = (cursor_hz, view.spectrum.spectrograph.cursor_s)
                 && before <= f64::from(span)
             {
                 let v = s
@@ -608,7 +611,7 @@ pub fn spectrograph_scene(
             theme.text_dim,
         ));
     }
-    if let Some(hz) = view.cursor_hz {
+    if let Some(hz) = cursor_hz {
         canvas::vline(&mut c.overlay, plot, xm.to_px(hz), theme.cursor);
     }
     if let Some(cur) = &cursor {

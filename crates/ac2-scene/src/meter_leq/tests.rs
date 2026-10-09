@@ -123,6 +123,7 @@ fn view<'a>(
         layout: l,
         run: f.meta.run.map(|r| run_text(&r, c, |_| 7200)),
         stage: false,
+        chrome: crate::view::PlotChrome::Full,
     }
 }
 
