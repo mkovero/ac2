@@ -141,6 +141,26 @@ pub struct SweepSpec {
     pub tail_s: Option<f64>,
     /// Grid of the reported curves.
     pub grid: LogGrid,
+    /// Harmonic windows at the lowest columns.
+    pub lf_harmonics: LfHarmonics,
+}
+
+/// Harmonic windows where 1/24 octave is narrower than a few resolution cells (the lowest
+/// columns, harmonics below about 1 kHz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LfHarmonics {
+    /// Every order in one window, short enough for the highest order and capped at
+    /// [`MAX_WINDOW_S`]: the lowest floor, but at 25 Hz a resolution cell is 40 % of the
+    /// fundamental, so a harmonic that changes steeply with frequency (behind a roll-off
+    /// ahead of the distortion) reads its mean over the cell, a few tenths of a dB high.
+    #[default]
+    Standard,
+    /// Each order in the longest window that fits between its neighbours' impulses (on a
+    /// 5.5 s sweep about 0.47 s for H2, 0.16 s for H5; twice that on an 11 s sweep), with the
+    /// fundamental and the floor in the same window: finer resolution and columns reported
+    /// from 2/window up, for a floor raised by the window's length over the standard one.
+    /// The post-roll grows to four of the longest window.
+    Fine,
 }
 
 /// Why an analysis was refused.
@@ -259,8 +279,18 @@ impl SweepTiming {
             pre_s = pre_s.max(window / 3.0);
             post_s = window - pre_s;
         }
+        let lf_max = match spec.lf_harmonics {
+            LfHarmonics::Standard => 0.0,
+            LfHarmonics::Fine => (2..=spec.max_order)
+                .map(|k| {
+                    let (pre, post) = lf_window(l, k);
+                    pre + post
+                })
+                .fold(0.0, f64::max),
+        };
         let post_roll_s = MIN_POST_ROLL_S
             .max(4.0 * (pre_s + post_s))
+            .max(4.0 * lf_max)
             .max(spec.tail_s.unwrap_or(0.0));
         Ok(Self {
             emitted,
@@ -632,6 +662,61 @@ fn high_passed(spec: &[Complex64], bin_hz: f64, fc: f64) -> Vec<Complex64> {
         .collect()
 }
 
+/// The spectra one harmonic column is read from: the shared window's or an order's own.
+struct Windowed<'a> {
+    /// Lowest fundamental this window resolves (and the sweep plays at full level), Hz.
+    f_lo: f64,
+    /// Narrowest band a point averages over: [`DISTORTION_MIN_CELLS`] of this window.
+    min_hz: f64,
+    /// Bin spacing of the spectra, Hz.
+    bin: f64,
+    pk: &'a [f64],
+    p1: &'a [f64],
+    noise: &'a [f64],
+}
+
+/// An order's own longest window ([`LfHarmonics::Fine`]), with the fundamental and the
+/// noise in the same window.
+struct OwnWindow {
+    f_lo: f64,
+    min_hz: f64,
+    bin: f64,
+    pk: Vec<f64>,
+    p1: Vec<f64>,
+    noise: Vec<f64>,
+}
+
+impl OwnWindow {
+    fn view(&self) -> Windowed<'_> {
+        Windowed {
+            f_lo: self.f_lo,
+            min_hz: self.min_hz,
+            bin: self.bin,
+            pk: &self.pk,
+            p1: &self.p1,
+            noise: &self.noise,
+        }
+    }
+}
+
+/// Order `k`'s longest window (pre, post) at rate `l`, seconds: from a tenth of the way to
+/// the next-higher order's impulse to nine tenths of the way to the next-lower one, the rise
+/// widened to a third of the window where the next-higher order still lies a window away
+/// (as for the shared window).
+fn lf_window(l: f64, k: u8) -> (f64, f64) {
+    let k = f64::from(k);
+    let up = l * ((k + 1.0) / k).ln();
+    let down = l * (k / (k - 1.0)).ln();
+    let pre = PRE_FRACTION * up;
+    let post = (1.0 - PRE_FRACTION) * down;
+    let w = pre + post;
+    if up >= w {
+        (w / 3.0, w - w / 3.0)
+    } else {
+        (pre, post)
+    }
+}
+
 /// Half-Hann rise over `rise` samples, flat, half-Hann fall over the last `fall` samples.
 fn taper(len: usize, rise: usize, fall: usize) -> Vec<f64> {
     (0..len)
@@ -726,6 +811,7 @@ pub fn analyse_recording(
         high_passed(&acc, fs / n as f64, HARMONIC_HIGH_PASS * f_lo),
         n,
     );
+    let acc_lf = (spec.lf_harmonics == LfHarmonics::Fine).then(|| acc.clone());
     let h = fft_inverse(acc, n);
 
     // Arrival: the strongest sample from slightly before the reference to half the
@@ -785,33 +871,82 @@ pub fn analyse_recording(
         })
         .collect();
     let min_hz = DISTORTION_MIN_CELLS / timing.window_s();
+    let shared = |k: u8| Windowed {
+        f_lo,
+        min_hz,
+        bin: bin_w,
+        pk: &spectra[usize::from(k) - 1],
+        p1: &spectra[0],
+        noise: &noise,
+    };
+    // `LfHarmonics::Fine`: per order, its longest window, the harmonic from a response
+    // high-passed below that window's own lowest fundamental.
+    let own: Vec<Option<OwnWindow>> = (2..=k_max)
+        .map(|k| {
+            let acc = acc_lf.as_ref()?;
+            let (pre, post) = lf_window(l, k);
+            let (pre_n, post_n) = ((pre * fs).round() as usize, (post * fs).round() as usize);
+            let w_len = pre_n + post_n;
+            let count = usize::try_from((noise_end - noise_first) / w_len as i64).unwrap_or(0);
+            if count == 0 {
+                return None;
+            }
+            let w = taper(w_len, pre_n, (post_n / 5).max(1));
+            let nw = 4 * w_len.next_power_of_two();
+            let ws = w_len as f64 / fs;
+            let f_lo = timing.full_level_hz().max(2.0 / ws);
+            let hk = fft_inverse(
+                high_passed(acc, fs / n as f64, HARMONIC_HIGH_PASS * f_lo),
+                n,
+            );
+            Some(OwnWindow {
+                f_lo,
+                min_hz: DISTORTION_MIN_CELLS / ws,
+                bin: fs / nw as f64,
+                pk: power_spectrum(&segment(&hk, t_k(k) - pre_n as i64, &w), nw),
+                p1: power_spectrum(&segment(&h, t_k(1) - pre_n as i64, &w), nw),
+                noise: noise_power(&hk, noise_end, count, &w, nw),
+            })
+        })
+        .collect();
+    let f_lo_any = own.iter().flatten().map(|x| x.f_lo).fold(f_lo, f64::min);
     let mut thd_db = vec![f64::NAN; freqs.len()];
     let mut thd_floor_db = vec![f64::NAN; freqs.len()];
+    let half = 2f64.powf(DISTORTION_BAND_OCT / 2.0);
     for (i, &f) in freqs.iter().enumerate() {
-        if f < f_lo {
+        if f < f_lo_any {
             continue;
         }
         let (mut sum, mut floor_sum, mut any) = (0.0, 0.0, false);
         for hc in &mut harmonics {
             let k = f64::from(hc.order);
             let kf = k * f;
-            let (lo, hi) = band(kf, DISTORTION_BAND_OCT, min_hz);
+            // Its own window where the shared one's band had to be widened to `min_hz`.
+            let widened = min_hz > kf * (half - 1.0 / half);
+            let x = match &own[usize::from(hc.order) - 2] {
+                Some(o) if widened => o.view(),
+                _ => shared(hc.order),
+            };
+            if f < x.f_lo {
+                continue;
+            }
+            let (lo, hi) = band(kf, DISTORTION_BAND_OCT, x.min_hz);
             // The whole band below the fade-out: dividing by a reference faded there while
             // the harmonic was driven by the fundamental at full level reads it too high.
             if hi > f_top {
                 continue;
             }
-            let pk = mean_power(&spectra[usize::from(hc.order) - 1], bin_w, lo, hi, kf);
+            let pk = mean_power(x.pk, x.bin, lo, hi, kf);
             // The fundamentals whose harmonic falls in that band: the window's resolution
             // widens a low harmonic's band to `min_hz`, which spans k times fewer hertz of
             // fundamental. Under a roll-off the fundamental's power slopes steeply there
             // (6 dB over 10–40 Hz at 25 Hz behind a 20 Hz high-pass), so averaged over a
             // band of its own it would not be the gain those harmonics were driven with.
-            let p1 = mean_power(&spectra[0], bin_w, lo / k, hi / k, f);
+            let p1 = mean_power(x.p1, x.bin, lo / k, hi / k, f);
             if p1.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
                 continue;
             }
-            let nk = band_power(&noise, bin_w, kf, FLOOR_BAND_OCT, 2.0 * min_hz);
+            let nk = band_power(x.noise, x.bin, kf, FLOOR_BAND_OCT, 2.0 * x.min_hz);
             hc.level_db[i] = db10(pk / p1);
             hc.floor_db[i] = db10(nk / p1);
             sum += pk / p1;

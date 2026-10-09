@@ -56,6 +56,7 @@ pub(crate) fn spec(
         gate_s: gate.map(|g| g.0),
         tail_s: tail.map(|t| t.0),
         grid: LogGrid::covering(PPO, ess.start_hz, ess.end_hz),
+        lf_harmonics: ac2_core::sweep::LfHarmonics::Standard,
     };
     let timing = SweepTiming::new(&spec).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
     Ok((spec, timing))

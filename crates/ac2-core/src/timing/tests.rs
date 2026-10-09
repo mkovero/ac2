@@ -655,6 +655,7 @@ fn an_extended_sweep_start_neither_jumps_nor_loses_the_lock() {
         gate_s: None,
         tail_s: None,
         grid: LogGrid::covering(48, 20.0, 40_000.0),
+        lf_harmonics: crate::sweep::LfHarmonics::Standard,
     };
     let t = SweepTiming::new(&spec).expect("timing");
     assert!(t.emitted.start_hz < 5.0, "{:?}", t.emitted);

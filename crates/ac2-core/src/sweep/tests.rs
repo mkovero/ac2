@@ -38,6 +38,7 @@ fn spec(ess: EssConfig) -> SweepSpec {
             k_min: -240,
             k_max: 239,
         },
+        lf_harmonics: LfHarmonics::Standard,
     }
 }
 
@@ -1033,4 +1034,82 @@ fn harmonics_near_the_sweeps_top_read_no_higher_than_they_are() {
     let (f, k, e) = worst;
     eprintln!("top of the sweep: max error {e:.3} dB (H{k} at {f:.0} Hz)");
     assert!(e <= 0.05, "H{k} at {f:.0} Hz: {e:.3} dB");
+}
+
+#[test]
+fn own_windows_resolve_the_lowest_columns_finer() {
+    // The high-pass ahead of a strong x⁵ (as in harmonics_behind…): in the shared 0.1 s
+    // window a cell is 10 Hz, 40 % of a 25 Hz fundamental, and the steep harmonics read their
+    // mean over it. Each order's own longest window resolves them finer, reaches lower, and
+    // pays for it with a floor raised by the longer window.
+    let fc = 20.0;
+    let run = |lf_harmonics| {
+        let s = SweepSpec {
+            level_dbfs: -13.0,
+            lf_harmonics,
+            grid: LogGrid::covering(48, 15.0, 20_000.0),
+            ..spec(ess(10.0, 20_000.0, 5.5))
+        };
+        let t = SweepTiming::new(&s).expect("timing");
+        let a = dbfs_to_rms(s.level_dbfs) * std::f64::consts::SQRT_2;
+        let (reference, mic) = record(&s, 1, |x| polyn(&dc_blocked(x, fc), &POLY5), 1e-7, 21);
+        let r = analyse_recording(&s, &reference, &mic, 1).expect("analysis");
+        let err = |lo: f64, hi: f64| {
+            let mut e = 0.0f64;
+            for c in &r.harmonics {
+                for (i, &f) in r.frequencies.iter().enumerate() {
+                    let l = c.level_db[i];
+                    if (lo..hi).contains(&f) && is_valid(l, c.floor_db[i]) {
+                        let g = dc_blocked_gain(fc, f);
+                        let want = 20.0 * harm(&POLY5, a * g, usize::from(c.order)).log10();
+                        e = e.max((l - want).abs());
+                    }
+                }
+            }
+            e
+        };
+        let lowest = r
+            .frequencies
+            .iter()
+            .zip(&r.harmonics[0].level_db)
+            .find(|(_, l)| l.is_finite())
+            .map_or(f64::NAN, |(&f, _)| f);
+        let at = r
+            .frequencies
+            .iter()
+            .position(|&f| f >= 25.0)
+            .expect("column");
+        (
+            t.post_roll_s,
+            lowest,
+            err(20.0, 25.0),
+            err(25.0, 30.0),
+            r.harmonics[0].floor_db[at],
+        )
+    };
+    let (roll_s, low_s, e20_s, e25_s, floor_s) = run(LfHarmonics::Standard);
+    let (roll_f, low_f, e20_f, e25_f, floor_f) = run(LfHarmonics::Fine);
+    eprintln!(
+        "standard: from {low_s:.1} Hz, 20–25 Hz {e20_s:.3} dB, 25–30 Hz {e25_s:.3}, H2 floor \
+         {floor_s:.1} dBr at 25 Hz, post-roll {roll_s:.2} s; fine: from {low_f:.1} Hz, \
+         {e20_f:.3}, {e25_f:.3}, {floor_f:.1}, {roll_f:.2} s"
+    );
+    assert!(
+        e20_s > 0.5 && e20_f < 0.3,
+        "20–25 Hz: {e20_s:.3} → {e20_f:.3} dB"
+    );
+    assert!(
+        e25_f < 0.2 && e25_f < e25_s,
+        "25–30 Hz: {e25_s:.3} → {e25_f:.3} dB"
+    );
+    assert!(
+        low_s >= 20.0 && low_f < 17.0,
+        "lowest column {low_s:.1} → {low_f:.1} Hz"
+    );
+    // H2's own window is about 4.7 times the shared one: its floor is that much higher.
+    assert!(
+        (floor_f - floor_s - 6.7).abs() < 2.0,
+        "{floor_s:.1} → {floor_f:.1} dBr"
+    );
+    assert!(roll_f >= 4.0 * 0.45 && roll_s < roll_f);
 }
