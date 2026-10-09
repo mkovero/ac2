@@ -356,6 +356,15 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
   checkout once and failed on types the checkout no longer had; touching the sources
   (`find crates -name '*.rs' -exec touch {} +`) fixed it.
 
+## Deploy of 2416a06, then 511efb0 (2026-10-09, all three hosts)
+
+Protocol 33, session format 18 (LF harmonics standard / fine): the c618724 deploy's state was
+the restore's source. The new daemon set `autosave.v17` aside; `restore.sh` from
+`deploy-eb74253/` with the trace path changed recreated measurements 1–14 and imported its 55
+traces (backup and script in `/work/ac2-scratch/deploy-2416a06/`). 511efb0 (fine's shared
+windows) was a plain swap. `ac2-jack-dut` was not in `~/ac2-test/bin` (only `bin.old`); rebuilt
+from `tools/jack-dut` and copied there: the swap's `cp -f bin.new/* bin/` keeps it now.
+
 ## Deploy of c618724 (2026-10-09, all three hosts)
 
 Protocol 32 and session format 17 as at eb74253, so a plain binary swap: the daemon restored
