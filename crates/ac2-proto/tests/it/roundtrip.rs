@@ -437,3 +437,18 @@ fn oversized_ctrl_is_refused_before_parsing() {
     let b = vec![0u8; ctrl::MAX_CTRL_BYTES + 1];
     assert_eq!(decode_request(&b), Err(CtrlError::TooLarge(b.len())));
 }
+
+#[test]
+fn lf_harmonics_is_a_named_setting_that_defaults_to_standard() {
+    use ac2_proto::model::LfHarmonics;
+    assert_eq!(LfHarmonics::default(), LfHarmonics::Standard);
+    for (l, name) in [
+        (LfHarmonics::Standard, "standard"),
+        (LfHarmonics::Fine, "fine"),
+    ] {
+        let b = rmp_serde::to_vec_named(&l).expect("encode");
+        let s: String = rmp_serde::from_slice(&b).expect("a string on the wire");
+        assert_eq!(s, name);
+        assert_eq!(rmp_serde::from_slice::<LfHarmonics>(&b).expect("decode"), l);
+    }
+}

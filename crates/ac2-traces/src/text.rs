@@ -60,8 +60,8 @@ use ac2_proto::ImportProblem;
 use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{
     CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportNote, ImportRole,
-    MicState, Polarity, RoomAcoustics, RoomRefusal, RoomValue, SmoothingFraction, SmoothingMode,
-    SweepData, SweepInfo, SweepIr, TraceKind, TraceMicCurve, TraceSource,
+    LfHarmonics, MicState, Polarity, RoomAcoustics, RoomRefusal, RoomValue, SmoothingFraction,
+    SmoothingMode, SweepData, SweepInfo, SweepIr, TraceKind, TraceMicCurve, TraceSource,
 };
 use ac2_proto::units::Seconds;
 use serde::{Deserialize, Serialize};
@@ -940,15 +940,20 @@ fn source_text(s: &TraceSource) -> String {
             sweep,
             level,
             repeats,
+            lf_harmonics,
             reference_input,
             measurement_input,
         } => format!(
-            "run {number} of sweep measurement {meas_name:?} (measurement {meas}, sweep {}; {} Hz – {} Hz, {} s, {} dBFS, {repeats}×), input {} re {}, session epoch {}",
+            "run {number} of sweep measurement {meas_name:?} (measurement {meas}, sweep {}; {} Hz – {} Hz, {} s, {} dBFS, {repeats}×{}), input {} re {}, session epoch {}",
             run.0,
             sweep.start.0,
             sweep.end.0,
             sweep.duration.0,
             level.0,
+            match lf_harmonics {
+                LfHarmonics::Standard => "",
+                LfHarmonics::Fine => ", LF harmonics fine",
+            },
             u32::from(*measurement_input) + 1,
             u32::from(*reference_input) + 1,
             epoch.0

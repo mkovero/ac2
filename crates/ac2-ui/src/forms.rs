@@ -9,9 +9,9 @@
 //! shares live here.
 
 use ac2_proto::model::{
-    BandFraction, DepthPolicy, EssSpec, MeasConfig, MeasKind, Measurement, OpenSession, Operand,
-    RtaConfig, Smoothing, SmoothingFraction, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting,
-    TransferConfig, Weighting,
+    BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
+    OpenSession, Operand, RtaConfig, Smoothing, SmoothingFraction, SpectrumConfig, SplConfig,
+    SweepConfig, TimeWeighting, TransferConfig, Weighting,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -94,6 +94,8 @@ pub enum FieldId {
     Repeats,
     /// Silence recorded after each sweep: the room's decay and its noise.
     Tail,
+    /// Harmonic windows at a sweep's lowest columns.
+    LfHarmonics,
     /// Whether this operand is in a math channel's average.
     Member(Operand),
     /// How a math channel's average combines its operands.
@@ -235,6 +237,14 @@ const TAILS: [(&str, f64); 4] = [
     ("4 s (halls)", 4.0),
     ("8 s (large halls, churches)", 8.0),
 ];
+/// Harmonic windows at a sweep's lowest columns, the CLI's `--lf-harmonics` values.
+const LF_HARMONICS: [(&str, LfHarmonics); 2] = [
+    ("standard", LfHarmonics::Standard),
+    ("fine", LfHarmonics::Fine),
+];
+/// What `fine` trades, under the LF harmonics choice.
+pub const LF_HARMONICS_HINT: &str =
+    "fine: finer low-frequency harmonics, higher floor there, longer silence after the sweep";
 
 /// `20`, `20 Hz`, `20k`, `1.5 kHz`.
 pub fn parse_freq(text: &str) -> Result<f64, String> {
@@ -509,6 +519,15 @@ impl Form {
             ),
             Field::choice(FieldId::Repeats, "Repeats", &REPEATS.map(|r| r.0), 0),
             Field::choice(FieldId::Tail, "Silence after", &TAILS.map(|t| t.0), 0),
+            Field {
+                hint: LF_HARMONICS_HINT.into(),
+                ..Field::choice(
+                    FieldId::LfHarmonics,
+                    "LF harmonics",
+                    &LF_HARMONICS.map(|l| l.0),
+                    0,
+                )
+            },
             Field::text(FieldId::Name, "Name", format!("Sweep {}", sweeps + 1), ""),
         ];
         Self::new(FormKind::Sweep, fields)
@@ -583,6 +602,12 @@ impl Form {
                 }
                 (FieldId::Tail, Value::Choice { index, .. }) => {
                     *index = nearest(c.tail.map_or(1.0, |t| t.0), &tails);
+                }
+                (FieldId::LfHarmonics, Value::Choice { index, .. }) => {
+                    *index = LF_HARMONICS
+                        .iter()
+                        .position(|l| l.1 == c.lf_harmonics)
+                        .unwrap_or(0);
                 }
                 (FieldId::Name, Value::Text(t)) => *t = m.config.name.clone(),
                 _ => {}
@@ -666,6 +691,7 @@ impl Form {
         .1;
         let repeats = REPEATS[self.choice_index(FieldId::Repeats).unwrap_or(0)].1;
         let tail = TAILS[self.choice_index(FieldId::Tail).unwrap_or(0)].1;
+        let lf_harmonics = LF_HARMONICS[self.choice_index(FieldId::LfHarmonics).unwrap_or(0)].1;
         let name = self.text(FieldId::Name).trim();
         if name.is_empty() {
             return Err("type a name".into());
@@ -682,6 +708,7 @@ impl Form {
                     repeats,
                     gate: None,
                     tail: Some(Seconds(tail)),
+                    lf_harmonics,
                 },
             },
         })

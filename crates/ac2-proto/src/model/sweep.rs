@@ -29,6 +29,24 @@ pub struct SweepConfig {
     /// are computed up to its end), at most [`SweepConfig::MAX_TAIL`]; `None` or anything
     /// shorter = the shortest the analysis needs (1 s or more).
     pub tail: Option<Seconds>,
+    /// Harmonic windows at the lowest columns; `fine` also lengthens the silence after
+    /// each sweep, so it is part of the measurement, not only of its analysis.
+    pub lf_harmonics: LfHarmonics,
+}
+
+/// Harmonic windows at the lowest columns (harmonics below about 1 kHz), where 1/24 octave
+/// is narrower than a few of the window's resolution cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfHarmonics {
+    /// Every order in one shared window: the lowest floor, coarser resolution at the
+    /// lowest columns.
+    #[default]
+    Standard,
+    /// Each order in its own longest window: finer low-frequency resolution and columns
+    /// below 20 Hz on a sweep that starts there, a higher floor there, and up to four of the
+    /// longest window of silence after each sweep.
+    Fine,
 }
 
 impl SweepConfig {
@@ -113,6 +131,8 @@ pub struct SweepRun {
     pub repeats: u8,
     /// Linear gate.
     pub gate: Option<Seconds>,
+    /// Harmonic windows at the lowest columns.
+    pub lf_harmonics: LfHarmonics,
     /// Status.
     pub status: SweepStatus,
     /// When it started.

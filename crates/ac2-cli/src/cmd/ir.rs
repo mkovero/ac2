@@ -15,8 +15,8 @@
 
 use ac2_client::{Client, LeaseLost, OnDrop, StimulusLease, expect_body};
 use ac2_proto::model::{
-    EssSpec, GeneratorDesired, GeneratorSettings, MeasConfig, MeasKind, Measurement, Signal, State,
-    SweepConfig, SweepStatus, TraceData,
+    EssSpec, GeneratorDesired, GeneratorSettings, LfHarmonics, MeasConfig, MeasKind, Measurement,
+    Signal, State, SweepConfig, SweepStatus, TraceData,
 };
 use ac2_proto::units::{Dbfs, Hz, Seconds, SweepId, TraceId};
 use ac2_proto::{Command, ReplyBody};
@@ -90,6 +90,7 @@ pub struct SweepFlags {
     pub repeats: u8,
     pub gate: Option<Seconds>,
     pub tail: Option<Seconds>,
+    pub lf_harmonics: LfHarmonics,
 }
 
 /// The sweep measurement settings of `f`, validated without a daemon.
@@ -117,6 +118,7 @@ pub fn sweep_config(f: &SweepFlags) -> Result<SweepConfig, CliError> {
         repeats: f.repeats,
         gate: f.gate,
         tail: f.tail,
+        lf_harmonics: f.lf_harmonics,
     })
 }
 
@@ -134,12 +136,17 @@ pub fn request(a: &IrCaptureArgs, (reference, mic): (u16, u16)) -> Result<SweepC
         repeats: a.repeats,
         gate: a.gate.map(|g| g.0),
         tail: a.tail.map(|t| t.0),
+        lf_harmonics: a.lf_harmonics.into(),
     })
 }
 
 fn describe(r: &SweepConfig) -> String {
+    let lf = match r.lf_harmonics {
+        LfHarmonics::Standard => "",
+        LfHarmonics::Fine => " · LF harmonics fine",
+    };
     format!(
-        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {}",
+        "sweep {} – {}, {} s × {} at {} on out {} · in {} re in {}{lf}",
         ac2_scene::format::freq_readout(r.sweep.start.0),
         ac2_scene::format::freq_readout(r.sweep.end.0),
         ac2_scene::format::fixed(r.sweep.duration.0, 1),
@@ -529,6 +536,7 @@ pub fn print_summary(out: &mut Out<'_>, data: &TraceData, freqs: &[f64]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::LfHarmonicsArg;
     use crate::output::Out;
     use crate::units::{Channel, Channels, Freq, LevelDbfs, Time};
 
@@ -545,6 +553,7 @@ mod tests {
             repeats: 1,
             gate: None,
             tail: None,
+            lf_harmonics: LfHarmonicsArg::Standard,
             name: None,
             force: false,
         }
@@ -565,9 +574,44 @@ mod tests {
             "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2"
         );
         let mut a = args();
+        a.lf_harmonics = LfHarmonicsArg::Fine;
+        let r = request(&a, (1, 0)).expect("request");
+        assert_eq!(r.lf_harmonics, LfHarmonics::Fine);
+        assert_eq!(
+            describe(&r),
+            "sweep 20.0 Hz – 20.0 kHz, 3.0 s × 1 at −50.0 dBFS on out 1,2 · in 1 re in 2 · LF \
+             harmonics fine"
+        );
+        let mut a = args();
         a.from = Freq(Hz(30_000.0));
         assert!(request(&a, (1, 0)).is_err());
         assert!(request(&args(), (1, 1)).is_err());
+    }
+
+    #[test]
+    fn ir_capture_takes_lf_harmonics_by_name() {
+        use clap::Parser;
+        let parse = |extra: &[&str]| {
+            let base = [
+                "ac2", "ir", "capture", "--ref", "2", "--mic", "1", "--out", "1,2",
+            ];
+            let argv: Vec<&str> = base
+                .iter()
+                .chain(&["--level", "-50dbfs"])
+                .chain(extra)
+                .copied()
+                .collect();
+            let cli = Cli::try_parse_from(argv).expect("parse");
+            let crate::args::Cmd::Ir {
+                cmd: IrCmd::Capture(a),
+            } = cli.cmd
+            else {
+                panic!("not ir capture");
+            };
+            a.lf_harmonics
+        };
+        assert_eq!(parse(&[]), LfHarmonicsArg::Standard);
+        assert_eq!(parse(&["--lf-harmonics", "fine"]), LfHarmonicsArg::Fine);
     }
 
     type R<T = ()> = Result<T, Box<dyn std::error::Error>>;

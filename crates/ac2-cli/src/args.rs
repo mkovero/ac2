@@ -411,6 +411,26 @@ pub enum MeasKindArg {
     Sweep,
 }
 
+/// Sweep harmonic windows at the lowest columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum LfHarmonicsArg {
+    /// Every order in one shared window: the lowest floor.
+    #[default]
+    Standard,
+    /// Each order in its own longest window: finer low-frequency harmonics, a higher floor
+    /// there, a longer silence after the sweep.
+    Fine,
+}
+
+impl From<LfHarmonicsArg> for ac2_proto::model::LfHarmonics {
+    fn from(a: LfHarmonicsArg) -> Self {
+        match a {
+            LfHarmonicsArg::Standard => Self::Standard,
+            LfHarmonicsArg::Fine => Self::Fine,
+        }
+    }
+}
+
 /// Frequency weighting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum WeightArg {
@@ -561,6 +581,10 @@ pub struct MeasNew {
     /// Sweep: silence recorded after each sweep (at most 20 s).
     #[arg(long, value_name = "TIME")]
     pub tail: Option<Time>,
+    /// Sweep: LF harmonics (default standard); fine: finer low-frequency harmonics, a
+    /// higher floor there, a longer silence after the sweep.
+    #[arg(long, value_enum)]
+    pub lf_harmonics: Option<LfHarmonicsArg>,
     /// Input (spectrum, rta, spl).
     #[arg(long)]
     pub input: Option<Channel>,
@@ -1699,6 +1723,10 @@ pub struct IrCaptureArgs {
     /// what the sweep needs), at most 20 s.
     #[arg(long, value_name = "TIME")]
     pub tail: Option<Time>,
+    /// LF harmonics: `fine` gives finer low-frequency harmonics (sub and LF distortion), a
+    /// higher floor there and a longer silence after the sweep.
+    #[arg(long, value_enum, default_value_t = LfHarmonicsArg::Standard)]
+    pub lf_harmonics: LfHarmonicsArg,
     /// Name of the stored run (default: `Run <number>`).
     #[arg(long)]
     pub name: Option<String>,

@@ -8,8 +8,8 @@ use ac2_core::sweep::{
     DEFAULT_MAX_ORDER, FLOOR_MARGIN_DB, SweepAnalysis, SweepError, SweepSpec, SweepTiming,
 };
 use ac2_proto::model::{
-    DistortionCurve, EssSpec, HarmonicCurve, RoomAcoustics, RoomBand, RoomRefusal, RoomValue,
-    SweepData, SweepFailure, SweepInfo, SweepIr,
+    DistortionCurve, EssSpec, HarmonicCurve, LfHarmonics, RoomAcoustics, RoomBand, RoomRefusal,
+    RoomValue, SweepData, SweepFailure, SweepInfo, SweepIr,
 };
 use ac2_proto::units::{Db, Hz, Seconds};
 use ac2_proto::{ErrorCode, GridDef, ProtoError};
@@ -37,6 +37,7 @@ pub(crate) fn spec(
     level_dbfs: f64,
     gate: Option<Seconds>,
     tail: Option<Seconds>,
+    lf_harmonics: LfHarmonics,
     fs: f64,
 ) -> Result<(SweepSpec, SweepTiming), ProtoError> {
     let ess = conv::ess(sweep);
@@ -56,7 +57,7 @@ pub(crate) fn spec(
         gate_s: gate.map(|g| g.0),
         tail_s: tail.map(|t| t.0),
         grid: LogGrid::covering(PPO, ess.start_hz, ess.end_hz),
-        lf_harmonics: ac2_core::sweep::LfHarmonics::Standard,
+        lf_harmonics: conv::lf_harmonics(lf_harmonics),
     };
     let timing = SweepTiming::new(&spec).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
     Ok((spec, timing))

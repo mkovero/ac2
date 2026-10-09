@@ -891,6 +891,7 @@ pub(crate) mod tests {
             repeats: 1,
             gate: None,
             tail: None,
+            lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
         }
     }
 
@@ -945,6 +946,7 @@ pub(crate) mod tests {
             sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
             level: Dbfs(-50.0),
             repeats: 1,
+            lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             reference_input: 0,
             measurement_input: 1,
         }
@@ -1196,6 +1198,7 @@ pub(crate) mod tests {
             post_roll: Seconds(1.0),
             repeats: 2,
             gate: None,
+            lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(0),
         };

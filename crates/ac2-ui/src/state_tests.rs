@@ -493,6 +493,7 @@ fn sweep_run(status: SweepStatus) -> SweepRun {
         post_roll: Seconds(1.0),
         repeats: 1,
         gate: None,
+        lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
         status,
         started_at: WallNs(0),
     }
@@ -514,6 +515,7 @@ fn sweep_meta(id: u32) -> TraceMeta {
             sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
             level: Dbfs(-50.0),
             repeats: 1,
+            lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             reference_input: 0,
             measurement_input: 1,
         },

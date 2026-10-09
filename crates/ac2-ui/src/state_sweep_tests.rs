@@ -17,6 +17,7 @@ fn sweep_measurement() -> Measurement {
                 repeats: 1,
                 gate: None,
                 tail: Some(Seconds(1.0)),
+                lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             },
         },
     )
@@ -265,6 +266,75 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
 
 /// A sweep submitted right after Esc, while that stop is still on its way, arms once the
 /// stop has landed instead of being dropped with it.
+#[test]
+fn the_sweep_dialog_offers_fine_lf_harmonics() {
+    use crate::forms::FieldId;
+    let mut t = T::new();
+    t.type_key("Shift+S", "S");
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("no dialog: {:?}", t.st.overlay);
+    };
+    let lf = f
+        .fields
+        .iter()
+        .find(|x| x.id == FieldId::LfHarmonics)
+        .expect("LF harmonics field");
+    assert_eq!(lf.label, "LF harmonics");
+    assert_eq!(
+        lf.hint,
+        "fine: finer low-frequency harmonics, higher floor there, longer silence after the sweep"
+    );
+    let crate::forms::Value::Choice { options, index } = &lf.value else {
+        panic!("{:?}", lf.value);
+    };
+    assert_eq!(
+        (options.as_slice(), *index),
+        (&["standard".to_owned(), "fine".to_owned()][..], 0)
+    );
+    let pos = |f: &crate::forms::Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
+    let (level, lf) = (pos(f, FieldId::Level), pos(f, FieldId::LfHarmonics));
+    // The reference has the focus: → picks the first input.
+    t.key("Right");
+    for _ in 0..level {
+        t.key("Down");
+    }
+    t.text("-50");
+    for _ in level..lf {
+        t.key("Down");
+    }
+    t.key("Right");
+    let r = t.key("Enter");
+    let c = r
+        .iter()
+        .find_map(|x| match x {
+            Request::CreateMeas { config } => Some(config.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no measurement made: {r:?}"));
+    let MeasKind::Sweep { config: sc } = &c.kind else {
+        panic!("{c:?}");
+    };
+    assert_eq!(sc.lf_harmonics, ac2_proto::model::LfHarmonics::Fine);
+    // Editing it shows the setting it was made with.
+    let m = Measurement {
+        config: c.clone(),
+        ..sweep_measurement()
+    };
+    let (inputs, outputs) = (t.st.session_input_names(), t.st.session_output_names());
+    let e = crate::forms::Form::edit_sweep(&m, t.st.open_session(), &inputs, &outputs)
+        .expect("edit dialog");
+    assert_eq!(
+        e.fields
+            .iter()
+            .find(|x| x.id == FieldId::LfHarmonics)
+            .map(|x| &x.value),
+        Some(&crate::forms::Value::Choice {
+            options: vec!["standard".into(), "fine".into()],
+            index: 1
+        })
+    );
+}
+
 #[test]
 fn a_sweep_submitted_during_a_stop_arms_after_it() {
     let mut t = T::new();

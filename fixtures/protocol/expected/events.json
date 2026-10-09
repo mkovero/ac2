@@ -648,6 +648,7 @@
    "post_roll": 1.0,
    "repeats": 2,
    "gate": null,
+   "lf_harmonics": "standard",
    "status": {
     "type": "done",
     "trace": 9
@@ -683,7 +684,8 @@
        },
        "repeats": 2,
        "gate": 0.005,
-       "tail": 3.0
+       "tail": 3.0,
+       "lf_harmonics": "fine"
       }
      }
     },

@@ -28,7 +28,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 32`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 33`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -282,7 +282,8 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
 
 - **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_input`,
   `outputs` ([u16], the speaker's and the loopback's), `level: Dbfs` (typed, no default),
-  `sweep: EssSpec`, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`). Settings
+  `sweep: EssSpec`, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`,
+  `lf_harmonics: LfHarmonics`). Settings
   only: it publishes no stream, `running` stays false, and `meas.start` / `meas.stop` /
   `meas.reset` of it are `invalid`. `sweep.run` plays it (below); each run is
   a stored `sweep` trace it owns. `meas.update` changes the settings for the next run.
@@ -751,7 +752,14 @@ Design: `docs/design/sweep-distortion.md`. `sweep.run {lease_token, meas, name}`
 sweep measurement `meas` (`MeasKind::Sweep`, `SweepConfig` above) with its settings:
 `sweep: EssSpec` {`start: Hz`, `end: Hz`, `duration`, `fade_in`, `fade_out`}, `tail`
 (silence recorded after each sweep: the room's decay and its noise, at most 20 s; nil or
-shorter = the analysis minimum, ≥ 1 s). The emitted sweep keeps the rate but starts up to two
+shorter = the analysis minimum, ≥ 1 s), `lf_harmonics` (`LfHarmonics`, the harmonic windows
+at the lowest columns, harmonics below about 1 kHz: `standard` puts every order in one shared
+window, short enough for H5 — the lowest floor; `fine` puts each order in the longest window
+between its neighbours' impulses, with the fundamental and the floor in that window — finer
+low-frequency resolution and lower columns (a 5.5 s sweep from 10 Hz: H2 from 10 Hz where
+the shared window stops near 20 Hz), a floor
+higher by the window's length over the shared one, and a `post_roll` of at least four of the
+longest window; it changes the recording, so it is a setting of the measurement). The emitted sweep keeps the rate but starts up to two
 octaves below `start` (a whole number of cycles per rate constant, at least 1 Hz) and fades
 in up to `start` in place of `fade_in`, so a path's switch-on transient lies below the
 analysed band; responses are reported from `start`. `name` nil names the trace `Run <number>`.
@@ -765,7 +773,7 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
   followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records both inputs, analyses on a job thread
   and stores a trace of `kind: sweep` owned by the measurement (source `sweep` {`meas`,
   `meas_name`, `run`, `number` — one more than the highest run number of the measurement's
-  stored runs —, `epoch`, `sweep`, `level`, `repeats`, `reference_input`,
+  stored runs —, `epoch`, `sweep`, `level`, `repeats`, `lf_harmonics`, `reference_input`,
   `measurement_input`}, `delay` = the arrival). While it plays
   the generator is `firing` with the sweep as its settings; once the recording is in it is
   disarmed (`last_action` `stop` by the daemon; the lease stays with its holder), so the next
@@ -773,7 +781,7 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
 - Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `meas`, `owner`,
   `name`,
   `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
-  (actual, of each emitted sweep), `post_roll`, `repeats`, `gate`, `started_at`, `status` (`SweepStatus`, tagged by
+  (actual, of each emitted sweep), `post_roll`, `repeats`, `gate`, `lf_harmonics`, `started_at`, `status` (`SweepStatus`, tagged by
   `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`trace`} or `failed`
   {`reason`, `msg`}. `SweepFailure`: `stopped` (`gen.stop`, `gen.release`, forced takeover),
   `lease_expired`, `session_closed`, `dropout` (audio lost while recording), `no_reference`

@@ -52,6 +52,7 @@ fn request(level: f64) -> SweepConfig {
         repeats: 1,
         gate: None,
         tail: None,
+        lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
     }
 }
 
@@ -521,6 +522,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         measurement_input: 2,
         sweep: EssSpec::with_fades(Hz(100.0), Hz(10_000.0), Seconds(1.0)),
         tail: Some(Seconds(2.0)),
+        lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
         ..request(LEVEL)
     };
     let meas = create(&mut c, "hall", req);
@@ -596,4 +598,67 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         other => panic!("{other:?}"),
     };
     assert_eq!(again.sweep.and_then(|s| s.room), Some(room));
+}
+
+#[test]
+fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
+    use ac2_proto::model::LfHarmonics;
+    let (_h, _b, mut c, sub, ka, mut d, token) = setup();
+    // Lowest frequency with a valid H2 point, the run's silence after the sweep, and the
+    // setting its trace records.
+    let mut sweep = |lf_harmonics: LfHarmonics| {
+        let config = SweepConfig {
+            sweep: EssSpec::with_fades(Hz(10.0), Hz(2000.0), Seconds(5.5)),
+            lf_harmonics,
+            ..request(LEVEL)
+        };
+        let meas = create(&mut c, &format!("{lf_harmonics:?}"), config);
+        arm(&mut c, token);
+        let r = start(&mut c, token, meas);
+        assert_eq!(r.lf_harmonics, lf_harmonics, "the run echoes it");
+        let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
+            x.id == r.id && !x.active()
+        });
+        let SweepStatus::Done { trace } = done.status else {
+            panic!("sweep failed: {:?}", done.status);
+        };
+        let data = match c.ok(Command::TraceGet { trace }) {
+            ReplyBody::TraceData(t) => *t,
+            other => panic!("{other:?}"),
+        };
+        let TraceSource::Sweep {
+            lf_harmonics: stored,
+            ..
+        } = data.meta.source
+        else {
+            panic!("{:?}", data.meta.source);
+        };
+        let s = data.sweep.expect("sweep data");
+        let freqs = ac2_traces::frequencies(&match c.ok(Command::GridGet {
+            grid_id: data.meta.grid_id,
+        }) {
+            ReplyBody::Grid(g) => g,
+            other => panic!("{other:?}"),
+        });
+        let h2 = s.harmonics.iter().find(|h| h.order == 2).expect("H2");
+        let lowest = (0..freqs.len())
+            .find(|&i| h2.curve.valid(i, s.info.floor_margin))
+            .map_or(f64::INFINITY, |i| freqs[i]);
+        (lowest, r.post_roll.0, stored)
+    };
+    let (low_s, roll_s, stored_s) = sweep(LfHarmonics::Standard);
+    let (low_f, roll_f, stored_f) = sweep(LfHarmonics::Fine);
+    eprintln!(
+        "H2 from {low_s:.1} Hz (standard), {low_f:.1} Hz (fine); post-roll {roll_s:.2} → {roll_f:.2} s"
+    );
+    assert_eq!(
+        (stored_s, stored_f),
+        (LfHarmonics::Standard, LfHarmonics::Fine)
+    );
+    assert!(low_s >= 20.0, "standard reports H2 from {low_s:.1} Hz");
+    assert!(low_f < 20.0, "fine reports H2 from {low_f:.1} Hz");
+    assert!(
+        roll_f > roll_s,
+        "fine waits longer: {roll_s:.2} → {roll_f:.2} s"
+    );
 }

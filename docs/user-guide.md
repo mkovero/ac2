@@ -1200,6 +1200,7 @@ measurement** in the palette) opens the dialog that makes one:
 | duration | 1 s quick look, 3 s default; 6 s and 12 s lower the noise floor |
 | repeats | each doubling lowers the floor by 3 dB |
 | silence after | 1, 2, 4, 8 s: must hold the room's decay ([room parameters](#room-parameters-iso-3382-1)) |
+| LF harmonics | standard (default) or fine: [low-frequency harmonics](#low-frequency-harmonics-lf-harmonics-fine) |
 | name | |
 
 **←/→** step a choice (→ longer / more) and stop at the ends; a text field's text is
@@ -1241,6 +1242,29 @@ the run selected).
 | **N** | steps through stored sweeps, selecting each |
 | **Shift+W** | hides the pane |
 
+### Low-frequency harmonics (LF harmonics: fine)
+
+At the lowest columns (harmonics below about 1 kHz) every order normally shares one short
+window, short enough for H5. That gives the lowest floor, but at 25 Hz one of its
+resolution cells is about 40 % of the fundamental: a harmonic that changes steeply with
+frequency there (behind a roll-off) reads its mean over the cell, a few tenths of a dB high,
+and the lowest columns (below about 20 Hz) are not reported at all.
+
+**LF harmonics: fine** puts each order in its own longest window instead. Use it for sub and
+LF distortion work:
+
+- finer low-frequency harmonics, reported below 20 Hz when the sweep starts there (a 5.5 s
+  sweep from 10 Hz reads H2 from 10 Hz; set **From** low enough);
+- a **higher floor** at those columns (H2's window is several times the shared one, and its
+  noise grows with it);
+- a **longer silence after the sweep** (up to four of the longest window), so each run takes
+  a little longer. It is a setting of the measurement because it changes the recording.
+
+> A longer sweep lengthens every window and lowers the floor: 6 s or 12 s with fine gives
+> both the resolution and a usable floor at the bottom.
+
+A run made with it reads *… · LF harmonics fine* in the trace list.
+
 ### Progress strip
 
 While a sweep runs (from this app, another client or the CLI), a strip is drawn over the
@@ -1260,11 +1284,14 @@ stored.
 
 ```sh
 ac2 meas new sweep --ref 2 --meas 1 --out 1,2 --level -50dbfs --name "Genelec 1 m" \
-    [--from 20hz --to 20khz --duration 3s --repeats 1 --gate 5ms --tail 2s]
+    [--from 20hz --to 20khz --duration 3s --repeats 1 --gate 5ms --tail 2s \
+     --lf-harmonics standard|fine]
 ac2 sweep run "Genelec 1 m"
 ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs    # same flags; --name names the run
 ```
 
+- `--lf-harmonics fine`: [LF harmonics: fine](#low-frequency-harmonics-lf-harmonics-fine)
+  (default `standard`).
 - `ac2 ir capture` runs the sweep measurement with exactly those settings, making one
   (`Sweep 1`, …) when there is none: the same command again is the next run of the same
   measurement.

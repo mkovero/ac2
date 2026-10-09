@@ -162,6 +162,7 @@ fn sweep_config() -> SweepConfig {
         repeats: 2,
         gate: Some(Seconds(0.005)),
         tail: Some(Seconds(3.0)),
+        lf_harmonics: LfHarmonics::Fine,
     }
 }
 
@@ -676,6 +677,7 @@ fn sweep_run() -> SweepRun {
         post_roll: Seconds(1.0),
         repeats: 2,
         gate: None,
+        lf_harmonics: LfHarmonics::Standard,
         status: SweepStatus::Done { trace: TraceId(9) },
         started_at: WallNs(1_790_000_000_000_000_000),
     }
@@ -698,6 +700,7 @@ fn sweep_meta() -> TraceMeta {
             sweep: sweep(),
             level: Dbfs(-50.0),
             repeats: 2,
+            lf_harmonics: LfHarmonics::Fine,
             reference_input: 1,
             measurement_input: 0,
         },

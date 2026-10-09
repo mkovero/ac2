@@ -139,6 +139,7 @@ fn traces_survive_a_restart() {
                 repeats: 2,
                 gate: None,
                 tail: None,
+                lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             },
         },
     };

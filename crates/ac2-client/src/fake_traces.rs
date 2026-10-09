@@ -226,6 +226,7 @@ impl Shared {
             post_roll: Seconds(1.0),
             repeats: req.repeats,
             gate: req.gate,
+            lf_harmonics: req.lf_harmonics,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(1_790_000_000_000_000_000),
         };
@@ -247,6 +248,7 @@ impl Shared {
                 sweep: req.sweep,
                 level,
                 repeats: req.repeats,
+                lf_harmonics: req.lf_harmonics,
                 reference_input: reference,
                 measurement_input: measurement,
             },

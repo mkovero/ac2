@@ -924,16 +924,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 17", "\"version\": 16")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 18", "\"version\": 17")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 16
+            found: 17
         }
     );
-    assert!(e.to_string().contains("reads version 17 only"), "{e}");
+    assert!(e.to_string().contains("reads version 18 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -964,6 +964,7 @@ fn sweep_trace(id: u32) -> StoredTrace {
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
         level: Dbfs(-50.0),
         repeats: 2,
+        lf_harmonics: ac2_proto::model::LfHarmonics::Fine,
         reference_input: 1,
         measurement_input: 0,
     };

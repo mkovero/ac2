@@ -129,7 +129,8 @@ impl Control {
             ));
         }
         let fs = f64::from(rt.sample_rate);
-        let (spec, timing) = sweep::spec(req.sweep, level.0, req.gate, req.tail, fs)?;
+        let (spec, timing) =
+            sweep::spec(req.sweep, level.0, req.gate, req.tail, req.lf_harmonics, fs)?;
         let sweeps = (0..req.repeats)
             .map(|_| {
                 CoreGenerator::new(&GeneratorConfig {
@@ -241,6 +242,7 @@ impl Control {
             post_roll: Seconds(timing.post_roll_samples(fs) as f64 / fs),
             repeats: req.repeats,
             gate: req.gate,
+            lf_harmonics: req.lf_harmonics,
             status: SweepStatus::Playing { repeat: 1 },
             started_at: WallNs(wall_ns()),
         };
@@ -398,6 +400,7 @@ impl Control {
                 sweep: run.sweep,
                 level: run.level,
                 repeats: run.repeats,
+                lf_harmonics: run.lf_harmonics,
                 reference_input: run.reference_input,
                 measurement_input: run.measurement_input,
             },

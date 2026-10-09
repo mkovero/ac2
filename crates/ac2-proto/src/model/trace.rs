@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AverageMethod, CalKey, DelayReference, DepthPolicy, EssSpec, LevelScale, MathExpr, MathOp,
-    MicCurveRef, Operand, PhaseBasis, Smoothing, SweepData, TraceOwner,
+    AverageMethod, CalKey, DelayReference, DepthPolicy, EssSpec, LevelScale, LfHarmonics, MathExpr,
+    MathOp, MicCurveRef, Operand, PhaseBasis, Smoothing, SweepData, TraceOwner,
 };
 use crate::grid::GridId;
 use crate::units::{
@@ -146,6 +146,8 @@ pub enum TraceSource {
         level: Dbfs,
         /// Sweeps averaged.
         repeats: u8,
+        /// Harmonic windows at the lowest columns.
+        lf_harmonics: LfHarmonics,
         /// Reference input.
         reference_input: u16,
         /// Measurement input.

@@ -136,6 +136,13 @@ pub(crate) fn ess(s: pm::EssSpec) -> core::generator::EssConfig {
     }
 }
 
+pub(crate) fn lf_harmonics(l: pm::LfHarmonics) -> core::sweep::LfHarmonics {
+    match l {
+        pm::LfHarmonics::Standard => core::sweep::LfHarmonics::Standard,
+        pm::LfHarmonics::Fine => core::sweep::LfHarmonics::Fine,
+    }
+}
+
 /// Generator signal; `None` for a negative or oversized period.
 pub(crate) fn signal(s: pm::Signal) -> Option<core::generator::Signal> {
     use core::generator::Signal as S;

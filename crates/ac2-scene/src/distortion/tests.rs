@@ -59,6 +59,7 @@ pub(crate) fn data() -> TraceData {
                 sweep: EssSpec::with_fades(Hz(20.0), Hz(4000.0), Seconds(3.0)),
                 level: Dbfs(-50.0),
                 repeats: 2,
+                lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
                 reference_input: 1,
                 measurement_input: 0,
             },

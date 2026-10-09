@@ -1,7 +1,7 @@
 //! The list of stored traces beside the panes: every trace by name, what it is, its slot,
 //! whether it is shown, and its colour, in the order the selection keys step through.
 
-use ac2_proto::model::{MathExpr, MathOp, TraceKind, TraceMeta, TraceSource};
+use ac2_proto::model::{LfHarmonics, MathExpr, MathOp, TraceKind, TraceMeta, TraceSource};
 use ac2_proto::units::TraceId;
 
 use crate::format;
@@ -32,12 +32,14 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
     }
 }
 
-/// What a sweep run played: `3 s −50.0 dBFS` (`2 × 3 s …` when averaged).
+/// What a sweep run played: `3 s −50.0 dBFS` (`2 × 3 s …` when averaged, `… · LF harmonics
+/// fine` with each order in its own window at the lowest columns).
 pub fn run_settings(t: &TraceMeta) -> Option<String> {
     let TraceSource::Sweep {
         sweep,
         level,
         repeats,
+        lf_harmonics,
         ..
     } = &t.source
     else {
@@ -50,7 +52,14 @@ pub fn run_settings(t: &TraceMeta) -> Option<String> {
     } else {
         String::new()
     };
-    Some(format!("{times}{secs} s {} dBFS", format::level(level.0)))
+    let lf = match lf_harmonics {
+        LfHarmonics::Standard => "",
+        LfHarmonics::Fine => " · LF harmonics fine",
+    };
+    Some(format!(
+        "{times}{secs} s {} dBFS{lf}",
+        format::level(level.0)
+    ))
 }
 
 /// The list's order within a group, which the selection keys follow too: slotted traces by
@@ -266,6 +275,7 @@ mod tests {
             },
             level: Dbfs(-20.0),
             repeats: 1,
+            lf_harmonics: LfHarmonics::Standard,
             reference_input: 0,
             measurement_input: 1,
         }
@@ -344,6 +354,19 @@ mod tests {
         for (kind, source, want) in cases {
             assert_eq!(kind_name(&meta(1, "x", None, kind, source)), want);
         }
+    }
+
+    #[test]
+    fn a_fine_lf_harmonics_run_says_so() {
+        let mut fine = meta(5, "Sweep 1", None, TraceKind::Sweep, swept());
+        assert_eq!(run_settings(&fine).as_deref(), Some("1 s −20.0 dBFS"));
+        if let TraceSource::Sweep { lf_harmonics, .. } = &mut fine.source {
+            *lf_harmonics = LfHarmonics::Fine;
+        }
+        assert_eq!(
+            run_settings(&fine).as_deref(),
+            Some("1 s −20.0 dBFS · LF harmonics fine")
+        );
     }
 
     #[test]

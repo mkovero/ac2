@@ -12,7 +12,7 @@ import struct
 
 import msgpack
 
-PROTO_VERSION = 32
+PROTO_VERSION = 33
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8

@@ -248,6 +248,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         ("repeats", n.repeats.is_some()),
         ("gate", n.gate.is_some()),
         ("tail", n.tail.is_some()),
+        ("lf-harmonics", n.lf_harmonics.is_some()),
     ];
     if n.kind != MeasKindArg::Sweep
         && let Some((flag, _)) = sweep_only.iter().find(|(_, given)| *given)
@@ -288,6 +289,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     repeats: n.repeats.unwrap_or(1),
                     gate: n.gate.map(|g| g.0),
                     tail: n.tail.map(|t| t.0),
+                    lf_harmonics: n.lf_harmonics.unwrap_or_default().into(),
                 })?,
             }
         }
@@ -822,6 +824,49 @@ mod tests {
             unreachable!()
         };
         meas_config(&n)
+    }
+
+    #[test]
+    fn a_sweep_takes_lf_harmonics_by_name() {
+        use ac2_proto::model::LfHarmonics;
+        let base = [
+            "sweep", "--name", "s", "--ref", "2", "--meas", "1", "--out", "1,2", "--level",
+            "-50dbfs",
+        ];
+        let lf = |extra: &[&str]| {
+            let args: Vec<&str> = base.iter().chain(extra).copied().collect();
+            match config(&args).map(|c| c.kind) {
+                Ok(MeasKind::Sweep { config }) => Ok(config.lf_harmonics),
+                Ok(other) => panic!("{other:?}"),
+                Err(e) => Err(e),
+            }
+        };
+        assert_eq!(lf(&[]).expect("parsed"), LfHarmonics::Standard);
+        assert_eq!(
+            lf(&["--lf-harmonics", "fine"]).expect("parsed"),
+            LfHarmonics::Fine
+        );
+        assert_eq!(
+            lf(&["--lf-harmonics", "standard"]).expect("parsed"),
+            LfHarmonics::Standard
+        );
+        assert!(lf(&["--lf-harmonics", "on"]).is_err());
+        let e = config(&[
+            "tf",
+            "--name",
+            "t",
+            "--ref",
+            "2",
+            "--meas",
+            "1",
+            "--lf-harmonics",
+            "fine",
+        ])
+        .expect_err("refused");
+        assert!(
+            e.to_string().contains("--lf-harmonics applies to a sweep"),
+            "{e}"
+        );
     }
 
     /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.

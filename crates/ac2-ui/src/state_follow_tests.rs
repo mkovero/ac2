@@ -127,6 +127,7 @@ fn panes_follow_a_sweep() {
                 repeats: 1,
                 gate: None,
                 tail: Some(Seconds(1.0)),
+                lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
             },
         },
     ));
