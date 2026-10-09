@@ -10,10 +10,14 @@ on:
       all_os:
         type: boolean
         default: false
-  # `gh workflow run ci.yml --ref <branch> -f all_os=true` runs the macOS/Windows jobs on demand.
+  # `gh workflow run ci.yml --ref <branch> -f all_os=true` runs the macOS/Windows jobs on demand;
+  # `-f full=true` runs the full test tier on Linux only. A push runs the quick tier.
   workflow_dispatch:
     inputs:
       all_os:
+        type: boolean
+        default: false
+      full:
         type: boolean
         default: false
 
@@ -179,7 +183,8 @@ jobs:
         # multicast on loopback, so a missing answer is a failure here, not a skip.
         env:
           AC2_REQUIRE_MDNS: "1"
-        run: cargo nextest run --workspace --locked --profile ci
+        # Quick tier (no `slow_*`) on a push; everything on an all-OS or release run or on request.
+        run: cargo nextest run --workspace --locked --profile ${{ (inputs.all_os || inputs.full) && 'ci-full' || 'ci' }}
 
       # nextest does not run doctests.
       - name: doctests

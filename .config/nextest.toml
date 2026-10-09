@@ -5,8 +5,9 @@
 #
 # Two tiers. A test whose function name starts with `slow_` takes seconds of real time
 # (Leq windows filling, backoffs, expiries, the app driven end to end on the real-time
-# simulated rig); the default profile skips them, `--profile full` (and CI, and plain
-# `cargo test`) runs everything. Rename a test to `slow_…` when it needs about 5 s or more
+# simulated rig); the default profile skips them, `--profile full` (and plain `cargo test`)
+# runs everything. CI runs the quick tier on every push (`ci`) and everything (`ci-full`) on an
+# all-OS or release run, or when dispatched with `full`. Rename a test to `slow_…` when it needs about 5 s or more
 # after its waits are as short as what it checks allows.
 
 [profile.default]
@@ -48,9 +49,13 @@ retries = 1
 [profile.full]
 default-filter = "all()"
 
-[profile.ci]
-default-filter = "all()"
 # One thread per core: hosted runners have 3–4 and run the GPU tests on a software
 # renderer. They are slower and shared: the same tests may take twice as long.
+[profile.ci]
+test-threads = "num-cpus"
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[profile.ci-full]
+default-filter = "all()"
 test-threads = "num-cpus"
 slow-timeout = { period = "60s", terminate-after = 5 }

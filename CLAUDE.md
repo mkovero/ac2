@@ -21,8 +21,9 @@ Tests named `slow_…` need ~5 s+ of real time (Leq windows, recovery backoffs, 
 app runs). Profiles in `.config/nextest.toml`:
 - **Quick tier** (default, skips `slow_*`): iteration and pre-commit/pre-push; add
   `cargo test --workspace --doc` when docs changed.
-- **Full tier** (`--profile full` + doctests): locally only when the operator asks or for an
-  all-OS release build; CI runs `--profile ci` on every push.
+- **Full tier** (`--profile full` + doctests): only when the operator asks or for an all-OS
+  release build. CI runs the quick tier on every push; the full tier on an all-OS/release run
+  or `gh workflow run ci.yml --ref main -f full=true` (Linux only).
 - nextest `-j` = test threads; build jobs `--build-jobs N`. One area: `-p ac2d -E 'test(/^leq::/)'`.
 
 ## Crate map
