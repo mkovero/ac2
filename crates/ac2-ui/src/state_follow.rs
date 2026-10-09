@@ -15,7 +15,13 @@ use super::*;
 pub fn panes_drawing(kinds: &[&MeasKind], traces: &[&TraceMeta]) -> Vec<PaneKind> {
     PaneKind::ALL
         .into_iter()
-        .filter(|p| kinds.iter().any(|k| p.shows(k)) || traces.iter().any(|t| drawn_in(t, *p)))
+        .filter(|p| {
+            // A sweep's home is the sweep pane: the transfer pane follows it only for the runs
+            // it draws.
+            kinds.iter().any(|k| {
+                p.shows(k) && !(*p == PaneKind::Transfer && matches!(k, MeasKind::Sweep { .. }))
+            }) || traces.iter().any(|t| drawn_in(t, *p))
+        })
         .collect()
 }
 

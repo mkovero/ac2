@@ -45,12 +45,15 @@ impl AppState {
     }
 
     /// The measurement pane `p` shows: its own choice, else the selected measurement if it
-    /// fits, else the first that fits.
+    /// fits, else the first that fits. Unchosen, it leads with its own kind: the transfer
+    /// pane shows a sweep's runs only once picked for it, a live curve before that.
     pub fn pane_meas(&self, p: PaneKind) -> Option<&Measurement> {
         let c = self.pane_candidates(p);
         let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
+        let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind).owner() == p.owner();
         pick(self.pane_meas.get(&p.owner()).copied())
-            .or_else(|| pick(self.selected))
+            .or_else(|| pick(self.selected).filter(|m| home(m)))
+            .or_else(|| c.iter().find(|m| home(m)).copied())
             .or_else(|| c.first().copied())
     }
 
@@ -75,6 +78,15 @@ impl AppState {
                 PaneKind::Spectrum => "no spectrum or RTA: Ctrl+K → New spectrum / New RTA",
                 _ => "no SPL meter: Ctrl+K → New SPL meter",
             });
+        }
+        // The transfer pane showing a sweep's runs: a sweep plays only from the sweep pane.
+        if let Some(s) = m.as_ref().filter(|m| !m.config.kind.is_job()) {
+            self.warn(format!(
+                "{} is a sweep: run it on the {} pane",
+                s.config.name,
+                PaneKind::Distortion.title()
+            ));
+            return None;
         }
         m
     }
@@ -301,6 +313,7 @@ impl AppState {
             selected_trace: self.selected_trace,
             keys_on_trace: self.keys_on_trace(),
             sweep: self.daemon().and_then(|s| s.sweep.as_ref()),
+            compared: self.compared_rows(),
         })
     }
 
@@ -408,13 +421,7 @@ impl AppState {
         let mut v: Vec<&TraceMeta> = self
             .stored_traces()
             .into_iter()
-            .filter(|t| {
-                t.edit.visible
-                    && matches!(
-                        t.kind,
-                        TraceKind::Transfer | TraceKind::Target | TraceKind::Sweep
-                    )
-            })
+            .filter(|t| self.on_transfer_pane(t))
             .collect();
         v.sort_by_key(|t| (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id));
         v
@@ -440,8 +447,9 @@ impl AppState {
     }
 
     /// What the transfer pane says when there is nothing to measure yet: no audio session,
-    /// or a session without measurements. `None` once there is something (or no daemon).
-    /// Over stored curves it moves to the pane's title strip, out of their way.
+    /// or a session without measurements; or, with no stored curve of the pane's group
+    /// drawn, that shown traces wait under Imported. `None` once there is something (or no
+    /// daemon). Over drawn curves it moves to the pane's title strip, out of their way.
     pub fn empty_hint(&self, keymap: &Keymap) -> Option<EmptyHint> {
         if !self.connected() {
             return None;
@@ -457,6 +465,21 @@ impl AppState {
             format!(
                 "No measurements — {palette} → New transfer measurement… (or New spectrum, RTA, SPL meter)"
             )
+        } else if !self.transfer_shows_stored()
+            && let n @ 1.. = self.imported_transfer_traces()
+        {
+            // An imported file draws nowhere until it has a measurement: say where it went.
+            let key = keymap
+                .chords(CommandId::MoveTrace, Scope::Global)
+                .first()
+                .map(|c| c.label());
+            let text = ac2_scene::meas_list::imported_hint(n, key.as_deref());
+            let place = if self.transfer_shows_live() {
+                HintPlace::Title
+            } else {
+                HintPlace::Centre
+            };
+            return Some(EmptyHint { text, place });
         } else {
             return None;
         };
@@ -469,9 +492,115 @@ impl AppState {
     }
 
     /// Whether the transfer pane draws any stored curve (a shown capture, target or sweep
-    /// whose data has arrived).
+    /// of its group, or a compared one, whose data has arrived).
     pub fn transfer_shows_stored(&self) -> bool {
-        self.traces.values().any(|(t, _)| on_transfer_pane(&t.meta))
+        self.traces.values().any(|(t, _)| {
+            self.on_transfer_pane(&t.meta) || self.trace_compared_on_transfer(&t.meta)
+        })
+    }
+
+    /// The measurement whose group the transfer pane draws: the one it shows, or the owner
+    /// of the math channel it shows. `None`: no measurement, or a math channel whose owner
+    /// is gone (the pane then draws that channel alone).
+    pub fn transfer_group(&self) -> Option<MeasId> {
+        let m = self.pane_meas(PaneKind::Transfer)?;
+        match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
+            TraceOwner::Meas { meas } => Some(meas),
+            TraceOwner::Imported => None,
+        }
+    }
+
+    /// Whether the transfer pane draws stored trace `t`: a shown transfer-like curve of the
+    /// pane's group. Every other group's, Imported's too, waits until its measurement is the
+    /// pane's (or the trace is moved under it). With no measurement to show at all, the
+    /// pane's group is Imported: files looked at without a rig are drawn.
+    pub fn on_transfer_pane(&self, t: &TraceMeta) -> bool {
+        transfer_kind_shown(t)
+            && match ac2_scene::meas_list::group_of(t, &self.measurements()) {
+                TraceOwner::Meas { meas } => Some(meas) == self.transfer_group(),
+                TraceOwner::Imported => self.pane_meas(PaneKind::Transfer).is_none(),
+            }
+    }
+
+    /// Whether the transfer pane draws measurement `m`'s live curve: it publishes one, is not
+    /// hidden, and is the pane's measurement or a math channel of the pane's group.
+    pub fn live_on_transfer_pane(&self, m: &Measurement) -> bool {
+        if !m.config.kind.publishes_tf() || self.meas_hidden(m) {
+            return false;
+        }
+        if self.pane_meas(PaneKind::Transfer).map(|p| p.id) == Some(m.id) {
+            return true;
+        }
+        match ac2_scene::meas_list::meas_group(m, &self.measurements()) {
+            TraceOwner::Meas { meas } => Some(meas) == self.transfer_group(),
+            TraceOwner::Imported => false,
+        }
+    }
+
+    /// Whether measurement `m` (a live curve or math channel) is compared (C).
+    pub fn meas_compared(&self, m: &Measurement) -> bool {
+        self.compared_meas.contains(&m.config.name)
+    }
+
+    /// Whether the transfer pane draws `m`'s live curve for compare only: compared, not
+    /// hidden, and not of the pane's group (drawn there anyway, once, unmarked).
+    pub fn live_compared_on_transfer(&self, m: &Measurement) -> bool {
+        m.config.kind.publishes_tf()
+            && !self.meas_hidden(m)
+            && self.meas_compared(m)
+            && !self.live_on_transfer_pane(m)
+    }
+
+    /// Whether the transfer pane draws stored trace `t` for compare only: compared, shown,
+    /// a transfer-like curve, and not of the pane's group.
+    pub fn trace_compared_on_transfer(&self, t: &TraceMeta) -> bool {
+        self.compared_traces.contains(&t.id) && transfer_kind_shown(t) && !self.on_transfer_pane(t)
+    }
+
+    /// The tree rows compared (C), for their mark.
+    pub(super) fn compared_rows(&self) -> Vec<ac2_scene::meas_list::TreeKey> {
+        use ac2_scene::meas_list::TreeKey;
+        let mut v: Vec<TreeKey> = self
+            .measurements()
+            .into_iter()
+            .filter(|m| self.meas_compared(m))
+            .map(|m| match m.config.kind {
+                MeasKind::Math { .. } => TreeKey::Math(m.id),
+                _ => TreeKey::Live(m.id),
+            })
+            .collect();
+        v.extend(self.compared_traces.iter().map(|id| TreeKey::Trace(*id)));
+        v
+    }
+
+    /// Shown transfer-like stored traces under Imported the transfer pane leaves out: they
+    /// show once moved under a measurement (or compared).
+    fn imported_transfer_traces(&self) -> usize {
+        let ms = self.measurements();
+        self.stored_traces()
+            .into_iter()
+            .filter(|t| {
+                transfer_kind_shown(t)
+                    && ac2_scene::meas_list::group_of(t, &ms) == TraceOwner::Imported
+                    && !self.compared_traces.contains(&t.id)
+            })
+            .count()
+    }
+
+    /// Whether the transfer pane draws a live curve now (one with a frame).
+    fn transfer_shows_live(&self) -> bool {
+        let Some(d) = self.data.as_ref() else {
+            return false;
+        };
+        self.measurements().into_iter().any(|m| {
+            (self.live_on_transfer_pane(m) || self.live_compared_on_transfer(m))
+                && d.latest
+                    .get(&Topic::Data {
+                        meas: m.id,
+                        stream: Stream::Tf,
+                    })
+                    .is_some()
+        })
     }
 
     pub fn connected(&self) -> bool {
@@ -524,7 +653,7 @@ impl AppState {
             let id = self
                 .measurements()
                 .iter()
-                .find(|m| m.config.name == name && PaneKind::for_kind(&m.config.kind) == pane)
+                .find(|m| m.config.name == name && pane.shows(&m.config.kind))
                 .map(|m| m.id);
             if let Some(id) = id {
                 self.pane_meas.insert(pane, id);
@@ -552,15 +681,17 @@ impl AppState {
         }
         // Names of measurements that exist (all of them until the daemon's state is known):
         // a deleted one's name must not hide a new one of that name in a later run.
-        let hidden = match self.daemon() {
-            None => self.hidden_meas.clone(),
+        let existing = |set: &BTreeSet<String>| match self.daemon() {
+            None => set.clone(),
             Some(_) => self
                 .measurements()
                 .iter()
                 .map(|m| m.config.name.clone())
-                .filter(|n| self.hidden_meas.contains(n))
+                .filter(|n| set.contains(n))
                 .collect(),
         };
+        let hidden = existing(&self.hidden_meas);
+        let compared = existing(&self.compared_meas);
         crate::prefs::LayoutPrefs {
             focus: self.layout.focus,
             maximized: self.layout.maximized,
@@ -572,6 +703,7 @@ impl AppState {
             distortion_unit: self.view.distortion.unit,
             measurements,
             hidden,
+            compared,
         }
     }
 
@@ -675,6 +807,7 @@ impl AppState {
         }
         self.pending_pane_meas = l.measurements.clone();
         self.hidden_meas = l.hidden.clone();
+        self.compared_meas = l.compared.clone();
         self.prefs = prefs;
     }
 

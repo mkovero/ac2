@@ -4,8 +4,25 @@ use super::*;
 
 impl AppState {
     /// The one trace selection: a sweep selected is also what the sweep pane shows.
+    /// A transfer-like trace selected brings its measurement's group to the transfer pane,
+    /// which draws only that group: a selected curve the pane leaves out would take the
+    /// trace keys while nothing on screen moves.
     pub(super) fn select_trace(&mut self, id: Option<TraceId>) {
         self.selected_trace = id;
+        let owner = self
+            .selected_trace_meta()
+            .filter(|t| drawn_in(t, PaneKind::Transfer))
+            .and_then(|t| match t.edit.owner {
+                TraceOwner::Meas { meas } => Some(meas),
+                TraceOwner::Imported => None,
+            })
+            .filter(|m| {
+                self.meas(*m)
+                    .is_some_and(|m| PaneKind::Transfer.shows(&m.config.kind))
+            });
+        if let Some(m) = owner {
+            self.pane_meas.insert(PaneKind::Transfer, m);
+        }
         if let Some(id) = id
             && self.daemon().is_some_and(|s| {
                 s.traces
@@ -293,7 +310,14 @@ impl AppState {
         }
         self.layout.shown[p.index()] = true;
         self.layout.focus = p;
+        self.select_on(p, id);
+    }
+
+    /// Selects `id` as what pane `p` shows: a sweep picked on the transfer pane is the
+    /// transfer pane's (its runs drawn there), not only the sweep pane's.
+    fn select_on(&mut self, p: PaneKind, id: MeasId) {
         self.select(id);
+        self.pane_meas.insert(p.owner(), id);
     }
 
     /// The measurement list of pane `p`, the shown one highlighted.
@@ -416,7 +440,7 @@ impl AppState {
             .pane_meas(p)
             .and_then(|s| ids.iter().position(|x| *x == s.id))
             .map_or(if d > 0 { -1 } else { 0 }, |i| i as i32);
-        self.select(ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
+        self.select_on(p, ids[((i + d).rem_euclid(ids.len() as i32)) as usize]);
     }
 
     /// V / Shift+V: the next / previous shown stored trace in the list's order (slotted
@@ -474,11 +498,33 @@ impl AppState {
         };
         let mut edit = t.edit.clone();
         edit.visible = !edit.visible;
-        let what = format!(
+        let mut what = format!(
             "{} {}",
             trace_label(t),
             if edit.visible { "shown" } else { "hidden" }
         );
+        // The transfer pane draws one group: a trace shown outside it says where it is.
+        let shown = TraceMeta {
+            edit: edit.clone(),
+            ..t.clone()
+        };
+        if edit.visible
+            && drawn_in(&shown, PaneKind::Transfer)
+            && !self.on_transfer_pane(&shown)
+            && !self.compared_traces.contains(&shown.id)
+        {
+            let ms = self.measurements();
+            what.push_str(&match ac2_scene::meas_list::group_of(&shown, &ms) {
+                TraceOwner::Meas { meas } => format!(
+                    " · on the transfer pane with {}",
+                    self.meas(meas)
+                        .map_or("its measurement", |m| &m.config.name)
+                ),
+                TraceOwner::Imported => {
+                    " · under Imported: compare it (C) or Move to measurement… to see it".to_owned()
+                }
+            });
+        }
         self.call(out, Command::TraceUpdate { trace: id, edit }, what);
     }
 
@@ -743,6 +789,8 @@ impl AppState {
                 }
                 self.level_key(c)
             }
+            C::Compare => self.toggle_compare(),
+            C::ClearCompare => self.clear_compare(),
             C::ToggleCursor => {
                 let t = self.nav.target;
                 self.view.cursor_hz = match self.view.cursor_hz {
@@ -909,7 +957,10 @@ impl AppState {
                             PaneKind::Spectrum => PaneKind::Spectrum,
                             _ => PaneKind::Transfer,
                         };
-                        self.pane_meas(p).map(|m| Operand::Meas { meas: m.id })
+                        // A sweep has no live curve to be an operand: its runs are traces.
+                        self.pane_meas(p)
+                            .filter(|m| m.config.kind.is_job())
+                            .map(|m| Operand::Meas { meas: m.id })
                     });
                 match Form::math(self.math_candidates(Some(owner)), first, owner) {
                     Ok(f) => self.overlay = Overlay::Form(Box::new(f)),

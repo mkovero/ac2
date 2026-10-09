@@ -180,7 +180,7 @@ fn the_ir_cursor_reads_time_and_value() {
             .cursor
             .map(|c| c.text())
     };
-    t.key("C");
+    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(cursor(&t), Some(0.5));
     assert_eq!(reading(&t).as_deref(), Some("0.5 ms · 0 FS"));
     t.key("Shift+Left");
@@ -193,7 +193,7 @@ fn the_ir_cursor_reads_time_and_value() {
     assert_eq!(reading(&t).as_deref(), Some("1.5 ms · −6.0 dB"));
     // The frequency cursor is the transfer pane's own.
     assert_eq!(t.st.view.cursor_hz, None);
-    t.key("C");
+    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(cursor(&t), None);
     assert_eq!(reading(&t), None);
 }
@@ -225,7 +225,7 @@ fn the_sweep_ir_view_has_its_own_navigation() {
     assert!((r.span() - 199.0 / 1.5).abs() < 1e-9, "{r:?}");
     assert_eq!(t.st.nav.target, freq);
     assert_eq!(axes(&t, IrPane::Live), IrAxes::default());
-    t.key("C");
+    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     let s = crate::scenes::sweep(&t.st, &Theme::dark(), SIZE, now());
     let crate::scenes::SweepPane::Ir(ir) = s else {
         panic!("the IR view");

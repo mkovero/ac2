@@ -18,7 +18,7 @@ use ac2_proto::model::{
     AverageMethod, CalKey, CurveChoice, DelayFinding, DelayOutcome, DelayPick, DelayReference,
     FinderBand, GeneratorDesired, GeneratorSettings, ImportRole, InputSetup, MathDomain, MeasKind,
     Measurement, MicCurveId, Operand, Polarity, SessionRef, Signal, Smoothing, SmoothingFraction,
-    SmoothingMode, State, SweepStatus, TraceData, TraceKind, TraceMeta,
+    SmoothingMode, State, SweepStatus, TraceData, TraceKind, TraceMeta, TraceOwner,
 };
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId};
@@ -79,8 +79,8 @@ mod stimulus;
 mod text;
 use text::{SELECT_TRACE_FIRST, drawn_in, offset_text, slot_of};
 pub use text::{
-    curve_what, meas_input, mics_text, on_transfer_pane, open_session_hint, parse_band, parse_mics,
-    parse_number, parse_outputs, parse_session_ref, parse_slot, trace_label,
+    curve_what, meas_input, mics_text, open_session_hint, parse_band, parse_mics, parse_number,
+    parse_outputs, parse_session_ref, parse_slot, trace_label, transfer_kind_shown,
 };
 
 /// The panes.
@@ -132,7 +132,9 @@ impl PaneKind {
     /// pane's measurement).
     pub fn shows(self, k: &MeasKind) -> bool {
         match self {
-            PaneKind::Transfer => k.publishes_tf(),
+            // A sweep measurement has no live curve, but its runs are transfer curves: the
+            // pane draws them when the sweep is its measurement.
+            PaneKind::Transfer => k.publishes_tf() || matches!(k, MeasKind::Sweep { .. }),
             // A math channel has no impulse response of its own.
             PaneKind::Ir => matches!(k, MeasKind::Transfer { .. }),
             PaneKind::Spectrum => k.publishes_levels(),
@@ -1087,6 +1089,12 @@ pub struct AppState {
     /// Measurements whose live curves this app hides, by name (as `ui.toml` keeps them):
     /// display only, they keep measuring.
     pub hidden_meas: BTreeSet<String>,
+    /// Measurements (live curves, math channels) every transfer pane draws besides its own
+    /// group, by name as hidden ones are (compare, C): an overlay, never an operand.
+    pub compared_meas: BTreeSet<String>,
+    /// Stored traces every transfer pane draws besides its own group (compare, C), whatever
+    /// their owner. Ids are the daemon's: kept while the app runs, not in `ui.toml`.
+    pub compared_traces: BTreeSet<TraceId>,
     /// Groups of the measurement tree folded in this app (their rows not listed).
     pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
@@ -1247,6 +1255,8 @@ impl AppState {
             spl_hold: BTreeMap::new(),
             pending_pane_meas: BTreeMap::new(),
             hidden_meas: BTreeSet::new(),
+            compared_meas: BTreeSet::new(),
+            compared_traces: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             link_wants: crate::link_wants::Sent::default(),
             spectrum_running: BTreeSet::new(),
@@ -1273,6 +1283,7 @@ impl AppState {
         if !tick {
             self.fit_focus();
             self.restore_pane_meas();
+            self.prune_compared();
             self.remember_layout();
         }
         out

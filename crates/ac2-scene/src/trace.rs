@@ -114,7 +114,13 @@ pub struct TfTrace<'a> {
     /// The selected stored trace: the trace keys act on it, so the plot and the legend
     /// mark it.
     pub selected: bool,
+    /// Drawn for compare only (another measurement's or an imported curve, not the pane's
+    /// group): the legend tags it [`COMPARED`].
+    pub compared: bool,
 }
+
+/// The legend tag of a compared curve, and the measurement tree's mark of a compared row.
+pub const COMPARED: &str = "cmp";
 
 impl<'a> TfTrace<'a> {
     /// A live trace from a TF frame of measurement `frame.meas`.
@@ -149,6 +155,7 @@ impl<'a> TfTrace<'a> {
             note: None,
             stored: None,
             selected: false,
+            compared: false,
         }
     }
 
@@ -197,6 +204,7 @@ impl<'a> TfTrace<'a> {
             note,
             stored: Some(data),
             selected: false,
+            compared: false,
         }
     }
 }
@@ -798,6 +806,7 @@ mod tests {
                 note: None,
                 stored: None,
                 selected: false,
+                compared: false,
             }
         }
     }

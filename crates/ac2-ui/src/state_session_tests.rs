@@ -56,8 +56,10 @@ fn connected_to(t: &mut T, target: &str) {
 fn empty_hint_yields_to_stored_traces() {
     let mut t = T::disconnected();
     connected_to(&mut t, "local daemon");
-    let meta = stored(10, Some(1), 2);
+    let meta = captured(10, Some(1), 2);
+    // Main L, kept from an earlier session: the pane draws its capture.
     let mut s = no_session_state();
+    s.measurements = vec![meas(1, "Main L", transfer())];
     s.traces = vec![meta.clone()];
     t.conn(mirror(s));
     let place = |t: &T| t.st.empty_hint(&t.keys).map(|h| h.place);
@@ -90,6 +92,7 @@ fn empty_hint_yields_to_stored_traces() {
     let mut hidden = meta.clone();
     hidden.edit.visible = false;
     let mut s = no_session_state();
+    s.measurements = vec![meas(1, "Main L", transfer())];
     s.traces = vec![hidden.clone()];
     t.conn(mirror(s));
     t.conn(ConnEvent::Trace(data(&hidden), grid));

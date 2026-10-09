@@ -161,10 +161,6 @@ pub fn daemon_wall(st: &AppState, client_now: WallNs) -> WallNs {
     WallNs(t.clamp(0, i128::from(u64::MAX)) as u64)
 }
 
-fn is_tf(m: &Measurement) -> bool {
-    m.config.kind.publishes_tf()
-}
-
 /// What a math channel's frame combined, operands named as the lists name them; `None`
 /// for any other frame.
 fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<MathStatus> {
@@ -202,9 +198,16 @@ fn shown_math(
 }
 
 /// The TF measurement the IR pane and the delay banner follow: the one the transfer pane
-/// shows.
+/// shows; while that is a sweep (its runs drawn, no live curve), the IR pane's own choice.
 pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
+    pane_tf(st).or_else(|| st.pane_meas(PaneKind::Ir))
+}
+
+/// The measurement with a live transfer curve the transfer pane shows (`None` while it
+/// shows a sweep's runs).
+fn pane_tf(st: &AppState) -> Option<&Measurement> {
     st.pane_meas(PaneKind::Transfer)
+        .filter(|m| m.config.kind.publishes_tf())
 }
 
 /// The colour of measurement `id`'s live curve (or math result) in every pane: its colour
@@ -229,14 +232,18 @@ struct LiveTf<'a> {
     cols: Arc<GridColumns>,
 }
 
-/// The transfer view: every transfer measurement with a frame, plus visible stored traces.
+/// The transfer view: the group of the measurement the pane shows — its live curve, the
+/// math channels made on it, its shown stored traces — and the curves compared (C), tagged
+/// so. Other groups (Imported too) wait until theirs is the pane's measurement.
 pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfScene {
     let grids = st.data.as_ref().map(|d| &d.grids);
     let colours = st.curve_colours(theme);
     let mut live = Vec::new();
     for (_, m) in pane_order(st, PaneKind::Transfer) {
-        // A hidden measurement keeps its colour: showing it again brings back the same curve.
-        if !is_tf(m) || st.meas_hidden(m) {
+        // The pane's group (its measurement and the math channels made on it), and what is
+        // compared. A hidden measurement keeps its colour: showing it again brings back the
+        // same curve.
+        if !(st.live_on_transfer_pane(m) || st.live_compared_on_transfer(m)) {
             continue;
         }
         let Some(tf) = frame(st, m.id, Stream::Tf) else {
@@ -259,7 +266,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let mut stored: Vec<(&Arc<ac2_proto::model::TraceData>, Arc<GridColumns>)> = st
         .traces
         .values()
-        .filter(|(t, _)| crate::state::on_transfer_pane(&t.meta))
+        .filter(|(t, _)| st.on_transfer_pane(&t.meta) || st.trace_compared_on_transfer(&t.meta))
         .map(|(t, g)| (t, columns(g)))
         .collect();
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
@@ -269,7 +276,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let ms = st.measurements();
     // The group of the measurement the pane shows leads, as its curve does.
     let groups = ac2_scene::meas_list::group_order(&ms);
-    let lead = focus_tf(st).map(|m| match &m.config.kind {
+    let lead = pane_tf(st).map(|m| match &m.config.kind {
         ac2_proto::model::MeasKind::Math { config } => config.owner,
         _ => ac2_proto::model::TraceOwner::Meas { meas: m.id },
     });
@@ -306,6 +313,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
             Polarity::Normal
         };
         t.note = math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag());
+        t.compared = st.live_compared_on_transfer(l.meas);
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
         if f.meta
@@ -321,6 +329,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.selected_trace == Some(data.meta.id);
+        t.compared = st.trace_compared_on_transfer(&data.meta);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
             data.meta.source.shared_epoch(),
@@ -336,7 +345,7 @@ pub fn transfer(st: &AppState, theme: &Theme, size: Viewport, now: Now) -> TfSce
     let mut slots: Vec<Option<TfTrace<'_>>> = traces.into_iter().map(Some).collect();
     let traces: Vec<TfTrace<'_>> = order.iter().filter_map(|i| slots[*i].take()).collect();
     let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
-    let focus = focus_tf(st);
+    let focus = pane_tf(st);
     let mut status = status(st, &shown, focus, now);
     // The shown math channel's operands.
     let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();

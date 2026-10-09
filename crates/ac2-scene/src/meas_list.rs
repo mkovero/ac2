@@ -222,6 +222,9 @@ pub struct TreeInput<'a> {
     pub keys_on_trace: bool,
     /// The latest sweep run (a sweep measurement's header says it plays).
     pub sweep: Option<&'a SweepRun>,
+    /// Rows compared on the transfer pane (live curves, math channels, stored traces): marked
+    /// [`crate::trace::COMPARED`], as the legend tags their curves.
+    pub compared: Vec<TreeKey>,
 }
 
 /// The group a trace is listed in: its owner, or the imported group when its owner is gone.
@@ -247,6 +250,41 @@ pub(crate) fn math_group(m: &Measurement, meas: &[&Measurement]) -> Option<Trace
         }
         _ => TraceOwner::Imported,
     })
+}
+
+/// The group a measurement is listed in: its own for one with a live curve or runs, its
+/// owner's for a math channel (Imported once that owner is gone).
+pub fn meas_group(m: &Measurement, meas: &[&Measurement]) -> TraceOwner {
+    math_group(m, meas).unwrap_or(TraceOwner::Meas { meas: m.id })
+}
+
+/// What the transfer pane says while it draws no stored trace of its measurement's group but
+/// `n` shown transfer traces wait under Imported: a pane draws only its measurement's group,
+/// so they show once moved under it. `move_key` is the chord of "Move to measurement…".
+pub fn imported_hint(n: usize, move_key: Option<&str>) -> String {
+    let what = if n == 1 {
+        "1 trace under Imported is".to_owned()
+    } else {
+        format!("{n} traces under Imported are")
+    };
+    let how = move_key.map_or_else(
+        || "Move to measurement…".to_owned(),
+        |k| format!("Move to measurement… ({k})"),
+    );
+    format!("{what} not on this pane — select it, then {how}")
+}
+
+/// What C says: `Main R compared on the transfer pane (cmp)`, or that compare is off.
+/// A hidden curve is compared but not drawn until shown.
+pub fn compare_toast(name: &str, on: bool, shown: bool) -> String {
+    let tag = crate::trace::COMPARED;
+    match (on, shown) {
+        (false, _) => format!("{name}: compare off"),
+        (true, true) => format!("{name} compared on the transfer pane ({tag})"),
+        (true, false) => {
+            format!("{name} compared on the transfer pane ({tag}) — hidden: A shows it")
+        }
+    }
 }
 
 /// The groups in tree order: the measurements that are not math channels by id, then the
@@ -379,6 +417,11 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 dot: Some((item.color, !item.hidden)),
             });
         }
+        for c in &mut children {
+            if input.compared.contains(&c.key) {
+                mark_compared(c);
+            }
+        }
         if let Some(c) = children.last_mut() {
             c.last = true;
         }
@@ -455,6 +498,19 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
         }
     }
     rows
+}
+
+/// A compared row says so the way the legend does: ` · cmp` after each detail line.
+fn mark_compared(r: &mut TreeRow) {
+    let tag = crate::trace::COMPARED;
+    for d in &mut r.details {
+        d.push_str(&format!(" · {tag}"));
+    }
+    if r.details.is_empty() {
+        r.details.push(tag.to_owned());
+    }
+    r.describe
+        .push_str(&format!(", compared on the transfer pane ({tag})"));
 }
 
 /// What a measurement owns, for the question Delete asks: `3 traces`, `2 traces and 1 math
@@ -974,7 +1030,42 @@ pub(crate) mod tests {
             selected_trace: trace,
             keys_on_trace: trace.is_some(),
             sweep: None,
+            compared: Vec::new(),
         })
+    }
+
+    /// A compared row says `cmp` as the legend tags its curve; others are unchanged.
+    #[test]
+    fn compared_rows_are_marked() {
+        let r = rig();
+        let none = BTreeSet::new();
+        let plain = rows(&r, &none, None, None);
+        let marked = tree_rows(&TreeInput {
+            meas: r.meas.iter().map(item).collect(),
+            traces: r
+                .traces
+                .iter()
+                .map(|meta| TraceItem {
+                    meta,
+                    has_data: true,
+                    color: Color::from_rgba8([1, 2, 3, 255]),
+                })
+                .collect(),
+            collapsed: &none,
+            selected: None,
+            selected_trace: None,
+            keys_on_trace: false,
+            sweep: None,
+            compared: vec![TreeKey::Trace(TraceId(5)), TreeKey::Live(MeasId(1))],
+        });
+        for (a, b) in plain.iter().zip(&marked) {
+            if matches!(b.key, TreeKey::Trace(TraceId(5)) | TreeKey::Live(MeasId(1))) {
+                assert!(b.details.iter().all(|d| d.ends_with(" · cmp")), "{b:?}");
+                assert!(b.describe.ends_with("compared on the transfer pane (cmp)"));
+            } else {
+                assert_eq!(a, b);
+            }
+        }
     }
 
     #[test]
@@ -1124,6 +1215,7 @@ pub(crate) mod tests {
             selected_trace: None,
             keys_on_trace: false,
             sweep: Some(&playing),
+            compared: Vec::new(),
         });
         assert_eq!(t[0].details[0], "running · hidden");
         assert!(t[0].hidden && t[1].hidden);

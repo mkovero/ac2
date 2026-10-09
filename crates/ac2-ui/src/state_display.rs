@@ -14,7 +14,7 @@ use ac2_scene::format;
 use ac2_scene::grid::column_frequencies;
 use ac2_scene::view::{ViewState, level};
 
-use super::{AppState, Overlay, PaneKind, drawn_in, on_transfer_pane, trace_label};
+use super::{AppState, Overlay, PaneKind, drawn_in, trace_label};
 use crate::conn::Request;
 
 /// What a delete confirmation would delete.
@@ -354,7 +354,7 @@ impl AppState {
                 for m in self
                     .measurements()
                     .into_iter()
-                    .filter(|m| !self.meas_hidden(m))
+                    .filter(|m| self.live_on_transfer_pane(m) || self.live_compared_on_transfer(m))
                 {
                     if let Some((f, freqs)) = live(Stream::Tf, m)
                         && let ac2_proto::FrameData::Tf(tf) = &f.data
@@ -363,7 +363,7 @@ impl AppState {
                     }
                 }
                 for (t, g) in self.traces.values() {
-                    if on_transfer_pane(&t.meta) {
+                    if self.on_transfer_pane(&t.meta) || self.trace_compared_on_transfer(&t.meta) {
                         add(&column_frequencies(g), &t.mag_db, t.meta.edit.offset.0);
                     }
                 }
@@ -573,6 +573,7 @@ impl AppState {
                     _ => return,
                 };
                 self.hidden_meas.remove(&c.label);
+                self.compared_meas.remove(&c.label);
                 let mut what = match traces {
                     OwnedTraces::Keep => {
                         format!("{} deleted; its traces are under Imported", c.label)
@@ -748,6 +749,7 @@ impl AppState {
             DeleteTarget::Meas(meas) => {
                 // A measurement of that name made later starts shown.
                 self.hidden_meas.remove(&label);
+                self.compared_meas.remove(&label);
                 // It owns nothing (else the three-answer question was asked).
                 let mut what = format!("{label} deleted");
                 self.stimulus_with_deleted(meas, &mut what, out);
@@ -776,7 +778,73 @@ impl AppState {
 
     /// Deletes stored trace `id`; the selection moves to the next shown trace in the list,
     /// else the one before it, else the live measurement.
+    /// C: compares what is selected in the tree (a stored trace selected last, else the
+    /// selected measurement or math channel) on the transfer pane, or stops comparing it.
+    /// The pane draws compared curves besides its own group, whoever owns them; display
+    /// only (never an average's or a math channel's operand).
+    pub(super) fn toggle_compare(&mut self) {
+        if let Some(t) = self.selected_trace_meta().cloned() {
+            let label = trace_label(&t);
+            if !drawn_in(&t, PaneKind::Transfer) {
+                self.warn(format!("{label}: compare draws transfer curves only"));
+                return;
+            }
+            let on = self.compared_traces.insert(t.id);
+            if !on {
+                self.compared_traces.remove(&t.id);
+            }
+            self.toast(ac2_scene::meas_list::compare_toast(
+                &label,
+                on,
+                t.edit.visible,
+            ));
+            return;
+        }
+        let Some(m) = self.selected_meas().cloned() else {
+            self.warn(
+                "select a measurement or a stored trace to compare (click it in the list, N, V)",
+            );
+            return;
+        };
+        let name = m.config.name.clone();
+        if !m.config.kind.publishes_tf() {
+            self.warn(format!("{name}: no live transfer curve to compare"));
+            return;
+        }
+        let on = self.compared_meas.insert(name.clone());
+        if !on {
+            self.compared_meas.remove(&name);
+        }
+        self.toast(ac2_scene::meas_list::compare_toast(
+            &name,
+            on,
+            !self.meas_hidden(&m),
+        ));
+    }
+
+    /// Clear compare: the transfer pane draws its own group alone again.
+    pub(super) fn clear_compare(&mut self) {
+        let n = self.compared_meas.len() + self.compared_traces.len();
+        self.compared_meas.clear();
+        self.compared_traces.clear();
+        self.toast(match n {
+            0 => "nothing compared".to_owned(),
+            1 => "compare cleared: 1 curve".to_owned(),
+            n => format!("compare cleared: {n} curves"),
+        });
+    }
+
+    /// A stored trace gone from the daemon (deleted here or elsewhere) drops out of compare.
+    pub(super) fn prune_compared(&mut self) {
+        let Some(st) = self.mirror.as_ref().and_then(|m| m.state.as_deref()) else {
+            return;
+        };
+        let ids: std::collections::BTreeSet<TraceId> = st.traces.iter().map(|t| t.id).collect();
+        self.compared_traces.retain(|id| ids.contains(id));
+    }
+
     fn delete_trace(&mut self, id: TraceId, label: String, out: &mut Vec<Request>) {
+        self.compared_traces.remove(&id);
         let list: Vec<(TraceId, bool)> = self
             .trace_list()
             .iter()
@@ -812,7 +880,9 @@ impl AppState {
         let Some(kind) = self.meas(id).map(|m| m.config.kind.clone()) else {
             return;
         };
-        if !self.layout.focus.shows(&kind) {
+        // A sweep picked in the list is the sweep pane's: the transfer pane draws its runs
+        // only when chosen there.
+        if !self.layout.focus.shows(&kind) || matches!(kind, MeasKind::Sweep { .. }) {
             let p = PaneKind::for_kind(&kind);
             self.layout.shown[p.index()] = true;
             self.layout.focus = p;

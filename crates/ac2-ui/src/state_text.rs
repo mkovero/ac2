@@ -49,8 +49,9 @@ pub(super) fn drawn_in(t: &TraceMeta, p: PaneKind) -> bool {
     }
 }
 
-/// A stored trace the transfer pane draws: shown, and a transfer-like curve.
-pub fn on_transfer_pane(t: &TraceMeta) -> bool {
+/// A shown transfer-like stored curve: what the transfer pane draws when it is also in the
+/// pane's group ([`super::AppState::on_transfer_pane`]).
+pub fn transfer_kind_shown(t: &TraceMeta) -> bool {
     t.edit.visible
         && matches!(
             t.kind,

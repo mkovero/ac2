@@ -121,7 +121,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
         Some(ac2_scene::view::IrPane::Sweep),
         "the sweep's IR view"
     );
-    d.key("C");
+    d.send(Msg::Command(CommandId::ToggleCursor));
     assert!(d.st.view.distortion.ir.cursor_ms.is_some());
     assert_eq!(
         d.st.view.cursor_hz,

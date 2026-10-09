@@ -389,6 +389,12 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(second.id, 240)?;
+    // The transfer pane draws one measurement's group; C on each keeps both curves on it
+    // whichever measurement the pane follows.
+    d.key("C");
+    d.send(Msg::SelectMeas(first.id));
+    d.key("C");
+    assert_eq!(d.st.compared_meas.len(), 2);
 
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {
@@ -798,8 +804,8 @@ fn spectrograph_from_an_empty_daemon() -> R {
         text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS"),
         "{text}"
     );
-    // C turns the cursor off, time and all.
-    d.key("C");
+    // The cursor toggle turns it off, time and all.
+    d.send(Msg::Command(CommandId::ToggleCursor));
     assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
 
     // Shift+G: a minute of history, started afresh.

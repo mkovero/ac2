@@ -232,6 +232,11 @@ fn transfer_view_two_traces_and_banner() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
+    // The pane draws Main L's group; Delay tower joins it compared (C), tagged `cmp`.
+    h.state_mut()
+        .state
+        .compared_meas
+        .insert("Delay tower".to_owned());
     {
         let st = &h.state().state;
         assert_eq!(st.selected, Some(MeasId(1)));
@@ -354,11 +359,11 @@ fn ir_pane_of_a_stopped_measurement() {
     h.step();
     snapshot(&mut h, "ir_stopped");
     // The frequency panes' keys on its time and amplitude axes: I twice zooms time about
-    // the middle, Ctrl+I the amplitude, C puts the time cursor there with its readout.
+    // the middle, Ctrl+I the amplitude, the cursor toggle puts the time cursor there.
     h.key_press(Key::I);
     h.key_press(Key::I);
     h.key_press_modifiers(Modifiers::COMMAND, Key::I);
-    h.key_press(Key::C);
+    palette(&mut h, "comparison cursor");
     step_until(&mut h, "zoomed, the cursor on", |a| {
         let ax = a.state.view.ir.axes;
         ax.time_ms.is_some() && ax.amplitude.is_some() && ax.cursor_ms.is_some()
@@ -1004,7 +1009,8 @@ fn startup_first_frame() {
     assert!(app < Duration::from_secs(1), "{app:?}");
 }
 
-/// Two captures in slots 1 and 2 and an imported target curve, drawn with the live traces:
+/// Two captures in slots 1 and 2 and an imported target curve, drawn with the live traces
+/// (the other group and the target compared):
 /// captures share the epoch's time base (Δt to the reference), the target is independent.
 #[test]
 fn stored_traces_and_target() {
@@ -1045,6 +1051,20 @@ fn stored_traces_and_target() {
         a.state.slots()[1].is_some_and(|t| t.edit.visible)
             && a.state.traces.values().all(|(d, _)| d.meta.edit.visible)
     });
+    // The pane shows Delay tower's group (N chose it): Main L, its capture and the imported
+    // target join it compared (C).
+    {
+        let st = &mut h.state_mut().state;
+        st.compared_meas.insert("Main L".to_owned());
+        let others: Vec<_> = st
+            .traces
+            .values()
+            .map(|(d, _)| d.meta.clone())
+            .filter(|t| !t.edit.name.starts_with("Delay tower"))
+            .map(|t| t.id)
+            .collect();
+        st.compared_traces.extend(others);
+    }
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
@@ -1061,9 +1081,9 @@ fn stored_traces_and_target() {
         );
         let legend: Vec<&str> = s.legend.iter().map(|e| e.text.as_str()).collect();
         assert_eq!(legend.len(), 5, "{legend:?}");
-        assert!(legend.contains(&"house_curve · indep."), "{legend:?}");
+        assert!(legend.contains(&"house_curve · cmp · indep."), "{legend:?}");
         assert!(
-            legend.iter().any(|l| l.starts_with("Main L S1 · Δt")),
+            legend.iter().any(|l| l.starts_with("Main L S1 · cmp · Δt")),
             "{legend:?}"
         );
     }
@@ -1595,13 +1615,13 @@ fn session_dialog() {
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_percent");
-    // C: the cursor reads the fundamental, every order and THD, here in percent.
-    h.key_press(Key::C);
+    // The cursor (palette) reads the fundamental, every order and THD, here in percent.
+    palette(&mut h, "comparison cursor");
     step_until(&mut h, "the cursor", |a| a.state.view.cursor_hz.is_some());
     h.state_mut().state.toasts.clear();
     h.step();
     snapshot(&mut h, "sweep_distortion_cursor");
-    h.key_press(Key::C);
+    palette(&mut h, "comparison cursor");
     h.key_press_modifiers(Modifiers::SHIFT, Key::I);
     step_until(&mut h, "sweep IR", |a| {
         a.state.view.distortion.mode == ac2_scene::view::SweepMode::Ir

@@ -115,7 +115,7 @@ mod tests {
                 "B coherence mask",
                 "P wrap/unwrap",
                 "K smoothing",
-                "Alt+↑ offset",
+                "C compare",
                 "H all keys"
             ]
         );
@@ -138,7 +138,6 @@ mod tests {
                 "G linear/log/ETC",
                 "I zoom time",
                 "Ctrl+I zoom level",
-                "C cursor",
                 "Shift+Home fit",
                 "N next measurement",
                 "Shift+I hide pane",
@@ -168,7 +167,6 @@ mod tests {
                 "U dB/%",
                 "G response/IR/room",
                 "Shift+G linear/log/ETC",
-                "C cursor",
                 "W maximise",
                 "Shift+W hide pane",
                 "H all keys"
@@ -207,7 +205,7 @@ mod tests {
             c == CommandId::DistortionUnit
         });
         assert!(t.iter().all(|h| h.command != CommandId::DistortionUnit));
-        assert_eq!(t.len(), 8);
+        assert_eq!(t.len(), 7);
     }
 
     #[test]

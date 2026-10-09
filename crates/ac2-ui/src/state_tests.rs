@@ -210,6 +210,16 @@ fn trace_update(r: &[Request]) -> (TraceId, TraceEdit, String) {
     }
 }
 
+/// A capture filed under Main L (1), as the daemon files captures: the transfer pane draws
+/// it while it shows Main L.
+fn captured(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
+    let mut t = stored(id, slot, epoch);
+    t.edit.owner = TraceOwner::Meas { meas: MeasId(1) };
+    t
+}
+
+/// A stored transfer trace under Imported: the transfer pane leaves it out ([`captured`] is
+/// one it draws while it shows Main L).
 fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
     TraceMeta {
         id: TraceId(id),
@@ -751,3 +761,6 @@ mod layout;
 
 #[path = "state_follow_tests.rs"]
 mod follow;
+
+#[path = "state_tf_group_tests.rs"]
+mod tf_group;

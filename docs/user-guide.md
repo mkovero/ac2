@@ -384,9 +384,33 @@ so low frequencies get long windows and high frequencies stay responsive.
 
 ### Choosing what a pane shows
 
-Each pane's title has a **chip** naming the measurement it shows (the transfer pane draws
-every transfer measurement, with that one first in the legend; the IR pane follows the
-transfer pane's choice). To pick another:
+Each pane's title has a **chip** naming the measurement it shows; the IR pane follows the
+transfer pane's choice. The transfer pane draws that measurement's **group** as the
+measurement tree lists it, and nothing else:
+
+- its live curve (unless hidden with **A**), the math channels filed under it (unless
+  hidden), and its shown stored traces;
+- a math channel chosen on the chip draws its owner's group;
+- a sweep measurement can be chosen too: the pane then draws its shown runs (no live curve;
+  **S** there says to run it on the Sweep / distortion pane).
+
+Other measurements' curves and traces wait until theirs is the pane's measurement, and
+**Imported** traces show only when compared or moved: to file an import with a measurement,
+select it and **Move to measurement…** (**Shift+F2**). While the group has no stored trace
+drawn and shown traces wait under Imported, the pane says so (`1 trace under Imported is not
+on this pane — select it, then Move to measurement… (Shift+F2)`). Selecting a stored trace
+(click, **V**) brings its measurement's group to the pane.
+
+**Compare (C)** draws something else over the group without moving it: select a measurement
+(its live curve), a math channel, a stored trace or an Imported trace in the tree and press
+**C**. The transfer pane draws it whatever group it is in, tagged `cmp` in the legend, and its
+tree row says `cmp` too; **C** on it again stops comparing, and *Clear compare* in the palette
+(**Ctrl+K**) drops them all. A compared curve of the pane's own group is drawn once, untagged.
+Compare is display only: **M** (average), math channel operands and the phase reference take
+the group's own curves. Compared measurements are remembered by name (as hidden ones are, in
+`ui.toml`); compared stored traces while the app runs, and a deleted one drops out.
+
+To pick another measurement:
 
 - click the chip for the list of measurements the pane can show;
 - or focus the pane (click it, **Ctrl+Tab**, **Alt+1 … Alt+4**) and press **N** / **Shift+N**:
@@ -572,8 +596,8 @@ a **time axis** (ms re t = 0):
 - The value axis is the amplitude in FS (linear view) or dB re the peak (log and ETC views).
 - Time zooms no closer than four samples and pans no further than one IR length outside the
   IR.
-- **C** (or a click) puts a time cursor on the IR; **Shift+←** / **Shift+→** step it (a
-  sample when zoomed in, a hundredth of the shown span otherwise). The readout under the
+- A click (or *Comparison cursor on / off* in the palette) puts a time cursor on the IR;
+  **Shift+←** / **Shift+→** step it (a sample when zoomed in, a hundredth of the shown span otherwise). The readout under the
   origin line reads its sample: `1.25 ms · +0.500 FS` or `1.25 ms · −12.3 dB`.
 - The IR pane and the sweep's IR view each keep their own zoom and cursor; the log / ETC
   ranges are remembered in `ui.toml` (`ir`, `sweep_ir`).
@@ -647,8 +671,8 @@ the newest frame at the top, level as colour.
 - Alone, the caption above it also names the spectrum's window and calibration.
 
 - A click in the spectrograph puts the cursor there: above the plot it reads frequency, time
-  before the newest frame and level (`1.00 kHz · 4.2 s ago · −32.0 dBFS`); **C** turns it
-  off. The spectrum's cursor line runs through both.
+  before the newest frame and level (`1.00 kHz · 4.2 s ago · −32.0 dBFS`); *Comparison cursor
+  on / off* (palette) turns it off. The spectrum's cursor line runs through both.
 - Time without frames — the stream went STALE, the measurement was stopped — is a gap (the
   plot's background), never the last spectrum stretched over it. A long FFT that updates a few
   times a second fills the time between its frames with each frame.
@@ -1088,9 +1112,12 @@ measurement):
   step to, for the transfer pane and the trace keys too. A finished sweep is selected.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
   times between traces stay visible.
-- **C** turns on the comparison cursor, synchronised across panes and traces; **Shift+←/→**
-  moves it.
-- **M** averages the shown stored traces (power; complex and coherence-weighted averages are
+- A click, or *Comparison cursor on / off* in the palette (**Ctrl+K**; it has no key: **C**
+  is compare), puts the comparison cursor, synchronised across panes and traces;
+  **Shift+←/→** moves it.
+- **C** compares the selected trace or measurement on the transfer pane, whatever group it
+  is in (*Choosing what a pane shows* above).
+- **M** averages the shown stored traces of the transfer pane's group (power; complex and coherence-weighted averages are
   in the command palette). A ÷ B, A × B, A + B and A − B of stored traces (and live
   measurements) are math channels: **Shift+M** with the trace selected starts with it as A
   (*Math channels* above).
@@ -2295,7 +2322,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Ctrl+↓` | Pan level axis down (towards lower levels) | `level_pan_down` |
 | `Shift+Home` | Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR) | `level_fit` |
 | `Ctrl+Home` | Level and frequency axes back to the pane's default | `level_reset` |
-| `C` | Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
+| `C` | Compare the selected measurement or trace on the transfer pane (on / off) | `compare` |
 | `Shift+←` | Cursor 1/12 octave down (IR: earlier) | `cursor_left` |
 | `Shift+→` | Cursor 1/12 octave up (IR: later) | `cursor_right` |
 | `Ctrl+1` | Capture selected measurement to slot 1 | `slot_1` |
@@ -2419,6 +2446,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |
+| Comparison cursor on / off (IR: a time cursor) | `toggle_cursor` |
+| Clear compare: no compared curves | `clear_compare` |
 | Move the selected trace to slot… (1 … 9, none frees its slot) | `trace_slot` |
 | Export the selected trace (ac2 CSV) to a file… | `trace_export` |
 | Deselect the stored trace: keys act on the live measurement again | `select_live` |
@@ -2478,11 +2507,11 @@ The least used go first on a narrow pane; the sweep pane shows `U` while it show
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `Alt+↑` offset · `H` all keys |
+| Transfer function | `V` select trace · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` wrap/unwrap · `K` smoothing · `C` compare · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peak hold · `G` spectrum/both/spectrograph · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Impulse response | `G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `C` cursor · `Shift+Home` fit · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
+| Impulse response | `G` linear/log/ETC · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit · `N` next measurement · `Shift+I` hide pane · `W` maximise · `H` all keys |
 | SPL | `G` meter/Leq/both/bands · `Shift+F` F/S/I · `Z` A/C/Z · `B` columns/tiles · `Shift+B` history · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `C` cursor · `W` maximise · `Shift+W` hide pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `N` next sweep · `U` dB/% · `G` response/IR/room · `Shift+G` linear/log/ETC · `W` maximise · `Shift+W` hide pane · `H` all keys |
 
 <!-- keymap:end -->
 

@@ -149,7 +149,7 @@ fn offset_steps_change_the_pane_measurement_without_a_trace() {
 #[test]
 fn offsets_are_named_where_the_curves_are_drawn() {
     let mut t = T::new();
-    let tf = with_offset(stored(13, Some(2), 2), 3.0);
+    let tf = with_offset(captured(13, Some(2), 2), 3.0);
     let sp = with_offset(spec_meta(16), -6.0);
     t.conn(with_traces(vec![tf.clone(), sp.clone()]));
     t.conn(data(&tf, vec![-10.0; 8]));
@@ -174,8 +174,8 @@ fn offsets_are_named_where_the_curves_are_drawn() {
 #[test]
 fn the_selected_trace_is_marked_in_its_legend() {
     let mut t = T::new();
-    let a = stored(13, Some(1), 2);
-    let b = stored(14, Some(2), 2);
+    let a = captured(13, Some(1), 2);
+    let b = captured(14, Some(2), 2);
     let sp = spec_meta(16);
     t.conn(with_traces(vec![a.clone(), b.clone(), sp.clone()]));
     t.conn(data(&a, vec![-10.0; 8]));

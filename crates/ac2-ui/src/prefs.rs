@@ -42,6 +42,7 @@
 //! ir_mode = "etc"
 //! distortion_unit = "percent"
 //! hidden = ["TF 2"]
+//! compared = ["Main R"]
 //!
 //! [layout.measurements]
 //! transfer = "Main L"
@@ -125,6 +126,9 @@ pub struct LayoutPrefs {
     pub measurements: BTreeMap<PaneKind, String>,
     /// Measurements whose live curves are hidden (A), by name.
     pub hidden: BTreeSet<String>,
+    /// Measurements whose live curves every transfer pane draws besides its own group
+    /// (compare, C), by name.
+    pub compared: BTreeSet<String>,
 }
 
 impl Default for LayoutPrefs {
@@ -140,6 +144,7 @@ impl Default for LayoutPrefs {
             distortion_unit: DistortionUnit::Db,
             measurements: BTreeMap::new(),
             hidden: BTreeSet::new(),
+            compared: BTreeSet::new(),
         }
     }
 }
@@ -596,6 +601,8 @@ struct LayoutFile {
     distortion_unit: UnitFile,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hidden: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    compared: Vec<String>,
     /// Last: a table.
     #[serde(default)]
     measurements: MeasurementsFile,
@@ -656,6 +663,7 @@ impl LayoutFile {
             },
             measurements,
             hidden: self.hidden.into_iter().collect(),
+            compared: self.compared.into_iter().collect(),
         }
     }
 
@@ -691,6 +699,7 @@ impl LayoutFile {
                 DistortionUnit::Percent => UnitFile::Percent,
             },
             hidden: l.hidden.iter().cloned().collect(),
+            compared: l.compared.iter().cloned().collect(),
             measurements: MeasurementsFile {
                 transfer: name(PaneKind::Transfer),
                 spectrum: name(PaneKind::Spectrum),
@@ -1112,6 +1121,7 @@ mod tests {
             ]
             .into(),
             hidden: ["TF 2".to_owned()].into(),
+            compared: ["Main R".to_owned()].into(),
         };
         p.window = Some(WindowPrefs {
             width: 1600,
@@ -1130,6 +1140,7 @@ mod tests {
             "ir_mode = \"etc\"",
             "distortion_unit = \"percent\"",
             "hidden = [\"TF 2\"]",
+            "compared = [\"Main R\"]",
             "[layout.measurements]",
             "spl = \"FOH SPL\"",
             "[window]",

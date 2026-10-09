@@ -117,8 +117,19 @@ pub struct TfScene {
 /// `nudge_s`: a stored trace's delay from its arrival (its display nudge); `stepped_s`: a
 /// live curve's delay from its measured arrival, already in its columns and not part of
 /// `Δ`. Either is tagged the same way: `+0.10 ms from arrival`.
-fn legend_entry(t: &DisplayTrace, nudge_s: f64, stepped_s: f64, selected: bool) -> LegendEntry {
-    let mut tags: Vec<String> = t.note.iter().cloned().collect();
+fn legend_entry(
+    t: &DisplayTrace,
+    nudge_s: f64,
+    stepped_s: f64,
+    selected: bool,
+    compared: bool,
+) -> LegendEntry {
+    // A compared curve is not of the pane's group: said first, before what it is.
+    let mut tags: Vec<String> = compared
+        .then(|| crate::trace::COMPARED.to_owned())
+        .into_iter()
+        .chain(t.note.iter().cloned())
+        .collect();
     match t.relation {
         PhaseRelation::Reference => tags.push("ref".to_string()),
         PhaseRelation::Independent => tags.push("indep.".to_string()),
@@ -564,14 +575,14 @@ pub fn transfer_scene(
     }
 
     // Legend and cursor values, top-left / top-right of the first pane.
-    let nudges: Vec<(f64, f64)> = traces
+    let nudges: Vec<(f64, f64, bool)> = traces
         .iter()
-        .map(|t| (t.nudge.0, t.delay_nudge.0))
+        .map(|t| (t.nudge.0, t.delay_nudge.0, t.compared))
         .collect();
     let legend: Vec<LegendEntry> = shown
         .iter()
         .zip(&nudges)
-        .map(|(t, (n, s))| legend_entry(t, *n, *s, selected == Some(t.key)))
+        .map(|(t, (n, s, c))| legend_entry(t, *n, *s, selected == Some(t.key), *c))
         .collect();
     let cursor = view
         .cursor_hz
@@ -703,6 +714,7 @@ mod tests {
             note: None,
             stored: None,
             selected: false,
+            compared: false,
         }
     }
 

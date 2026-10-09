@@ -395,6 +395,8 @@ commands! {
     LevelFit => "level_fit", "Fit level axis to the shown curves, frequency to 20 Hz – 20 kHz (IR: the whole IR)", [Global];
     LevelReset => "level_reset", "Level and frequency axes back to the pane's default", [Global];
     ToggleCursor => "toggle_cursor", "Comparison cursor on / off (IR: a time cursor)", [Global];
+    Compare => "compare", "Compare the selected measurement or trace on the transfer pane (on / off)", [Global];
+    ClearCompare => "clear_compare", "Clear compare: no compared curves", [Global];
     CursorLeft => "cursor_left", "Cursor 1/12 octave down (IR: earlier)", [Global];
     CursorRight => "cursor_right", "Cursor 1/12 octave up (IR: later)", [Global];
     Slot1 => "slot_1", "Capture selected measurement to slot 1", [Global];
@@ -640,7 +642,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::DeleteSelected, S::Global, k(K::Delete)),
         (C::DeleteSelected, S::Global, k(K::Backspace)),
         (C::TraceRename, S::Global, k(K::F2)),
-        (C::ToggleCursor, S::Global, k(K::C)),
+        (C::Compare, S::Global, k(K::C)),
         (C::CursorLeft, S::Global, sh(K::ArrowLeft)),
         (C::CursorRight, S::Global, sh(K::ArrowRight)),
         (C::Slot1, S::Global, cmd(K::Num1)),
@@ -799,7 +801,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::CoherenceMask, "coherence mask", 65),
                     hint(C::PhaseUnwrap, "wrap/unwrap", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
-                    hint(C::OffsetUp, "offset", 45),
+                    hint(C::Compare, "compare", 45),
                 ]
             }
         }
@@ -824,7 +826,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::IrMode, "linear/log/ETC", 90),
                     hint(C::ZoomIn, "zoom time", 80),
                     hint(C::LevelZoomIn, "zoom level", 65),
-                    hint(C::ToggleCursor, "cursor", 75),
                     hint(C::LevelFit, "fit", 55),
                     hint(C::NextMeasurement, "next measurement", 60),
                     hint(C::ToggleIr, "hide pane", 70),
@@ -854,7 +855,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::DistortionUnit, "dB/%", 70),
                     hint(C::SweepView, "response/IR/room", 75),
                     hint(C::IrMode, "linear/log/ETC", 70),
-                    hint(C::ToggleCursor, "cursor", 60),
                     hint(C::MaximizePane, "maximise", 50),
                     hint(C::HideDistortion, "hide pane", 40),
                 ]
@@ -1139,6 +1139,8 @@ mod tests {
             CommandId::EditMeas,
             CommandId::ToggleGroup,
             CommandId::AverageComplex,
+            CommandId::ToggleCursor,
+            CommandId::ClearCompare,
             CommandId::AverageCoherence,
             CommandId::LegendTopLeft,
             CommandId::LegendTopRight,

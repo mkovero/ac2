@@ -850,20 +850,20 @@ fn digits_show_and_hide_slots_alt_digits_focus_panes() {
 fn m_averages_the_shown_stored_traces() {
     let mut t = T::new();
     // One shown trace is not enough.
-    t.conn(with_traces(vec![stored(4, Some(1), 2)]));
+    t.conn(with_traces(vec![captured(4, Some(1), 2)]));
     assert!(t.key("M").is_empty());
     assert!(
         t.st.toasts
             .last()
             .is_some_and(|x| x.severity == Severity::Warning)
     );
-    let mut hidden = stored(6, Some(3), 2);
+    let mut hidden = captured(6, Some(3), 2);
     hidden.edit.visible = false;
-    let mut target = stored(7, None, 2);
+    let mut target = captured(7, None, 2);
     target.kind = TraceKind::Target;
     t.conn(with_traces(vec![
-        stored(4, Some(2), 2),
-        stored(5, Some(1), 2),
+        captured(4, Some(2), 2),
+        captured(5, Some(1), 2),
         hidden,
         target,
     ]));
@@ -1173,13 +1173,13 @@ fn navigation_animates_values_do_not() {
 #[test]
 fn cursor_keys() {
     let mut t = T::new();
-    t.key("C");
+    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     let hz = t.st.view.cursor_hz.expect("cursor");
     assert!((hz - (20.0f64 * 20_000.0).sqrt()).abs() < 1e-9);
     t.key("Shift+Right");
     let up = t.st.view.cursor_hz.expect("cursor");
     assert!((up / hz - 2f64.powf(1.0 / 12.0)).abs() < 1e-12);
-    t.key("C");
+    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(t.st.view.cursor_hz, None);
 }
 

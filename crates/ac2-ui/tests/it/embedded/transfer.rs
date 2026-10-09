@@ -426,6 +426,7 @@ fn phase_of(v: &[(ac2_scene::trace::TraceKey, f64, String)], k: ac2_scene::trace
 #[test]
 fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     use ac2_scene::trace::TraceKey;
+    use ac2_ui::state::PaneKind;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
@@ -510,13 +511,12 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         off.abs() < 2.0,
         "live moved {off:+.1}° off its expected rotation — before {before:?} after {after:?}"
     );
-    for k in [TraceKey::Stored(cap), TraceKey::Stored(run)] {
-        assert_eq!(
-            phase_of(&after, k).to_bits(),
-            phase_of(&before, k).to_bits(),
-            "{k:?} moved: before {before:?} after {after:?}"
-        );
-    }
+    let k = TraceKey::Stored(cap);
+    assert_eq!(
+        phase_of(&after, k).to_bits(),
+        phase_of(&before, k).to_bits(),
+        "{k:?} moved: before {before:?} after {after:?}"
+    );
     assert!(legend(&after, live).contains("· ref"), "{after:?}");
     let tag = ac2_scene::format::from_arrival(10.0 / rate).ok_or("an offset")?;
     assert!(legend(&after, live).contains(&tag), "{tag}: {after:?}");
@@ -578,6 +578,12 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
+    // The run takes the transfer pane to the sweep's group, so the live curve is compared
+    // onto it first.
+    d.send(Msg::SelectMeas(m.id));
+    assert_eq!(d.st.selected_trace, None);
+    d.key("C");
+    assert!(d.st.compared_meas.contains(&m.config.name));
     for _ in 0..8 {
         if d.st.selected_trace == Some(run) {
             break;
@@ -621,7 +627,15 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     }
     d.stop()?;
 
-    // Stopped: no live curve to move, so the keys change nothing and say why.
+    // Stopped: no live curve to move, so the keys change nothing and say why. The pane went
+    // to the sweep with its run; it steps back to the measurement first.
+    for _ in 0..4 {
+        if d.st.pane_meas(PaneKind::Transfer).map(|x| x.id) == Some(m.id) {
+            break;
+        }
+        d.send(Msg::Command(CommandId::NextMeasurement));
+    }
+    assert_eq!(d.st.pane_meas(PaneKind::Transfer).map(|x| x.id), Some(m.id));
     d.send(Msg::Command(CommandId::StartStop));
     d.until("stopped", |s| {
         s.daemon()
