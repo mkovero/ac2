@@ -1,9 +1,11 @@
 # Spike: audio duplex (phase 0)
 
-> **History.** A record of what the phase 0 spike (`spikes/audio-duplex`) measured, not a
-> description of the product. The backends live in `crates/ac2-audio`; Linux there is JACK
-> only (decision L1 in `open-questions.md`), so the ALSA-through-cpal results below no longer
-> apply to a shipped path.
+> **History; code removed.** A record of what the phase 0 spike measured, not a description
+> of the product. The backends live in `crates/ac2-audio`; Linux there is JACK only
+> (decision L1 in `open-questions.md`), so the ALSA-through-cpal results below no longer
+> apply to a shipped path. The spike crate is deleted: its checks run through the production
+> backends as `ac2 selftest duplex` (`crates/ac2-cli/src/selftest`), and §8 is now that
+> command's hardware procedure. §2 describes the spike as it was built.
 
 **Question.** Can one small trait give RT-safe, multichannel, sample-indexed duplex capture
 on all three OSes, using cpal (CoreAudio / WASAPI / ALSA) and JACK (the `jack` crate)?
@@ -17,7 +19,7 @@ catch exactly that. JACK was proven locally against a dummy server, and ALSA was
 through cpal on the `null` PCM. **macOS and Windows compile paths exist but are unverified**:
 there is no hardware here, and only the Linux target is installed. The manual steps are in §8.
 
-Code: `spikes/audio-duplex` (throwaway). cpal 0.18.2, jack 0.13.5, rtrb 0.4.
+Code (removed): the phase 0 spike crate. cpal 0.18.2, jack 0.13.5, rtrb 0.4.
 
 ---
 
@@ -59,7 +61,7 @@ single driver `bufferSwitch` callback.
   and a hard clamp at the cap. `DuplexStream::stop` requests the fade, waits for the
   renderer to report silence, then drops the stream. **`--emit` was never run.**
 - `cpal_backend.rs`, `jack_backend.rs` (feature `jack`, Linux only), `fake.rs`.
-- `bin/audio-duplex.rs`:
+- The spike binary:
   - `--list [--backend cpal|jack|fake|all]` prints JSON capabilities.
   - `--run <s>` prints JSON: negotiated config, block counts, flag counts, index gaps and
     regressions, callback and capture interval jitter, input lag, backend event counters,
@@ -296,66 +298,74 @@ Design points that came out of the spike:
 - **CoreAudio device-wide buffer size** can be changed by another app mid-run. Does cpal
   surface that as an error? Unknown (§8).
 
-## 8. Manual hardware verification (cannot be done here)
+## 8. Manual hardware verification: `ac2 selftest duplex`
 
-Run these on one machine per OS, with a real interface and a **physical cable from output 1
-to input 1** where the step says loopback. Silence-only steps need no cable. Use a release
-build: `cargo run --release -p spike-audio-duplex --bin audio-duplex -- …`. Record the JSON.
+The spike's run mode lives on as `ac2 selftest duplex`: it opens the production backend in
+the `ac2` process (no daemon; stop one that holds the device) and prints a report ending in
+`result PASS` or one `FAIL` line per named reason; `--json` gives the same as one document.
+Exit status 0 passes, 1 fails. Release binaries are enough; testers paste the text report.
+
+What it judges. Silently (the default; outputs open but play zeros): the stream opens;
+channel counts; block sizes; xrun, discontinuity, overflow and config-change flags; index
+gaps and regressions; host xrun / error / end notifications; callback and capture interval
+spread, input lag, output playback lead; per-input peak; and both clocks against the host
+clock (`input rate`, `output rate`, failing beyond ±1000 ppm). With `--emit <dBFS>` (pink
+noise, at most −20 dBFS, fades in and out) and `--loopback-out` / `--loopback-in` on a cable,
+it also runs the daemon's loopback timing monitor: the output→input offset, locks, jumps,
+losses, and the in/out drift (judged after 10 s; a drift warning fails as `ClockDrift`).
+
+Run on one machine per OS, with a real interface. Silent steps need no cable. Emitting steps
+need a **physical cable from the loopback output to the loopback input**, monitors off; a
+human runs them, never an agent.
 
 **All OSes**
 
-1. `--list --backend cpal`. Check:
-   - every interface appears;
-   - channel counts match the hardware (WASAPI: does a multichannel interface show all its
-     inputs?);
-   - rate ranges and buffer ranges look right;
-   - `duplex_clock` is `same_device_separate_callbacks` for single-device interfaces on mac
-     and Linux, and `unknown` on Windows.
-2. Silence run, 60 s, built-in or USB interface: `--run 60 --in-dev <id> --inputs 0,1`.
-   Expect `index_gaps = 0`, `flagged_xrun = 0`, `index_regressions = 0`, and all
-   `frame_sizes` equal (CoreAudio/ALSA). For WASAPI, write down the distribution. Record
-   callback and capture interval stddev, `input_lag_us`, and the output playback lead.
-3. Multichannel: `--inputs 0,3,7` on an 8+ input interface. Feed a signal (a mic or an
-   external generator) into input 4 only. `channel_peak_dbfs` must show it in block channel 1
-   only, with the other channels at the noise floor.
-4. Stress: run step 2 while loading the CPU (`stress -c $(nproc)` or a browser benchmark).
-   Every xrun must show up as flags. Check `flagged_xrun` and `flagged_discontinuity`
-   against the OS's own xrun indication (CoreAudio overload in Console.app; Windows: none
-   available).
-5. Hot-unplug the USB interface during `--run 30`. Expect `backend_events.errors` or
-   `config_changes` > 0 and no crash or hang. Check that `stop()` returns.
+1. `ac2 devices` (daemon running) or the error of a misnamed `--device` lists the
+   interfaces. Check that every interface appears, that channel counts match the hardware
+   (WASAPI: does a multichannel interface show all its inputs?), and the rate and buffer
+   ranges.
+2. Silence, 60 s: `ac2 selftest duplex --backend cpal --device <id> --duration 60s`.
+   Expect PASS, one block size (Core Audio), the `clock` line `one device, separate
+   callbacks` on single-device interfaces on macOS and `separate devices or endpoints` on
+   Windows. Record the interval spreads, input lag and playback lead.
+3. Multichannel: `--in 1,4,8` on an 8+ input interface, a signal (a mic, an external
+   generator) into input 4 only. `input peaks` must show it on 4 only, the others at the
+   noise floor.
+4. Stress: step 2 while loading the CPU (`stress -c $(nproc)` or a browser benchmark).
+   Every xrun must fail the run by name (`xruns`, `sample-index gaps`); compare with the
+   OS's own indication (Core Audio overload in Console.app; Windows: none).
+5. Hot-unplug the USB interface during a 30 s run. Expect `stream errors` or `stream ended`
+   (or a configuration change), no crash or hang, and the command returning.
 6. Change the buffer size from another app mid-run (macOS: Audio MIDI Setup or a DAW;
-   Windows: the control panel sample-rate change). Record which flags and errors appear.
-7. Restart offset repeatability, the core Q3 risk. **This needs emission; a human runs it,
-   not an agent.** Use the loopback cable and turn monitors off:
-   `--run 5 --emit -40dbfs`, ten times. The follow-up must compute the output→input offset
-   per run. Measure how much it varies between runs on each OS. Expected: varies on cpal,
-   constant on JACK.
+   Windows: the sample-rate setting). Record which failures appear.
+7. Restart offset repeatability, the core Q3 risk (emits; loopback cable; monitors off):
+   `ac2 selftest duplex --backend cpal --device <id> --duration 20s --emit -40dbfs
+   --loopback-out 1 --loopback-in 1`, ten times. Record the `loopback offset` of each run.
+   Expected: varies between runs on cpal, constant on JACK. Each run must itself PASS (no
+   jumps, no loss, no drift).
 
 **macOS specific**
 
-8. Aggregate device of two interfaces: `--list` shows it as one device. A silence run must be
-   clean. Note what happens with drift correction on vs off.
-9. Microphone permission: the first `--run` from Terminal must prompt. After denial, expect a
-   clean `AudioError`, not a hang.
+8. Aggregate device of two interfaces: listed as one device; a silent run must PASS. With
+   the loopback cable from one member to the other, step 7 shows the drift with drift
+   correction off, and none with it on.
+9. Microphone permission: the first run from Terminal must prompt. After denial, expect a
+   clean failure (`the stream did not open` or `no capture block arrived`), not a hang.
 
 **Windows specific**
 
-10. Pair a capture endpoint and a render endpoint of the same interface (`--in-dev`,
-    `--out-dev`). Confirm the stream rate equals the endpoint's mix rate in Sound settings.
-    Also try a mismatched `--rate` and expect `UnsupportedConfig`.
-11. Callback size distribution at the default period (expect about 480 frames at 48 kHz) and
-    with `--buffer 128`. cpal's comment says `Fixed` does not change the period; verify it.
-12. Build check: `cargo build -p spike-audio-duplex` with **no** `jack` feature must not need
-    libjack.
+10. Capture and render endpoints of the same interface: `--device <capture id>
+    --out-device <render id>`. Confirm the stream rate equals the endpoint's mix rate in
+    Sound settings; a mismatched `--rate` must fail to open. With the cable, step 7's drift
+    must stay below the warning (one clock behind both endpoints).
+11. Block sizes at the default period (expect about 480 frames at 48 kHz) and with
+    `--buffer 128samples`.
 
-**Linux real hardware (lower priority; JACK is proven on dummy)**
+**Linux real hardware (lower priority; JACK is proven on a dummy server)**
 
-13. `jackd -d alsa -d hw:X -r 48000 -p 256` and then `--run 60 --backend jack --inputs 0,1`.
-    Expect 0 gaps with RT privileges. Then force an xrun (`-p 32` under load). Confirm that
-    `XRUN` is set and check whether the frame counter jumps.
-14. cpal ALSA on `hw:CARD=X,DEV=0` (expect i32 or i16 native) vs `plughw:`. Compare jitter;
-    plughw gets no RT promotion.
+12. `jackd -d alsa -d hw:X -r 48000 -p 256`, then `ac2 selftest duplex --backend jack
+    --duration 60s`. Expect PASS with RT privileges. Then force an xrun (`-p 32` under load)
+    and confirm it fails as `xruns`.
 
 ## 9. Compared to `ac`
 

@@ -540,7 +540,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 
 | # | Name | Scope | Exit criterion |
 |---|---|---|---|
-| 0 | Foundations + spikes | workspace, CI (linux/mac/win), lint/fmt, refgen; spikes: cpal multichannel duplex + output→input timing on mac/win, libzmq+CURVE vendored build on 3 OS, wgpu software-adapter test | CI: green on 3 OS incl. spikes; golden-vector harness runs. HW: duplex spike on one rig per OS |
+| 0 | Foundations + spikes | workspace, CI (linux/mac/win), lint/fmt, refgen; spikes: cpal multichannel duplex + output→input timing on mac/win, libzmq+CURVE vendored build on 3 OS, wgpu software-adapter test | CI: green on 3 OS; golden-vector harness runs. HW: duplex check (`ac2 selftest duplex`) on a real interface per OS |
 | 1 | Audio | backend trait + capabilities, sample-indexed blocks, JACK, cpal, fake (explicit), xrun/discontinuity telemetry, duplex timing validation | CI: forced overflow yields a discontinuity marker, never a channel shift. HW: 8 in / 2 out @ 48 kHz, 128-frame buffer (256 on Windows WASAPI), 4 TF jobs, 1 h, zero self-caused xruns, per OS |
 | 2 | Core DSP | MTW ladder + alignment, averaging (reset), smoothing, protection, delay finder (target, bands, confidence, candidates) + tracking, spectrum, RTA, weighting, generator | CI: §5.6 loopback suites pass against refgen; finder meets §5.2 acceptance numbers on scenario fixtures |
 | 3 | Daemon + protocol + CLI | session + jobs, ROUTER/XPUB, typed proto, state sync with replay/resync, bounded-freshness publishing, stimulus lease, CURVE + pairing, client, CLI `--watch` | CI: two clients stay in sync through dropped events, expired replay, session reopen and daemon restart; stalled subscriber recovers to fresh frames; unauthorized connect refused on both sockets; lease expiry stops output. HW: CLI drives a live TF remotely over CURVE |
@@ -555,7 +555,7 @@ Last updated 2026-10-05.
 
 | # | CI criteria | HW criteria |
 |---|---|---|
-| 0 | done | duplex spike on real mac/win interface — **open** |
+| 0 | done | duplex check (`ac2 selftest duplex`) on real mac/win interface — **open** |
 | 1 | done (overflow → discontinuity, never a channel shift) | 8 in / 2 out, 1 h, per OS — **done on Linux** (pupu, 48 kHz / 128, 4 TF jobs on electrical loops, 0 xruns in 65 min; `docs/rigs/pupu.md`); macOS, Windows open |
 | 2 | done (refgen + Q1 scenario acceptance) | — |
 | 3 | done (sync, replay, restart, lease expiry, CURVE refusal) | CLI drives a live TF remotely over CURVE — **done** on Linux (`docs/rigs/pupu.md`, network test) |

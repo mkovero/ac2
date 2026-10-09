@@ -2572,4 +2572,5 @@ documents each command; `ac2 discover` lists daemons on the local network.
 | `ac2 spl watch`, `ac2 spl set`, `ac2 spl cal`, `ac2 spl leq watch / set / export / new` | SPL readout, the meter's weightings, acoustic calibration (as `cal spl`), Leq windows and presets, the per-second log and a new log |
 | `ac2 timing --watch` | the loopback timing monitor |
 | `ac2 state dump` | the daemon's whole state as JSON |
+| `ac2 selftest duplex --backend …` | an interface checked without a daemon (stop one that holds it): runs it for `--duration` and prints pass or fail with named reasons (xruns, gaps, clock rate, …); silent unless `--emit <level> --loopback-out N --loopback-in N` plays pink noise (at most −20 dBFS) on a loopback cable to time output→input and drift |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |

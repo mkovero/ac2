@@ -11,6 +11,7 @@ mod ir;
 mod leq;
 mod math;
 mod rec;
+mod selftest;
 mod traces;
 
 use std::time::Duration;
@@ -43,6 +44,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Rec { cmd } => rec::run(cli, cmd, out).await,
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::State { cmd } => basic::state_dump(cli, cmd, out).await,
+        Cmd::Selftest { cmd } => selftest::run(cli, cmd, out).await,
         Cmd::Discover(a) => discover::run(cli, a, out),
         Cmd::Auth { cmd } => auth::run(cli, cmd, out),
     }

@@ -14,7 +14,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   ketunkolo and the Pi (`docs/rigs/pupu.md`, *Deploy of 2416a06, then 511efb0*).
 - Newest feature: band Leq per 1/3-octave band (STM 545/2015), `docs/design/band-leq.md`;
   its open items are in `docs/design/backlog.md`.
-- Open hardware gates: duplex spike and 1 h run on macOS/Windows, keyboard-only speaker
+- Open hardware gates: duplex check (`ac2 selftest duplex`) and 1 h run on macOS/Windows, keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
 
 ## Where to look

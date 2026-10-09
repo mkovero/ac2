@@ -112,8 +112,8 @@ CI uses the fake backend, with configurable output latency, output gaps, clock d
 | loopback SNR 0 dB, white and pink stimulus | Locked; no false jumps over 10 min simulated |
 | xrun flag without a counter jump | new epoch, re-acquired |
 
-A local JACK dummy server checks the same cases with real plumbing. Hardware: steps 3–6 of
-`spike-audio-duplex.md` §8 on each OS (loopback cable; level −40 dBFS; operator present).
+A local JACK dummy server checks the same cases with real plumbing. Hardware: `ac2 selftest duplex --emit …`
+on each OS, `spike-audio-duplex.md` §8 (loopback cable; level −40 dBFS; operator present).
 
 ## Not in scope
 

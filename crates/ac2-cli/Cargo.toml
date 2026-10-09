@@ -21,7 +21,11 @@ name = "ac2"
 path = "src/main.rs"
 
 [dependencies]
+# `selftest duplex` opens the audio backends in process and times the loopback with the
+# daemon's own monitor.
+ac2-audio = { path = "../ac2-audio" }
 ac2-client = { path = "../ac2-client" }
+ac2-core = { path = "../ac2-core" }
 ac2-discovery = { path = "../ac2-discovery" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
@@ -40,6 +44,5 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time", "sy
 [dev-dependencies]
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
 ac2d = { path = "../ac2d" }
-ac2-audio = { path = "../ac2-audio" }
 proptest = "1.11"
 tempfile = "3"

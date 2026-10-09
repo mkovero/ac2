@@ -58,6 +58,15 @@ pub fn rms_to_dbfs(rms: f64) -> f64 {
     20.0 * (rms * SQRT_2).log10()
 }
 
+/// The sample-peak limit, dB re full scale, that matches an RMS ceiling: the largest crest
+/// factor any generator signal is allowed ([`FILTERED_NOISE_CREST`]) times the ceiling RMS,
+/// capped at full scale. Generators refuse levels whose own crest would exceed it, so an
+/// output path enforcing this limit acts only on a computation error upstream.
+pub fn peak_limit_db(ceiling_dbfs: f64) -> f64 {
+    let peak = (dbfs_to_rms(ceiling_dbfs) * FILTERED_NOISE_CREST).min(1.0);
+    (20.0 * peak.max(1e-12).log10()).min(0.0)
+}
+
 /// Highest level (dBFS RMS) at which a signal with this crest factor stays within full scale.
 pub fn max_level_for_crest(crest: f64) -> f64 {
     rms_to_dbfs(1.0 / crest)

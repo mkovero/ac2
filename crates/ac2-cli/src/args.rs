@@ -133,6 +133,12 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: StateCmd,
     },
+    /// Hardware checks that run in this process on an audio backend, without a daemon.
+    Selftest {
+        /// Check.
+        #[command(subcommand)]
+        cmd: SelftestCmd,
+    },
     /// List ac2 daemons on the local network (mDNS).
     ///
     /// Listing a rig does not make it trusted: connect with `--remote` only after
@@ -155,6 +161,63 @@ pub enum DaemonCmd {
     Stop,
     /// Version, build id (stale check), incarnation, session.
     Status,
+}
+
+/// `selftest …`.
+#[derive(Debug, Subcommand)]
+pub enum SelftestCmd {
+    /// Duplex check of an audio interface: opens it, runs it for `--duration`, and prints a
+    /// pass/fail report (device open, channel counts, block continuity, xruns, callback
+    /// timing, both clocks against the host clock). Silent unless `--emit` is given; with
+    /// `--emit` and a loopback cable it also measures output→input timing and drift. Stop
+    /// the daemon first if it holds the device.
+    Duplex(SelftestDuplex),
+}
+
+/// `selftest duplex`.
+#[derive(Debug, Args)]
+pub struct SelftestDuplex {
+    /// Backend (no default: `fake` only when asked for).
+    #[arg(long, value_enum)]
+    pub backend: BackendArg,
+    /// Capture device id or name (default: the system's default input).
+    #[arg(long)]
+    pub device: Option<String>,
+    /// Playback device id or name, when it is another device than the capture one.
+    /// Default: the capture device when it has outputs, else the system's default output.
+    #[arg(long, value_name = "ID|NAME")]
+    pub out_device: Option<String>,
+    /// Input channels to capture, e.g. `1-8` (default: every input of the device).
+    #[arg(long = "in", value_name = "CHANNELS")]
+    pub inputs: Option<Channels>,
+    /// Output channels to open (default: up to 2). They play silence unless `--emit`
+    /// routes the stimulus to the loopback output.
+    #[arg(long = "outputs", value_name = "N")]
+    pub outputs: Option<u16>,
+    /// Sample rate, e.g. `48khz` (default: device default).
+    #[arg(long)]
+    pub rate: Option<Freq>,
+    /// Buffer size, e.g. `256samples` (default: the backend's choice).
+    #[arg(long)]
+    pub buffer: Option<SampleCount>,
+    /// How long to run, e.g. `60s`.
+    #[arg(long, default_value = "30s")]
+    pub duration: Time,
+    /// Play pink noise at this level (at most -20dbfs) on `--loopback-out` and time its
+    /// return on `--loopback-in` through a cable. Without it the outputs stay silent.
+    #[arg(
+        long,
+        value_name = "DBFS",
+        allow_hyphen_values = true,
+        requires_all = ["loopback_out", "loopback_in"]
+    )]
+    pub emit: Option<LevelDbfs>,
+    /// Output channel the loopback cable starts at (with `--emit`).
+    #[arg(long, requires = "emit")]
+    pub loopback_out: Option<Channel>,
+    /// Input channel the loopback cable returns on (with `--emit`).
+    #[arg(long, requires = "emit")]
+    pub loopback_in: Option<Channel>,
 }
 
 /// Audio backend, always named explicitly.

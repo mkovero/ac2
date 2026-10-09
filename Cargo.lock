@@ -21,6 +21,7 @@ version = "0.0.0"
 dependencies = [
  "ac2-audio",
  "ac2-client",
+ "ac2-core",
  "ac2-discovery",
  "ac2-proto",
  "ac2-scene",
@@ -4165,28 +4166,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "spike-audio-duplex"
-version = "0.0.0"
-dependencies = [
- "cpal",
- "jack",
- "rtrb",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "spike-gpu-headless"
-version = "0.0.0"
-dependencies = [
- "bytemuck",
- "glyphon",
- "png",
- "pollster 0.4.0",
- "wgpu",
 ]
 
 [[package]]

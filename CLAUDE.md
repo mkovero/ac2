@@ -36,7 +36,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-client` | async client |
 | `ac2-discovery` | mDNS advert (`_ac2._tcp`, network mode only) and browse; names rigs, never trusts them |
 | `ac2d` | daemon (`ac2d` binary): session, jobs, state, calibration store, autosave, SPL log and Leq history |
-| `ac2-cli` | CLI (`ac2` binary) |
+| `ac2-cli` | CLI (`ac2` binary); `ac2 selftest duplex` opens `ac2-audio` in process (no daemon) |
 | `ac2-traces` | stored traces and their math, text import/export, SPL log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
 | `ac2-paths` | platform config / data dirs, atomic writes (daemon and UI) |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
@@ -44,7 +44,6 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs, can host an embedded daemon; its own code uses no DSP (`tests/it/no_dsp.rs`) |
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
-| `spikes/*` | phase 0 spikes (`audio-duplex`, `gpu-headless`); findings in `docs/design/spike-*.md` |
 | `testing/` | per-platform tester guides; release binaries beside them are git-ignored |
 | `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments` |
 
@@ -76,7 +75,7 @@ What an agent reads stays in its context for the rest of the session; keep reads
   ends when the task is done. Unrelated follow-ups go to a fresh agent, not via SendMessage.
 
 ## Audio safety
-- Never emit sound on real hardware from automated runs. Tests and spikes output silence on
+- Never emit sound on real hardware from automated runs. Tests and `ac2 selftest` output silence on
   real devices unless an explicit `--emit` flag with a typed level is given; agents never
   pass it. Use the fake backend or a JACK dummy server (`jackd -d dummy`) for testing.
 - Any emitting code path enforces a global maximum level and fades out on stop.

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use ac2_audio::{LevelError, MaxLevel, SignalSource};
-use ac2_core::generator::{FILTERED_NOISE_CREST, Generator, dbfs_to_rms};
+use ac2_core::generator::Generator;
 
 /// Shared lease deadline.
 #[derive(Debug)]
@@ -195,16 +195,13 @@ impl SignalSource for LeasedSource {
     }
 }
 
-/// The sample-peak limit the output path enforces for an RMS ceiling: the largest crest
-/// factor any generator signal is allowed (filtered noise, 6) times the ceiling RMS, capped
-/// at full scale. The generator refuses levels whose own crest would exceed it, so the limit
-/// only ever acts on a computation error upstream.
+/// The sample-peak limit the output path enforces for an RMS ceiling
+/// ([`ac2_core::generator::peak_limit_db`]).
 pub(crate) fn peak_limit(ceiling_dbfs: f64) -> Result<MaxLevel, LevelError> {
     if !ceiling_dbfs.is_finite() {
         return Err(LevelError::NotFinite);
     }
-    let peak = (dbfs_to_rms(ceiling_dbfs) * FILTERED_NOISE_CREST).min(1.0);
-    MaxLevel::from_peak_db((20.0 * peak.max(1e-12).log10()).min(0.0))
+    MaxLevel::from_peak_db(ac2_core::generator::peak_limit_db(ceiling_dbfs))
 }
 
 #[cfg(test)]

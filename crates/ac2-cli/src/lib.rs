@@ -7,6 +7,7 @@
 pub mod args;
 mod cmd;
 mod output;
+pub mod selftest;
 pub mod units;
 mod watch;
 
@@ -36,6 +37,8 @@ pub enum CliError {
     Refused(String),
     /// Writing output or files failed.
     Io(std::io::Error),
+    /// A check ran and failed; its report, already printed, names the reasons.
+    CheckFailed,
 }
 
 impl std::fmt::Display for CliError {
@@ -45,6 +48,7 @@ impl std::fmt::Display for CliError {
             Self::NotRunning(m) | Self::Usage(m) => f.write_str(m),
             Self::Refused(m) => write!(f, "refused: {m}"),
             Self::Io(e) => write!(f, "{e}"),
+            Self::CheckFailed => f.write_str("self-test failed (reasons in the report above)"),
         }
     }
 }
@@ -81,6 +85,7 @@ impl CliError {
             Self::Usage(_) => "usage",
             Self::Refused(_) => "refused",
             Self::Io(_) => "io",
+            Self::CheckFailed => "check_failed",
         };
         let mut v = serde_json::json!({ "error": { "code": code, "msg": self.to_string() } });
         // Typed detail (import line and problem, session version, …) for scripts.
@@ -103,6 +108,8 @@ pub async fn run(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
 pub async fn run_reporting(cli: &Cli, out: &mut Out<'_>, err: &mut dyn Write) -> u8 {
     match run(cli, out).await {
         Ok(()) => 0,
+        // The report is the command's one JSON document and already says why.
+        Err(e @ CliError::CheckFailed) if cli.json => e.exit_code(),
         Err(e) => {
             if cli.json {
                 let _ = writeln!(out.w, "{}", e.json());

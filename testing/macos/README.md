@@ -145,7 +145,47 @@ crash.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
 
-## 7. Optional: record and replay
+## 7. Test 5: duplex self-test (command line)
+
+Checks the interface below the app: the same audio backend, run for a fixed time, judged
+pass or fail with a named reason per failure. Needs a build newer than dev.10 (`ac2 selftest
+--help` answers if yours has it). Use the command-line tools from section 1, step 5, in
+Terminal. The first run asks for microphone access for Terminal: allow it (a denial must end
+in a clean `FAIL`, not a hang; worth noting). **Quit the ac2 app first** so the device is
+free.
+
+1. **Silent** (no cable needed; the outputs open but play only zeros):
+
+   ```
+   ac2 selftest duplex --backend cpal --device "<interface>" --duration 60s
+   ```
+
+   `<interface>` is your interface as the app lists it, e.g. `--device "Babyface Pro"`. A
+   wrong name prints the devices it knows. Without `--device` it tests the system default
+   input. It reports device, channel counts, rate and buffer, block sizes, xruns and gaps,
+   callback timing, both clocks against the computer's clock and the peak of every input,
+   and ends in `result PASS` or one `FAIL` line per reason.
+
+2. Same again while loading the computer (a browser benchmark, a big build): any dropout
+   must show up as a `FAIL` line, not pass silently.
+
+3. **With the loopback cable** (cable 1, output 1 → input 1; optional, plays pink noise on
+   output 1 only, at the level you type; nothing but the cable on that output):
+
+   ```
+   ac2 selftest duplex --backend cpal --device "<interface>" --duration 30s \
+       --emit -40dbfs --loopback-out 1 --loopback-in 1
+   ```
+
+   It refuses levels above −20 dBFS, fades in and out, and Ctrl-C fades out early. It adds
+   the output→input delay (`loopback offset`), whether it held still, and the drift between
+   output and input clocks. Run it about five times and note each offset: whether it changes
+   between runs is the point.
+
+macOS: an aggregate device of two interfaces is worth one silent run too. Paste each report
+into what you send back (`--json` gives the same as JSON).
+
+## 8. Optional: record and replay
 
 Checks the file writes and the replay path on macOS.
 
@@ -158,7 +198,7 @@ Checks the file writes and the replay path on macOS.
    live. Note what the app shows when the recording ends.
 3. The files are in `~/Library/Application Support/ac2/recordings/`. Note their size.
 
-## 8. What to send back
+## 9. What to send back
 
 A short note per test is enough; failures with a screenshot and the log are the most
 useful.
@@ -173,6 +213,7 @@ useful.
 | Test 2 sweep: flat response, distortion level, arrival; finished cleanly? | |
 | Test 3: spectrum, RTA and SPL meter live; calibration if tried | |
 | Test 4: 1 h run clean? CPU %, memory and battery at start and end | |
+| Test 5: self-test reports (silent, under load, loopback offsets if run) | |
 | Record and replay (optional): file written, replay matches live? | |
 | Do the input meters and the SPL number move smoothly, or noticeably steppy? | |
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |
