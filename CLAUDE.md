@@ -24,8 +24,10 @@ checks allows. Profiles are in `.config/nextest.toml`:
 - **Quick tier**: `cargo nextest run --workspace` (default profile, skips `slow_*`) —
   iteration and an agent's pre-commit run; plus `cargo test --workspace --doc` when docs changed.
 - **Full tier**: `cargo nextest run --workspace --profile full` and
-  `cargo test --workspace --doc` — once before merging to main; CI runs it (`--profile ci`)
-  on every push. Plain `cargo test --workspace` also runs everything.
+  `cargo test --workspace --doc` — run locally only when the operator asks for it or for a
+  full CI release build (the all-OS run that builds macOS and Windows too). Otherwise CI
+  covers it: every push runs `--profile ci` on Linux. Plain `cargo test --workspace` also
+  runs everything.
 - In nextest, `-j` means test threads; build jobs are `--build-jobs N`. One area of one
   crate: `cargo nextest run -p ac2d -E 'test(/^leq::/)'`.
 
@@ -72,8 +74,8 @@ Every turn re-sends the whole context, so what an agent reads stays paid for unt
 - Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
   through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
   `grep -n '^#'` first, read one section.
-- Iterate with `cargo nextest run -p <crate> <filter>`; the quick tier once before commit, the full
-  tier before pushing to main (see *Tests*).
+- Iterate with `cargo nextest run -p <crate> <filter>`; the quick tier once before commit and
+  before pushing to main; the full tier only when asked (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
 - Delegation: one task per agent with the files and functions named in the brief; the agent
