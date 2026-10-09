@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crate::units::{
     BandLimitArg, BandSourceArg, BandWindowArg, ByteSize, Celsius, Channel, Channels, DayOffsetArg,
     DelayAmount, Freq, Gain, LeqLimitArg, LeqWindowArg, LevelDbfs, MicSensitivityArg, PeakLimitArg,
-    PositionArg, SampleCount, SplLevel, Time, TimeRef, VoltsArg,
+    PositionArg, SampleCount, SpecAveragingArg, SplLevel, Time, TimeRef, VoltsArg,
 };
 
 /// ac2: live dual-channel analyzer — command-line client.
@@ -587,6 +587,20 @@ pub enum MeasCmd {
         #[arg(long)]
         watch: bool,
     },
+    /// Change a measurement's averaging: `--average` (spectrum, rta), `--blocks` (tf). What
+    /// is not given stays as it is; a running measurement starts its average afresh.
+    Set {
+        /// Id or name.
+        meas: MeasRef,
+        /// Spectrum and RTA averaging, on power: `off`, `fifo:<frames>` (the mean of the last
+        /// frames: a spectrum's hop, an RTA's result interval of about 1/60 s, each weighted
+        /// by its length), `exp:<time>` (exponential, e.g. `exp:2s`).
+        #[arg(long, value_name = "AVG")]
+        average: Option<SpecAveragingArg>,
+        /// tf averaging: FIFO blocks of the full-rate stage (≥ 1).
+        #[arg(long)]
+        blocks: Option<u32>,
+    },
     /// Start a measurement.
     Start {
         /// Id or name.
@@ -668,6 +682,11 @@ pub struct MeasNew {
     /// at a higher coherence floor there. Default: equal confidence at every frequency.
     #[arg(long, num_args = 0..=1, default_missing_value = "1s", value_name = "TIME")]
     pub fast_lf: Option<Time>,
+    /// Spectrum and RTA averaging, on power (default off): `off`, `fifo:<frames>` (the mean
+    /// of the last frames: a spectrum's hop, an RTA's result interval of about 1/60 s, each
+    /// weighted by its length), `exp:<time>` (exponential, e.g. `exp:2s`).
+    #[arg(long, value_name = "AVG")]
+    pub average: Option<SpecAveragingArg>,
     /// Spectrum FFT length, samples.
     #[arg(long, default_value = "65536samples")]
     pub fft: SampleCount,

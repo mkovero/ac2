@@ -333,8 +333,12 @@ convention used here, 3 dB hotter than the −30 dBFS sweeps it is compared with
   formats, `Generate RT60` with the `/rt60` export, the RTA mode and averaging names, and
   REW's absolute FR convention for an imported response (the `REW (SPL…)` rows assume FR =
   gain + drive level). Check these rows on the first run.
-- **ac2's RTA is captured as one frame:** `meas new rta` has no averaging option, so its
-  third-octave row is INCONCLUSIVE (a snapshot against a 60 s average).
+- **ac2's RTA averages power over the whole run:** the ambient stage creates it with
+  `--average fifo:<N>`, a FIFO longer than the run (at most ~60 results a second), so the
+  capture is the duration-weighted power mean from its start to the capture: the window
+  plus a few seconds of the same room. A FIFO and not an exponential: τ ≈ window/3 would
+  weight the last third ~63 % instead of every moment alike. Runs from before this read
+  INCONCLUSIVE (one frame against a 60 s average).
 - **Speaker paths at −50 dBFS** leave most of 20–1000 Hz below the noise limit: those band
   rows are INCONCLUSIVE, and room clarity (C50/C80) is INCONCLUSIVE when ac2's decay meets
   the noise before the boundary.

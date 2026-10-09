@@ -57,7 +57,7 @@ impl AppState {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
-        let edit = f.math_edit();
+        let edit = f.edits();
         let r = f.meas_config(open.as_ref()).map(|config| match edit {
             Some(meas) => Request::Call {
                 what: format!("{} changed", config.name),

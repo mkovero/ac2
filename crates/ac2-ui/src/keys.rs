@@ -447,7 +447,7 @@ commands! {
     NewRta => "meas_new_rta", "New RTA…", [Global];
     NewSpl => "meas_new_spl", "New SPL meter…", [Global];
     NewMath => "meas_new_math", "New math channel: A ÷ × + − B, or the average of several (mic positions)…", [Global];
-    EditMeas => "meas_edit", "Edit the selected math channel (operands, operator, method) or sweep measurement (its next run)…", [Global];
+    EditMeas => "meas_edit", "Edit the selected math channel (operands, operator, method), sweep measurement (its next run), spectrum or RTA (averaging)…", [Global];
     HideGroup => "hide_group", "Show / hide the selected measurement with every trace under it", [Global];
     MoveTrace => "move_trace", "Move the selected trace or math channel to another measurement (or Imported)…", [Global];
     ToggleGroup => "toggle_group", "Fold / unfold the selected measurement in the list", [Global];

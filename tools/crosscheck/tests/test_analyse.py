@@ -93,3 +93,11 @@ def test_mic_curve_in_columns_reads_ac2s_export():
     assert not mic_curve_in_columns({"mic": 'MM1 34804 (curve: 90°, applied after capture as a display '
                                             'edit, not in the columns; 0 dB at 1000 Hz; file "x.txt", hash 0c)'})
     assert not mic_curve_in_columns({})
+
+
+def test_ambient_rta_fifo_outlasts_the_run():
+    # ac2's RTA gives at most ~60 results a second: a 60 s window plus a minute of margin at
+    # 90 a second never drops a frame, so the FIFO is the power mean since the RTA started.
+    from crosscheck.stages import RTA_FIFO_MAX, rta_average
+    assert rta_average(60) == "fifo:10800"
+    assert rta_average(1e6) == f"fifo:{RTA_FIFO_MAX}"

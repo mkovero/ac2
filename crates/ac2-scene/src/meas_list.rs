@@ -6,7 +6,9 @@
 
 use std::collections::BTreeSet;
 
-use ac2_proto::model::{MeasKind, Measurement, SweepRun, TraceMeta, TraceOwner, TraceSource};
+use ac2_proto::model::{
+    MeasKind, Measurement, SpecAveraging, SweepRun, TraceMeta, TraceOwner, TraceSource,
+};
 use ac2_proto::units::{MeasId, TraceId};
 
 use crate::format;
@@ -121,9 +123,21 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
             text.push_str(&format!(" · {}", format::smoothing(config.smoothing)));
         }
         MeasKind::Spectrum { config } => {
+            if config.averaging != SpecAveraging::Off {
+                text.push_str(&format!(
+                    " · avg {}",
+                    format::spec_averaging(config.averaging)
+                ));
+            }
             if let Some(f) = config.smoothing {
                 text.push_str(&format!(" · smoothed {}", format::octave_fraction(f)));
             }
+        }
+        MeasKind::Rta { config } if config.averaging != SpecAveraging::Off => {
+            text.push_str(&format!(
+                " · avg {}",
+                format::spec_averaging(config.averaging)
+            ));
         }
         _ => {}
     }
@@ -808,6 +822,51 @@ pub(crate) mod tests {
         assert_eq!(
             meas_row(&item(&plain), None, true).text,
             "TF  TF 3\n     running"
+        );
+    }
+
+    #[test]
+    fn spectrum_and_rta_rows_say_their_averaging() {
+        let mut m = tf(4, "Room");
+        m.config.kind = MeasKind::Rta {
+            config: RtaConfig::on_input(1, BandFraction::Third),
+        };
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "RTA  Room\n     running"
+        );
+        m.config.kind = MeasKind::Rta {
+            config: RtaConfig {
+                averaging: SpecAveraging::Fifo { frames: 2400 },
+                ..RtaConfig::on_input(1, BandFraction::Third)
+            },
+        };
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "RTA  Room\n     running · avg FIFO 2400 frames"
+        );
+        m.config.kind = MeasKind::Spectrum {
+            config: SpectrumConfig {
+                averaging: SpecAveraging::Exponential {
+                    time_constant: Seconds(2.0),
+                },
+                smoothing: Some(SmoothingFraction::Sixth),
+                ..SpectrumConfig::on_input(1)
+            },
+        };
+        assert_eq!(
+            meas_row(&item(&m), None, true).text,
+            "FFT  Room\n     running · avg exp τ 2 s · smoothed 1/6 oct"
+        );
+        assert_eq!(
+            format::spec_averaging(SpecAveraging::Exponential {
+                time_constant: Seconds(0.125)
+            }),
+            "exp τ 0.125 s"
+        );
+        assert_eq!(
+            format::spec_averaging(SpecAveraging::Fifo { frames: 1 }),
+            "FIFO 1 frame"
         );
     }
 

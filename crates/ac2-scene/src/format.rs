@@ -284,6 +284,22 @@ pub fn octave_fraction(f: ac2_proto::model::SmoothingFraction) -> String {
     format!("1/{} oct", f.b())
 }
 
+/// Spectrum / RTA averaging (always on power): `off`, `FIFO 16 frames`, `exp τ 2 s`. The CLI
+/// takes the same as `off`, `fifo:16`, `exp:2s`.
+pub fn spec_averaging(a: ac2_proto::model::SpecAveraging) -> String {
+    use ac2_proto::model::SpecAveraging;
+    match a {
+        SpecAveraging::Off => "off".into(),
+        SpecAveraging::Fifo { frames: 1 } => "FIFO 1 frame".into(),
+        SpecAveraging::Fifo { frames } => format!("FIFO {frames} frames"),
+        SpecAveraging::Exponential { time_constant } => {
+            let t = format!("{:.3}", time_constant.0);
+            let t = t.trim_end_matches('0').trim_end_matches('.');
+            format!("exp τ {t} s")
+        }
+    }
+}
+
 /// Absolute level with one decimal: `94.0`, `−23.5`.
 pub fn level(v: f64) -> String {
     fixed(v, 1)

@@ -2,7 +2,7 @@
 
 use ac2_core::generator::GeneratorError;
 use ac2_proto::grid::GridDef;
-use ac2_proto::model::{InputSetup, MeasConfig, MeasKind, Measurement, SweepConfig};
+use ac2_proto::model::{InputSetup, MeasConfig, MeasKind, Measurement, SpecAveraging, SweepConfig};
 use ac2_proto::units::{MeasId, Rev};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
 
@@ -133,6 +133,17 @@ pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             if conv::spec_averaging(config.averaging).is_none() {
                 return inv("invalid averaging");
             }
+            if let SpecAveraging::Fifo { frames } = config.averaging {
+                let bins = u64::from(config.fft_len) / 2 + 1;
+                let most = SpecAveraging::MAX_SPECTRUM_FIFO_VALUES / bins;
+                if u64::from(frames) > most {
+                    return inv(&format!(
+                        "a {}-point spectrum averages at most {most} FIFO frames \
+                         (use exponential averaging for longer)",
+                        config.fft_len
+                    ));
+                }
+            }
         }
         MeasKind::Rta { config } => {
             if !(config.f_lo.0.is_finite()
@@ -144,6 +155,15 @@ pub(super) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             }
             if conv::spec_averaging(config.averaging).is_none() {
                 return inv("invalid averaging");
+            }
+            if let SpecAveraging::Fifo { frames } = config.averaging
+                && frames > SpecAveraging::MAX_RTA_FIFO_FRAMES
+            {
+                return inv(&format!(
+                    "an RTA averages at most {} FIFO frames (use exponential averaging for \
+                     longer)",
+                    SpecAveraging::MAX_RTA_FIFO_FRAMES
+                ));
             }
         }
         MeasKind::Spl { config } => {
@@ -269,5 +289,54 @@ pub(super) fn static_grid(kind: &MeasKind) -> Option<GridDef> {
             k_max: config.grid.k_max,
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ac2_proto::model::{BandFraction, RtaConfig, SpectrumConfig};
+    use ac2_proto::units::Seconds;
+
+    use super::*;
+
+    fn meas(kind: MeasKind) -> MeasConfig {
+        MeasConfig {
+            name: "m".into(),
+            kind,
+        }
+    }
+
+    #[test]
+    fn spectrum_and_rta_averaging_is_bounded() {
+        let spec = |fft_len, averaging| {
+            validate_meas(&meas(MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    fft_len,
+                    averaging,
+                    ..SpectrumConfig::on_input(0)
+                },
+            }))
+        };
+        let fifo = |frames| SpecAveraging::Fifo { frames };
+        assert!(spec(65_536, fifo(511)).is_ok());
+        assert!(spec(65_536, fifo(512)).is_err());
+        assert!(spec(4096, fifo(8188)).is_ok());
+        assert!(spec(4096, fifo(0)).is_err());
+        let exp = |s| SpecAveraging::Exponential {
+            time_constant: Seconds(s),
+        };
+        assert!(spec(65_536, exp(600.0)).is_ok());
+        assert!(spec(65_536, exp(0.0)).is_err());
+        let rta = |averaging| {
+            validate_meas(&meas(MeasKind::Rta {
+                config: RtaConfig {
+                    averaging,
+                    ..RtaConfig::on_input(0, BandFraction::Third)
+                },
+            }))
+        };
+        assert!(rta(fifo(SpecAveraging::MAX_RTA_FIFO_FRAMES)).is_ok());
+        assert!(rta(fifo(SpecAveraging::MAX_RTA_FIFO_FRAMES + 1)).is_err());
+        assert!(rta(exp(-1.0)).is_err());
     }
 }

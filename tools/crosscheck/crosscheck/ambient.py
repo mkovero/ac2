@@ -118,11 +118,17 @@ def analyse(a, run):
             v = float(np.max(np.abs(dd[m])))
             st, why = judge(v, tb), ""
             if k == "ac2 RTA":
-                # `ac2 meas new rta` cannot set averaging and the default is off: the captured
-                # trace is one analysis frame, a sample of a fluctuating noise, not the window's
-                # mean power the numpy column holds
-                st, why = "INCONCLUSIVE", ("; ac2's RTA was captured without averaging (one frame, the CLI "
-                                           "offers no averaging option), so it is not an estimate over the window")
+                avg = win.get("ac2_rta_average")
+                if avg is None:
+                    # A run from before the stage set averaging: the captured trace is one
+                    # analysis frame, a sample of a fluctuating noise, not the window's mean power
+                    # the numpy column holds
+                    st, why = "INCONCLUSIVE", ("; ac2's RTA was captured without averaging (one frame), "
+                                               "so it is not an estimate over the window")
+                else:
+                    why = (f"; ac2's RTA averaged power with --average {avg}, a FIFO longer than the run: "
+                           "every result interval from its start to the capture, weighted by its length "
+                           "(the window plus the few seconds of the same room around it)")
             elif k == "REW RTA":
                 # REW's 'Forever' average reads low against the power mean, increasingly at HF:
                 # an average of levels in dB under-reads noise (the mean of a log is below the log

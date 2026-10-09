@@ -684,6 +684,42 @@ A long FFT updates every eighth of its window (about 6 times a second at 65 536 
 since windows overlapping more than that add work but no new information; short FFTs update
 about 30 times a second.
 
+#### Averaging (spectrum and RTA)
+
+Spectra and RTAs start **unaveraged**: each result is one frame, so a fluctuating sound
+(a room's noise, programme, a crowd) jumps by several dB from one moment to the next, and a
+single capture can read several dB away from the level over a longer time in some bands.
+Averaging is always on **power**, never on dB: the average of a moment at 0 dB and one at
+−20 dB is −3 dB, the level a meter integrating that time reads, not −10 dB.
+
+| Averaging | Reads | CLI (`--average`) |
+|---|---|---|
+| `off` | each frame as it comes | `off` |
+| `exp τ 2 s` | exponential: recent sound counts most, older sound fades with time constant τ; until τ has passed, the plain power mean so far | `exp:2s` |
+| `FIFO 64 frames` | the mean of the last 64 frames, each counted equally in time | `fifo:64` |
+
+A spectrum's frame is one hop of its FFT (an eighth of a long FFT: 0.17 s at 65 536 points
+and 48 kHz; 1024 samples for short ones), so a FIFO's span depends on the FFT length; an
+RTA's frame is one result interval, about 1/60 s, and each counts by its length. A time
+constant means the same for both, which is why the dialogs list those first. A spectrum
+FIFO stores every frame (at most 511 frames at 65 536 points); an RTA's at most 65 536.
+
+- **New spectrum** / **New RTA** have an *Averaging* field (**←** / **→**); *Edit
+  measurement…* (`meas_edit` in the palette) on a selected spectrum or RTA changes it, its
+  input, name and smoothing or bands, and keeps the rest (FFT length, window, band range,
+  weighting). A setting made from the CLI that the list does not offer shows as it is.
+- The measurement list says it: `RTA  Room · running · avg FIFO 2400 frames`; so does
+  `ac2 meas list`.
+- **R** restarts the average; a change of averaging restarts it too.
+
+```sh
+ac2 meas new rta --input 2 --name room --average exp:2s
+ac2 meas new spectrum --input 2 --name fft --average fifo:16
+ac2 meas set room --average fifo:2400     # about 40 s of RTA results, a plain power mean
+ac2 meas set room --average off
+ac2 meas set main-l --blocks 16           # a transfer measurement's averaging
+```
+
 ### Spectrograph
 
 **G** in the spectrum pane steps its views (the view is remembered):
@@ -2565,7 +2601,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | New spectrum… | `meas_new_spectrum` |
 | New RTA… | `meas_new_rta` |
 | New SPL meter… | `meas_new_spl` |
-| Edit the selected math channel (operands, operator, method) or sweep measurement (its next run)… | `meas_edit` |
+| Edit the selected math channel (operands, operator, method), sweep measurement (its next run), spectrum or RTA (averaging)… | `meas_edit` |
 | Fold / unfold the selected measurement in the list | `toggle_group` |
 | Input setup: Settings › Inputs & outputs (names, roles, mics, max level)… | `input_setup` |
 | Calibrations: Settings › Calibration (mics, curves, sensitivities)… | `calibrations` |

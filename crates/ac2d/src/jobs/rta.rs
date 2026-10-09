@@ -1,17 +1,17 @@
 //! Fractional-octave RTA job: IEC 61260-1 filterbank band power (`rta` frames).
 //!
 //! Each frame interval's band powers form one "frame" for averaging, which acts on power
-//! (never on dB) like the spectrum's. A calibrated input reads dB SPL; its mic curve, when
+//! (never on dB) like the spectrum's and weights each interval by its duration
+//! ([`ac2_core::power_average`]). A calibrated input reads dB SPL; its mic curve, when
 //! on, is subtracted per band as the curve's log-frequency power average over the band.
 
-use std::collections::VecDeque;
-
+use ac2_core::power_average::PowerAverager;
 use ac2_core::rta::OctaveFilterBank;
 use ac2_core::spectrum::power_dbfs;
 use ac2_core::weighting::WeightingFilter;
 use ac2_proto::frame::{FrameData, ProtectionFlags, RtaFrame, RtaMeta, ValidityMask};
 use ac2_proto::grid::{GridDef, GridId};
-use ac2_proto::model::{LevelScale, RtaConfig, SpecAveraging};
+use ac2_proto::model::{LevelScale, RtaConfig};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev};
 
@@ -46,12 +46,6 @@ pub(crate) fn grid(cfg: &RtaConfig, bank: &OctaveFilterBank) -> GridDef {
     }
 }
 
-enum Avg {
-    Off,
-    Fifo(usize, VecDeque<Vec<f64>>),
-    Exp(f64, Option<Vec<f64>>),
-}
-
 pub(crate) struct Rta {
     meas: MeasId,
     cfg: RtaConfig,
@@ -60,7 +54,7 @@ pub(crate) struct Rta {
     weight: WeightingFilter,
     bank: OctaveFilterBank,
     grid_id: GridId,
-    avg: Avg,
+    avg: PowerAverager,
     cal: InputCal,
     /// Mic-curve correction per band (dB subtracted).
     corr: Option<Vec<f64>>,
@@ -90,18 +84,9 @@ impl Rta {
         let bank = bank(&cfg, sample_rate)?;
         let weight = WeightingFilter::new(conv::weighting(cfg.weighting), f64::from(sample_rate))
             .map_err(|e| e.to_string())?;
-        let avg = match cfg.averaging {
-            SpecAveraging::Off => Avg::Off,
-            SpecAveraging::Fifo { frames } if frames >= 1 => {
-                Avg::Fifo(frames as usize, VecDeque::new())
-            }
-            SpecAveraging::Exponential { time_constant }
-                if time_constant.0.is_finite() && time_constant.0 > 0.0 =>
-            {
-                Avg::Exp(time_constant.0, None)
-            }
-            _ => return Err("invalid averaging".into()),
-        };
+        let avg = conv::spec_averaging(cfg.averaging)
+            .and_then(|a| PowerAverager::new(a, bank.len()).ok())
+            .ok_or("invalid averaging")?;
         let mut r = Self {
             grid_id: grid(&cfg, &bank).id(),
             powers: vec![0.0; bank.len()],
@@ -139,11 +124,7 @@ impl Rta {
     }
 
     fn reset(&mut self) {
-        match &mut self.avg {
-            Avg::Off => {}
-            Avg::Fifo(_, q) => q.clear(),
-            Avg::Exp(_, s) => *s = None,
-        }
+        self.avg.reset();
         self.shown = None;
         self.generation += 1;
     }
@@ -251,35 +232,7 @@ impl Analysis for Rta {
         if self.bank.samples() > 0 {
             self.generation += 1;
             self.bank.band_powers(&mut self.powers);
-            let p = self.powers.clone();
-            self.shown = Some(match &mut self.avg {
-                Avg::Off => p,
-                Avg::Fifo(n, q) => {
-                    q.push_back(p);
-                    while q.len() > *n {
-                        q.pop_front();
-                    }
-                    let k = q.len() as f64;
-                    (0..self.powers.len())
-                        .map(|i| q.iter().map(|v| v[i]).sum::<f64>() / k)
-                        .collect()
-                }
-                Avg::Exp(tau, s) => {
-                    let a = 1.0 - (-interval_s / *tau).exp();
-                    match s {
-                        None => {
-                            *s = Some(p.clone());
-                            p
-                        }
-                        Some(prev) => {
-                            for (x, y) in prev.iter_mut().zip(&p) {
-                                *x += a * (y - *x);
-                            }
-                            prev.clone()
-                        }
-                    }
-                }
-            });
+            self.shown = Some(self.avg.push(&self.powers, interval_s).to_vec());
         }
         self.bank.reset_powers();
         let stamp = self.stamp(end);

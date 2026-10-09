@@ -1372,3 +1372,60 @@ fn warning_toasts_off_keeps_warnings_in_the_log_only() {
     t.st.warn("no stimulus level yet");
     assert_eq!(t.last_toast(), "no stimulus level yet");
 }
+
+#[test]
+fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
+    let mut t = T::new();
+    t.conn(mirror(daemon_state()));
+    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.key("Ctrl+K");
+    t.text("edit the selected math");
+    t.key("Enter");
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    assert_eq!(f.kind, FormKind::SpectrumEdit);
+    let shown: Vec<(String, String)> = f
+        .fields
+        .iter()
+        .map(|x| (x.label.clone(), x.display()))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            ("Input".to_owned(), "2 · Input 2".to_owned()),
+            ("Name".to_owned(), "Sub".to_owned()),
+            ("Smoothing".to_owned(), "off".to_owned()),
+            ("Averaging".to_owned(), "off".to_owned()),
+        ]
+    );
+    // Averaging: off → exp τ 0.5 s → exp τ 1 s.
+    for _ in 0..3 {
+        t.key("Down");
+    }
+    t.key("Right");
+    t.key("Right");
+    let r = t.key("Enter");
+    let [
+        Request::Call {
+            cmd: Command::MeasUpdate { meas, config },
+            what,
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
+    };
+    assert_eq!(*meas, MeasId(2));
+    assert_eq!(what, "Sub changed");
+    let MeasKind::Spectrum { config } = &config.kind else {
+        panic!("{config:?}");
+    };
+    assert_eq!(
+        config.averaging,
+        SpecAveraging::Exponential {
+            time_constant: Seconds(1.0)
+        }
+    );
+    // What the dialog does not show stays the spectrum's own.
+    assert_eq!((config.fft_len, config.input), (8192, 1));
+}

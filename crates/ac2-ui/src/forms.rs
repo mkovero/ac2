@@ -1,6 +1,6 @@
 //! The new-measurement dialogs: a few fields that build a `meas.create` (a sweep
 //! measurement's too: its settings, run later with `sweep.run`), and the dialogs that edit
-//! a math channel or a sweep measurement. Inputs and outputs are picked by name from the
+//! a math channel, a sweep measurement, a spectrum or an RTA. Inputs and outputs are picked by name from the
 //! session's channels (inputs with their meters in the view), never typed as numbers. Pure
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
@@ -10,8 +10,8 @@
 
 use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
-    OpenSession, Operand, RtaConfig, Smoothing, SmoothingFraction, SpectrumConfig, SplConfig,
-    SweepConfig, TimeWeighting, TransferConfig, Weighting,
+    OpenSession, Operand, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging, SpectrumConfig,
+    SplConfig, SweepConfig, TimeWeighting, TransferConfig, Weighting,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -30,6 +30,10 @@ pub enum FormKind {
     Math,
     /// A math channel edited.
     MathEdit,
+    /// A spectrum's settings edited.
+    SpectrumEdit,
+    /// An RTA's settings edited.
+    RtaEdit,
 }
 
 impl FormKind {
@@ -43,6 +47,8 @@ impl FormKind {
             FormKind::MathEdit => "Edit math channel",
             FormKind::Sweep => "New sweep measurement (response and harmonic distortion)",
             FormKind::SweepEdit => "Edit sweep measurement (its next run)",
+            FormKind::SpectrumEdit => "Edit spectrum",
+            FormKind::RtaEdit => "Edit RTA",
         }
     }
 
@@ -52,7 +58,10 @@ impl FormKind {
             FormKind::Sweep => {
                 "Enter creates it; nothing plays · Space on the sweep pane arms a run, Enter plays it"
             }
-            FormKind::MathEdit | FormKind::SweepEdit => "Enter applies",
+            FormKind::MathEdit
+            | FormKind::SweepEdit
+            | FormKind::SpectrumEdit
+            | FormKind::RtaEdit => "Enter applies",
             _ => "Enter creates and starts",
         }
     }
@@ -67,7 +76,10 @@ impl FormKind {
     pub fn verb(self) -> &'static str {
         match self {
             FormKind::Sweep => "Create",
-            FormKind::MathEdit | FormKind::SweepEdit => "Apply",
+            FormKind::MathEdit
+            | FormKind::SweepEdit
+            | FormKind::SpectrumEdit
+            | FormKind::RtaEdit => "Apply",
             _ => "Create and start",
         }
     }
@@ -81,6 +93,8 @@ pub enum FieldId {
     Measurement,
     Input,
     Smoothing,
+    /// Spectrum / RTA averaging (on power).
+    Averaging,
     Depth,
     Fraction,
     Weighting,
@@ -281,6 +295,10 @@ pub struct Form {
     pub math: Option<Box<crate::math_dialog::MathForm>>,
     /// The sweep measurement this dialog edits.
     pub sweep_edit: Option<MeasId>,
+    /// The spectrum or RTA this dialog edits: what the fields don't show stays its own.
+    pub meas_edit: Option<Box<Measurement>>,
+    /// The averaging field's values, one per option.
+    averaging: Vec<SpecAveraging>,
 }
 
 /// Smoothing choices of the transfer and spectrum dialogs (index 0: none, as `ac2 meas new`
@@ -292,6 +310,33 @@ const SMOOTHING: [(&str, Option<SmoothingFraction>); 6] = [
     ("1/12 octave", Some(SmoothingFraction::Twelfth)),
     ("1/24 octave", Some(SmoothingFraction::TwentyFourth)),
     ("1/48 octave", Some(SmoothingFraction::FortyEighth)),
+];
+/// Averaging choices of the spectrum and RTA dialogs, in their list order (index 0: off, as
+/// `ac2 meas new` without `--average`). Exponential first, by time constant: a time reads
+/// the same for every FFT length and for the RTA, where a FIFO frame does not. The options
+/// read as the measurement list says them ([`ac2_scene::format::spec_averaging`]).
+const AVERAGING: [SpecAveraging; 9] = [
+    SpecAveraging::Off,
+    SpecAveraging::Exponential {
+        time_constant: Seconds(0.5),
+    },
+    SpecAveraging::Exponential {
+        time_constant: Seconds(1.0),
+    },
+    SpecAveraging::Exponential {
+        time_constant: Seconds(2.0),
+    },
+    SpecAveraging::Exponential {
+        time_constant: Seconds(5.0),
+    },
+    SpecAveraging::Exponential {
+        time_constant: Seconds(10.0),
+    },
+    SpecAveraging::Exponential {
+        time_constant: Seconds(30.0),
+    },
+    SpecAveraging::Fifo { frames: 16 },
+    SpecAveraging::Fifo { frames: 64 },
 ];
 const DEPTH: [&str; 2] = [
     "equal confidence (every frequency alike)",
@@ -365,7 +410,86 @@ impl Form {
             selected: false,
             math: None,
             sweep_edit: None,
+            meas_edit: None,
+            averaging: AVERAGING.to_vec(),
         }
+    }
+
+    /// The averaging field showing `current` (added to the options when it is none of them,
+    /// so an edit never changes it silently).
+    fn averaging_field(&mut self, current: SpecAveraging) -> Field {
+        if !self.averaging.contains(&current) {
+            self.averaging.push(current);
+        }
+        let options: Vec<String> = self
+            .averaging
+            .iter()
+            .map(|a| ac2_scene::format::spec_averaging(*a))
+            .collect();
+        let index = self
+            .averaging
+            .iter()
+            .position(|a| *a == current)
+            .unwrap_or(0);
+        Field {
+            id: FieldId::Averaging,
+            label: "Averaging".into(),
+            value: Value::Choice { options, index },
+            hint: "on power".into(),
+        }
+    }
+
+    /// The dialog editing spectrum or RTA `m` over the session's captured `inputs`: its
+    /// input, name, smoothing or bands, and averaging.
+    pub fn edit_spec(m: &Measurement, inputs: &[(u16, String)]) -> Result<Self, String> {
+        let (kind, input, averaging) = match &m.config.kind {
+            MeasKind::Spectrum { config } => {
+                (FormKind::SpectrumEdit, config.input, config.averaging)
+            }
+            MeasKind::Rta { config } => (FormKind::RtaEdit, config.input, config.averaging),
+            _ => return Err(format!("{} is not a spectrum or an RTA", m.config.name)),
+        };
+        let mut f = Self::new(kind, Vec::new());
+        // An input the session no longer captures stays listed, so the edit does not move
+        // the measurement to another input unasked (Enter then says to reopen the session).
+        let mut inputs = inputs.to_vec();
+        if !inputs.iter().any(|(c, _)| *c == input) {
+            inputs.push((input, format!("In {} (not captured)", input + 1)));
+        }
+        let mut fields = vec![
+            Field::channel(FieldId::Input, "Input", &inputs, Some(input), ""),
+            Field::text(FieldId::Name, "Name", m.config.name.clone(), ""),
+        ];
+        match &m.config.kind {
+            MeasKind::Spectrum { config } => fields.push(Field::choice(
+                FieldId::Smoothing,
+                "Smoothing",
+                &SMOOTHING.map(|s| s.0),
+                SMOOTHING
+                    .iter()
+                    .position(|s| s.1 == config.smoothing)
+                    .unwrap_or(0),
+            )),
+            MeasKind::Rta { config } => fields.push(Field::choice(
+                FieldId::Fraction,
+                "Bands",
+                &FRACTIONS.map(|f| f.0),
+                FRACTIONS
+                    .iter()
+                    .position(|f| f.1 == config.fraction)
+                    .unwrap_or(1),
+            )),
+            _ => {}
+        }
+        fields.push(f.averaging_field(averaging));
+        f.fields = fields;
+        f.meas_edit = Some(Box::new(m.clone()));
+        Ok(f)
+    }
+
+    /// The measurement this dialog edits (a math channel, a spectrum or an RTA), if any.
+    pub fn edits(&self) -> Option<MeasId> {
+        self.math_edit().or(self.meas_edit.as_ref().map(|m| m.id))
     }
 
     /// A measurement dialog over the session's captured `inputs` (channel, name). The
@@ -399,9 +523,12 @@ impl Form {
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
             // Built by [`Form::sweep`] and [`Form::math`].
-            FormKind::Sweep | FormKind::SweepEdit | FormKind::Math | FormKind::MathEdit => {
-                Vec::new()
-            }
+            FormKind::Sweep
+            | FormKind::SweepEdit
+            | FormKind::Math
+            | FormKind::MathEdit
+            | FormKind::SpectrumEdit
+            | FormKind::RtaEdit => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -445,7 +572,12 @@ impl Form {
                 ),
             ],
         };
-        Self::new(kind, fields)
+        let mut f = Self::new(kind, fields);
+        if matches!(kind, FormKind::Spectrum | FormKind::Rta) {
+            let a = f.averaging_field(SpecAveraging::Off);
+            f.fields.push(a);
+        }
+        f
     }
 
     /// The sweep dialog over the session's captured `inputs` and its `outputs` (channel,
@@ -870,6 +1002,12 @@ impl Form {
         };
         let pick = |id: FieldId| self.choice_index(id).unwrap_or(0);
         let smoothing = SMOOTHING[pick(FieldId::Smoothing).min(SMOOTHING.len() - 1)].1;
+        let averaging = self
+            .averaging
+            .get(pick(FieldId::Averaging))
+            .copied()
+            .unwrap_or(SpecAveraging::Off);
+        let base = self.meas_edit.as_ref().map(|m| &m.config.kind);
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
             FormKind::Math | FormKind::MathEdit => return self.math_config(),
@@ -892,18 +1030,37 @@ impl Form {
                 }
                 MeasKind::Transfer { config }
             }
-            FormKind::Spectrum => MeasKind::Spectrum {
-                config: SpectrumConfig {
-                    smoothing,
-                    ..SpectrumConfig::on_input(input(FieldId::Input, "input")?)
-                },
-            },
-            FormKind::Rta => MeasKind::Rta {
-                config: RtaConfig::on_input(
-                    input(FieldId::Input, "input")?,
-                    FRACTIONS[pick(FieldId::Fraction).min(FRACTIONS.len() - 1)].1,
-                ),
-            },
+            FormKind::Spectrum | FormKind::SpectrumEdit => {
+                let input = input(FieldId::Input, "input")?;
+                let base = match base {
+                    Some(MeasKind::Spectrum { config }) => config.clone(),
+                    _ => SpectrumConfig::on_input(input),
+                };
+                MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        input,
+                        smoothing,
+                        averaging,
+                        ..base
+                    },
+                }
+            }
+            FormKind::Rta | FormKind::RtaEdit => {
+                let input = input(FieldId::Input, "input")?;
+                let fraction = FRACTIONS[pick(FieldId::Fraction).min(FRACTIONS.len() - 1)].1;
+                let base = match base {
+                    Some(MeasKind::Rta { config }) => config.clone(),
+                    _ => RtaConfig::on_input(input, fraction),
+                };
+                MeasKind::Rta {
+                    config: RtaConfig {
+                        input,
+                        fraction,
+                        averaging,
+                        ..base
+                    },
+                }
+            }
             FormKind::Spl => MeasKind::Spl {
                 config: SplConfig::on_input(
                     input(FieldId::Input, "input")?,
@@ -1077,6 +1234,98 @@ mod tests {
                 }
             }
         );
+    }
+
+    #[test]
+    fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
+        let o = open(vec![0, 1], None);
+        let at = |f: &Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
+        let mut f = Form::measurement(FormKind::Rta, Some(&o), &[], &names(&o), &[]);
+        let i = at(&f, FieldId::Averaging);
+        assert_eq!(f.fields[i].label, "Averaging");
+        assert_eq!(f.fields[i].display(), "off");
+        let Value::Choice { options, .. } = &f.fields[i].value else {
+            panic!("choice");
+        };
+        assert_eq!(
+            options,
+            &[
+                "off",
+                "exp τ 0.5 s",
+                "exp τ 1 s",
+                "exp τ 2 s",
+                "exp τ 5 s",
+                "exp τ 10 s",
+                "exp τ 30 s",
+                "FIFO 16 frames",
+                "FIFO 64 frames"
+            ]
+        );
+        f.focus = i;
+        f.cycle(3);
+        assert_eq!(f.fields[i].display(), "exp τ 2 s");
+        let c = f.meas_config(Some(&o)).expect("rta");
+        let MeasKind::Rta { config } = c.kind else {
+            panic!("kind");
+        };
+        assert_eq!(
+            config.averaging,
+            SpecAveraging::Exponential {
+                time_constant: Seconds(2.0)
+            }
+        );
+        // The spectrum dialog has the same control.
+        let f = Form::measurement(FormKind::Spectrum, Some(&o), &[], &names(&o), &[]);
+        assert_eq!(f.fields[at(&f, FieldId::Averaging)].display(), "off");
+
+        // Editing an RTA made by the CLI with a FIFO no preset has: the field shows it,
+        // and the RTA's range and weighting stay its own.
+        let m = Measurement {
+            id: MeasId(7),
+            config: MeasConfig {
+                name: "Room".into(),
+                kind: MeasKind::Rta {
+                    config: RtaConfig {
+                        f_lo: Hz(100.0),
+                        weighting: Weighting::A,
+                        averaging: SpecAveraging::Fifo { frames: 2400 },
+                        ..RtaConfig::on_input(1, BandFraction::Sixth)
+                    },
+                },
+            },
+            config_rev: ac2_proto::units::Rev(1),
+            running: true,
+            delay: None,
+            grid_id: None,
+        };
+        let mut f = Form::edit_spec(&m, &names(&o)).expect("edit");
+        assert_eq!(f.kind.title(), "Edit RTA");
+        assert_eq!(f.kind.verb(), "Apply");
+        assert_eq!(f.edits(), Some(MeasId(7)));
+        assert_eq!(f.fields[at(&f, FieldId::Fraction)].display(), "1/6 octave");
+        let i = at(&f, FieldId::Averaging);
+        assert_eq!(f.fields[i].display(), "FIFO 2400 frames");
+        let unchanged = f.meas_config(Some(&o)).expect("rta");
+        assert_eq!(unchanged, m.config);
+        f.focus = i;
+        f.cycle(-20);
+        let MeasKind::Rta { config } = f.meas_config(Some(&o)).expect("rta").kind else {
+            panic!("kind");
+        };
+        assert_eq!(config.averaging, SpecAveraging::Off);
+        assert_eq!((config.f_lo, config.weighting), (Hz(100.0), Weighting::A));
+        // An input the session no longer captures is not swapped for another.
+        let mut gone = m.clone();
+        if let MeasKind::Rta { config } = &mut gone.config.kind {
+            config.input = 5;
+        }
+        let f = Form::edit_spec(&gone, &names(&o)).expect("edit");
+        assert_eq!(
+            f.fields[at(&f, FieldId::Input)].display(),
+            "In 6 (not captured)"
+        );
+        let e = f.meas_config(Some(&o)).expect_err("refused");
+        assert!(e.contains("not captured by the session"), "{e}");
     }
 
     #[test]

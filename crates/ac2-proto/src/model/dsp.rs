@@ -183,7 +183,10 @@ pub enum SpecAveraging {
     /// Each frame replaces the previous one.
     Off,
     /// Mean of the last `frames` frames (a spectrum computes one per hop: `n / 8` for long
-    /// FFTs, a 1024-sample hop at 48 kHz for short ones; never more than `n / 2`).
+    /// FFTs, a 1024-sample hop at 48 kHz for short ones; never more than `n / 2`. An RTA's
+    /// frame is one result interval, about 1/60 s, each weighted by its duration). At most
+    /// [`SpecAveraging::MAX_SPECTRUM_FIFO_VALUES`] stored values for a spectrum
+    /// (`frames · (n/2 + 1)`), [`SpecAveraging::MAX_RTA_FIFO_FRAMES`] frames for an RTA.
     Fifo {
         /// Frames.
         frames: u32,
@@ -193,6 +196,14 @@ pub enum SpecAveraging {
         /// Time constant.
         time_constant: Seconds,
     },
+}
+
+impl SpecAveraging {
+    /// A spectrum FIFO stores every frame's bins: `frames · (n/2 + 1)` at most this many
+    /// (128 MiB of f64), e.g. 511 frames of a 65536-point FFT, 8188 of a 4096-point one.
+    pub const MAX_SPECTRUM_FIFO_VALUES: u64 = 1 << 24;
+    /// An RTA FIFO's frames at most: about 18 minutes of result intervals at 60 per second.
+    pub const MAX_RTA_FIFO_FRAMES: u32 = 1 << 16;
 }
 
 /// How traces are combined by `trace.average`.

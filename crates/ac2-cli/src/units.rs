@@ -221,6 +221,36 @@ impl FromStr for Time {
     }
 }
 
+/// Spectrum / RTA averaging, always on power: `off`, `fifo:16` (the mean of the last 16
+/// frames), `exp:2s` (exponential, time constant 2 s). Frames ≥ 1, the time constant > 0.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpecAveragingArg(pub ac2_proto::model::SpecAveraging);
+
+impl FromStr for SpecAveragingArg {
+    type Err = UnitError;
+    fn from_str(s: &str) -> Result<Self, UnitError> {
+        use ac2_proto::model::SpecAveraging;
+        let t = s.trim().to_ascii_lowercase();
+        let expected = "expected off, fifo:<frames> (e.g. fifo:16) or exp:<time> (e.g. exp:2s)";
+        match t.split_once(':') {
+            None if t == "off" => Ok(Self(SpecAveraging::Off)),
+            Some(("fifo", n)) => match n.trim().parse::<u32>() {
+                Ok(frames) if frames >= 1 => Ok(Self(SpecAveraging::Fifo { frames })),
+                _ => fail(format!("{s:?}: FIFO frames must be a whole number ≥ 1")),
+            },
+            Some(("exp", t)) => {
+                let Time(tau) = t.parse()?;
+                if tau.0 > 0.0 {
+                    Ok(Self(SpecAveraging::Exponential { time_constant: tau }))
+                } else {
+                    fail(format!("{s:?}: the time constant must be longer than 0"))
+                }
+            }
+            _ => fail(format!("{s:?}: {expected}")),
+        }
+    }
+}
+
 /// A file size: `500MB`, `2GB`, `1.5GiB` (decimal kB/MB/GB/TB, binary KiB/MiB/GiB/TiB).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByteSize(pub u64);
@@ -861,6 +891,27 @@ impl FromStr for DayOffsetArg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spectrum_averaging() {
+        use ac2_proto::model::SpecAveraging;
+        assert_eq!(ok::<SpecAveragingArg>("off").0, SpecAveraging::Off);
+        assert_eq!(
+            ok::<SpecAveragingArg>("FIFO:16").0,
+            SpecAveraging::Fifo { frames: 16 }
+        );
+        assert_eq!(
+            ok::<SpecAveragingArg>("exp:500ms").0,
+            SpecAveraging::Exponential {
+                time_constant: Seconds(0.5)
+            }
+        );
+        assert!(bad::<SpecAveragingArg>("fifo:0").contains("≥ 1"));
+        assert!(bad::<SpecAveragingArg>("fifo:1.5").contains("whole number"));
+        assert!(bad::<SpecAveragingArg>("exp:0s").contains("longer than 0"));
+        assert!(bad::<SpecAveragingArg>("exp:2").contains("missing unit"));
+        assert!(bad::<SpecAveragingArg>("2s").contains("expected off"));
+    }
 
     #[test]
     fn bands_and_band_limits() {

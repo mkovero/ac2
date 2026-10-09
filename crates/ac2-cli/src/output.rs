@@ -125,6 +125,14 @@ pub fn peak_weighting(p: PeakWeighting) -> &'static str {
     }
 }
 
+/// ` · avg FIFO 16 frames`, as the measurement list in the app says it; nothing when off.
+fn spec_averaging(a: ac2_proto::model::SpecAveraging) -> String {
+    match a {
+        ac2_proto::model::SpecAveraging::Off => String::new(),
+        a => format!(" · avg {}", ac2_scene::format::spec_averaging(a)),
+    }
+}
+
 /// One-line description of what a measurement computes (channels 1-based).
 pub fn meas_kind(k: &MeasKind) -> String {
     match k {
@@ -133,14 +141,18 @@ pub fn meas_kind(k: &MeasKind) -> String {
             config.reference_input + 1,
             config.measurement_input + 1
         ),
-        MeasKind::Spectrum { config } => {
-            format!("spectrum in {} ({} pt)", config.input + 1, config.fft_len)
-        }
+        MeasKind::Spectrum { config } => format!(
+            "spectrum in {} ({} pt){}",
+            config.input + 1,
+            config.fft_len,
+            spec_averaging(config.averaging)
+        ),
         MeasKind::Rta { config } => format!(
-            "rta 1/{} oct in {} ({})",
+            "rta 1/{} oct in {} ({}){}",
             config.fraction.b(),
             config.input + 1,
-            weighting(config.weighting)
+            weighting(config.weighting),
+            spec_averaging(config.averaging)
         ),
         MeasKind::Spl { config } => format!(
             "spl in {} (L{}{})",

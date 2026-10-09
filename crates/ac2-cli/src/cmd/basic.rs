@@ -258,6 +258,17 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             n.kind
         )));
     }
+    if n.average.is_some() && !matches!(n.kind, MeasKindArg::Spectrum | MeasKindArg::Rta) {
+        return Err(CliError::Usage(format!(
+            "--average applies to spectrum and rta, not {:?}{}",
+            n.kind,
+            if n.kind == MeasKindArg::Tf {
+                " (tf averages over --blocks)"
+            } else {
+                ""
+            }
+        )));
+    }
     let kind = match n.kind {
         MeasKindArg::Sweep => {
             refuse(n.input, "input")?;
@@ -364,6 +375,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                             fft_len: len as u32,
                             window: window(n.window),
                             smoothing: n.smooth.map(smoothing).transpose()?,
+                            averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
                             ..SpectrumConfig::on_input(input)
                         },
                     }
@@ -377,6 +389,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                             f_lo: n.from.0,
                             f_hi: n.to.0,
                             weighting: weighting(n.weight.unwrap_or(WeightArg::Z)),
+                            averaging: n.average.map_or(SpecAveraging::Off, |a| a.0),
                             ..RtaConfig::on_input(input, band_fraction(n.fraction)?)
                         },
                     }
@@ -398,6 +411,50 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         name: n.name.clone(),
         kind,
     })
+}
+
+/// `meas set`: `config` with the averaging changed.
+pub(crate) fn meas_set(
+    config: &MeasConfig,
+    average: Option<SpecAveraging>,
+    blocks: Option<u32>,
+) -> Result<MeasConfig, CliError> {
+    if average.is_none() && blocks.is_none() {
+        return Err(CliError::Usage(
+            "say what changes: --average (spectrum, rta) or --blocks (tf)".into(),
+        ));
+    }
+    let mut config = config.clone();
+    let name = config.name.clone();
+    let kind = match &config.kind {
+        MeasKind::Transfer { .. } => "tf",
+        MeasKind::Spectrum { .. } => "spectrum",
+        MeasKind::Rta { .. } => "rta",
+        MeasKind::Spl { .. } => "spl",
+        MeasKind::Math { .. } => "math",
+        MeasKind::Sweep { .. } => "sweep",
+    };
+    match (&mut config.kind, average, blocks) {
+        (MeasKind::Spectrum { config: c }, Some(a), None) => c.averaging = a,
+        (MeasKind::Rta { config: c }, Some(a), None) => c.averaging = a,
+        (MeasKind::Transfer { config: c }, None, Some(b)) => {
+            if b == 0 {
+                return Err(CliError::Usage("--blocks must be at least 1".into()));
+            }
+            c.averaging = TfAveraging::Fifo { blocks: b };
+        }
+        (_, Some(_), _) => {
+            return Err(CliError::Usage(format!(
+                "--average applies to spectrum and rta; {name} is a {kind} measurement"
+            )));
+        }
+        (_, _, _) => {
+            return Err(CliError::Usage(format!(
+                "--blocks applies to tf; {name} is a {kind} measurement"
+            )));
+        }
+    }
+    Ok(config)
 }
 
 pub(crate) async fn meas_call(c: &Client, cmd: Command) -> Result<Measurement, CliError> {
@@ -424,6 +481,17 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
         MeasCmd::List { .. } => {
             let s = state(&c).await?;
             out.emit(&s.measurements, || output::measurements(&s.measurements))?;
+        }
+        MeasCmd::Set {
+            meas,
+            average,
+            blocks,
+        } => {
+            let s = state(&c).await?;
+            let m = find_meas(&s, meas)?;
+            let config = meas_set(&m.config, average.map(|a| a.0), *blocks)?;
+            let m = meas_call(&c, Command::MeasUpdate { meas: m.id, config }).await?;
+            out.emit(&m, || output::measurement(&m))?;
         }
         MeasCmd::Start { meas } | MeasCmd::Stop { meas } => {
             let s = state(&c).await?;
@@ -867,6 +935,81 @@ mod tests {
             e.to_string().contains("--lf-harmonics applies to a sweep"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn spectrum_and_rta_take_an_average_and_meas_set_changes_it() {
+        use ac2_proto::units::Seconds;
+        let rta = config(&[
+            "rta",
+            "--name",
+            "r",
+            "--input",
+            "1",
+            "--average",
+            "fifo:2400",
+        ])
+        .expect("rta");
+        let MeasKind::Rta { config: c } = &rta.kind else {
+            panic!("{rta:?}");
+        };
+        assert_eq!(c.averaging, SpecAveraging::Fifo { frames: 2400 });
+        let spec = config(&[
+            "spectrum",
+            "--name",
+            "s",
+            "--input",
+            "1",
+            "--average",
+            "exp:2s",
+        ])
+        .expect("spectrum");
+        let MeasKind::Spectrum { config: c } = &spec.kind else {
+            panic!("{spec:?}");
+        };
+        assert_eq!(
+            c.averaging,
+            SpecAveraging::Exponential {
+                time_constant: Seconds(2.0)
+            }
+        );
+        // Off unless asked, as the UI's dialogs.
+        let plain = config(&["rta", "--name", "r", "--input", "1"]).expect("rta");
+        assert!(matches!(
+            plain.kind,
+            MeasKind::Rta { config } if config.averaging == SpecAveraging::Off
+        ));
+        assert!(config(&["rta", "--name", "r", "--input", "1", "--average", "fifo:0"]).is_err());
+        let e = config(&[
+            "tf",
+            "--name",
+            "t",
+            "--ref",
+            "2",
+            "--meas",
+            "1",
+            "--average",
+            "exp:1s",
+        ])
+        .expect_err("refused");
+        assert!(e.to_string().contains("tf averages over --blocks"), "{e}");
+
+        let set = meas_set(&rta, Some(SpecAveraging::Off), None).expect("set");
+        assert!(matches!(
+            set.kind,
+            MeasKind::Rta { config } if config.averaging == SpecAveraging::Off
+        ));
+        assert!(meas_set(&rta, None, None).is_err());
+        let e = meas_set(&rta, None, Some(4)).expect_err("refused");
+        assert!(e.to_string().contains("--blocks applies to tf"), "{e}");
+        let tf = config(&["tf", "--name", "t", "--ref", "2", "--meas", "1"]).expect("tf");
+        let set = meas_set(&tf, None, Some(32)).expect("set");
+        assert!(matches!(
+            set.kind,
+            MeasKind::Transfer { config } if config.averaging == TfAveraging::Fifo { blocks: 32 }
+        ));
+        let e = meas_set(&tf, Some(SpecAveraging::Off), None).expect_err("refused");
+        assert!(e.to_string().contains("t is a tf measurement"), "{e}");
     }
 
     /// A merged lobe lists one candidate: the text explains why and offers only `--pick 1`.

@@ -948,6 +948,23 @@ impl AppState {
                     }
                     return;
                 }
+                // A spectrum or RTA selected edits its input, smoothing or bands, averaging.
+                let spec = self
+                    .selected_meas()
+                    .filter(|m| {
+                        matches!(
+                            m.config.kind,
+                            MeasKind::Spectrum { .. } | MeasKind::Rta { .. }
+                        )
+                    })
+                    .cloned();
+                if let Some(m) = spec {
+                    match Form::edit_spec(&m, &self.session_input_names()) {
+                        Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+                        Err(e) => self.warn(e),
+                    }
+                    return;
+                }
                 let m = self
                     .selected_meas()
                     .filter(|m| matches!(m.config.kind, MeasKind::Math { .. }))
@@ -966,7 +983,9 @@ impl AppState {
                 match m.map(|m| Form::edit_math(&m, candidates)) {
                     Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
                     Some(Err(e)) => self.warn(e),
-                    None => self.warn("select a math channel or a sweep measurement first"),
+                    None => self.warn(
+                        "select a math channel, a sweep measurement, a spectrum or an RTA first",
+                    ),
                 }
             }
             C::HideGroup => self.toggle_group_shown(out),

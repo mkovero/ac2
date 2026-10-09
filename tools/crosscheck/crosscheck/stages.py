@@ -611,6 +611,18 @@ def _pw_active(rig) -> bool:
     return subprocess.run(rig["pipewire"]["is_active"], capture_output=True, text=True).stdout.strip() == "active"
 
 
+# ac2's RTA FIFO holds at most this many frames (SpecAveraging::MAX_RTA_FIFO_FRAMES).
+RTA_FIFO_MAX = 65536
+
+
+def rta_average(window_s: float) -> str:
+    """`--average` for an RTA that must not drop a frame over a run of `window_s` plus the
+    stage's setup and teardown (a minute of margin): frames at 90 per second, above the
+    daemon's 60 result intervals per second."""
+    frames = int(min(RTA_FIFO_MAX, max(1, round((window_s + 60.0) * 90.0))))
+    return f"fifo:{frames}"
+
+
 def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
     """No emission: the mic input's ambient level by ac2's SPL meters (Z, A, C), REW's SPL
     meters through PipeWire, both RTAs, and a JACK recording of the same seconds."""
@@ -665,8 +677,15 @@ def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
                 ctx.manifest.setdefault("notes", []).append(f"ambient: REW RTA config: {e}")
         name = "xc-ambient-rta"
         ctx.ac2.meas_rm(name)
+        # The RTA must read the window's power mean, as numpy's column and an Leq do: every
+        # moment counted equally. A FIFO longer than the whole run (an RTA frame is one result
+        # interval, at most ~60 per second) never drops a frame, so it is the duration-weighted
+        # power mean from the start to the capture: the window plus the few seconds of the
+        # same room around it. An exponential with tau ~ window/3 would weight the last third
+        # ~63 %, an estimate of the end of the window rather than its mean.
+        rta_avg = rta_average(secs)
         ctx.ac2.run("meas", "new", "rta", "--name", name, "--input", mic_in, "--fraction", "3", "--from", "20hz",
-                    "--to", "20khz", "--weight", "z", "--start")
+                    "--to", "20khz", "--weight", "z", "--average", rta_avg, "--start")
         starts = {}
         for w in ("z", "a", "c"):
             argv = ctx.ac2.argv("spl", "watch", "--input", mic_in, "--weight", w, "--time", "slow", "--for",
@@ -703,7 +722,8 @@ def ambient_stage(ctx: Ctx, cal: dict, cal_file: str | None):
         ctx.ac2.export_trace(cap.get("id") or f"{name}-cap", d / "ac2_rta.csv")
         ctx.ac2.run("meas", "stop", name, json_out=False, check=False)
         _j(d / "window.json", {"seconds": secs, "starts_unix": starts,
-                               "skew_s": max(starts.values()) - min(starts.values())})
+                               "skew_s": max(starts.values()) - min(starts.values()),
+                               "ac2_rta_average": rta_avg})
     finally:
         for p, f in procs:
             if p.poll() is None:
