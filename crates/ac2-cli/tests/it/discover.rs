@@ -19,6 +19,7 @@ fn advert(name: &str, key: &KeyPair) -> Advert {
         version: "1.2.3".into(),
         proto: ac2_proto::PROTO_VERSION,
         fingerprint: key.public.fingerprint(),
+        server_key: key.public.to_z85(),
     }
 }
 

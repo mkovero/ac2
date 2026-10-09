@@ -1,15 +1,14 @@
 //! mDNS / DNS-SD for network-mode ac2 daemons (PLAN.md §6.4).
 //!
 //! A daemon in network mode advertises one `_ac2._tcp` service: its ctrl port, a human name,
-//! the daemon version, the protocol version and the **fingerprint** of its CURVE server key.
+//! the daemon version, protocol version, public CURVE server key and its fingerprint.
 //! Clients browse for those adverts to list rigs on the local network.
 //!
 //! Discovery never establishes trust. Anyone on the network can send an advert with any
 //! name and any fingerprint. A client connects to a discovered rig only with a server key it
-//! pinned earlier (`ac2 auth pair`), and CURVE refuses a server that cannot prove it holds
-//! that key's secret half. The advertised fingerprint only lets a client *select* which
-//! pinned key to try and tell the operator whether a rig looks paired; a mismatch is shown,
-//! never acted on.
+//! pinned after the operator verified its fingerprint on the daemon host. CURVE refuses a
+//! server that cannot prove it holds that key's secret half. A discovered public key may
+//! prefill pairing, but must never replace a pinned key without operator verification.
 //!
 //! Layers: [`Advert`] / [`Rig`] / [`RigTable`] are plain data with the TXT encoding and the
 //! browse-result bookkeeping (tested without a network); [`Advertiser`] and [`Browser`] are
@@ -33,7 +32,7 @@ pub const SERVICE_TYPE: &str = "_ac2._tcp.local.";
 /// The mDNS port (RFC 6762).
 pub const MDNS_PORT: u16 = 5353;
 /// Version of the TXT record layout below (`txtvers`, RFC 6763 §6.7).
-pub const TXT_VERSION: &str = "1";
+pub const TXT_VERSION: &str = "2";
 /// Longest instance name we advertise (a DNS label is at most 63 bytes).
 pub const MAX_NAME_LEN: usize = 63;
 
@@ -48,6 +47,8 @@ pub struct Advert {
     pub proto: u16,
     /// Fingerprint of the daemon's CURVE server key (`PublicKey::fingerprint`).
     pub fingerprint: String,
+    /// Z85-encoded public server key. Discovery supplies it, never grants trust.
+    pub server_key: String,
 }
 
 /// A TXT record that is not an ac2 advert we understand.
@@ -99,6 +100,7 @@ impl Advert {
             ("v", self.version.clone()),
             ("proto", self.proto.to_string()),
             ("fp", self.fingerprint.clone()),
+            ("key", self.server_key.clone()),
         ]
     }
 
@@ -121,11 +123,21 @@ impl Advert {
                 value: fingerprint,
             });
         }
+        let server_key = need("key")?;
+        const Z85: &str =
+            "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
+        if server_key.len() != 40 || !server_key.bytes().all(|b| Z85.as_bytes().contains(&b)) {
+            return Err(TxtError::Invalid {
+                key: "key",
+                value: server_key,
+            });
+        }
         Ok(Self {
             name: need("name")?,
             version: need("v")?,
             proto,
             fingerprint,
+            server_key,
         })
     }
 }
@@ -654,6 +666,7 @@ mod tests {
             version: "1.0.0".into(),
             proto: 1,
             fingerprint: "1a2b-3c4d-5e6f-7a8b-9c0d".into(),
+            server_key: "0".repeat(40),
         }
     }
 
@@ -690,9 +703,21 @@ mod tests {
             Advert::from_txt(move |k| m.get(k).cloned())
         };
         assert_eq!(with("fp", None), Err(TxtError::Missing("fp")));
+        assert_eq!(with("key", None), Err(TxtError::Missing("key")));
+        for bad in [
+            "".to_owned(),
+            "0".repeat(39),
+            "0".repeat(41),
+            "_".repeat(40),
+        ] {
+            assert!(matches!(
+                with("key", Some(&bad)),
+                Err(TxtError::Invalid { key: "key", .. })
+            ));
+        }
         assert_eq!(
-            with("txtvers", Some("2")),
-            Err(TxtError::Version("2".into()))
+            with("txtvers", Some("99")),
+            Err(TxtError::Version("99".into()))
         );
         assert!(matches!(
             with("proto", Some("one")),

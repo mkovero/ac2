@@ -1435,14 +1435,15 @@ TXT record (all values UTF-8 strings):
 
 | key | meaning |
 |---|---|
-| `txtvers` | layout of this record, `1`. A reader that does not know the value ignores the advert. |
+| `txtvers` | layout of this record, `2`. A reader that does not know the value ignores the advert. |
 | `name` | the rig name, as above |
 | `v` | daemon version (`ac2d --version`) |
 | `proto` | `PROTO_VERSION` the daemon speaks (§2) |
 | `fp` | fingerprint of the daemon's CURVE server key: the first 10 bytes of SHA-256 over the 32 raw key bytes as five dash-separated groups of four lowercase hex digits (`1a2b-3c4d-5e6f-7a8b-9c0d`) |
 
-The advert carries no key and grants nothing. A client connects only with a server key it
-pinned beforehand (`ac2 auth pair`, after comparing the fingerprint with the one the daemon
-host shows), and CURVE fails the handshake when the daemon does not hold that key. Clients
+The `key` TXT value is the full 40-character Z85 public CURVE server key.
+The advert carries no secret and grants nothing. A client connects only with a server key it
+pinned after comparing the fingerprint with the one the daemon host shows
+(`ac2 auth pair` or a discovered-key pairing dialog), and CURVE fails the handshake when the daemon does not hold that key. Clients
 may use `fp` to pick which pinned key belongs to an advert and to warn when a known host
 advertises a different fingerprint; they must not pin a key based on an advert alone.

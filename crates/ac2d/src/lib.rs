@@ -504,6 +504,7 @@ fn advertise(a: &Advertise, key: &PublicKey, ctrl: &str) -> Option<ac2_discovery
         version: env!("CARGO_PKG_VERSION").to_owned(),
         proto: ac2_proto::PROTO_VERSION,
         fingerprint: key.fingerprint(),
+        server_key: key.to_z85(),
     };
     let report = |e: ac2_discovery::AdvertEvent| match e {
         ac2_discovery::AdvertEvent::Error(e) => {

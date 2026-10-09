@@ -33,14 +33,16 @@ fn have_gpu(test: &str) -> bool {
 
 fn rig(name: &str, key: &PublicKey, addr: &str, port: u16) -> Rig {
     let fp = key.fingerprint();
+    let z85 = key.to_z85();
     let name_s = name.to_owned();
     let txt = move |k: &str| -> Option<String> {
         match k {
-            "txtvers" => Some("1".into()),
+            "txtvers" => Some(ac2_discovery::TXT_VERSION.into()),
             "name" => Some(name_s.clone()),
             "v" => Some("1.0.0".into()),
             "proto" => Some(ac2_proto::PROTO_VERSION.to_string()),
             "fp" => Some(fp.clone()),
+            "key" => Some(z85.clone()),
             _ => None,
         }
     };

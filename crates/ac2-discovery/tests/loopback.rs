@@ -30,6 +30,7 @@ fn advert_is_browsed_and_goodbye_removes_it() {
         version: "9.9.9".into(),
         proto: 1,
         fingerprint: "0000-1111-2222-3333-4444".into(),
+        server_key: "0".repeat(40),
     };
     let browser = Browser::start(&opts).unwrap_or_else(|e| panic!("{e}"));
     let adv = Advertiser::start(
