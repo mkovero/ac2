@@ -3,6 +3,25 @@
 Work found in use, not yet scheduled into a phase. Newest first. Move an item to
 `backlog-done.md` with the commit when it lands.
 
+## Band Leq (2026-10-09, after eb74253; design `band-leq.md`)
+
+- **The daemon drops a frame that fails to encode without a word.** With 22 band windows the
+  `band_leq` frame meta passed the old 1 KiB header cap and no band frame arrived at all, with
+  nothing in the log (cap now 8 KiB, eb74253). Log once per stream and job when an encode or
+  send fails.
+- **Predicted window only from a preset**: its length and day/night LAeq limits are not
+  settable in the dialog or `spl bands set`.
+- **No per-band warn margin beyond the window's own**; a range added with "+ range…" copies
+  one margin to every band.
+- **+ / − are mouse-only in the dialog**; keys are Insert / Shift+Insert / Delete. Arrows in
+  the Band column shift a little with the label width ("31.5 Hz" vs "20 Hz"), as in the Leq rows.
+- **Transfer step**: per-band numbers are a text wall (a table would read better); typing an
+  estimated attenuation is CLI-only (`ac2 spl bands estimate`).
+- **Band history view** (per-band Leq over time from the band log); recorder file-time marks
+  for transfer spans; spans of a fast-pace replay.
+- **`ac2-core` comments still say "dwelling"** (never shown to users; the UI names the
+  operator's place).
+
 ## Protocol tidy-up (2026-10-08, protocol.md audit)
 
 - **`EssSpec.fade_in` is mostly dead on the wire.** Since the sweep starts below the asked

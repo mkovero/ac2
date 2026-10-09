@@ -2,6 +2,29 @@
 
 Items moved here from `backlog.md` when they land, newest first, with the commit.
 
+Band Leq per 1/3-octave band against STM 545/2015 (operator's pro-audio friend, 2026-10-08;
+design and stages in `band-leq.md`):
+- **Core, daemon, scene, CLI** (86aca6e, 6f61a09, 104a050, ba731d1): band integrator over the
+  1/3-octave bank, rolling windows per band, day/night limits, per-second band log, the SPL
+  pane's band view, `ac2 spl bands set|watch`.
+- **Transfer FOH → place without a cable** (35f6ca4): `spl.band_log_get`, the app's transfer
+  step (T on a band row), `ac2 spl bands log|transfer|estimate`, `ac2 rec import` for a
+  recorder's WAV.
+- **Band windows like the Leq windows** (ae54f65, operator: "make band meter configuration
+  similar to Leq … do not be so specific"): length and Z/A/C weighting per window, no
+  "no band transfer" headline, the place is named by the operator (never "bedroom"); band
+  frames go STALE after 3 s like Leq (was 1 s: the yellow STALE banner flickered).
+- **One band per window, + / − like the Leq rows** (502f87e, eb74253, operator: "add single
+  bands in similar way than one can add Leq windows"; "add band ranges too but make it
+  generate the single bands"): `‹63 Hz› ‹LZeq 60 min› ‹Z› limit day+dB warn −`, "+ range…" /
+  Shift+Insert expands a range into single-band rows, `--windows z:60min@20hz..200hz` expands
+  the same way; the 545 preset is 11 rows; the frame header cap 1 KiB → 8 KiB. PROTO 32,
+  session format 17.
+
+CI (operator, 2026-10-08, ae54f65): pushes run Linux only; macOS / Windows run before each
+release and on `gh workflow run ci.yml --ref <branch> -f all_os=true`. Deploy binaries are
+built locally, never taken from CI.
+
 One delay per measurement (operator, 2026-10-07: "measurement can have delay change and it
 can be nudged, this is confusing"; then "make sure the delay change is reported on
 measurements and traces in similar way"):

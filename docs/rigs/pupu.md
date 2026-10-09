@@ -338,6 +338,24 @@ from ketunkolo. Per-topic traffic over 30 s with a throwaway CURVE subscriber on
 689.7 → 238.2 KiB/s (the two ÷ channels of stored traces 30 → 3.8 msg/s, the spectrum sum
 30 → 17.4 msg/s); ac2d CPU over 60 s 60 → 48 % of a core (the sum's thread 20.8 → 13.0 %).
 
+## Deploys 35f6ca4 … eb74253 (2026-10-08/09, all three hosts)
+
+Four deploys of the band Leq work, each a session format change (13 → 17), so each was the
+restore from the previous one: `autosave.vN` set aside by the new daemon, a `restore.sh`
+recreating measurements 1–14 in id order, `trace import` of `autosave.vN/traces/*`
+(copied to ketunkolo with `scp -3`), then the band and Leq presets. Backups and scripts in
+`/work/ac2-scratch/deploy-<sha>/` (state dump, `restore.sh`); the newest is
+`deploy-eb74253/` (protocol 32, session format 17, 14 measurements, 52 traces).
+- Not recreated: the `xc-*` / `xc-dut-*` measurements; `tools/crosscheck` makes its own.
+- State at eb74253: FOH SPL (1) Leq preset `finland-545` (LAeq 4 h 100, LAFmax 115,
+  LCpeak 140) and band preset `finland-545-lf`; FOH SPL (5) Leq `din15905` and band
+  `finland-545-lf`; no band transfer measured. TF 2 stays stopped after the restore.
+- The script's `session open` is the one in the state dump (8 in, 6 out, loopback 2→2, mic
+  MM1 34804 on in 1); check `session open --help` still takes its flags before running it.
+- The Pi's cross build (`~/src/sys/ac2pi/build-ac2.sh`) reused crates built from an earlier
+  checkout once and failed on types the checkout no longer had; touching the sources
+  (`find crates -name '*.rs' -exec touch {} +`) fixed it.
+
 ## Deploy of 6136f8a (2026-10-07, all three hosts)
 
 Protocol 25, session format 12 (a measurement's delay steps kept apart from its measured
