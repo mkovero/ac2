@@ -358,7 +358,7 @@ recreating measurements 1–14 in id order, `trace import` of `autosave.vN/trace
 
 ## Deploy of 8b87f49 (2026-10-09, all three hosts)
 
-No protocol or session format change (protocol 33, session format 18): a plain swap, the
+No protocol or session format change (protocol 34, session format 19): a plain swap, the
 daemon restored its autosave and `session open` reopened audio. New for the operator: a mic's
 curve now applies to sweeps through that input as well (a display edit on the stored trace,
 `meta.mic_curve`; the columns stay raw), and spectrum/RTA averaging is settable (`ac2 meas
