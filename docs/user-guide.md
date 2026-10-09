@@ -647,7 +647,8 @@ a **time axis** (ms re t = 0):
   **Shift+←** / **Shift+→** step it (a sample when zoomed in, a hundredth of the shown span otherwise). The readout under the
   origin line reads its sample: `1.25 ms · +0.500 FS` or `1.25 ms · −12.3 dB`.
 - The IR pane and the sweep's IR view each keep their own zoom and cursor; the log / ETC
-  ranges are remembered in `ui.toml` (`ir`, `sweep_ir`).
+  ranges are remembered in `ui.toml` (`ir`, `sweep_ir`). A selected transfer trace's stored
+  IR is drawn on the IR pane's axes ([The impulse-response pane](#the-impulse-response-pane)).
 
 The sweep's response & distortion view uses the frequency keys and mouse of the other
 panes, its level axis in dB or in % (the wheel zooms about the level under the pointer
@@ -993,6 +994,20 @@ its transfer curve is (`stopped`, `audio stopped`, `STALE`). Without an IR it sa
   `armed — Enter starts the stimulus`, or, with the stimulus playing,
   `nothing is driving the loopback`);
 - `no signal: …`.
+
+**A stored IR.** A transfer capture (**Ctrl+1 … 9**, or *Capture*) keeps the impulse
+response the IR pane showed at that moment — every sample, time zero at the trace's
+inserted delay — unless the measurement had none yet (no reference). **Select** that trace
+(**V**, or a click on its row) and the IR pane draws its IR instead of the live one, in the
+trace's colour and named after the origin line as its legend row names it:
+`t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`. No live banners apply to it;
+the keys, zoom and cursor are the pane's as before. The pane goes back to the live IR when
+the trace is deselected (**V** past the last trace, a click on it again, *Deselect the stored
+trace*, or a measurement selected), or when the selected trace has no IR (an average, a math
+capture, an import of analyzer text, a capture taken without a reference). Only a trace the
+transfer pane would draw beside the pane's measurement is picked up: one of its group, or
+one compared (**C**). The IR travels with the trace in sessions, the autosave and ac2 CSV
+exports.
 
 <sub>[↑ Contents](#contents)</sub>
 

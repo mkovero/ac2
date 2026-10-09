@@ -67,6 +67,7 @@ fn trace_data(meta: &TraceMeta) -> ConnEvent {
             phase_deg: None,
             coherence: None,
             sweep: None,
+            ir: None,
         }),
         Arc::new(GridDef::Log {
             ppo: 1,

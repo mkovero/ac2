@@ -9,6 +9,7 @@ use std::borrow::Cow;
 
 use ac2_proto::FrameData;
 use ac2_proto::frame::IrFrame;
+use ac2_proto::model::{TraceData, TraceKind};
 use ac2_proto::topic::Stream;
 use ac2_scene::axis::Range;
 use ac2_scene::format;
@@ -80,11 +81,29 @@ impl AppState {
         }
     }
 
+    /// The stored trace an IR pane following `shown` draws instead of its live IR: the
+    /// selected trace, when it is a transfer trace captured with an impulse response that a
+    /// transfer pane showing `shown` draws (in its group, or compared). Selecting the
+    /// trace is what picks it, as it picks the sweep pane's run; with no such trace
+    /// selected the pane follows its measurement live.
+    pub fn stored_ir(&self, shown: Option<&ac2_proto::model::Measurement>) -> Option<&TraceData> {
+        let (d, _) = self.traces.get(&self.selected_trace?)?;
+        (d.meta.kind == TraceKind::Transfer
+            && d.ir.is_some()
+            && (self.on_transfer_pane(&d.meta, shown)
+                || self.trace_compared_on_transfer(&d.meta, shown)))
+        .then_some(d.as_ref())
+    }
+
     /// The IR picture `p` draws, when it has one.
     pub fn ir_frame_of(&self, p: IrPane) -> Option<Cow<'_, IrFrame>> {
         match p {
             IrPane::Live => {
-                let m = self.live_ir_meas()?;
+                let shown = self.live_ir_meas();
+                if let Some(d) = self.stored_ir(shown) {
+                    return ac2_scene::ir::stored_frame(d).map(Cow::Owned);
+                }
+                let m = shown?;
                 if self.meas_hidden(m) {
                     return None;
                 }

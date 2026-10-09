@@ -12,8 +12,8 @@ use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathConfig,
     MathExpr, MeasKind, Measurement, MicCurveId, MicState, NamedOperand, Operand, Smoothing,
-    SmoothingMode, SweepData, TraceEdit, TraceKind, TraceMeta, TraceMicCurve, TraceOwner,
-    TraceSource,
+    SmoothingMode, SweepData, TraceEdit, TraceIr, TraceKind, TraceMeta, TraceMicCurve, TraceOwner,
+    TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -32,6 +32,8 @@ pub(crate) struct TraceStore {
     data: BTreeMap<TraceId, (GridDef, Columns)>,
     /// Distortion and IR of sweep traces.
     sweeps: BTreeMap<TraceId, SweepData>,
+    /// The IR transfer traces were captured with.
+    irs: BTreeMap<TraceId, TransferIr>,
     /// Mic curves applied after capture.
     mic_curves: BTreeMap<TraceId, Correction>,
     next_id: u32,
@@ -51,6 +53,7 @@ impl TraceStore {
         grid: GridDef,
         columns: Columns,
         sweep: Option<SweepData>,
+        ir: Option<TransferIr>,
         mic_curve: Option<Correction>,
     ) {
         self.next_id = self.next_id.max(id.0.saturating_add(1));
@@ -61,6 +64,14 @@ impl TraceStore {
             }
             None => {
                 self.sweeps.remove(&id);
+            }
+        }
+        match ir {
+            Some(i) => {
+                self.irs.insert(id, i);
+            }
+            None => {
+                self.irs.remove(&id);
             }
         }
         self.set_mic_curve(id, mic_curve);
@@ -80,12 +91,14 @@ impl TraceStore {
     pub(crate) fn remove(&mut self, id: TraceId) {
         self.data.remove(&id);
         self.sweeps.remove(&id);
+        self.irs.remove(&id);
         self.mic_curves.remove(&id);
     }
 
     pub(crate) fn clear(&mut self) {
         self.data.clear();
         self.sweeps.clear();
+        self.irs.clear();
         self.mic_curves.clear();
     }
 
@@ -118,6 +131,25 @@ fn common_smoothing(inputs: &[&StoredTrace], kind: TraceKind) -> Option<Smoothin
         .flatten()
 }
 
+/// The IR pane's frame as a transfer trace keeps it: every sample the pane drew, time zero
+/// at the inserted delay, which is the trace's `delay`. The live IR is the inverse FFT of the
+/// full-rate transfer stage, so it is circular over one FFT length (4096 points, ±42.7 ms at
+/// 48 kHz): an arrival further from the inserted delay wraps round into that span. The span
+/// therefore holds everything the IR can say and is kept whole, a fixed 32 KiB of samples
+/// per trace at any sample rate (about 190 kB as CSV rows in a session).
+fn transfer_ir(f: ac2_proto::frame::IrFrame) -> Option<TransferIr> {
+    let etc_db = f.etc?;
+    (etc_db.len() == f.linear.len()).then_some(TransferIr {
+        sample_rate: f.meta.sample_rate,
+        ir: TraceIr {
+            t0: f.meta.t0,
+            dt: f.meta.dt,
+            linear: f.linear,
+            etc_db,
+        },
+    })
+}
+
 fn no_trace(id: TraceId) -> ProtoError {
     perr(ErrorCode::NotFound, format!("no trace {id}"))
 }
@@ -145,6 +177,7 @@ impl Control {
             grid,
             columns,
             sweep: self.traces.sweeps.get(&id).cloned(),
+            ir: self.traces.irs.get(&id).cloned(),
             mic_curve: self.traces.mic_curves.get(&id).cloned(),
         })
     }
@@ -156,13 +189,14 @@ impl Control {
         grid: GridDef,
         columns: Columns,
         sweep: Option<SweepData>,
+        ir: Option<TransferIr>,
     ) -> ReplyBody {
         let gid = self.register_grid(grid.clone());
         debug_assert_eq!(gid, meta.grid_id);
         for other in meta::take_slot(&self.store.state().traces, meta.id, meta.edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
-        self.traces.insert(meta.id, grid, columns, sweep, None);
+        self.traces.insert(meta.id, grid, columns, sweep, ir, None);
         self.commit(Change::Trace(Patch::Set(meta.clone())));
         ReplyBody::Trace(meta)
     }
@@ -210,7 +244,7 @@ impl Control {
                 ),
             ));
         }
-        let frame = self
+        let super::Captured { frame, ir } = self
             .jobs
             .get(&meas)
             .and_then(super::JobHandle::capture)
@@ -309,8 +343,11 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
+        let ir = ir
+            .filter(|_| kind == TraceKind::Transfer)
+            .and_then(transfer_ir);
         tracing::info!("trace {id} captured from measurement {meas}");
-        Ok(self.add_trace(t, grid, columns, None))
+        Ok(self.add_trace(t, grid, columns, None, ir))
     }
 
     /// The name of math operand `o` as the state names it now.
@@ -412,7 +449,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} captured from math channel {}", m.id);
-        Ok(self.add_trace(t, grid, columns, None))
+        Ok(self.add_trace(t, grid, columns, None, None))
     }
 
     pub(super) fn trace_get(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
@@ -505,7 +542,7 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
-        Ok(self.add_trace(t, d.grid, d.columns, None))
+        Ok(self.add_trace(t, d.grid, d.columns, None, None))
     }
 
     pub(super) fn trace_average(
@@ -570,7 +607,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
-        Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep))
+        Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir))
     }
 
     /// `trace.mic_curve`: puts the curve the calibration store holds for `mic` on the

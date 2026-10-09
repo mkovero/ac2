@@ -331,7 +331,7 @@ fn capture_average_math_export_import() {
     assert_eq!(file_name, "aligned.csv");
     let csv = String::from_utf8(content.0.clone()).unwrap();
     assert!(
-        csv.starts_with("# ac2 trace export v3\n# name: aligned\n"),
+        csv.starts_with("# ac2 trace export v4\n# name: aligned\n"),
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
@@ -1058,7 +1058,7 @@ fn session_save_load_round_trip() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     std::fs::write(
         &manifest,
-        text.replace("\"version\": 18", "\"version\": 19"),
+        text.replace("\"version\": 19", "\"version\": 20"),
     )
     .unwrap();
     let e = c
@@ -1072,8 +1072,8 @@ fn session_save_load_round_trip() {
     assert_eq!(
         e.detail,
         Some(ErrorDetail::SessionVersion {
-            found: 19,
-            supported: 18
+            found: 20,
+            supported: 19
         })
     );
     assert_eq!(traces(c).len(), n);
@@ -1452,5 +1452,110 @@ fn old_sweep_export_imports_as_transfer_with_its_delay() {
         TraceSource::Imported { notes, .. } if notes == &[ImportNote::SweepWithoutAnalysis]
     ));
     assert!(data(c, t.id).sweep.is_none());
+    r.h.shutdown();
+}
+
+/// Time of the largest |sample| of a stored transfer IR, seconds re the trace's delay.
+fn ir_peak_s(ir: &TransferIr) -> f64 {
+    let (i, _) = ir
+        .ir
+        .linear
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+        .unwrap();
+    ir.ir.t0.0 + i as f64 * ir.ir.dt.0
+}
+
+/// A transfer capture keeps the IR the IR pane shows: every sample, time zero at the
+/// inserted delay (the trace's `delay`), so the acoustic arrival sits at its path delay
+/// less the inserted delay. It survives export and import. A measurement whose reference
+/// never carried signal has no IR to keep.
+#[test]
+fn transfer_capture_keeps_its_ir() {
+    let mut r = rig("trace-ir");
+    let c = &mut r.c;
+    let fs = f64::from(FS);
+    let path_s = f64::from(ACOUSTIC_DELAY) / fs;
+    let raw = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "raw".into(),
+        slot: Some(1),
+    }));
+    let ir = data(c, raw.id).ir.expect("captured with an IR");
+    assert_eq!(ir.sample_rate, Hz(fs));
+    assert_eq!(ir.ir.linear.len(), 4096);
+    assert_eq!(ir.ir.etc_db.len(), 4096);
+    assert!((ir.ir.dt.0 - 1.0 / fs).abs() < 1e-15);
+    assert!((ir.ir.t0.0 + 2048.0 / fs).abs() < 1e-12);
+    let peak = ir_peak_s(&ir);
+    assert!((peak - path_s).abs() < 0.5 / fs, "peak {peak}");
+
+    // Aligned: the arrival moves to time zero with the inserted delay.
+    let rev = match c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(path_s),
+    }) {
+        ReplyBody::Measurement(m) => m.config_rev.0,
+        other => panic!("{other:?}"),
+    };
+    settle(&mut r.d, c, &r.sub, r.tok, rev);
+    let aligned = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "aligned".into(),
+        slot: Some(2),
+    }));
+    let air = data(c, aligned.id).ir.expect("captured with an IR");
+    assert!((aligned.delay.0 - path_s).abs() < 1e-12);
+    let peak = ir_peak_s(&air);
+    assert!(peak.abs() < 0.5 / fs, "peak {peak}");
+
+    // Export and import keep it bit for bit.
+    let content = match c.ok(Command::TraceExport {
+        trace: aligned.id,
+        format: ExportFormat::Ac2Csv,
+    }) {
+        ReplyBody::Export { content, .. } => content,
+        other => panic!("{other:?}"),
+    };
+    let back = trace(c.ok(Command::TraceImport {
+        file_name: "aligned.csv".into(),
+        format: ImportFormat::Auto,
+        role: ImportRole::Trace,
+        content,
+    }));
+    assert_eq!(data(c, back.id).ir, Some(air));
+
+    // The stimulus stops (and has faded out) before a second measurement starts: its
+    // reference never carries signal, so it has a result but no IR.
+    c.ok(Command::GenSet {
+        lease_token: r.tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: false,
+        },
+    });
+    run(&mut r.d, 1.0);
+    c.ok(Command::MeasCreate {
+        config: transfer("no-ref"),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(2) });
+    for _ in 0..4 {
+        run(&mut r.d, 0.5);
+        c.ok(Command::GenRefresh { lease_token: r.tok });
+    }
+    let none = trace(c.ok(Command::TraceCapture {
+        meas: MeasId(2),
+        name: "no reference".into(),
+        slot: None,
+    }));
+    assert_eq!(none.kind, TraceKind::Transfer);
+    assert_eq!(data(c, none.id).ir, None);
     r.h.shutdown();
 }

@@ -1,12 +1,14 @@
-//! Live impulse-response pane: linear, log (|h| in dB re peak) or ETC, on a time axis whose
+//! Impulse-response pane: linear, log (|h| in dB re peak) or ETC, on a time axis whose
 //! origin is the inserted delay.
 //!
 //! The IR frame's point `i` is at `t0 + i·dt` seconds relative to the inserted delay, so
 //! t = 0 is where the delay finder put the arrival; the absolute time is `t + inserted`.
 //! The log and ETC views are normalised to their own peak (0 dB = strongest point), which
-//! is display scaling, not a level claim.
+//! is display scaling, not a level claim. A stored transfer trace captured with an IR
+//! ([`stored_ir_scene`]) is drawn the same way, time zero at its delay.
 
 use ac2_proto::frame::IrFrame;
+use ac2_proto::model::TraceData;
 
 use crate::axis::{self, Axis, Range};
 use crate::banner::{BannerRow, Status};
@@ -30,7 +32,7 @@ pub struct IrScene {
     /// Why nothing is drawn, when that is the case.
     pub note: Option<String>,
     /// The curve's freshness as its transfer curve's legend says it (`stopped`,
-    /// `STALE 3.2 s`, `audio stopped`), drawn after the origin.
+    /// `STALE 3.2 s`, `audio stopped`), or a stored trace's name, drawn after the origin.
     pub tag: Option<String>,
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
@@ -181,6 +183,63 @@ pub fn ir_scene(
     theme: &Theme,
     size: Viewport,
 ) -> IrScene {
+    let tag = freshness.and_then(|f| f.tag());
+    draw(
+        frame, color, freshness, tag, status, view, axes, chrome, theme, size,
+    )
+}
+
+/// A stored transfer trace's impulse response as an IR frame: the samples it was captured
+/// with, time zero at its `delay` (the inserted delay at capture).
+pub fn stored_frame(d: &TraceData) -> Option<IrFrame> {
+    let s = d.ir.as_ref()?;
+    Some(IrFrame {
+        meas: ac2_proto::units::MeasId(0),
+        meta: ac2_proto::frame::IrMeta {
+            sample_rate: s.sample_rate,
+            t0: s.ir.t0,
+            dt: s.ir.dt,
+            inserted_delay: d.meta.delay,
+        },
+        linear: s.ir.linear.clone(),
+        etc: Some(s.ir.etc_db.clone()),
+    })
+}
+
+/// A stored transfer trace's impulse response in the IR pane: drawn in the trace's colour
+/// and tagged with its name, as its row in the transfer legend names it. `None` for a
+/// trace captured without one.
+#[allow(clippy::too_many_arguments)]
+pub fn stored_ir_scene(
+    d: &TraceData,
+    color: Color,
+    status: &Status,
+    view: &ViewState,
+    axes: &IrAxes,
+    chrome: PlotChrome,
+    theme: &Theme,
+    size: Viewport,
+) -> Option<IrScene> {
+    let frame = stored_frame(d)?;
+    let tag = Some(d.meta.edit.name.clone());
+    Some(draw(
+        &frame, color, None, tag, status, view, axes, chrome, theme, size,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw(
+    frame: &IrFrame,
+    color: Color,
+    freshness: Option<Freshness>,
+    tag: Option<String>,
+    status: &Status,
+    view: &ViewState,
+    axes: &IrAxes,
+    chrome: PlotChrome,
+    theme: &Theme,
+    size: Viewport,
+) -> IrScene {
     let mode = view.ir.mode;
     let mut c = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
@@ -205,7 +264,6 @@ pub fn ir_scene(
         "t = 0 at inserted delay {}",
         readout::delay_readout(frame.meta.inserted_delay.0, view.temperature_c)
     );
-    let tag = freshness.and_then(|f| f.tag());
     let origin_line = match &tag {
         Some(t) => format!("{origin} · {t}"),
         None => origin.clone(),

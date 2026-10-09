@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, CalKey, DelayReference, DepthPolicy, EssSpec, LevelScale, LfHarmonics, MathExpr,
-    MathOp, MicCurveRef, Operand, PhaseBasis, Smoothing, SweepData, TraceOwner,
+    MathOp, MicCurveRef, Operand, PhaseBasis, Smoothing, SweepData, TraceIr, TraceOwner,
 };
 use crate::grid::GridId;
 use crate::units::{
@@ -373,4 +373,19 @@ pub struct TraceData {
     pub coherence: Option<Vec<f32>>,
     /// Distortion and impulse response of a [`TraceKind::Sweep`] trace.
     pub sweep: Option<SweepData>,
+    /// The impulse response a [`TraceKind::Transfer`] trace was captured with; `None` when
+    /// the measurement had none to show at capture (no reference yet) and for traces that
+    /// were not captured from a transfer measurement.
+    pub ir: Option<TransferIr>,
+}
+
+/// The impulse response a transfer trace was captured with: the samples the IR pane drew at
+/// that moment, unsmoothed and without the trace's display edits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransferIr {
+    /// Sample rate of the measurement.
+    pub sample_rate: Hz,
+    /// The samples, time zero at the trace's `delay` (the inserted delay at capture).
+    pub ir: TraceIr,
 }

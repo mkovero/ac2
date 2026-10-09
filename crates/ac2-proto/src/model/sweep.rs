@@ -185,16 +185,19 @@ pub struct HarmonicCurve {
     pub curve: DistortionCurve,
 }
 
-/// The impulse response of a sweep: from the highest order's window to the end of the
-/// linear window, decimated peak-preserving.
+/// The impulse response a stored trace keeps: a sweep's from the highest order's window to
+/// the end of the linear window, decimated peak-preserving; a captured transfer trace's as
+/// the IR pane drew it at capture ([`super::TransferIr`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SweepIr {
-    /// Time of point 0 re the arrival.
+pub struct TraceIr {
+    /// Time of point 0 re the trace's `delay`: a sweep's arrival, a transfer capture's
+    /// inserted delay.
     pub t0: Seconds,
     /// Point spacing.
     pub dt: Seconds,
-    /// Signed extreme per point (unit: the reference's level).
+    /// Signed value per point (a sweep's: the extreme of its decimation bucket), in the
+    /// reference's level.
     pub linear: Vec<f32>,
     /// Hilbert envelope maximum per point, dB.
     pub etc_db: Vec<f32>,
@@ -239,7 +242,7 @@ pub struct SweepData {
     /// Total harmonic distortion (power sum of the orders in band).
     pub thd: DistortionCurve,
     /// Impulse response.
-    pub ir: SweepIr,
+    pub ir: TraceIr,
     /// Analysis facts.
     pub info: SweepInfo,
     /// ISO 3382-1 room parameters of the impulse response; `None` for a sweep imported from

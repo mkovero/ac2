@@ -9,7 +9,8 @@
 //! ```
 //!
 //! A sweep trace's CSV holds all of it: distortion curves as columns, analysis facts in its
-//! header and the impulse response as a second table ([`crate::text`]). A mic curve applied
+//! header and the impulse response as a second table ([`crate::text`]); a transfer trace
+//! captured with an impulse response keeps it the same way. A mic curve applied
 //! to a trace after capture keeps its points in the manifest (`mic_curve_points`), so the
 //! trace reads the same after the calibration store changed.
 //!
@@ -55,7 +56,7 @@ use crate::text::{export_csv, import};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 18;
+pub const VERSION: u32 = 19;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -521,6 +522,7 @@ pub fn load_named(dir: &Path, name: &str) -> Result<(Session, Vec<SplLogOnDisk>)
             grid: t.grid.clone(),
             columns: imp.columns,
             sweep: imp.sweep,
+            ir: imp.ir,
             mic_curve,
         });
     }

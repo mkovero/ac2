@@ -296,6 +296,7 @@ fn capture_works_with_nobody_subscribed() {
         .find_map(|_| {
             let f = h
                 .capture()
+                .map(|c| c.frame)
                 .filter(|f| f.stamp.audio_sample.0 + 1 == 32 * 256);
             if f.is_none() {
                 std::thread::sleep(Duration::from_millis(10));

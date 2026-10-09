@@ -77,6 +77,7 @@ fn empty_hint_yields_to_stored_traces() {
             phase_deg: None,
             coherence: None,
             sweep: None,
+            ir: None,
         })
     };
     t.conn(ConnEvent::Trace(data(&meta), grid.clone()));

@@ -15,7 +15,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{
-    ClipFlags, Frame, FrameData, FrameStamp, LevelsFrame, LevelsMeta, ProtectionFlags,
+    ClipFlags, Frame, FrameData, FrameStamp, IrFrame, LevelsFrame, LevelsMeta, ProtectionFlags,
 };
 use ac2_proto::grid::GridId;
 use ac2_proto::topic::Topic;
@@ -309,8 +309,10 @@ pub(crate) enum JobMsg {
     /// Blocks of one hand-off, oldest first.
     Blocks(Batch),
     Cmd(JobCmd),
-    /// Form the current result for a capture and answer on the channel.
+    /// Form the current result for a math channel's operand and answer on the channel.
     Capture(SyncSender<Option<Frame>>),
+    /// Form the current result with its impulse response for `trace.capture`.
+    CaptureTrace(SyncSender<Option<Captured>>),
     Stop,
 }
 
@@ -326,6 +328,12 @@ pub(crate) trait Analysis: Send {
     /// carry it but before display smoothing (a stored trace is re-smoothed); `None` for
     /// analyses without one, or before the first result.
     fn capture(&mut self) -> Option<(StampArgs, FrameData)>;
+    /// The impulse response the IR pane would draw of the result [`Analysis::capture`]
+    /// returns, formed from the same state; `None` for analyses without one, or before
+    /// there is one (a transfer job that has accepted no block with a reference yet).
+    fn capture_ir(&mut self) -> Option<IrFrame> {
+        None
+    }
     /// Frames of further audio without which the job can form nothing new, so it sleeps
     /// through the hand-offs until that much is queued and takes them together; commands and
     /// stop wake it at once. `None`: every hand-off may change the result, so the job wakes
@@ -344,6 +352,15 @@ pub(crate) trait Analysis: Send {
 /// any message and is answered after at most one drain of queued audio, so only a stuck job
 /// takes this long.
 const CAPTURE_WAIT: Duration = Duration::from_secs(1);
+
+/// A job's result as `trace.capture` stores it.
+#[derive(Debug)]
+pub(crate) struct Captured {
+    /// The curve result.
+    pub(crate) frame: Frame,
+    /// Its impulse response, when the job forms one.
+    pub(crate) ir: Option<IrFrame>,
+}
 
 /// A running job thread.
 pub(crate) struct JobHandle {
@@ -368,12 +385,13 @@ impl JobHandle {
         }
     }
 
-    /// The job's current curve result, formed on request: results are built for clients
-    /// only while someone subscribes, so a capture cannot rely on a published frame. It is
-    /// the newest state, so it is never older than any frame a client has seen.
-    pub(crate) fn capture(&self) -> Option<Frame> {
+    /// The job's current curve result with its impulse response, formed on request:
+    /// results are built for clients only while someone subscribes, so a capture cannot
+    /// rely on a published frame. It is the newest state, so it is never older than any
+    /// frame a client has seen.
+    pub(crate) fn capture(&self) -> Option<Captured> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        self.tx.send(JobMsg::Capture(tx)).ok()?;
+        self.tx.send(JobMsg::CaptureTrace(tx)).ok()?;
         self.wake();
         rx.recv_timeout(CAPTURE_WAIT).ok().flatten()
     }
@@ -556,6 +574,14 @@ fn run(
                 JobMsg::Capture(reply) => {
                     let f = a.capture().map(|(s, d)| em.frame(s, 0, d));
                     let _ = reply.send(f);
+                    false
+                }
+                JobMsg::CaptureTrace(reply) => {
+                    let c = a.capture().map(|(s, d)| Captured {
+                        frame: em.frame(s, 0, d),
+                        ir: a.capture_ir(),
+                    });
+                    let _ = reply.send(c);
                     false
                 }
                 JobMsg::Stop => return,

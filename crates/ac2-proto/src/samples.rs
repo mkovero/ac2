@@ -727,7 +727,7 @@ fn sweep_data() -> SweepData {
             },
         ],
         thd: curve(-39.5),
-        ir: SweepIr {
+        ir: TraceIr {
             t0: Seconds(-0.75),
             dt: Seconds(1.0 / 48_000.0),
             linear: vec![0.0, 0.5, -0.25],
@@ -1493,6 +1493,15 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             phase_deg: Some(vec![0.0, 45.0, f32::NAN]),
             coherence: None,
             sweep: None,
+            ir: Some(TransferIr {
+                sample_rate: Hz(48_000.0),
+                ir: TraceIr {
+                    t0: Seconds(-2.0 / 48_000.0),
+                    dt: Seconds(1.0 / 48_000.0),
+                    linear: vec![0.0, -0.125, 0.75, 0.25],
+                    etc_db: vec![-200.0, -12.0, -2.5, -9.0],
+                },
+            }),
         }))),
         Ok(ReplyBody::TraceData(Box::new(TraceData {
             meta: sweep_meta(),
@@ -1500,6 +1509,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             phase_deg: Some(vec![10.0, -20.0, f32::NAN]),
             coherence: None,
             sweep: Some(sweep_data()),
+            ir: None,
         }))),
         Ok(ReplyBody::Sweep(SweepRun {
             status: SweepStatus::Playing { repeat: 1 },

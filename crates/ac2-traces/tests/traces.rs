@@ -90,6 +90,7 @@ fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> Stored
         },
         grid: g,
         sweep: None,
+        ir: None,
         mic_curve: None,
     }
 }
@@ -220,7 +221,7 @@ fn typed_refusals() {
     assert_eq!(e.problem, ImportProblem::NoData);
     let e = bad("20 1 0 1.5\n30 2 0 0.5\n");
     assert_eq!(e.problem, ImportProblem::BadCoherence);
-    let e = bad("# ac2 trace export v4\nfreq_hz,mag_db\n20,1\n30,2\n");
+    let e = bad("# ac2 trace export v5\nfreq_hz,mag_db\n20,1\n30,2\n");
     assert_eq!((e.line, e.problem), (Some(1), ImportProblem::BadHeader));
     let e = import(b"20 1\n30 2\n", ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
     assert_eq!(e.problem, ImportProblem::BadHeader);
@@ -237,7 +238,7 @@ fn ac2_csv_round_trips_bit_for_bit() {
     t.columns.mag_db[11] = -2.718_281_7e-3;
     t.meta.edit.name = "Main L, pre EQ".into();
     let csv = export_csv(&t);
-    assert!(csv.starts_with("# ac2 trace export v3\n# name: Main L, pre EQ\n"));
+    assert!(csv.starts_with("# ac2 trace export v4\n# name: Main L, pre EQ\n"));
     assert!(csv.contains("# delay_ms: 12\n"));
     assert!(csv.contains("freq_hz,mag_db,phase_deg,coherence\n"));
     let back = import(csv.as_bytes(), ImportFormat::Auto, ImportRole::Trace).unwrap();
@@ -280,6 +281,7 @@ fn linear_grid_spectrum_round_trips_with_dc_bin() {
             coherence: None,
         },
         sweep: None,
+        ir: None,
         mic_curve: None,
     };
     let back = import(
@@ -451,6 +453,7 @@ fn a_over_b_of_stored_traces() {
         grid: target.grid,
         columns: target.columns,
         sweep: None,
+        ir: None,
         mic_curve: None,
     };
     let d = binary(&a, &tt, MathOp::Divide).unwrap();
@@ -477,6 +480,7 @@ fn level_trace(id: u32, kind: TraceKind, g: GridDef) -> StoredTrace {
         },
         grid: g,
         sweep: None,
+        ir: None,
         mic_curve: None,
     }
 }
@@ -924,16 +928,16 @@ fn session_refusals() {
     let text = std::fs::read_to_string(&m).unwrap();
     // A session of the previous format is refused with its version named, never read
     // best-effort.
-    std::fs::write(&m, text.replace("\"version\": 18", "\"version\": 17")).unwrap();
+    std::fs::write(&m, text.replace("\"version\": 19", "\"version\": 18")).unwrap();
     let e = session::load(&dir).unwrap_err();
     assert_eq!(
         e,
         SessionError::Version {
             path: dir.clone(),
-            found: 17
+            found: 18
         }
     );
-    assert!(e.to_string().contains("reads version 18 only"), "{e}");
+    assert!(e.to_string().contains("reads version 19 only"), "{e}");
     assert_eq!(
         session::load(&tmp.path().join("missing")),
         Err(SessionError::NotFound(tmp.path().join("missing")))
@@ -995,7 +999,7 @@ fn sweep_trace(id: u32) -> StoredTrace {
                 },
             ],
             thd: curve(ramp(-39.6)),
-            ir: SweepIr {
+            ir: TraceIr {
                 t0: Seconds(-0.75),
                 dt: Seconds(1.0 / 48_000.0),
                 linear: vec![0.0, 0.5, -0.25, 0.125],
@@ -1017,6 +1021,7 @@ fn sweep_trace(id: u32) -> StoredTrace {
             },
             room: Some(room()),
         }),
+        ir: None,
         mic_curve: None,
     }
 }
@@ -1101,7 +1106,7 @@ fn sweep_csv_and_session_round_trip() {
     assert_eq!(back.room, s.room);
     // An export written before the room parameters (v2) is the same sweep without them.
     let v2: String = csv
-        .replacen("# ac2 trace export v3", "# ac2 trace export v2", 1)
+        .replacen("# ac2 trace export v4", "# ac2 trace export v2", 1)
         .lines()
         .filter(|l| !l.starts_with("# room_metrics"))
         .map(|l| format!("{l}\n"))
@@ -1148,6 +1153,100 @@ fn sweep_csv_and_session_round_trip() {
         .collect();
     std::fs::write(&p, cut).unwrap();
     assert!(session::load(&dir).is_err());
+}
+
+/// A transfer trace as captured with the IR pane's impulse response: 4096 samples at
+/// 48 kHz, time zero at the inserted delay, a decaying arrival 2.5 ms after it.
+fn transfer_with_ir(id: u32) -> StoredTrace {
+    let mut t = delayed(id, 2, 0.0125, 0.0100, 0.95);
+    let fs = 48_000.0;
+    let n = 4096;
+    let linear: Vec<f32> = (0..n)
+        .map(|i| {
+            let k: i32 = i - 2048 - 120;
+            if k < 0 {
+                0.0
+            } else {
+                0.5 * (-(k as f32) / 200.0).exp() * if k % 2 == 0 { 1.0 } else { -0.7 }
+            }
+        })
+        .collect();
+    let etc_db = linear
+        .iter()
+        .map(|v| (20.0 * v.abs().log10()).max(-200.0))
+        .collect();
+    t.ir = Some(TransferIr {
+        sample_rate: Hz(fs),
+        ir: TraceIr {
+            t0: Seconds(-2048.0 / fs),
+            dt: Seconds(1.0 / fs),
+            linear,
+            etc_db,
+        },
+    });
+    t
+}
+
+#[test]
+fn transfer_ir_csv_and_session_round_trip() {
+    let t = transfer_with_ir(6);
+    let csv = export_csv(&t);
+    assert!(csv.starts_with("# ac2 trace export v4\n"));
+    assert!(
+        csv.contains("\n# transfer_ir: {\"sample_rate\":48000.0,\"t0\":-0.042666666666666665,"),
+        "{}",
+        &csv[..1500]
+    );
+    assert!(!csv.contains("# sweep_ir"));
+    assert!(csv.contains("\nt_s,linear,etc_db\n-0.042666666666666665,0,-200\n"));
+    let plain = export_csv(&delayed(7, 2, 0.0125, 0.0100, 0.95));
+    // The IR table is the whole difference: its rows bound what a trace adds.
+    let added = csv.len() - plain.len();
+    assert!(added < 200_000, "the IR adds {added} bytes");
+    let imp = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    assert_eq!(imp.kind, TraceKind::Transfer);
+    assert_eq!(imp.ir, t.ir, "bit for bit");
+    assert!(imp.sweep.is_none());
+    // A target keeps the magnitude only.
+    let tgt = import(csv.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Target).unwrap();
+    assert!(tgt.ir.is_none());
+    // An export written before transfer traces kept their IR (v3) imports without one.
+    let v3: String = csv[..csv.find("# impulse response").unwrap()]
+        .replacen("# ac2 trace export v4", "# ac2 trace export v3", 1)
+        .lines()
+        .filter(|l| !l.starts_with("# transfer_ir"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let old = import(v3.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap();
+    assert_eq!(old.kind, TraceKind::Transfer);
+    assert!(old.ir.is_none());
+    assert_eq!(old.columns, imp.columns);
+    // A transfer IR on another kind, or announced without its table, is refused.
+    let wrong = csv.replacen("# kind: transfer", "# kind: spectrum dBFS", 1);
+    let e = import(wrong.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
+    assert_eq!(e.problem, ImportProblem::BadHeader, "{e}");
+    let cut = &csv[..csv.find("# impulse response").unwrap()];
+    let e = import(cut.as_bytes(), ImportFormat::Ac2Csv, ImportRole::Trace).unwrap_err();
+    assert_eq!(e.problem, ImportProblem::NoData, "{e}");
+    assert!(e.msg.contains("transfer_ir announced"), "{e}");
+
+    // A session keeps it beside a trace captured without one.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("ir");
+    let without = delayed(7, 2, 0.0125, 0.0100, 0.95);
+    let sess = Session {
+        saved_at: WallNs(1_790_000_000_000_000_002),
+        measurements: vec![],
+        spl_logs: vec![],
+        traces: vec![t.clone(), without.clone()],
+    };
+    session::save(&dir, &sess).unwrap();
+    let back = session::load(&dir).unwrap();
+    assert_eq!(back.traces.len(), 2);
+    assert_eq!(back.traces[0].ir, t.ir);
+    assert_eq!(back.traces[0].data().ir, t.ir, "served with the trace");
+    assert_eq!(back.traces[1].ir, None);
+    assert_eq!(back.traces[1].columns, without.columns);
 }
 
 /// Field exports written before the analysis facts were exported (v1): the transfer

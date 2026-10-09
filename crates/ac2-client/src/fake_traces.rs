@@ -87,6 +87,7 @@ impl Shared {
             grid,
             columns,
             sweep: self.traces.sweeps.get(&id).cloned(),
+            ir: None,
             mic_curve: self.traces.mic_curves.get(&id).cloned(),
         })
     }
@@ -801,7 +802,7 @@ fn synthetic_sweep(grid: &GridDef, f2: f64, rate: f64, repeats: u8) -> (Columns,
     let sweep = SweepData {
         harmonics,
         thd,
-        ir: SweepIr {
+        ir: TraceIr {
             t0: Seconds(t0),
             dt: Seconds(dt),
             linear,

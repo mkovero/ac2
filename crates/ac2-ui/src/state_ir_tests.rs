@@ -300,3 +300,114 @@ fn the_distortion_cursor_reads_in_db_and_percent() {
     let frac = |r: Range| (-40.0 - r.lo) / r.span();
     assert!((frac(r) - frac(before)).abs() < 1e-9 && (r.span() - before.span() / 2.0).abs() < 1e-9);
 }
+
+/// A transfer trace of Main L's group, stored with (or without) the IR it was captured with.
+fn stored_tf(id: u32, name: &str, ir: Option<TransferIr>) -> (TraceMeta, Arc<TraceData>) {
+    let mut m = stored(id, Some(1), 0);
+    m.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
+    m.edit.slot = (ir.is_some()).then_some(1);
+    m.edit.name = name.into();
+    m.delay = Seconds(0.0125);
+    let n = 480;
+    let d = TraceData {
+        meta: m.clone(),
+        mag_db: vec![0.0; n],
+        phase_deg: Some(vec![0.0; n]),
+        coherence: None,
+        sweep: None,
+        ir,
+    };
+    (m, Arc::new(d))
+}
+
+/// The selected stored transfer trace's IR replaces the live one in the IR pane: its 64
+/// samples in the trace's colour, tagged with the trace's name, time zero at its delay, no
+/// live banners; Home and the cursor act on it. A trace captured without an IR, or none
+/// selected, leaves the pane on the live IR.
+#[test]
+fn the_ir_pane_shows_the_selected_stored_ir() {
+    let mut t = T::new();
+    t.conn(ir_event(1));
+    t.key("Alt+3");
+    let mut linear = vec![0.0f32; 64];
+    linear[40] = 0.75;
+    let ir = TransferIr {
+        sample_rate: Hz(48_000.0),
+        ir: TraceIr {
+            t0: Seconds(-32.0 / 48_000.0),
+            dt: Seconds(1.0 / 48_000.0),
+            linear,
+            etc_db: vec![-60.0; 64],
+        },
+    };
+    let (with, wd) = stored_tf(5, "Main L pre EQ", Some(ir));
+    let (bare, bd) = stored_tf(6, "Main L old", None);
+    t.conn(with_traces(vec![with, bare]));
+    let grid = Arc::new(GridDef::Log {
+        ppo: 48,
+        k_min: -240,
+        k_max: 239,
+    });
+    t.conn(ConnEvent::Trace(wd, grid.clone()));
+    t.conn(ConnEvent::Trace(bd, grid));
+    let theme = Theme::dark();
+    let scene = |t: &T| {
+        crate::scenes::ir(&t.st, t.pane(PaneKind::Ir), &t.keys, &theme, SIZE, now()).expect("scene")
+    };
+    // The curve: the longest polyline (axes and grid lines have two points).
+    let curve = |s: &ac2_scene::ir::IrScene| {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.polylines)
+            .max_by_key(|p| p.points.len())
+            .cloned()
+            .expect("curve")
+    };
+    let live = scene(&t);
+    assert_eq!(curve(&live).points.len(), 21);
+    assert_eq!(live.tag, None);
+
+    t.st.select_trace(Some(TraceId(5)));
+    let s = scene(&t);
+    assert_eq!(s.tag.as_deref(), Some("Main L pre EQ"));
+    assert!(
+        s.origin.starts_with("t = 0 at inserted delay 12.5"),
+        "{}",
+        s.origin
+    );
+    assert!(s.banners.is_empty());
+    let c = curve(&s);
+    assert_eq!(c.points.len(), 64);
+    assert_eq!(
+        c.stroke.color,
+        t.st.curve_colours(&theme).trace(TraceId(5)),
+        "the trace's colour, as its legend row"
+    );
+    let labels: Vec<String> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|x| x.text.clone()))
+        .collect();
+    assert!(
+        labels.iter().any(|l| l.ends_with(" · Main L pre EQ")),
+        "{labels:?}"
+    );
+    // Navigation and the cursor act on the stored IR: its extent.
+    let e = t.st.ir_extent(IrPane::Live).expect("extent");
+    assert!((e.t0_ms + 32.0 / 48.0).abs() < 1e-9 && e.n == 64, "{e:?}");
+    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
+    // The cursor comes on at the stored IR's sample nearest its middle (the live one's is
+    // 0.5 ms).
+    let mid_ms = (-32.0 + 31.0) / 2.0 / 48.0;
+    assert!((axes(&t, IrPane::Live).cursor_ms.expect("on") - mid_ms).abs() <= 0.5 / 48.0 + 1e-9);
+    assert!(scene(&t).cursor.is_some());
+
+    // A trace without an IR, or none selected: the live IR.
+    t.st.select_trace(Some(TraceId(6)));
+    assert_eq!(curve(&scene(&t)).points.len(), 21);
+    t.st.select_trace(None);
+    assert_eq!(curve(&scene(&t)).points.len(), 21);
+    assert_eq!(scene(&t).tag, None);
+}

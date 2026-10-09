@@ -9,7 +9,7 @@ use ac2_core::sweep::{
 };
 use ac2_proto::model::{
     DistortionCurve, EssSpec, HarmonicCurve, LfHarmonics, RoomAcoustics, RoomBand, RoomRefusal,
-    RoomValue, SweepData, SweepFailure, SweepInfo, SweepIr,
+    RoomValue, SweepData, SweepFailure, SweepInfo, TraceIr,
 };
 use ac2_proto::units::{Db, Hz, Seconds};
 use ac2_proto::{ErrorCode, GridDef, ProtoError};
@@ -113,7 +113,7 @@ pub(crate) fn trace_data(a: &SweepAnalysis) -> (Columns, SweepData) {
             })
             .collect(),
         thd: curve(&a.thd_db, &a.thd_floor_db),
-        ir: SweepIr {
+        ir: TraceIr {
             t0: Seconds(a.ir_t0_s),
             dt: Seconds(a.ir_dt_s),
             linear: finite(&a.ir, 0.0),

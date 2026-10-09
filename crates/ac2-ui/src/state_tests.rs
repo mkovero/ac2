@@ -639,13 +639,14 @@ fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
         mag_db: vec![-6.0; n],
         phase_deg: Some(vec![0.0; n]),
         coherence: None,
+        ir: None,
         sweep: Some(SweepData {
             harmonics: vec![HarmonicCurve {
                 order: 2,
                 curve: curve(-40.0),
             }],
             thd: curve(-40.0),
-            ir: SweepIr {
+            ir: TraceIr {
                 t0: Seconds(-0.1),
                 dt: Seconds(0.001),
                 linear: vec![0.0; 200],

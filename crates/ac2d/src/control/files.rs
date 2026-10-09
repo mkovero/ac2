@@ -322,7 +322,7 @@ impl Control {
         for t in data.traces {
             self.register_grid(t.grid.clone());
             self.traces
-                .insert(t.meta.id, t.grid, t.columns, t.sweep, t.mic_curve);
+                .insert(t.meta.id, t.grid, t.columns, t.sweep, t.ir, t.mic_curve);
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));

@@ -74,6 +74,7 @@ pub(crate) fn data() -> TraceData {
         mag_db: vec![-6.0; n],
         phase_deg: Some(vec![0.0; n]),
         coherence: None,
+        ir: None,
         sweep: Some(SweepData {
             harmonics: vec![
                 HarmonicCurve {
@@ -86,7 +87,7 @@ pub(crate) fn data() -> TraceData {
                 },
             ],
             thd: curve(-39.9, -67.0, 2000.0),
-            ir: SweepIr {
+            ir: TraceIr {
                 t0: Seconds(-0.75),
                 dt: Seconds(0.001),
                 linear: (0..1000)

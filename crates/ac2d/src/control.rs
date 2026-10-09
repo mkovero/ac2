@@ -36,7 +36,7 @@ use crate::calstore::{self, CalStore};
 use crate::config::{DedupLimits, ReplayLimits};
 use crate::dedup::Dedup;
 use crate::io::Interest;
-use crate::jobs::{self, JobCmd, JobHandle, Probes, Seqs, block_index};
+use crate::jobs::{self, Captured, JobCmd, JobHandle, Probes, Seqs, block_index};
 use crate::outbox::Outbox;
 use crate::preview::Preview;
 use crate::session::{Limits, Runtime};

@@ -610,7 +610,9 @@ pub(crate) fn with_spectrum<R>(
 /// The IR of the focused transfer measurement, under the banners of its transfer stream
 /// (protection flags, stopped, audio stopped, daemon silence), tagged as its transfer curve
 /// is; without its IR frame, an empty plot that says why. `None` without a transfer
-/// measurement.
+/// measurement. While the selected trace is a stored transfer trace with an IR that the
+/// pane's transfer group draws ([`AppState::stored_ir`]), that IR instead, named as its
+/// legend row is.
 pub fn ir(
     st: &AppState,
     pane: PaneId,
@@ -620,8 +622,22 @@ pub fn ir(
     now: Now,
 ) -> Option<IrScene> {
     use ac2_scene::ir::{IrMissing, missing_scene, missing_text};
-    let m = st.pane_meas(pane)?;
     let view = st.view_for(pane);
+    if let Some(d) = st.stored_ir(st.pane_meas(pane)) {
+        // A stored trace is no live stream: none of the measurement's banners apply to it.
+        let status = status(st, &[], None, now);
+        return ac2_scene::ir::stored_ir_scene(
+            d,
+            st.curve_colours(theme).trace(d.meta.id),
+            &status,
+            &view,
+            &view.ir.axes,
+            view.chrome,
+            theme,
+            size,
+        );
+    }
+    let m = st.pane_meas(pane)?;
     let tf = frame(st, m.id, Stream::Tf);
     let ir = frame(st, m.id, Stream::Ir);
     let shown: Vec<&TopicFrame> = [tf, ir].into_iter().flatten().collect();

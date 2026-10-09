@@ -420,7 +420,7 @@ impl Control {
             a.reference_db,
             if a.clipped { ", CLIPPED" } else { "" }
         );
-        self.add_trace(t, grid, columns, Some(data));
+        self.add_trace(t, grid, columns, Some(data), None);
         let mut run = active.run;
         run.status = SweepStatus::Done { trace: tid };
         self.commit(Change::Sweep(run));

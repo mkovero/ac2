@@ -630,6 +630,10 @@ impl Analysis for Transfer {
         let stamp = self.stamp(end, self.last_prot);
         Some((stamp, FrameData::Tf(self.tf_frame(false))))
     }
+
+    fn capture_ir(&mut self) -> Option<IrFrame> {
+        self.ir_frame()
+    }
 }
 
 #[cfg(test)]

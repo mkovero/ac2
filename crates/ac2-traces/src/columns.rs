@@ -2,7 +2,7 @@
 
 use ac2_core::mic_curve::Correction;
 use ac2_proto::GridDef;
-use ac2_proto::model::{SweepData, TraceData, TraceMeta};
+use ac2_proto::model::{SweepData, TraceData, TraceMeta, TransferIr};
 
 /// A trace's columns, in grid order. NaN = no value in that column (a gap, never bridged).
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +45,8 @@ pub struct StoredTrace {
     pub columns: Columns,
     /// A sweep trace's distortion and impulse response (on the same grid as `columns`).
     pub sweep: Option<SweepData>,
+    /// The impulse response a transfer trace was captured with.
+    pub ir: Option<TransferIr>,
     /// The mic curve applied after capture (`meta.mic_curve`), normalised at its `f_norm`;
     /// a display edit, never in `columns` ([`crate::mic`]).
     pub mic_curve: Option<Correction>,
@@ -85,6 +87,7 @@ impl StoredTrace {
             phase_deg: c.phase_deg,
             coherence: c.coherence,
             sweep: self.display_sweep(),
+            ir: self.ir.clone(),
         }
     }
 }

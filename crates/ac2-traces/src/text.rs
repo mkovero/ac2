@@ -3,7 +3,7 @@
 //! # ac2 CSV
 //!
 //! ```text
-//! # ac2 trace export v3
+//! # ac2 trace export v4
 //! # name: Main L pre EQ
 //! # kind: transfer
 //! # source: captured from "main-l" (measurement 1), session epoch 3, sample 480000
@@ -36,7 +36,15 @@
 //! Its ISO 3382-1 room parameters are one JSON header line (`# room_metrics: {…}`,
 //! [`RoomAcoustics`]) and, for reading, a table of comment lines after the impulse
 //! response (`# band_hz,edt_s,…`; a refused value reads `refused:<why>`).
-//! Such an export re-imports as the sweep trace it was. A version 2 export (written before
+//! Such an export re-imports as the sweep trace it was.
+//!
+//! A transfer trace captured with an impulse response ([`TransferIr`]) writes it the same
+//! way: `# transfer_ir: {"sample_rate":…,"t0":…,"dt":…,"points":n}` and the same
+//! `t_s,linear,etc_db` table after the frequency rows, `t_s` re the trace's `delay_ms` (the
+//! inserted delay at capture). It re-imports with the trace.
+//!
+//! A version 3 export (written before transfer traces kept their impulse response) imports
+//! as it was. A version 2 export (written before
 //! the room parameters were exported) imports as a sweep without them. A version 1 export
 //! (written before the analysis facts were exported) is still read: a sweep among them
 //! imports as its transfer function with the distortion dropped and
@@ -61,23 +69,26 @@ use ac2_proto::frame::MAX_N;
 use ac2_proto::model::{
     CalState, DepthPolicy, DistortionCurve, HarmonicCurve, ImportFormat, ImportNote, ImportRole,
     LfHarmonics, MicState, Polarity, RoomAcoustics, RoomRefusal, RoomValue, SmoothingFraction,
-    SmoothingMode, SweepData, SweepInfo, SweepIr, TraceKind, TraceMicCurve, TraceSource,
+    SmoothingMode, SweepData, SweepInfo, TraceIr, TraceKind, TraceMicCurve, TraceSource,
+    TransferIr,
 };
-use ac2_proto::units::Seconds;
+use ac2_proto::units::{Hz, Seconds};
 use serde::{Deserialize, Serialize};
 
 use crate::columns::{Columns, StoredTrace, frequencies, resample, wrap_deg};
 
 /// First line of an ac2 CSV file of this format version.
-pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v3";
-/// First line of the previous version, still read: it has no room parameters (and nothing
-/// else differs).
+pub const AC2_CSV_MAGIC: &str = "# ac2 trace export v4";
+/// First line of the previous version, still read: no transfer trace in it has an impulse
+/// response (and nothing else differs).
+const AC2_CSV_MAGIC_V3: &str = "# ac2 trace export v3";
+/// First line of the version before, still read: it has no room parameters either.
 const AC2_CSV_MAGIC_V2: &str = "# ac2 trace export v2";
 /// First line of the version before, still read: it has no sweep analysis facts and no
 /// impulse response either.
 const AC2_CSV_MAGIC_V1: &str = "# ac2 trace export v1";
 const AC2_CSV_PREFIX: &str = "# ac2 trace export";
-/// Column header of a sweep export's impulse-response table.
+/// Column header of an export's impulse-response table.
 const IR_HEADER: &str = "t_s,linear,etc_db";
 
 /// The `# sweep_ir:` header line: where the impulse response's points sit in time.
@@ -87,6 +98,54 @@ struct IrHeader {
     t0: Seconds,
     dt: Seconds,
     points: u32,
+}
+
+impl IrHeader {
+    fn of(ir: &TraceIr) -> Self {
+        Self {
+            t0: ir.t0,
+            dt: ir.dt,
+            points: u32::try_from(ir.linear.len().min(ir.etc_db.len())).unwrap_or(u32::MAX),
+        }
+    }
+}
+
+/// The `# transfer_ir:` header line: a transfer trace's impulse response, with the sample
+/// rate it was measured at.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransferIrHeader {
+    sample_rate: Hz,
+    t0: Seconds,
+    dt: Seconds,
+    points: u32,
+}
+
+/// Which header line announced an impulse-response table.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum IrAnnounce {
+    Sweep(IrHeader),
+    Transfer(TransferIrHeader),
+}
+
+impl IrAnnounce {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Sweep(_) => "sweep_ir",
+            Self::Transfer(_) => "transfer_ir",
+        }
+    }
+
+    fn table(self) -> IrHeader {
+        match self {
+            Self::Sweep(h) => h,
+            Self::Transfer(h) => IrHeader {
+                t0: h.t0,
+                dt: h.dt,
+                points: h.points,
+            },
+        }
+    }
 }
 
 /// A refused import.
@@ -140,6 +199,8 @@ pub struct Imported {
     /// A sweep export's distortion, impulse response and analysis facts (`kind` is then
     /// `sweep`).
     pub sweep: Option<SweepData>,
+    /// A transfer export's impulse response (`kind` is then `transfer`).
+    pub ir: Option<TransferIr>,
     /// What the file held that the import does not keep.
     pub notes: Vec<ImportNote>,
 }
@@ -541,11 +602,18 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         .find(|(_, l)| !l.trim().is_empty())
         .ok_or_else(|| fail(None, ImportProblem::NoData, "empty file"))?;
     let magic = first.1.trim();
-    if ![AC2_CSV_MAGIC, AC2_CSV_MAGIC_V2, AC2_CSV_MAGIC_V1].contains(&magic) {
+    if ![
+        AC2_CSV_MAGIC,
+        AC2_CSV_MAGIC_V3,
+        AC2_CSV_MAGIC_V2,
+        AC2_CSV_MAGIC_V1,
+    ]
+    .contains(&magic)
+    {
         let msg = if magic.starts_with(AC2_CSV_PREFIX) {
             format!(
                 "{magic:?}: another ac2 CSV version; this build reads {AC2_CSV_MAGIC:?}, \
-                 {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
+                 {AC2_CSV_MAGIC_V3:?}, {AC2_CSV_MAGIC_V2:?} and {AC2_CSV_MAGIC_V1:?}"
             )
         } else {
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
@@ -558,7 +626,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
     let mut delay = None;
     let mut info: Option<SweepInfo> = None;
     let mut room: Option<RoomAcoustics> = None;
-    let mut ir_head: Option<(usize, IrHeader)> = None;
+    let mut ir_head: Option<(usize, IrAnnounce)> = None;
     let mut mic_curve = false;
     let mut header = None;
     let bad = |no: usize, what: &str, e: &dyn std::fmt::Display| {
@@ -585,10 +653,11 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
             } else if let Some(v) = m.strip_prefix("room_metrics: ") {
                 room = Some(serde_json::from_str(v).map_err(|e| bad(no, "room_metrics", &e))?);
             } else if let Some(v) = m.strip_prefix("sweep_ir: ") {
-                ir_head = Some((
-                    no,
-                    serde_json::from_str(v).map_err(|e| bad(no, "sweep_ir", &e))?,
-                ));
+                let h = serde_json::from_str(v).map_err(|e| bad(no, "sweep_ir", &e))?;
+                ir_head = Some((no, IrAnnounce::Sweep(h)));
+            } else if let Some(v) = m.strip_prefix("transfer_ir: ") {
+                let h = serde_json::from_str(v).map_err(|e| bad(no, "transfer_ir", &e))?;
+                ir_head = Some((no, IrAnnounce::Transfer(h)));
             } else if m.starts_with("mic_curve: ") {
                 mic_curve = true;
             }
@@ -668,22 +737,46 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         (harmonics, curve(base + 2 * orders.len()))
     });
     let ir = match (ir_head, ir_at) {
-        (Some((_, h)), Some(at)) => Some(ir_table(lines, at, h)?),
-        (Some((no, _)), None) => {
+        (Some((no, h)), Some(at)) => {
+            let fits = match h {
+                IrAnnounce::Sweep(_) => kind == TraceKind::Sweep,
+                IrAnnounce::Transfer(_) => kind == TraceKind::Transfer,
+            };
+            if !fits {
+                return Err(fail(
+                    Some(no),
+                    ImportProblem::BadHeader,
+                    format!("{} on a {} trace", h.key(), kind_header(kind)),
+                ));
+            }
+            Some((h, ir_table(lines, at, h)?))
+        }
+        (Some((no, h)), None) => {
             return Err(fail(
                 Some(no),
                 ImportProblem::NoData,
-                format!("sweep_ir announced but no {IR_HEADER:?} table follows"),
+                format!("{} announced but no {IR_HEADER:?} table follows", h.key()),
             ));
         }
         (None, Some(at)) => {
             return Err(fail(
                 Some(at),
                 ImportProblem::BadHeader,
-                "an impulse-response table without its sweep_ir line",
+                "an impulse-response table without its sweep_ir or transfer_ir line",
             ));
         }
         (None, None) => None,
+    };
+    let (sweep_ir, transfer_ir) = match ir {
+        Some((IrAnnounce::Sweep(_), ir)) => (Some(ir), None),
+        Some((IrAnnounce::Transfer(h), ir)) => (
+            None,
+            Some(TransferIr {
+                sample_rate: h.sample_rate,
+                ir,
+            }),
+        ),
+        None => (None, None),
     };
     let known = grid.clone();
     let (grid, columns) = on_import_grid(raw, grid)?;
@@ -692,7 +785,7 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         notes.push(ImportNote::MicCurveNotApplied);
     }
     let sweep = if kind == TraceKind::Sweep {
-        match (distortion, info, ir) {
+        match (distortion, info, sweep_ir) {
             // Distortion is kept only on the grid it was written on (it is not resampled).
             _ if known.as_ref() != Some(&grid) => {
                 notes.push(ImportNote::SweepOffGrid);
@@ -725,13 +818,15 @@ fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         rows,
         delay,
         sweep,
+        ir: transfer_ir,
         notes,
     })
 }
 
 /// The impulse-response table whose column header is line `at` (`t_s,linear,etc_db`).
 /// Exactly `h.points` rows; `inf` is accepted here, as a dB of an all-zero stretch.
-fn ir_table(lines: &[(usize, &str)], at: usize, h: IrHeader) -> Result<SweepIr, ImportError> {
+fn ir_table(lines: &[(usize, &str)], at: usize, a: IrAnnounce) -> Result<TraceIr, ImportError> {
+    let h = a.table();
     let mut linear = Vec::with_capacity(h.points as usize);
     let mut etc_db = Vec::with_capacity(h.points as usize);
     for &(no, l) in lines.iter().filter(|(n, _)| *n > at) {
@@ -771,13 +866,14 @@ fn ir_table(lines: &[(usize, &str)], at: usize, h: IrHeader) -> Result<SweepIr, 
             Some(at),
             ImportProblem::NoData,
             format!(
-                "{} impulse-response rows, sweep_ir announces {}",
+                "{} impulse-response rows, {} announces {}",
                 linear.len(),
+                a.key(),
                 h.points
             ),
         ));
     }
-    Ok(SweepIr {
+    Ok(TraceIr {
         t0: h.t0,
         dt: h.dt,
         linear,
@@ -818,6 +914,7 @@ fn import_text(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         rows,
         delay: None,
         sweep: None,
+        ir: None,
         notes: Vec::new(),
     })
 }
@@ -850,6 +947,7 @@ pub fn import(
         imported.columns.phase_deg = None;
         imported.columns.coherence = None;
         imported.sweep = None;
+        imported.ir = None;
         imported.delay = None;
         imported.notes.clear();
     } else if imported.kind == TraceKind::Target {
@@ -1053,14 +1151,9 @@ pub fn export_csv(t: &StoredTrace) -> String {
             "sweep_info",
             serde_json::to_string(&sw.info).unwrap_or_else(|_| "null".into()),
         );
-        let h = IrHeader {
-            t0: sw.ir.t0,
-            dt: sw.ir.dt,
-            points: u32::try_from(sw.ir.linear.len().min(sw.ir.etc_db.len())).unwrap_or(u32::MAX),
-        };
         line(
             "sweep_ir",
-            serde_json::to_string(&h).unwrap_or_else(|_| "null".into()),
+            serde_json::to_string(&IrHeader::of(&sw.ir)).unwrap_or_else(|_| "null".into()),
         );
         if let Some(r) = &sw.room {
             line(
@@ -1068,6 +1161,20 @@ pub fn export_csv(t: &StoredTrace) -> String {
                 serde_json::to_string(r).unwrap_or_else(|_| "null".into()),
             );
         }
+    }
+    let transfer_ir = t.ir.as_ref().filter(|_| m.kind == TraceKind::Transfer);
+    if let Some(ti) = transfer_ir {
+        let h = IrHeader::of(&ti.ir);
+        let h = TransferIrHeader {
+            sample_rate: ti.sample_rate,
+            t0: h.t0,
+            dt: h.dt,
+            points: h.points,
+        };
+        line(
+            "transfer_ir",
+            serde_json::to_string(&h).unwrap_or_else(|_| "null".into()),
+        );
     }
     let mut out = format!("{AC2_CSV_MAGIC}\n{s}");
     let c = &t.columns;
@@ -1119,17 +1226,29 @@ pub fn export_csv(t: &StoredTrace) -> String {
             "# impulse response: time re the arrival (s), signed extreme re the reference, \
              envelope (dB)\n",
         );
-        out.push_str(IR_HEADER);
-        out.push('\n');
-        for (i, (l, e)) in sw.ir.linear.iter().zip(&sw.ir.etc_db).enumerate() {
-            let at = sw.ir.t0.0 + i as f64 * sw.ir.dt.0;
-            let _ = writeln!(out, "{at},{},{}", num32(*l), num32(*e));
-        }
+        ir_rows(&mut out, &sw.ir);
         if let Some(r) = &sw.room {
             room_table(&mut out, r);
         }
     }
+    if let Some(ti) = transfer_ir {
+        out.push_str(
+            "# impulse response: time re the inserted delay (s), linear re the reference, \
+             envelope (dB)\n",
+        );
+        ir_rows(&mut out, &ti.ir);
+    }
     out
+}
+
+/// An impulse-response table: its column header, then one row per point.
+fn ir_rows(out: &mut String, ir: &TraceIr) {
+    out.push_str(IR_HEADER);
+    out.push('\n');
+    for (i, (l, e)) in ir.linear.iter().zip(&ir.etc_db).enumerate() {
+        let at = ir.t0.0 + i as f64 * ir.dt.0;
+        let _ = writeln!(out, "{at},{},{}", num32(*l), num32(*e));
+    }
 }
 
 /// The room parameters as comment lines, for reading (the import uses `room_metrics`).

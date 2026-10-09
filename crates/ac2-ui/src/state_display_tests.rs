@@ -32,6 +32,7 @@ fn data(meta: &TraceMeta, mag: Vec<f32>) -> ConnEvent {
             phase_deg: None,
             coherence: None,
             sweep: None,
+            ir: None,
         }),
         Arc::new(grid),
     )
