@@ -390,6 +390,21 @@ def deconvolve(ref: np.ndarray, meas: np.ndarray, eps_rel: float = 1e-6) -> np.n
     return np.fft.irfft(M * np.conj(R) / (np.abs(R) ** 2 + eps), n)
 
 
+def deconvolve_noise(ref: np.ndarray, meas: np.ndarray, noise_ref: np.ndarray,
+                     noise_meas: np.ndarray, eps_rel: float = 1e-6) -> np.ndarray:
+    """The noise part of deconvolve(ref, meas), from noise-only recordings of both inputs.
+
+    Dividing by a captured reference S + Nr gives H + (Nm − H·Nr)/S to first order: the
+    reference input's noise enters scaled by the response, and where |H| ≈ 1 with equal noise
+    on both inputs it doubles the floor's power (+3 dB) over the measurement noise alone."""
+    n = 2 * (1 << int(np.ceil(np.log2(len(ref)))))
+    R, M = np.fft.rfft(ref, n), np.fft.rfft(meas, n)
+    nm, nr = np.fft.rfft(noise_meas, n), np.fft.rfft(noise_ref, n)
+    den = np.abs(R) ** 2 + eps_rel * np.max(np.abs(R) ** 2)
+    H = M * np.conj(R) / den
+    return np.fft.irfft((nm - H * nr) * np.conj(R) / den, n)
+
+
 def _taper(n, rise, fall):
     i = np.arange(n)
     w = np.ones(n)

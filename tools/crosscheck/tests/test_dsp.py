@@ -186,6 +186,30 @@ def test_sweep_noise_floor_matches_the_noise_inside_the_record():
     assert np.allclose(r8["floor"][2], r["floor"][2] - 10 * np.log10(8))
 
 
+def test_sweep_noise_floor_counts_the_reference_inputs_noise():
+    # Unity path with equal noise on both inputs (a digital loop): dividing by the noisy
+    # reference doubles the noise in h, so the floor reads 3 dB above the measurement noise.
+    fs, L = 48000.0, 0.4
+    s = _ess(fs, 20.0, 20000.0, L)
+    pre, post = int(0.1 * fs), int(1.0 * fs)
+    clean = np.concatenate([np.zeros(pre), s, np.zeros(post)])
+    rng = np.random.default_rng(4)
+    sigma = 1e-4
+    ref = clean + sigma * rng.standard_normal(len(clean))
+    meas = clean + sigma * rng.standard_normal(len(clean))
+    n_ref, n_meas = (sigma * rng.standard_normal(len(clean)) for _ in range(2))
+    h = dsp.deconvolve(ref, meas)
+    freqs = np.array([300.0, 1000.0, 3000.0])
+    kw = dict(kmax=3, pre=0.02, post=0.06)
+    both = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=dsp.deconvolve_noise(ref, meas, n_ref, n_meas), **kw)
+    meas_only = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=dsp.deconvolve(ref, n_meas), **kw)
+    start2 = -round(L * np.log(2) * fs) - int(0.02 * fs)
+    h_quiet = np.roll(h, -(int(0.6 * fs) - start2))
+    inside = dsp.sweep_harmonics(h, 0, fs, L, freqs, noise_h=h_quiet, **kw)
+    assert np.all(np.abs(both["floor"][2] - inside["floor"][2]) < 1.5), (both["floor"][2], inside["floor"][2])
+    assert np.all(np.abs(both["floor"][2] - meas_only["floor"][2] - 3.0) < 1.0)
+
+
 def test_gd_slope_err_and_sine_sigma():
     f = 1000.0 * 2 ** (np.arange(-40, 41) / 96)
     tau = 3e-6

@@ -986,15 +986,17 @@ class Analysis:
         # Noise only, as long as that record: the capture's own silence before the sweep when it
         # is long enough, else the silent recording of the sine stage (same inputs, same chain).
         if a0 - int(0.2 * fs) >= n_cut:
-            noise_meas, src = meas[a0 - int(0.2 * fs) - n_cut: a0 - int(0.2 * fs)], "the capture's silence before the sweep"
+            q = slice(a0 - int(0.2 * fs) - n_cut, a0 - int(0.2 * fs))
+            noise_meas, noise_ref, src = meas[q], ref[q], "the capture's silence before the sweep"
         elif p.noise is not None and len(p.noise.meas) >= n_cut:
-            noise_meas, src = p.noise.meas[:n_cut], "the sine stage's silent recording"
+            noise_meas, noise_ref, src = p.noise.meas[:n_cut], p.noise.ref[:n_cut], "the sine stage's silent recording"
         else:
             self.notes.append(f"{p.name}: {name}: no noise-only recording as long as the sweep's record "
                               f"({n_cut/fs:.1f} s): floor cross-check skipped")
             return
         h = dsp.deconvolve(seg_ref, seg_meas)
-        hn = dsp.deconvolve(seg_ref, noise_meas)
+        # both inputs' noise: ac2 divides by its captured reference, whose noise lands in the floor too
+        hn = dsp.deconvolve_noise(seg_ref, seg_meas, noise_ref, noise_meas)
         d = int(np.argmax(np.abs(h[: int(0.05 * fs)])))
         b = s.trace.freq
         fsel = b["freq_hz"][(b["freq_hz"] >= 20) & (b["freq_hz"] <= 10000)][::4]
@@ -1013,7 +1015,8 @@ class Analysis:
                      title=f"ac2 sweep {name}: H{k} floor vs raw-capture floor", value=float(np.nanmedian(dd)),
                      unit="dB", tol=(lim / 2, lim), status=judge(float(np.nanmedian(dd)), (lim / 2, lim)),
                      meaning="ac2's floor: noise windows in the silence after its linear response. This one: "
-                             f"{src}, as long as ac2's record ({n_cut/fs:.2f} s), deconvolved by the same reference, "
+                             f"{src}, as long as ac2's record ({n_cut/fs:.2f} s), deconvolved by the same reference with "
+                             "the reference input's noise scaled by the response (ac2 divides by a noisy reference too), "
                              f"8 windows at the harmonic's own lag, the floor band 1/3 octave like ac2's"
                              + (f", ÷ {repeats} for the mean of {repeats} repeats" if repeats > 1 else "")
                              + f". Value: median difference; {int(np.nansum(bad))} columns differ by more than {lim:g} dB",
