@@ -11,9 +11,9 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, MathConfig,
-    MathExpr, MeasKind, Measurement, MicCurveId, MicState, NamedOperand, Operand, Smoothing,
-    SmoothingMode, SweepData, TraceEdit, TraceIr, TraceKind, TraceMeta, TraceMicCurve, TraceOwner,
-    TraceSource, TransferIr,
+    MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState, NamedOperand, Operand,
+    Smoothing, SmoothingMode, SweepData, TraceEdit, TraceIr, TraceKind, TraceMeta, TraceMicCurve,
+    TraceOwner, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -182,7 +182,8 @@ impl Control {
         })
     }
 
-    /// Commits a new trace (taking its slot from any other trace) and stores its data.
+    /// Commits a new trace (taking its slot from any other trace) and stores its data;
+    /// `mic_curve` is the correction of `meta.mic_curve`.
     pub(super) fn add_trace(
         &mut self,
         meta: TraceMeta,
@@ -190,13 +191,16 @@ impl Control {
         columns: Columns,
         sweep: Option<SweepData>,
         ir: Option<TransferIr>,
+        mic_curve: Option<Correction>,
     ) -> ReplyBody {
         let gid = self.register_grid(grid.clone());
         debug_assert_eq!(gid, meta.grid_id);
         for other in meta::take_slot(&self.store.state().traces, meta.id, meta.edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
         }
-        self.traces.insert(meta.id, grid, columns, sweep, ir, None);
+        debug_assert_eq!(mic_curve.is_some(), meta.mic_curve.is_some());
+        self.traces
+            .insert(meta.id, grid, columns, sweep, ir, mic_curve);
         self.commit(Change::Trace(Patch::Set(meta.clone())));
         ReplyBody::Trace(meta)
     }
@@ -225,6 +229,23 @@ impl Control {
                 curve: c.curve,
             });
         (cal, mic)
+    }
+
+    /// The mic curve a capture of `input` puts on its trace after capture, for a trace
+    /// whose columns are of the raw input (a sweep): the input's active curve normalised
+    /// where the live jobs on that input normalise it, so the trace reads what a live
+    /// transfer of the same input reads. `None` when the input has no curve in use.
+    pub(super) fn input_after_capture(
+        &self,
+        input: u16,
+    ) -> Option<(Box<TraceMicCurve>, Correction)> {
+        let rt = self.session.as_ref()?;
+        let c = self.input_cal(rt, input);
+        let curve = c.curve?;
+        let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, input).mic?;
+        let points = self.cal.curve(&mic, &curve.label)?;
+        let f_norm = crate::calstore::f_norm(c.spl_entry.as_ref());
+        Some(after_capture(mic, curve, points, f_norm))
     }
 
     pub(super) fn trace_capture(
@@ -347,7 +368,7 @@ impl Control {
             .filter(|_| kind == TraceKind::Transfer)
             .and_then(transfer_ir);
         tracing::info!("trace {id} captured from measurement {meas}");
-        Ok(self.add_trace(t, grid, columns, None, ir))
+        Ok(self.add_trace(t, grid, columns, None, ir, None))
     }
 
     /// The name of math operand `o` as the state names it now.
@@ -449,7 +470,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} captured from math channel {}", m.id);
-        Ok(self.add_trace(t, grid, columns, None, None))
+        Ok(self.add_trace(t, grid, columns, None, None, None))
     }
 
     pub(super) fn trace_get(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
@@ -542,7 +563,7 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
         };
-        Ok(self.add_trace(t, d.grid, d.columns, None, None))
+        Ok(self.add_trace(t, d.grid, d.columns, None, None, None))
     }
 
     pub(super) fn trace_average(
@@ -607,7 +628,7 @@ impl Control {
             created_at: WallNs(wall_ns()),
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
-        Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir))
+        Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir, None))
     }
 
     /// `trace.mic_curve`: puts the curve the calibration store holds for `mic` on the
@@ -681,13 +702,9 @@ impl Control {
                 .filter(|e| e.key.mic == m.mic)
                 .max_by_key(|e| e.spl.calibrated_at)
         }));
-        t.mic_curve = Some(Box::new(TraceMicCurve {
-            mic: m.mic.clone(),
-            curve: curve_ref,
-            f_norm: Hz(f_norm),
-        }));
-        self.traces
-            .set_mic_curve(id, Some(points.normalised(f_norm)));
+        let (applied, k) = after_capture(m.mic.clone(), curve_ref, &points, f_norm);
+        t.mic_curve = Some(applied);
+        self.traces.set_mic_curve(id, Some(k));
         self.commit(Change::Trace(Patch::Set(t.clone())));
         // The curve corrects the trace's columns as a math channel combines them.
         self.restart_maths_naming(Operand::Trace { trace: id });
@@ -708,4 +725,24 @@ impl Control {
             }),
         }
     }
+}
+
+/// An after-capture mic curve and the correction it subtracts: `points` normalised to 0 dB
+/// at `f_norm`. One constructor for `trace.mic_curve` and for sweeps, so both normalise
+/// alike.
+fn after_capture(
+    mic: String,
+    curve: MicCurveRef,
+    points: &ac2_core::mic_curve::MicCurve,
+    f_norm: f64,
+) -> (Box<TraceMicCurve>, Correction) {
+    let k = points.normalised(f_norm);
+    (
+        Box::new(TraceMicCurve {
+            mic,
+            curve,
+            f_norm: Hz(f_norm),
+        }),
+        k,
+    )
 }

@@ -283,7 +283,10 @@ needed the curve's points kept anyway to undo it.
   "captured with mic curve … applied: it is in the columns already, a second curve would
   correct twice"). The two fields are never set together. A sweep's analysis works on the
   raw recordings, so a sweep trace never names a curve in `mic.curve` (the earlier capture
-  wrongly named the input's curve there) and can always take one afterwards. Targets are
+  wrongly named the input's curve there) and can always take one afterwards. When the
+  measurement input has a curve in use, the stored sweep gets it this way at once — the
+  input's curve normalised as its live jobs normalise it (`resolve`) — so a correction put
+  on an input applies wherever the input is used. Targets are
   refused (`invalid`), locked traces `refused`.
 - **Derived traces.** `trace.average` / `trace.math` combine the corrected columns; the
   result names the curve in `mic.curve` (its columns carry it now).

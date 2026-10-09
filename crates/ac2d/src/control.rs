@@ -256,7 +256,15 @@ struct ActiveSweep {
     /// The recorder; gone once the recording is in.
     job: Option<JobHandle>,
     epoch: SessionEpoch,
+    /// The measurement input's mic, without a curve: the sweep analysis works on the raw
+    /// recordings, so no curve is in its columns.
     mic: Option<MicState>,
+    /// The input's active mic curve, put on the trace after capture (as the live jobs on
+    /// the input apply it), so the sweep reads what a live transfer of the input reads.
+    mic_curve: Option<(
+        Box<ac2_proto::model::TraceMicCurve>,
+        ac2_core::mic_curve::Correction,
+    )>,
 }
 
 pub(crate) struct Control {

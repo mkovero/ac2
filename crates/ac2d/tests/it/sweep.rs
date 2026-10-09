@@ -662,3 +662,133 @@ fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
         "fine waits longer: {roll_s:.2} → {roll_f:.2} s"
     );
 }
+
+/// The ac2 CSV's table: column name → values, in grid order.
+fn csv_columns(csv: &str) -> std::collections::BTreeMap<String, Vec<f64>> {
+    let mut lines = csv.lines().skip_while(|l| !l.starts_with("freq_hz,"));
+    let names: Vec<String> = lines
+        .next()
+        .expect("column header")
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    let mut cols: std::collections::BTreeMap<String, Vec<f64>> =
+        names.iter().map(|n| (n.clone(), Vec::new())).collect();
+    for l in lines.take_while(|l| !l.starts_with('#')) {
+        for (n, v) in names.iter().zip(l.split(',')) {
+            cols.get_mut(n)
+                .unwrap()
+                .push(v.parse::<f64>().unwrap_or(f64::NAN));
+        }
+    }
+    cols
+}
+
+/// The rule "a correction put on an input is used wherever the input is": a sweep whose
+/// measurement input has a mic curve in use stores its trace with that curve applied after
+/// capture (its columns stay of the raw recordings), normalised as the live jobs normalise
+/// it. The served magnitude is the measured one − c(f); each harmonic Hk, a ratio of what
+/// the mic picked up at k·f to what it picked up at f, moves by −(c(k·f) − c(f)); phase is
+/// untouched. Taking the curve off serves the measured columns again.
+#[test]
+fn a_sweep_through_a_corrected_mic_applies_its_curve() {
+    use ac2_core::mic_curve::MicCurve;
+    // Flat to 1 kHz (the normalisation point without a calibration), +6 dB from 4 kHz.
+    const CURVE: &str = "* test mic\n20 0\n1000 0\n4000 6\n24000 6\n";
+    let (_h, _b, mut c, sub, ka, mut d, token) = setup();
+    c.ok(Command::CalCurveImport {
+        mic: "M30".into(),
+        label: None,
+        file_name: "M30.frd".into(),
+        content: Blob(CURVE.as_bytes().to_vec()),
+        input: Some(1),
+    });
+    let k = MicCurve::from_points(&[(20.0, 0.0), (1000.0, 0.0), (4000.0, 6.0), (24000.0, 6.0)])
+        .unwrap()
+        .normalised(1000.0);
+    let meas = create(&mut c, "sweep", request(LEVEL));
+    arm(&mut c, token);
+    let r = start(&mut c, token, meas);
+    let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
+        x.id == r.id && !x.active()
+    });
+    let SweepStatus::Done { trace } = done.status else {
+        panic!("sweep failed: {:?}", done.status);
+    };
+    let shown = match c.ok(Command::TraceGet { trace }) {
+        ReplyBody::TraceData(t) => *t,
+        other => panic!("{other:?}"),
+    };
+    let meta = &shown.meta;
+    assert_eq!(
+        meta.mic
+            .as_ref()
+            .map(|m| (m.name.as_str(), m.curve.is_none())),
+        Some(("M30", true)),
+        "the columns are of the raw recordings"
+    );
+    let mc = meta.mic_curve.as_ref().expect("the input's curve applied");
+    assert_eq!((mc.mic.as_str(), mc.curve.label.as_str()), ("M30", "M30"));
+    assert_eq!(mc.f_norm, Hz(1000.0));
+
+    let csv = match c.ok(Command::TraceExport {
+        trace,
+        format: ac2_proto::model::ExportFormat::Ac2Csv,
+    }) {
+        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        csv.contains("# mic: M30 (curve: M30, applied after capture as a display edit"),
+        "{}",
+        &csv[..1500]
+    );
+    let raw = csv_columns(&csv);
+    let f = &raw["freq_hz"];
+    let s = shown.sweep.as_ref().expect("sweep data");
+    let mut checked = (0, 0);
+    for (i, fi) in f.iter().enumerate() {
+        let (a, b) = (raw["mag_db"][i], f64::from(shown.mag_db[i]));
+        if a.is_finite() {
+            assert!((a - b - k.db(*fi)).abs() < 1e-3, "{fi} Hz: {a} → {b}");
+            checked.0 += 1;
+        }
+        for h in &s.harmonics {
+            let n = f64::from(h.order);
+            let a = raw[&format!("h{}_db", h.order)][i];
+            let b = f64::from(h.curve.level_db[i]);
+            if a.is_finite() {
+                let want = k.db(n * fi) - k.db(*fi);
+                assert!(
+                    (a - b - want).abs() < 1e-3,
+                    "H{} at {fi} Hz: {a} → {b}",
+                    h.order
+                );
+                if want.abs() > 1.0 {
+                    checked.1 += 1;
+                }
+            }
+        }
+    }
+    assert!(checked.0 > 100 && checked.1 > 10, "{checked:?}");
+    // Phase is never corrected.
+    let p = &raw["phase_deg"];
+    let sp = shown.phase_deg.as_ref().expect("phase");
+    assert!(
+        p.iter()
+            .zip(sp)
+            .all(|(a, b)| !a.is_finite() || (a - f64::from(*b)).abs() < 1e-3)
+    );
+
+    // Taken off, the trace serves what was measured.
+    c.ok(Command::TraceMicCurve { trace, curve: None });
+    let bare = match c.ok(Command::TraceGet { trace }) {
+        ReplyBody::TraceData(t) => *t,
+        other => panic!("{other:?}"),
+    };
+    for (i, a) in raw["mag_db"].iter().enumerate() {
+        if a.is_finite() {
+            assert!((a - f64::from(bare.mag_db[i])).abs() < 1e-3);
+        }
+    }
+}

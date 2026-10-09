@@ -230,7 +230,8 @@ end, with the SPL-meter and RTA settings. The report shows the mapping table. Th
 are uncalibrated ratio comparisons.
 
 The curve is in some columns and not in others: ac2's live TF carries it ("in the columns"
-in its export), its sweeps never do (the curve is a display edit there), REW's speaker import
+in its export), its sweeps do not (ac2 applies the input's curve to a sweep after capture, as
+a display edit: "applied after capture …, not in the columns"), REW's speaker import
 carries it, and the direct cross-spectra and steady sines are of the raw inputs. The suite
 takes the curve back out of the TF and of REW's dBFS response when it loads a run, so every
 relative comparison is of raw inputs; only the absolute-SPL rows put it back, for every

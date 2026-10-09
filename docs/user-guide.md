@@ -1196,7 +1196,9 @@ with every metadata field, then one row per column.
 ### Mic curve on a stored trace
 
 A trace captured before the mic had a curve (or with no mic name, or with the input's mic
-curve off) can be corrected afterwards.
+curve off) can be corrected afterwards. A **sweep** gets its input's curve in use this way
+automatically when it is stored (`mic M30 (curve M30 applied after capture, …)`); it can be
+taken off or changed like any other.
 
 - **CLI:** `ac2 trace mic <trace> "MM1 34804" --label 90°` applies that curve of the mic
   library (the label may be left out when the mic has one curve);
@@ -1208,11 +1210,18 @@ curve off) can be corrected afterwards.
 Like smoothing it is a display setting:
 
 - the stored curve stays as measured; the correction (0 dB at the calibrator frequency, else
-  1 kHz) is applied when the trace is shown, and `ac2 trace show` reads
+  1 kHz) is applied to the magnitude when the trace is shown — phase and the impulse response
+  are never corrected — and `ac2 trace show` reads
   `mic MM1 34804 (curve 90° applied after capture, 0 dB at 1000 Hz, file …)`;
 - the curve's points are kept with the trace, so deleting or replacing the curve in the
   store later does not change the trace;
-- a sweep's distortion is corrected too (each harmonic is picked up at its own frequency);
+- a sweep's distortion is corrected too: Hk at f is a ratio of what the mic picked up at k·f
+  to what it picked up at f, so it moves by c(k·f) − c(f), and THD is re-summed from the
+  corrected harmonics;
+- the export keeps the measured columns and says so in its header (`# mic: … (curve: 90°,
+  applied after capture as a display edit, not in the columns; 0 dB at 1000 Hz; …)` and a
+  `# mic_curve:` line with the curve), while a live capture's export reads `(curve: 90°, in
+  the columns; …)`;
 - a trace captured **with** the curve already applied (`mic … (curve … in the columns)`)
   refuses a second one: it would correct twice;
 - averages and math channels combine the corrected curves.
@@ -1357,8 +1366,9 @@ ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs    # same flags; --name
 - `ac2 trace export <sweep> --csv out.csv` writes every curve (response, each order and its
   floor, THD), the analysis facts and the impulse response; `ac2 trace import` of that file
   restores the sweep.
-- The sweep's columns are uncorrected even when its mic has a curve:
-  `ac2 trace mic <sweep> <mic>` applies it.
+- When its input has a mic curve in use the sweep shows it corrected (applied after
+  capture, [Mic curve on a stored trace](#mic-curve-on-a-stored-trace)); the export's columns
+  stay as measured and its header names the curve.
 
 ### Arrival
 
@@ -1590,6 +1600,14 @@ It is chosen per input, explicitly:
 
 ac2 never guesses: importing a mic's first curve on an input chooses it; with several curves
 and none chosen, none applies and the input says *choose: 0°, 90°*.
+
+**The rule:** an input's curve in use applies to every measurement that reads the input —
+transfer, spectrum, RTA, SPL meter, Leq and band Leq, and sweeps. It corrects levels at a
+frequency (the magnitude; a sweep's harmonics, each at its own frequency, and THD); phase,
+coherence and impulse responses stay as measured. A sweep's analysis works on the raw
+recordings, so its trace gets the curve after capture, normalised as the live measurements on
+the input normalise it ([Mic curve on a stored trace](#mic-curve-on-a-stored-trace)): a
+sweep and a live transfer of the same input read the same.
 
 The change applies to the running measurements at once (it is a display correction of the
 magnitude, so averages need no reset). Wherever a corrected readout is shown it says which

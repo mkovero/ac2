@@ -259,12 +259,14 @@ impl Control {
             reference + 1
         );
         self.commit(Change::Sweep(run.clone()));
-        // The sweep analysis works on the raw recordings: no curve is in its columns, so
-        // the trace names the mic only (`trace.mic_curve` applies a curve afterwards).
+        // The sweep analysis works on the raw recordings: no curve is in its columns. The
+        // input's active curve still applies to everything measured through it, so the
+        // trace gets it after capture (a display edit, normalised as the live jobs do).
         let mic = self
             .cal_and_mic(measurement)
             .1
             .map(|m| ac2_proto::model::MicState { curve: None, ..m });
+        let mic_curve = self.input_after_capture(measurement);
         self.sweep = Some(ActiveSweep {
             run: run.clone(),
             meas_name,
@@ -273,6 +275,7 @@ impl Control {
             job: Some(job),
             epoch: self.epoch(),
             mic,
+            mic_curve,
         });
         Ok(ReplyBody::Sweep(run))
     }
@@ -410,7 +413,7 @@ impl Control {
             // A ratio of two inputs: no calibration applies.
             cal: CalState::Uncalibrated,
             mic: active.mic.clone(),
-            mic_curve: None,
+            mic_curve: active.mic_curve.as_ref().map(|(m, _)| m.clone()),
             created_at: WallNs(wall_ns()),
         };
         tracing::info!(
@@ -420,7 +423,14 @@ impl Control {
             a.reference_db,
             if a.clipped { ", CLIPPED" } else { "" }
         );
-        self.add_trace(t, grid, columns, Some(data), None);
+        self.add_trace(
+            t,
+            grid,
+            columns,
+            Some(data),
+            None,
+            active.mic_curve.as_ref().map(|(_, k)| k.clone()),
+        );
         let mut run = active.run;
         run.status = SweepStatus::Done { trace: tid };
         self.commit(Change::Sweep(run));

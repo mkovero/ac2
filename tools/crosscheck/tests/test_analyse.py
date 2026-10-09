@@ -89,4 +89,7 @@ def test_mic_curve_in_columns_reads_ac2s_export():
     from crosscheck.model import mic_curve_in_columns
     assert mic_curve_in_columns({"mic": 'MM1 34804 (curve: 90°, in the columns; file "x.txt", hash 0c)'})
     assert not mic_curve_in_columns({"mic": "MM1 34804 (curve: none)"})
+    # a sweep: the input's curve is applied after capture, its exported columns are raw
+    assert not mic_curve_in_columns({"mic": 'MM1 34804 (curve: 90°, applied after capture as a display '
+                                            'edit, not in the columns; 0 dB at 1000 Hz; file "x.txt", hash 0c)'})
     assert not mic_curve_in_columns({})

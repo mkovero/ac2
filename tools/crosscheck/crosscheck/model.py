@@ -153,8 +153,11 @@ def load_fixtures(root: Path) -> RunData:
 
 def mic_curve_in_columns(meta: dict) -> bool:
     """ac2's export names the mic on every trace; only "(curve: …, in the columns)" means
-    the trace's magnitudes carry the curve's correction (a live TF does, a sweep never)."""
-    return "in the columns" in str(meta.get("mic", "")).lower()
+    the trace's magnitudes carry the curve's correction. A live TF does; a sweep gets the
+    input's curve "applied after capture as a display edit, not in the columns": ac2 shows
+    it corrected, but its exported columns are of the raw inputs."""
+    mic = str(meta.get("mic", "")).lower()
+    return "in the columns" in mic and "not in the columns" not in mic
 
 
 def _remove_curve(mag_db: np.ndarray, f: np.ndarray, curve) -> np.ndarray:
