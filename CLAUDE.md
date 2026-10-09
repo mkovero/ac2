@@ -16,20 +16,14 @@ Toolchain pinned in `rust-toolchain.toml`. Edition 2024. Each crate's integratio
 binary, `tests/it/` (a module per area): `cargo test -p ac2d --test it leq::`. A test that needs
 its process to itself (global allocator, process CPU time) stays a separate file in `tests/`.
 
-## Tests: quick tier and full tier
-A test whose function name starts with `slow_` needs seconds of real time (Leq windows
-filling, device recovery backoffs, drift, the app driven end to end on the real-time rig).
-Name a test `slow_…` when it takes about 5 s or more once its waits are as short as what it
-checks allows. Profiles are in `.config/nextest.toml`:
-- **Quick tier**: `cargo nextest run --workspace` (default profile, skips `slow_*`) —
-  iteration and an agent's pre-commit run; plus `cargo test --workspace --doc` when docs changed.
-- **Full tier**: `cargo nextest run --workspace --profile full` and
-  `cargo test --workspace --doc` — run locally only when the operator asks for it or for a
-  full CI release build (the all-OS run that builds macOS and Windows too). Otherwise CI
-  covers it: every push runs `--profile ci` on Linux. Plain `cargo test --workspace` also
-  runs everything.
-- In nextest, `-j` means test threads; build jobs are `--build-jobs N`. One area of one
-  crate: `cargo nextest run -p ac2d -E 'test(/^leq::/)'`.
+## Tests
+Tests named `slow_…` need ~5 s+ of real time (Leq windows, recovery backoffs, drift, end-to-end
+app runs). Profiles in `.config/nextest.toml`:
+- **Quick tier** (default, skips `slow_*`): iteration and pre-commit/pre-push; add
+  `cargo test --workspace --doc` when docs changed.
+- **Full tier** (`--profile full` + doctests): locally only when the operator asks or for an
+  all-OS release build; CI runs `--profile ci` on every push.
+- nextest `-j` = test threads; build jobs `--build-jobs N`. One area: `-p ac2d -E 'test(/^leq::/)'`.
 
 ## Crate map
 | crate | role |
@@ -42,15 +36,15 @@ checks allows. Profiles are in `.config/nextest.toml`:
 | `ac2-discovery` | mDNS advert (`_ac2._tcp`, network mode only) and browse; names rigs, never trusts them |
 | `ac2d` | daemon (`ac2d` binary): session, jobs, state, calibration store, autosave, SPL log and Leq history |
 | `ac2-cli` | CLI (`ac2` binary) |
-| `ac2-traces` | stored traces: capture columns, average / A−B, smoothing, mic curve after capture, text import/export, per-second SPL log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
-| `ac2-paths` | where files live (platform config / data dirs) and atomic writes; shared by the daemon and the UI |
+| `ac2-traces` | stored traces and their math, text import/export, SPL log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
+| `ac2-paths` | platform config / data dirs, atomic writes (daemon and UI) |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
 | `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs, can host an embedded daemon; its own code uses no DSP (`tests/it/no_dsp.rs`) |
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
-| `spikes/*` | phase 0 throwaway spikes (`audio-duplex`, `gpu-headless`; the ZMQ spike became `ac2-zmq`); findings in `docs/design/spike-*.md` |
-| `testing/` | per-platform tester guides (`testing/macos/README.md`, `testing/windows/README.md`); release binaries placed beside them are git-ignored |
+| `spikes/*` | phase 0 spikes (`audio-duplex`, `gpu-headless`); findings in `docs/design/spike-*.md` |
+| `testing/` | per-platform tester guides; release binaries beside them are git-ignored |
 | `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments` |
 
 ## Rules
@@ -70,12 +64,11 @@ checks allows. Profiles are in `.config/nextest.toml`:
   `fixtures/protocol/WIRE_LOCK` and its test enforce it.
 
 ## Context budget
-Every turn re-sends the whole context, so what an agent reads stays paid for until it ends.
+What an agent reads stays in its context for the rest of the session; keep reads bounded.
 - Locate before reading: `grep -n` the symbol, then read about 60 lines around it. Never page
   through a file top to bottom. Big docs (`PLAN.md`, `docs/protocol.md`, `docs/user-guide.md`):
   `grep -n '^#'` first, read one section.
-- Iterate with `cargo nextest run -p <crate> <filter>`; the quick tier once before commit and
-  before pushing to main; the full tier only when asked (see *Tests*).
+- Iterate with `cargo nextest run -p <crate> <filter>`; quick tier before commit/push (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
 - Delegation: one task per agent with the files and functions named in the brief; the agent

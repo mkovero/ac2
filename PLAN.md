@@ -200,33 +200,11 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 ```
 
 ### 4.1 Workspace
-```
-crates/
-  ac2-core/    MTW ladder, smoothing, averaging, protection, delay finder, IR views,
-               spectrum, filterbank, weighting, SPL integrators, rolling Leq, mic curves,
-               generator, ESS sweep and distortion (ISO 3382 later). No I/O.
-  ac2-audio/   Backend trait (open duplex: N in / M out, callback → sample-indexed blocks)
-               + explicit capability set. Backends: jack, cpal (CoreAudio/WASAPI/ASIO), fake.
-  ac2-proto/   Typed commands (serde enum), events, normative frame schema, topics, version.
-  ac2-zmq/     The only crate linking libzmq (+libsodium): typed sockets, CURVE via SecureContext.
-  ac2-client/  Async client: connect, call, subscribe, mirrored state.
-  ac2-discovery/ mDNS advert and browse (names rigs, never trusts them).
-  ac2d/        Daemon: audio session, jobs, state store, sessions, autosave, SPL log and
-               Leq history, calibration store, ZMQ server, CURVE/ZAP, mDNS.
-  ac2-cli/     `ac2` binary.
-  ac2-traces/  Stored traces, math channels' combinations, text import/export, SPL log files,
-               session files.
-  ac2-paths/   Platform config / data directories, atomic writes.
-  ac2-scene/   Pure display layer: traces → geometry, axes, ticks, readout strings,
-               banners. No GPU, no windowing, no sockets.
-  ac2-plot/    wgpu renderer for scenes: lines, fills, heatmaps, grids, text.
-  ac2-ui/      Desktop app; can host an embedded daemon (`--embedded`, local transports).
-  ac2-testkit/ Golden-vector and golden-image comparison for tests.
-tools/refgen/  numpy/scipy scripts producing golden vectors
-tools/protocol/ Python cross-language protocol fixtures
-fixtures/      golden vectors, mic-curve files, protocol fixtures (WIRE_LOCK)
-packaging/     per-OS packaging scripts and icon (run by .github/workflows/release.yml)
-```
+One crate per concern: pure DSP (`ac2-core`) and pure display (`ac2-scene`) have no I/O;
+only `ac2-zmq` links libzmq; the daemon (`ac2d`) owns audio, jobs and state; the desktop app
+(`ac2-ui`) can host an embedded daemon (`--embedded`, local transports). The crate map with
+each crate's role is in `CLAUDE.md`; golden vectors come from `tools/refgen`, protocol
+fixtures from `tools/protocol`.
 
 ### 4.2 Key crates
 | Need | Choice | Notes |
@@ -571,7 +549,9 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 6 | Release 1.0 | packaging + signing, install docs, protocol docs, mDNS polish | HW: clean machine install → first measurement < 2 min per OS; FOH↔stage over WiFi |
 | 7 | Post-1.0 extras | ASIO, SPL logging/alarms, ESS IR + ISO 3382, spectrograph, spatial average, raw capture files, delay without resettle, multi-device | per-feature criteria (room metrics vs published values; 24 h log clean; …) |
 
-### 9.0 Status (2026-10-05)
+### 9.0 Status
+
+Last updated 2026-10-05.
 
 | # | CI criteria | HW criteria |
 |---|---|---|

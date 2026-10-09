@@ -106,7 +106,7 @@ spectrograph, math channels and spatial averages, rolling Leq windows with the p
 log, band Leq, raw recording and replay, and the Settings view are done; ASIO and
 multi-device support are open.
 
-The hardware acceptance runs are still open ([status table](PLAN.md#90-status-2026-10-05)):
+The hardware acceptance runs are still open ([status table](PLAN.md#90-status)):
 
 - **Linux**: verified on a real rig (JACK, RME Fireface 400): transfer, delay finder, sweeps,
   electrical SPL calibration, remote use over CURVE and mDNS, a 24 h SPL log, cross-checked
