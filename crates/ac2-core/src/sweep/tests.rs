@@ -272,12 +272,14 @@ fn memoryless_polynomial_harmonics_and_thd() {
     eprintln!("memoryless: fundamental max error {e_lin:.4} dB");
     assert!(e_lin <= 0.1);
 
-    // Below the sweep (and inside the fade-in) and above f2/k nothing is reported.
+    // Below the sweep (and inside the fade-in) and where the harmonic's band reaches the
+    // fade-out nothing is reported.
     let at = |f: f64| r.frequencies.iter().position(|&x| x >= f).expect("column");
     assert!(r.harmonics[0].level_db[at(40.0)].is_nan());
     assert!(r.harmonics[0].level_db[at(3100.0)].is_nan());
     assert!(r.harmonics[1].level_db[at(2100.0)].is_nan());
-    assert!(r.harmonics[0].level_db[at(2900.0)].is_finite());
+    assert!(r.harmonics[0].level_db[at(2900.0)].is_nan());
+    assert!(r.harmonics[0].level_db[at(2850.0)].is_finite());
 
     // The stored IR shows the linear impulse at 0 and H2 at −L·ln 2.
     let t_of = |i: usize| r.ir_t0_s + i as f64 * r.ir_dt_s;
@@ -966,4 +968,69 @@ fn harmonics_under_a_low_frequency_roll_off_read_the_fundamentals_own_gain() {
         "bias H2 {b2:.3} dB, H3 {b3:.3}"
     );
     assert!(e2 <= 0.2 && e3 <= 0.2, "H2 {e2:.3} dB, H3 {e3:.3} dB");
+}
+
+/// `Σ c[k]·x^k` per sample.
+fn polyn(x: &[f64], c: &[f64]) -> Vec<f64> {
+    x.iter()
+        .map(|&v| c.iter().rev().fold(0.0, |acc, &k| acc * v + k))
+        .collect()
+}
+
+/// |harmonic k| / |fundamental| at the output of `polyn` driven by `a·sin`, from one period's DFT.
+fn harm(c: &[f64], a: f64, k: usize) -> f64 {
+    let n = 256;
+    let y = polyn(
+        &(0..n)
+            .map(|i| a * (TAU * i as f64 / n as f64).sin())
+            .collect::<Vec<_>>(),
+        c,
+    );
+    let bin = |m: usize| {
+        y.iter()
+            .enumerate()
+            .map(|(i, &v)| Complex64::from_polar(v, -TAU * (m * i) as f64 / n as f64))
+            .sum::<Complex64>()
+            .norm()
+    };
+    bin(k) / bin(1)
+}
+
+/// A fifth-order polynomial, as in a digital test stage.
+const POLY5: [f64; 6] = [0.0, 1.0, 0.002, 0.008, 0.18, 0.5];
+
+#[test]
+fn harmonics_near_the_sweeps_top_read_no_higher_than_they_are() {
+    // A memoryless polynomial: every harmonic is flat. Near the top the reference fades out,
+    // so dividing by it lifts a harmonic its fundamental drove at full level. With the fade
+    // L·ln 2/24 the fade starts at f2·2^(−1/24): H5's band at 40 kHz/5 of that has its centre
+    // just below it and its upper half inside, and read 1 dB high. Above 9 kHz the stage's own
+    // aliases land in the harmonic windows (H3 of 12.3 kHz folds to 96 − 37 kHz, L·ln 2 early).
+    let fs = 96_000.0;
+    let s = SweepSpec {
+        level_dbfs: -13.0,
+        sample_rate: fs,
+        grid: LogGrid::covering(48, 20.0, 40_000.0),
+        ..spec(ess(10.0, 40_000.0, 5.5))
+    };
+    let t = SweepTiming::new(&s).expect("timing");
+    let a = dbfs_to_rms(s.level_dbfs) * std::f64::consts::SQRT_2;
+    let mut x = vec![0.0; (0.37 * fs) as usize];
+    x.extend((0..t.sweep_samples()).map(|n| a * t.plan.sample(n)));
+    x.extend(std::iter::repeat_n(0.0, t.post_roll_samples(fs) + 4_800));
+    let mut mic = polyn(&x, &POLY5);
+    Noise(5).add(&mut mic, 1e-7);
+    let r = analyse_recording(&s, &x, &mic, 1).expect("analysis");
+    let mut worst = (0.0, 0, 0.0f64);
+    for c in &r.harmonics {
+        let want = 20.0 * harm(&POLY5, a, usize::from(c.order)).log10();
+        for (&f, &l) in r.frequencies.iter().zip(&c.level_db) {
+            if (2_000.0..=9_000.0).contains(&f) && l.is_finite() && (l - want).abs() > worst.2 {
+                worst = (f, c.order, (l - want).abs());
+            }
+        }
+    }
+    let (f, k, e) = worst;
+    eprintln!("top of the sweep: max error {e:.3} dB (H{k} at {f:.0} Hz)");
+    assert!(e <= 0.05, "H{k} at {f:.0} Hz: {e:.3} dB");
 }

@@ -26,7 +26,9 @@
 //! Power is averaged over 1/24 octave ([`DISTORTION_BAND_OCT`]), widened to a few of the
 //! window's resolution cells at low frequencies. Harmonic `k` at fundamental `f` is
 //! `P_k(k·f) / P_1(f)`, `P_1` averaged over the fundamentals whose harmonic lies in `P_k`'s
-//! band (`1/k` of its width in hertz); THD is the sum of those ratios over the orders in band. The
+//! band (`1/k` of its width in hertz); THD is the sum of those ratios over the orders in band.
+//! An order is reported only where its whole band lies below the fade-out, where the reference
+//! still carries the sweep at full level. The
 //! noise floor is the same window cut from the deconvolved silence after the response; a
 //! point counts when it is [`FLOOR_MARGIN_DB`] above that floor ([`is_valid`]).
 //!
@@ -793,10 +795,12 @@ pub fn analyse_recording(
         for hc in &mut harmonics {
             let k = f64::from(hc.order);
             let kf = k * f;
-            if kf > f_top {
+            let (lo, hi) = band(kf, DISTORTION_BAND_OCT, min_hz);
+            // The whole band below the fade-out: dividing by a reference faded there while
+            // the harmonic was driven by the fundamental at full level reads it too high.
+            if hi > f_top {
                 continue;
             }
-            let (lo, hi) = band(kf, DISTORTION_BAND_OCT, min_hz);
             let pk = mean_power(&spectra[usize::from(hc.order) - 1], bin_w, lo, hi, kf);
             // The fundamentals whose harmonic falls in that band: the window's resolution
             // widens a low harmonic's band to `min_hz`, which spans k times fewer hertz of
