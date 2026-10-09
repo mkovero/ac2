@@ -160,6 +160,7 @@ xone = [
 ]
 dut = [
   { name = "10Hz-5.5s", from = "10hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
+  { name = "10Hz-5.5s-fine", from = "10hz", to = "40khz", duration = 5.5, repeats = 1, plan = false, lf_harmonics = "fine" },
   { name = "3Hz-5.5s", from = "3hz", to = "40khz", duration = 5.5, repeats = 1, plan = false },
   { name = "10Hz-11s", from = "10hz", to = "40khz", duration = 11.0, repeats = 1, plan = false },
   { name = "dist", from = "20hz", to = "40khz", duration = 5.5, repeats = 1, plan = true },

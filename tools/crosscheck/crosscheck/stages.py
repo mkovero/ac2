@@ -454,7 +454,8 @@ def _sweep_config(ctx: Ctx, name: str) -> dict:
     raise RuntimeError(f"ac2: measurement {name} not found after creating it")
 
 
-def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration: float, repeats: int) -> dict:
+def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration: float, repeats: int,
+                   lf_harmonics: str = "standard") -> dict:
     rig, pc = ctx.rig, ctx.rig["paths"][pname]
     speaker = pc["kind"] == "speaker"
     outs = [int(pc["out"]), int(pc["ref_out"])]
@@ -466,7 +467,7 @@ def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration
     ctx.ac2.meas_rm(name)
     ctx.ac2.run("meas", "new", "sweep", "--name", name, "--ref", pc["ref_in"], "--meas", pc["meas_in"],
                 "--out", ",".join(map(str, outs)), "--level", f"{level:g}dbfs", "--from", frm, "--to", to,
-                "--duration", f"{duration:g}s", "--repeats", repeats)
+                "--duration", f"{duration:g}s", "--repeats", repeats, "--lf-harmonics", lf_harmonics)
     cfg = _sweep_config(ctx, name)
     start = float(cfg["sweep"]["start"])
     if abs(float(cfg["level"]) - level) > 1e-6 or sorted(cfg["outputs"]) != sorted(o - 1 for o in outs):
@@ -504,6 +505,7 @@ def ac2_sweep_once(ctx: Ctx, pname: str, vname: str, frm: str, to: str, duration
     inputs = list(rec["inputs"])
     _j(d / "info.json", {"level_dbfs": level, "from_hz": start, "to_hz": float(cfg["sweep"]["end"]),
                          "duration_s": duration, "repeats": repeats, "fade_in_s": cfg["sweep"].get("fade_in"),
+                         "lf_harmonics": cfg.get("lf_harmonics"),
                          "rec_columns": [inputs.index(int(pc["meas_in"]) - 1), inputs.index(int(pc["ref_in"]) - 1)],
                          "armed": armed, "measurement": name})
     return done
@@ -521,7 +523,7 @@ def ac2_sweeps(ctx: Ctx, pname: str):
     for v in sc[pname]:
         dur, reps = float(v["duration"]), int(v.get("repeats", 1))
         if not v.get("plan"):
-            ac2_sweep_once(ctx, pname, v["name"], v["from"], v["to"], dur, reps)
+            ac2_sweep_once(ctx, pname, v["name"], v["from"], v["to"], dur, reps, v.get("lf_harmonics", "standard"))
             ctx.manifest["paths"][pname].setdefault("primary_sweep", v["name"])
             continue
         # SNR plan: a probe run, then repeats (+10·log10 N) and length (+10·log10 T) to the target
