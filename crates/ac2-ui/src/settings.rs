@@ -241,6 +241,7 @@ pub enum DisplayRow {
     Theme,
     KeyHints,
     PanesFollow,
+    WarningToasts,
     SplHold,
     SpectrumView,
     Spectrograph,
@@ -249,10 +250,11 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 8] = [
+    pub const ALL: [DisplayRow; 9] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::PanesFollow,
+        DisplayRow::WarningToasts,
         DisplayRow::SplHold,
         DisplayRow::SpectrumView,
         DisplayRow::Spectrograph,
@@ -265,6 +267,7 @@ impl DisplayRow {
             DisplayRow::Theme => "Theme",
             DisplayRow::KeyHints => "Key hints",
             DisplayRow::PanesFollow => "Panes follow selection",
+            DisplayRow::WarningToasts => "Warning toasts",
             DisplayRow::SplHold => "SPL number holds",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SweepView => "Sweep pane shows",
@@ -330,11 +333,27 @@ pub struct PaneViews {
     pub sweep: SweepMode,
 }
 
+/// What the Warning toasts setting says, on the Display page and in its toast.
+pub fn warning_toasts_text(on: bool) -> &'static str {
+    if on {
+        "on: warnings and Leq limit alarms pop up in the corner"
+    } else {
+        "off: warnings and Leq limit alarms go only to the notification log"
+    }
+}
+
+/// The Display page's on / off lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisplaySwitches {
+    pub key_hints: bool,
+    pub panes_follow: bool,
+    pub warning_toasts: bool,
+}
+
 /// What the Display page shows for each line: title, value, whose.
 pub fn display_rows(
     theme: ThemeName,
-    key_hints: bool,
-    panes_follow: bool,
+    switches: DisplaySwitches,
     spl_hold_ms: Option<u32>,
     span_s: u32,
     views: PaneViews,
@@ -345,19 +364,20 @@ pub fn display_rows(
             let v = match r {
                 DisplayRow::Theme => theme_name(theme).to_owned(),
                 DisplayRow::KeyHints => {
-                    if key_hints {
+                    if switches.key_hints {
                         "shown under the focused pane".into()
                     } else {
                         "hidden".into()
                     }
                 }
                 DisplayRow::PanesFollow => {
-                    if panes_follow {
+                    if switches.panes_follow {
                         "on: only the panes that draw the selected measurement".into()
                     } else {
                         "off: every pane".into()
                     }
                 }
+                DisplayRow::WarningToasts => warning_toasts_text(switches.warning_toasts).into(),
                 DisplayRow::SplHold => match spl_hold_ms {
                     None => "by the time weighting".into(),
                     Some(ms) => {
@@ -991,7 +1011,12 @@ mod tests {
             spectrum: SpectrumMode::Split,
             sweep: SweepMode::Room,
         };
-        let rows = display_rows(ThemeName::Light, false, false, Some(500), 30, views);
+        let switches = DisplaySwitches {
+            key_hints: false,
+            panes_follow: false,
+            warning_toasts: false,
+        };
+        let rows = display_rows(ThemeName::Light, switches, Some(500), 30, views);
         let texts: Vec<&str> = rows.iter().map(|(_, v)| v.as_str()).collect();
         assert_eq!(
             texts,
@@ -999,6 +1024,7 @@ mod tests {
                 "light",
                 "hidden",
                 "off: every pane",
+                "off: warnings and Leq limit alarms go only to the notification log",
                 "0.50 s",
                 "the spectrum over its spectrograph",
                 "last 30 s",

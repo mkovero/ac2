@@ -333,10 +333,8 @@ impl AppState {
         }
         self.leq_alarms_seen = seen;
         for (name, a) in news {
-            match ac2_scene::leq::alarm_text(&name, &a) {
-                (true, text) => self.fault(text),
-                (false, text) => self.toast(text),
-            }
+            let (over, text) = ac2_scene::leq::alarm_text(&name, &a);
+            self.leq_alarm(over, text);
         }
     }
 }

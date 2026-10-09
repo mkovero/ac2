@@ -218,6 +218,9 @@ pub struct UiPrefs {
     /// Only the panes that draw the selected measurement (or trace) are laid out
     /// ([`crate::state::AppState::visible_panes`]); off by default.
     pub panes_follow: bool,
+    /// Warnings and Leq limit alarms pop up in the corner (on until the operator turns it
+    /// off); off, they go only to the notification log.
+    pub warning_toasts: bool,
     /// How long the SPL meter's number holds a reading; `None`: by its time weighting
     /// (`ac2_scene::spl::display_period_s`).
     pub spl_hold_ms: Option<u32>,
@@ -251,6 +254,7 @@ impl Default for UiPrefs {
             leq: LeqLayout::default(),
             key_hints: true,
             panes_follow: false,
+            warning_toasts: true,
             spl_hold_ms: None,
             layout: LayoutPrefs::default(),
             levels: LevelPrefs::default(),
@@ -308,6 +312,9 @@ struct File {
     /// Written only when on (the default is off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     panes_follow: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    warning_toasts: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spl_hold_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -886,6 +893,7 @@ impl UiPrefs {
             leq,
             key_hints: f.key_hints.unwrap_or(true),
             panes_follow: f.panes_follow.unwrap_or(false),
+            warning_toasts: f.warning_toasts.unwrap_or(true),
             spl_hold_ms: f.spl_hold_ms,
             layout: f.layout.map(LayoutFile::parse).unwrap_or_default(),
             levels: f
@@ -913,6 +921,7 @@ impl UiPrefs {
         let f = File {
             key_hints: (!self.key_hints).then_some(false),
             panes_follow: self.panes_follow.then_some(true),
+            warning_toasts: (!self.warning_toasts).then_some(false),
             spl_hold_ms: self.spl_hold_ms,
             theme: self.theme.map(ThemeFile::of),
             record_limit_min: self.record_limit_min,
@@ -1045,6 +1054,19 @@ mod tests {
         assert!(text.contains("panes_follow = true"), "{text}");
         assert_eq!(UiPrefs::from_toml(&text), Ok(p));
         assert!(UiPrefs::from_toml("panes_follow = 1\n").is_err());
+    }
+
+    #[test]
+    fn warning_toasts_round_trip() {
+        let mut p = UiPrefs::default();
+        assert!(p.warning_toasts);
+        // On is the default and is not written.
+        assert!(!p.to_toml().contains("warning_toasts"));
+        p.warning_toasts = false;
+        let text = p.to_toml();
+        assert!(text.contains("warning_toasts = false"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+        assert!(UiPrefs::from_toml("warning_toasts = \"off\"\n").is_err());
     }
 
     #[test]

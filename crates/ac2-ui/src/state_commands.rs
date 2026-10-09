@@ -553,6 +553,7 @@ impl AppState {
             }
 
             C::PanesFollow => self.toggle_panes_follow(),
+            C::WarningToasts => self.toggle_warning_toasts(),
 
             C::StimulusArm => self.space(false, keymap, out),
             C::StimulusTakeOver => self.space(true, keymap, out),

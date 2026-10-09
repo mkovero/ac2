@@ -355,6 +355,7 @@ commands! {
     Fullscreen => "fullscreen", "Window full screen on / off", [Global];
     KeyHints => "key_hints", "Key hints on / off", [Global];
     PanesFollow => "panes_follow", "Panes follow selection on / off (only the panes that draw the selected measurement)", [Global];
+    WarningToasts => "warning_toasts", "Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log)", [Global];
 
     StimulusArm => "stimulus_arm", "Stimulus: arm what the view plays (sweep view: a run of the selected sweep measurement; others: the generator)", [Global];
     StimulusFire => "stimulus_fire", "Stimulus: fire what is armed (named in the top bar)", [Global];
@@ -1127,6 +1128,7 @@ mod tests {
             CommandId::StimulusTakeOver,
             CommandId::Reconnect,
             CommandId::PanesFollow,
+            CommandId::WarningToasts,
             CommandId::CloseSession,
             CommandId::Record,
             CommandId::ReplayRecording,

@@ -834,6 +834,14 @@ pub struct Notice {
     pub count: u32,
 }
 
+/// Whether the Warning toasts setting keeps a notification out of the corner (the log
+/// keeps it either way).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Muted {
+    Never,
+    WithWarningToasts,
+}
+
 /// Most toasts kept up at once; older ones go first (the log keeps them).
 pub const MAX_TOASTS: usize = 32;
 /// Coherence mask thresholds `B` cycles through (decision: blanking below γ²).
@@ -1383,34 +1391,52 @@ impl AppState {
 
     /// Information: what a key or a reply did.
     fn toast(&mut self, text: impl Into<String>) {
-        self.notify(Severity::Info, text.into());
+        self.notify(Severity::Info, text.into(), Muted::Never);
     }
 
     /// A key refused or something missing, with what to do instead.
     fn warn(&mut self, text: impl Into<String>) {
-        self.notify(Severity::Warning, text.into());
+        self.notify(Severity::Warning, text.into(), Muted::WithWarningToasts);
     }
 
-    /// Something failed: a command, the link, the stimulus; an Leq limit went over.
+    /// Something failed: a command, the link, the stimulus.
     fn fault(&mut self, text: impl Into<String>) {
-        self.notify(Severity::Fault, text.into());
+        self.notify(Severity::Fault, text.into(), Muted::Never);
     }
 
-    /// Shows `text` and logs it. The same message again replaces the one up (newest, its
-    /// time restarted) rather than stacking copies, and counts up in the log.
-    fn notify(&mut self, severity: Severity, text: String) {
-        self.toasts
-            .retain(|t| !(t.severity == severity && t.text == text));
-        if self.toasts.len() >= MAX_TOASTS {
-            self.toasts.remove(0);
+    /// An Leq limit went over (`over`) or a window came back within it: an alarm the
+    /// operator may be causing on purpose, so it goes quiet with the warnings.
+    fn leq_alarm(&mut self, over: bool, text: String) {
+        let severity = if over {
+            Severity::Fault
+        } else {
+            Severity::Info
+        };
+        self.notify(severity, text, Muted::WithWarningToasts);
+    }
+
+    /// Shows `text` (unless `muted` by the Warning toasts setting) and logs it. The same
+    /// message again replaces the one up (newest, its time restarted) rather than
+    /// stacking copies, and counts up in the log.
+    fn notify(&mut self, severity: Severity, text: String, muted: Muted) {
+        let pops = match muted {
+            Muted::Never => true,
+            Muted::WithWarningToasts => self.prefs.warning_toasts,
+        };
+        if pops {
+            self.toasts
+                .retain(|t| !(t.severity == severity && t.text == text));
+            if self.toasts.len() >= MAX_TOASTS {
+                self.toasts.remove(0);
+            }
+            self.toast_seq += 1;
+            self.toasts.push(Toast {
+                id: self.toast_seq,
+                until_s: self.now_s + ac2_scene::toast::duration_s(severity, &text),
+                text: text.clone(),
+                severity,
+            });
         }
-        self.toast_seq += 1;
-        self.toasts.push(Toast {
-            id: self.toast_seq,
-            until_s: self.now_s + ac2_scene::toast::duration_s(severity, &text),
-            text: text.clone(),
-            severity,
-        });
         match self.notices.back_mut() {
             Some(n) if n.severity == severity && n.text == text => {
                 n.count += 1;

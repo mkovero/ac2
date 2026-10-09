@@ -249,6 +249,7 @@ impl AppState {
                 self.prefs_dirty = true;
             }
             DisplayRow::PanesFollow if d != 0 => self.toggle_panes_follow(),
+            DisplayRow::WarningToasts if d != 0 => self.toggle_warning_toasts(),
             DisplayRow::SplHold if d != 0 => {
                 self.prefs.spl_hold_ms = step_hold(self.prefs.spl_hold_ms, d);
                 self.prefs_dirty = true;
@@ -614,5 +615,18 @@ impl AppState {
                 }
             }
         }
+    }
+}
+
+impl AppState {
+    /// The Display setting and its palette command. Its own toast is information, so it
+    /// shows either way.
+    pub(super) fn toggle_warning_toasts(&mut self) {
+        self.prefs.warning_toasts = !self.prefs.warning_toasts;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "warning toasts {}",
+            crate::settings::warning_toasts_text(self.prefs.warning_toasts)
+        ));
     }
 }

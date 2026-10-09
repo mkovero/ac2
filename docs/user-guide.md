@@ -175,7 +175,7 @@ Each page says whose its settings are:
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL pane's meter's Leq windows and limits ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, panes follow selection, how long the SPL number holds, spectrograph history, level axes reset | |
+| Display | theme, key hints, panes follow selection, warning toasts, how long the SPL number holds, spectrograph history, level axes reset | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -2234,6 +2234,13 @@ corner, just above the focused pane's key hints.
 The pointer resting on the notifications holds them all (none expires while you read); a
 click dismisses one. Esc does not: Esc belongs to the open window or to the stimulus.
 
+**Warning toasts.** While you go over a limit on purpose (testing a limiter, finding the
+headroom), the alarms and warnings in the corner only get in the way. **Warning toasts**
+(Settings › Display, or the palette: **Ctrl+K** → *Warning toasts on / off*; on by default,
+kept in `ui.toml` as `warning_toasts = false`) off keeps warnings and Leq limit alarms (over,
+and back within) out of the corner; they still go to *Recent notifications…*, and the SPL
+tiles and rows still turn the limit colour. Other errors and information still pop up.
+
 **Recent notifications.** The palette's *Recent notifications…* (**Ctrl+K**, type
 `notif`) opens the last 50 of this app, newest first, each with its kind, how long ago it came
 and how many times in a row. **↑/↓**, **PageUp / PageDown**, **Home / End** and the wheel
@@ -2407,6 +2414,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|
 | Recent notifications… (the messages that went by in the corner) | `notifications` |
 | Panes follow selection on / off (only the panes that draw the selected measurement) | `panes_follow` |
+| Warning toasts on / off (off: warnings and Leq limit alarms go only to the notification log) | `warning_toasts` |
 | Stimulus outputs: tick them in Settings › Inputs & outputs… | `stimulus_outputs` |
 | Stimulus: take over the lease from another client and arm | `stimulus_take_over` |
 | Choose the measurement the focused pane shows… | `pane_measurement` |

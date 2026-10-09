@@ -360,11 +360,27 @@ fn leq_history_and_alarm_toasts() {
         level: DbSpl(98.9),
         ..old
     });
-    t.conn(mirror(s));
+    t.conn(mirror(s.clone()));
     assert_eq!(
         t.last_toast(),
         "FOH SPL: LAeq 30 min back within its limit — 98.9 dB"
     );
+    // Warning toasts off: the alarms go to the log only, the over one still an error.
+    t.st.prefs.warning_toasts = false;
+    let toasts = t.st.toasts.len();
+    s.spl_logs[0].alarms.push(LeqAlarm {
+        at: WallNs(30),
+        level: DbSpl(99.8),
+        ..old
+    });
+    t.conn(mirror(s));
+    assert_eq!(t.st.toasts.len(), toasts, "a muted alarm does not pop up");
+    let n = t.st.notices.back().expect("logged");
+    assert_eq!(
+        n.text,
+        "FOH SPL: LAeq 30 min over its limit — 99.8 dB > 99.0 dB"
+    );
+    assert_eq!(n.severity, Severity::Fault);
 }
 
 /// The history rebuild the reducer asked for, if any: (meter, number).

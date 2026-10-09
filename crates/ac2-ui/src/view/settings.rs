@@ -293,8 +293,11 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
     let st = &app.state;
     let rows = display_rows(
         st.theme,
-        st.prefs.key_hints,
-        st.prefs.panes_follow,
+        crate::settings::DisplaySwitches {
+            key_hints: st.prefs.key_hints,
+            panes_follow: st.prefs.panes_follow,
+            warning_toasts: st.prefs.warning_toasts,
+        },
         st.prefs.spl_hold_ms,
         st.view.spectrum.spectrograph.span_s,
         crate::settings::PaneViews {

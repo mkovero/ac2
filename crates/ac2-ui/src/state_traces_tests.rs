@@ -1293,3 +1293,41 @@ fn the_notification_log_keeps_the_last_ones_and_opens_from_the_palette() {
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
 }
+
+/// Warning toasts off: a warning goes only to the log, an error and information still pop
+/// up; on again, warnings pop up again. The palette and its toast name it the same way.
+#[test]
+fn warning_toasts_off_keeps_warnings_in_the_log_only() {
+    let mut t = T::new();
+    assert!(t.st.prefs.warning_toasts);
+    let keys = t.keys.clone();
+    let scope = t.st.layout.focus.scope();
+    let mut p = crate::palette::Palette::default();
+    p.type_text("warning toasts");
+    assert_eq!(
+        p.entries(&keys, scope).first().map(|e| e.command),
+        Some(CommandId::WarningToasts)
+    );
+    t.st.prefs_dirty = false;
+    t.st.update(Msg::Command(CommandId::WarningToasts), &keys);
+    assert!(!t.st.prefs.warning_toasts);
+    assert!(t.st.prefs_dirty);
+    assert_eq!(
+        t.last_toast(),
+        "warning toasts off: warnings and Leq limit alarms go only to the notification log"
+    );
+    let toasts = t.st.toasts.len();
+    t.st.warn("no stimulus level yet");
+    assert_eq!(t.st.toasts.len(), toasts, "a warning does not pop up");
+    let n = t.st.notices.back().expect("logged");
+    assert_eq!(n.text, "no stimulus level yet");
+    assert_eq!(n.severity, Severity::Warning);
+    t.st.fault("the link went down");
+    assert_eq!(t.last_toast(), "the link went down");
+    t.st.toast("saved");
+    assert_eq!(t.last_toast(), "saved");
+    t.st.update(Msg::Command(CommandId::WarningToasts), &keys);
+    assert!(t.st.prefs.warning_toasts);
+    t.st.warn("no stimulus level yet");
+    assert_eq!(t.last_toast(), "no stimulus level yet");
+}
