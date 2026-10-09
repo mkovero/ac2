@@ -71,6 +71,7 @@ class PathData:
     primary: str | None = None
     tf: formats.Ac2Trace | None = None
     tf_raw: Raw | None = None
+    tf_blocks: int | None = None  # the live TF's FIFO blocks, from its stage's info.json
     rew: RewSet | None = None
     rew_live: RewSet | None = None
     rec: Raw | None = None  # the REW stage's recording (meas, ref)
@@ -194,6 +195,8 @@ def load_run(root: Path) -> RunData:
         td = d / "ac2_tf"
         if (td / "trace.csv").exists():
             p.tf = formats.read_ac2_csv(td / "trace.csv")
+            if (td / "info.json").exists():
+                p.tf_blocks = json.loads((td / "info.json").read_text()).get("blocks")
             # every relative comparison (direct cross-spectra, steady sines, sweeps) is of the
             # raw inputs; the absolute-SPL rows put the correction back for all sources alike
             if curve and mic_curve_in_columns(p.tf.meta):

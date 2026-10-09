@@ -711,3 +711,15 @@ summed FFT bins: worst third octave +1.69 dB at 79 Hz (WARN), median +0.19 dB, w
 from a single unaveraged frame; REW's worst on the same recording is 3.75 dB. What remains is
 filter skirts against ideal band edges in a falling LF ambient and the averaging span not
 matching the numpy window to the sample.
+
+### Genelec at −30 dBFS on 8b87f49 (2026-10-10, operator-approved)
+
+Run `20261009T232923Z`, the first speaker run with the mic curve applied to sweeps (as a
+display edit; the suite reads the raw columns). Every ac2 sweep row against the direct
+estimates passes, as on d6cc773 (magnitude spread ≤ 0.29 dB at 20–100 Hz, ≤ 0.05 dB above
+100 Hz on ac2's own capture; phase ≤ 2.2°). The 4 FAILs were all suite gates, now fixed:
+the live TF's per-column spread had no noise gate (σ from its coherence over 8 blocks,
+√((1 − γ²)/(2γ²n)), is ≥ 0.2 dB at γ² = 0.99); the absolute-SPL rows at 2 and 5 kHz lacked
+the room fine-structure uncertainty the magnitude-vs-sine rows already carry (1.25 dB at
+5 kHz between a 1/48-octave column and the sine). With both: FAIL 0, WARN 9. H3 at 500 Hz
+is now INCONCLUSIVE in both apps: H3 = 1504.5 Hz lies on the 1500 Hz mains line.

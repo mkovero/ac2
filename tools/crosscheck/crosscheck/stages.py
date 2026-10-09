@@ -224,7 +224,7 @@ def remove_dropin(ctx: Ctx) -> dict:
     # the run's final check after a stage already removed it must not erase that record
     rec.update(r if existed or not rec.get("removed") else {"ceiling_after": c})
     ctx.save()
-    return r
+    return {"removed": bool(rec.get("removed")), "ceiling_after": c}
 
 
 # ---------------------------------------------------------------- steady sines

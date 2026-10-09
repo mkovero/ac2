@@ -209,6 +209,7 @@ class Analysis:
             src[f"ac2 sweep {name}"] = Hs * np.exp(-2j * np.pi * f * arr)
         src = {f"ac2 sweep {p.primary}": src.pop(f"ac2 sweep {p.primary}"), **src}
         self.coh = {}
+        self.fine_u = {}  # path → tone → the room's fine structure between a column and the sine, dB
         self.coh_by_path = getattr(self, "coh_by_path", {})
         self.coh_by_path[p.name] = self.coh
         if p.tf is not None:
@@ -285,6 +286,12 @@ class Analysis:
                     if id(raw) not in cache:
                         cache[id(raw)] = dsp.band_noise_rel(raw.meas, p.noise.meas, raw.fs, f)
                     self.noise_rel[name] = cache[id(raw)]
+        # The live TF's own noise from its coherence over its FIFO blocks: σ = √((1 − γ²) / (2 γ² n)).
+        # n = blocks counts every block as independent, though they overlap, so this is a lower
+        # bound on the TF's noise and the gate leaves out too few columns rather than too many.
+        if "ac2 TF" in self.coh and p.tf_blocks:
+            g = np.clip(np.nan_to_num(self.coh["ac2 TF"]), 1e-6, 1.0)
+            self.noise_rel["ac2 TF"] = np.sqrt((1 - g) / (2 * g * p.tf_blocks))
         self.src = src
         self.series[p.name] = {"f": f, "src": src}
         return f
@@ -378,7 +385,8 @@ class Analysis:
                                      path=p.name, title=f"{a} − {b}, {lo}–{hi} Hz, {'magnitude' if g == 'mag' else 'phase'}",
                                      value=None, unit=unit, tol=tm if g == "mag" else None, status="INCONCLUSIVE",
                                      meaning=meaning + f". {nn} of {int(inb.sum())} columns carry more noise (2σ, from "
-                                             "the recordings' SNR against the silent recording) than the pass limit; "
+                                             "the recordings' SNR against the silent recording, or the live TF's coherence over "
+                                             "its blocks) than the pass limit; "
                                              "too few left to judge")
                     continue
                 nm = int((self.mains_cols & (f >= lo) & (f < hi)).sum())
@@ -395,7 +403,7 @@ class Analysis:
                          meaning=meaning + f". Mean {mean:+.3f} dB, max deviation from the mean ±{spread:.3f} dB "
                                  f"over {m.sum()} columns"
                                  + (f" ({nm} columns within {MAINS_GUARD_HZ:g} Hz of a mains line left out)" if nm else "")
-                                 + (f" ({nn} columns whose noise alone (2σ) exceeds the pass limit left out)" if nn else "")
+                                 + (f" ({nn} columns whose noise alone (2σ{', from its coherence' if a == 'ac2 TF' else ''}) exceeds the pass limit left out)" if nn else "")
                                  + (f" ({int((null & (f >= lo) & (f < hi)).sum())} comb-null columns ≥ 10 dB below "
                                     "their 1/3-octave mean left out)" if (null & (f >= lo) & (f < hi)).any() else "")
                                  + ".",
@@ -450,6 +458,7 @@ class Analysis:
                             # where the narrow band is noisy the structure is not known any better
                             u_db = max(abs(float(dsp.db(hc) - dsp.db(hn))), narrow_u[0])
                             u_deg = max(abs(float(dsp.wrap_deg(np.rad2deg(np.angle(hc / hn))))), narrow_u[1])
+                self.fine_u.setdefault(p.name, {})[fc] = u_db
                 names = [primary, "REW live", "REW offline", "direct (REW recording)", "ac2 TF"]
                 if narrow is not None:
                     names.append("direct (REW recording), narrow at the sine")
@@ -1328,15 +1337,22 @@ class Analysis:
                 fr = p.rew.meas_fr_spl
                 k = int(np.argmin(np.abs(fr.f - fc)))
                 vals["REW (SPL, cal from ac2)"] = float(np.mean(fr.mag[max(k - 2, 0):k + 3])) - p.rew.level_dbfs
+            # ac2's sources are read at 1/48-octave columns, REW's averaged around the sine's bin:
+            # the columns carry the room's fine structure against the sine's single frequency
+            ud = self.fine_u.get(p.name, {}).get(fc, 0.0)
             for name, v in vals.items():
                 d = v - sine
+                u = 0.0 if name.startswith("REW") else ud
                 row.append(f"{v:.2f} ({d:+.2f})")
                 self.add(id=f"{p.name}.spl.{name}.{fc:g}", group="absolute SPL", path=p.name,
                          title=f"{name} at {fc:g} Hz vs steady sine, dB SPL per 0 dBFS drive", value=d, unit="dB", tol=tl,
-                         status=judge(d, tl),
+                         status=judge_u(d, tl, u),
                          meaning=f"sine: in-1 level + sensitivity {S_db:.2f} dB + mic-curve correction {corr:+.2f} dB "
                                  f"− drive; ac2: meas÷ref + reference level + sensitivity"
-                                 + ("" if curve_in_columns else " + the same curve correction (not in ac2's columns)"))
+                                 + ("" if curve_in_columns else " + the same curve correction (not in ac2's columns)")
+                                 + (f"; the room's fine structure: a 1/48-oct column and the sine's frequency "
+                                    f"differ by {u:.2f} dB in the direct estimate" if u else ""),
+                         detail={"uncertainty": u})
             rows.append(row)
         self.table(f"{p.name}: absolute response, dB SPL at the mic per 0 dBFS drive", ["f Hz", "sine",
                    "ac2 sweep", "ac2 TF × ref", "REW"], rows,
