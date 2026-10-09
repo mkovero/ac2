@@ -67,8 +67,12 @@ def test_a_sweep_divided_by_the_reference_reads_the_meas_harmonic_less_the_refer
     # the reference's harmonic, carried through the path, in phase with the meas one: half of it comes off
     half = dict(tones[0], h_vec={"3": {"meas": [d, 0.0], "ref": [d / 2 / t, 0.0]}})
     assert abs(dual_channel_harmonic_dbr(tones, half, 3) - (-90 + 20 * np.log10(0.5))) < 1e-9
-    # k·f outside the tones: no truth to form
-    assert dual_channel_harmonic_dbr(tones, dict(tones[1], h_vec=half["h_vec"]), 3) is None
+    # k·f outside the tones: no truth to form, unless a measured transfer covers it
+    top = dict(tones[1], h_vec=half["h_vec"])
+    assert dual_channel_harmonic_dbr(tones, top, 3) is None
+    assert dual_channel_harmonic_dbr(tones, top, 3, lambda fk: None) is None
+    got = dual_channel_harmonic_dbr(tones, top, 3, lambda fk: complex(t, 0.0) if abs(fk - 300.0) < 1e-9 else None)
+    assert abs(got - (-90 + 20 * np.log10(0.5))) < 1e-9
 
 
 def test_settle_lag_from_full_level_to_the_column():
