@@ -883,6 +883,7 @@ How the keys relate:
 
 - **D** is the same move in one go: the arrival stays and the live curve alone moves to the
   typed delay (`Main L: delay 12.00 ms (−0.50 ms from arrival)`).
+  It takes −10000 … 10000 ms: a negative delay is the measurement leading the reference.
 - **1** (the finder's) sets a new arrival: nothing moves and the offset is gone.
 - Tracking (**Y**) follows the arrival and keeps your offset on top of it.
 - A stopped or hidden measurement has no live curve to move: the keys only say so (**S**
@@ -891,8 +892,8 @@ How the keys relate:
 **Fractions of a sample.** Steps of 0.1 ms are fractional samples at most rates (9.6
 samples at 96 kHz): the daemon keeps the fraction and holds the delay to a millionth of a
 sample, so stepping out and back lands exactly where you started. The finder's estimate is
-inserted exactly, `600.25samples` can be typed, and the measurement list shows delays to the
-microsecond. Tracking moves to a fractional arrival too once two windows agree within a
+inserted exactly, **D** takes milliseconds with any number of decimals, and the measurement
+list shows delays to the microsecond. Tracking moves to a fractional arrival too once two windows agree within a
 tenth of a sample, and leaves the delay alone while the arrival stays within 0.05 sample of
 it.
 

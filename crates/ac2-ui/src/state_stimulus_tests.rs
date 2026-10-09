@@ -396,6 +396,20 @@ fn transfer_commands() {
         ),
         "{r:?}"
     );
+    // A negative typed delay: the measurement leads the reference.
+    t.type_key("D", "d");
+    if let Overlay::Prompt(p) = &mut t.st.overlay {
+        p.text = "\u{2212}2.5".into();
+    }
+    let r = t.key("Enter");
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Call { cmd: Command::DelaySet { delay: Seconds(d), .. }, .. }]
+                if (*d + 0.0025).abs() < 1e-12
+        ),
+        "{r:?}"
+    );
     // View toggles.
     t.key("B");
     assert_eq!(t.st.view.tf.coherence.blank_below, Some(0.3));

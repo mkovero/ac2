@@ -542,8 +542,10 @@ impl AppState {
                 });
             }),
             PromptKind::Delay(id) => parse_number(&text, &["ms"]).and_then(|v| {
-                if !(0.0..=10_000.0).contains(&v) {
-                    return Err("delay must be 0 … 10000 ms".to_string());
+                // Negative is the measurement leading the reference (a mic ahead of the
+                // reference tap): the aligner buffers the measurement leg instead.
+                if !(-10_000.0..=10_000.0).contains(&v) {
+                    return Err("delay must be −10000 … 10000 ms".to_string());
                 }
                 let delay = v / 1000.0;
                 // A typed delay keeps the arrival: the daemon moves the offset from it.
